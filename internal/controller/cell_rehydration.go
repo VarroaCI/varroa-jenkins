@@ -90,51 +90,45 @@ func (r *Reconciler) numberSeededJobsCopy(cellKey string) map[string]bool {
 	return out
 }
 
-// setNumberOnlyPending records cellKey's in-flight number-only block,
-// creating the tracking map on first use — a Reconciler built directly
-// in a test, bypassing NewReconciler, would otherwise panic on this
-// write.
-func (r *Reconciler) setNumberOnlyPending(cellKey string, block numberOnlyPendingBlock) {
-	r.numberCacheMu.Lock()
-	defer r.numberCacheMu.Unlock()
-	if r.numberOnlyPending == nil {
-		r.numberOnlyPending = make(map[string]numberOnlyPendingBlock)
-	}
-	r.numberOnlyPending[cellKey] = block
-}
-
 // commitNumberOnlyProgress implements task 5.7's per-block commit rule:
-// a number-only block's job paths join the seeded cache only once a
-// DesiredStateResult whose CommandId matches the block reports
-// rehydration success with no error. A failed or unmatched result
-// leaves the cache untouched, so the next tick's AdvanceNumberOnlyRound
-// call recomputes the same remaining set and resends the same block —
-// design.md D5's write rule 3 makes a repeat number-only write of an
-// already-numbered job a harmless no-op, so resending costs nothing.
-// A job the mite deferred (write rule 1: its folder did not exist yet)
-// never counts as seeded even on a success result, because its
+// a number-only block's job paths join the seeded cache only once the
+// DesiredStateResult of the push that carried the block reports
+// rehydration success with no error. The caller resolves the block from
+// the cell's in-flight push (takeRehydrationResult), so a failed or
+// unmatched result leaves the cache untouched, and the next tick's
+// AdvanceNumberOnlyRound call recomputes the same remaining set and
+// resends the same block. Design D5's write rule 3 makes a repeat
+// number-only write of an already-numbered job a harmless no-op. A job
+// the mite deferred (write rule 1: its folder did not exist yet) never
+// counts as seeded even on a success result, because its
 // nextBuildNumber file was not written.
-func (r *Reconciler) commitNumberOnlyProgress(cellKey, commandID string, success bool, rehydrationErr string, deferredJobs []string) {
+func (r *Reconciler) commitNumberOnlyProgress(cellKey string, jobPaths []string, success bool, rehydrationErr string, deferredJobs []string) {
+	if len(jobPaths) == 0 || !success || rehydrationErr != "" {
+		return
+	}
 	r.numberCacheMu.Lock()
 	defer r.numberCacheMu.Unlock()
-	pending, ok := r.numberOnlyPending[cellKey]
-	if !ok || pending.CommandID != commandID {
-		return
-	}
-	delete(r.numberOnlyPending, cellKey)
-	if !success || rehydrationErr != "" {
-		return
-	}
 	deferred := make(map[string]bool, len(deferredJobs))
 	for _, p := range deferredJobs {
 		deferred[p] = true
 	}
 	seeded := r.numberSeededJobsLocked(cellKey)
-	for _, p := range pending.JobPaths {
+	for _, p := range jobPaths {
 		if !deferred[p] {
 			seeded[p] = true
 		}
 	}
+}
+
+// rehydrationTenantState is one placed tenant's state at the start of a
+// tick: its entry from before this tick's rebuild and its placement.
+type rehydrationTenantState struct {
+	team      *v1alpha1.Team
+	existing  *v1alpha1.CellRehydrationEntry
+	placement rehydrationPlacement
+	applied   bool
+	expired   bool
+	builds    int32
 }
 
 // attachCellRehydration builds and attaches this cell's rehydration
@@ -143,30 +137,135 @@ func (r *Reconciler) commitNumberOnlyProgress(cellKey, commandID string, success
 // end-of-tick status patch persists it, matching every other status
 // field the controller reconciler writes on cr directly.
 //
-// It answers true when any tenant is not yet applied, so the caller can
-// bypass the idle-converged short-circuit: field 17 stays out of the
-// composite desired-state hash (design D3), so a converged cell would
-// otherwise never retry a still-pending tenant.
-func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Controller, desired *mitev1.DesiredStateCommand, hasArtifactManagerS3 bool, now time.Time) bool {
+// It answers nil when the tick attaches no bundle and holds none. Field
+// 17 stays out of the composite desired-state hash (design D3), so the
+// caller bypasses the idle-converged short-circuit only when
+// desired.Rehydration is set: a push with no bundle only sends the
+// delivered state again.
+//
+// While a delivered push has no result and its window is open, the tick
+// holds: it keeps the entries, attaches nothing, and answers a held plan.
+// A new bundle would replace the stamped command ID, and the result of
+// the slower push would then match no entry.
+//
+// The pre-send entries carry no command ID. The caller stamps it with
+// markRehydrationSent after a delivered push.
+func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Controller, desired *mitev1.DesiredStateCommand, hasArtifactManagerS3 bool, now time.Time) *rehydrationSendPlan {
 	if !isCellController(cr) {
-		return false
+		return nil
 	}
+	cellKey := cr.Namespace + "/" + cr.Name
 	teams := r.listPlacedTeams(ctx, cr)
 	if len(teams) == 0 {
-		return false
+		r.dropRehydrationInFlight(cellKey)
+		return nil
 	}
 
-	cellKey := cr.Namespace + "/" + cr.Name
 	cellInstance := ""
 	if cr.Status.Cell != nil {
 		cellInstance = cr.Status.Cell.Instance
 	}
 	opts := rehydrate.Options{HasArtifactManagerS3: hasArtifactManagerS3}
 
+	// First pass: decide for each tenant whether it is applied, past its
+	// deadline, or pending. The pending set decides whether the tenants
+	// of an in-flight push still hold it.
+	states := make([]rehydrationTenantState, 0, len(teams))
+	pendingSet := make(map[string]rehydrationPlacement)
+	existingByTenant := make(map[string]*v1alpha1.CellRehydrationEntry, len(teams))
+	for _, team := range teams {
+		tenant := team.Name
+		generation := int64(0)
+		if team.Status.Placement != nil {
+			generation = team.Status.Placement.Generation
+		}
+		st := rehydrationTenantState{
+			team:      team,
+			existing:  findCellRehydrationEntry(cr, tenant),
+			placement: rehydrationPlacement{Generation: generation, CellInstance: cellInstance},
+		}
+		existingByTenant[tenant] = st.existing
+		if rehydrationApplied(st.existing, generation, cellInstance) {
+			r.clearRehydrationPendingSince(cellKey, tenant)
+			st.applied = true
+			states = append(states, st)
+			continue
+		}
+		st.builds = v1alpha1.DefaultRehydrateBuilds
+		rehydrateDeadline := v1alpha1.DefaultRehydrateDeadline().Duration
+		if team.Spec.Pipelines != nil {
+			st.builds = team.Spec.Pipelines.EffectiveRehydrateBuilds()
+			rehydrateDeadline = team.Spec.Pipelines.EffectiveRehydrateDeadline()
+		}
+		pendingSince := r.rehydrationPendingSinceFor(cellKey, tenant, generation, cellInstance, now)
+		st.expired = rehydrationExpired(pendingSince, rehydrateDeadline, now)
+		if !st.expired {
+			pendingSet[tenant] = st.placement
+		}
+		states = append(states, st)
+	}
+
 	entries := make([]v1alpha1.CellRehydrationEntry, 0, len(teams))
+	if cr.Status.Cell == nil {
+		cr.Status.Cell = &v1alpha1.CellStatus{}
+	}
+
+	// outcomes caches each pending tenant's seed outcome, so a hold check
+	// and the rebuild after it fetch each tenant's records only once.
+	outcomes := make(map[string]tenantSeedOutcome)
+	outcomeFor := func(st rehydrationTenantState) tenantSeedOutcome {
+		o, ok := outcomes[st.team.Name]
+		if !ok {
+			o = r.gatherTenantSeeds(ctx, cellKey, st, opts)
+			outcomes[st.team.Name] = o
+		}
+		return o
+	}
+
+	// A tenant outside the held push ends the hold only when it has a
+	// seed to send. A tenant whose fetch or render fails has nothing to
+	// send, and ending the hold for it would replace the stamped command
+	// ID on every tick.
+	// A hold that ends only because another tenant has a seed leaves the
+	// in-flight push valid. Its record and its stamped command ID stay
+	// until a delivered push replaces them, so its result still counts
+	// when the new push is held back or not delivered.
+	var keep *rehydrationPush
+	inFlight := r.rehydrationInFlightFor(cellKey)
+	if held := heldRehydrationPlan(inFlight, pendingSet, existingByTenant, now); held != nil {
+		holds := true
+		for _, st := range states {
+			if _, covered := held.Tenants[st.team.Name]; covered || st.applied || st.expired {
+				continue
+			}
+			if len(outcomeFor(st).seeds) > 0 {
+				holds = false
+				break
+			}
+		}
+		if holds {
+			for _, st := range states {
+				_, covered := held.Tenants[st.team.Name]
+				switch {
+				case st.applied || covered:
+					entries = append(entries, *st.existing)
+				case st.expired:
+					entries = append(entries, expiredEntry(st, cellInstance, now))
+				default:
+					entries = r.appendUnseededEntry(entries, cellKey, st, outcomeFor(st), now)
+				}
+			}
+			cr.Status.Cell.Rehydration = entries
+			return held
+		}
+		keep = inFlight
+	}
+	if keep == nil {
+		r.dropRehydrationInFlight(cellKey)
+	}
+
 	var allSeeds []rehydrate.JobSeed
 	tenantJobPaths := make(map[string][]string)
-	tenantSeedRecordCounts := make(map[string]int)
 	// tenantFailedJobPaths holds, per tenant, every enumerated job path
 	// whose BuildJobSeed call errored this tick (design D4: every
 	// enumerated job gets a seed or a pending/unseeded representation
@@ -175,112 +274,47 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	// they never reach allSeeds, so they are folded into the unseeded
 	// set by hand once the cross-tenant selection is known.
 	tenantFailedJobPaths := make(map[string][]string)
-	pending := false
+	sentTenants := make(map[string]rehydrationPlacement)
 
-	for _, team := range teams {
-		tenant := team.Name
-		generation := int64(0)
-		if team.Status.Placement != nil {
-			generation = team.Status.Placement.Generation
+	for _, st := range states {
+		tenant := st.team.Name
+		if st.applied {
+			entries = append(entries, *st.existing)
+			continue
 		}
-		existing := findCellRehydrationEntry(cr, tenant)
-
-		if rehydrationApplied(existing, generation, cellInstance) {
-			r.clearRehydrationPendingSince(cellKey, tenant)
-			entries = append(entries, *existing)
+		if st.expired {
+			entries = append(entries, expiredEntry(st, cellInstance, now))
+			continue
+		}
+		o := outcomeFor(st)
+		if len(o.seeds) == 0 {
+			entries = r.appendUnseededEntry(entries, cellKey, st, o, now)
 			continue
 		}
 
-		rehydrateBuilds := v1alpha1.DefaultRehydrateBuilds
-		rehydrateDeadline := v1alpha1.DefaultRehydrateDeadline().Duration
-		if team.Spec.Pipelines != nil {
-			rehydrateBuilds = team.Spec.Pipelines.EffectiveRehydrateBuilds()
-			rehydrateDeadline = team.Spec.Pipelines.EffectiveRehydrateDeadline()
-		}
-
-		pendingSince := r.rehydrationPendingSinceFor(cellKey, tenant, generation, cellInstance, now)
-		if rehydrationExpired(pendingSince, rehydrateDeadline, now) {
-			var deferred []string
-			if existing != nil {
-				deferred = existing.Deferred
-			}
-			entries = append(entries, deadlineEntry(tenant, generation, cellInstance, deferred, now))
-			pending = true
-			continue
-		}
-
-		jobRecords, err := fetchTenantJobRecords(ctx, r.recordsFunc, r.clusterName, tenant, int(rehydrateBuilds))
-		if err != nil {
-			if r.Logger != nil {
-				r.Logger.Warn("rehydration records fetch failed", "tenant", tenant, "controller", cellKey, "error", err)
-			}
-			pending = true
-			if existing != nil {
-				entries = append(entries, *existing)
-			}
-			continue
-		}
-		if len(jobRecords) == 0 {
-			r.clearRehydrationPendingSince(cellKey, tenant)
-			entries = append(entries, emptySelectionEntry(tenant, generation, cellInstance, now))
-			continue
-		}
-
-		var tenantSeeds []rehydrate.JobSeed
-		var failedPaths []string
-		for _, jr := range jobRecords {
-			seed, err := r.buildJobSeed(adaptJobRecords(jr), int(rehydrateBuilds), cellJenkinsHome, opts)
-			if err != nil {
-				if r.Logger != nil {
-					r.Logger.Warn("rehydration seed build failed", "tenant", tenant, "job", jr.JobPath, "error", err)
-				}
-				failedPaths = append(failedPaths, jr.JobPath)
-				continue
-			}
-			tenantSeeds = append(tenantSeeds, seed)
-		}
-		if len(tenantSeeds) == 0 {
-			pending = true
-			switch {
-			case existing != nil:
-				entries = append(entries, *existing)
-			case len(failedPaths) > 0:
-				// No prior entry and every job of the tenant failed to
-				// render this tick: write one anyway, so the fence
-				// still sees this tenant as unseeded rather than
-				// absent from status entirely.
-				entries = append(entries, preSendEntry(tenant, "", "", generation, cellInstance, 0, false, int32(len(failedPaths)), now))
-			}
-			continue
-		}
-
-		paths := make([]string, len(tenantSeeds), len(tenantSeeds)+len(failedPaths))
+		paths := make([]string, len(o.seeds), len(o.seeds)+len(o.failedPaths))
 		count := 0
-		for i, s := range tenantSeeds {
-			paths[i] = s.JobPath
-			count += s.RecordCount()
+		for i, seed := range o.seeds {
+			paths[i] = seed.JobPath
+			count += seed.RecordCount()
 		}
-		paths = append(paths, failedPaths...)
+		paths = append(paths, o.failedPaths...)
 		tenantJobPaths[tenant] = paths
-		tenantFailedJobPaths[tenant] = failedPaths
-		tenantSeedRecordCounts[tenant] = count
-		allSeeds = append(allSeeds, tenantSeeds...)
-		pending = true
+		tenantFailedJobPaths[tenant] = o.failedPaths
+		allSeeds = append(allSeeds, o.seeds...)
+		sentTenants[tenant] = st.placement
 		// Task 6.1: written before the send, Applied false, Deferred
-		// empty. Truncated and UnseededJobs are filled below, once the
-		// whole cell's cross-tenant selection is known — the failed
-		// paths already count toward it here, in case a later error
-		// return leaves this initial value standing.
-		entries = append(entries, preSendEntry(tenant, desired.CommandId, "", generation, cellInstance, int32(count), false, int32(len(failedPaths)), now))
-	}
-
-	if cr.Status.Cell == nil {
-		cr.Status.Cell = &v1alpha1.CellStatus{}
+		// empty, and no command ID until a delivered push stamps it.
+		// Truncated and UnseededJobs are filled below, once the whole
+		// cell's cross-tenant selection is known — the failed paths
+		// already count toward it here, in case a later error return
+		// leaves this initial value standing.
+		entries = append(entries, preSendEntry(tenant, "", st.placement.Generation, cellInstance, int32(count), false, int32(len(o.failedPaths)), now))
 	}
 
 	if len(allSeeds) == 0 {
-		cr.Status.Cell.Rehydration = entries
-		return pending
+		publishRehydrationEntries(cr, entries, keep, existingByTenant)
+		return nil
 	}
 
 	result, err := rehydrate.SelectForBundle(allSeeds)
@@ -288,10 +322,11 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		if r.Logger != nil {
 			r.Logger.Warn("rehydration selection failed", "controller", cellKey, "error", err)
 		}
-		cr.Status.Cell.Rehydration = entries
-		return pending
+		publishRehydrationEntries(cr, entries, keep, existingByTenant)
+		return nil
 	}
 
+	var numberOnlyJobPaths []string
 	if result.NumberOnly {
 		// Order 4 triggers only when the bare NumberFiles for every job
 		// of the cell already exceed the budget (design.md D4): job
@@ -308,11 +343,8 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		// AdvanceNumberOnlyRound is called against a copy of the
 		// confirmed seeded set, never the set itself: computing this
 		// tick's candidate block must not commit it. A block counts as
-		// seeded only once commitNumberOnlyProgress sees a matching,
-		// successful DesiredStateResult for it (task 5.7) — otherwise a
-		// block whose delivery failed, or that the mite rejected, would
-		// never be resent, and the fence would treat its jobs as
-		// numbered when no number was ever written.
+		// seeded only once commitNumberOnlyProgress sees the successful
+		// DesiredStateResult of the push that carried it (task 5.7).
 		candidate := r.numberSeededJobsCopy(cellKey)
 		blockResult, _, blockErr := rehydrate.AdvanceNumberOnlyRound(allSeeds, candidate, rehydrate.BundleBudgetBytes)
 		if blockErr != nil {
@@ -321,20 +353,21 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 			}
 		} else {
 			result = blockResult
-			r.setNumberOnlyPending(cellKey, numberOnlyPendingBlock{
-				CommandID: desired.CommandId,
-				JobPaths:  append([]string(nil), blockResult.JobPaths...),
-			})
+			numberOnlyJobPaths = append([]string(nil), blockResult.JobPaths...)
 		}
 	}
 
-	bundle, err := rehydrate.BuildBundle(result)
+	buildBundle := r.buildBundle
+	if buildBundle == nil {
+		buildBundle = rehydrate.BuildBundle
+	}
+	bundle, err := buildBundle(result)
 	if err != nil {
 		if r.Logger != nil {
 			r.Logger.Warn("rehydration bundle build failed", "controller", cellKey, "error", err)
 		}
-		cr.Status.Cell.Rehydration = entries
-		return pending
+		publishRehydrationEntries(cr, entries, keep, existingByTenant)
+		return nil
 	}
 
 	// Task 6.4: the field is set only while at least one tenant above
@@ -361,10 +394,10 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	}
 
 	for i := range entries {
-		if entries[i].CommandID != desired.CommandId {
+		tenant := entries[i].Tenant
+		if _, ok := sentTenants[tenant]; !ok {
 			continue
 		}
-		tenant := entries[i].Tenant
 		var tenantUnseeded int32
 		var tenantCovered int
 		for _, p := range tenantJobPaths[tenant] {
@@ -383,6 +416,111 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		}
 	}
 
+	deferredEntries := publishRehydrationEntries(cr, entries, keep, existingByTenant)
+	return &rehydrationSendPlan{Bundle: bundle, Tenants: sentTenants, NumberOnlyJobPaths: numberOnlyJobPaths, Entries: deferredEntries}
+}
+
+// tenantSeedOutcome is one pending tenant's seeds for a tick. fetchErr
+// is true when the records fetch failed, and empty is true when the
+// store enumerates no job path for the tenant.
+type tenantSeedOutcome struct {
+	fetchErr    bool
+	empty       bool
+	seeds       []rehydrate.JobSeed
+	failedPaths []string
+}
+
+// gatherTenantSeeds fetches st's build records and renders one seed per
+// job. A job whose render fails goes to failedPaths, so the fence still
+// counts it as unseeded.
+func (r *Reconciler) gatherTenantSeeds(ctx context.Context, cellKey string, st rehydrationTenantState, opts rehydrate.Options) tenantSeedOutcome {
+	tenant := st.team.Name
+	jobRecords, err := fetchTenantJobRecords(ctx, r.recordsFunc, r.clusterName, tenant, int(st.builds))
+	if err != nil {
+		if r.Logger != nil {
+			r.Logger.Warn("rehydration records fetch failed", "tenant", tenant, "controller", cellKey, "error", err)
+		}
+		return tenantSeedOutcome{fetchErr: true}
+	}
+	if len(jobRecords) == 0 {
+		return tenantSeedOutcome{empty: true}
+	}
+	var out tenantSeedOutcome
+	for _, jr := range jobRecords {
+		seed, err := r.buildJobSeed(adaptJobRecords(jr), int(st.builds), cellJenkinsHome, opts)
+		if err != nil {
+			if r.Logger != nil {
+				r.Logger.Warn("rehydration seed build failed", "tenant", tenant, "job", jr.JobPath, "error", err)
+			}
+			out.failedPaths = append(out.failedPaths, jr.JobPath)
+			continue
+		}
+		out.seeds = append(out.seeds, seed)
+	}
+	return out
+}
+
+// appendUnseededEntry appends the entry of a pending tenant with no seed
+// to send this tick. A failed fetch keeps the previous entry. An empty
+// enumeration counts as applied at once (task 6.0a). A tenant whose every
+// job failed to render keeps its previous entry, or gets a new one, so
+// the fence still sees it as unseeded rather than absent from status.
+func (r *Reconciler) appendUnseededEntry(entries []v1alpha1.CellRehydrationEntry, cellKey string, st rehydrationTenantState, o tenantSeedOutcome, now time.Time) []v1alpha1.CellRehydrationEntry {
+	tenant := st.team.Name
+	switch {
+	case o.empty:
+		r.clearRehydrationPendingSince(cellKey, tenant)
+		return append(entries, emptySelectionEntry(tenant, st.placement.Generation, st.placement.CellInstance, now))
+	case st.existing != nil:
+		return append(entries, *st.existing)
+	case !o.fetchErr && len(o.failedPaths) > 0:
+		return append(entries, preSendEntry(tenant, "", st.placement.Generation, st.placement.CellInstance, 0, false, int32(len(o.failedPaths)), now))
+	}
+	return entries
+}
+
+// expiredEntry answers the give-up entry of a tenant past its deadline,
+// carrying the job paths its previous entry still deferred.
+func expiredEntry(st rehydrationTenantState, cellInstance string, now time.Time) v1alpha1.CellRehydrationEntry {
+	var deferred []string
+	if st.existing != nil {
+		deferred = st.existing.Deferred
+	}
+	return deadlineEntry(st.team.Name, st.placement.Generation, cellInstance, deferred, now)
+}
+
+// keepTenants answers the tenants of a kept in-flight push, or nil.
+func keepTenants(keep *rehydrationPush) map[string]rehydrationPlacement {
+	if keep == nil {
+		return nil
+	}
+	return keep.Tenants
+}
+
+// publishRehydrationEntries writes entries to cr's status. A tenant of a
+// kept in-flight push keeps its status entry whole until a delivered push
+// replaces it: a result of the kept push must update the entry that
+// describes the kept bundle, never the new selection. It answers the new
+// entry of each such tenant, which markRehydrationSent writes after a
+// delivered push. Every return after the per-tenant pass calls it, so an
+// error return also keeps the stamp.
+func publishRehydrationEntries(cr *v1alpha1.Controller, entries []v1alpha1.CellRehydrationEntry, keep *rehydrationPush, existingByTenant map[string]*v1alpha1.CellRehydrationEntry) map[string]v1alpha1.CellRehydrationEntry {
+	var deferred map[string]v1alpha1.CellRehydrationEntry
+	for i := range entries {
+		tenant := entries[i].Tenant
+		if _, covered := keepTenants(keep)[tenant]; !covered {
+			continue
+		}
+		existing := existingByTenant[tenant]
+		if existing == nil {
+			continue
+		}
+		if deferred == nil {
+			deferred = make(map[string]v1alpha1.CellRehydrationEntry)
+		}
+		deferred[tenant] = entries[i]
+		entries[i] = *existing
+	}
 	cr.Status.Cell.Rehydration = entries
-	return pending
+	return deferred
 }

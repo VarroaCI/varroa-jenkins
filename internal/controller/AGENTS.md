@@ -170,8 +170,9 @@ sections describe.
     convergence path**; manual+unapproved surfaces an approvable `PendingPluginRoll`
     instead); builds+pushes the `DesiredStateCommand` with a 5-minute convergence
     short-circuit (skip push if hash+RBAC unchanged and pushed recently), bypassed by
-    `forcePush` (mite reconnect epoch change) or the one-shot force-reprovision
-    annotation. NATS keeps no copy of the command, so `DesiredStateHash` and
+    `forcePush` (mite reconnect epoch change), the one-shot force-reprovision
+    annotation, or an attached rehydration bundle (`desired.Rehydration`, never
+    a pending tenant with no bundle). NATS keeps no copy of the command, so `DesiredStateHash` and
     `LastDesiredPushAt` are stamped only after `Send` succeeds. On
     `transport.ErrMiteUnreachable` the push raises no `ReconcileBlocked`. The
     connection epoch is recorded only after a delivered push, and a reconnect
@@ -185,7 +186,8 @@ sections describe.
     idle builds, and the mite keeps only the newest state), and raises a pending
     restart when that apply failed. A cell whose full hash is unchanged pushes an
     attached rehydration bundle under the same push and hold rule; it raises no
-    pending restart and clears a stale one.
+    pending restart and clears a stale one. A push that goes out while a
+    rehydration push is in flight carries the held bundle.
   - `handleRunning` never changes the phase of a disconnected mite. Its
     `provisioningTimeout` guard skips a controller whose `StreamLost`
     transition is later than `ProvisioningStartedAt` (`streamLostSince`); a
@@ -1153,15 +1155,31 @@ sections describe.
   (`preSendEntry` before the send, `applyRehydrationResult` after the mite's
   `DesiredStateResult` returns, attributing `rehydration_deferred_jobs` back
   to each tenant by job-path prefix with `partitionDeferredJobs`).
+  **An entry carries a command ID only for a delivered push with a bundle.**
+  `preSendEntry` writes no command ID; `markRehydrationSent`
+  (`cell_rehydration_inflight.go`) stamps it after a delivered push that
+  carried `desired.Rehydration`, because the mite reports success for an
+  absent rehydration section. It also opens the cell's in-memory
+  `rehydrationInFlight` record (command IDs, bundle, tenant placements,
+  number-only block, `Until`). **While that record holds, the tick builds
+  no new bundle** (`heldRehydrationPlan`): a new command ID would replace
+  the stamp before a slow apply reports. The hold ends on a result for any
+  of the record's command IDs (`takeRehydrationResult` maps it to the
+  stamped ID), a mite reconnect, a covered tenant's placement change, a
+  tenant outside the push with a seed to send (a failed fetch never ends
+  it; the record and its stamp then stay until a delivered push replaces
+  them), or `Until` (`rehydrationPushWindow`: the command deadline plus
+  one minute). A restart or shard move loses the record, and the next tick
+  sends once more.
   **A number-only block never joins the process-local seeded-job cache on
   send.** `AdvanceNumberOnlyRound` runs against a copy of
-  `numberSeededJobsFor`'s set, and `attachCellRehydration` records the sent
-  block (command ID + job paths) in `numberOnlyPending`. `handleConnected`'s
-  result-drain calls `commitNumberOnlyProgress`, which copies the block's
-  paths into the real seeded set only once a `DesiredStateResult` with a
-  matching `CommandId` reports `rehydration_success` with no error, minus any
-  path the mite deferred. A failed or unmatched block is never committed, so
-  the next tick's selection naturally recomputes and resends it.
+  `numberSeededJobsFor`'s set, and the in-flight record keeps the sent
+  block's job paths. `handleConnected`'s result-drain calls
+  `commitNumberOnlyProgress` with the block that `takeRehydrationResult`
+  returns, which copies the paths into the real seeded set only on
+  `rehydration_success` with no error, minus any path the mite deferred. A
+  failed or unmatched block is never committed, so the next tick's selection
+  recomputes and resends it.
   `cells.RehydrationPass`, called from `TeamReconciler.Reconcile` inside the
   same status patch, derives `Team.status.rehydration` and the `Rehydrated`
   condition from the tenant's own entry on the bound cell by comparing

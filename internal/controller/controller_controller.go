@@ -230,6 +230,10 @@ type Reconciler struct {
 	// render failure keeps that job's fence open instead of vanishing
 	// from the accounting.
 	buildJobSeed func(jr rehydrate.JobRecords, n int, jenkinsHome string, opts rehydrate.Options) (rehydrate.JobSeed, error)
+	// buildBundle encodes the cell's selection into one bundle.
+	// Production wires rehydrate.BuildBundle; a test injects a failure,
+	// to prove a tick whose bundle build fails stamps no entry.
+	buildBundle func(result rehydrate.BudgetResult) (*mitev1.RehydrationBundle, error)
 	// numberSeededJobs tracks, per cell key ("ns/name"), the job paths a
 	// prior tick's number-only bundle already covered AND a matching
 	// DesiredStateResult confirmed applied (design.md D4 order 4, task
@@ -237,16 +241,14 @@ type Reconciler struct {
 	// round: design.md D5's write rule 3 makes resending an
 	// already-seeded nextBuildNumber a no-op.
 	numberSeededJobs map[string]map[string]bool
-	// numberOnlyPending tracks, per cell key, the number-only block the
-	// current tick built and sent but has not yet seen a matching,
-	// successful DesiredStateResult for (task 5.7). attachCellRehydration
-	// overwrites the entry every tick from its own fresh selection;
-	// commitNumberOnlyProgress consumes it once a result arrives. Losing
-	// it (an operator restart) only costs one redundant resend of a
-	// block already in flight, which is the same harmless no-op as
-	// losing numberSeededJobs.
-	numberOnlyPending map[string]numberOnlyPendingBlock
-	// numberCacheMu guards numberSeededJobs, numberOnlyPending, and
+	// rehydrationInFlight tracks, per cell key, the delivered
+	// rehydration push that has no result yet, with the number-only block
+	// it carried (task 5.7). markRehydrationSent writes it after a
+	// delivered push; the result drain consumes it. Losing it (an
+	// operator restart or a shard move) costs one more send of the
+	// bundle on the next tick.
+	rehydrationInFlight map[string]*rehydrationPush
+	// numberCacheMu guards numberSeededJobs, rehydrationInFlight, and
 	// rehydrationPendingSince: up to maxConcurrentReconciles cells
 	// reconcile at once and each touches only its own key, but the
 	// outer maps are shared.
@@ -283,15 +285,6 @@ type rehydrationPendingMark struct {
 	Generation   int64
 	CellInstance string
 	Since        time.Time
-}
-
-// numberOnlyPendingBlock is one cell's in-flight number-only bundle
-// (design D4, task 5.7): the command it rode on and the job paths it
-// covers. commitNumberOnlyProgress reads it once the mite's result for
-// that command arrives.
-type numberOnlyPendingBlock struct {
-	CommandID string
-	JobPaths  []string
 }
 
 // SetVarroaEndpoint sets the gRPC endpoint that mite sidecars use to connect back to Varroa.
@@ -1190,8 +1183,9 @@ func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceC
 		versionRollGate:         allowAllVersionRolls,
 		clusterName:             "core",
 		buildJobSeed:            rehydrate.BuildJobSeed,
+		buildBundle:             rehydrate.BuildBundle,
 		numberSeededJobs:        make(map[string]map[string]bool),
-		numberOnlyPending:       make(map[string]numberOnlyPendingBlock),
+		rehydrationInFlight:     make(map[string]*rehydrationPush),
 		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
 		controllerLocks:         newKeyLock(),
 		approveLockWait:         defaultApproveLockWait,
@@ -3837,12 +3831,22 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
 				}
 				// Rehydration result (design D13, task 6.2): update only
-				// the entries whose CommandID matches this result's own
-				// CommandId (res.CommandId, the outer CommandResult field
-				// the mite echoes back). A whole-bundle rehydration_error
-				// applies to every one of them; the flat
-				// rehydration_deferred_jobs list is partitioned back to
-				// each tenant by its own job-path prefix first.
+				// the entries whose CommandID matches this result. The
+				// in-flight push maps each command that carried its bundle
+				// to the ID its entries carry, so the result of a push
+				// that a later push re-attached still counts. A
+				// whole-bundle rehydration_error applies to every matching
+				// entry; the flat rehydration_deferred_jobs list is
+				// partitioned back to each tenant by its own job-path
+				// prefix first.
+				rehydrationID := res.CommandId
+				var numberOnlyJobPaths []string
+				if isCellController(cr) {
+					if stamped, paths, ok := recv.takeRehydrationResult(cr.Namespace+"/"+cr.Name, res.CommandId); ok {
+						rehydrationID = stamped
+						numberOnlyJobPaths = paths
+					}
+				}
 				if isCellController(cr) && cr.Status.Cell != nil && len(cr.Status.Cell.Rehydration) > 0 {
 					tenants := make([]string, 0, len(cr.Status.Cell.Rehydration))
 					for _, e := range cr.Status.Cell.Rehydration {
@@ -3850,7 +3854,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					}
 					deferredByTenant := partitionDeferredJobs(r.DesiredState.RehydrationDeferredJobs, tenants)
 					cr.Status.Cell.Rehydration = applyRehydrationResult(
-						cr.Status.Cell.Rehydration, res.CommandId,
+						cr.Status.Cell.Rehydration, rehydrationID,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
 						deferredByTenant, time.Now(),
 					)
@@ -3859,7 +3863,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// counts as seeded only once this matching, successful
 				// result confirms it. See commitNumberOnlyProgress.
 				if isCellController(cr) {
-					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, res.CommandId,
+					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, numberOnlyJobPaths,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
 						r.DesiredState.RehydrationDeferredJobs)
 				}
@@ -4179,13 +4183,6 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	}
 	r.reconcileConnectedJenkinsBoot(ctx, cr)
 
-	// Build-record rehydration (design D3/D4/D13, tasks 5.7/5.8/6.0a/6.1/
-	// 6.3/6.4): attach a bundle for every not-yet-applied tenant. Field 17
-	// stays out of desiredHash above, so rehydrationPending must bypass
-	// the convergence short-circuit below on its own — an otherwise
-	// converged cell would never retry a still-pending tenant.
-	rehydrationPending := r.attachCellRehydration(ctx, cr, desired, pluginPinned(coreSet, "artifact-manager-s3"), now.Time)
-
 	// Detect (re)connection via epoch change and force a push so the
 	// mite always gets a fresh token. Also clear the cached token so it
 	// is re-minted for the new process. The epoch is recorded only after
@@ -4205,6 +4202,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		r.miteTokenMu.Unlock()
 	}
 	forcePush := reconnected
+
+	// Build-record rehydration (design D3/D4/D13, tasks 5.7/5.8/6.0a/6.1/
+	// 6.3/6.4): attach a bundle for every not-yet-applied tenant, or hold
+	// the in-flight one. A new mite process holds no command, so a
+	// reconnect ends the hold first.
+	if reconnected {
+		r.dropRehydrationInFlight(key)
+	}
+	rehydrationPlan := r.attachCellRehydration(ctx, cr, desired, pluginPinned(coreSet, "artifact-manager-s3"), now.Time)
+
 	// A reconnected mite gets the state it already had again, past the
 	// pause, manual-mode, and wave gates. Those gates hold back a new
 	// state, and this one was already delivered.
@@ -4231,7 +4238,11 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// push and we must retry regardless of the operator-side hash tracking.
 	// Always push on a reconnect (forcePush) so the fresh token reaches the mite.
 	rbacInSync := snapshot == nil || desired.RbacYaml == "" || snapshot.RbacHash == rbacH
-	if !forcePush && !rehydrationPending &&
+	// Field 17 stays out of desiredHash, so an attached rehydration bundle
+	// bypasses the short-circuit on its own. A tick that attaches no
+	// bundle only sends the delivered state again, so it waits for the
+	// drift window like any converged tick.
+	if !forcePush && desired.Rehydration == nil &&
 		cr.Status.DesiredStateHash == desiredHash &&
 		rbacInSync &&
 		cr.Status.LastDesiredPushAt != nil &&
@@ -4438,6 +4449,13 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// source.
 	}
 
+	// A push that goes out while a rehydration push is in flight carries
+	// the held bundle. The mite keeps only the newest desired state, so a
+	// push without the bundle can replace the held push before it starts.
+	if rehydrationPlan != nil && rehydrationPlan.Held && desired.Rehydration == nil {
+		desired.Rehydration = rehydrationPlan.Bundle
+	}
+
 	// The hash and the push time are stamped only after a delivered push.
 	// NATS keeps no copy of the command, so a stamp after a failed push
 	// would let the convergence short-circuit skip the retry.
@@ -4463,6 +4481,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		cr.Status.DesiredStateHash = desiredHash
 		cr.Status.DesiredContentHash = computeDesiredContentHash(desired)
 		cr.Status.LastDesiredPushAt = &now
+		r.markRehydrationSent(cr, rehydrationPlan, desired, now.Time)
 		if reconnected {
 			r.miteTokenMu.Lock()
 			r.lastMiteEpoch[key] = connEpoch

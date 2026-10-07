@@ -317,7 +317,7 @@ child seeds only after branch indexing creates it; the operator retries until th
 | Reason | Status | Meaning | Action |
 |---|---|---|---|
 | `TenantRehydrated` | True | Every selected seed reached the cell. | None. |
-| `RehydrationPending` | False | A bundle is outstanding, or a job is deferred. | Wait; the operator resends each tick. |
+| `RehydrationPending` | False | A bundle is outstanding, or a job is deferred. | Wait; the operator resends after a result or a timeout. |
 | `RehydrationTruncated` | False | Seeds exceed one bundle; some jobs hold only a build number. | Wait; number-only bundles cover every job before full records resume. |
 | `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. | Read the message. A give-up needs a fresh generation: move the tenant or roll the cell. |
 

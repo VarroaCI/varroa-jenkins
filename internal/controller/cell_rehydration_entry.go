@@ -28,11 +28,13 @@ func emptySelectionEntry(tenant string, generation int64, cellInstance string, n
 // reconciler writes before it sends the command, with Applied false and
 // Deferred empty. Records, Truncated, and UnseededJobs come from the
 // tenant's own selection; bundleID from the bundle SelectForBundle and
-// BuildBundle built for the whole cell.
-func preSendEntry(tenant, commandID, bundleID string, generation int64, cellInstance string, records int32, truncated bool, unseededJobs int32, now time.Time) v1alpha1.CellRehydrationEntry {
+// BuildBundle built for the whole cell. The entry carries no command ID:
+// markRehydrationSent stamps it after a delivered push, so a result of a
+// push that carried no bundle never matches it.
+func preSendEntry(tenant, bundleID string, generation int64, cellInstance string, records int32, truncated bool, unseededJobs int32, now time.Time) v1alpha1.CellRehydrationEntry {
 	at := metav1.NewTime(now)
 	return v1alpha1.CellRehydrationEntry{
-		Tenant: tenant, CommandID: commandID, BundleID: bundleID,
+		Tenant: tenant, BundleID: bundleID,
 		Generation: generation, CellInstance: cellInstance,
 		Records: records, Truncated: truncated, UnseededJobs: unseededJobs,
 		Applied: false, At: &at,

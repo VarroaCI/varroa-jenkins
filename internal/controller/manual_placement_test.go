@@ -249,11 +249,11 @@ func TestControllerStatusPatch_CarriesDesiredContentHash(t *testing.T) {
 	}
 }
 
-// manualCellWithPendingRehydration answers a manual-mode cell whose last
-// delivered push holds the current desired state, with one tenant whose
-// rehydration is not applied. The first tick runs in automatic mode, so it
-// delivers and stamps both hashes. records answers the record store.
-func manualCellWithPendingRehydration(t *testing.T, name string, records cells.RecordsFunc) (*Reconciler, *scriptedSendTransport, *v1alpha1.Controller) {
+// newRehydrationCell answers an automatic-mode cell with one placed
+// tenant, team-a, after its first tick. That tick delivers the desired
+// state and stamps both hashes. records answers the record store, and
+// configure, when set, adjusts the reconciler before the first tick.
+func newRehydrationCell(t *testing.T, name string, records cells.RecordsFunc, configure func(*Reconciler)) (*Reconciler, *scriptedSendTransport, *v1alpha1.Controller) {
 	t.Helper()
 	client := newTestClientWithGateBundle()
 	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
@@ -269,6 +269,9 @@ func manualCellWithPendingRehydration(t *testing.T, name string, records cells.R
 			Placement: &v1alpha1.TeamPlacementStatus{Cell: name, CellNamespace: "default", Generation: 1},
 		},
 	})
+	if configure != nil {
+		configure(rec)
+	}
 	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
 	rec.miteTransport = tr
 
@@ -280,6 +283,23 @@ func manualCellWithPendingRehydration(t *testing.T, name string, records cells.R
 	if tr.sends != 1 || cr.Status.DesiredStateHash == "" || cr.Status.DesiredContentHash == "" {
 		t.Fatalf("first push: sends=%d hash=%q content=%q, want one delivered push with both hashes",
 			tr.sends, cr.Status.DesiredStateHash, cr.Status.DesiredContentHash)
+	}
+	return rec, tr, cr
+}
+
+// manualCellWithPendingRehydration answers a manual-mode cell whose last
+// delivered push holds the current desired state, with one tenant whose
+// rehydration is not applied and no push in flight. The first tick runs
+// in automatic mode, so it delivers and stamps both hashes.
+func manualCellWithPendingRehydration(t *testing.T, name string, records cells.RecordsFunc) (*Reconciler, *scriptedSendTransport, *v1alpha1.Controller) {
+	t.Helper()
+	rec, tr, cr := newRehydrationCell(t, name, records, nil)
+	// The mite answers the first push. When that push carried a bundle,
+	// its rehydration section deferred the tenant's job, so the tenant
+	// stays pending with no push in flight.
+	if stamped, _, ok := rec.takeRehydrationResult(cr.Namespace+"/"+cr.Name, tr.last.CommandId); ok {
+		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, stamped, true, "",
+			map[string][]string{"team-a": {"team-a/build"}}, time.Now())
 	}
 	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
 	return rec, tr, cr
@@ -380,5 +400,28 @@ func TestReconcileConnected_ManualCellSendsNothingWithoutABundle(t *testing.T) {
 	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
 	if tr.sends != 1 {
 		t.Fatalf("sends = %d, want 1: a pending tenant with no bundle sends nothing", tr.sends)
+	}
+}
+
+// TestReconcileConnected_ManualCellHoldsAnInFlightRehydrationBundle pins
+// that a manual-mode cell sends no new bundle while its delivered bundle
+// has no result. The apply result of the full hash stays successful, so
+// only the hold stops the push.
+func TestReconcileConnected_ManualCellHoldsAnInFlightRehydrationBundle(t *testing.T) {
+	rec, tr, cr := manualCellWithPendingRehydration(t, "cell-rehydration-inflight", oneJobRecords)
+	cr.Status.LastApplyResult = &v1alpha1.ApplyResult{Hash: cr.Status.DesiredStateHash, Succeeded: true}
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 || tr.last.Rehydration == nil {
+		t.Fatalf("sends = %d, want the pending bundle pushed", tr.sends)
+	}
+	pushed := tr.last.CommandId
+
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d, want 2: the in-flight bundle holds", tr.sends)
+	}
+	if got := cr.Status.Cell.Rehydration[0].CommandID; got != pushed {
+		t.Fatalf("entry command = %q, want the in-flight command %q", got, pushed)
 	}
 }

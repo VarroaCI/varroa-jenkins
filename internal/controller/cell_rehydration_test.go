@@ -29,6 +29,26 @@ func seedRehydrationTeam(client *testClient, name string, generation int64) {
 	crdstore.MustSeed(client.store, team)
 }
 
+// deliverRehydration stands for a delivered push of plan's bundle on
+// desired, the way handleConnected stamps it after a delivered send.
+func deliverRehydration(rec *Reconciler, cr *v1alpha1.Controller, plan *rehydrationSendPlan, desired *mitev1.DesiredStateCommand, now time.Time) {
+	rec.markRehydrationSent(cr, plan, desired, now)
+}
+
+// answerRehydration stands for the mite's result for commandID, applied
+// the way handleConnected's result drain applies it.
+func answerRehydration(rec *Reconciler, cr *v1alpha1.Controller, commandID string, success bool, rehydrationErr string, now time.Time) {
+	cellKey := cr.Namespace + "/" + cr.Name
+	id := commandID
+	var paths []string
+	if stamped, p, ok := rec.takeRehydrationResult(cellKey, commandID); ok {
+		id = stamped
+		paths = p
+	}
+	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, id, success, rehydrationErr, map[string][]string{}, now)
+	rec.commitNumberOnlyProgress(cellKey, paths, success, rehydrationErr, nil)
+}
+
 // TestAttachCellRehydration_AppliedTenantSendsNoBundle covers task 6.4:
 // a tenant that already counts as applied gets no rehydration field on
 // the command, and the cell reports no pending tenant.
@@ -54,10 +74,10 @@ func TestAttachCellRehydration_AppliedTenantSendsNoBundle(t *testing.T) {
 	}
 
 	desired := &mitev1.DesiredStateCommand{CommandId: "cmd-1"}
-	pending := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
+	plan := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
 
-	if pending {
-		t.Fatal("expected no pending tenant")
+	if plan != nil {
+		t.Fatalf("expected no send plan, got %+v", plan)
 	}
 	if desired.Rehydration != nil {
 		t.Fatalf("expected no rehydration field for an applied tenant, got %+v", desired.Rehydration)
@@ -85,13 +105,13 @@ func TestAttachCellRehydration_PendingTenantSendsBundle(t *testing.T) {
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}, Instance: "uid-1"}
 
 	desired := &mitev1.DesiredStateCommand{CommandId: "cmd-1"}
-	pending := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
+	plan := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
 
-	if !pending {
-		t.Fatal("expected the tenant reported pending")
+	if plan == nil || plan.Held {
+		t.Fatalf("expected a send plan for a new bundle, got %+v", plan)
 	}
-	if desired.Rehydration == nil {
-		t.Fatal("expected a rehydration bundle attached")
+	if desired.Rehydration == nil || plan.Bundle != desired.Rehydration {
+		t.Fatal("expected the plan's rehydration bundle attached")
 	}
 	if len(cr.Status.Cell.Rehydration) != 1 {
 		t.Fatalf("expected one entry written, got %+v", cr.Status.Cell.Rehydration)
@@ -100,8 +120,13 @@ func TestAttachCellRehydration_PendingTenantSendsBundle(t *testing.T) {
 	if entry.Applied {
 		t.Fatal("expected Applied false before any result arrives")
 	}
-	if entry.CommandID != "cmd-1" || entry.BundleID != desired.Rehydration.BundleId {
-		t.Fatalf("expected the entry correlated to this command and bundle, got %+v", entry)
+	if entry.CommandID != "" || entry.BundleID != desired.Rehydration.BundleId {
+		t.Fatalf("expected the pre-send entry to name the bundle and no command, got %+v", entry)
+	}
+
+	deliverRehydration(rec, cr, plan, desired, time.Now())
+	if got := cr.Status.Cell.Rehydration[0].CommandID; got != "cmd-1" {
+		t.Fatalf("expected the delivered push to stamp cmd-1, got %q", got)
 	}
 }
 
@@ -123,10 +148,10 @@ func TestAttachCellRehydration_EmptySelectionAppliedAtOnce(t *testing.T) {
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}, Instance: "uid-1"}
 
 	desired := &mitev1.DesiredStateCommand{CommandId: "cmd-1"}
-	pending := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
+	plan := rec.attachCellRehydration(context.Background(), cr, desired, false, time.Now())
 
-	if pending {
-		t.Fatal("expected the empty-selection tenant to count as applied, not pending")
+	if plan != nil {
+		t.Fatalf("expected the empty-selection tenant to count as applied, got plan %+v", plan)
 	}
 	if desired.Rehydration != nil {
 		t.Fatalf("expected no rehydration field sent, got %+v", desired.Rehydration)
@@ -188,9 +213,9 @@ func TestAttachCellRehydration_NumberOnlyProgressesAcrossThreeTicks(t *testing.T
 
 	for tick := 1; tick <= 3; tick++ {
 		desired := &mitev1.DesiredStateCommand{CommandId: fmt.Sprintf("cmd-%d", tick)}
-		pending := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
-		if !pending {
-			t.Fatalf("tick %d: expected the tenant reported pending", tick)
+		plan := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
+		if plan == nil {
+			t.Fatalf("tick %d: expected a send plan", tick)
 		}
 		if desired.Rehydration == nil {
 			t.Fatalf("tick %d: expected a bundle sent; a stuck applied predicate would skip it", tick)
@@ -204,12 +229,10 @@ func TestAttachCellRehydration_NumberOnlyProgressesAcrossThreeTicks(t *testing.T
 			t.Fatalf("tick %d: expected jobs still unseeded before the final block", tick)
 		}
 
-		// Simulate the mite applying this tick's bundle successfully,
-		// as controller_controller.go's own result handler does: commit
-		// this tick's number-only block into the seeded cache, then
-		// apply the whole-entry result.
-		rec.commitNumberOnlyProgress("cells-ns/cell-a", desired.CommandId, true, "", nil)
-		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, desired.CommandId, true, "", map[string][]string{}, now)
+		// Simulate a delivered push and the mite applying this tick's
+		// bundle successfully, as handleConnected's result drain does.
+		deliverRehydration(rec, cr, plan, desired, now)
+		answerRehydration(rec, cr, desired.CommandId, true, "", now)
 	}
 
 	if len(bundleIDs) != 3 {
@@ -222,8 +245,7 @@ func TestAttachCellRehydration_NumberOnlyProgressesAcrossThreeTicks(t *testing.T
 	// A fourth tick sees the fully-seeded entry and sends no further
 	// bundle: the tenant now counts as applied.
 	desired4 := &mitev1.DesiredStateCommand{CommandId: "cmd-4"}
-	pending4 := rec.attachCellRehydration(context.Background(), cr, desired4, false, now)
-	if pending4 {
+	if plan4 := rec.attachCellRehydration(context.Background(), cr, desired4, false, now); plan4 != nil {
 		t.Fatal("tick 4: expected the tenant to finally count as applied")
 	}
 	if desired4.Rehydration != nil {
@@ -263,9 +285,9 @@ func TestAttachCellRehydration_FailedSeedStaysUnseeded(t *testing.T) {
 
 	now := time.Now()
 	desired := &mitev1.DesiredStateCommand{CommandId: "cmd-1"}
-	pending := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
-	if !pending {
-		t.Fatal("expected the tenant reported pending: one job failed to render")
+	plan := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
+	if plan == nil {
+		t.Fatal("expected a send plan: one job rendered")
 	}
 	if desired.Rehydration == nil {
 		t.Fatal("expected a bundle for the successfully rendered job")
@@ -284,7 +306,8 @@ func TestAttachCellRehydration_FailedSeedStaysUnseeded(t *testing.T) {
 	// The mite applies the bundle for the job that did render; the
 	// failed job's path was never inside it, so success alone must
 	// not mark the tenant applied.
-	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, desired.CommandId, true, "", map[string][]string{}, now)
+	deliverRehydration(rec, cr, plan, desired, now)
+	answerRehydration(rec, cr, desired.CommandId, true, "", now)
 	if rehydrationApplied(&cr.Status.Cell.Rehydration[0], 2, "uid-1") {
 		t.Fatal("expected UnseededJobs to keep the tenant unrehydrated after the mite applies the partial bundle")
 	}
@@ -292,8 +315,7 @@ func TestAttachCellRehydration_FailedSeedStaysUnseeded(t *testing.T) {
 	// Tick 2: the render still fails, so the tenant stays pending and
 	// the failed job is retried, not dropped.
 	desired2 := &mitev1.DesiredStateCommand{CommandId: "cmd-2"}
-	pending2 := rec.attachCellRehydration(context.Background(), cr, desired2, false, now)
-	if !pending2 {
+	if plan2 := rec.attachCellRehydration(context.Background(), cr, desired2, false, now); plan2 == nil {
 		t.Fatal("tick 2: expected the tenant still pending")
 	}
 	if len(cr.Status.Cell.Rehydration) != 1 || cr.Status.Cell.Rehydration[0].UnseededJobs != 1 {
@@ -359,13 +381,13 @@ func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *test
 	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: []string{"team-a"}, Instance: "uid-1"}
 
 	now := time.Now()
-	cellKey := "cells-ns/cell-a"
 
+	var lastPlan *rehydrationSendPlan
 	send := func(cmdID string) (*mitev1.DesiredStateCommand, v1alpha1.CellRehydrationEntry) {
 		desired := &mitev1.DesiredStateCommand{CommandId: cmdID}
-		pending := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
-		if !pending {
-			t.Fatalf("%s: expected the tenant reported pending", cmdID)
+		lastPlan = rec.attachCellRehydration(context.Background(), cr, desired, false, now)
+		if lastPlan == nil {
+			t.Fatalf("%s: expected a send plan", cmdID)
 		}
 		if desired.Rehydration == nil {
 			t.Fatalf("%s: expected a bundle sent", cmdID)
@@ -399,7 +421,8 @@ func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *test
 	}
 
 	// The mite rejects cmd-2's block outright.
-	rec.commitNumberOnlyProgress(cellKey, desired2.CommandId, false, "simulated rejection", nil)
+	deliverRehydration(rec, cr, lastPlan, desired2, now)
+	answerRehydration(rec, cr, desired2.CommandId, false, "simulated rejection", now)
 
 	// Tick 3: a rejection must not advance progress either — the same
 	// block is sent again.
@@ -413,8 +436,8 @@ func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *test
 	}
 
 	// The mite now confirms cmd-3's block applied.
-	rec.commitNumberOnlyProgress(cellKey, desired3.CommandId, true, "", nil)
-	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, desired3.CommandId, true, "", map[string][]string{}, now)
+	deliverRehydration(rec, cr, lastPlan, desired3, now)
+	answerRehydration(rec, cr, desired3.CommandId, true, "", now)
 	if rehydrationApplied(&cr.Status.Cell.Rehydration[0], 1, "uid-1") {
 		t.Fatal("tick 3: expected the tenant still not rehydrated — later blocks remain unseeded")
 	}
@@ -431,8 +454,8 @@ func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *test
 	for ; tick <= jobCount+5; tick++ {
 		cmdID := fmt.Sprintf("cmd-%d", tick)
 		desired := &mitev1.DesiredStateCommand{CommandId: cmdID}
-		pending := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
-		if !pending {
+		plan := rec.attachCellRehydration(context.Background(), cr, desired, false, now)
+		if plan == nil {
 			// No further bundle: the tenant is fully seeded.
 			break
 		}
@@ -445,8 +468,8 @@ func TestAttachCellRehydration_NumberOnlyBlockNotCommittedUntilConfirmed(t *test
 			}
 			seen[p] = true
 		}
-		rec.commitNumberOnlyProgress(cellKey, cmdID, true, "", nil)
-		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, cmdID, true, "", map[string][]string{}, now)
+		deliverRehydration(rec, cr, plan, desired, now)
+		answerRehydration(rec, cr, cmdID, true, "", now)
 		if len(cr.Status.Cell.Rehydration) != 1 {
 			t.Fatalf("tick %d: expected one entry, got %+v", tick, cr.Status.Cell.Rehydration)
 		}
@@ -477,12 +500,20 @@ func TestNumberOnlyCaches_ConcurrentCellsDoNotRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			key := fmt.Sprintf("ns/cell-%d", i%3)
+			cr := &v1alpha1.Controller{}
+			cr.Namespace = "ns"
+			cr.Name = fmt.Sprintf("cell-%d", i%3)
+			key := cr.Namespace + "/" + cr.Name
 			for n := 0; n < 50; n++ {
 				id := fmt.Sprintf("cmd-%d-%d", i, n)
-				r.setNumberOnlyPending(key, numberOnlyPendingBlock{CommandID: id, JobPaths: []string{"a", "b"}})
+				bundle := &mitev1.RehydrationBundle{BundleId: id}
+				plan := &rehydrationSendPlan{Bundle: bundle, NumberOnlyJobPaths: []string{"a", "b"}}
+				r.markRehydrationSent(cr, plan, &mitev1.DesiredStateCommand{CommandId: id, Rehydration: bundle}, time.Now())
+				_ = r.rehydrationInFlightFor(key)
 				_ = r.numberSeededJobsCopy(key)
-				r.commitNumberOnlyProgress(key, id, true, "", nil)
+				_, paths, _ := r.takeRehydrationResult(key, id)
+				r.commitNumberOnlyProgress(key, paths, true, "", nil)
+				r.dropRehydrationInFlight(key)
 			}
 		}(i)
 	}

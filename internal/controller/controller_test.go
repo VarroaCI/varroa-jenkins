@@ -3316,6 +3316,17 @@ type scriptedSendTransport struct {
 	sends   int
 	epoch   int64
 	last    *mitev1.DesiredStateCommand
+	// results, when set, is what the next DrainResults call answers.
+	results []*mitev1.CommandResult
+}
+
+func (s *scriptedSendTransport) DrainResults(ns, name string) []*mitev1.CommandResult {
+	if s.results != nil {
+		out := s.results
+		s.results = nil
+		return out
+	}
+	return s.Transport.DrainResults(ns, name)
 }
 
 func (s *scriptedSendTransport) Send(_ context.Context, _, _ string, msg *mitev1.OperatorMessage) error {

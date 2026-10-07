@@ -52,20 +52,20 @@ func TestEmptySelectionEntry_RehydratedBecomesTrue(t *testing.T) {
 // --- task 6.1: the pre-send entry ---
 
 func TestPreSendEntry_WrittenBeforeSend(t *testing.T) {
-	entry := preSendEntry("team-a", "cmd-1", "bundle-1", 1, "uid-1", 5, true, 2, rehydrationTestNow)
+	entry := preSendEntry("team-a", "bundle-1", 1, "uid-1", 5, true, 2, rehydrationTestNow)
 	if entry.Applied {
 		t.Fatal("expected Applied false before any result has arrived")
 	}
 	if len(entry.Deferred) != 0 {
 		t.Fatal("expected Deferred empty before any result has arrived")
 	}
-	if entry.CommandID != "cmd-1" || entry.Records != 5 || !entry.Truncated || entry.UnseededJobs != 2 {
-		t.Fatalf("expected the selection's own fields carried through, got %+v", entry)
+	if entry.CommandID != "" || entry.Records != 5 || !entry.Truncated || entry.UnseededJobs != 2 {
+		t.Fatalf("expected the selection's own fields and no command ID, got %+v", entry)
 	}
 }
 
 func TestPreSendEntry_BundleIDMatches(t *testing.T) {
-	entry := preSendEntry("team-a", "cmd-1", "bundle-xyz", 1, "uid-1", 0, false, 0, rehydrationTestNow)
+	entry := preSendEntry("team-a", "bundle-xyz", 1, "uid-1", 0, false, 0, rehydrationTestNow)
 	if entry.BundleID != "bundle-xyz" {
 		t.Fatalf("expected bundleId to match the bundle, got %q", entry.BundleID)
 	}
