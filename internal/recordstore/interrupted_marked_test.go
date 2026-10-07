@@ -546,6 +546,7 @@ func TestEndStaleMarkedIntentHonoursTheConsumerGate(t *testing.T) {
 	if _, err := conn.PublishJetStream("builds.core.ns.cell", []byte("{}")); err != nil {
 		t.Fatalf("publish backlog message: %v", err)
 	}
+	waitSweepConsumerPending(t, conn, 1)
 
 	ended, err := EndMarkedLostIntents(context.Background(), pool, conn, nil, nil, nil, nil,
 		1, time.Now().UTC(), testGrace, nil)

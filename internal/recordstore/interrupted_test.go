@@ -810,6 +810,31 @@ func freshenSweepConsumer(t *testing.T, conn *bus.Conn) {
 	}
 }
 
+// waitSweepConsumerPending polls the recorder consumer until its
+// NumPending equals want. The server sends the publish ack before it
+// signals the consumer, so a ConsumerInfo read just after the ack can
+// still report the old pending count. A test that publishes to
+// varroa_builds and then expects the sweep gate to skip calls this
+// first.
+func waitSweepConsumerPending(t *testing.T, conn *bus.Conn, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last uint64
+	for {
+		info, err := conn.ConsumerInfo(bus.BuildsStreamName, RecorderConsumerName)
+		if err == nil {
+			last = info.NumPending
+			if last == want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recorder consumer NumPending = %d after 5s, want %d (last error: %v)", last, want, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestSweepInterruptedRunsMarksASilentRun is the sweep's end-to-end
 // case: a fresh consumer, a RUNNING run whose heartbeat is silent, and a
 // placement row confirming its owning cell instance is not alive. The
@@ -897,6 +922,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 			t.Fatalf("publish backlog message %d: %v", i, err)
 		}
 	}
+	waitSweepConsumerPending(t, conn, 3)
 
 	mp, reader := newTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics(mp)
@@ -939,6 +965,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 	if _, err := conn.PublishJetStream("builds.core.ns.cell", []byte("{}")); err != nil {
 		t.Fatalf("publish a pending message: %v", err)
 	}
+	waitSweepConsumerPending(t, conn, 1)
 
 	mp, reader := newTestMeterProvider(t)
 	metrics, err := NewInterruptedMetrics(mp)

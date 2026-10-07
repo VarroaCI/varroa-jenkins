@@ -265,6 +265,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   monthly-partitioned table only inside the window its migration creates
   (`00001` for `runs` and `log_chunks`, `00002` for `activity`). That
   window runs from the previous month to two months ahead of the clock.
+- **Consumer gate after a publish** (`interrupted_test.go`) — the NATS
+  server sends a publish ack before it signals the consumer. A
+  `ConsumerInfo` read just after the ack can report a low `NumPending`. A
+  test that publishes to `varroa_builds` and then expects the sweep gate
+  to skip calls `waitSweepConsumerPending` first.
 - **Cluster-wide roles in a grants test** (`grants_test.go`) — a Postgres
   role is instance-wide, not per-database. A grants test creates
   `varroa_client`/`varroa_gateway` only when the role does not already
