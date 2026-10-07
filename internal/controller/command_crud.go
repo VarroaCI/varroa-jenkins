@@ -31,8 +31,8 @@ type CommandCRUDClient interface {
 	// against the applied object's unstructured spec.
 	ApplyControllerSpecSSA(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
-	// SetHibernated is the single writer for status.hibernated and
-	// status.hibernatedAt. HandleUpdate calls it to clear the flag when the
+	// SetHibernated writes status.hibernated and status.hibernatedAt from a
+	// fresh read. HandleUpdate calls it to clear the flag when the
 	// submitted patch writes spec.powerState.
 	SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error)
 }

@@ -283,21 +283,24 @@ func TestHibernateController_RefusesStopped(t *testing.T) {
 // captureTransport (connected, healthy, Send succeeds without a gRPC stream).
 type idleTransport struct {
 	*captureTransport
+	// timerTriggerJobs is the TimerTriggerJobs gauge the mite reports.
+	timerTriggerJobs int
 }
 
 func (t *idleTransport) IdleGauges(_, _ string) (*mitev1.IdleGauges, time.Time, bool) {
-	return freshGauges(), time.Now(), true
+	g := freshGauges()
+	g.TimerTriggerJobs = t.timerTriggerJobs
+	return g, time.Now(), true
 }
 
 func TestAutoHibernateWritesStatusNotSpec(t *testing.T) {
 	client := newTestClient()
-	client.hibernatedChanged = true
 	rec := newTestReconciler(client)
 	rec.miteTransport = &idleTransport{captureTransport: &captureTransport{}}
 
 	now := time.Now()
 	cr := &v1alpha1.Controller{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(now)},
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(now), ResourceVersion: "7"},
 		Spec: v1alpha1.ControllerSpec{
 			PowerState:  "Running",
 			Hibernation: &v1alpha1.HibernationSpec{Enabled: true, GracePeriodMinutes: 60},
@@ -318,17 +321,58 @@ func TestAutoHibernateWritesStatusNotSpec(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// The auto-hibernate write must go to status via SetHibernated(true)...
-	if len(client.hibernatedWrites) != 1 {
-		t.Fatalf("expected exactly 1 SetHibernated write, got %d", len(client.hibernatedWrites))
+	// The auto-hibernate write must go to status through the conditional
+	// SetHibernatedAt at the tick's read version, never the fresh-read
+	// SetHibernated...
+	if len(client.hibernatedWrites) != 0 {
+		t.Fatalf("the tick called SetHibernated: %+v", client.hibernatedWrites)
 	}
-	w := client.hibernatedWrites[0]
-	if w.name != "test" || w.namespace != "ns" || !w.want {
-		t.Errorf("SetHibernated = %+v, want {test ns true}", w)
+	if len(client.tickHibernatedWrites) != 1 {
+		t.Fatalf("expected exactly 1 SetHibernatedAt write, got %d", len(client.tickHibernatedWrites))
+	}
+	w := client.tickHibernatedWrites[0]
+	if w.name != "test" || w.namespace != "ns" || !w.want || w.resourceVersion != "7" {
+		t.Errorf("SetHibernatedAt = %+v, want {test ns 7 true}", w)
 	}
 	// ...and must not touch spec: powerState is unchanged.
 	if cr.Spec.PowerState != "Running" {
 		t.Errorf("spec.powerState = %q, want Running (auto-hibernate must not write spec)", cr.Spec.PowerState)
+	}
+}
+
+// TestReconcile_AutoHibernateEndWriteLands pins that the tick's own
+// hibernation write moves its resourceVersion chain forward. The end status
+// write of the same tick then lands, so the HibernationCronTriggersSkipped
+// condition that the tick sets is saved.
+func TestReconcile_AutoHibernateEndWriteLands(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	rec := newTestReconciler(client)
+	rec.miteTransport = &idleTransport{captureTransport: &captureTransport{}, timerTriggerJobs: 2}
+	crdstore.MustSeed(client.store, idleConnectedController())
+
+	res, err := rec.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.RequeueAfter == tickConflictRequeue {
+		t.Fatal("the tick conflicted on its own hibernation write")
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !got.Status.Hibernated || got.Status.HibernatedAt == nil {
+		t.Fatalf("hibernated = %v, hibernatedAt = %v; want true and set", got.Status.Hibernated, got.Status.HibernatedAt)
+	}
+	skipped := false
+	for _, c := range got.Status.Conditions {
+		if c.Type == v1alpha1.ConditionHibernationCronTriggersSkipped && c.Status == metav1.ConditionTrue {
+			skipped = true
+		}
+	}
+	if !skipped {
+		t.Fatalf("conditions = %+v, want HibernationCronTriggersSkipped True from the end write", got.Status.Conditions)
 	}
 }
 
@@ -355,9 +399,9 @@ func TestStopThenStartCoalescedStartsAndDoesNotRehibernate(t *testing.T) {
 	if cr.Status.Phase != v1alpha1.ControllerPhasePending {
 		t.Fatalf("phase = %q, want Pending (waking from hibernation)", cr.Status.Phase)
 	}
-	// Must not re-park: no SetHibernated(true) and no scale-to-0.
-	if len(client.hibernatedWrites) != 0 {
-		t.Errorf("expected no SetHibernated writes, got %+v", client.hibernatedWrites)
+	// Must not re-park: no hibernation write and no scale-to-0.
+	if len(client.hibernatedWrites) != 0 || len(client.tickHibernatedWrites) != 0 {
+		t.Errorf("expected no hibernation writes, got %+v and %+v", client.hibernatedWrites, client.tickHibernatedWrites)
 	}
 	if len(client.scaleCalls) != 0 {
 		t.Errorf("expected no ScaleStatefulSet calls (must not re-hibernate), got %+v", client.scaleCalls)

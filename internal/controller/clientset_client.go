@@ -3300,7 +3300,8 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	// end-of-reconcile status write is blind, and a JSON merge patch retains
 	// omitted keys — a false value could never clear the flag, and a stale
 	// true read before a concurrent wake would re-assert it and un-wake the
-	// controller. They are written only by SetHibernated, the status CAS.
+	// controller. They are written only by SetHibernated, the status CAS,
+	// and by SetHibernatedAt, the conditional write of the tick.
 	// Force overlayWarnings so that an empty slice clears prior warnings
 	// (omitempty would prevent the merge patch from clearing them).
 	overlayWarnings := status.OverlayWarnings
@@ -3429,10 +3430,12 @@ func (c *ClientsetClient) PatchControllerCellStatus(ctx context.Context, name, n
 	return err
 }
 
-// SetHibernated is the single writer for status.hibernated and
-// status.hibernatedAt. It reads the live object and returns (false, nil) when
-// the flag already matches want. Otherwise it sets the two hibernation fields
-// on the freshly read object and Updates the STATUS SUBRESOURCE, carrying the
+// SetHibernated writes status.hibernated and status.hibernatedAt for the
+// callers outside the reconcile tick: the wake and hibernate actions, the
+// power write, and the brood verbs. The tick uses SetHibernatedAt. It reads
+// the live object and returns (false, nil) when the flag already matches
+// want. Otherwise it sets the two hibernation fields on the freshly read
+// object and Updates the STATUS SUBRESOURCE, carrying the
 // fetched resourceVersion so a concurrent write conflicts rather than being
 // clobbered.
 //
@@ -3442,8 +3445,7 @@ func (c *ClientsetClient) PatchControllerCellStatus(ctx context.Context, name, n
 // bounded number of times on conflict: the clear (wake) callers are one-shot
 // and would otherwise drop the wake, and the set direction is reached by
 // HibernateController — also a one-shot request-reply action — which would
-// surface a conflict as a spurious 500. Auto-hibernate additionally requeues
-// naturally inside the reconcile.
+// surface a conflict as a spurious 500.
 func (c *ClientsetClient) SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error) {
 	var changed bool
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -3485,6 +3487,44 @@ func (c *ClientsetClient) setHibernatedOnce(ctx context.Context, name, namespace
 		return false, err
 	}
 	return true, nil
+}
+
+// SetHibernatedAt sets status.hibernated to want only while the Controller
+// still carries resourceVersion, and returns the resourceVersion after the
+// write. It sends one JSON merge patch on the status subresource with the
+// resourceVersion in the body, which the apiserver treats as a precondition.
+// It does not read the Controller and does not retry: the caller decided from
+// its own read, so a write since that read must surface as Conflict. A set
+// stamps status.hibernatedAt, and a clear removes it.
+func (c *ClientsetClient) SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error) {
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("set controller %s/%s hibernation: resourceVersion is required", namespace, name)
+	}
+	patchBytes, err := json.Marshal(map[string]interface{}{
+		"metadata": map[string]interface{}{"resourceVersion": resourceVersion},
+		"status":   hibernationStatusPatch(want, metav1.Now()),
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal hibernation patch: %w", err)
+	}
+	out, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
+	)
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
+}
+
+// hibernationStatusPatch is the status body of a SetHibernatedAt merge patch.
+// A clear sends a null hibernatedAt, which deletes the key.
+func hibernationStatusPatch(want bool, now metav1.Time) map[string]interface{} {
+	var at interface{}
+	if want {
+		at = now.UTC().Format(time.RFC3339)
+	}
+	return map[string]interface{}{"hibernated": want, "hibernatedAt": at}
 }
 
 // PatchControllerAnnotations merge-patches metadata.annotations on a Controller.

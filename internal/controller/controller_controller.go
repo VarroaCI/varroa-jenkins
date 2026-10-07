@@ -1087,12 +1087,17 @@ type ResourceClient interface {
 	// is invalid on the create path the server takes for a missing object).
 	// Existing ApplyControllerSpecSSA call sites are unaffected.
 	ApplyControllerSpecSSAIfExists(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
-	// SetHibernated is the single writer for status.hibernated and
-	// status.hibernatedAt. It reads the live object, returns (false, nil)
+	// SetHibernated writes status.hibernated and status.hibernatedAt for
+	// every caller outside the reconcile tick. It reads the live object, returns (false, nil)
 	// when the flag already matches want, and otherwise writes the STATUS
 	// SUBRESOURCE via Update carrying the fetched resourceVersion so a
 	// concurrent write conflicts instead of being clobbered.
 	SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error)
+	// SetHibernatedAt sets status.hibernated only while the Controller still
+	// carries resourceVersion, and returns the resourceVersion after the
+	// write. It does not read the Controller. A write since that version
+	// answers apierrors Conflict. The tick uses it through setTickHibernated.
+	SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error)
 	// PatchControllerStatus merge-patches status only while the Controller
 	// still carries resourceVersion, and returns the resourceVersion after
 	// the patch. A write since that version answers apierrors Conflict.
@@ -1554,6 +1559,33 @@ func (r *Reconciler) patchTickMeta(ctx context.Context, cr *v1alpha1.Controller,
 	}
 	cr.ResourceVersion = rv
 	return nil
+}
+
+// setTickHibernated sets status.hibernated of the tick's Controller to want
+// only while it still carries cr.ResourceVersion, and moves cr.ResourceVersion
+// forward. It reports whether it wrote. The tick decides from its own read,
+// so the flag in cr is the live flag exactly when the precondition holds. A
+// stalled replica therefore cannot hibernate a controller that a newer owner
+// woke. A conflict cancels the tick context through fenceTick. Never call
+// SetHibernated from the tick: its fresh read defeats the fence.
+func (r *Reconciler) setTickHibernated(ctx context.Context, cr *v1alpha1.Controller, want bool) (bool, error) {
+	if cr.Status.Hibernated == want {
+		return false, nil
+	}
+	rv, err := r.client.SetHibernatedAt(ctx, cr.Name, cr.Namespace, cr.ResourceVersion, want)
+	if err != nil {
+		fenceTick(ctx, err, "hibernation", cr.ResourceVersion)
+		return false, err
+	}
+	cr.ResourceVersion = rv
+	cr.Status.Hibernated = want
+	if want {
+		now := metav1Now()
+		cr.Status.HibernatedAt = &now
+	} else {
+		cr.Status.HibernatedAt = nil
+	}
+	return true, nil
 }
 
 const reconcileBlockedMessageCap = 2048
@@ -2542,12 +2574,15 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			return fmt.Errorf("scale down statefulset: %w", serr)
 		}
 		// Hard power beats hibernation: clear any stale hibernation flag so a
-		// later power-on cannot resurrect it. Must go through SetHibernated —
+		// later power-on cannot resurrect it. Must go through setTickHibernated:
 		// an in-memory assignment is silently dropped, because the flag is
 		// excluded from the end-of-reconcile PatchControllerStatus.
-		if cr.Status.Hibernated {
-			if _, herr := r.client.SetHibernated(ctx, cr.Name, cr.Namespace, false); herr != nil {
-				logger.Warn("clear hibernation flag on stop", "error", herr)
+		if _, herr := r.setTickHibernated(ctx, cr, false); herr != nil {
+			logger.Warn("clear hibernation flag on stop", "error", herr)
+			// A conflict cancelled the tick. Stop before the side effects
+			// below.
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
 			}
 		}
 		clearMiteConnection(cr)
@@ -4474,14 +4509,20 @@ func (r *Reconciler) evaluateHibernationPolicy(ctx context.Context, cr *v1alpha1
 			}
 
 			if shouldHib {
-				// Persist status.hibernated via the CAS helper, then wake the
-				// follow-up reconcile so it observes the flag and scales the
-				// StatefulSet down. Persist FIRST: enqueueReconcile is a
-				// non-blocking send drained after this reconcile returns, so
-				// waking first could let the follow-up read a stale false and
-				// skip the scale-down.
-				changed, terr := r.client.SetHibernated(ctx, cr.Name, cr.Namespace, true)
+				// Persist status.hibernated conditionally on the tick's read,
+				// then wake the follow-up reconcile so it observes the flag
+				// and scales the StatefulSet down. Persist FIRST:
+				// enqueueReconcile is a non-blocking send drained after this
+				// reconcile returns, so waking first could let the follow-up
+				// read a stale false and skip the scale-down.
+				changed, terr := r.setTickHibernated(ctx, cr, true)
 				if terr != nil {
+					// A conflict cancelled the tick: a newer write, such as
+					// a wake by the new shard owner, supersedes this
+					// decision. Reconcile requeues without an error.
+					if ctx.Err() != nil {
+						return context.Cause(ctx)
+					}
 					r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedHibernateTransitionFailed, terr.Error())
 					return fmt.Errorf("hibernate setHibernated: %w", terr)
 				}

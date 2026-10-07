@@ -81,13 +81,19 @@ type testClient struct {
 	getSecretCalls             map[string]int               // name -> GetSecret call count
 	getSecretErrs              map[string]error             // name -> error GetSecret returns instead of a lookup
 
-	// hibernation CAS tracking (SetHibernated).
+	// hibernation CAS tracking (SetHibernated). With statusToStore,
+	// SetHibernated also reads the store fresh and updates its status, the
+	// way ClientsetClient does.
 	hibernatedWrites []struct {
 		name, namespace string
 		want            bool
 	}
-	hibernatedChanged bool
-	hibernatedErr     error
+	// tickHibernatedWrites records SetHibernatedAt, the conditional write
+	// of the tick. With statusToStore, it also patches the store under the
+	// resourceVersion precondition.
+	tickHibernatedWrites []tickHibernatedWrite
+	hibernatedChanged    bool
+	hibernatedErr        error
 
 	// Users/Group tracking for local auth tests.
 	users                            map[string]*v1alpha1.User
@@ -665,7 +671,7 @@ func (t *testClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ ma
 func (t *testClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, nil
 }
-func (t *testClient) SetHibernated(_ context.Context, name, namespace string, want bool) (bool, error) {
+func (t *testClient) SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error) {
 	t.hibernatedWrites = append(t.hibernatedWrites, struct {
 		name, namespace string
 		want            bool
@@ -673,7 +679,62 @@ func (t *testClient) SetHibernated(_ context.Context, name, namespace string, wa
 	if t.hibernatedErr != nil {
 		return false, t.hibernatedErr
 	}
+	if t.statusToStore {
+		return t.setHibernatedInStore(ctx, name, namespace, want)
+	}
 	return t.hibernatedChanged, nil
+}
+
+// setHibernatedInStore models ClientsetClient.SetHibernated on the store: a
+// fresh read, a compare, and a status update under the read's version.
+func (t *testClient) setHibernatedInStore(ctx context.Context, name, namespace string, want bool) (bool, error) {
+	gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+	if err != nil {
+		return false, err
+	}
+	u, err := t.store.GetObject(ctx, gvr, namespace, name)
+	if err != nil {
+		return false, err
+	}
+	cur, _, _ := unstructured.NestedBool(u.Object, "status", "hibernated")
+	if cur == want {
+		return false, nil
+	}
+	if err := unstructured.SetNestedField(u.Object, want, "status", "hibernated"); err != nil {
+		return false, err
+	}
+	if want {
+		if err := unstructured.SetNestedField(u.Object, metav1.Now().UTC().Format(time.RFC3339), "status", "hibernatedAt"); err != nil {
+			return false, err
+		}
+	} else {
+		unstructured.RemoveNestedField(u.Object, "status", "hibernatedAt")
+	}
+	if _, err := t.store.UpdateObjectStatus(ctx, gvr, namespace, u); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// tickHibernatedWrite is one recorded SetHibernatedAt call.
+type tickHibernatedWrite struct {
+	name, namespace, resourceVersion string
+	want                             bool
+}
+
+func (t *testClient) SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error) {
+	t.tickHibernatedWrites = append(t.tickHibernatedWrites, tickHibernatedWrite{name, namespace, resourceVersion, want})
+	if t.hibernatedErr != nil {
+		return "", t.hibernatedErr
+	}
+	if !t.statusToStore {
+		return resourceVersion, nil
+	}
+	gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+	if err != nil {
+		return "", err
+	}
+	return t.store.PatchObjectStatusAt(ctx, gvr, namespace, name, resourceVersion, hibernationStatusPatch(want, metav1.Now()))
 }
 func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error) {
 	next := resourceVersion

@@ -491,7 +491,7 @@ sections describe.
   K8s surface (StatefulSet/Service/Ingress/Secret/ConfigMap/pod/wake operations, including
   `DeleteControllerPodGrace` for a short-grace, UID-fenced pod delete, plus the
   named special-semantics methods `PatchControllerStatus`/`ApplyControllerSpecSSA`/
-  `SetHibernated`/`ClearUserPassword`); `ClientsetClient` (`clientset_client.go`)
+  `SetHibernated`/`SetHibernatedAt`/`ClearUserPassword`); `ClientsetClient` (`clientset_client.go`)
   is the only real implementation (client-go clientset + dynamic client + REST config)
   and also implements `crdstore.Backend` (`crdstore_backend.go`) — all per-kind CRD CRUD
   goes through `internal/crdstore` typed helpers on the reconcilers' `store` field, never
@@ -1216,14 +1216,19 @@ sections describe.
   checks `ctx.Err()` before its end writes. A replica that stalls past its lease
   still holds the shard until its next pass, so the tick writes are also fenced in
   storage: every write of the tick to its own Controller goes through
-  `writeTickStatus` or `patchTickMeta`. Each sends `cr.ResourceVersion` as a
-  precondition and moves it forward on success, starting from the tick's read.
-  Never adopt a version from a fresh read (`SetHibernated`, `crdstore.Get`): that
-  defeats the fence. A conflict calls `fenceTick`, which cancels the tick context
+  `writeTickStatus`, `patchTickMeta`, or `setTickHibernated`. Each sends
+  `cr.ResourceVersion` as a precondition and moves it forward on success,
+  starting from the tick's read. `setTickHibernated` is the tick's only writer of
+  `status.hibernated` (the power-off clear and the auto-hibernate set), through
+  `SetHibernatedAt`. The tick never calls `SetHibernated`: its fresh read lets a
+  stalled replica hibernate a controller that the new owner woke. The wake,
+  hibernate, power-write, and brood paths keep `SetHibernated`. Never adopt a
+  version from a fresh read (`SetHibernated`, `crdstore.Get`): that defeats the
+  fence. A conflict calls `fenceTick`, which cancels the tick context
   (cause `*tickConflictError`), so the tick sends no further write of any kind.
   `Reconcile` checks `tickFenced` after each write and after the phase machine:
   one Info line, requeue after 1s, no error. A new tick write to the
-  Controller must use one of the two helpers. An approve waits at
+  Controller must use one of the three helpers. An approve waits at
   most `approveLockWait` (20s) and then fails with a plain-text "retry the approve"
   error. It writes nothing and sends nothing to the mite. A `plugin-roll` approval approves
   only the target checksum that it read (`errPluginRollChanged` otherwise). An

@@ -57,6 +57,9 @@ func (f *fakeBroodClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _
 func (f *fakeBroodClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }
+func (f *fakeBroodClient) SetHibernatedAt(_ context.Context, _, _, rv string, _ bool) (string, error) {
+	return rv, nil
+}
 func (f *fakeBroodClient) DeleteControllerCRD(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {

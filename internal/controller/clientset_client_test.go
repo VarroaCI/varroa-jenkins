@@ -2556,3 +2556,96 @@ func TestPatchObjectMetaAt_SendsResourceVersionPrecondition(t *testing.T) {
 		t.Errorf("patch metadata.finalizers = %v, want [f]", fin)
 	}
 }
+
+// setHibernatedAtBody calls SetHibernatedAt on a fake dynamic client and
+// returns the patch body, the subresource, and the verbs of every request.
+func setHibernatedAtBody(t *testing.T, want bool) (map[string]any, string, []string) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+		"status":     map[string]interface{}{"hibernated": !want, "hibernatedAt": "2026-01-01T00:00:00Z"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	var subresource string
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		body = pa.GetPatch()
+		subresource = pa.GetSubresource()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.SetHibernatedAt(context.Background(), "ctrl", "ns", "7", want); err != nil {
+		t.Fatalf("SetHibernatedAt failed: %v", err)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	actions := dyn.Actions()
+	verbs := make([]string, 0, len(actions))
+	for _, a := range actions {
+		verbs = append(verbs, a.GetVerb())
+	}
+	return patch, subresource, verbs
+}
+
+// TestSetHibernatedAt_SendsResourceVersionPrecondition pins that the tick's
+// hibernation write is one status patch that carries the caller's
+// resourceVersion, with no read of its own.
+func TestSetHibernatedAt_SendsResourceVersionPrecondition(t *testing.T) {
+	patch, subresource, verbs := setHibernatedAtBody(t, true)
+	if subresource != "status" {
+		t.Errorf("subresource = %q, want status", subresource)
+	}
+	if len(verbs) != 1 || verbs[0] != "patch" {
+		t.Errorf("requests = %v, want one patch and no read", verbs)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if h, _, _ := unstructured.NestedBool(patch, "status", "hibernated"); !h {
+		t.Error("patch status.hibernated is not true")
+	}
+	if at, _, _ := unstructured.NestedString(patch, "status", "hibernatedAt"); at == "" {
+		t.Error("patch status.hibernatedAt is empty on a set")
+	}
+}
+
+// TestSetHibernatedAt_ClearSendsNullHibernatedAt pins that a clear sends a
+// null hibernatedAt, which a merge patch reads as a delete.
+func TestSetHibernatedAt_ClearSendsNullHibernatedAt(t *testing.T) {
+	patch, _, _ := setHibernatedAtBody(t, false)
+	status, _ := patch["status"].(map[string]any)
+	if h, ok := status["hibernated"].(bool); !ok || h {
+		t.Errorf("patch status.hibernated = %v, want false", status["hibernated"])
+	}
+	at, ok := status["hibernatedAt"]
+	if !ok || at != nil {
+		t.Errorf("patch status.hibernatedAt = %v (present %v), want an explicit null", at, ok)
+	}
+}
+
+// TestSetHibernatedAt_RequiresResourceVersion pins that an empty
+// resourceVersion fails before any request.
+func TestSetHibernatedAt_RequiresResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.SetHibernatedAt(context.Background(), "ctrl", "ns", "", true); err == nil {
+		t.Fatal("SetHibernatedAt with an empty resourceVersion succeeded")
+	}
+	if n := len(dyn.Actions()); n != 0 {
+		t.Fatalf("requests sent = %d, want 0", n)
+	}
+}

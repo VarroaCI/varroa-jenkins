@@ -575,13 +575,14 @@ type ControllerStatus struct {
 
 	// Hibernated is true when the operator has parked this controller (scaled its
 	// StatefulSet to 0) for automatic or manual hibernation. It is written only by
-	// the status compare-and-swap helper SetHibernated, never by the
-	// end-of-reconcile status patch.
+	// the status compare-and-swap helper SetHibernated and by the reconcile's
+	// conditional SetHibernatedAt, never by the end-of-reconcile status patch.
 	// +optional
 	Hibernated bool `json:"hibernated,omitempty"`
 
 	// HibernatedAt is when the controller was last hibernated. It is cleared when
-	// the controller wakes, and like Hibernated is written only by SetHibernated.
+	// the controller wakes, and like Hibernated is written only by SetHibernated
+	// and SetHibernatedAt.
 	// +optional
 	HibernatedAt *metav1.Time `json:"hibernatedAt,omitempty"`
 

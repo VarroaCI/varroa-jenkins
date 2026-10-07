@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -330,5 +331,131 @@ func TestReconcile_StalledReplicaCannotRevertNewOwnersApprove(t *testing.T) {
 	}
 	if got.Status.ApprovedPluginRollChecksum != "abc" {
 		t.Fatalf("approved checksum = %q, want abc: the stalled tick reverted the approve", got.Status.ApprovedPluginRollChecksum)
+	}
+}
+
+// idleConnectedController returns ns/mine as a Connected controller that
+// passes every auto-hibernate gate under idleTransport. It carries its wake
+// token, label, and finalizer, so the tick sends no write to it before the
+// hibernation decision.
+func idleConnectedController() *v1alpha1.Controller {
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.ResourceVersion = "1"
+	cr.Labels = map[string]string{v1alpha1.LabelControllerName: "mine"}
+	cr.Finalizers = []string{finalizerName}
+	cr.Spec.PowerState = "Running"
+	cr.Spec.Hibernation = &v1alpha1.HibernationSpec{Enabled: true, GracePeriodMinutes: 60}
+	connected := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	cr.Status.FirstConnectedAt = &connected
+	cr.Status.WakeToken = "wake-token"
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{{
+		Type:               v1alpha1.ConditionReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             "JenkinsHealthy",
+		LastTransitionTime: connected,
+	}}
+	return cr
+}
+
+// TestReconcile_StalledReplicaDoesNotHibernateAfterNewOwnerWakes models a
+// replica that reads an idle controller and then stalls past its shard
+// lease. During the stall, the new owner hibernates the controller and then
+// wakes it. The stalled tick resumes with its auto-hibernate decision from
+// the old read. Its hibernation write must conflict, so the controller stays
+// awake.
+func TestReconcile_StalledReplicaDoesNotHibernateAfterNewOwnerWakes(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	setA, setB := sharding.NewShardSet(), sharding.NewShardSet()
+	setA.Add(shard)
+	setB.Add(shard)
+	stalled := shardedReplica(client, ring, setA)
+	stalled.miteTransport = &idleTransport{captureTransport: &captureTransport{}}
+	newOwner := shardedReplica(client, ring, setB)
+	crdstore.MustSeed(client.store, idleConnectedController())
+
+	var ownerRV string
+	stallAfterFirstRead(t, client, func() {
+		ctx := context.Background()
+		if err := newOwner.HibernateController(ctx, "ns", "mine"); err != nil {
+			t.Errorf("new owner hibernate: %v", err)
+		}
+		if err := newOwner.WakeControllerAction(ctx, "ns", "mine"); err != nil {
+			t.Errorf("new owner wake: %v", err)
+		}
+		got, err := crdstore.Get[v1alpha1.Controller](ctx, client.store, "mine", "ns")
+		if err != nil {
+			t.Errorf("read after the wake: %v", err)
+			return
+		}
+		ownerRV = got.ResourceVersion
+	})
+
+	res, err := stalled.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("stalled replica reconcile: %v", err)
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if got.Status.Hibernated {
+		t.Fatal("the stalled replica hibernated the controller again after the new owner woke it")
+	}
+	if got.ResourceVersion != ownerRV {
+		t.Fatalf("resourceVersion = %q, want the new owner's %q: a stalled write landed", got.ResourceVersion, ownerRV)
+	}
+	if res.RequeueAfter != tickConflictRequeue {
+		t.Fatalf("stalled replica RequeueAfter = %v, want %v", res.RequeueAfter, tickConflictRequeue)
+	}
+}
+
+// TestReconcile_StalledReplicaStopClearDoesNotLandAfterNewerWrite models a
+// replica that reads a Stopped, hibernated controller and then stalls. A
+// newer write changes the Controller during the stall. The stalled tick's
+// hibernation clear must conflict and stop the tick.
+func TestReconcile_StalledReplicaStopClearDoesNotLandAfterNewerWrite(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	rec := newTestReconciler(client)
+	cr := idleConnectedController()
+	cr.Spec.PowerState = "Stopped"
+	cr.Status.Phase = v1alpha1.ControllerPhaseHibernated
+	cr.Status.Hibernated = true
+	crdstore.MustSeed(client.store, cr)
+	gvr := mustControllerGVR(t)
+
+	var newerRV string
+	stallAfterFirstRead(t, client, func() {
+		if err := client.store.PatchObjectStatus(context.Background(), gvr, "ns", "mine", map[string]any{"configHash": "newer"}); err != nil {
+			t.Errorf("newer write: %v", err)
+		}
+		got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+		if err != nil {
+			t.Errorf("read after the newer write: %v", err)
+			return
+		}
+		newerRV = got.ResourceVersion
+	})
+
+	res, err := rec.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.RequeueAfter != tickConflictRequeue {
+		t.Fatalf("RequeueAfter = %v, want %v", res.RequeueAfter, tickConflictRequeue)
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("final read: %v", err)
+	}
+	if !got.Status.Hibernated || got.ResourceVersion != newerRV {
+		t.Fatalf("hibernated = %v at resourceVersion %q, want true at %q: the stale clear landed",
+			got.Status.Hibernated, got.ResourceVersion, newerRV)
+	}
+	if len(client.tickHibernatedWrites) != 1 || client.tickHibernatedWrites[0].resourceVersion != "1" {
+		t.Fatalf("tick hibernation writes = %+v, want one at the tick's read version 1", client.tickHibernatedWrites)
 	}
 }

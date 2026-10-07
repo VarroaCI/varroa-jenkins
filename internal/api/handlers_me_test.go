@@ -300,6 +300,9 @@ func (f *fakeResourceClient) ApplyControllerSpecSSAIfExists(_ context.Context, n
 func (f *fakeResourceClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }
+func (f *fakeResourceClient) SetHibernatedAt(_ context.Context, _, _, rv string, _ bool) (string, error) {
+	return rv, nil
+}
 func (f *fakeResourceClient) DeleteControllerCRD(_ context.Context, name, ns string) error {
 	return nil
 }
