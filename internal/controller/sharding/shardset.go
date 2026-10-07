@@ -30,6 +30,10 @@ type shardWork struct {
 	cancels   map[uint64]context.CancelFunc
 	next      uint64
 	cancelled bool
+	// confirmedAt is the start of the last lease write that confirmed this
+	// holding. ShardSet.mu guards it. The value must carry a monotonic
+	// reading, so that a jump of the wall clock cannot move a revoke.
+	confirmedAt time.Time
 }
 
 func newShardWork() *shardWork {
@@ -107,11 +111,15 @@ func (s *ShardSet) Remove(shard int) {
 }
 
 // Revoke drops a shard and cancels the context of the work that entered it.
-// Use it when another replica can already hold the lease.
-func (s *ShardSet) Revoke(shard int) {
-	if w := s.detach(shard); w != nil {
-		w.cancelAll()
+// Use it when another replica can already hold the lease. It returns false
+// when the shard was not held, for example after a stale sweep dropped it.
+func (s *ShardSet) Revoke(shard int) bool {
+	w := s.detach(shard)
+	if w == nil {
+		return false
 	}
+	w.cancelAll()
+	return true
 }
 
 func (s *ShardSet) detach(shard int) *shardWork {
@@ -120,6 +128,42 @@ func (s *ShardSet) detach(shard int) *shardWork {
 	w := s.held[shard]
 	delete(s.held, shard)
 	return w
+}
+
+// Confirm records at as the start of a lease write that confirmed the shard.
+// Take at before the request goes out, because the lease counts from that
+// time. Confirm of an unheld shard changes nothing, and Confirm never moves
+// the time back.
+func (s *ShardSet) Confirm(shard int, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w := s.held[shard]; w != nil && at.After(w.confirmedAt) {
+		w.confirmedAt = at
+	}
+}
+
+// RevokeStale revokes every held shard whose last confirmation is maxAge or
+// more before now. It cancels the work on those shards before it returns, and
+// it returns the revoked shards sorted. A shard with no confirmation stays
+// held.
+func (s *ShardSet) RevokeStale(now time.Time, maxAge time.Duration) []int {
+	s.mu.Lock()
+	stale := make(map[int]*shardWork)
+	for shard, w := range s.held {
+		if !w.confirmedAt.IsZero() && now.Sub(w.confirmedAt) >= maxAge {
+			stale[shard] = w
+			delete(s.held, shard)
+		}
+	}
+	s.mu.Unlock()
+
+	out := make([]int, 0, len(stale))
+	for shard, w := range stale {
+		w.cancelAll()
+		out = append(out, shard)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Held returns true if the shard is currently held.
@@ -196,23 +240,35 @@ func (s *ShardSet) EnterController(ctx context.Context, ring *Ring, ns, name str
 // The caller must not release the lease of such a shard. That lease must
 // expire, because the work can still write.
 func (s *ShardSet) Drain(shards []int, wait, cancelWait time.Duration) []int {
+	_, busy := s.DrainHeld(shards, wait, cancelWait)
+	return busy
+}
+
+// DrainHeld is Drain that also returns the sorted shards that it dropped.
+// A shard that was not held when the drain started is in neither list.
+func (s *ShardSet) DrainHeld(shards []int, wait, cancelWait time.Duration) (dropped, busy []int) {
 	works := make(map[int]*shardWork, len(shards))
 	for _, shard := range shards {
 		if w := s.detach(shard); w != nil {
 			works[shard] = w
 		}
 	}
-	busy := waitIdle(works, wait)
-	for _, w := range busy {
+	dropped = make([]int, 0, len(works))
+	for shard := range works {
+		dropped = append(dropped, shard)
+	}
+	slices.Sort(dropped)
+	still := waitIdle(works, wait)
+	for _, w := range still {
 		w.cancelAll()
 	}
-	busy = waitIdle(busy, cancelWait)
-	out := make([]int, 0, len(busy))
-	for shard := range busy {
-		out = append(out, shard)
+	still = waitIdle(still, cancelWait)
+	busy = make([]int, 0, len(still))
+	for shard := range still {
+		busy = append(busy, shard)
 	}
-	slices.Sort(out)
-	return out
+	slices.Sort(busy)
+	return dropped, busy
 }
 
 // waitIdle waits at most d for all works to become idle. It returns the works

@@ -1194,8 +1194,11 @@ sections describe.
   `NewShardManager` takes a `metric.MeterProvider` as its first parameter and
   creates `varroa.operator.shards.held` and `varroa.operator.shard.handoffs` on
   its `"varroa-operator"` meter; it returns an error that `main` exits on.
-  `ShardManager` calls `onReleased` once per rebalance pass with the shards that
-  the pass dropped, before the pass claims shards. The operator wires it to
+  `ShardManager` calls `onReleased` once per revoke group: once per rebalance
+  pass with the shards that the pass dropped, before the pass claims shards, and
+  once per stale sweep that revokes shards. The sweep call can run during a pass.
+  This is safe: the hook reads the held set when it runs, and a shard that a pass
+  claims again enqueues its controllers again through `onAcquired`. The operator wires it to
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
   controller that the replica does not own. `ApproveRestart` and `ApproveDeletion`
   return `ErrNotShardOwner` on a replica that does not own the controller, before
@@ -1212,7 +1215,14 @@ sections describe.
   through `ShardSet.Drain`: it waits for that work (`releaseDrainWait` 4s, at
   shutdown `shutdownDrainWait` 10s), cancels what still runs, and waits once more.
   It releases the lease only when the work ended; otherwise the lease must expire.
-  A lost lease calls `ShardSet.Revoke`, which cancels the work at once. The tick
+  A lost lease calls `ShardSet.Revoke`, which cancels the work at once. Each held
+  shard records the start of its last confirmed lease write (`ShardSet.Confirm`,
+  monotonic clock). A sweep goroutine (`staleSweepInterval` 1s) and both List
+  failure returns of a pass call `revokeUnconfirmed`, which revokes every shard
+  not confirmed for `leaseDuration - heldLeaseMargin` (25s of 30s). Never compare
+  against the Lease `renewTime` for this. The deadline must stay above the
+  healthy renewal age of about 20s. A pass claims a lease that this replica still
+  holds, through an Update with the listed `resourceVersion`. The tick
   checks `ctx.Err()` before its end writes. A replica that stalls past its lease
   still holds the shard until its next pass, so the tick writes are also fenced in
   storage: every write of the tick to its own Controller goes through
