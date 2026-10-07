@@ -1481,3 +1481,71 @@ func TestCheckPluginRollFailed_ArtifactSecretReadFaultGivesNoVerdict(t *testing.
 		t.Fatalf("expected PluginRollFailed to clear once the fault is gone, got %+v", cleared)
 	}
 }
+
+// TestSecretDataHash covers the framing of a Secret's values. A NUL byte
+// inside a value must not look like a key or value boundary, and binary
+// values must hash by their bytes.
+func TestSecretDataHash(t *testing.T) {
+	t.Run("delimiter collision differs", func(t *testing.T) {
+		a := secretDataHash(map[string][]byte{"a": []byte("x\x00b\x00y")})
+		b := secretDataHash(map[string][]byte{"a": []byte("x"), "b": []byte("y")})
+		if a == b {
+			t.Fatal("a NUL byte in a value collides with two keys")
+		}
+	})
+	t.Run("key order is irrelevant", func(t *testing.T) {
+		first := map[string][]byte{}
+		first["a"] = []byte("1")
+		first["b"] = []byte("2")
+		first["c"] = []byte("3")
+		second := map[string][]byte{}
+		second["c"] = []byte("3")
+		second["b"] = []byte("2")
+		second["a"] = []byte("1")
+		want := secretDataHash(first)
+		for i := 0; i < 50; i++ {
+			if got := secretDataHash(first); got != want {
+				t.Fatalf("iteration %d: hash %q, want %q", i, got, want)
+			}
+			if got := secretDataHash(second); got != want {
+				t.Fatalf("iteration %d: reordered hash %q, want %q", i, got, want)
+			}
+		}
+	})
+	t.Run("value change changes hash", func(t *testing.T) {
+		a := secretDataHash(map[string][]byte{"a": []byte("one"), "b": []byte("two")})
+		b := secretDataHash(map[string][]byte{"a": []byte("one"), "b": []byte("twp")})
+		if a == b {
+			t.Fatal("changing a value did not change the hash")
+		}
+	})
+	t.Run("binary values differ", func(t *testing.T) {
+		a := secretDataHash(map[string][]byte{"a": {0xff}})
+		b := secretDataHash(map[string][]byte{"a": {0xfe}})
+		if a == b {
+			t.Fatal("distinct invalid UTF-8 values hash the same")
+		}
+	})
+	t.Run("empty answers empty", func(t *testing.T) {
+		if got := secretDataHash(nil); got != "" {
+			t.Errorf("nil hash = %q, want empty", got)
+		}
+		if got := secretDataHash(map[string][]byte{}); got != "" {
+			t.Errorf("empty map hash = %q, want empty", got)
+		}
+	})
+}
+
+// TestSecretDataHash_GoldenValue pins the encoding. Changing the encoding
+// rolls every pod that carries a static artifact Secret once, the same
+// way TestComputeDesiredContentHash_GoldenValue pins the content hash.
+func TestSecretDataHash_GoldenValue(t *testing.T) {
+	got := secretDataHash(map[string][]byte{
+		"access-key-id":     []byte("AKIAEXAMPLE"),
+		"secret-access-key": []byte("secretvalue"),
+	})
+	const want = "785f9441c0fcd3ccf85b07554314a64b4d6e5c463c580d845e4497ba31700ea0"
+	if got != want {
+		t.Errorf("secretDataHash = %s, want %s", got, want)
+	}
+}

@@ -2,10 +2,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -662,21 +662,18 @@ func (r *Reconciler) reconcileArtifactSecretRoll(ctx context.Context, cr *v1alph
 	return true
 }
 
-// secretDataHash returns a deterministic hash of a Secret's Data, keyed so
-// that a value change on any key changes the hash regardless of Go's
-// randomized map iteration order.
+// secretDataHash returns a deterministic hash of a Secret's Data.
+// encoding/json sorts the keys and base64-encodes each value, so a NUL
+// byte or other binary content in a value cannot shift a key boundary.
+// Do not convert the values to string first: invalid UTF-8 then
+// encodes as U+FFFD, and two different values give one hash.
 func secretDataHash(data map[string][]byte) string {
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
+	if len(data) == 0 {
+		return ""
 	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for _, k := range keys {
-		b.WriteString(k)
-		b.WriteByte(0)
-		b.Write(data[k])
-		b.WriteByte(0)
+	b, err := json.Marshal(data)
+	if err != nil {
+		return ""
 	}
-	return sha256Hex([]byte(b.String()))
+	return sha256Hex(b)
 }
