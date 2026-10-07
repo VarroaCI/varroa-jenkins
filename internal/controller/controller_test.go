@@ -101,8 +101,17 @@ type testClient struct {
 	createdSecrets                   map[string]map[string][]byte
 	secretOwners                     map[string]metav1.OwnerReference
 	createOrUpdateSecretWithOwnerErr error // injected CreateOrUpdateSecretWithOwner failure
-	// scaleCalls records ScaleStatefulSet(name -> last requested replica count).
-	scaleCalls      map[string]int32
+	// scaleCalls records ScaleStatefulSetToZero(name -> last requested replica count).
+	scaleCalls map[string]int32
+	// stsReplicas and stsRV model the live StatefulSets by name: the replica
+	// count and the resourceVersion. CreateStatefulSet sets and bumps them.
+	stsReplicas map[string]int32
+	stsRV       map[string]int
+	// scaleFenceCalls counts the fence calls of ScaleStatefulSetToZero.
+	scaleFenceCalls int
+	// afterScaleFence runs after a successful fence, before the precondition
+	// check. It may call into the test client. The client holds no lock.
+	afterScaleFence func()
 	composedBundles map[string]*v1alpha1.ComposedBundle
 
 	// profiles stores JenkinsVersionProfiles by name.
@@ -461,6 +470,18 @@ func (t *testClient) CreateServiceAccountTokenSecret(_ context.Context, name, na
 func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) error {
 	t.statefulSets = append(t.statefulSets, spec.Name)
 	t.stsSpecs = append(t.stsSpecs, spec)
+	if t.stsReplicas == nil {
+		t.stsReplicas = make(map[string]int32)
+	}
+	if t.stsRV == nil {
+		t.stsRV = make(map[string]int)
+	}
+	replicas := int32(1)
+	if spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	t.stsReplicas[spec.Name] = replicas
+	t.stsRV[spec.Name]++
 	return nil
 }
 func (t *testClient) UpdateStatefulSetOIDCEnv(_ context.Context, name, namespace string, authEnv JenkinsAuthEnv) error {
@@ -792,11 +813,35 @@ func (t *testClient) DeleteControllerPodGrace(_ context.Context, namespace, podN
 	t.podGraceDeletes = append(t.podGraceDeletes, podGraceDelete{namespace: namespace, pod: podName, uid: uid, graceSeconds: graceSeconds})
 	return nil
 }
-func (t *testClient) ScaleStatefulSet(_ context.Context, name, _ string, replicas int32) error {
+
+// ScaleStatefulSetToZero models the ClientsetClient contract on the test
+// StatefulSets. It takes no mutex: a mutex held across afterScaleFence would
+// deadlock when that hook calls CreateStatefulSet.
+func (t *testClient) ScaleStatefulSetToZero(ctx context.Context, name, _ string, fence func(context.Context) error) error {
+	replicas, found := t.stsReplicas[name]
+	if !found || replicas == 0 {
+		return nil
+	}
+	if t.stsRV == nil {
+		t.stsRV = make(map[string]int)
+	}
+	rv := t.stsRV[name]
+	t.scaleFenceCalls++
+	if err := fence(ctx); err != nil {
+		return err
+	}
+	if t.afterScaleFence != nil {
+		t.afterScaleFence()
+	}
+	if t.stsRV[name] != rv {
+		return apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, name, fmt.Errorf("resourceVersion changed"))
+	}
 	if t.scaleCalls == nil {
 		t.scaleCalls = make(map[string]int32)
 	}
-	t.scaleCalls[name] = replicas
+	t.stsReplicas[name] = 0
+	t.stsRV[name]++
+	t.scaleCalls[name] = 0
 	return nil
 }
 func (t *testClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
@@ -1676,6 +1721,7 @@ func TestPowerOffScalesStatefulSetToZero(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
+	client.stsReplicas = map[string]int32{controllerPrefix(cr): 1}
 	if err := rec.reconcileController(context.Background(), cr); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -1683,12 +1729,37 @@ func TestPowerOffScalesStatefulSetToZero(t *testing.T) {
 		t.Errorf("phase = %q, want Stopped", cr.Status.Phase)
 	}
 	if len(client.scaleCalls) == 0 {
-		t.Fatal("power off must scale the StatefulSet, but ScaleStatefulSet was never called")
+		t.Fatal("power off must scale the StatefulSet, but ScaleStatefulSetToZero never scaled it")
 	}
 	for name, replicas := range client.scaleCalls {
 		if replicas != 0 {
 			t.Errorf("scale call for %s = %d, want 0", name, replicas)
 		}
+	}
+	if client.scaleFenceCalls != 1 {
+		t.Errorf("scale fence calls = %d, want 1", client.scaleFenceCalls)
+	}
+}
+
+// TestPowerOffSteadyTickSendsNoFenceWrite pins the write cost of a Stopped
+// tick whose StatefulSet is already at 0: no fence write and no scale.
+func TestPowerOffSteadyTickSendsNoFenceWrite(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
+		Spec:       v1alpha1.ControllerSpec{PowerState: "Stopped"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseStopped},
+	}
+	client.stsReplicas = map[string]int32{controllerPrefix(cr): 0}
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if client.scaleFenceCalls != 0 {
+		t.Errorf("scale fence calls = %d, want 0", client.scaleFenceCalls)
+	}
+	if len(client.scaleCalls) != 0 {
+		t.Errorf("scale calls = %v, want none", client.scaleCalls)
 	}
 }
 

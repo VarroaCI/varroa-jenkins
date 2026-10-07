@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -2647,5 +2649,113 @@ func TestSetHibernatedAt_RequiresResourceVersion(t *testing.T) {
 	}
 	if n := len(dyn.Actions()); n != 0 {
 		t.Fatalf("requests sent = %d, want 0", n)
+	}
+}
+
+// scaleTestClient returns a ClientsetClient over a fake clientset that holds
+// sts (when non-nil). The returned slice collects every StatefulSet patch body.
+func scaleTestClient(sts *appsv1.StatefulSet) (*ClientsetClient, *[]string) {
+	var objs []runtime.Object
+	if sts != nil {
+		objs = append(objs, sts)
+	}
+	cs := fake.NewSimpleClientset(objs...)
+	patches := &[]string{}
+	cs.PrependReactor("patch", "statefulsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		*patches = append(*patches, string(action.(clienttesting.PatchAction).GetPatch()))
+		return false, nil, nil
+	})
+	return &ClientsetClient{clientset: cs}, patches
+}
+
+// scaleTestStatefulSet returns ns/web at the given replicas with resourceVersion 7.
+func scaleTestStatefulSet(replicas *int32) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns", ResourceVersion: "7"},
+		Spec:       appsv1.StatefulSetSpec{Replicas: replicas},
+	}
+}
+
+func TestScaleStatefulSetToZero_FencesThenSendsResourceVersionPrecondition(t *testing.T) {
+	one := int32(1)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&one))
+	fenceCalls := 0
+	fence := func(context.Context) error {
+		fenceCalls++
+		if len(*patches) != 0 {
+			t.Errorf("fence ran after a patch was sent")
+		}
+		return nil
+	}
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", fence); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	got, err := c.clientset.AppsV1().StatefulSets("ns").Get(context.Background(), "web", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ResourceVersion == "" {
+		t.Fatal("statefulset has no resourceVersion to pin")
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	want := fmt.Sprintf(`{"metadata":{"resourceVersion":%q},"spec":{"replicas":0}}`, "7")
+	if len(*patches) != 1 || (*patches)[0] != want {
+		t.Fatalf("patches = %v, want one patch %s", *patches, want)
+	}
+}
+
+func TestScaleStatefulSetToZero_NilReplicasScales(t *testing.T) {
+	c, patches := scaleTestClient(scaleTestStatefulSet(nil))
+	fenceCalls := 0
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		fenceCalls++
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	if fenceCalls != 1 || len(*patches) != 1 {
+		t.Fatalf("fence calls = %d, patches = %d; want 1 and 1 for a nil replica count", fenceCalls, len(*patches))
+	}
+}
+
+func TestScaleStatefulSetToZero_SkipsFenceWhenAlreadyZero(t *testing.T) {
+	zero := int32(0)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&zero))
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		t.Error("fence must not run for a StatefulSet already at 0")
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none", *patches)
+	}
+}
+
+func TestScaleStatefulSetToZero_SkipsFenceWhenMissing(t *testing.T) {
+	c, patches := scaleTestClient(nil)
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		t.Error("fence must not run for a missing StatefulSet")
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero on a missing StatefulSet: %v", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none", *patches)
+	}
+}
+
+func TestScaleStatefulSetToZero_FenceErrorSendsNoPatch(t *testing.T) {
+	one := int32(1)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&one))
+	fenceErr := errors.New("fence refused")
+	err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error { return fenceErr })
+	if !errors.Is(err, fenceErr) {
+		t.Fatalf("err = %v, want the fence error", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none after a fence error", *patches)
 	}
 }

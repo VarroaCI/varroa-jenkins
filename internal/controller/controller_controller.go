@@ -1008,10 +1008,13 @@ type ResourceClient interface {
 		resourcesSource map[string]string,
 		found bool, err error,
 	)
-	// ScaleStatefulSet sets the StatefulSet's replica count (power on/off).
-	// Idempotent: a no-op when the count already matches, and not an error
-	// when the StatefulSet does not exist.
-	ScaleStatefulSet(ctx context.Context, name, namespace string, replicas int32) error
+	// ScaleStatefulSetToZero scales the StatefulSet to 0 for a power-off or
+	// hibernation tick. It returns nil when the StatefulSet is missing or
+	// already at 0, and does not call fence in that case. Otherwise it calls
+	// fence, then patches the replica count under the StatefulSet
+	// resourceVersion it read, so a scale-up that lands after the read
+	// conflicts. A fence error or a conflict is returned unchanged.
+	ScaleStatefulSetToZero(ctx context.Context, name, namespace string, fence func(context.Context) error) error
 	CreateSecret(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
 	CreateSecretExclusive(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
 	CreateOrUpdateSecret(ctx context.Context, name, namespace string, data map[string][]byte) error
@@ -1553,6 +1556,22 @@ func (r *Reconciler) patchTickMeta(ctx context.Context, cr *v1alpha1.Controller,
 	}
 	cr.ResourceVersion = rv
 	return nil
+}
+
+// scaleTickToZero is the only scale-down the tick sends to a StatefulSet. It
+// reads the StatefulSet first. It then runs the tick fence (writeTickStatus at
+// cr.ResourceVersion) before the patch, which carries the StatefulSet
+// resourceVersion that was read. A tick whose read predates a power-on or a
+// wake therefore cannot scale the workload down. A StatefulSet that is missing
+// or already at 0 gets no fence write. A conflict cancels the tick through
+// fenceTick.
+func (r *Reconciler) scaleTickToZero(ctx context.Context, cr *v1alpha1.Controller) error {
+	err := r.client.ScaleStatefulSetToZero(ctx, controllerPrefix(cr), cr.Namespace,
+		func(ctx context.Context) error { return r.writeTickStatus(ctx, cr) })
+	if err != nil {
+		fenceTick(ctx, err, "statefulset scale", cr.ResourceVersion)
+	}
+	return err
 }
 
 // setTickHibernated sets status.hibernated of the tick's Controller to want
@@ -2560,10 +2579,13 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	// Powered-off: scale the StatefulSet to 0 and report Stopped. This must
 	// actually scale the workload down (the replica count is otherwise only
 	// applied in handleProvisioning, which the Stopped phase never reaches),
-	// so powering off a running controller really stops Jenkins. ScaleStatefulSet
-	// is idempotent and a no-op when the StatefulSet is missing or already at 0.
+	// so powering off a running controller really stops Jenkins. scaleTickToZero
+	// is a no-op when the StatefulSet is missing or already at 0.
 	if cr.Spec.PowerState == "Stopped" {
-		if serr := r.client.ScaleStatefulSet(ctx, controllerPrefix(cr), cr.Namespace, 0); serr != nil {
+		if serr := r.scaleTickToZero(ctx, cr); serr != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedScaleDownFailed, fmt.Sprintf("scale down statefulset (phase %s, powerState Stopped): %v", cr.Status.Phase, serr))
 			return fmt.Errorf("scale down statefulset: %w", serr)
 		}
@@ -2596,7 +2618,10 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	// Stopped branch above except the reason and phase names differ. Gated on
 	// status.hibernated — hard power (Stopped) beats hibernation.
 	if cr.Status.Hibernated && cr.Spec.PowerState != "Stopped" {
-		if serr := r.client.ScaleStatefulSet(ctx, controllerPrefix(cr), cr.Namespace, 0); serr != nil {
+		if serr := r.scaleTickToZero(ctx, cr); serr != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedScaleDownFailed, fmt.Sprintf("scale down statefulset for hibernation (phase %s, status.hibernated): %v", cr.Status.Phase, serr))
 			return fmt.Errorf("scale down statefulset for hibernation: %w", serr)
 		}

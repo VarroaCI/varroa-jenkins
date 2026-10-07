@@ -268,7 +268,9 @@ func (f *fakeBroodClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ 
 func (f *fakeBroodClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
 }
-func (f *fakeBroodClient) ScaleStatefulSet(_ context.Context, _, _ string, _ int32) error { return nil }
+func (f *fakeBroodClient) ScaleStatefulSetToZero(_ context.Context, _, _ string, _ func(context.Context) error) error {
+	return nil
+}
 func (f *fakeBroodClient) CreateSecret(_ context.Context, _, _ string, _ map[string]string, _ map[string][]byte) error {
 	return nil
 }

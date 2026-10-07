@@ -140,7 +140,7 @@ sections describe.
   an RBAC CRD edit is pushed live instead of waiting for the periodic tick.
 - Phase dispatch is `reconcileController` (`controller_controller.go:1278`): handles
   deletion/finalization first, then `PowerState` `Stopped`/`Hibernated` short-circuits
-  (scale StatefulSet to 0, `ScaleStatefulSet` is idempotent), then dispatches on
+  (scale StatefulSet to 0 through `scaleTickToZero` and `ScaleStatefulSetToZero`), then dispatches on
   `cr.Status.Phase` to `handlePending` (1499), `handleProvisioning` (1757),
   `handleRunning` (3013), `handleConnected` (2186), `handleFailed` (3100).
   - `handleProvisioning`: builds the Service (`reconcileService`, shared with the
@@ -1254,6 +1254,9 @@ sections describe.
   version from a fresh read (`SetHibernated`, `crdstore.Get`): that defeats the
   fence. A conflict calls `fenceTick`, which cancels the tick context
   (cause `*tickConflictError`), so the tick sends no further write of any kind.
+  The tick scales a StatefulSet down only through `scaleTickToZero`. It reads the
+  StatefulSet, writes `writeTickStatus` as a fence, then patches with the StatefulSet
+  `resourceVersion` it read. A StatefulSet at 0 gets no fence write.
   `Reconcile` checks `tickFenced` after each write and after the phase machine:
   one Info line, requeue after 1s, no error. A new tick write to the
   Controller must use one of the three helpers. An approve waits at

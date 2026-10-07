@@ -415,11 +415,14 @@ func (c *ClientsetClient) IsStatefulSetReady(ctx context.Context, name, namespac
 	return sts.Status.ReadyReplicas >= 1, nil
 }
 
-// ScaleStatefulSet sets a StatefulSet's replica count via a merge patch.
-// It is idempotent: a no-op when the count already matches, and not an error
-// when the StatefulSet does not exist (e.g. a controller stopped before it was
-// ever provisioned).
-func (c *ClientsetClient) ScaleStatefulSet(ctx context.Context, name, namespace string, replicas int32) error {
+// ScaleStatefulSetToZero scales a StatefulSet to 0 for a power-off or
+// hibernation tick. It reads the StatefulSet and returns nil when the
+// StatefulSet is missing or already at 0, without calling fence. Otherwise it
+// calls fence and then sends a merge patch that carries the StatefulSet
+// resourceVersion it read. A write that changed the StatefulSet after the read
+// makes the patch conflict. A fence error or a conflict is returned unchanged.
+// A StatefulSet that does not exist when the patch lands counts as scaled.
+func (c *ClientsetClient) ScaleStatefulSetToZero(ctx context.Context, name, namespace string, fence func(context.Context) error) error {
 	sts, err := c.clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -427,10 +430,20 @@ func (c *ClientsetClient) ScaleStatefulSet(ctx context.Context, name, namespace 
 		}
 		return err
 	}
-	if sts.Spec.Replicas != nil && *sts.Spec.Replicas == replicas {
+	// A nil Replicas means 1 (the API default), so it still needs the scale.
+	if sts.Spec.Replicas != nil && *sts.Spec.Replicas == 0 {
 		return nil
 	}
-	patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas))
+	if err := fence(ctx); err != nil {
+		return err
+	}
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{"resourceVersion": sts.ResourceVersion},
+		"spec":     map[string]any{"replicas": 0},
+	})
+	if err != nil {
+		return err
+	}
 	_, err = c.clientset.AppsV1().StatefulSets(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil

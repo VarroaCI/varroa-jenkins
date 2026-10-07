@@ -508,7 +508,7 @@ func (f *fakeResourceClient) DeleteWakeEndpointSlice(_ context.Context, _, _ str
 func (f *fakeResourceClient) ListOperatorPodIPs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeResourceClient) ScaleStatefulSet(_ context.Context, _, _ string, _ int32) error {
+func (f *fakeResourceClient) ScaleStatefulSetToZero(_ context.Context, _, _ string, _ func(context.Context) error) error {
 	return nil
 }
 func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {

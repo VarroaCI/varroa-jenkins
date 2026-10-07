@@ -44,7 +44,7 @@ func (s *stubClient) EnsureStatefulSetPodLabel(ctx context.Context, namespace, s
 func (s *stubClient) IsStatefulSetReady(ctx context.Context, name, namespace string) (bool, error) {
 	return false, nil
 }
-func (s *stubClient) ScaleStatefulSet(ctx context.Context, name, namespace string, replicas int32) error {
+func (s *stubClient) ScaleStatefulSetToZero(ctx context.Context, name, namespace string, fence func(context.Context) error) error {
 	return nil
 }
 func (s *stubClient) CreateSecret(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {

@@ -1039,7 +1039,7 @@ const (
 	ReasonReconcileBlockedHibernateTransitionFailed = "HibernateTransitionFailed"
 	// ReasonReconcileBlockedFinalizeFailed is set when finalize fails during deletion.
 	ReasonReconcileBlockedFinalizeFailed = "FinalizeFailed"
-	// ReasonReconcileBlockedScaleDownFailed is set when ScaleStatefulSet fails on Stopped or Hibernated.
+	// ReasonReconcileBlockedScaleDownFailed is set when ScaleStatefulSetToZero fails on Stopped or Hibernated.
 	ReasonReconcileBlockedScaleDownFailed = "ScaleDownFailed"
 	// ReasonReconcileBlockedUnknownPhase is set when the controller's phase is unrecognized.
 	ReasonReconcileBlockedUnknownPhase = "UnknownPhase"
