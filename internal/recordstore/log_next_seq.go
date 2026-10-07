@@ -23,6 +23,8 @@ type LogIndexReader interface {
 type storedLogIndexEntry struct {
 	Seq    int64  `json:"seq"`
 	Writer string `json:"writer,omitempty"`
+	// Reserved marks a reservation line, which names no bytes.
+	Reserved bool `json:"reserved,omitempty"`
 }
 
 // StoredLogNextSeq answers the next log sequence that the gateway
@@ -70,7 +72,8 @@ func StoredLogNextSeq(ctx context.Context, store LogIndexReader, runID string) (
 }
 
 // readStoredLogIndex parses every ndjson line of the index at key, keyed
-// by sequence. A missing index answers an empty map.
+// by sequence. It skips a reservation line. A missing index answers an
+// empty map.
 func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (map[int64]storedLogIndexEntry, error) {
 	entries := make(map[int64]storedLogIndexEntry)
 	r, err := store.NewRangeReader(ctx, key, 0, -1)
@@ -92,6 +95,9 @@ func readStoredLogIndex(ctx context.Context, store LogIndexReader, key string) (
 		var e storedLogIndexEntry
 		if err := json.Unmarshal(line, &e); err != nil {
 			return nil, fmt.Errorf("parse log index line: %w", err)
+		}
+		if e.Reserved {
+			continue
 		}
 		entries[e.Seq] = e
 	}

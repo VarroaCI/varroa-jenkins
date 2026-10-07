@@ -28,6 +28,10 @@ type LogIndexEntry struct {
 	// first chunk from a repeat of the same writer. A crash-repair entry
 	// carries the writer of the part it repairs.
 	Writer string `json:"writer,omitempty"`
+	// Reserved marks a reservation line: the slot that a moved build's
+	// writer holds before it empties or replaces any log part. A
+	// reservation names no bytes, and every reader skips it.
+	Reserved bool `json:"reserved,omitempty"`
 }
 
 // indexWriter answers the writer of the highest entry at or below seq
@@ -208,8 +212,8 @@ func logObjectLength(ctx context.Context, store blob.Store, key string, limit in
 
 // readLogIndex reads key to io.EOF and parses each ndjson line into a
 // LogIndexEntry, keyed by seq. It also reports the highest seq seen and
-// whether any entry carries final true. A missing index reports an empty
-// map, not an error.
+// whether any entry carries final true. It skips a reservation line. A
+// missing index reports an empty map, not an error.
 func readLogIndex(ctx context.Context, store blob.Store, key string) (map[int64]LogIndexEntry, int64, bool, error) {
 	entries := make(map[int64]LogIndexEntry)
 	var maxSeq int64 = -1
@@ -236,6 +240,9 @@ func readLogIndex(ctx context.Context, store blob.Store, key string) (map[int64]
 		var e LogIndexEntry
 		if err := json.Unmarshal(line, &e); err != nil {
 			return nil, 0, false, err
+		}
+		if e.Reserved {
+			continue
 		}
 		entries[e.Seq] = e
 		if e.Seq > maxSeq {

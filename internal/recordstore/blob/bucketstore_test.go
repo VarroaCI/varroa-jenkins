@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/fileblob"
 	"gocloud.dev/blob/memblob"
@@ -43,8 +44,8 @@ func TestBucketStoreAppendNeverReplacesAPartCreatedAfterItsCheck(t *testing.T) {
 			first.Writer = "ns/cell/inst2"
 			store.afterCheck = func(string) {
 				store.afterCheck = nil
-				if err := store.Overwrite(ctx, "logs/r1", 3, []byte("new"), first); err != nil {
-					t.Errorf("overwrite inside the window: %v", err)
+				if err := store.writeObject(ctx, partKey("logs/r1", 3), []byte("new"), first, false); err != nil {
+					t.Errorf("write inside the window: %v", err)
 				}
 			}
 			late := opts
@@ -107,5 +108,46 @@ func writeNativeBucket(t *testing.T, s Store, key string, data []byte, opts Obje
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close native writer: %v", err)
+	}
+}
+
+// TestIfMatchBeforeWriteSetsIfMatchOnTheS3Upload drives the BeforeWrite
+// hook the way the S3 driver calls it, and asserts that the upload
+// carries If-Match on the ETag Overwrite read.
+func TestIfMatchBeforeWriteSetsIfMatchOnTheS3Upload(t *testing.T) {
+	upload := &transfermanager.UploadObjectInput{}
+	unsupported := false
+	err := ifMatchBeforeWrite(`"etag-1"`, &unsupported)(func(i any) bool {
+		p, ok := i.(**transfermanager.UploadObjectInput)
+		if ok {
+			*p = upload
+		}
+		return ok
+	})
+	if err != nil || unsupported {
+		t.Fatalf("hook = %v, unsupported %v, want a supported S3 upload", err, unsupported)
+	}
+	if upload.IfMatch == nil || *upload.IfMatch != `"etag-1"` {
+		t.Fatalf("IfMatch = %v, want the ETag the overwrite read", upload.IfMatch)
+	}
+}
+
+// TestBucketStoreOverwriteRefusesADriverWithoutIfMatch asserts that a
+// driver that can send no If-Match fails the overwrite and keeps the
+// part. memblob stands for the gs and azblob drivers here.
+func TestBucketStoreOverwriteRefusesADriverWithoutIfMatch(t *testing.T) {
+	ctx := context.Background()
+	store := NewBucketStore(memblob.OpenBucket(nil))
+	opts := ObjectOptions{ObjectClass: "log", ContentType: "text/plain", CreatedAt: time.Now().UTC()}
+	if err := store.Append(ctx, "logs/r1", 0, []byte("old"), opts); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	err := store.Overwrite(ctx, "logs/r1", 0, []byte("new"), Stamp{Digest: Digest([]byte("old"))}, opts)
+	if !errors.Is(err, ErrOverwriteUnsupported) {
+		t.Fatalf("overwrite: got %v, want ErrOverwriteUnsupported", err)
+	}
+	got, err := store.(*bucketStore).bucket.ReadAll(ctx, partKey("logs/r1", 0))
+	if err != nil || string(got) != "old" {
+		t.Fatalf("part bytes = %q, %v, want the old bytes", got, err)
 	}
 }

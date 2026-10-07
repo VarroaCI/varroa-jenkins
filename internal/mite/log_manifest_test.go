@@ -34,7 +34,7 @@ func appendIndexEntry(t *testing.T, store blob.Store, runID string, e LogIndexEn
 		t.Fatalf("marshal index entry: %v", err)
 	}
 	line = append(line, '\n')
-	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "application/x-ndjson", CreatedAt: runCreatedAtFromUUIDv7(runID)}
+	opts := indexOptions(runCreatedAtFromUUIDv7(runID), e.Writer)
 	if err := store.Append(context.Background(), blob.LogIndexKey(runID), e.Seq, line, opts); err != nil {
 		t.Fatalf("append index seq %d: %v", e.Seq, err)
 	}
@@ -168,6 +168,42 @@ func TestBuildLogManifestCountsNoPartOfAnotherWriter(t *testing.T) {
 	}
 	appendIndexEntry(t, store, runID, LogIndexEntry{Seq: 0, Offset: 0, Len: 3, Writer: "ns1/cell1/inst2"})
 
+	m, err := BuildLogManifest(ctx, store, runID, nil)
+	if err != nil {
+		t.Fatalf("build manifest: %v", err)
+	}
+	if m.ByteCount != 6 || m.ChunkCount != 2 {
+		t.Fatalf("byteCount = %d chunkCount = %d, want 6 bytes in 2 chunks", m.ByteCount, m.ChunkCount)
+	}
+}
+
+// TestBuildLogManifestSkipsAReservationAndServesTheReservingWriter
+// asserts that a reservation line is no index entry, and that the parts
+// of the reserving writer above it are served while the parts of the
+// writer that lost the build are not.
+func TestBuildLogManifestSkipsAReservationAndServesTheReservingWriter(t *testing.T) {
+	runID := newTestRunID()
+	store := newManifestTestStore(t)
+	ctx := context.Background()
+	for seq, part := range []struct{ data, writer string }{
+		{"a0 ", "ns1/cell1/inst1"}, {"b1 ", "ns1/cell1/inst2"}, {"a2 ", "ns1/cell1/inst1"},
+	} {
+		opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8",
+			CreatedAt: runCreatedAtFromUUIDv7(runID), Writer: part.writer}
+		if err := store.Append(ctx, blob.LogKey(runID), int64(seq), []byte(part.data), opts); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	appendIndexEntry(t, store, runID, LogIndexEntry{Seq: 0, Offset: 0, Len: 3, Writer: "ns1/cell1/inst1"})
+	appendIndexEntry(t, store, runID, LogIndexEntry{Seq: 1, Writer: "ns1/cell1/inst2", Reserved: true})
+
+	entries, maxSeq, _, err := readLogIndex(ctx, store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if _, ok := entries[1]; ok || maxSeq != 0 {
+		t.Fatalf("entries = %+v, maxSeq = %d, want the reservation skipped", entries, maxSeq)
+	}
 	m, err := BuildLogManifest(ctx, store, runID, nil)
 	if err != nil {
 		t.Fatalf("build manifest: %v", err)

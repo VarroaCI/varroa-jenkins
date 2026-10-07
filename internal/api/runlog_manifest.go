@@ -41,6 +41,9 @@ type runLogIndexEntry struct {
 	Final     bool   `json:"final,omitempty"`
 	Recovered bool   `json:"recovered,omitempty"`
 	Writer    string `json:"writer,omitempty"`
+	// Reserved marks a reservation line, which names no bytes. Every
+	// reader skips it.
+	Reserved bool `json:"reserved,omitempty"`
 }
 
 // readRunLogObject reads the console object of runID and returns the
@@ -117,8 +120,9 @@ func runLogIndexWriter(entries map[int64]runLogIndexEntry, seq int64) string {
 }
 
 // readRunLogIndex reads key to io.EOF and parses each ndjson line into a
-// runLogIndexEntry, keyed by seq, and reports the highest seq seen. A
-// missing index returns an empty map, not an error.
+// runLogIndexEntry, keyed by seq, and reports the highest seq seen. It
+// skips a reservation line. A missing index returns an empty map, not an
+// error.
 func readRunLogIndex(ctx context.Context, store blob.Store, key string) (map[int64]runLogIndexEntry, int64, error) {
 	entries := make(map[int64]runLogIndexEntry)
 	maxSeq := int64(-1)
@@ -142,6 +146,9 @@ func readRunLogIndex(ctx context.Context, store blob.Store, key string) (map[int
 		var e runLogIndexEntry
 		if err := json.Unmarshal(line, &e); err != nil {
 			return nil, 0, err
+		}
+		if e.Reserved {
+			continue
 		}
 		entries[e.Seq] = e
 		if e.Seq > maxSeq {

@@ -373,8 +373,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   manifest readers call the same helper, so the four agree.
   `adoptWriter` treats a chunk from another writer as a move: after a
   fresh ledger read (`confirmOwner` invalidates the owner cache first) it
+  reserves index slot `ackSeq+1` (`reserveIndexSlot`), then
   empties every stored part above `ackSeq` that holds bytes of another
-  writer (`blankPartsAboveAckSeq`, through `Parts`, `PartWriter`, and an
+  writer (`blankPartsAboveAckSeq`, through `Parts`, `PartStamp`, and an
   empty `Overwrite`), reserves `ackSeq+1` with an empty part when none is
   stored there (a conflict there empties only another writer's part), and drops the old writer's `pendingEntries`, or refuses
   the chunk `foreign-run` when the sender does not own the run. The empty
@@ -386,11 +387,38 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   another gateway replica: the store fences that write. `Append` is
   write-once at commit, so a late write at the reservation or at a sequence
   the new writer wrote conflicts and is refused; a late write above those
-  lands, and recovery stops at it by its writer. The same-writer rule is unchanged: a repeat at or below
+  lands, and recovery stops at it by its writer. Every `Overwrite` (the
+  blank pass's `blankPart`, `replaceStalePart`, a reservation takeover)
+  reads the part's `blob.Stamp`, then the owner (`ownerStillMatches`), and
+  carries that stamp. A writer that took the run later wrote only after the
+  ledger named it, so either the owner read refuses the caller or the write
+  conflicts. On a conflict the part is read again: an empty part, a part of
+  the caller's writer, or the chunk's own bytes need nothing.
+  `blob.ErrOverwriteUnsupported` (a `gs` or `azblob` bucket) is permanent:
+  `retryWrite` answers `writeDeadline` at once, and the run is abandoned.
+  **Index reservation** — the reservation is the index line
+  `{"seq":k,"writer":w,"reserved":true}` (`reservationLine`), stamped with
+  `w`. Every index reader skips it (`readLogIndex`, the BFF's
+  `readRunLogIndex`, the recorder's `readStoredLogIndex`), and
+  `blob.UnindexedLogParts` takes its writer as the baseline. Append is
+  write-once, so of an old replica's in-flight entry and the reservation,
+  the first to commit keeps the slot. A reservation that loses reads the
+  owner and the index again (`recoverRunState`) and reserves the next
+  slot; it never empties a part that an entry names. Another writer's
+  reservation is taken over by a conditional `Overwrite` after an owner
+  read, at reservation time and at the flush (`writeIndexEntry`); an index
+  entry is never replaced. A retried `Overwrite` of the writer's own
+  reservation that finds its own line succeeds. `replaceStalePart` reserves too, and a chunk whose sequence an
+  old entry took is a `gateway-gap`. The writer's own entry replaces its
+  reservation through `writeIndexEntry`, and recovery's
+  `appendRecoveredEntry` does the same for the reserving writer's part.
+  The same-writer rule is unchanged: a repeat at or below
   `ackSeq`, or still pending, is acked `STORED`, and a `BUSY` ack names the
   refused chunk's `seq`. `retryWrite` returns `ErrChunkConflict` at once;
   a log-key conflict from the owner replaces the stale part through
-  `blob.Store.Overwrite` (`replaceStalePart`), and an index-key conflict
+  `blob.Store.Overwrite` (`replaceStalePart`). An index-key conflict reads
+  the owner again: a sender that lost the run is refused `foreign-run`
+  quietly (no `gateway-gap`, no abandon; `appendRefused`), and the owner
   abandons the run. A drop, or an empty or replace of a part that held
   bytes, marks the run `gateway-gap`; replacing an empty part marks nothing.
   `adoptWriter` records `ackSeq` as `adoptedThrough`. `checkOldWriterPart`
@@ -547,7 +575,10 @@ Key tests: `gateway_integration_test.go` (end-to-end mite↔gateway↔bus),
 `jenkinstoken_test.go`, `consumed_token_kv_test.go`, `log_writer_test.go`
 (blob-writer pipeline, ownership, pending bounds, the finalize deadline —
 including the idle-run case with no later chunk to trigger it),
-`tail_test.go` (lease table, renewal-versus-expiry races),
+`log_writer_fence_test.go` (writes held across a mesh takeover through
+`gatedWriteStore`: a stalled `Overwrite` and a stalled index append must
+lose; `assertIndexMatchesParts` checks that every entry names its own
+part), `tail_test.go` (lease table, renewal-versus-expiry races),
 `crosstenant_bridge_test.go` (identity overwrite, unhosted-caller and
 unknown-kind fail-closed paths, the 8 in-flight cap, the timeout budget
 and its warning), `imperative_redelivery_test.go` (a pod roll in both

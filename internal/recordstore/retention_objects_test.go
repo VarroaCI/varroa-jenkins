@@ -135,7 +135,7 @@ func (r *recordingBlobStore) Parts(context.Context, string, int64) ([]blob.Part,
 	return nil, nil
 }
 
-func (r *recordingBlobStore) Overwrite(context.Context, string, int64, []byte, blob.ObjectOptions) error {
+func (r *recordingBlobStore) Overwrite(context.Context, string, int64, []byte, blob.Stamp, blob.ObjectOptions) error {
 	return nil
 }
 
@@ -435,7 +435,7 @@ func (r *prefixRecordingStore) Parts(context.Context, string, int64) ([]blob.Par
 	return nil, nil
 }
 
-func (r *prefixRecordingStore) Overwrite(context.Context, string, int64, []byte, blob.ObjectOptions) error {
+func (r *prefixRecordingStore) Overwrite(context.Context, string, int64, []byte, blob.Stamp, blob.ObjectOptions) error {
 	return nil
 }
 

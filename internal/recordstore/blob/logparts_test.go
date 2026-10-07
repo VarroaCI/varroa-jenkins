@@ -7,15 +7,17 @@ import (
 	"testing"
 )
 
-// fixedPartLister answers a fixed part list, filtered by from, and a
-// fixed writer for each sequence.
+// fixedPartLister answers a fixed log part list, filtered by from, a
+// fixed writer for each sequence, and the writer of an index reservation
+// at each sequence in reserved.
 type fixedPartLister struct {
-	parts   []Part
-	writers map[int64]string
-	err     error
+	parts    []Part
+	writers  map[int64]string
+	reserved map[int64]string
+	err      error
 }
 
-func (f fixedPartLister) Parts(_ context.Context, _ string, from int64) ([]Part, error) {
+func (f fixedPartLister) Parts(_ context.Context, key string, from int64) ([]Part, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -28,13 +30,19 @@ func (f fixedPartLister) Parts(_ context.Context, _ string, from int64) ([]Part,
 	return out, nil
 }
 
-func (f fixedPartLister) PartWriter(_ context.Context, _ string, seq int64) (string, error) {
+func (f fixedPartLister) PartStamp(_ context.Context, key string, seq int64) (Stamp, error) {
+	if key == LogIndexKey("r1") {
+		if w, ok := f.reserved[seq]; ok {
+			return Stamp{Writer: w}, nil
+		}
+		return Stamp{}, ErrObjectNotFound
+	}
 	for _, p := range f.parts {
 		if p.Seq == seq {
-			return f.writers[seq], nil
+			return Stamp{Writer: f.writers[seq]}, nil
 		}
 	}
-	return "", ErrObjectNotFound
+	return Stamp{}, ErrObjectNotFound
 }
 
 func TestUnindexedLogParts(t *testing.T) {
@@ -100,6 +108,34 @@ func TestUnindexedLogPartsBaselineIsTheFirstPartWithNoIndexWriter(t *testing.T) 
 	}
 	if fmt.Sprint(got) != "[{0 3} {1 3}]" || writer != "ns/a/i1" {
 		t.Fatalf("parts = %v, writer = %q, want [{0 3} {1 3}] and ns/a/i1", got, writer)
+	}
+}
+
+// TestUnindexedLogPartsBaselineIsTheReservationWriter pins the index
+// reservation rule: a reservation at from names the baseline, so the
+// reserving writer's parts are answered and the parts of the writer that
+// lost the build are not.
+func TestUnindexedLogPartsBaselineIsTheReservationWriter(t *testing.T) {
+	lister := fixedPartLister{
+		parts:    []Part{{2, 3}, {3, 3}},
+		writers:  map[int64]string{2: "ns/b/i2", 3: "ns/a/i1"},
+		reserved: map[int64]string{2: "ns/b/i2"},
+	}
+	got, writer, err := UnindexedLogParts(context.Background(), lister, "r1", 2, "ns/a/i1")
+	if err != nil {
+		t.Fatalf("UnindexedLogParts: %v", err)
+	}
+	if fmt.Sprint(got) != "[{2 3}]" || writer != "ns/b/i2" {
+		t.Fatalf("parts = %v, writer = %q, want [{2 3}] and ns/b/i2", got, writer)
+	}
+
+	lister.writers = map[int64]string{2: "ns/a/i1", 3: "ns/a/i1"}
+	got, _, err = UnindexedLogParts(context.Background(), lister, "r1", 2, "ns/a/i1")
+	if err != nil {
+		t.Fatalf("UnindexedLogParts: %v", err)
+	}
+	if fmt.Sprint(got) != "[]" {
+		t.Fatalf("parts = %v, want none above another writer's reservation", got)
 	}
 }
 

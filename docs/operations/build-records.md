@@ -53,7 +53,7 @@ recordStore:
       existingSecret: my-s3-credentials
 ```
 
-The bucket must support a conditional PUT (`If-None-Match: *`). AWS S3 and MinIO do.
+The bucket must support conditional PUTs (`If-None-Match: *` and `If-Match`). AWS S3 and MinIO do.
 
 `recorder.*` configures the `varroa-recorder` component as `bff.*` configures the BFF.
 

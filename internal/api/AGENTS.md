@@ -333,8 +333,9 @@ federation, activity persistence, and SSE fanout.
   serves the `/pipelines/{team}/...` and `/runs/{run}/...` paths over
   `internal/recordstore`. The run log manifest (`computeRunLogManifest`) serves each
   log part that `readRunLogUnattributed` names through `blob.UnindexedLogParts` (passing the
-  highest index entry's `writer`) as one
-  unattributed chunk, never a missing sequence. `readRunLogObject` is the only console reader; it serves
+  highest index entry's `writer`; an index reservation at the next slot overrides it) as one
+  unattributed chunk, never a missing sequence. `readRunLogIndex` skips a reservation line
+  (`reserved`). `readRunLogObject` is the only console reader; it serves
   no byte past those accepted parts, so a lost cell's late part never reaches a viewer. `TenantResolver` (`tenantresolver.go`, `deps.TenantResolver`)
   is the one seam that maps a `{team}` URL segment onto record-store tenants: a placed
   Team resolves to one tenant, an unplaced Team fans out over its namespaces, a name

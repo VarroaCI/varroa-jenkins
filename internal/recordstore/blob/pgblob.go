@@ -142,39 +142,46 @@ func (s *pgStore) Append(ctx context.Context, key string, seq int64, p []byte, o
 	return nil
 }
 
-// Overwrite inserts one row, or replaces the bytes, the digest, and the
-// writer of the row already at the same primary key. It sets no other
-// column, because role varroa_gateway holds UPDATE on those three alone.
-func (s *pgStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error {
+// Overwrite replaces the bytes, the digest, and the writer of the row
+// at the same primary key, only while that row still carries expect.
+// The condition sits in the UPDATE itself, so Postgres checks it when
+// the write commits. No updated row means the row changed or is absent:
+// Overwrite then returns ErrChunkConflict. It sets no other column,
+// because role varroa_gateway holds UPDATE on those three alone.
+func (s *pgStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, expect Stamp, opts ObjectOptions) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO varroa.log_chunks (object_key, chunk_seq, created_at, object_class, content_type, digest, bytes, writer)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (created_at, object_key, chunk_seq) DO UPDATE
-		SET digest = EXCLUDED.digest, bytes = EXCLUDED.bytes, writer = EXCLUDED.writer
-	`, key, seq, opts.CreatedAt, opts.ObjectClass, nullableString(opts.ContentType), sha256Digest(p), p, opts.Writer); err != nil {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE varroa.log_chunks
+		SET digest = $1, bytes = $2, writer = $3
+		WHERE created_at = $4 AND object_key = $5 AND chunk_seq = $6
+		  AND digest = $7 AND writer = $8
+	`, sha256Digest(p), p, opts.Writer, opts.CreatedAt, key, seq, expect.Digest, expect.Writer)
+	if err != nil {
 		return fmt.Errorf("overwrite chunk: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrChunkConflict
 	}
 	return nil
 }
 
-// PartWriter reads the writer column of the row at seq.
-func (s *pgStore) PartWriter(ctx context.Context, key string, seq int64) (string, error) {
-	var writer string
+// PartStamp reads the digest and writer columns of the row at seq.
+func (s *pgStore) PartStamp(ctx context.Context, key string, seq int64) (Stamp, error) {
+	var stamp Stamp
 	err := s.pool.QueryRow(ctx, `
-		SELECT writer FROM varroa.log_chunks
+		SELECT digest, writer FROM varroa.log_chunks
 		WHERE object_key = $1 AND chunk_seq = $2
 		LIMIT 1
-	`, key, seq).Scan(&writer)
+	`, key, seq).Scan(&stamp.Digest, &stamp.Writer)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return "", ErrObjectNotFound
+		return Stamp{}, ErrObjectNotFound
 	case err != nil:
-		return "", fmt.Errorf("read part writer: %w", err)
+		return Stamp{}, fmt.Errorf("read part stamp: %w", err)
 	}
-	return writer, nil
+	return stamp, nil
 }
 
 // Parts lists every chunked row of key at or above from, with its byte

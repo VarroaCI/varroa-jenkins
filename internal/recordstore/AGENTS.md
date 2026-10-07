@@ -85,7 +85,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   the takeover commits. It parses the gateway's log index itself, because
   this package cannot import `internal/mite`; its rule must equal the
   gateway's `recoverRunState`. Both count each part that
-  `blob.UnindexedLogParts` names as one sequence, and the scenario table
+  `blob.UnindexedLogParts` names as one sequence, both skip an index
+  reservation line (`"reserved":true`), and the scenario table
   in `internal/mite`'s `TestStoredLogNextSeqMatchesGatewayRecovery` pins
   the two. A read failure publishes 0 and logs the
   running failure count. `TakeOverLostRuns` claims a lost run in two steps: it
@@ -135,7 +136,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   `log_chunks_object_class_check` to accept the class `state`, which the
   pipeline mesh's run-state objects carry. `00026_log_chunks_writer.sql`
   adds `log_chunks.writer`, the writer a part was last written with
-  (`blob.Store.PartWriter`); `varroa_gateway` holds `UPDATE` on it.
+  (`blob.Store.PartStamp`); `varroa_gateway` holds `UPDATE` on it, and
+  `Overwrite`'s `WHERE digest = … AND writer = …` needs only its `SELECT`.
   `00005_tenant_placements.sql` adds
   `tenant_placements`, the placement-fencing authority: one row per
   `(cluster, tenant)`, holding the placement identity, the rehydration

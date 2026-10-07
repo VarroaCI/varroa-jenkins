@@ -78,8 +78,8 @@ func (failingLogReader) Parts(context.Context, string, int64) ([]blob.Part, erro
 	return nil, errors.New("blob tier unavailable")
 }
 
-func (failingLogReader) PartWriter(context.Context, string, int64) (string, error) {
-	return "", errors.New("blob tier unavailable")
+func (failingLogReader) PartStamp(context.Context, string, int64) (blob.Stamp, error) {
+	return blob.Stamp{}, errors.New("blob tier unavailable")
 }
 
 // partsFailingStore reads the index but fails every part listing.
@@ -198,6 +198,39 @@ func TestStoredLogNextSeqStopsAtAnotherWritersPart(t *testing.T) {
 		line = append(line, '\n')
 		if err := store.Append(ctx, blob.LogIndexKey(logSeqTestRunID), seq, line,
 			logSeqTestOptions("application/x-ndjson")); err != nil {
+			t.Fatalf("append index line %d: %v", seq, err)
+		}
+	}
+	assertLogNextSeq(t, store, 3)
+}
+
+// TestStoredLogNextSeqSkipsAReservationAndCountsItsWritersParts asserts
+// that a reservation line is no index entry, and that the next sequence
+// counts the reserving writer's parts above the index, up to a part of
+// another writer.
+func TestStoredLogNextSeqSkipsAReservationAndCountsItsWritersParts(t *testing.T) {
+	store := newLogSeqTestStore(t)
+	ctx := context.Background()
+	for seq, w := range []string{"ns/a/i1", "ns/a/i1", "ns/b/i2", "ns/a/i1"} {
+		opts := logSeqTestOptions("text/plain; charset=utf-8")
+		opts.Writer = w
+		if err := store.Append(ctx, blob.LogKey(logSeqTestRunID), int64(seq), []byte("x\n"), opts); err != nil {
+			t.Fatalf("append log part %d: %v", seq, err)
+		}
+	}
+	lines := []map[string]any{
+		{"seq": 0, "offset": 0, "len": 2, "writer": "ns/a/i1"},
+		{"seq": 1, "offset": 2, "len": 2, "writer": "ns/a/i1"},
+		{"seq": 2, "offset": 0, "len": 0, "writer": "ns/b/i2", "reserved": true},
+	}
+	for seq, l := range lines {
+		line, err := json.Marshal(l)
+		if err != nil {
+			t.Fatalf("marshal index line: %v", err)
+		}
+		opts := logSeqTestOptions("application/x-ndjson")
+		opts.Writer = l["writer"].(string)
+		if err := store.Append(ctx, blob.LogIndexKey(logSeqTestRunID), int64(seq), append(line, '\n'), opts); err != nil {
 			t.Fatalf("append index line %d: %v", seq, err)
 		}
 	}

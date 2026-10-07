@@ -41,12 +41,34 @@ GCS, Azure Blob, and the local filesystem.
   `digest` and `writer` metadata. The chart never renders `fileblob`. A bucket without conditional writes
   fails every `Append`; no fallback exists. `afterCheck` is a test-only
   seam into that window.
-- **`Overwrite` replaces one part** — it writes `(key, seq)` over any
-  stored part and stores the new digest and writer, so `Append` stays write-once
-  against the new bytes. Only the gateway log writer calls it, for a log
-  part that a lost writer left above a hole. `pgblob` uses `ON CONFLICT
-  … DO UPDATE` that sets `digest`, `bytes`, and `writer` alone, because
+- **`Overwrite` is a compare-and-swap on a `Stamp`** — `Overwrite(ctx,
+  key, seq, p, expect, opts)` replaces the part at `(key, seq)` only while
+  it still carries `expect` (`Stamp{Digest, Writer}`), and stores the new
+  digest and writer, so `Append` stays write-once against the new bytes.
+  A changed or absent part answers `ErrChunkConflict`. Only the gateway
+  log writer calls it: for a log part a lost writer left above a hole,
+  for a blank-pass empty part, and for its own index reservation.
+  `pgblob` runs `UPDATE … WHERE digest = $expected AND writer =
+  $expected`, which sets `digest`, `bytes`, and `writer` alone, because
   role `varroa_gateway` holds `UPDATE` on those three columns and no other.
+  The `gocloud.dev` adapter compares the stamp after one attribute read,
+  then writes with `If-Match` on the ETag it read. gocloud.dev has no
+  `If-Match` option: `ifMatchBeforeWrite` sets it on the S3 driver's
+  `transfermanager.UploadObjectInput` through `BeforeWrite`. Known limits:
+  - An ETag covers the bytes alone. Between the stamp check and the write,
+    a part that another writer stored with the same bytes (in practice an
+    empty part) passes `If-Match`. `pgblob` checks the writer at commit.
+  - MinIO creates the object when `If-Match` names an absent key; AWS S3
+    refuses it. Only retention deletes a log part, after the run ended, so
+    no live `Overwrite` targets an absent part.
+  - `fileblob` sends no condition: the stamp check is its only guard. It is
+    never deployed. `gs` and `azblob` refuse every `Overwrite`
+    (`ErrOverwriteUnsupported`); the chart never renders them either.
+  - `beforeOverwrite` is a test-only seam into the window between the check
+    and the write.
+  On S3 a stamp's digest comes from object metadata; on every other driver
+  it is the digest of the stored bytes, because `fileblob` metadata can
+  name a refused write's bytes.
 - **`Parts` lists past a hole, with sizes** — it answers every chunked
   part at or above `from` as a `Part{Seq, Size}`, holes included, where
   `NewRangeReader` stops at the first missing part. A driver answers the
@@ -55,14 +77,18 @@ GCS, Azure Blob, and the local filesystem.
   writer uses it to find the old parts a moved build must empty.
 - **Writer stamp** — `ObjectOptions.Writer` names a part's writer.
   `pgblob` stores it in `log_chunks.writer`, the adapter in object metadata
-  `writer`; `Overwrite` replaces it. `PartWriter` reads it back (one
-  attribute read on the object tier) and answers `ErrObjectNotFound` for an
-  absent part. `Parts` never answers it, so a listing stays one call.
+  `writer`; `Overwrite` replaces it. `PartStamp` reads it back with the
+  part's digest (one attribute read on S3) and answers `ErrObjectNotFound`
+  for an absent part. `Parts` never answers it, so a listing stays one
+  call. `Digest(p)` is the `sha256:<hex>` value a stamp carries.
 - **`UnindexedLogParts`** (`logparts.go`) — the one rule for the log parts
   a restarted gateway indexes: the run of parts directly above the highest
   index entry, up to the first missing part, the first part of size 0, or
-  the first part whose writer differs from the baseline (the caller's
-  highest-entry writer, else the first part's). It returns that baseline.
+  the first part whose writer differs from the baseline. The baseline is
+  the writer stamp of an index reservation at `from` (the gateway's
+  `reserved` line, read by `PartStamp` on `logindex/<run_id>`), else the
+  caller's highest-entry writer, else the first part's. It returns that
+  baseline.
   The gateway's `recoverRunState`, the recorder's `StoredLogNextSeq`, and
   both manifest readers call it, and they must not compute it another way.
 - **`Open`** (`open.go`) accepts `pgblob:`, `s3://`, `gs://`, `azblob://`,
@@ -116,7 +142,10 @@ GCS, Azure Blob, and the local filesystem.
   a `file://` bucket in a temp directory (always runs). Each driver's
   `writeNative` hook writes a native object the way a foreign writer
   would: a direct `INSERT` with `chunk_seq = -1` for `pgblob`, a direct
-  `bucket.NewWriter` at the bare key for `gocloud.dev`.
+  `bucket.NewWriter` at the bare key for `gocloud.dev`. `s3_live_test.go`
+  runs the suite and the `If-Match` window against a live S3 bucket, only
+  when `VARROA_TEST_S3_URL` is set; its file comment holds the port-forward
+  recipe for the core cluster's MinIO.
 
 ## Work Guidance
 
@@ -132,6 +161,7 @@ go build ./internal/recordstore/blob/...
 VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
   go test -race -count=1 ./internal/recordstore/blob/...
 go test -race -count=1 ./internal/recordstore/blob/...   # DSN unset: pgblob skips, file:// still runs
+VARROA_TEST_S3_URL='s3://…' go test -race -count=1 -run S3 ./internal/recordstore/blob/   # live S3; see s3_live_test.go
 ```
 
 ## Child DOX Index

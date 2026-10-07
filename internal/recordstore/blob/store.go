@@ -33,11 +33,15 @@ type Store interface {
 	// created the part never replaces that part, however late it lands.
 	Append(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
 
-	// Overwrite writes one chunk at sequence seq, over any part that
-	// sequence already holds. Append stays write-once. Only a writer
-	// that knows the stored part is stale may call Overwrite: the log
-	// writer calls it for a part that a lost writer left above a hole.
-	Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error
+	// Overwrite writes one chunk at sequence seq over the part that
+	// sequence holds, but only while that part still carries expect. The
+	// store checks expect when the write commits. It returns
+	// ErrChunkConflict when the stored stamp differs from expect, and
+	// when key holds no part at seq. Append stays write-once. Only a
+	// writer that read the stored part and knows it is stale may call
+	// Overwrite: the log writer calls it for a part that a lost writer
+	// left above a hole, and for its own index reservation.
+	Overwrite(ctx context.Context, key string, seq int64, p []byte, expect Stamp, opts ObjectOptions) error
 
 	// Parts lists every chunked part of key at or above from, in
 	// ascending sequence order, holes included, with the byte size of
@@ -45,10 +49,11 @@ type Store interface {
 	// sequence. It returns an empty list when key holds no such part.
 	// A driver answers the sizes from its listing and reads no part.
 	Parts(ctx context.Context, key string, from int64) ([]Part, error)
-	// PartWriter answers the ObjectOptions.Writer that the part at seq
-	// was last written with, or "" when that write named none. It
-	// returns ErrObjectNotFound when key holds no part at seq.
-	PartWriter(ctx context.Context, key string, seq int64) (string, error)
+	// PartStamp answers the stamp of the part at seq: the digest of its
+	// bytes, and the ObjectOptions.Writer it was last written with ("" when
+	// that write named none). It returns ErrObjectNotFound when key holds
+	// no part at seq.
+	PartStamp(ctx context.Context, key string, seq int64) (Stamp, error)
 
 	// NewRangeReader concatenates the parts of a chunked object in
 	// ascending sequence order, starting offset bytes from the start.
@@ -86,6 +91,14 @@ type Part struct {
 	Size int64
 }
 
+// Stamp identifies the content of one stored part: the "sha256:<hex>"
+// digest of its bytes and the writer that stored it. Overwrite compares
+// it to decide whether a part changed since the caller read it.
+type Stamp struct {
+	Digest string
+	Writer string
+}
+
 // ObjectOptions carries the metadata a write needs.
 type ObjectOptions struct {
 	// ObjectClass is "log", "artifact", or "state". pgblob writes it to
@@ -99,7 +112,7 @@ type ObjectOptions struct {
 	// key and insert a second row.
 	CreatedAt time.Time
 	// Writer names the writer of a log part. The driver stores it with
-	// the part, and PartWriter reads it back. Restart recovery compares
+	// the part, and PartStamp reads it back. Restart recovery compares
 	// it to tell a moved build's parts from the parts of the cell that
 	// lost the build. It is optional.
 	Writer string
@@ -117,7 +130,9 @@ func (o ObjectOptions) Validate() error {
 // Sentinel errors every Store driver returns.
 var (
 	// ErrChunkConflict means a retried Append carried bytes that differ
-	// from the chunk already stored at that key and sequence.
+	// from the chunk already stored at that key and sequence, or that an
+	// Overwrite found a stored part that no longer carries its expected
+	// stamp.
 	ErrChunkConflict = errors.New("blob: chunk conflict")
 	// ErrObjectExists means Put found a part already at key.
 	ErrObjectExists = errors.New("blob: object already exists")
@@ -134,6 +149,12 @@ var (
 	// and can sign no URL.
 	ErrUnsupported = errors.New("blob: signed URLs are not supported on this tier")
 )
+
+// Digest returns the "sha256:<hex>" digest of p, the value a Stamp
+// carries.
+func Digest(p []byte) string {
+	return sha256Digest(p)
+}
 
 // sha256Digest returns the "sha256:<hex>" digest of p. Every driver
 // stores this value so an Append retry can tell an identical write from

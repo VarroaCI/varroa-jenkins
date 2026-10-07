@@ -8,7 +8,7 @@ import (
 // LogPartReader is the two Store methods UnindexedLogParts needs.
 type LogPartReader interface {
 	Parts(ctx context.Context, key string, from int64) ([]Part, error)
-	PartWriter(ctx context.Context, key string, seq int64) (string, error)
+	PartStamp(ctx context.Context, key string, seq int64) (Stamp, error)
 }
 
 // UnindexedLogParts answers the log parts of runID that a restarted
@@ -17,9 +17,16 @@ type LogPartReader interface {
 // that names one, or "" when no entry names one. The answer is the run
 // of parts at from, from+1, and up. It stops at the first missing
 // sequence, at the first part of size 0, and at the first part whose
-// writer differs from the baseline. The baseline is writer, or the
-// writer of the part at from when writer is "". It also returns the
-// baseline, which every answered part carries.
+// writer differs from the baseline. The baseline is the writer of an
+// index reservation at from, else writer, else the writer of the part
+// at from. It also returns the baseline, which every answered part
+// carries.
+//
+// A reservation is the only index part that can sit at from, because
+// readers skip it and real entries never leave a hole. A moved build's
+// writer reserves that slot before it empties or replaces any log part,
+// so the parts above it belong to the reserving writer, and the parts of
+// the writer that lost the build are not served.
 //
 // The gateway's restart recovery, the recorder's next log sequence, and
 // both manifest readers use this rule, and they must stay equal.
@@ -43,15 +50,25 @@ func UnindexedLogParts(ctx context.Context, store LogPartReader, runID string, f
 		return nil, "", err
 	}
 	baseline := writer
+	if len(parts) > 0 && parts[0].Seq == from {
+		reservation, err := store.PartStamp(ctx, LogIndexKey(runID), from)
+		switch {
+		case err == nil:
+			baseline = reservation.Writer
+		case !errors.Is(err, ErrObjectNotFound):
+			return nil, "", err
+		}
+	}
 	n := 0
 	for n < len(parts) && parts[n].Seq == from+int64(n) && parts[n].Size > 0 {
-		partWriter, err := store.PartWriter(ctx, key, parts[n].Seq)
+		stamp, err := store.PartStamp(ctx, key, parts[n].Seq)
 		if errors.Is(err, ErrObjectNotFound) {
 			break
 		}
 		if err != nil {
 			return nil, "", err
 		}
+		partWriter := stamp.Writer
 		if n == 0 && baseline == "" {
 			baseline = partWriter
 		}

@@ -136,7 +136,11 @@ func RunConformance(
 		return string(got)
 	}
 
-	t.Run("OverwriteReplacesAPart", func(t *testing.T) {
+	stampOf := func(p []byte, writer string) Stamp {
+		return Stamp{Digest: Digest(p), Writer: writer}
+	}
+
+	t.Run("OverwriteReplacesAPartWithTheExpectedStamp", func(t *testing.T) {
 		key := "conformance/overwrite-replace"
 		if err := store.Append(ctx, key, 0, []byte("old "), logOpts); err != nil {
 			t.Fatalf("append 0: %v", err)
@@ -144,7 +148,7 @@ func RunConformance(
 		if err := store.Append(ctx, key, 1, []byte("stale"), logOpts); err != nil {
 			t.Fatalf("append 1: %v", err)
 		}
-		if err := store.Overwrite(ctx, key, 1, []byte("fresh"), logOpts); err != nil {
+		if err := store.Overwrite(ctx, key, 1, []byte("fresh"), stampOf([]byte("stale"), ""), logOpts); err != nil {
 			t.Fatalf("overwrite 1: %v", err)
 		}
 		if got := readKey(t, key); got != "old fresh" {
@@ -152,13 +156,47 @@ func RunConformance(
 		}
 	})
 
-	t.Run("OverwriteWritesAnAbsentPart", func(t *testing.T) {
-		key := "conformance/overwrite-absent"
-		if err := store.Overwrite(ctx, key, 0, []byte("first"), logOpts); err != nil {
-			t.Fatalf("overwrite 0: %v", err)
+	t.Run("OverwriteRefusesAStaleExpectedDigest", func(t *testing.T) {
+		key := "conformance/overwrite-stale"
+		if err := store.Append(ctx, key, 0, []byte("first"), logOpts); err != nil {
+			t.Fatalf("append: %v", err)
 		}
-		if got := readKey(t, key); got != "first" {
-			t.Fatalf("got %q, want %q", got, "first")
+		if err := store.Overwrite(ctx, key, 0, []byte("second"), stampOf([]byte("first"), ""), logOpts); err != nil {
+			t.Fatalf("first overwrite: %v", err)
+		}
+		err := store.Overwrite(ctx, key, 0, []byte("third"), stampOf([]byte("first"), ""), logOpts)
+		if !errors.Is(err, ErrChunkConflict) {
+			t.Fatalf("overwrite with a stale stamp: got %v, want ErrChunkConflict", err)
+		}
+		if got := readKey(t, key); got != "second" {
+			t.Fatalf("got %q, want %q", got, "second")
+		}
+	})
+
+	t.Run("OverwriteRefusesAnAbsentPart", func(t *testing.T) {
+		key := "conformance/overwrite-absent"
+		err := store.Overwrite(ctx, key, 0, []byte("first"), stampOf(nil, ""), logOpts)
+		if !errors.Is(err, ErrChunkConflict) {
+			t.Fatalf("overwrite of an absent part: got %v, want ErrChunkConflict", err)
+		}
+		if parts, err := store.Parts(ctx, key, 0); err != nil || len(parts) != 0 {
+			t.Fatalf("parts = %v, %v, want none", parts, err)
+		}
+	})
+
+	t.Run("OverwriteRefusesSameBytesOfAnotherWriter", func(t *testing.T) {
+		key := "conformance/overwrite-other-writer"
+		stored := logOpts
+		stored.Writer = "ns/cell/inst2"
+		if err := store.Append(ctx, key, 0, []byte{}, stored); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		err := store.Overwrite(ctx, key, 0, []byte("late"), stampOf(nil, "ns/cell/inst1"), logOpts)
+		if !errors.Is(err, ErrChunkConflict) {
+			t.Fatalf("overwrite expecting another writer: got %v, want ErrChunkConflict", err)
+		}
+		if got := readKey(t, key); got != "" {
+			t.Fatalf("got %q, want the empty part", got)
 		}
 	})
 
@@ -167,7 +205,7 @@ func RunConformance(
 		if err := store.Append(ctx, key, 0, []byte("stale"), logOpts); err != nil {
 			t.Fatalf("append: %v", err)
 		}
-		if err := store.Overwrite(ctx, key, 0, []byte("fresh"), logOpts); err != nil {
+		if err := store.Overwrite(ctx, key, 0, []byte("fresh"), stampOf([]byte("stale"), ""), logOpts); err != nil {
 			t.Fatalf("overwrite: %v", err)
 		}
 		if err := store.Append(ctx, key, 0, []byte("fresh"), logOpts); err != nil {
@@ -178,8 +216,8 @@ func RunConformance(
 		}
 	})
 
-	t.Run("PartWriterReadsTheStoredWriter", func(t *testing.T) {
-		key := "conformance/part-writer"
+	t.Run("PartStampAnswersDigestAndWriter", func(t *testing.T) {
+		key := "conformance/part-stamp"
 		stamped := logOpts
 		stamped.Writer = "ns/cell/inst1"
 		if err := store.Append(ctx, key, 0, []byte("a"), stamped); err != nil {
@@ -188,14 +226,14 @@ func RunConformance(
 		if err := store.Append(ctx, key, 1, []byte("b"), logOpts); err != nil {
 			t.Fatalf("append unstamped part: %v", err)
 		}
-		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst1" {
-			t.Fatalf("PartWriter(0) = %q, %v, want ns/cell/inst1", got, err)
+		if got, err := store.PartStamp(ctx, key, 0); err != nil || got != stampOf([]byte("a"), "ns/cell/inst1") {
+			t.Fatalf("PartStamp(0) = %+v, %v, want the digest of a and ns/cell/inst1", got, err)
 		}
-		if got, err := store.PartWriter(ctx, key, 1); err != nil || got != "" {
-			t.Fatalf("PartWriter(1) = %q, %v, want an empty writer", got, err)
+		if got, err := store.PartStamp(ctx, key, 1); err != nil || got != stampOf([]byte("b"), "") {
+			t.Fatalf("PartStamp(1) = %+v, %v, want the digest of b and an empty writer", got, err)
 		}
-		if _, err := store.PartWriter(ctx, key, 2); !errors.Is(err, ErrObjectNotFound) {
-			t.Fatalf("PartWriter(2): got %v, want ErrObjectNotFound", err)
+		if _, err := store.PartStamp(ctx, key, 2); !errors.Is(err, ErrObjectNotFound) {
+			t.Fatalf("PartStamp(2): got %v, want ErrObjectNotFound", err)
 		}
 	})
 
@@ -208,17 +246,17 @@ func RunConformance(
 		}
 		second := logOpts
 		second.Writer = "ns/cell/inst2"
-		if err := store.Overwrite(ctx, key, 0, []byte{}, second); err != nil {
+		if err := store.Overwrite(ctx, key, 0, []byte{}, stampOf([]byte("old"), "ns/cell/inst1"), second); err != nil {
 			t.Fatalf("overwrite: %v", err)
 		}
-		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst2" {
-			t.Fatalf("PartWriter = %q, %v, want ns/cell/inst2", got, err)
+		if got, err := store.PartStamp(ctx, key, 0); err != nil || got != stampOf(nil, "ns/cell/inst2") {
+			t.Fatalf("PartStamp = %+v, %v, want the empty part of ns/cell/inst2", got, err)
 		}
 		if err := store.Append(ctx, key, 0, []byte("late"), first); !errors.Is(err, ErrChunkConflict) {
 			t.Fatalf("late append over the emptied part: got %v, want ErrChunkConflict", err)
 		}
-		if got, err := store.PartWriter(ctx, key, 0); err != nil || got != "ns/cell/inst2" {
-			t.Fatalf("PartWriter after the refused append = %q, %v, want ns/cell/inst2", got, err)
+		if got, err := store.PartStamp(ctx, key, 0); err != nil || got.Writer != "ns/cell/inst2" {
+			t.Fatalf("PartStamp after the refused append = %+v, %v, want ns/cell/inst2", got, err)
 		}
 	})
 

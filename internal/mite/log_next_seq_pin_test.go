@@ -27,7 +27,13 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 		// foreign names the trailing parts that another cell instance
 		// wrote, as a lost cell's late write after a takeover does.
 		foreign map[int64]bool
-		want    int64
+		// moved names the trailing parts that the moved build's cell
+		// instance wrote. reserved puts that instance's index reservation
+		// at sequence 2, as a gateway replica that stopped after its
+		// reservation leaves it.
+		moved    map[int64]bool
+		reserved bool
+		want     int64
 	}{
 		{name: "indexed log", want: 2},
 		{name: "one unindexed part", trailing: map[int64]string{2: "unindexed trailing line\n"}, want: 3},
@@ -36,6 +42,8 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 		{name: "an empty part above the index", trailing: map[int64]string{2: "two\n", 3: "", 4: "four\n"}, want: 3},
 		{name: "another writer's part above the index", trailing: map[int64]string{2: "two\n", 3: "late\n"}, foreign: map[int64]bool{3: true}, want: 3},
 		{name: "another writer's part at the index end", trailing: map[int64]string{2: "late\n", 3: "three\n"}, foreign: map[int64]bool{2: true}, want: 2},
+		{name: "a reservation over the reserving writer's part", trailing: map[int64]string{2: "moved\n", 3: "late\n"}, moved: map[int64]bool{2: true}, reserved: true, want: 3},
+		{name: "a reservation over the old writer's part", trailing: map[int64]string{2: "old\n"}, reserved: true, want: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -61,8 +69,19 @@ func TestStoredLogNextSeqMatchesGatewayRecovery(t *testing.T) {
 				if tc.foreign[seq] {
 					opts.Writer = "ns1/cell1/inst9"
 				}
+				if tc.moved[seq] {
+					opts.Writer = "ns1/cell1/inst2"
+				}
 				if err := store.Append(ctx, blob.LogKey(runID), seq, []byte(data), opts); err != nil {
 					t.Fatalf("append unindexed part %d: %v", seq, err)
+				}
+			}
+
+			if tc.reserved {
+				const moved = "ns1/cell1/inst2"
+				if err := store.Append(ctx, blob.LogIndexKey(runID), 2, reservationLine(2, moved),
+					indexOptions(runCreatedAtFromUUIDv7(runID), moved)); err != nil {
+					t.Fatalf("append the reservation: %v", err)
 				}
 			}
 

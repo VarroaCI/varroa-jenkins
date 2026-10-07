@@ -80,6 +80,56 @@ func TestReadRunLogObject_StopsBeforeAnotherWritersPart(t *testing.T) {
 	}
 }
 
+// TestReadRunLogObject_ServesTheReservingWriterPastAReservation proves
+// the reservation rule in the BFF reader. Index slot 1 holds a moved
+// build's reservation. The reader skips the line, serves the reserving
+// writer's part 1, and stops at the old writer's part 2.
+func TestReadRunLogObject_ServesTheReservingWriterPastAReservation(t *testing.T) {
+	store := newRunLogTestStore(t)
+	runID := "run-reserved-slot"
+	ctx := context.Background()
+	opts := blob.ObjectOptions{ObjectClass: "log", ContentType: "text/plain; charset=utf-8", CreatedAt: time.Now()}
+	for seq, part := range []struct{ data, writer string }{
+		{"a0\n", "ns/cell/inst1"}, {"b1\n", "ns/cell/inst2"}, {"a2\n", "ns/cell/inst1"},
+	} {
+		o := opts
+		o.Writer = part.writer
+		if err := store.Append(ctx, blob.LogKey(runID), int64(seq), []byte(part.data), o); err != nil {
+			t.Fatalf("append part %d: %v", seq, err)
+		}
+	}
+	for seq, e := range []runLogIndexEntry{
+		{Seq: 0, Offset: 0, Len: 3, Writer: "ns/cell/inst1"},
+		{Seq: 1, Writer: "ns/cell/inst2", Reserved: true},
+	} {
+		line, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("marshal index entry: %v", err)
+		}
+		o := opts
+		o.ContentType = "application/x-ndjson"
+		o.Writer = e.Writer
+		if err := store.Append(ctx, blob.LogIndexKey(runID), int64(seq), append(line, '\n'), o); err != nil {
+			t.Fatalf("append index entry %d: %v", seq, err)
+		}
+	}
+
+	entries, maxSeq, err := readRunLogIndex(ctx, store, blob.LogIndexKey(runID))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if _, ok := entries[1]; ok || maxSeq != 0 {
+		t.Fatalf("entries = %+v, maxSeq = %d, want the reservation skipped", entries, maxSeq)
+	}
+	got, err := readRunLogObject(ctx, store, runID)
+	if err != nil {
+		t.Fatalf("read console: %v", err)
+	}
+	if string(got) != "a0\nb1\n" {
+		t.Fatalf("console = %q, want the indexed part and the reserving writer's part", got)
+	}
+}
+
 // --- 5.1: the history reader ---
 
 // TestRunLogHistory_LineNumbersOffsetsStageGroups proves the reader

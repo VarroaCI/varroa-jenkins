@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"gocloud.dev/blob"
 	"gocloud.dev/gcerrors"
 )
@@ -35,11 +38,23 @@ type bucketStore struct {
 	// and its write. Only a test sets it, to put another writer's part
 	// into that window.
 	afterCheck func(key string)
+	// beforeOverwrite, when not nil, runs between Overwrite's stamp
+	// check and its conditional write. Only a test sets it, to change
+	// the part inside that window.
+	beforeOverwrite func(key string)
+	// isS3 is true for a bucket of the S3 driver, whose object metadata
+	// holds the true digest of a part.
+	isS3 bool
 }
+
+// ErrOverwriteUnsupported is the error Overwrite returns on a driver
+// that can send no If-Match condition. A retry can never succeed.
+var ErrOverwriteUnsupported = errors.New("blob: conditional overwrite needs the s3 driver; this bucket cannot send If-Match")
 
 // NewBucketStore returns a Store backed by bucket.
 func NewBucketStore(bucket *blob.Bucket) Store {
-	return &bucketStore{bucket: bucket}
+	var client *s3.Client
+	return &bucketStore{bucket: bucket, isS3: bucket.As(&client)}
 }
 
 // Put writes key as a single part at sequence 0. It returns
@@ -91,24 +106,112 @@ func (s *bucketStore) Append(ctx context.Context, key string, seq int64, p []byt
 }
 
 // Overwrite writes one part object at sequence seq, with the digest in
-// object metadata, over any part already there.
-func (s *bucketStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, opts ObjectOptions) error {
+// object metadata, over a part that still carries expect.
+//
+// It reads the part's attributes, compares the stamp with expect, and
+// then writes with If-Match on the ETag it read, so the bucket refuses
+// the write when the part changed after the read. An ETag covers the
+// bytes alone: a part that another writer stored with the same bytes
+// passes If-Match. The stamp check before the write still compares the
+// writer. Only the S3 driver carries If-Match. fileblob carries no
+// condition, so on that driver the check before the write is the only
+// guard. Every other driver refuses the write.
+func (s *bucketStore) Overwrite(ctx context.Context, key string, seq int64, p []byte, expect Stamp, opts ObjectOptions) error {
 	if err := opts.Validate(); err != nil {
 		return err
 	}
-	return s.writeObject(ctx, partKey(key, seq), p, opts, false)
+	pk := partKey(key, seq)
+	attrs, err := s.bucket.Attributes(ctx, pk)
+	switch {
+	case gcerrors.Code(err) == gcerrors.NotFound:
+		return ErrChunkConflict
+	case err != nil:
+		return fmt.Errorf("read part attributes %q: %w", pk, err)
+	}
+	stored, err := s.stampOf(ctx, pk, attrs)
+	if err != nil {
+		return err
+	}
+	if stored != expect {
+		return ErrChunkConflict
+	}
+	if s.beforeOverwrite != nil {
+		s.beforeOverwrite(pk)
+	}
+	err = s.writeIfMatch(ctx, pk, p, opts, attrs.ETag)
+	switch gcerrors.Code(err) {
+	case gcerrors.OK:
+		return nil
+	case gcerrors.FailedPrecondition, gcerrors.NotFound:
+		return ErrChunkConflict
+	default:
+		return err
+	}
 }
 
-// PartWriter reads the writer from the part's object metadata.
-func (s *bucketStore) PartWriter(ctx context.Context, key string, seq int64) (string, error) {
-	attrs, err := s.bucket.Attributes(ctx, partKey(key, seq))
+// PartStamp reads the writer from the part's object metadata, and the
+// digest as stampOf answers it.
+func (s *bucketStore) PartStamp(ctx context.Context, key string, seq int64) (Stamp, error) {
+	pk := partKey(key, seq)
+	attrs, err := s.bucket.Attributes(ctx, pk)
 	switch {
-	case err == nil:
-		return attrs.Metadata[writerMetadataKey], nil
 	case gcerrors.Code(err) == gcerrors.NotFound:
-		return "", ErrObjectNotFound
-	default:
-		return "", fmt.Errorf("read part attributes %q: %w", key, err)
+		return Stamp{}, ErrObjectNotFound
+	case err != nil:
+		return Stamp{}, fmt.Errorf("read part attributes %q: %w", pk, err)
+	}
+	return s.stampOf(ctx, pk, attrs)
+}
+
+// stampOf answers the stamp of the part at pk. On S3 the digest comes
+// from object metadata. On every other driver it is computed from the
+// stored bytes: fileblob writes the metadata of a refused conditional
+// write, so its digest metadata can name bytes it never stored.
+func (s *bucketStore) stampOf(ctx context.Context, pk string, attrs *blob.Attributes) (Stamp, error) {
+	stamp := Stamp{Digest: attrs.Metadata[digestMetadataKey], Writer: attrs.Metadata[writerMetadataKey]}
+	if s.isS3 {
+		return stamp, nil
+	}
+	data, err := s.bucket.ReadAll(ctx, pk)
+	switch {
+	case gcerrors.Code(err) == gcerrors.NotFound:
+		return Stamp{}, ErrObjectNotFound
+	case err != nil:
+		return Stamp{}, fmt.Errorf("read part %q: %w", pk, err)
+	}
+	stamp.Digest = sha256Digest(data)
+	return stamp, nil
+}
+
+// writeIfMatch writes data at pk with If-Match on etag. The condition
+// reaches the S3 upload through BeforeWrite, because gocloud.dev has no
+// If-Match option of its own. fileblob takes the write with no
+// condition. Every other driver gets ErrOverwriteUnsupported.
+func (s *bucketStore) writeIfMatch(ctx context.Context, pk string, data []byte, opts ObjectOptions, etag string) error {
+	unsupported := false
+	err := s.writeObjectWith(ctx, pk, data, opts, false, ifMatchBeforeWrite(etag, &unsupported))
+	if unsupported {
+		return ErrOverwriteUnsupported
+	}
+	return err
+}
+
+// ifMatchBeforeWrite answers the BeforeWrite hook that sets If-Match to
+// etag on an S3 upload. It accepts a fileblob write with no condition.
+// For every other driver it sets *unsupported and fails the write.
+func ifMatchBeforeWrite(etag string, unsupported *bool) func(func(any) bool) error {
+	return func(asFunc func(any) bool) error {
+		var upload *transfermanager.UploadObjectInput
+		if asFunc(&upload) {
+			upload.IfMatch = &etag
+			return nil
+		}
+		var file *os.File
+		if asFunc(&file) {
+			return nil
+		}
+		*unsupported = true
+		return ErrOverwriteUnsupported
 	}
 }
 
@@ -317,6 +420,12 @@ func (s *bucketStore) matchStoredPart(ctx context.Context, key string, data []by
 // object metadata. ifNotExist makes the bucket refuse the write with
 // gcerrors.FailedPrecondition when key already exists.
 func (s *bucketStore) writeObject(ctx context.Context, key string, data []byte, opts ObjectOptions, ifNotExist bool) error {
+	return s.writeObjectWith(ctx, key, data, opts, ifNotExist, nil)
+}
+
+// writeObjectWith is writeObject with a driver hook that runs before the
+// write.
+func (s *bucketStore) writeObjectWith(ctx context.Context, key string, data []byte, opts ObjectOptions, ifNotExist bool, beforeWrite func(func(any) bool) error) error {
 	md := map[string]string{digestMetadataKey: sha256Digest(data)}
 	if opts.Writer != "" {
 		md[writerMetadataKey] = opts.Writer
@@ -325,6 +434,7 @@ func (s *bucketStore) writeObject(ctx context.Context, key string, data []byte, 
 		ContentType: opts.ContentType,
 		Metadata:    md,
 		IfNotExist:  ifNotExist,
+		BeforeWrite: beforeWrite,
 	})
 	if err != nil {
 		return fmt.Errorf("open writer %q: %w", key, err)

@@ -160,11 +160,11 @@ func (f *fakeLogBlobStore) Parts(_ context.Context, _ string, from int64) ([]blo
 	return []blob.Part{{Seq: 0, Size: int64(len(f.data))}}, nil
 }
 
-func (f *fakeLogBlobStore) PartWriter(_ context.Context, _ string, seq int64) (string, error) {
-	if seq != 0 || len(f.data) == 0 {
-		return "", blob.ErrObjectNotFound
+func (f *fakeLogBlobStore) PartStamp(_ context.Context, key string, seq int64) (blob.Stamp, error) {
+	if strings.HasPrefix(key, "logindex/") || seq != 0 || len(f.data) == 0 {
+		return blob.Stamp{}, blob.ErrObjectNotFound
 	}
-	return "", nil
+	return blob.Stamp{Digest: blob.Digest(f.data)}, nil
 }
 
 // pipelinesTestAuthorizer grants verb on "pipelines" for tenant
