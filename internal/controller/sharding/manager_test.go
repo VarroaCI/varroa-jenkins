@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1236,5 +1238,303 @@ func TestShardManager_BlockedListTimesOutAndTheNextPassRenews(t *testing.T) {
 				t.Fatalf("onReleased reported %d shards, want none", len(got))
 			}
 		})
+	}
+}
+
+// enforceLeaseResourceVersions makes the fake Lease store check the
+// resourceVersion of each update, as the apiserver does, and stamps a new
+// resourceVersion on every write. Prepend it before the test reactors, so that
+// the test reactors run first.
+func enforceLeaseResourceVersions(h *testHarness) {
+	gvr := coordinationv1.SchemeGroupVersion.WithResource("leases")
+	var counter atomic.Int64
+	h.cs.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		in := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		stored, err := h.cs.Tracker().Get(gvr, h.ns, in.Name)
+		if err != nil {
+			return true, nil, err
+		}
+		if in.ResourceVersion != stored.(*coordinationv1.Lease).ResourceVersion {
+			return true, nil, apierrors.NewConflict(coordinationv1.Resource("leases"), in.Name,
+				errors.New("resourceVersion does not match the stored lease"))
+		}
+		out := in.DeepCopy()
+		out.ResourceVersion = strconv.FormatInt(counter.Add(1), 10)
+		if err := h.cs.Tracker().Update(gvr, out, h.ns); err != nil {
+			return true, nil, err
+		}
+		return true, out, nil
+	})
+	h.cs.PrependReactor("create", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		in := action.(k8stesting.CreateAction).GetObject().(*coordinationv1.Lease)
+		out := in.DeepCopy()
+		out.ResourceVersion = strconv.FormatInt(counter.Add(1), 10)
+		if err := h.cs.Tracker().Create(gvr, out, h.ns); err != nil {
+			return true, nil, err
+		}
+		return true, out, nil
+	})
+}
+
+// shardLeaseName returns the name of the Lease of one shard.
+func shardLeaseName(shard int) string {
+	return fmt.Sprintf("varroa-shard-%d.varroa.dev", shard)
+}
+
+// seedLeasesHeldByOld creates the shard leases of shards, held by "old" and
+// renewed at at.
+func seedLeasesHeldByOld(t *testing.T, h *testHarness, shards []int, at time.Time) map[string]bool {
+	t.Helper()
+	names := make(map[string]bool, len(shards))
+	holder := "old"
+	duration := int32(30)
+	for _, s := range shards {
+		name := shardLeaseName(s)
+		names[name] = true
+		_, err := h.cs.CoordinationV1().Leases(h.ns).Create(context.Background(), &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: h.ns,
+				Labels:    map[string]string{"varroa.dev/component": "shard", "varroa.dev/lease": "shard"},
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity:       &holder,
+				LeaseDurationSeconds: &duration,
+				RenewTime:            &metav1.MicroTime{Time: at},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("seed lease %s: %v", name, err)
+		}
+	}
+	return names
+}
+
+// freeLeases clears the holder of the named leases, so that a pass can claim them.
+func freeLeases(t *testing.T, h *testHarness, names map[string]bool) {
+	t.Helper()
+	empty := ""
+	for name := range names {
+		l, err := h.cs.CoordinationV1().Leases(h.ns).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get lease %s: %v", name, err)
+		}
+		l.Spec.HolderIdentity = &empty
+		if _, err := h.cs.CoordinationV1().Leases(h.ns).Update(context.Background(), l, metav1.UpdateOptions{}); err != nil {
+			t.Fatalf("free lease %s: %v", name, err)
+		}
+	}
+}
+
+// advanceOnClaims advances the clock by d on each claim of a named lease. A
+// claim is a write that finds the stored lease without a holder.
+func advanceOnClaims(h *testHarness, names map[string]bool, d time.Duration) {
+	gvr := coordinationv1.SchemeGroupVersion.WithResource("leases")
+	h.cs.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		in := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		if !names[in.Name] {
+			return false, nil, nil
+		}
+		stored, err := h.cs.Tracker().Get(gvr, h.ns, in.Name)
+		if err == nil && isLeaseReleased(stored.(*coordinationv1.Lease)) {
+			h.clock.advance(d)
+		}
+		return false, nil, nil
+	})
+}
+
+// renewTimeOf returns the renew time of one shard lease.
+func renewTimeOf(t *testing.T, h *testHarness, shard int) time.Time {
+	t.Helper()
+	l, err := h.cs.CoordinationV1().Leases(h.ns).Get(context.Background(), shardLeaseName(shard), metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get lease for shard %d: %v", shard, err)
+	}
+	if l.Spec.RenewTime == nil {
+		t.Fatalf("shard %d lease has no renew time", shard)
+	}
+	return l.Spec.RenewTime.Time
+}
+
+// setupLongPass runs pass 1 at start for one replica of a 16-shard ring. The
+// replica claims shards 8 to 15. Shards 0 to 7 stay held by "old" until the
+// test frees them. It returns the names of those shards.
+func setupLongPass(t *testing.T, start time.Time) (*testHarness, *testManagerWrap, map[string]bool) {
+	t.Helper()
+	h := newHarness(t, start)
+	enforceLeaseResourceVersions(h)
+	old := seedLeasesHeldByOld(t, h, []int{0, 1, 2, 3, 4, 5, 6, 7}, start)
+	w := h.addManager("op-0", NewRing(16))
+	w.m.interval = 10 * time.Second
+	h.runRebalances(1)
+	if got := w.m.held.Count(); got != 8 {
+		t.Fatalf("pass 1 held %d shards, want 8", got)
+	}
+	return h, w, old
+}
+
+// TestShardManager_LongClaimPhaseRenewsHeldShardsBetweenClaims pins that a
+// claim phase longer than the deadline does not drop the shards that the
+// replica already holds. Before the fix the first shards are dropped at 25s.
+func TestShardManager_LongClaimPhaseRenewsHeldShardsBetweenClaims(t *testing.T) {
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	h, w, old := setupLongPass(t, start)
+
+	h.clock.advance(9 * time.Second)
+	freeLeases(t, h, old)
+	advanceOnClaims(h, old, 2*time.Second)
+	h.runRebalances(1)
+	w.m.revokeUnconfirmed(context.Background())
+
+	if got := w.m.held.Count(); got != 16 {
+		t.Fatalf("held = %d, want 16", got)
+	}
+	if got := releasedShards(w); len(got) != 0 {
+		t.Fatalf("onReleased reported %v, want none", got)
+	}
+	for shard := 8; shard < 16; shard++ {
+		if !renewTimeOf(t, h, shard).After(start) {
+			t.Fatalf("shard %d was not renewed after the start of the long pass", shard)
+		}
+	}
+}
+
+// TestShardManager_RenewsOldestConfirmationFirst pins that a pass renews the
+// due shards in the order that it confirmed them.
+func TestShardManager_RenewsOldestConfirmationFirst(t *testing.T) {
+	h := newHarness(t, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
+	w := h.addManager("op-0", NewRing(8))
+	w.m.interval = 10 * time.Second
+
+	var claims []string
+	h.cs.PrependReactor("create", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		l := action.(k8stesting.CreateAction).GetObject().(*coordinationv1.Lease)
+		if strings.HasPrefix(l.Name, "varroa-shard-") {
+			claims = append(claims, l.Name)
+			h.clock.advance(time.Second)
+		}
+		return false, nil, nil
+	})
+	h.runRebalances(1)
+	if len(claims) != 8 {
+		t.Fatalf("pass 1 claimed %d shards, want 8", len(claims))
+	}
+
+	h.clock.advance(10 * time.Second)
+	var renewals []string
+	h.cs.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		l := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		if strings.HasPrefix(l.Name, "varroa-shard-") {
+			renewals = append(renewals, l.Name)
+		}
+		return false, nil, nil
+	})
+	h.runRebalances(1)
+
+	if !slices.Equal(renewals, claims) {
+		t.Fatalf("renewal order %v, want the claim order %v", renewals, claims)
+	}
+}
+
+// TestShardManager_SecondRenewalInOnePassUsesTheFreshLease pins that a shard
+// renewed twice in one pass carries the resourceVersion of the first renewal.
+// A stale resourceVersion conflicts and drops the shard.
+func TestShardManager_SecondRenewalInOnePassUsesTheFreshLease(t *testing.T) {
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	h, w, old := setupLongPass(t, start)
+
+	h.clock.advance(10 * time.Second)
+	freeLeases(t, h, old)
+	advanceOnClaims(h, old, 2*time.Second)
+	h.runRebalances(1)
+
+	if got := releasedShards(w); len(got) != 0 {
+		t.Fatalf("onReleased reported %v, want none", got)
+	}
+	for shard := 8; shard < 16; shard++ {
+		if !w.m.held.Held(shard) {
+			t.Fatalf("shard %d is not held", shard)
+		}
+		if !renewTimeOf(t, h, shard).After(start.Add(10 * time.Second)) {
+			t.Fatalf("shard %d was not renewed again during the claims", shard)
+		}
+	}
+}
+
+// TestShardManager_RenewalFailureDuringClaimsIsReportedOnce pins that a
+// renewal that fails during the claims revokes the shard once, reports it in
+// the hook after the claims, and does not claim it again in the same pass.
+func TestShardManager_RenewalFailureDuringClaimsIsReportedOnce(t *testing.T) {
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	h, w, old := setupLongPass(t, start)
+
+	const failing = 8
+	var failRenewals atomic.Bool
+	h.cs.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		l := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		if failRenewals.Load() && l.Name == shardLeaseName(failing) {
+			return true, nil, apierrors.NewConflict(coordinationv1.Resource("leases"), l.Name,
+				errors.New("renewal conflict"))
+		}
+		return false, nil, nil
+	})
+	failRenewals.Store(true)
+
+	h.clock.advance(9 * time.Second)
+	freeLeases(t, h, old)
+	advanceOnClaims(h, old, 2*time.Second)
+	h.runRebalances(1)
+
+	if w.m.held.Held(failing) {
+		t.Fatalf("shard %d is still held after its renewal failed", failing)
+	}
+	calls := 0
+	for _, call := range *w.released {
+		for _, s := range call {
+			if s == failing {
+				calls++
+			}
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("shard %d reported in %d onReleased calls, want 1", failing, calls)
+	}
+	if w.heldInHook[failing] {
+		t.Fatal("shard was still held when onReleased ran")
+	}
+	if last := (*w.acquired)[len(*w.acquired)-1]; slices.Contains(last, failing) {
+		t.Fatalf("shard %d was claimed again in the same pass: %v", failing, last)
+	}
+
+	failRenewals.Store(false)
+	h.clock.advance(time.Second)
+	h.runRebalances(1)
+	if !w.m.held.Held(failing) {
+		t.Fatalf("shard %d was not claimed again in the next pass", failing)
+	}
+}
+
+// TestShardManager_ChecksDuringClaimsWriteNothingWhileLeasesAreFresh pins that
+// the checks between claims add no lease write while no shard is due.
+func TestShardManager_ChecksDuringClaimsWriteNothingWhileLeasesAreFresh(t *testing.T) {
+	start := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	h, _, old := setupLongPass(t, start)
+
+	h.clock.advance(3 * time.Second)
+	freeLeases(t, h, old)
+	advanceOnClaims(h, old, 500*time.Millisecond)
+
+	var renewals int
+	h.cs.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		l := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		if strings.HasPrefix(l.Name, "varroa-shard-") && !old[l.Name] && l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity == "op-0" {
+			renewals++
+		}
+		return false, nil, nil
+	})
+	h.runRebalances(1)
+
+	if renewals != 0 {
+		t.Fatalf("expected no renewal writes while the leases are fresh, got %d", renewals)
 	}
 }

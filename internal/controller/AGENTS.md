@@ -1216,9 +1216,7 @@ sections describe.
   `NewShardManager` takes a `metric.MeterProvider` as its first parameter and
   creates `varroa.operator.shards.held` and `varroa.operator.shard.handoffs` on
   its `"varroa-operator"` meter; it returns an error that `main` exits on.
-  `ShardManager` calls `onReleased` once per revoke group: once per rebalance
-  pass with the shards that the pass dropped, before the pass claims shards, and
-  once per stale sweep that revokes shards. The sweep call can run during a pass.
+  `ShardManager` calls `onReleased` once per revoke group. A rebalance pass makes at most two calls: before its claims with the shards that it dropped, and after its claims with the shards whose renewal failed during the claims. A stale sweep makes one call per sweep that revokes shards. The sweep call can run during a pass.
   This is safe: the hook reads the held set when it runs, and a shard that a pass
   claims again enqueues its controllers again through `onAcquired`. The operator wires it to
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
@@ -1243,7 +1241,7 @@ sections describe.
   failure returns of a pass call `revokeUnconfirmed`, which revokes every shard
   not confirmed for `leaseDuration - heldLeaseMargin` (25s of 30s). Never compare
   against the Lease `renewTime` for this. The deadline must stay above the
-  healthy renewal age of about 20s. A pass claims a lease that this replica still
+  healthy renewal age of about 20s. A pass renews due shards oldest first, before each claim and after the last claim. Each confirming response is stored, so a second renewal in the same pass carries the new `resourceVersion`. A pass claims a lease that this replica still
   holds, through an Update with the listed `resourceVersion`. The tick
   checks `ctx.Err()` before its end writes. A replica that stalls past its lease
   still holds the shard until its next pass, so the tick writes are also fenced in

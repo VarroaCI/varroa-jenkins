@@ -1,6 +1,7 @@
 package sharding
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -39,10 +40,13 @@ const (
 // that it could not confirm. Other replicas judge the expiry by their own wall
 // clock, and a cancel needs time to stop a send that is in flight. The margin
 // gives that time. The revoke deadline is the lease duration minus this
-// margin: 25 seconds of the 30-second lease. A healthy replica renews a shard
-// at most about 20 seconds after the last renewal, because a pass skips the
-// renewal while more than two intervals of the lease remain. So the deadline
-// must stay above 20 seconds, and the margin must stay at or under 5 seconds.
+// margin: 25 seconds of the 30-second lease. A pass renews each due shard
+// before each claim and after the last claim. A healthy replica therefore
+// renews a shard at most about 20 seconds after its last renewal. The presence
+// write and the two List calls come before the renewals, and add to that age.
+// The deadline must stay above 20 seconds, and the margin must stay at or under
+// 5 seconds. A lease call that runs near its timeout can still carry a held
+// shard past the deadline. The sweep then drops that shard.
 const heldLeaseMargin = 5 * time.Second
 
 // staleSweepInterval is the period of the sweep that revokes unconfirmed
@@ -66,13 +70,13 @@ type ShardManager struct {
 	ring       *Ring
 	held       *ShardSet          // shared with the Reconciler (read side)
 	onAcquired func(shards []int) // Reconciler.EnqueueShards; called outside the CAS loop
-	// onReleased receives each group of revoked or released shards: the
-	// shards that one rebalance pass dropped, or the shards that one stale
-	// sweep revoked. A pass calls it before it claims shards, so a shard
-	// dropped and claimed again in one pass starts from a clean state. A pass
-	// calls it after the release waited for the work on those shards. The
-	// sweep can call it while a pass runs. The shutdown release does not call
-	// it.
+	// onReleased receives each group of revoked or released shards. A pass
+	// calls it at most twice. It calls it before its claims with the shards
+	// that the pass dropped, after the release waited for their work. It calls
+	// it after its claims with the shards whose renewal failed during the
+	// claims. A shard dropped during the claims is not claimed again in the
+	// same pass. The stale sweep calls it with the shards that it revokes, and
+	// can do so while a pass runs. The shutdown release does not call it.
 	onReleased func(shards []int)
 	logger     *slog.Logger
 
@@ -245,6 +249,82 @@ func (m *ShardManager) revokeInPass(ctx context.Context, shard int, released *[]
 	}
 }
 
+// renewalDue returns true when a held lease has two rebalance intervals or
+// less of validity left. A lease without a renew time is due.
+func (m *ShardManager) renewalDue(lease *coordinationv1.Lease, now time.Time) bool {
+	if lease.Spec.RenewTime == nil {
+		return true
+	}
+	remaining := lease.Spec.RenewTime.Add(time.Duration(m.leaseDuration) * time.Second).Sub(now)
+	return remaining <= 2*m.interval
+}
+
+// renewDue renews every held shard that is due, oldest renewal first. A shard
+// that the stale sweep drops before its turn is skipped. A failed or late
+// renewal revokes the shard and records it in released.
+//
+// Every write that confirms a shard stores its response in leases. A second
+// renewal in one pass must carry the new resourceVersion.
+func (m *ShardManager) renewDue(ctx context.Context, leases map[int]*coordinationv1.Lease, released *[]int) {
+	now := m.clock()
+	due := make([]int, 0)
+	for _, shard := range m.held.Shards() {
+		lease, ok := leases[shard]
+		if !ok || !isLeaseHeldBy(lease, m.identity) || !m.renewalDue(lease, now) {
+			continue
+		}
+		due = append(due, shard)
+	}
+	slices.SortFunc(due, func(a, b int) int {
+		if c := compareRenewTime(leases[a], leases[b]); c != 0 {
+			return c
+		}
+		return cmp.Compare(a, b)
+	})
+	for _, shard := range due {
+		if !m.held.Held(shard) {
+			continue
+		}
+		m.renewShard(ctx, shard, leases, released)
+	}
+}
+
+// compareRenewTime orders two leases by renew time. A lease without a renew
+// time sorts first.
+func compareRenewTime(a, b *coordinationv1.Lease) int {
+	switch {
+	case a.Spec.RenewTime == nil && b.Spec.RenewTime == nil:
+		return 0
+	case a.Spec.RenewTime == nil:
+		return -1
+	case b.Spec.RenewTime == nil:
+		return 1
+	}
+	return a.Spec.RenewTime.Compare(b.Spec.RenewTime.Time)
+}
+
+// renewShard renews one held shard. It writes the lease that leases holds for
+// the shard, and a confirming response replaces that entry.
+func (m *ShardManager) renewShard(ctx context.Context, shard int, leases map[int]*coordinationv1.Lease, released *[]int) {
+	updatedLease := leases[shard].DeepCopy()
+	start := m.clock()
+	updatedLease.Spec.RenewTime = &metav1.MicroTime{Time: start}
+	updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
+	got, err := m.updateLease(ctx, updatedLease)
+	if err != nil {
+		m.revokeInPass(ctx, shard, released)
+		return
+	}
+	// A renewal whose response came after the deadline does not prove
+	// that the lease is still ours: another replica can have claimed it.
+	if m.clock().Sub(start) >= m.confirmDeadline() {
+		m.revokeInPass(ctx, shard, released)
+		return
+	}
+	leases[shard] = got
+	m.held.Confirm(shard, start)
+}
+
 // rebalance implements the rebalance algorithm from design §1.2.
 func (m *ShardManager) rebalance(ctx context.Context) {
 	logger := m.logger
@@ -299,9 +379,10 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		}
 	}
 
-	// Step 5: Renew held shards — drop any where we lost the lock. Another
+	// Step 5: Check the held shards. Drop any where we lost the lock. Another
 	// replica can hold such a lease already, so Revoke cancels the work on
-	// the shard at once. A wait cannot keep that shard exclusive.
+	// the shard at once. A wait cannot keep that shard exclusive. Then renew
+	// the shards that are due.
 	released := make([]int, 0)
 	for _, shard := range m.held.Shards() {
 		lease, exists := shardLeaseMap[shard]
@@ -312,35 +393,9 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		holder := lease.Spec.HolderIdentity
 		if holder == nil || *holder != m.identity {
 			m.revokeInPass(ctx, shard, &released)
-			continue
 		}
-		// Skip the apiserver write while the lease is still fresh: renewal is
-		// only needed once the remaining validity drops under two rebalance
-		// intervals (halves the steady-state write rate at the default 30s
-		// duration / 10s interval).
-		if lease.Spec.RenewTime != nil {
-			remaining := lease.Spec.RenewTime.Add(time.Duration(m.leaseDuration) * time.Second).Sub(m.clock())
-			if remaining > 2*m.interval {
-				continue
-			}
-		}
-		// Try to renew our lease.
-		updatedLease := lease.DeepCopy()
-		now := m.clock()
-		updatedLease.Spec.RenewTime = &metav1.MicroTime{Time: now}
-		updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
-		if err := m.updateLease(ctx, updatedLease); err != nil {
-			m.revokeInPass(ctx, shard, &released)
-			continue
-		}
-		// A renewal whose response came after the deadline does not prove
-		// that the lease is still ours: another replica can have claimed it.
-		if m.clock().Sub(now) >= m.confirmDeadline() {
-			m.revokeInPass(ctx, shard, &released)
-			continue
-		}
-		m.held.Confirm(shard, now)
 	}
+	m.renewDue(ctx, shardLeaseMap, &released)
 
 	// Step 6: Release shards we hold but no longer desire. The lease is
 	// still ours, so the work on these shards may end first. The release
@@ -376,6 +431,9 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 			// Lease already gone; nothing to release.
 			continue
 		}
+		// Each release spends a lease call. Renew the due shards before it,
+		// so a slow release does not carry a retained shard past its deadline.
+		m.renewDue(ctx, shardLeaseMap, &released)
 		m.releaseLease(ctx, lease)
 	}
 
@@ -385,10 +443,13 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		m.onReleased(released)
 	}
 
-	// Step 7: Acquire desired but not held shards.
+	// Step 7: Acquire desired but not held shards. The pass renews the due
+	// held shards before each claim and after the last claim, so a long claim
+	// phase does not delay a renewal past the deadline.
 	newly := make([]int, 0)
+	claimReleased := make([]int, 0)
 	for shard := range desired {
-		if m.held.Held(shard) {
+		if m.held.Held(shard) || slices.Contains(claimReleased, shard) {
 			continue
 		}
 		lease, exists := shardLeaseMap[shard]
@@ -401,15 +462,19 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		if !claimable {
 			continue
 		}
+		m.renewDue(ctx, shardLeaseMap, &claimReleased)
 
 		leaseName := fmt.Sprintf("varroa-shard-%d.varroa.dev", shard)
 		now := m.clock()
 
+		var got *coordinationv1.Lease
+		var err error
 		if exists {
 			// Try to update the existing lease.
 			updatedLease := lease.DeepCopy()
 			updatedLease.Spec = m.heldLeaseSpec(now, true)
-			if err := m.updateLease(ctx, updatedLease); err != nil {
+			got, err = m.updateLease(ctx, updatedLease)
+			if err != nil {
 				if apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -420,7 +485,8 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		} else {
 			// Create a new lease.
 			newLease := m.buildLease(leaseName, "shard", now, true)
-			if err := m.createLease(ctx, newLease); err != nil {
+			got, err = m.createLease(ctx, newLease)
+			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -438,9 +504,21 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		}
 		m.held.Add(shard)
 		m.held.Confirm(shard, now)
+		shardLeaseMap[shard] = got
 		newly = append(newly, shard)
 		m.addHandoff(ctx, "acquired")
 	}
+
+	// Renew the due shards after the last claim. Then report the shards whose
+	// renewal failed during the claims. A shard in that group is not held, so
+	// it is removed from newly before onAcquired runs.
+	m.renewDue(ctx, shardLeaseMap, &claimReleased)
+	if len(claimReleased) > 0 && m.onReleased != nil {
+		m.onReleased(claimReleased)
+	}
+	newly = slices.DeleteFunc(newly, func(shard int) bool {
+		return slices.Contains(claimReleased, shard)
+	})
 
 	// Step 8: Notify on newly acquired shards.
 	if len(newly) > 0 && m.onAcquired != nil {
@@ -486,7 +564,7 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 	now := m.clock()
 
 	lease := m.buildLease(leaseName, "replica", now, false)
-	err := m.createLease(ctx, lease)
+	_, err := m.createLease(ctx, lease)
 	if err == nil {
 		return
 	}
@@ -502,7 +580,7 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 		return
 	}
 	existing.Spec = m.heldLeaseSpec(now, false)
-	if err := m.updateLease(ctx, existing); err != nil {
+	if _, err := m.updateLease(ctx, existing); err != nil {
 		m.logger.Warn("failed to update presence lease", "lease", leaseName, "error", err)
 	}
 }
@@ -524,7 +602,7 @@ func (m *ShardManager) releasedSpec(l *coordinationv1.Lease) {
 func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.Lease) {
 	updated := lease.DeepCopy()
 	m.releasedSpec(updated)
-	err := m.updateLease(ctx, updated)
+	_, err := m.updateLease(ctx, updated)
 	if err == nil {
 		return
 	}
@@ -542,7 +620,7 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 		return
 	}
 	m.releasedSpec(fresh)
-	if err := m.updateLease(ctx, fresh); err != nil {
+	if _, err := m.updateLease(ctx, fresh); err != nil {
 		m.logger.Debug("shard lease release retry failed, will expire", "lease", lease.Name, "error", err)
 	}
 }
@@ -603,20 +681,20 @@ func (m *ShardManager) getLease(ctx context.Context, name string) (*coordination
 	return m.leases.Get(ctx, name, metav1.GetOptions{})
 }
 
-// createLease creates one lease under the lease call timeout.
-func (m *ShardManager) createLease(ctx context.Context, lease *coordinationv1.Lease) error {
+// createLease creates one lease under the lease call timeout. It returns the
+// stored lease.
+func (m *ShardManager) createLease(ctx context.Context, lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
 	ctx, cancel := m.callCtx(ctx)
 	defer cancel()
-	_, err := m.leases.Create(ctx, lease, metav1.CreateOptions{})
-	return err
+	return m.leases.Create(ctx, lease, metav1.CreateOptions{})
 }
 
-// updateLease updates one lease under the lease call timeout.
-func (m *ShardManager) updateLease(ctx context.Context, lease *coordinationv1.Lease) error {
+// updateLease updates one lease under the lease call timeout. It returns the
+// stored lease.
+func (m *ShardManager) updateLease(ctx context.Context, lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
 	ctx, cancel := m.callCtx(ctx)
 	defer cancel()
-	_, err := m.leases.Update(ctx, lease, metav1.UpdateOptions{})
-	return err
+	return m.leases.Update(ctx, lease, metav1.UpdateOptions{})
 }
 
 // deleteLease deletes one lease under the lease call timeout.
