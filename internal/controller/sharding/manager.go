@@ -46,9 +46,16 @@ const (
 const heldLeaseMargin = 5 * time.Second
 
 // staleSweepInterval is the period of the sweep that revokes unconfirmed
-// shards. The sweep runs apart from the rebalance pass, because a List call
-// can block for longer than the lease while the pass waits.
+// shards. The sweep runs apart from the rebalance pass, because one pass can
+// wait longer than the margin: each lease call can take up to leaseCallTimeout,
+// and a pass can wait in the release drain.
 const staleSweepInterval = 1 * time.Second
+
+// leaseCallTimeout limits each lease API call of the shard manager. It is below
+// the 25 s revoke deadline, so a hung call ends before the deadline. A shorter
+// bound would drop every shard on a slow apiserver. It is a context per call:
+// watches share rest.Config, so rest.Config.Timeout must stay unset.
+const leaseCallTimeout = 20 * time.Second
 
 // ShardManager claims per-shard Kubernetes Leases so operator replicas divide
 // Controller CRs among themselves (active/active). It runs on every replica.
@@ -82,6 +89,10 @@ type ShardManager struct {
 	// sweepInterval is the stale sweep period. A zero value selects
 	// staleSweepInterval.
 	sweepInterval time.Duration
+
+	// callTimeout limits each lease API call. A zero value selects
+	// leaseCallTimeout.
+	callTimeout time.Duration
 
 	// metrics
 	shardsHeld metric.Int64ObservableGauge
@@ -242,9 +253,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	m.upsertPresence(ctx)
 
 	// Step 2: List presence leases to discover live replicas.
-	replicaLeases, err := m.leases.List(ctx, metav1.ListOptions{
-		LabelSelector: "varroa.dev/lease=replica",
-	})
+	replicaLeases, err := m.listLeases(ctx, "replica")
 	if err != nil {
 		logger.Warn("failed to list replica presence leases", "error", err)
 		m.revokeUnconfirmed(ctx)
@@ -275,9 +284,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	}
 
 	// Step 4: List shard ownership leases.
-	shardLeases, err := m.leases.List(ctx, metav1.ListOptions{
-		LabelSelector: "varroa.dev/lease=shard",
-	})
+	shardLeases, err := m.listLeases(ctx, "shard")
 	if err != nil {
 		logger.Warn("failed to list shard leases", "error", err)
 		m.revokeUnconfirmed(ctx)
@@ -322,7 +329,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		now := m.clock()
 		updatedLease.Spec.RenewTime = &metav1.MicroTime{Time: now}
 		updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
-		if _, err := m.leases.Update(ctx, updatedLease, metav1.UpdateOptions{}); err != nil {
+		if err := m.updateLease(ctx, updatedLease); err != nil {
 			m.revokeInPass(ctx, shard, &released)
 			continue
 		}
@@ -402,7 +409,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 			// Try to update the existing lease.
 			updatedLease := lease.DeepCopy()
 			updatedLease.Spec = m.heldLeaseSpec(now, true)
-			if _, err := m.leases.Update(ctx, updatedLease, metav1.UpdateOptions{}); err != nil {
+			if err := m.updateLease(ctx, updatedLease); err != nil {
 				if apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -413,7 +420,7 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		} else {
 			// Create a new lease.
 			newLease := m.buildLease(leaseName, "shard", now, true)
-			if _, err := m.leases.Create(ctx, newLease, metav1.CreateOptions{}); err != nil {
+			if err := m.createLease(ctx, newLease); err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -479,7 +486,7 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 	now := m.clock()
 
 	lease := m.buildLease(leaseName, "replica", now, false)
-	_, err := m.leases.Create(ctx, lease, metav1.CreateOptions{})
+	err := m.createLease(ctx, lease)
 	if err == nil {
 		return
 	}
@@ -489,13 +496,13 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 	}
 
 	// Lease exists; update it.
-	existing, err := m.leases.Get(ctx, leaseName, metav1.GetOptions{})
+	existing, err := m.getLease(ctx, leaseName)
 	if err != nil {
 		m.logger.Warn("failed to get presence lease for update", "lease", leaseName, "error", err)
 		return
 	}
 	existing.Spec = m.heldLeaseSpec(now, false)
-	if _, err := m.leases.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+	if err := m.updateLease(ctx, existing); err != nil {
 		m.logger.Warn("failed to update presence lease", "lease", leaseName, "error", err)
 	}
 }
@@ -517,7 +524,7 @@ func (m *ShardManager) releasedSpec(l *coordinationv1.Lease) {
 func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.Lease) {
 	updated := lease.DeepCopy()
 	m.releasedSpec(updated)
-	_, err := m.leases.Update(ctx, updated, metav1.UpdateOptions{})
+	err := m.updateLease(ctx, updated)
 	if err == nil {
 		return
 	}
@@ -525,7 +532,7 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 		m.logger.Warn("failed to release shard lease, will expire", "lease", lease.Name, "error", err)
 		return
 	}
-	fresh, getErr := m.leases.Get(ctx, lease.Name, metav1.GetOptions{})
+	fresh, getErr := m.getLease(ctx, lease.Name)
 	if getErr != nil {
 		m.logger.Debug("shard lease release retry get failed, will expire", "lease", lease.Name, "error", getErr)
 		return
@@ -535,7 +542,7 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 		return
 	}
 	m.releasedSpec(fresh)
-	if _, err := m.leases.Update(ctx, fresh, metav1.UpdateOptions{}); err != nil {
+	if err := m.updateLease(ctx, fresh); err != nil {
 		m.logger.Debug("shard lease release retry failed, will expire", "lease", lease.Name, "error", err)
 	}
 }
@@ -557,7 +564,7 @@ func (m *ShardManager) releaseAll(ctx context.Context) {
 		}
 		leaseName := fmt.Sprintf("varroa-shard-%d.varroa.dev", shard)
 		// Try to release by setting empty holderIdentity.
-		existing, err := m.leases.Get(ctx, leaseName, metav1.GetOptions{})
+		existing, err := m.getLease(ctx, leaseName)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				m.logger.Warn("failed to get shard lease for release", "lease", leaseName, "error", err)
@@ -569,11 +576,54 @@ func (m *ShardManager) releaseAll(ctx context.Context) {
 
 	// Delete presence lease.
 	presenceName := "varroa-replica-" + m.identity + ".varroa.dev"
-	if err := m.leases.Delete(ctx, presenceName, metav1.DeleteOptions{}); err != nil {
+	if err := m.deleteLease(ctx, presenceName); err != nil {
 		if !apierrors.IsNotFound(err) {
 			m.logger.Warn("failed to delete presence lease on shutdown", "lease", presenceName, "error", err)
 		}
 	}
+}
+
+// callCtx returns a context for one lease API call. The call ends at the
+// lease call timeout, or earlier when ctx ends.
+func (m *ShardManager) callCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, orDefault(m.callTimeout, leaseCallTimeout))
+}
+
+// listLeases lists the leases of one role under the lease call timeout.
+func (m *ShardManager) listLeases(ctx context.Context, role string) (*coordinationv1.LeaseList, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.List(ctx, metav1.ListOptions{LabelSelector: "varroa.dev/lease=" + role})
+}
+
+// getLease gets one lease under the lease call timeout.
+func (m *ShardManager) getLease(ctx context.Context, name string) (*coordinationv1.Lease, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Get(ctx, name, metav1.GetOptions{})
+}
+
+// createLease creates one lease under the lease call timeout.
+func (m *ShardManager) createLease(ctx context.Context, lease *coordinationv1.Lease) error {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	_, err := m.leases.Create(ctx, lease, metav1.CreateOptions{})
+	return err
+}
+
+// updateLease updates one lease under the lease call timeout.
+func (m *ShardManager) updateLease(ctx context.Context, lease *coordinationv1.Lease) error {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	_, err := m.leases.Update(ctx, lease, metav1.UpdateOptions{})
+	return err
+}
+
+// deleteLease deletes one lease under the lease call timeout.
+func (m *ShardManager) deleteLease(ctx context.Context, name string) error {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 // orDefault returns d, or def when d is zero.

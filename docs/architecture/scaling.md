@@ -16,7 +16,7 @@ Scale the Varroa control plane independently from Jenkins workloads. Each `Contr
 
 Gateway and BFF HPAs target 70 percent CPU. They need the Kubernetes metrics API and resource requests.
 
-Operator replicas divide controllers through virtual shards. A replica that loses a shard stops listening to its mites. A replica gives up a shard after its work ends. It waits at most 5 seconds, or 12 seconds at shutdown. A replica that cannot renew its leases for 25 seconds drops its shards. Tick writes are conditional, so a stalled replica cannot overwrite newer status. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more work. `operator.shardCount` must match across every replica. Changing it requires restarting all replicas together.
+Operator replicas divide controllers through virtual shards. A replica that loses a shard stops listening to its mites. A replica gives up a shard after its work ends. It waits at most 5 seconds, or 12 seconds at shutdown. A replica drops its shards after 25 seconds without a renewal. Each lease call times out after 20 seconds. Tick writes are conditional, so a stalled replica cannot overwrite newer status. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more work. `operator.shardCount` must match across every replica. Changing it requires restarting all replicas together.
 
 ## Jenkins Capacity
 

@@ -2,6 +2,7 @@ package sharding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -1052,6 +1054,9 @@ func TestShardManager_HeldLeaseMarginLeavesRoomForRenewal(t *testing.T) {
 	if staleSweepInterval >= heldLeaseMargin {
 		t.Fatalf("sweep interval %v, want less than the margin %v", staleSweepInterval, heldLeaseMargin)
 	}
+	if leaseCallTimeout >= deadline {
+		t.Fatalf("lease call timeout %v, want less than the deadline %v", leaseCallTimeout, deadline)
+	}
 }
 
 // TestShardManager_ReclaimsOwnUnexpiredLeaseAfterRevoke pins that a pass
@@ -1138,5 +1143,98 @@ func TestShardManager_LateRenewalResponseRevokes(t *testing.T) {
 	}
 	if !releasedShards(w)[0] {
 		t.Fatal("onReleased did not report shard 0")
+	}
+}
+
+// blockingListLeases blocks the List of the leases with one role label until
+// the call context ends, while block is set.
+type blockingListLeases struct {
+	coordinationv1client.LeaseInterface
+	role    string
+	block   *atomic.Bool
+	entered chan struct{} // buffered 1
+	lastErr atomic.Value  // the error a blocked List returned
+}
+
+func (b *blockingListLeases) List(ctx context.Context, opts metav1.ListOptions) (*coordinationv1.LeaseList, error) {
+	if b.block.Load() && opts.LabelSelector == "varroa.dev/lease="+b.role {
+		select {
+		case b.entered <- struct{}{}:
+		default:
+		}
+		<-ctx.Done()
+		b.lastErr.Store(ctx.Err())
+		return nil, ctx.Err()
+	}
+	return b.LeaseInterface.List(ctx, opts)
+}
+
+// TestShardManager_BlockedListTimesOutAndTheNextPassRenews pins that a List
+// call that blocks ends at the call timeout, and that the next pass renews
+// the leases once the call works again.
+func TestShardManager_BlockedListTimesOutAndTheNextPassRenews(t *testing.T) {
+	for _, role := range []string{"shard", "replica"} {
+		t.Run(role, func(t *testing.T) {
+			h := newHarness(t, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+			w := h.addManager("op-0", NewRing(8))
+			w.m.interval = 10 * time.Second
+			h.runRebalances(1)
+			if got := w.m.held.Count(); got != 8 {
+				t.Fatalf("held = %d after the first pass, want 8", got)
+			}
+
+			blocked := &blockingListLeases{
+				LeaseInterface: w.m.leases,
+				role:           role,
+				block:          &atomic.Bool{},
+				entered:        make(chan struct{}, 1),
+			}
+			blocked.block.Store(true)
+			w.m.leases = blocked
+			w.m.callTimeout = 20 * time.Millisecond
+
+			// 15 seconds is inside the renewal window and under the deadline.
+			h.clock.advance(15 * time.Second)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				w.m.rebalance(context.Background())
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the pass did not return within 5 s of a blocked List")
+			}
+			select {
+			case <-blocked.entered:
+			default:
+				t.Fatal("the blocked List was never called")
+			}
+			if err, _ := blocked.lastErr.Load().(error); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("blocked List ended with %v, want context.DeadlineExceeded", err)
+			}
+			if got := w.m.held.Count(); got != 8 {
+				t.Fatalf("held = %d after the timed-out pass, want 8 before the deadline", got)
+			}
+
+			blocked.block.Store(false)
+			h.runRebalances(1)
+			if got := w.m.held.Count(); got != 8 {
+				t.Fatalf("held = %d after the next pass, want 8", got)
+			}
+			for i := 0; i < 8; i++ {
+				leaseName := fmt.Sprintf("varroa-shard-%d.varroa.dev", i)
+				l, err := h.cs.CoordinationV1().Leases(h.ns).Get(context.Background(), leaseName, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("Get %s: %v", leaseName, err)
+				}
+				if l.Spec.RenewTime == nil || !l.Spec.RenewTime.Time.Equal(h.clock.Now()) {
+					t.Fatalf("%s RenewTime = %v, want %v", leaseName, l.Spec.RenewTime, h.clock.Now())
+				}
+			}
+			if got := releasedShards(w); len(got) != 0 {
+				t.Fatalf("onReleased reported %d shards, want none", len(got))
+			}
+		})
 	}
 }
