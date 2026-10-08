@@ -51,4 +51,17 @@ kubectl get updatecenter varroa-update-center
 varroactl get versionprofiles
 ```
 
-The update center reports gaps when a pinned plugin is unavailable. Resolve gaps by adding the required artifact or changing the version profile. A member cluster needs its own enabled and populated update center when its controllers cannot reach the core service.
+The update center reports two signals about the declared plugins:
+
+- `CoverageComplete`, `status.gapCount`, and `status.gaps` report declared plugins that are not in the store. The list is informational while pull-through is on, because pull-through fetches a missing plugin on demand. Check it before an air-gapped cutover.
+- `PluginsServable`, `status.unservableCount`, and `status.unservable` report declared plugins the update center cannot serve, from the store or by pull-through. Each entry has a reason:
+
+| Reason | Meaning |
+|---|---|
+| `NotListed` | No upstream source lists the version, and the archive checksum fallback has no record of it. |
+| `ArchiveDisabled` | The version is an aged pin. Upstream metadata no longer lists it, and `updateCenter.pullThrough.archiveURL` is empty. |
+| `PullThroughDisabled` | The plugin is not stored, and pull-through is off. |
+
+`Ready` follows `PluginsServable`. An unservable plugin sets `Ready=False`, and the phase becomes `Degraded`. An `Unknown` `PluginsServable` does not block `Ready`. It means upstream could not answer for some plugins.
+
+Resolve an unservable plugin by seeding the artifact, restoring the archive URL, or changing the version profile. A member cluster needs its own enabled and populated update center when its controllers cannot reach the core service.

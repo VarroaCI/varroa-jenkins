@@ -12892,6 +12892,9 @@
           "plugin": {
             "type": "string"
           },
+          "reason": {
+            "type": "string"
+          },
           "requiredBy": {
             "type": "string"
           },
@@ -12961,6 +12964,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "gapCount": {
+            "type": "integer"
+          },
           "gaps": {
             "items": {
               "$ref": "#/components/schemas/components_schemas_UpdateCenterGap"
@@ -12986,6 +12992,15 @@
           },
           "storeBytes": {
             "format": "int64",
+            "type": "integer"
+          },
+          "unservable": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_UpdateCenterGap"
+            },
+            "type": "array"
+          },
+          "unservableCount": {
             "type": "integer"
           }
         },

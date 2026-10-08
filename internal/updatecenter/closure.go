@@ -43,6 +43,10 @@ type ClosureEntry struct {
 	ResolvedVersion string `json:"resolvedVersion,omitempty"`
 	Source          string `json:"source,omitempty"`
 	Fetched         bool   `json:"fetched,omitempty"`
+
+	// depsUnverified is set when the pin resolved from the archive checksum
+	// sidecar, which carries no dependency list. The planner does not descend.
+	depsUnverified bool
 }
 
 // OptionalDependency is a recorded-but-never-resolved optional dependency.
@@ -114,6 +118,7 @@ type storeLookup interface {
 type metaResolver interface {
 	ResolveExact(ctx context.Context, name, version string) ucmeta.Resolution
 	ResolveSatisfying(ctx context.Context, name, minVersion string) ucmeta.Resolution
+	ResolveAvailable(ctx context.Context, name, version string) ucmeta.Availability
 }
 
 // closurePlanner walks a plugin's transitive mandatory dependency closure using
@@ -206,10 +211,14 @@ func (p *closurePlanner) planClosure(ctx context.Context, root hpi.PluginManifes
 					"provisioning's plugin-version gate gets the final say", e.ResolvedVersion, e.Min),
 			})
 		case StatusDeclaredNotYetStored:
+			msg := fmt.Sprintf("the declared version %s is not in the store yet; on-demand pull-through will "+
+				"fetch it at that exact version", e.ResolvedVersion)
+			if e.depsUnverified {
+				msg += " Its own dependency list is not verified; provisioning installs the dependencies."
+			}
 			plan.Warnings = append(plan.Warnings, UploadWarning{
 				Code: StatusDeclaredNotYetStored, Plugin: name, Min: e.Min,
-				Message: fmt.Sprintf("the declared version %s is not in the store yet; on-demand pull-through will "+
-					"fetch it at that exact version", e.ResolvedVersion),
+				Message: msg,
 			})
 		case StatusPlannedFetch:
 			plan.Fetches = append(plan.Fetches, p.fetchFor(ctx, name, e.ResolvedVersion))
@@ -275,9 +284,14 @@ func (p *closurePlanner) resolveOne(ctx context.Context, name, minVersion string
 		// it is actually resolvable before promising it. The existing on-demand
 		// pull-through resolves the EXACT pinned version, which is precisely the
 		// aged-pin case that can fail.
-		switch res := p.resolver.ResolveExact(ctx, name, vhi); res.Outcome {
+		switch res := p.resolver.ResolveAvailable(ctx, name, vhi); res.Outcome {
 		case ucmeta.Resolved:
 			entry.Status = StatusDeclaredNotYetStored
+			if res.Via == ucmeta.ViaArchive {
+				// The sidecar proves the checksum but carries no dependency list.
+				entry.depsUnverified = true
+				return entry, "", nil
+			}
 			return entry, vhi, mandatoryOf(res.Meta.Dependencies)
 		case ucmeta.SourcesDegraded:
 			entry.Status = StatusMetadataUnavailable
@@ -379,9 +393,9 @@ func remediationFor(status, name, minVersion string, row UnresolvedDependency) s
 		return fmt.Sprintf("pull-through is disabled; seed %s via spec.seed.refs or `varroactl import --to uc://…`", name)
 	case StatusUnreachable:
 		if row.FoundDeclared != nil {
-			return fmt.Sprintf("the declared version %s of %s is listed by no healthy metadata source — an aged pin. "+
-				"Pre-seed it with `varroactl export`/`import` or spec.seed.refs, or refresh the pin",
-				*row.FoundDeclared, name)
+			return fmt.Sprintf("no metadata source lists the declared version %s of %s, and the archive checksum "+
+				"fallback has no sidecar for it or is disabled. Pre-seed it with `varroactl export`/`import` or "+
+				"spec.seed.refs, or refresh the pin", *row.FoundDeclared, name)
 		}
 		if row.FoundUpstream != nil {
 			return fmt.Sprintf("upstream's newest version %s is older than the required minimum %s", *row.FoundUpstream, minVersion)

@@ -174,7 +174,13 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("storage-not-ready-local", testStorageNotReadyLocal)
 	t.Run("storage-not-ready-oci", testStorageNotReadyOCI)
 	t.Run("inventory-failure-degraded", testInventoryFailureDegraded)
-	t.Run("pullthrough-gaps-ready", testPullThroughGapsReady)
+	t.Run("pullthrough-unstored-but-servable-ready", testPullThroughUnstoredButServableReady)
+	t.Run("unservable-archive-disabled-not-ready", testUnservableArchiveDisabledNotReady)
+	t.Run("unservable-pull-through-disabled-reason", testUnservablePullThroughDisabledReason)
+	t.Run("servability-call-failed-ready-degraded", testServabilityCallFailedReadyDegraded)
+	t.Run("servability-sources-degraded-ready-degraded", testServabilitySourcesDegradedReadyDegraded)
+	t.Run("declared-duplicates-deduplicated", testDeclaredDuplicatesDeduplicated)
+	t.Run("servability-endpoint-missing-blocks-ready", testServabilityEndpointMissingBlocksReady)
 	t.Run("pullthrough-inventory-failure-degraded", testPullThroughInventoryFailureDegraded)
 	t.Run("all-ready", testAllReady)
 	t.Run("seed-import-idempotency", testSeedImportIdempotency)
@@ -453,6 +459,49 @@ func ucWithPullThrough(enabled bool) *v1alpha1.UpdateCenter {
 		UpstreamURL: "https://updates.jenkins.io",
 	}
 	return uc
+}
+
+// gapTestUCServer serves an empty /api/v1/inventory and a /api/v1/servability answer.
+// unservable maps "name@version" to a servability reason; every other plugin is
+// servable. A non-empty servabilityStatus overrides the servability response code.
+func gapTestUCServer(t *testing.T, unservable map[string]string) *httptest.Server {
+	t.Helper()
+	return gapTestUCServerWith(t, unservable, 0)
+}
+
+func gapTestUCServerWith(t *testing.T, unservable map[string]string, servabilityStatus int) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ucInventoryResponse{Plugins: []inventoryEntry{}})
+		case "/api/v1/servability":
+			if servabilityStatus != 0 {
+				w.WriteHeader(servabilityStatus)
+				return
+			}
+			var req ucServabilityRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			resp := ucServabilityResponse{}
+			for _, p := range req.Plugins {
+				res := ucServabilityResult{Name: p.Name, Version: p.Version, Servable: true, Via: "metadata"}
+				if reason, ok := unservable[p.Name+"@"+p.Version]; ok {
+					res = ucServabilityResult{Name: p.Name, Version: p.Version, Reason: reason}
+				}
+				resp.Plugins = append(resp.Plugins, res)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
 }
 
 // emptyInventoryServer serves an empty /api/v1/inventory so computeGaps succeeds.
@@ -877,22 +926,20 @@ func testAllReady(t *testing.T) {
 	}
 }
 
-// testPullThroughGapsReady: pull-through enabled + genuine coverage gaps →
-// phase=Ready, Ready=True reason PullThroughServing. Gaps are served on demand,
-// so a cold-cache pull-through UC must report Ready (otherwise the native path
-// never engages and the store never warms).
-func testPullThroughGapsReady(t *testing.T) {
+// testPullThroughUnstoredButServableReady: a declared plugin missing from the store
+// that pull-through can serve leaves CoverageComplete False but keeps the update center
+// Ready, so controllers route to it and the store warms.
+func testPullThroughUnstoredButServableReady(t *testing.T) {
 	client := newTestClient()
 	client.updateCenter = ucWithPullThrough(true)
 	crdstore.MustSeed(client.store, client.updateCenter)
 	client.pvc = boundPVC()
 
-	// A profile declaring a plugin the (empty) inventory does not hold → a gap.
 	addProfile(client, "prof-gap", "2.479.1")
 	client.configMapData["prof-gap-content"]["plugins.yaml"] =
 		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
 
-	ts := emptyInventoryServer(t)
+	ts := gapTestUCServer(t, nil)
 
 	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
 	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
@@ -903,23 +950,186 @@ func testPullThroughGapsReady(t *testing.T) {
 	if status.Phase != v1alpha1.UpdateCenterPhase("Ready") {
 		t.Errorf("expected phase Ready, got %s", status.Phase)
 	}
+	if status.GapCount != 1 || len(status.Gaps) != 1 || status.Gaps[0].Plugin != "foo" {
+		t.Fatalf("expected the foo gap (count 1), got count %d gaps %+v", status.GapCount, status.Gaps)
+	}
 
-	// Coverage is genuinely incomplete — the gap is still reported.
 	cc := findUCCondition(status.Conditions, condTypeCoverageComplete)
 	if cc == nil || cc.Status != metav1.ConditionFalse || cc.Reason != reasonGapAnalysisComplete {
 		t.Fatalf("CoverageComplete expected False/GapAnalysisComplete, got %+v", cc)
 	}
-	if len(status.Gaps) != 1 || status.Gaps[0].Plugin != "foo" {
-		t.Fatalf("expected the foo gap to be reported, got %+v", status.Gaps)
+	ps := findUCCondition(status.Conditions, condTypePluginsServable)
+	if ps == nil || ps.Status != metav1.ConditionTrue || ps.Reason != reasonAllPluginsServable {
+		t.Fatalf("PluginsServable expected True/AllPluginsServable, got %+v", ps)
 	}
-
-	// ...but the UC is Ready via pull-through so controllers route to it.
 	rd := findUCCondition(status.Conditions, condTypeReady)
-	if rd == nil || rd.Status != metav1.ConditionTrue {
-		t.Fatalf("Ready expected True, got %+v", rd)
+	if rd == nil || rd.Status != metav1.ConditionTrue || rd.Reason != reasonAllPluginsServable {
+		t.Fatalf("Ready expected True/AllPluginsServable, got %+v", rd)
 	}
-	if rd.Reason != "PullThroughServing" {
-		t.Errorf("Ready reason expected PullThroughServing, got %s", rd.Reason)
+	if status.UnservableCount != 0 || len(status.Unservable) != 0 {
+		t.Errorf("expected no unservable plugins, got count %d list %+v", status.UnservableCount, status.Unservable)
+	}
+}
+
+// testUnservableArchiveDisabledNotReady: a plugin the update center cannot serve
+// (aged pin, archive disabled) makes Ready False even under pull-through.
+func testUnservableArchiveDisabledNotReady(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(true)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	addProfile(client, "prof-aged", "2.479.1")
+	client.configMapData["prof-aged-content"]["plugins.yaml"] =
+		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+
+	ts := gapTestUCServer(t, map[string]string{"foo@1.0": "archive-disabled"})
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	if status.Phase != v1alpha1.UpdateCenterPhase("Degraded") {
+		t.Errorf("expected phase Degraded, got %s", status.Phase)
+	}
+	if status.UnservableCount != 1 || len(status.Unservable) != 1 {
+		t.Fatalf("expected one unservable plugin, got count %d list %+v", status.UnservableCount, status.Unservable)
+	}
+	if got := status.Unservable[0]; got.Plugin != "foo" || got.Reason != unservableArchiveDisabled {
+		t.Errorf("unservable entry = %+v, want foo with reason ArchiveDisabled", got)
+	}
+	ps := findUCCondition(status.Conditions, condTypePluginsServable)
+	if ps == nil || ps.Status != metav1.ConditionFalse || ps.Reason != reasonPluginsUnservable {
+		t.Fatalf("PluginsServable expected False/PluginsUnservable, got %+v", ps)
+	}
+	rd := findUCCondition(status.Conditions, condTypeReady)
+	if rd == nil || rd.Status != metav1.ConditionFalse || rd.Reason != reasonPluginsUnservable {
+		t.Fatalf("Ready expected False/PluginsUnservable, got %+v", rd)
+	}
+}
+
+// testUnservablePullThroughDisabledReason: with pull-through off, an unstored plugin is
+// unservable with reason PullThroughDisabled.
+func testUnservablePullThroughDisabledReason(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(false)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	addProfile(client, "prof-air", "2.479.1")
+	client.configMapData["prof-air-content"]["plugins.yaml"] =
+		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+
+	ts := gapTestUCServer(t, map[string]string{"foo@1.0": "pull-through-disabled"})
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	if len(status.Unservable) != 1 || status.Unservable[0].Reason != unservablePullThroughDisabled {
+		t.Fatalf("unservable = %+v, want one PullThroughDisabled entry", status.Unservable)
+	}
+	rd := findUCCondition(status.Conditions, condTypeReady)
+	if rd == nil || rd.Status != metav1.ConditionFalse {
+		t.Fatalf("Ready expected False, got %+v", rd)
+	}
+}
+
+// testServabilityCallFailedReadyDegraded: when the servability call fails, the
+// update center cannot tell whether a plugin is servable. It stays Ready with reason
+// ResolutionDegraded, and the phase is Degraded.
+func testServabilityCallFailedReadyDegraded(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(true)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	addProfile(client, "prof-x", "2.479.1")
+	client.configMapData["prof-x-content"]["plugins.yaml"] =
+		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+
+	ts := gapTestUCServerWith(t, nil, http.StatusInternalServerError)
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	ps := findUCCondition(status.Conditions, condTypePluginsServable)
+	if ps == nil || ps.Status != metav1.ConditionUnknown || ps.Reason != reasonResolutionDegraded {
+		t.Fatalf("PluginsServable expected Unknown/ResolutionDegraded, got %+v", ps)
+	}
+	rd := findUCCondition(status.Conditions, condTypeReady)
+	if rd == nil || rd.Status != metav1.ConditionTrue || rd.Reason != reasonResolutionDegraded {
+		t.Fatalf("Ready expected True/ResolutionDegraded, got %+v", rd)
+	}
+	if status.Phase != v1alpha1.UpdateCenterPhase("Degraded") {
+		t.Errorf("expected phase Degraded, got %s", status.Phase)
+	}
+}
+
+// testServabilitySourcesDegradedReadyDegraded: a plugin the update center cannot
+// decide because upstream metadata is degraded is undecided. It is not listed as
+// unservable, and Ready stays True with reason ResolutionDegraded.
+func testServabilitySourcesDegradedReadyDegraded(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(true)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	addProfile(client, "prof-d", "2.479.1")
+	client.configMapData["prof-d-content"]["plugins.yaml"] =
+		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+
+	ts := gapTestUCServer(t, map[string]string{"foo@1.0": "sources-degraded"})
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	if status.UnservableCount != 0 || len(status.Unservable) != 0 {
+		t.Fatalf("an undecided plugin must not be listed unservable, got %+v", status.Unservable)
+	}
+	ps := findUCCondition(status.Conditions, condTypePluginsServable)
+	if ps == nil || ps.Status != metav1.ConditionUnknown || ps.Reason != reasonResolutionDegraded {
+		t.Fatalf("PluginsServable expected Unknown/ResolutionDegraded, got %+v", ps)
+	}
+	rd := findUCCondition(status.Conditions, condTypeReady)
+	if rd == nil || rd.Status != metav1.ConditionTrue || rd.Reason != reasonResolutionDegraded {
+		t.Fatalf("Ready expected True/ResolutionDegraded, got %+v", rd)
+	}
+}
+
+// testDeclaredDuplicatesDeduplicated: one pin declared by two profiles is one gap.
+func testDeclaredDuplicatesDeduplicated(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(true)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	const pluginsYAML = "core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+	addProfile(client, "prof-one", "2.479.1")
+	client.configMapData["prof-one-content"]["plugins.yaml"] = pluginsYAML
+	addProfile(client, "prof-two", "2.479.1")
+	client.configMapData["prof-two-content"]["plugins.yaml"] = pluginsYAML
+
+	ts := gapTestUCServer(t, nil)
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	if status.GapCount != 1 || len(status.Gaps) != 1 {
+		t.Fatalf("expected one deduplicated gap, got count %d gaps %+v", status.GapCount, status.Gaps)
 	}
 }
 
@@ -1102,16 +1312,8 @@ func testGapTruncation(t *testing.T) {
 	crdstore.MustSeed(client.store, client.updateCenter)
 	client.pvc = boundPVC()
 
-	// Inventory returns 0 entries.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/inventory" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(ucInventoryResponse{Plugins: []inventoryEntry{}})
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(ts.Close)
+	// Inventory returns 0 entries, and every declared plugin is servable.
+	ts := gapTestUCServer(t, nil)
 
 	// Seed 60 declared plugins via a JenkinsVersionProfile ConfigMap.
 	const profileName = "test-profile"
@@ -1157,12 +1359,12 @@ func testGapTruncation(t *testing.T) {
 	}
 	status := lastUCStatus(t, client)
 
-	// Gaps must be truncated to maxGaps.
-	if len(status.Gaps) > maxGaps {
-		t.Errorf("expected gaps truncated to max %d, got %d", maxGaps, len(status.Gaps))
-	}
+	// Gaps must be truncated to maxGaps, while the count stays untruncated.
 	if len(status.Gaps) != maxGaps {
-		t.Errorf("expected exactly %d gaps, got %d", maxGaps, len(status.Gaps))
+		t.Errorf("expected exactly %d gaps listed, got %d", maxGaps, len(status.Gaps))
+	}
+	if status.GapCount != 60 {
+		t.Errorf("GapCount = %d, want the untruncated 60", status.GapCount)
 	}
 
 	cc := findUCCondition(status.Conditions, condTypeCoverageComplete)
@@ -1172,8 +1374,11 @@ func testGapTruncation(t *testing.T) {
 	if cc.Status != metav1.ConditionFalse {
 		t.Errorf("CoverageComplete expected False, got %s", cc.Status)
 	}
-	if !strings.Contains(cc.Message, "more gaps not shown") {
-		t.Errorf("expected 'more gaps not shown' in message, got: %s", cc.Message)
+	if !strings.Contains(cc.Message, "60 declared plugins are not in the store") {
+		t.Errorf("expected the true gap count in message, got: %s", cc.Message)
+	}
+	if !strings.Contains(cc.Message, "status.gaps shows the first 50") {
+		t.Errorf("expected the truncation note in message, got: %s", cc.Message)
 	}
 }
 
@@ -1603,5 +1808,36 @@ func testSeedFailedImportIsRetriedNextTick(t *testing.T) {
 	cond = findUCCondition(status.Conditions, condTypeSeedImported)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Fatalf("expected SeedImported=True after the retry succeeded, got %+v", cond)
+	}
+}
+
+// testServabilityEndpointMissingBlocksReady: an update center image that predates the
+// servability endpoint answers 404. That is a version skew, not an upstream outage, so it
+// must keep Ready=False rather than clear the air-gap gate.
+func testServabilityEndpointMissingBlocksReady(t *testing.T) {
+	client := newTestClient()
+	client.updateCenter = ucWithPullThrough(false)
+	crdstore.MustSeed(client.store, client.updateCenter)
+	client.pvc = boundPVC()
+
+	addProfile(client, "prof-skew", "2.479.1")
+	client.configMapData["prof-skew-content"]["plugins.yaml"] =
+		"core:\n  - 2.479.1\nplugins:\n  - artifactId: foo\n    version: \"1.0\"\n"
+
+	ts := gapTestUCServerWith(t, nil, http.StatusNotFound)
+
+	rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+	if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	status := lastUCStatus(t, client)
+
+	ps := findUCCondition(status.Conditions, condTypePluginsServable)
+	if ps == nil || ps.Status != metav1.ConditionFalse || ps.Reason != reasonInventoryUnavailable {
+		t.Fatalf("PluginsServable expected False/InventoryUnavailable, got %+v", ps)
+	}
+	rd := findUCCondition(status.Conditions, condTypeReady)
+	if rd == nil || rd.Status != metav1.ConditionFalse {
+		t.Fatalf("Ready expected False, got %+v", rd)
 	}
 }

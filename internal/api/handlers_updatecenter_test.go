@@ -489,3 +489,32 @@ func init() {
 		},
 	)
 }
+
+// TestUpdateCenterStatusServability: the servability fields map through, and
+// unservable is always a non-nil array so the wire shape never changes with the count.
+func TestUpdateCenterStatusServability(t *testing.T) {
+	t.Parallel()
+
+	empty := updateCenterStatusResponseFromCR(&v1alpha1.UpdateCenter{})
+	if empty.Unservable == nil || len(empty.Unservable) != 0 {
+		t.Errorf("Unservable with no entries = %#v, want a non-nil empty slice", empty.Unservable)
+	}
+	if empty.GapCount != 0 || empty.UnservableCount != 0 {
+		t.Errorf("counts = %d/%d, want 0/0", empty.GapCount, empty.UnservableCount)
+	}
+
+	uc := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
+		GapCount:        7,
+		UnservableCount: 1,
+		Unservable: []v1alpha1.UpdateCenterGap{
+			{Plugin: "foo", Version: "1.0", RequiredBy: "profile:p", Reason: "ArchiveDisabled"},
+		},
+	}}
+	resp := updateCenterStatusResponseFromCR(uc)
+	if resp.GapCount != 7 || resp.UnservableCount != 1 {
+		t.Errorf("counts = %d/%d, want 7/1", resp.GapCount, resp.UnservableCount)
+	}
+	if len(resp.Unservable) != 1 || resp.Unservable[0].Reason != "ArchiveDisabled" || resp.Unservable[0].Plugin != "foo" {
+		t.Errorf("Unservable = %+v, want foo with reason ArchiveDisabled", resp.Unservable)
+	}
+}

@@ -1354,6 +1354,8 @@ export interface UpdateCenterGap {
   plugin: string;
   version: string;
   requiredBy: string;
+  /** Set only on unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled. */
+  reason?: string;
 }
 
 export interface UpdateCenterStatus {
@@ -1362,7 +1364,10 @@ export interface UpdateCenterStatus {
   conditions: UpdateCenterCondition[];
   pluginCount: number;
   storeBytes: number;
+  gapCount: number;
   gaps: UpdateCenterGap[];
+  unservable: UpdateCenterGap[];
+  unservableCount: number;
   lastSyncTime: string | null;
   storageType: string;
   pullThroughEnabled: boolean;

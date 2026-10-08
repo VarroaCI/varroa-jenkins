@@ -575,6 +575,9 @@ func (nilResolver) ResolveExact(context.Context, string, string) ucmeta.Resoluti
 func (nilResolver) ResolveSatisfying(context.Context, string, string) ucmeta.Resolution {
 	return ucmeta.Resolution{Outcome: ucmeta.NotListed}
 }
+func (nilResolver) ResolveAvailable(context.Context, string, string) ucmeta.Availability {
+	return ucmeta.Availability{Outcome: ucmeta.NotListed}
+}
 
 // rejectUpload writes a rejection envelope with no per-dependency diff.
 func (s *Server) rejectUpload(w http.ResponseWriter, status int, code, msg string) {

@@ -340,6 +340,12 @@ reading each package's entry point):
   `ResolveExact`/`ResolveSatisfying`: a provable negative (`NotListed`, 422) and
   an unprovable one (`SourcesDegraded`, retryable 503) must not be conflated,
   and a healthy source's answer always beats another source's degradation.
+  `ResolveAvailable` is the single serving entry point: pull-through
+  (`ResolveSHA256` delegates to it), the `POST /api/v1/servability` endpoint,
+  and the upload planner's declared-pin check all call it. Do not add a second
+  resolution path. `POST /api/v1/servability` is unauthenticated, bounded to
+  1 MiB and 2000 entries, and runs 8 lookups at once. The operator's
+  `PluginsServable` condition calls it for plugins absent from the store.
   The declared plugin set arrives as a mounted file
   (`VARROA_UC_DECLARED_PLUGINS_FILE`, re-read per request) because the service
   has no Kubernetes client; an UNREADABLE file rejects an upload rather than

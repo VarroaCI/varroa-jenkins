@@ -173,15 +173,27 @@ spec:
                   - type
                   type: object
                 type: array
+              gapCount:
+                description: |-
+                  GapCount is the number of distinct declared plugins missing from the store.
+                  It is not truncated. Gaps lists the first 50 of them.
+                type: integer
               gaps:
-                description: Gaps lists plugins required by profiles but missing from
-                  the store.
+                description: |-
+                  Gaps lists the first 50 distinct declared plugins missing from the store.
+                  A missing plugin is informational while pull-through is on: it is fetched on
+                  demand. It matters before an air-gapped cutover.
                 items:
-                  description: UpdateCenterGap identifies a plugin missing from the
-                    store.
+                  description: UpdateCenterGap identifies a declared plugin that is
+                    missing from the store.
                   properties:
                     plugin:
                       description: Plugin is the plugin artifact ID.
+                      type: string
+                    reason:
+                      description: |-
+                        Reason explains why the plugin cannot be served. It is set only on
+                        status.unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled.
                       type: string
                     requiredBy:
                       description: RequiredBy identifies the profile or bundle that
@@ -196,6 +208,7 @@ spec:
                   - version
                   type: object
                 type: array
+                x-kubernetes-list-type: atomic
               lastSyncTime:
                 description: LastSyncTime is the last sync time.
                 format: date-time
@@ -230,6 +243,41 @@ spec:
               storeBytes:
                 description: StoreBytes is the total bytes stored.
                 format: int64
+                type: integer
+              unservable:
+                description: |-
+                  Unservable lists the first 50 declared plugins that the update center cannot
+                  serve, from the store or by pull-through. Each entry carries a reason.
+                items:
+                  description: UpdateCenterGap identifies a declared plugin that is
+                    missing from the store.
+                  properties:
+                    plugin:
+                      description: Plugin is the plugin artifact ID.
+                      type: string
+                    reason:
+                      description: |-
+                        Reason explains why the plugin cannot be served. It is set only on
+                        status.unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled.
+                      type: string
+                    requiredBy:
+                      description: RequiredBy identifies the profile or bundle that
+                        requires this plugin.
+                      type: string
+                    version:
+                      description: Version is the required plugin version.
+                      type: string
+                  required:
+                  - plugin
+                  - requiredBy
+                  - version
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              unservableCount:
+                description: |-
+                  UnservableCount is the number of declared plugins that cannot be served. It
+                  is not truncated. Unservable lists the first 50 of them.
                 type: integer
             type: object
         required:

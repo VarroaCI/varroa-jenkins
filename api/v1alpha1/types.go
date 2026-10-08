@@ -3260,9 +3260,25 @@ type UpdateCenterStatus struct {
 	// StoreBytes is the total bytes stored.
 	// +optional
 	StoreBytes int64 `json:"storeBytes,omitempty"`
-	// Gaps lists plugins required by profiles but missing from the store.
+	// GapCount is the number of distinct declared plugins missing from the store.
+	// It is not truncated. Gaps lists the first 50 of them.
 	// +optional
+	GapCount int `json:"gapCount,omitempty"`
+	// Gaps lists the first 50 distinct declared plugins missing from the store.
+	// A missing plugin is informational while pull-through is on: it is fetched on
+	// demand. It matters before an air-gapped cutover.
+	// +optional
+	// +listType=atomic
 	Gaps []UpdateCenterGap `json:"gaps,omitempty"`
+	// Unservable lists the first 50 declared plugins that the update center cannot
+	// serve, from the store or by pull-through. Each entry carries a reason.
+	// +optional
+	// +listType=atomic
+	Unservable []UpdateCenterGap `json:"unservable,omitempty"`
+	// UnservableCount is the number of declared plugins that cannot be served. It
+	// is not truncated. Unservable lists the first 50 of them.
+	// +optional
+	UnservableCount int `json:"unservableCount,omitempty"`
 	// LastSyncTime is the last sync time.
 	// +optional
 	LastSyncTime metav1.Time `json:"lastSyncTime,omitempty"`
@@ -3294,7 +3310,7 @@ type UpdateCenterCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// UpdateCenterGap identifies a plugin missing from the store.
+// UpdateCenterGap identifies a declared plugin that is missing from the store.
 type UpdateCenterGap struct {
 	// Plugin is the plugin artifact ID.
 	Plugin string `json:"plugin"`
@@ -3302,6 +3318,10 @@ type UpdateCenterGap struct {
 	Version string `json:"version"`
 	// RequiredBy identifies the profile or bundle that requires this plugin.
 	RequiredBy string `json:"requiredBy"`
+	// Reason explains why the plugin cannot be served. It is set only on
+	// status.unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

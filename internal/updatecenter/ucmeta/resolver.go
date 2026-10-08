@@ -192,21 +192,50 @@ func (r *Resolver) SetArchiveBaseURL(baseURL string) {
 	r.archive = newArchiveResolver(baseURL, r.client)
 }
 
-// ResolveSHA256 returns the base64 SHA-256 for name@version from the first source (in
-// the order sources() returns) whose index contains that exact (name, version). Any
-// source whose cache is older than ttl is refreshed first; a source that fails to fetch
-// or parse is skipped without failing the call. Returns ErrVersionUnavailable if no
-// source lists the exact (name, version).
-func (r *Resolver) ResolveSHA256(ctx context.Context, name, version string) (string, error) {
+// Via names the path that supplied a resolved checksum.
+type Via string
+
+const (
+	// ViaMetadata means a metadata source listed the exact version.
+	ViaMetadata Via = "metadata"
+	// ViaArchive means the Maven repository sidecar supplied the checksum.
+	ViaArchive Via = "archive"
+)
+
+// Availability is the answer to "can this server serve name@version?". It is the one
+// shape that both pull-through serving and the servability endpoint read.
+type Availability struct {
+	Outcome Outcome
+	// SHA256 is the upstream base64 digest. Set when Outcome == Resolved.
+	SHA256 string
+	// Via names the path that supplied SHA256. Set when Outcome == Resolved.
+	Via Via
+	// Meta carries the metadata entry, including its dependencies. Set only when
+	// Via == ViaMetadata.
+	Meta *PluginMeta
+	// ArchiveDisabled is set on NotListed when metadata lists the plugin at another
+	// version and the archive fallback is off, so a sidecar could have answered.
+	ArchiveDisabled bool
+}
+
+// ResolveAvailable resolves name@version through every path this resolver has: the
+// metadata sources in order, then the archive sidecar. It is the single entry point
+// for serving decisions; ResolveSHA256 delegates to it.
+func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) Availability {
 	key := verKey{name: name, version: version}
-	var gav string
+	var (
+		gav         string
+		anyDegraded bool
+	)
 	for _, src := range r.sources() {
 		entry := r.ensureFresh(ctx, src.URL)
 		if entry.index == nil {
+			anyDegraded = true
 			continue // failed/skipped source
 		}
 		if sha, ok := entry.index[key]; ok {
-			return sha, nil
+			pm := entry.byName[name]
+			return Availability{Outcome: Resolved, SHA256: sha, Via: ViaMetadata, Meta: &pm}
 		}
 		// Wrong version, but the listing still supplies a groupId, which is stable
 		// across a plugin's versions and is all the archive fallback needs.
@@ -220,18 +249,43 @@ func (r *Resolver) ResolveSHA256(ctx context.Context, name, version string) (str
 	// No source lists this exact version. That is the steady state for any pin that
 	// has aged past current, not a transient gap, so fall back to the archive rather
 	// than failing a download we can otherwise fetch and verify.
-	if r.archive != nil && gav != "" {
-		sha, err := r.archive.resolve(ctx, gav, name, version)
-		if err == nil {
-			r.logger.Debug("resolved checksum from archive fallback",
-				"name", name, "version", version)
-			return sha, nil
+	if gav == "" {
+		if anyDegraded {
+			return Availability{Outcome: SourcesDegraded}
 		}
+		return Availability{Outcome: NotListed}
+	}
+	if r.archive == nil {
+		// An unhealthy source could have listed the pin, so the negative is unproven.
+		if anyDegraded {
+			return Availability{Outcome: SourcesDegraded}
+		}
+		return Availability{Outcome: NotListed, ArchiveDisabled: true}
+	}
+	sha, err := r.archive.resolve(ctx, gav, name, version)
+	switch {
+	case err == nil:
+		r.logger.Debug("resolved checksum from archive fallback",
+			"name", name, "version", version)
+		return Availability{Outcome: Resolved, SHA256: sha, Via: ViaArchive}
+	case errors.Is(err, errArchiveNotFound):
+		return Availability{Outcome: NotListed}
+	default:
 		r.logger.Debug("archive fallback did not resolve checksum",
 			"name", name, "version", version, "error", err)
+		return Availability{Outcome: SourcesDegraded}
 	}
+}
 
-	return "", ErrVersionUnavailable
+// ResolveSHA256 returns the base64 SHA-256 for name@version from any path
+// ResolveAvailable consults. Returns ErrVersionUnavailable when the call does not
+// resolve, whether the answer is a provable negative or an unprovable one.
+func (r *Resolver) ResolveSHA256(ctx context.Context, name, version string) (string, error) {
+	a := r.ResolveAvailable(ctx, name, version)
+	if a.Outcome != Resolved {
+		return "", ErrVersionUnavailable
+	}
+	return a.SHA256, nil
 }
 
 // SourceURLs returns the URLs currently returned by sources(), for status reporting.

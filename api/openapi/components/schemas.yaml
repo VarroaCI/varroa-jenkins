@@ -3751,10 +3751,18 @@ UpdateCenterStatus:
     storeBytes:
       type: integer
       format: int64
+    gapCount:
+      type: integer
     gaps:
       type: array
       items:
         $ref: '#/UpdateCenterGap'
+    unservable:
+      type: array
+      items:
+        $ref: '#/UpdateCenterGap'
+    unservableCount:
+      type: integer
     lastSyncTime:
       type: string
       format: date-time
@@ -3788,6 +3796,8 @@ UpdateCenterGap:
     version:
       type: string
     requiredBy:
+      type: string
+    reason:
       type: string
 
 UpdateCenterPlugins:

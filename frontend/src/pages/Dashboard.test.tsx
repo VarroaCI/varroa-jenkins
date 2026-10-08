@@ -269,13 +269,16 @@ describe("Dashboard", () => {
       vi.mocked(useApi.bffFetch).mockClear();
     });
 
-    it("renders chip when enabled:true and gaps.length > 0", async () => {
+    it("renders chip when enabled:true and unservableCount > 0", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
           return Promise.resolve({
             enabled: true,
             gaps: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a" }],
-            conditions: [], phase: "Ready", pluginCount: 1, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false,
+            gapCount: 1,
+            unservable: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a", reason: "ArchiveDisabled" }],
+            unservableCount: 1,
+            conditions: [], phase: "Degraded", pluginCount: 1, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false,
           });
         }
         return Promise.resolve({ items: [] });
@@ -285,16 +288,16 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.getByText(/1 plugin missing from Update Center/)).toBeInTheDocument();
+        expect(screen.getByText(/1 plugin the Update Center cannot serve/)).toBeInTheDocument();
       });
-      const link = screen.getByRole("link", { name: /1 plugin missing/ });
+      const link = screen.getByRole("link", { name: /1 plugin the Update Center/ });
       expect(link).toHaveAttribute("href", "/administration/update-center");
     });
 
     it("does not render chip when enabled:false", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
-          return Promise.resolve({ enabled: false, conditions: [], gaps: [], lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false });
+          return Promise.resolve({ enabled: false, conditions: [], gaps: [], unservable: [], gapCount: 0, unservableCount: 0, lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false });
         }
         return Promise.resolve({ items: [] });
       });
@@ -303,14 +306,19 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.queryByText(/missing from Update Center/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
       });
     });
 
-    it("does not render chip when enabled:true but gaps:[]", async () => {
+    it("does not render chip when gaps exist but nothing is unservable", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
-          return Promise.resolve({ enabled: true, gaps: [], conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false });
+          return Promise.resolve({
+            enabled: true,
+            gaps: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a" }],
+            gapCount: 1, unservable: [], unservableCount: 0,
+            conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: true,
+          });
         }
         return Promise.resolve({ items: [] });
       });
@@ -319,7 +327,23 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.queryByText(/missing from Update Center/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
+      });
+    });
+
+    it("does not render chip when enabled:true but unservableCount is 0", async () => {
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
+        if (path === "/updatecenter") {
+          return Promise.resolve({ enabled: true, gaps: [], unservable: [], gapCount: 0, unservableCount: 0, conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false });
+        }
+        return Promise.resolve({ items: [] });
+      });
+      mockUseControllers.mockReturnValue({
+        data: [], isLoading: false, error: null,
+      });
+      renderWithProviders(<Dashboard />);
+      await waitFor(() => {
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
       });
     });
 

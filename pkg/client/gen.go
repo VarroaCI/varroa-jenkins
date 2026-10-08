@@ -3925,6 +3925,7 @@ type ComponentsSchemasUpdateCenterCondition struct {
 // ComponentsSchemasUpdateCenterGap defines model for components_schemas_UpdateCenterGap.
 type ComponentsSchemasUpdateCenterGap struct {
 	Plugin     *string `json:"plugin,omitempty"`
+	Reason     *string `json:"reason,omitempty"`
 	RequiredBy *string `json:"requiredBy,omitempty"`
 	Version    *string `json:"version,omitempty"`
 }
@@ -3953,6 +3954,7 @@ type ComponentsSchemasUpdateCenterPlugins struct {
 type ComponentsSchemasUpdateCenterStatus struct {
 	Conditions         *[]ComponentsSchemasUpdateCenterCondition `json:"conditions,omitempty"`
 	Enabled            *bool                                     `json:"enabled,omitempty"`
+	GapCount           *int                                      `json:"gapCount,omitempty"`
 	Gaps               *[]ComponentsSchemasUpdateCenterGap       `json:"gaps,omitempty"`
 	LastSyncTime       *time.Time                                `json:"lastSyncTime"`
 	Phase              *string                                   `json:"phase,omitempty"`
@@ -3960,6 +3962,8 @@ type ComponentsSchemasUpdateCenterStatus struct {
 	PullThroughEnabled *bool                                     `json:"pullThroughEnabled,omitempty"`
 	StorageType        *string                                   `json:"storageType,omitempty"`
 	StoreBytes         *int64                                    `json:"storeBytes,omitempty"`
+	Unservable         *[]ComponentsSchemasUpdateCenterGap       `json:"unservable,omitempty"`
+	UnservableCount    *int                                      `json:"unservableCount,omitempty"`
 }
 
 // ComponentsSchemasUpdateCenterUnresolvedDependency One rejecting dependency. The foundInStore/foundDeclared/foundUpstream triple is what makes the diff actionable.

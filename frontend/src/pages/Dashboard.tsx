@@ -155,7 +155,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <UpdateCenterGapsChip />
+      <UpdateCenterUnservableChip />
 
       <div className={styles.twoCol}>
         <Card title="⬡ Brood health" headerRight={<span className={styles.muted}>{controllers.length} controller{controllers.length === 1 ? "" : "s"}</span>}>
@@ -311,7 +311,7 @@ function ActivityFeed() {
   );
 }
 
-function UpdateCenterGapsChip() {
+function UpdateCenterUnservableChip() {
   const [data, setData] = useState<UpdateCenterStatus | null>(null);
   useEffect(() => {
     getUpdateCenterStatus()
@@ -320,7 +320,7 @@ function UpdateCenterGapsChip() {
         // Swallow — failed fetch must not surface a dashboard error.
       });
   }, []);
-  if (!data?.enabled || !data.gaps || data.gaps.length === 0) return null;
+  if (!data?.enabled || !data.unservableCount) return null;
   return (
     <Link
       to="/administration/update-center"
@@ -338,7 +338,7 @@ function UpdateCenterGapsChip() {
         textDecoration: "none",
       }}
     >
-      ⚠ {data.gaps.length} plugin{data.gaps.length > 1 ? "s" : ""} missing from Update Center
+      ⚠ {data.unservableCount} plugin{data.unservableCount > 1 ? "s" : ""} the Update Center cannot serve
     </Link>
   );
 }

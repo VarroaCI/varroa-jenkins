@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -168,32 +167,21 @@ func TestUcBlockAirgapMessage(t *testing.T) {
 			notSubstr:  []string{"seed.refs", "pullThrough"},
 		},
 		{
-			name: "coverage gaps list the actual remedies",
+			name: "unservable plugins list the actual remedies with the untruncated count",
 			uc: &v1alpha1.UpdateCenter{
 				Status: v1alpha1.UpdateCenterStatus{
 					Conditions: []v1alpha1.UpdateCenterCondition{
-						{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonGapAnalysisComplete},
+						{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonPluginsUnservable},
 					},
-					Gaps: []v1alpha1.UpdateCenterGap{
-						{Plugin: "git", Version: "5.0.0", RequiredBy: "profile/lts"},
-						{Plugin: "workflow-job", Version: "1300.v0", RequiredBy: "profile/lts"},
+					Unservable: []v1alpha1.UpdateCenterGap{
+						{Plugin: "git", Version: "5.0.0", RequiredBy: "profile/lts", Reason: unservableArchiveDisabled},
+						{Plugin: "workflow-job", Version: "1300.v0", RequiredBy: "profile/lts", Reason: unservableNotListed},
 					},
+					UnservableCount: 60,
 				},
 			},
-			wantSubstr: []string{"2 plugin coverage gap", "spec.seed.refs", "spec.pullThrough", "ProvisioningDefaults"},
-			notSubstr:  []string{"capped"},
-		},
-		{
-			name: "gap count at the cap discloses truncation",
-			uc: &v1alpha1.UpdateCenter{
-				Status: v1alpha1.UpdateCenterStatus{
-					Conditions: []v1alpha1.UpdateCenterCondition{
-						{Type: condTypeReady, Status: metav1.ConditionFalse, Reason: reasonGapAnalysisComplete},
-					},
-					Gaps: make([]v1alpha1.UpdateCenterGap, maxGaps),
-				},
-			},
-			wantSubstr: []string{fmt.Sprintf("%d plugin coverage gap", maxGaps), "capped at 50"},
+			wantSubstr: []string{"cannot serve 60 declared plugin(s)", "spec.seed.refs", "spec.pullThrough", "ProvisioningDefaults"},
+			notSubstr:  []string{"capped", "coverage gap"},
 		},
 	}
 	for _, tt := range tests {

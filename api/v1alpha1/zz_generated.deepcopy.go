@@ -3079,6 +3079,11 @@ func (in *UpdateCenterStatus) DeepCopyInto(out *UpdateCenterStatus) {
 		*out = make([]UpdateCenterGap, len(*in))
 		copy(*out, *in)
 	}
+	if in.Unservable != nil {
+		in, out := &in.Unservable, &out.Unservable
+		*out = make([]UpdateCenterGap, len(*in))
+		copy(*out, *in)
+	}
 	in.LastSyncTime.DeepCopyInto(&out.LastSyncTime)
 	if in.SeedImportedDigests != nil {
 		in, out := &in.SeedImportedDigests, &out.SeedImportedDigests

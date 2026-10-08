@@ -2,6 +2,7 @@ package updatecenter
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/hpi"
@@ -50,6 +51,25 @@ type fakeResolver struct {
 	// listed maps name -> the single version upstream lists, with its metadata.
 	listed   map[string]ucmeta.PluginMeta
 	degraded map[string]bool
+	// archive names "name@version" pins whose checksum sidecar resolves. The
+	// archive carries no dependency list.
+	archive map[string]bool
+}
+
+// ResolveAvailable mirrors ucmeta.Resolver.ResolveAvailable: metadata first, then the
+// archive sidecar for pins that metadata no longer lists.
+func (f *fakeResolver) ResolveAvailable(_ context.Context, name, version string) ucmeta.Availability {
+	if f.degraded[name] {
+		return ucmeta.Availability{Outcome: ucmeta.SourcesDegraded}
+	}
+	if m, ok := f.listed[name]; ok && m.Version == version {
+		meta := m
+		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: m.SHA256, Via: ucmeta.ViaMetadata, Meta: &meta}
+	}
+	if f.archive[name+"@"+version] {
+		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: "c2hhLWZha2U=", Via: ucmeta.ViaArchive}
+	}
+	return ucmeta.Availability{Outcome: ucmeta.NotListed}
 }
 
 func (f *fakeResolver) lookup(name string, accept func(ucmeta.PluginMeta) bool) ucmeta.Resolution {
@@ -421,6 +441,47 @@ func TestPlanClosure_UnverifiableRecoveredFromUpstream(t *testing.T) {
 	plan := p.planClosure(context.Background(), root(dep("a", "1.0")))
 	if got := statusOf(plan, "a"); got != StatusSatisfiedStore {
 		t.Fatalf("status = %q, want satisfied-store", got)
+	}
+}
+
+// TestPlanClosure_AgedDeclaredPinViaArchive_DeclaredNotYetStoredNoDescent: an aged
+// declared pin the archive can verify is accepted with a warning. Its dependency list
+// is not verified, so the planner does not descend into it.
+func TestPlanClosure_AgedDeclaredPinViaArchive_DeclaredNotYetStoredNoDescent(t *testing.T) {
+	res := &fakeResolver{
+		listed:  map[string]ucmeta.PluginMeta{},
+		archive: map[string]bool{"dep@1.0": true},
+	}
+	p := newPlanner(nil, DeclaredSet{"dep": {"1.0"}}, res, true)
+	plan := p.planClosure(context.Background(), root(dep("dep", "1.0")))
+	if got := statusOf(plan, "dep"); got != StatusDeclaredNotYetStored {
+		t.Fatalf("status = %q, want declared-not-yet-stored", got)
+	}
+	if len(plan.Unresolved) != 0 {
+		t.Fatalf("unresolved = %+v, want none", plan.Unresolved)
+	}
+	if len(plan.Fetches) != 0 {
+		t.Fatalf("fetches = %+v, want none (a declared pin is not fetched by the planner)", plan.Fetches)
+	}
+	found := false
+	for _, w := range plan.Warnings {
+		if w.Plugin == "dep" && strings.Contains(w.Message, "dependency list is not verified") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %+v, want a dependencies-unverified note for dep", plan.Warnings)
+	}
+}
+
+// TestPlanClosure_AgedDeclaredPinArchiveDisabled_Unreachable: with no archive and no
+// metadata listing for the pin, the aged pin is unreachable.
+func TestPlanClosure_AgedDeclaredPinArchiveDisabled_Unreachable(t *testing.T) {
+	res := &fakeResolver{listed: map[string]ucmeta.PluginMeta{}}
+	p := newPlanner(nil, DeclaredSet{"dep": {"1.0"}}, res, true)
+	plan := p.planClosure(context.Background(), root(dep("dep", "1.0")))
+	if got := statusOf(plan, "dep"); got != StatusUnreachable {
+		t.Fatalf("status = %q, want unreachable", got)
 	}
 }
 

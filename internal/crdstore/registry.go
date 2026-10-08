@@ -83,7 +83,10 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	updateCentersGVR: {
 		"seedImportedDigests":     nil,
 		"gaps":                    nil,
+		"unservable":              nil,
 		"resolvedMetadataSources": nil,
+		"gapCount":                0,
+		"unservableCount":         0,
 		"pluginCount":             0,
 		"storeBytes":              0,
 	},

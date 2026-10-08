@@ -35,6 +35,7 @@ type UpdateCenterGapDTO struct {
 	Plugin     string `json:"plugin"`
 	Version    string `json:"version"`
 	RequiredBy string `json:"requiredBy"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // UpdateCenterStatusResponse is the BFF response DTO for update center status.
@@ -44,7 +45,10 @@ type UpdateCenterStatusResponse struct {
 	Conditions         []UpdateCenterConditionDTO `json:"conditions"`
 	PluginCount        int                        `json:"pluginCount"`
 	StoreBytes         int64                      `json:"storeBytes"`
+	GapCount           int                        `json:"gapCount"`
 	Gaps               []UpdateCenterGapDTO       `json:"gaps"`
+	Unservable         []UpdateCenterGapDTO       `json:"unservable"`
+	UnservableCount    int                        `json:"unservableCount"`
 	LastSyncTime       *time.Time                 `json:"lastSyncTime"` // nil when never synced
 	StorageType        string                     `json:"storageType"`
 	PullThroughEnabled bool                       `json:"pullThroughEnabled"`
@@ -80,6 +84,8 @@ func updateCenterStatusResponseFromCR(uc *v1alpha1.UpdateCenter) UpdateCenterSta
 		LastSyncTime:       nil,
 		StorageType:        string(uc.Spec.Storage.Type),
 		PullThroughEnabled: uc.Spec.PullThrough.Enabled,
+		GapCount:           uc.Status.GapCount,
+		UnservableCount:    uc.Status.UnservableCount,
 	}
 
 	// Map conditions.
@@ -110,6 +116,21 @@ func updateCenterStatusResponseFromCR(uc *v1alpha1.UpdateCenter) UpdateCenterSta
 		}
 	} else {
 		resp.Gaps = []UpdateCenterGapDTO{}
+	}
+
+	// Map unservable plugins.
+	if len(uc.Status.Unservable) > 0 {
+		resp.Unservable = make([]UpdateCenterGapDTO, len(uc.Status.Unservable))
+		for i, g := range uc.Status.Unservable {
+			resp.Unservable[i] = UpdateCenterGapDTO{
+				Plugin:     g.Plugin,
+				Version:    g.Version,
+				RequiredBy: g.RequiredBy,
+				Reason:     g.Reason,
+			}
+		}
+	} else {
+		resp.Unservable = []UpdateCenterGapDTO{}
 	}
 
 	// LastSyncTime: convert metav1.Time to *time.Time, nil if zero.
@@ -143,6 +164,7 @@ func (s *Server) HandleUpdateCenterStatus(w http.ResponseWriter, r *http.Request
 		if k8serrors.IsNotFound(err) {
 			s.writeJSON(w, http.StatusOK, UpdateCenterStatusResponse{
 				Enabled: false, Conditions: []UpdateCenterConditionDTO{}, Gaps: []UpdateCenterGapDTO{},
+				Unservable: []UpdateCenterGapDTO{},
 			})
 			return
 		}

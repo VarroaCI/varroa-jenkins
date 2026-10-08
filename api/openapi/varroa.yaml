@@ -9688,6 +9688,8 @@ components:
       properties:
         plugin:
           type: string
+        reason:
+          type: string
         requiredBy:
           type: string
         version:
@@ -9734,6 +9736,8 @@ components:
           type: array
         enabled:
           type: boolean
+        gapCount:
+          type: integer
         gaps:
           items:
             $ref: '#/components/schemas/components_schemas_UpdateCenterGap'
@@ -9752,6 +9756,12 @@ components:
           type: string
         storeBytes:
           format: int64
+          type: integer
+        unservable:
+          items:
+            $ref: '#/components/schemas/components_schemas_UpdateCenterGap'
+          type: array
+        unservableCount:
           type: integer
       type: object
     components_schemas_UpdateCenterUnresolvedDependency:
