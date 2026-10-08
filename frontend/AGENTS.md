@@ -104,6 +104,11 @@ TypeScript consumer of it.
   never label a view with a time window the data does not cover. Relative
   ages use `age()` from `src/components/activityTimeline.util.ts`; it is the
   single relative-time helper.
+- **Fleet-scale rendering**: the Dashboard brood-health card renders a phase
+  bar, at most eight rows, and a "View all" link. `BroodControllerPicker`
+  renders its rows through `useVirtualizer` inside the scroll container
+  `data-testid="controller-table-scroll"`; the sticky header stays in that
+  container. Select-all reads the filtered data, never the rendered DOM.
 - **Module ownership**: each page/component owns its own `.module.css` —
   no page imports another page's module. Small boilerplate (e.g. the
   `.page`/`.pageHead`/`.pageTitle`/`.pageDesc` header pattern) is

@@ -42,7 +42,7 @@ status, and the error text. A person's successful cancel, input answer, or repla
 
 ## Read brood health
 
-The dashboard's brood health card lists every controller with the state Varroa last observed. Each row carries:
+The dashboard's brood health card summarizes the brood. A bar shows the number of controllers in each phase. Under the bar, the card lists at most eight controllers. Controllers that need attention come first, then controllers with no live mite that are not hibernated. The rest of the brood is on the Controllers page. Each listed row carries:
 
 | Element | Source |
 |---|---|

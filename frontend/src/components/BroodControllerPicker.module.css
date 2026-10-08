@@ -103,8 +103,39 @@
   cursor: pointer;
 }
 
-.ctrlRow:last-child {
+.virtualRow[data-last] .ctrlRow {
   border-bottom: none;
+}
+
+/* The scroll container holds the sticky header and the virtual window. */
+.tableScroll {
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  position: relative;
+}
+
+.tableScrollCompact {
+  max-height: 420px;
+  overflow-y: auto;
+  position: relative;
+}
+
+.stickyHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.virtualBody {
+  position: relative;
+  width: 100%;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
 }
 
 .ctrlRow:hover {

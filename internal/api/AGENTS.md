@@ -540,6 +540,12 @@ federation, activity persistence, and SSE fanout.
   class breakdown (bytewise, not a ranking), envelope cross-check (hash + all
   seven flags), and `Coverage`/`reason(phase)`.
 
+- **Bounded mite reads in the controllers list**: `handleControllersFiltered`
+  builds every row in a serial pass, then reads local mite state (`Info`,
+  `Snapshot`) with at most `listMiteReadConcurrency` (16) concurrent goroutines.
+  Each goroutine writes only its own `out[i]`. Keep the `fillCellSummary`
+  caps resolver in the serial pass; it is not goroutine-safe.
+
 ## Work Guidance
 
 - A new or changed HTTP path/payload shape must land in

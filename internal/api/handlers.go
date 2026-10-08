@@ -838,6 +838,10 @@ func (s *Server) visibleControllers(ctx context.Context, claims *auth.Claims, ns
 	return out, nil
 }
 
+// listMiteReadConcurrency bounds the mite KV reads of one controllers list.
+// Each read is a NATS round trip, so a serial loop costs two round trips per row.
+const listMiteReadConcurrency = 16
+
 // HandleControllers returns the list of controllers enriched with live mite status.
 // Supports ?namespace= and ?cluster= query parameters.
 func (s *Server) HandleControllers(w http.ResponseWriter, r *http.Request) {
@@ -891,8 +895,11 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 		allControllers = controllers
 	}
 
-	out := make([]controllerResponse, 0, len(allControllers))
+	out := make([]controllerResponse, len(allControllers))
 	caps := s.cellCaps(r.Context())
+	// localIdx lists the rows whose mite state is read from the local KV. The
+	// reads run after this serial pass, so the caps resolver stays serial.
+	var localIdx []int
 	for i, cr := range allControllers {
 		cluster := ""
 		if i < len(clusterLabels) {
@@ -921,7 +928,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 		// remote operator's own view from the CR status instead.
 		if cluster == "" || s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
 			seedPersistedMiteFacts(cr, &crResp.MiteVersion, &crResp.JenkinsVersion, &crResp.JenkinsHealth, &crResp.LastSeen)
-			s.mergeMiteStatus(cr.Name, cr.Namespace, &crResp)
+			localIdx = append(localIdx, i)
 		} else if ms := cr.Status.MiteStatus; ms != nil {
 			crResp.MiteConnected = ms.Connected
 			crResp.MiteVersion = ms.Version
@@ -933,7 +940,22 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 				crResp.LastSeen = ms.LastSeen.Format("2006-01-02T15:04:05Z")
 			}
 		}
-		out = append(out, crResp)
+		out[i] = crResp
+	}
+	if s.deps.MiteRegistry != nil && len(localIdx) > 0 {
+		sem := make(chan struct{}, listMiteReadConcurrency)
+		var wg sync.WaitGroup
+		for _, i := range localIdx {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				cr := allControllers[i]
+				s.mergeMiteStatus(cr.Name, cr.Namespace, &out[i])
+			}(i)
+		}
+		wg.Wait()
 	}
 
 	resp := map[string]interface{}{

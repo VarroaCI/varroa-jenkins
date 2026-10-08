@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
+import { stubVirtualViewport } from "../test/virtualViewport";
 import Controllers from "./Controllers";
 
 const mockNavigate = vi.fn();
@@ -53,6 +54,8 @@ function renderPage() {
 }
 
 describe("Controllers", () => {
+  stubVirtualViewport();
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() });

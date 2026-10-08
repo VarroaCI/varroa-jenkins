@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
+import { stubVirtualViewport } from "../test/virtualViewport";
 import BroodOperations from "./BroodOperations";
 
 const mockNavigate = vi.fn();
@@ -76,6 +77,8 @@ const ctrlFixture = (name: string, overrides?: Record<string, unknown>) => ({
 });
 
 describe("BroodOperations", () => {
+  stubVirtualViewport();
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });

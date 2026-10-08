@@ -107,6 +107,33 @@ export function createControllerListItem(
   };
 }
 
+// createControllerFleet builds a deterministic fleet of n controllers for
+// scale tests. The phase mix repeats every 20 rows so every bucket is present.
+export function createControllerFleet(n: number): ControllerListItem[] {
+  return Array.from({ length: n }, (_, i) => {
+    const isCell = i % 10 === 5;
+    const base = {
+      name: `fleet-${String(i).padStart(4, "0")}`,
+      namespace: `ns-${i % 20}`,
+      cluster: i % 10 === 0 ? "member-1" : "core",
+      kind: (isCell ? "cell" : "stateful") as ControllerListItem["kind"],
+      jenkinsVersion: "2.504.3",
+      version: "2.504.3",
+      jenkinsHealth: "healthy",
+      lastSeen: "2026-10-08T12:00:00Z",
+    };
+    const cell = isCell ? { cellPool: "default", tenantCount: 2, maxTenants: 8, warm: false } : {};
+    const phase = i % 20;
+    if (phase === 0) {
+      return createControllerListItem({ ...base, ...cell, phase: "Failed", miteConnected: false, attention: { kind: "bootFailed", message: "exit 5" } });
+    }
+    if (phase === 1) return createControllerListItem({ ...base, ...cell, phase: "Provisioning", miteConnected: false });
+    if (phase === 2) return createControllerListItem({ ...base, ...cell, phase: "Hibernated", miteConnected: false });
+    if (phase === 3) return createControllerListItem({ ...base, ...cell, phase: "Running", miteConnected: false });
+    return createControllerListItem({ ...base, ...cell, phase: "Connected", miteConnected: true });
+  });
+}
+
 export function createControllerDetail(
   overrides?: Partial<ControllerDetail>,
 ): ControllerDetail {

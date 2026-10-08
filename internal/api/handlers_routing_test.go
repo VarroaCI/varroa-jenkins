@@ -3,16 +3,20 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
@@ -1042,5 +1046,156 @@ func TestLiveSnapshotWithoutHealthKeepsPersistedVerdict(t *testing.T) {
 	}
 	if row["lastSeen"] != now.Format("2006-01-02T15:04:05Z") || row["miteConnected"] != true {
 		t.Errorf("live heartbeat must still win for lastSeen/liveness: %v", row)
+	}
+}
+
+// concurrencyMiteTransport records the peak number of mite KV reads in flight.
+// Each read sleeps for delay, so overlapping reads show up in maxInFlight.
+type concurrencyMiteTransport struct {
+	transport.Transport
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+	delay       time.Duration
+}
+
+func (m *concurrencyMiteTransport) track() {
+	n := m.inFlight.Add(1)
+	defer m.inFlight.Add(-1)
+	for {
+		cur := m.maxInFlight.Load()
+		if n <= cur || m.maxInFlight.CompareAndSwap(cur, n) {
+			break
+		}
+	}
+	time.Sleep(m.delay)
+}
+
+func (m *concurrencyMiteTransport) Info(_, name string) (string, time.Time, time.Time, bool) {
+	m.track()
+	return "mite-" + name, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC), time.Time{}, true
+}
+
+func (m *concurrencyMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {
+	m.track()
+	return &mitev1.StateSnapshot{JenkinsVersion: "2.504.3", JenkinsHealth: "healthy"}
+}
+
+// nameSortedBrood fixes the listing order. The fake brood lists in map order,
+// so the test sorts it to compare the response order with a known order.
+type nameSortedBrood struct {
+	Brood
+}
+
+func (b *nameSortedBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	cc, cs, err := b.Brood.ListAll(ctx, ns, clusterFilter)
+	sort.Slice(cc, func(i, j int) bool { return cc[i].CR.Name < cc[j].CR.Name })
+	return cc, cs, err
+}
+
+func seedConcurrencyFleet(client *fakeResourceClient, n int) {
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("ctrl-%03d", i)
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}}
+		client.controllers[name] = cr
+		crdstore.MustSeed(client.crdStore, cr)
+	}
+}
+
+// The list reads each local mite in a bounded pool. Reads overlap, and the
+// pool never exceeds listMiteReadConcurrency. Rows keep the brood order.
+func TestHandleControllersListReadsMiteStateConcurrently(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	mite := &concurrencyMiteTransport{delay: 2 * time.Millisecond}
+	srv.deps.MiteRegistry = mite
+	seedConcurrencyFleet(client, 64)
+	srv.deps.Brood = &nameSortedBrood{Brood: newFakeBrood(client)}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	listing, _, err := srv.deps.Brood.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(envelope.Items) != 64 || len(listing) != 64 {
+		t.Fatalf("expected 64 items, got %d (listing %d)", len(envelope.Items), len(listing))
+	}
+	for i, cc := range listing {
+		item := envelope.Items[i]
+		if item["name"] != cc.CR.Name {
+			t.Fatalf("item %d = %v, want %s (brood order)", i, item["name"], cc.CR.Name)
+		}
+		if item["miteVersion"] != "mite-"+cc.CR.Name {
+			t.Errorf("%s miteVersion = %v, want mite-%s", cc.CR.Name, item["miteVersion"], cc.CR.Name)
+		}
+	}
+	if got := mite.maxInFlight.Load(); got <= 1 || got > listMiteReadConcurrency {
+		t.Errorf("peak in-flight mite reads = %d, want between 2 and %d", got, listMiteReadConcurrency)
+	}
+}
+
+// BenchmarkHandleControllersList400 times one controllers list of 400 local
+// rows. Each mite read takes one millisecond.
+func BenchmarkHandleControllersList400(b *testing.B) {
+	srv, client := newRoutingTestServer()
+	srv.deps.MiteRegistry = &concurrencyMiteTransport{delay: time.Millisecond}
+	seedConcurrencyFleet(client, 400)
+	srv.deps.Brood = newFakeBrood(client)
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	req = req.WithContext(contextWithClaims(req.Context(), adminClaims))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w := httptest.NewRecorder()
+		srv.HandleControllers(w, req)
+		if w.Code != http.StatusOK {
+			b.Fatalf("expected 200, got %d", w.Code)
+		}
+	}
+}
+
+// One malformed remote row must not drop the valid rows or panic the list.
+func TestHandleControllersSkipsUnreadableRemoteRow(t *testing.T) {
+	srv, _ := newRoutingTestServer()
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	valid := func(name string) json.RawMessage {
+		raw, _ := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}})
+		return raw
+	}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{
+			valid("remote-a"), json.RawMessage(`42`), valid("remote-b"),
+		}})
+	}
+	srv.deps.Brood = bf
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(envelope.Items) != 2 {
+		t.Fatalf("expected the 2 valid rows, got %+v", envelope.Items)
+	}
+	if envelope.Items[0]["name"] != "remote-a" || envelope.Items[1]["name"] != "remote-b" {
+		t.Errorf("valid rows = %v, %v", envelope.Items[0]["name"], envelope.Items[1]["name"])
 	}
 }

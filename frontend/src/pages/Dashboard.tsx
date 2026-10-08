@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useControllers } from "../hooks/useControllers";
@@ -16,12 +16,48 @@ import type { ControllerListItem } from "../hooks/useControllers";
 import type { ClusterEntry } from "../types";
 import styles from "./Dashboard.module.css";
 
+// HEALTH_LIST_LIMIT caps the brood health card. The card shows a phase bar
+// for the whole brood and this many controller rows.
+const HEALTH_LIST_LIMIT = 8;
+const PHASE_BUCKETS = ["Connected", "Running", "Provisioning", "Hibernated", "Failed"] as const;
+
+// phaseCounts counts controllers per phase bucket. Phases outside the buckets
+// count as "Other". Zero buckets are dropped.
+function phaseCounts(cs: ControllerListItem[]): { phase: string; count: number }[] {
+  const byPhase = new Map<string, number>();
+  for (const c of cs) {
+    const bucket = (PHASE_BUCKETS as readonly string[]).includes(c.phase) ? c.phase : "Other";
+    byPhase.set(bucket, (byPhase.get(bucket) ?? 0) + 1);
+  }
+  return [...PHASE_BUCKETS, "Other"]
+    .map((phase) => ({ phase, count: byPhase.get(phase) ?? 0 }))
+    .filter((x) => x.count > 0);
+}
+
+// lookRank orders controllers that need a look first. Attention comes first,
+// then a controller with no live mite that is not hibernated.
+function lookRank(c: ControllerListItem): number {
+  if (c.attention) return 0;
+  if (!c.miteConnected && c.phase !== "Hibernated") return 1;
+  return 2;
+}
+
+function needsLookFirst(a: ControllerListItem, b: ControllerListItem): number {
+  return lookRank(a) - lookRank(b) || a.name.localeCompare(b.name);
+}
+
 export default function Dashboard() {
   const { data, isLoading, error } = useControllers();
   const { data: clustersData, isLoading: clustersLoading, error: clustersError } = useClusters();
 
   const controllers = data ?? [];
   const total = controllers.length;
+  const shortlist = useMemo(
+    () => [...(data ?? [])].sort(needsLookFirst).slice(0, HEALTH_LIST_LIMIT),
+    [data],
+  );
+  const phases = useMemo(() => phaseCounts(data ?? []), [data]);
+  const rest = total - shortlist.length;
   const connected = controllers.filter((c) => c.miteConnected).length;
   const provisioning = controllers.filter((c) => c.phase === "Provisioning").length;
   const attention = controllers.filter((c) => c.attention);
@@ -124,11 +160,21 @@ export default function Dashboard() {
       <div className={styles.twoCol}>
         <Card title="⬡ Brood health" headerRight={<span className={styles.muted}>{controllers.length} controller{controllers.length === 1 ? "" : "s"}</span>}>
           <div className={styles.healthGrid}>
-            {controllers.map((c) => (
-              <HealthBar key={`${c.namespace}/${c.name}`} controller={c} />
-            ))}
-            {controllers.length === 0 && (
+            {total === 0 ? (
               <div className={styles.empty}>No controllers deployed yet.</div>
+            ) : (
+              <>
+                <PhaseBar counts={phases} />
+                {shortlist.map((c) => (
+                  <HealthBar key={`${c.cluster}/${c.namespace}/${c.name}`} controller={c} />
+                ))}
+                {rest > 0 && (
+                  <div className={styles.healthMore}>
+                    and {rest} more ·{" "}
+                    <Link to="/controllers" className={styles.healthLink}>View all controllers</Link>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Card>
@@ -155,6 +201,28 @@ function ClusterStrip({ clusters, isLoading, error }: { clusters: ClusterEntry[]
           <div className={styles.clusterCardAge}>{age(c.lastHeartbeat, { variant: "heartbeat" })}</div>
         </Link>
       ))}
+    </div>
+  );
+}
+
+// PhaseBar draws the phase distribution of the whole brood as one stacked bar,
+// with a legend of counts per phase.
+function PhaseBar({ counts }: { counts: { phase: string; count: number }[] }) {
+  const label = "Phase distribution: " + counts.map((x) => `${x.count} ${x.phase}`).join(", ");
+  return (
+    <div>
+      <div className={styles.phaseBar} role="img" aria-label={label}>
+        {counts.map((x) => (
+          <span key={x.phase} className={styles.phaseSeg} data-phase={x.phase} style={{ flexGrow: x.count }} />
+        ))}
+      </div>
+      <ul className={styles.phaseLegend}>
+        {counts.map((x) => (
+          <li key={x.phase}>
+            <span className={styles.phaseDot} data-phase={x.phase} /> {x.phase} <b>{x.count}</b>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

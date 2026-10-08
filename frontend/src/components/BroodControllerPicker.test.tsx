@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router-dom";
 import { renderWithProviders } from "../test/render-utils";
 import { BroodControllerPicker } from "./BroodControllerPicker";
+import { stubVirtualViewport } from "../test/virtualViewport";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -55,6 +56,8 @@ function renderPicker(onSelectionChange = vi.fn(), compact = false) {
 }
 
 describe("BroodControllerPicker", () => {
+  stubVirtualViewport();
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -851,4 +854,33 @@ describe("Kind column and kind filter", () => {
   });
 });
 
+});
+
+describe("BroodControllerPicker table scroll container", () => {
+  stubVirtualViewport();
+
+  it("moves focus between rows with the Arrow keys", async () => {
+    mockUseControllers.mockReturnValue({
+      data: [ctrlFixture("ctrl-a"), ctrlFixture("ctrl-b")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    const first = screen.getByRole("button", { name: /^Controller ctrl-a / });
+    first.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("button", { name: /^Controller ctrl-b / })).toHaveFocus();
+  });
+
+  it("wraps the table in a scroll container that holds the header", () => {
+    mockUseControllers.mockReturnValue({
+      data: [ctrlFixture("ctrl-a"), ctrlFixture("ctrl-b")],
+      isLoading: false,
+      error: null,
+    });
+    renderPicker();
+    const scroll = screen.getByTestId("controller-table-scroll");
+    expect(within(scroll).getAllByRole("columnheader").length).toBeGreaterThan(0);
+    expect(within(scroll).getByText("ctrl-a")).toBeInTheDocument();
+  });
 });

@@ -374,3 +374,46 @@ describe("Dashboard needs-attention metric", () => {
     expect(within(card).getByText("1 blocked \u00b7 1 boot failed \u00b7 1 failed")).toBeInTheDocument();
   });
 });
+
+describe("Dashboard brood health rollup", () => {
+  it("lists controllers that need attention first and caps the list at eight", () => {
+    const attention = { kind: "bootFailed" as const, message: "exit 5" };
+    const ctrls = [
+      createControllerListItem({ name: "zeta-ok", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "bad-b", phase: "Failed", miteConnected: false, attention }),
+      createControllerListItem({ name: "bad-a", phase: "Failed", miteConnected: false, attention }),
+      createControllerListItem({ name: "down", phase: "Running", miteConnected: false }),
+      createControllerListItem({ name: "sleep", phase: "Hibernated", miteConnected: false }),
+    ];
+    for (let i = 0; i < 7; i++) {
+      ctrls.push(createControllerListItem({ name: `ok-${i}`, phase: "Connected", miteConnected: true }));
+    }
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    renderWithProviders(<Dashboard />);
+
+    const rows = screen.getAllByTestId("health-row");
+    expect(rows).toHaveLength(8);
+    expect(within(rows[0]).getByRole("link", { name: /bad-a/ })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole("link", { name: /bad-b/ })).toBeInTheDocument();
+    expect(within(rows[2]).getByRole("link", { name: /\/down$/ })).toBeInTheDocument();
+    expect(screen.getByText(/and 4 more/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all controllers" })).toHaveAttribute("href", "/controllers");
+  });
+
+  it("renders a phase distribution bar with per-phase counts", () => {
+    const ctrls = [
+      createControllerListItem({ name: "a", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "b", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "c", phase: "Provisioning", miteConnected: false }),
+      createControllerListItem({ name: "d", phase: "Failed", miteConnected: false, attention: { kind: "bootFailed", message: "exit 5" } }),
+    ];
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    const { container } = renderWithProviders(<Dashboard />);
+
+    const bar = screen.getByRole("img", { name: /Phase distribution/ });
+    expect(bar).toHaveAttribute("aria-label", "Phase distribution: 2 Connected, 1 Provisioning, 1 Failed");
+    expect(bar.querySelectorAll("[data-phase]")).toHaveLength(3);
+    expect(container.querySelectorAll("[data-testid='health-row']")).toHaveLength(4);
+    expect(screen.queryByText(/more ·/)).not.toBeInTheDocument();
+  });
+});

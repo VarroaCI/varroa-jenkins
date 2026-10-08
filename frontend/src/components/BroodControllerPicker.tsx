@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useControllers } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { getProvisioningConfig } from "../api/client";
@@ -49,6 +50,12 @@ function KindCell({ c }: { c: ControllerListItem }) {
     </span>
   );
 }
+
+// PickerRow is one entry of the flat list the virtualizer windows. A group
+// row carries a header; a controller row carries one controller.
+type PickerRow =
+  | { type: "group"; key: string; label: string; count: number }
+  | { type: "controller"; key: string; c: ControllerListItem };
 
 type SortKey = "name" | "cluster" | "phase" | "kind" | "version" | "endpoint" | "mite";
 type SortDir = "asc" | "desc";
@@ -199,8 +206,8 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     onSelectionChange(Array.from(next));
   };
 
-  const allControllers = controllers ?? [];
-  const filtered = allControllers.filter((c) => {
+  const allControllers = useMemo(() => controllers ?? [], [controllers]);
+  const filtered = useMemo(() => allControllers.filter((c) => {
     if (phaseFilter === ATTENTION_CHIP) {
       if (!c.attention) return false;
     } else if (phaseFilter !== "All" && c.phase !== phaseFilter) return false;
@@ -209,14 +216,17 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     if (clusterFilter && c.cluster !== clusterFilter) return false;
     if (kindFilter.length > 0 && !kindFilter.includes(c.kind)) return false;
     return true;
-  });
+  }), [allControllers, phaseFilter, nameFilter, nsFilter, clusterFilter, kindFilter]);
 
-  const sortedFiltered = [...filtered].sort((a, b) => {
+  const sortedFiltered = useMemo(() => [...filtered].sort((a, b) => {
     const cmp = compareControllers(a, b, sortKey);
     return sortDir === "asc" ? cmp : -cmp;
-  });
+  }), [filtered, sortKey, sortDir]);
 
-  const filteredKeys = filtered.map((c) => c.cluster + "/" + c.namespace + "/" + c.name);
+  const filteredKeys = useMemo(
+    () => filtered.map((c) => c.cluster + "/" + c.namespace + "/" + c.name),
+    [filtered],
+  );
   const allFilteredSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selectedSet.has(k));
 
   const toggleAll = () => {
@@ -230,28 +240,119 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     }
   };
 
-  const counts: Record<string, number> = {};
-  for (const c of allControllers) {
-    counts[c.phase] = (counts[c.phase] ?? 0) + 1;
-  }
-  counts["All"] = allControllers.length;
-  counts[ATTENTION_CHIP] = allControllers.filter((c) => c.attention).length;
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const c of allControllers) {
+      m[c.phase] = (m[c.phase] ?? 0) + 1;
+    }
+    m["All"] = allControllers.length;
+    m[ATTENTION_CHIP] = allControllers.filter((c) => c.attention).length;
+    return m;
+  }, [allControllers]);
 
-  const kindCounts: Record<string, number> = { cell: 0, stateful: 0 };
-  for (const c of allControllers) {
-    kindCounts[c.kind] = (kindCounts[c.kind] ?? 0) + 1;
-  }
+  const kindCounts = useMemo(() => {
+    const m: Record<string, number> = { cell: 0, stateful: 0 };
+    for (const c of allControllers) {
+      m[c.kind] = (m[c.kind] ?? 0) + 1;
+    }
+    return m;
+  }, [allControllers]);
   const toggleKind = (value: string) => {
     setKindFilter((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   };
 
-  const nsCounts: Record<string, number> = {};
-  for (const c of allControllers) {
-    nsCounts[c.namespace] = (nsCounts[c.namespace] ?? 0) + 1;
-  }
-  const nsOptions = Object.keys(nsCounts).sort();
+  const nsCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const c of allControllers) {
+      m[c.namespace] = (m[c.namespace] ?? 0) + 1;
+    }
+    return m;
+  }, [allControllers]);
+  const nsOptions = useMemo(() => Object.keys(nsCounts).sort(), [nsCounts]);
 
-  const clusterOptions = [...new Set(allControllers.map((c) => c.cluster))].sort();
+  const clusterOptions = useMemo(
+    () => [...new Set(allControllers.map((c) => c.cluster))].sort(),
+    [allControllers],
+  );
+
+  // rows is the flat list the virtualizer windows: group headers and
+  // controller rows in display order.
+  const rows = useMemo<PickerRow[]>(() => {
+    const controllerRow = (c: ControllerListItem): PickerRow => ({
+      type: "controller",
+      key: c.cluster + "/" + c.namespace + "/" + c.name,
+      c,
+    });
+    const groupRow = (key: string, label: string, count: number): PickerRow => ({
+      type: "group",
+      key,
+      label,
+      count,
+    });
+
+    if (groupBy === "none") return sortedFiltered.map(controllerRow);
+
+    if (groupBy === "namespace") {
+      const groups: Record<string, ControllerListItem[]> = {};
+      for (const c of sortedFiltered) (groups[c.namespace] ??= []).push(c);
+      return Object.keys(groups).sort().flatMap((ns) => [
+        groupRow(`group-ns-${ns}`, ns, groups[ns].length),
+        ...groups[ns].map(controllerRow),
+      ]);
+    }
+
+    const groups: Record<string, ControllerListItem[]> = {};
+    for (const c of sortedFiltered) (groups[c.cluster] ??= []).push(c);
+    const groupKeys = Object.keys(groups).sort((a, b) => {
+      if (core === a) return -1;
+      if (core === b) return 1;
+      return a.localeCompare(b);
+    });
+    return groupKeys.flatMap((cl) => [
+      groupRow(`group-cl-${cl}`, cl, groups[cl].length),
+      ...groups[cl].map(controllerRow),
+    ]);
+  }, [sortedFiltered, groupBy, core]);
+
+  // Rows are measured because the mobile layout below 760px renders taller
+  // rows. The hook runs before the loading and error branches.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (i) => (rows[i]?.type === "group" ? 36 : 56),
+    overscan: 12,
+    getItemKey: (i) => rows[i]?.key ?? i,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
+  // Rows outside the window are not in the DOM, so Arrow keys move focus
+  // between rows and scroll the window to the row that takes focus.
+  const pendingFocus = useRef<number | null>(null);
+  const focusRow = (index: number): boolean => {
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${index}"] [role="button"]`);
+    if (!el) return false;
+    el.focus();
+    return true;
+  };
+  useEffect(() => {
+    if (pendingFocus.current != null && focusRow(pendingFocus.current)) {
+      pendingFocus.current = null;
+    }
+  });
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const current = (e.target as HTMLElement).closest<HTMLElement>("[data-index]");
+    if (!current) return;
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    let next = Number(current.dataset.index) + step;
+    while (next >= 0 && next < rows.length && rows[next].type === "group") next += step;
+    if (next < 0 || next >= rows.length) return;
+    e.preventDefault();
+    if (focusRow(next)) return;
+    pendingFocus.current = next;
+    virtualizer.scrollToIndex(next, { align: "auto" });
+  };
 
   const renderRow = (c: ControllerListItem) => {
     const key = c.cluster + "/" + c.namespace + "/" + c.name;
@@ -266,7 +367,6 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
     };
     return (
       <div
-        key={key}
         className={styles.ctrlRow}
         role="button"
         tabIndex={0}
@@ -325,8 +425,13 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
   };
 
   const tableContent = (
-    <>
-      <div className={styles.ctrlRow + " " + styles.head}>
+    <div
+      ref={scrollRef}
+      className={compact ? styles.tableScrollCompact : styles.tableScroll}
+      data-testid="controller-table-scroll"
+      onKeyDown={onListKeyDown}
+    >
+      <div className={`${styles.ctrlRow} ${styles.head} ${styles.stickyHead}`}>
         <span>
           {canManage && <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} onClick={(e) => e.stopPropagation()} />}
         </span>
@@ -339,37 +444,25 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
         <SortHeader label="Mite" sortKeyName="mite" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
         <span />
       </div>
-      {(() => {
-        if (groupBy === "none") {
-          return sortedFiltered.map(renderRow);
-        }
-
-        if (groupBy === "namespace") {
-          const groups: Record<string, ControllerListItem[]> = {};
-          for (const c of sortedFiltered) (groups[c.namespace] ??= []).push(c);
-          const groupNames = Object.keys(groups).sort();
-          return groupNames.flatMap((ns) => [
-            <div key={`group-ns-${ns}`} className={styles.groupHeader}>
-              {ns} ({groups[ns].length})
-            </div>,
-            ...groups[ns].map(renderRow),
-          ]);
-        }
-
-        const groups: Record<string, ControllerListItem[]> = {};
-        for (const c of sortedFiltered) (groups[c.cluster] ??= []).push(c);
-        const groupKeys = Object.keys(groups).sort((a, b) => {
-          if (core === a) return -1;
-          if (core === b) return 1;
-          return a.localeCompare(b);
-        });
-        return groupKeys.flatMap((cl) => [
-          <div key={`group-cl-${cl}`} className={styles.groupHeader}>
-            {cl} ({groups[cl].length})
-          </div>,
-          ...groups[cl].map(renderRow),
-        ]);
-      })()}
+      <div className={styles.virtualBody} style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((v) => {
+          const row = rows[v.index];
+          return (
+            <div
+              key={v.key}
+              data-index={v.index}
+              data-last={v.index === rows.length - 1 ? "" : undefined}
+              ref={virtualizer.measureElement}
+              className={styles.virtualRow}
+              style={{ transform: `translateY(${v.start}px)` }}
+            >
+              {row.type === "group"
+                ? <div className={styles.groupHeader}>{row.label} ({row.count})</div>
+                : renderRow(row.c)}
+            </div>
+          );
+        })}
+      </div>
       {filtered.length === 0 && (
         <div className={styles.empty}>
           {allControllers.length === 0
@@ -377,9 +470,8 @@ export function BroodControllerPicker({ selected, onSelectionChange, compact = f
             : "No controllers match the current filters."}
         </div>
       )}
-    </>
+    </div>
   );
-
   return (
     <div>
       <div className={styles.filterBar}>

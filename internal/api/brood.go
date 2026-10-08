@@ -335,14 +335,14 @@ func (f *busBrood) listRemote(cluster, ns string) ([]ClusterController, []Cluste
 	if resp.Error != "" {
 		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
 	}
-	cc := make([]ClusterController, len(resp.Items))
-	for i, raw := range resp.Items {
+	cc := make([]ClusterController, 0, len(resp.Items))
+	for _, raw := range resp.Items {
 		var cr v1alpha1.Controller
 		if err := json.Unmarshal(raw, &cr); err != nil {
 			f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
 			continue
 		}
-		cc[i] = ClusterController{Cluster: cluster, CR: &cr}
+		cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
 	}
 	return cc, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }
