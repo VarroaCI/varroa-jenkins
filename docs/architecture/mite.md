@@ -117,4 +117,4 @@ kubectl logs -n <namespace> statefulset/<name>-<uid8> -c mite --tail=100
 | Commands time out | Jenkins readiness, command deadline, and long-running configuration work. |
 | Planned restart interrupts builds | Effective `drainTimeoutSeconds` and termination grace period. |
 
-Changing `spec.miteSpec.image`, pull policy, or resources requires a pod roll. See [Pod customization](../config/pod-customization.md) and [Reconciliation](../operations/reconciliation.md).
+Changing `spec.miteSpec.image`, pull policy, or resources requires a pod roll. You can edit these fields in the Spec Editor Form tab. See [Pod customization](../config/pod-customization.md) and [Reconciliation](../operations/reconciliation.md).

@@ -4,18 +4,21 @@ import type { UiSchema } from "@rjsf/utils";
  * Curated `uiSchema` for the Tier-1 generated ControllerSpec form — the "Form"
  * tab of `SpecEditorCard`.
  *
- * Tier 1 is exactly the six fields not owned by a dedicated card, not edited
- * as YAML, and not dead-pending-CRD-removal: `resources`, `persistence`,
- * `rbacSpec`, `pluginSpec`, `backupSpec`, `className`. Everything else in the
- * ControllerSpec schema is excluded from rendering by `EXCLUDED_FROM_TIER1`
- * (see `excludedFields.ts`), which also excludes the dead `endpoint` field.
+ * Tier 1 is every ControllerSpec field not owned by a dedicated card, not
+ * edited as YAML, and not dead-pending-CRD-removal: `className`, `resources`,
+ * `persistence`, `rbacSpec`, `pluginSpec`, `backupSpec`, `cell`, `headless`,
+ * `ingressSpec`, `miteSpec`. Everything else in the ControllerSpec schema is
+ * excluded from rendering by `EXCLUDED_FROM_TIER1` (see `excludedFields.ts`),
+ * which also excludes the dead `endpoint` field.
  *
  * The `ui:order` and `ui:title`s here replace RJSF's raw JSON property names
- * with a deliberate field order and human-readable labels. No `ui:readonly`
- * anywhere: no Tier-1 field is immutable — `persistence` is *ineffective until
- * teardown/recreate*, not immutable, so it carries `ui:help` instead.
- * `resources.limits`/`resources.requests` are free-form maps whose key inputs
- * get `ui:options.keySuggestions`, rendered as a non-restricting datalist.
+ * with a deliberate field order and human-readable labels. `ingressSpec.mode`
+ * is `ui:readonly` because the CRD and the operator refuse a change after
+ * create. `persistence` is *ineffective until teardown/recreate*, not
+ * immutable, so it carries `ui:help` instead. Map fields (`resources.*`,
+ * `ingressSpec.annotations`, `miteSpec.resources.*`) are free-form maps whose
+ * key inputs get `ui:options.keySuggestions`, rendered as a non-restricting
+ * datalist.
  */
 export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
   "ui:order": [
@@ -27,6 +30,9 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
     "backupSpec",
     "cell",
     "headless",
+    "ingressSpec",
+    "miteSpec",
+    "*",
   ],
   className: {
     "ui:title": "Controller class",
@@ -79,5 +85,41 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
     "ui:help":
       "Blocks the Jenkins web UI for every non-admin caller. A cell is " +
       "always headless, so this switch matters only for a one-tenant controller.",
+  },
+  ingressSpec: {
+    "ui:title": "Ingress",
+    host: { "ui:title": "Host" },
+    tlsSecretName: { "ui:title": "TLS secret" },
+    ingressClassName: { "ui:title": "Ingress class" },
+    mode: {
+      "ui:title": "Routing mode",
+      "ui:readonly": true,
+      "ui:help": "The routing mode cannot change after the controller is created.",
+    },
+    annotations: {
+      "ui:title": "Annotations",
+      "ui:options": {
+        keySuggestions: [
+          "nginx.ingress.kubernetes.io/proxy-body-size",
+          "cert-manager.io/cluster-issuer",
+        ],
+      },
+    },
+  },
+  miteSpec: {
+    "ui:title": "Mite sidecar",
+    image: { "ui:title": "Mite image" },
+    imagePullPolicy: { "ui:title": "Mite image pull policy" },
+    resources: {
+      "ui:title": "Mite resources",
+      requests: {
+        "ui:title": "Mite requests",
+        "ui:options": { keySuggestions: ["cpu", "memory"] },
+      },
+      limits: {
+        "ui:title": "Mite limits",
+        "ui:options": { keySuggestions: ["cpu", "memory"] },
+      },
+    },
   },
 };

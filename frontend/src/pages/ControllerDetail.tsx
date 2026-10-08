@@ -1598,7 +1598,7 @@ function ConfigurationTab({
         <ProbesCard ctrl={ctrl} cluster={cluster} ns={namespace} name={name} canUpdate={canUpdate} />
         {/*
           The SpecEditorCard hydrates every tier (curated form, podOverrides,
-          ingressSpec/miteSpec YAML, resource overlays) from ctrl.spec — the full
+          resource overlays) from ctrl.spec — the full
           ControllerSpec the BFF projects on the detail response. initialOverlay /
           initialPodOverrides remain as the pre-spec seed; the hydration effect
           overrides them from spec and keeps the immutable baseline for diffing.

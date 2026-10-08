@@ -1107,11 +1107,16 @@ MiteSpec:
           description: Minimum resource requests.
           additionalProperties:
             type: string
+            # Kubernetes quantity pattern, mirrored from the Controller CRD.
+            # See the pattern note on ControllerSpec.resources.
+            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
         limits:
           type: object
           description: Maximum resource limits.
           additionalProperties:
             type: string
+            # See the pattern note on requests.
+            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
     image:
       type: string
       description: Mite sidecar container image override for this Controller.

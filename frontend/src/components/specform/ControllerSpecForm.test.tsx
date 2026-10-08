@@ -42,14 +42,32 @@ describe("ControllerSpecForm", () => {
     expect(screen.queryByText("endpoint")).not.toBeInTheDocument();
   });
 
-  it("does not render ingressSpec or miteSpec sub-fields (moved to YAML tiers)", () => {
+  it("renders the Ingress and Mite sidecar groups with human labels", () => {
     renderWithQuery(<ControllerSpecForm />);
-    // ingressSpec and miteSpec are excluded via EXCLUDED_FROM_TIER1 — their
-    // nested field labels (previously rendered as a broken generated form,
-    // see issue #429) should NOT appear.
-    expect(screen.queryByText("host")).not.toBeInTheDocument();
-    expect(screen.queryByText("annotations")).not.toBeInTheDocument();
-    expect(screen.queryByText("imagePullPolicy")).not.toBeInTheDocument();
+    expect(screen.getByText("Ingress")).toBeInTheDocument();
+    expect(screen.getByText("Mite sidecar")).toBeInTheDocument();
+    expect(screen.getByText("Routing mode")).toBeInTheDocument();
+    expect(screen.getByText("Mite limits")).toBeInTheDocument();
+  });
+
+  it("renders the ingress routing mode read-only with its help text", () => {
+    renderWithQuery(<ControllerSpecForm value={{ ingressSpec: { mode: "path" } }} />);
+    const mode = document.getElementById("root_ingressSpec_mode") as HTMLInputElement;
+    expect(mode).toBeDisabled();
+    expect(screen.getByText(/cannot change after the controller is created/)).toBeInTheDocument();
+  });
+
+  it("renders ingress annotation rows whose keys contain a prefix and a slash", () => {
+    renderWithQuery(
+      <ControllerSpecForm
+        value={{ ingressSpec: { annotations: { "nginx.ingress.kubernetes.io/proxy-body-size": "512m" } } }}
+      />,
+    );
+    const keyInput = document.getElementById(
+      "root_ingressSpec_annotations_nginx.ingress.kubernetes.io/proxy-body-size-key",
+    ) as HTMLInputElement | null;
+    expect(keyInput).not.toBeNull();
+    expect(keyInput?.value).toBe("nginx.ingress.kubernetes.io/proxy-body-size");
   });
 
   it("renders typed fields with a human label (Controller class)", () => {
