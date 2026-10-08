@@ -37,6 +37,10 @@ inputs:
     description: Install python3 (apt).
     required: false
     default: "false"
+  jq:
+    description: Install jq (apt).
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -169,3 +173,16 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y -qq python3
         python3 --version
+
+    - name: Install jq
+      if: inputs.jq == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v jq >/dev/null 2>&1; then
+          echo "jq already present: $(jq --version)"
+          exit 0
+        fi
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq jq
+        jq --version
