@@ -123,7 +123,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 
 		spec := makeSpec("jenkins/jenkins:2.570.2", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -167,7 +167,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// Desired (spec) image for jenkins is unchanged from the previous
 		// stamp (2.570.1 -> 2.570.1): the out-of-band edit stays preserved.
 		spec := makeSpec("jenkins/jenkins:2.570.1", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -212,7 +212,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// prev==override != this tick's want==2.570.1, incorrectly treating
 		// the still-unchanged desired value as a delta and stomping the
 		// override.
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet (tick 2): %v", err)
 		}
 		got2, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -259,7 +259,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// Desired (spec) image for jenkins CHANGES from the previous stamp
 		// (2.570.1 -> 2.570.2): new intent must override the stale hotfix.
 		spec := makeSpec("jenkins/jenkins:2.570.2", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -297,7 +297,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 
 		spec := makeSpec("jenkins/jenkins:2.570.2", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -335,7 +335,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 
 		spec := makeSpec("jenkins/jenkins:2.570.2", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -376,7 +376,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		}
 
 		spec := makeSpec("jenkins/jenkins:2.570.1", "m:2")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -446,7 +446,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// (spec now wants "Always", live/stale is "Never").
 		spec := makeSpec("jenkins/jenkins:2.570.1", "m:1")
 		spec.MiteImagePullPolicy = "Always"
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -495,7 +495,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		// value is unchanged from its stamp, keeping its out-of-band override
 		// preserved and isolating this test to reordering behavior alone.
 		spec := makeSpec("jenkins/jenkins:2.570.1", "m:2")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -543,7 +543,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 		spec.ResourceOverlay = &v1alpha1.ResourceOverlay{
 			StatefulSet: "spec:\n  template:\n    spec:\n      containers:\n      - name: jenkins\n        image: my-reg/custom:9.9\n",
 		}
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -571,7 +571,7 @@ func TestCreateStatefulSetImageUpdate(t *testing.T) {
 	t.Run("create path (no existing STS)", func(t *testing.T) {
 		c, dyn := setup()
 		spec := makeSpec("jenkins/jenkins:2.570.2", "m:1")
-		if err := c.CreateStatefulSet(ctx, spec); err != nil {
+		if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 			t.Fatalf("CreateStatefulSet: %v", err)
 		}
 		got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -651,7 +651,7 @@ func TestCreateStatefulSetPreservesVolumeClaimTemplates(t *testing.T) {
 		OIDCIssuer:     "https://oidc.example.com",
 		VarroaLoginURL: "https://login.example.com",
 	}
-	if err := c.CreateStatefulSet(ctx, spec); err != nil {
+	if err := c.CreateStatefulSet(ctx, spec, noStatefulSetFence); err != nil {
 		t.Fatalf("CreateStatefulSet update: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "test-sts", metav1.GetOptions{})
@@ -673,7 +673,7 @@ func TestCreateStatefulSetPreservesVolumeClaimTemplates(t *testing.T) {
 	// update-only.
 	fresh := spec
 	fresh.Name = "fresh-sts"
-	if err := c.CreateStatefulSet(ctx, fresh); err != nil {
+	if err := c.CreateStatefulSet(ctx, fresh, noStatefulSetFence); err != nil {
 		t.Fatalf("CreateStatefulSet create: %v", err)
 	}
 	created, err := dyn.Resource(stsGVR).Namespace("ns").Get(ctx, "fresh-sts", metav1.GetOptions{})

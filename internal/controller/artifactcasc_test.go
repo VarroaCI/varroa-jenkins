@@ -726,7 +726,7 @@ func TestCreateStatefulSet_ArtifactSecretHashAnnotation(t *testing.T) {
 	spec.ArtifactSecretName = "ci-artifacts"
 	spec.ArtifactSecretHash = "deadbeef"
 
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace("ns").Get(context.Background(), "ci-artifacts-hash", metav1.GetOptions{})

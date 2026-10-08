@@ -2759,3 +2759,227 @@ func TestScaleStatefulSetToZero_FenceErrorSendsNoPatch(t *testing.T) {
 		t.Fatalf("patches = %v, want none after a fence error", *patches)
 	}
 }
+
+// noStatefulSetFence is a fence that always passes.
+func noStatefulSetFence(context.Context) error { return nil }
+
+// seedFenceStatefulSet returns a fake client whose store holds StatefulSet
+// "web" in namespace "ns" with resourceVersion "7". A nil replicas omits
+// spec.replicas.
+func seedFenceStatefulSet(t *testing.T, replicas any) (*ClientsetClient, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	c, dyn := newFakeStsClient()
+	spec := map[string]any{}
+	if replicas != nil {
+		spec["replicas"] = replicas
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "StatefulSet",
+		"metadata":   map[string]any{"name": "web", "namespace": "ns", "resourceVersion": "7"},
+		"spec":       spec,
+	}}
+	if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(context.Background(), obj, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed statefulset: %v", err)
+	}
+	// The seed write is not part of the call under test.
+	dyn.ClearActions()
+	return c, dyn
+}
+
+// statefulSetVerbs returns the verbs of the StatefulSet actions that the
+// fake dynamic client recorded, in order.
+func statefulSetVerbs(dyn *dynamicfake.FakeDynamicClient) []string {
+	var verbs []string
+	for _, a := range dyn.Actions() {
+		if a.GetResource().Resource == "statefulsets" {
+			verbs = append(verbs, a.GetVerb())
+		}
+	}
+	return verbs
+}
+
+func TestCreateStatefulSet_FencesBeforeCreate(t *testing.T) {
+	c, dyn := newFakeStsClient()
+	var atFence []string
+	fenceCalls := 0
+	err := c.CreateStatefulSet(context.Background(), baseCascHashSpec("web", ""), func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before any write", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "create"}) {
+		t.Fatalf("verbs = %v, want [get create]", got)
+	}
+}
+
+func TestCreateStatefulSet_FencesScaleUpFromZero(t *testing.T) {
+	c, dyn := seedFenceStatefulSet(t, int64(0))
+	var atFence []string
+	fenceCalls := 0
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before the update", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "update"}) {
+		t.Fatalf("verbs = %v, want [get update]", got)
+	}
+	var updated *unstructured.Unstructured
+	for _, a := range dyn.Actions() {
+		if u, ok := a.(clienttesting.UpdateAction); ok && a.GetResource().Resource == "statefulsets" {
+			updated = u.GetObject().(*unstructured.Unstructured)
+		}
+	}
+	if updated == nil {
+		t.Fatal("no statefulset update recorded")
+	}
+	if rv := updated.GetResourceVersion(); rv != "7" {
+		t.Fatalf("update resourceVersion = %q, want the value read before the fence (7)", rv)
+	}
+	if n := stsReplicaCount(updated); n != 1 {
+		t.Fatalf("update replicas = %d, want 1", n)
+	}
+}
+
+func TestCreateStatefulSet_SkipsFenceWhenReplicasUnchanged(t *testing.T) {
+	for name, replicas := range map[string]any{"one": int64(1), "missing": nil} {
+		t.Run(name, func(t *testing.T) {
+			c, dyn := seedFenceStatefulSet(t, replicas)
+			spec := baseCascHashSpec("web", "")
+			spec.Replicas = ptr32(1)
+			err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+				t.Error("fence must not run when the replica count does not scale up from 0")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("CreateStatefulSet: %v", err)
+			}
+			if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "update"}) {
+				t.Fatalf("verbs = %v, want [get update]", got)
+			}
+		})
+	}
+}
+
+func TestCreateStatefulSet_FenceErrorSendsNoWrite(t *testing.T) {
+	fenceErr := errors.New("fence refused")
+	fail := func(context.Context) error { return fenceErr }
+
+	c, dyn := newFakeStsClient()
+	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec("web", ""), fail); !errors.Is(err, fenceErr) {
+		t.Fatalf("create: err = %v, want the fence error", err)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get"}) {
+		t.Fatalf("create: verbs = %v, want [get] only", got)
+	}
+
+	zero, dynZero := seedFenceStatefulSet(t, int64(0))
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	if err := zero.CreateStatefulSet(context.Background(), spec, fail); !errors.Is(err, fenceErr) {
+		t.Fatalf("scale-up: err = %v, want the fence error", err)
+	}
+	if got := statefulSetVerbs(dynZero); !reflect.DeepEqual(got, []string{"get"}) {
+		t.Fatalf("scale-up: verbs = %v, want [get] only", got)
+	}
+}
+
+func TestStsReplicaCount(t *testing.T) {
+	cases := []struct {
+		name     string
+		replicas any
+		want     int64
+	}{
+		{"missing", nil, 1},
+		{"int64 zero", int64(0), 0},
+		{"int32 three", int32(3), 3},
+		{"int four", 4, 4},
+		{"float64 zero", float64(0), 0},
+		{"float64 two", float64(2), 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{}}}
+			if tc.replicas != nil {
+				obj.Object["spec"].(map[string]any)["replicas"] = tc.replicas
+			}
+			if got := stsReplicaCount(obj); got != tc.want {
+				t.Fatalf("stsReplicaCount = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateStatefulSet_AdoptsPeerCreateOnAlreadyExists(t *testing.T) {
+	c, dyn := newFakeStsClient()
+	raced := false
+	dyn.PrependReactor("create", "statefulsets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		if raced {
+			return false, nil, nil
+		}
+		raced = true
+		// A peer tick creates the StatefulSet between our read and our create.
+		peer := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "StatefulSet",
+			"metadata":   map[string]any{"name": "web", "namespace": "ns", "resourceVersion": "3"},
+			"spec":       map[string]any{"replicas": int64(1)},
+		}}
+		if err := dyn.Tracker().Create(stsGVR, peer, "ns"); err != nil {
+			t.Errorf("seed peer statefulset: %v", err)
+		}
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, "web")
+	})
+	// The fake tracker clears resourceVersion on the recorded update object,
+	// so the value is captured here, before the tracker handles the update.
+	updateRV := ""
+	dyn.PrependReactor("update", "statefulsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		updateRV = action.(clienttesting.UpdateAction).GetObject().(*unstructured.Unstructured).GetResourceVersion()
+		return false, nil, nil
+	})
+	var atFence []string
+	fenceCalls := 0
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet on a peer's create: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1: the adopted update must not fence again", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before the create", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "create", "get", "update"}) {
+		t.Fatalf("verbs = %v, want [get create get update]", got)
+	}
+	if updateRV != "3" {
+		t.Fatalf("update resourceVersion = %q, want the peer's 3 from the re-read", updateRV)
+	}
+}

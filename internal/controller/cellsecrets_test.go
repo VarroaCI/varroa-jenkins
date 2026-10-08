@@ -201,7 +201,7 @@ func TestCreateStatefulSet_CellSecretsHasNoContentHash(t *testing.T) {
 	spec.ArtifactSecretName = "cell-artifacts"
 	spec.ArtifactSecretHash = "deadbeef"
 
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace("ns").Get(context.Background(), "cell-secrets-hash", metav1.GetOptions{})

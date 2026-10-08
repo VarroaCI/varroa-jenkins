@@ -568,7 +568,7 @@ func TestReconcile_StalledReplicaDoesNotScaleDownAfterWake(t *testing.T) {
 		if err := newOwner.WakeControllerAction(ctx, "ns", "mine"); err != nil {
 			t.Fatalf("new owner wake: %v", err)
 		}
-		if err := client.CreateStatefulSet(ctx, StatefulSetSpec{Name: prefix, Namespace: "ns", Replicas: ptr32(1)}); err != nil {
+		if err := client.CreateStatefulSet(ctx, StatefulSetSpec{Name: prefix, Namespace: "ns", Replicas: ptr32(1)}, noStatefulSetFence); err != nil {
 			t.Fatalf("new owner scale up: %v", err)
 		}
 	})
@@ -600,7 +600,7 @@ func TestReconcile_ScaleDownConflictsWhenStatefulSetChangesAfterFence(t *testing
 	prefix := controllerPrefix(cr)
 	client.stsReplicas = map[string]int32{prefix: 1}
 	client.afterScaleFence = func() {
-		if err := client.CreateStatefulSet(context.Background(), StatefulSetSpec{Name: prefix, Namespace: "ns", Replicas: ptr32(1)}); err != nil {
+		if err := client.CreateStatefulSet(context.Background(), StatefulSetSpec{Name: prefix, Namespace: "ns", Replicas: ptr32(1)}, noStatefulSetFence); err != nil {
 			t.Errorf("concurrent statefulset write: %v", err)
 		}
 	}
@@ -614,6 +614,175 @@ func TestReconcile_ScaleDownConflictsWhenStatefulSetChangesAfterFence(t *testing
 	}
 	if client.stsReplicas[prefix] != 1 {
 		t.Fatalf("StatefulSet replicas = %d, want 1", client.stsReplicas[prefix])
+	}
+	got, gerr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if gerr != nil {
+		t.Fatalf("final read: %v", gerr)
+	}
+	for _, c := range got.Status.Conditions {
+		if c.Type == v1alpha1.ConditionReconcileBlocked && c.Status == metav1.ConditionTrue {
+			t.Fatalf("ReconcileBlocked=True, want no block after a fenced conflict")
+		}
+	}
+}
+
+// provisioningStalledController returns ns/mine as a Running controller in
+// Provisioning that carries its label and finalizer. The tick therefore sends
+// no meta write before it reaches the StatefulSet create or update.
+func provisioningStalledController() *v1alpha1.Controller {
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseProvisioning)
+	cr.ResourceVersion = "1"
+	cr.Labels = map[string]string{v1alpha1.LabelControllerName: "mine"}
+	cr.Finalizers = []string{finalizerName}
+	return cr
+}
+
+// requireStalledScaleUpFenced checks the outcome of a stalled provisioning
+// tick that resumed after the new owner powered the controller off. The tick
+// must requeue without an error, the StatefulSet must keep 0 replicas, and the
+// tick must have reached the scale-up fence.
+func requireStalledScaleUpFenced(t *testing.T, client *testClient, res reconcile.Result, err error, prefix string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("stalled replica reconcile: %v", err)
+	}
+	if res.RequeueAfter != tickConflictRequeue {
+		t.Fatalf("stalled replica RequeueAfter = %v, want %v", res.RequeueAfter, tickConflictRequeue)
+	}
+	if client.stsReplicas[prefix] != 0 {
+		t.Fatalf("StatefulSet replicas = %d, want 0: the stalled tick scaled a powered-off controller up", client.stsReplicas[prefix])
+	}
+	if client.createFenceCalls < 1 {
+		t.Fatalf("create fence calls = %d, want at least 1: the stalled tick did not reach the scale-up site", client.createFenceCalls)
+	}
+}
+
+// TestReconcile_StalledReplicaDoesNotScaleUpAfterPowerOff models a replica
+// that reads a Running controller in Provisioning and stalls. The user then
+// powers the controller off, and the new owner scales the StatefulSet to 0.
+// The stalled tick must conflict instead of writing replicas 1.
+func TestReconcile_StalledReplicaDoesNotScaleUpAfterPowerOff(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	setA, setB := sharding.NewShardSet(), sharding.NewShardSet()
+	setA.Add(shard)
+	setB.Add(shard)
+	stalled := shardedReplica(client, ring, setA)
+	newOwner := shardedReplica(client, ring, setB)
+	cr := provisioningStalledController()
+	crdstore.MustSeed(client.store, cr)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 1}
+	client.stsRV = map[string]int{prefix: 1}
+
+	stallAfterFirstRead(t, client, func() {
+		ctx := context.Background()
+		got, err := crdstore.Get[v1alpha1.Controller](ctx, client.store, "mine", "ns")
+		if err != nil {
+			t.Fatalf("read before power off: %v", err)
+		}
+		got.Spec.PowerState = "Stopped"
+		if err := crdstore.Update(ctx, client.store, got); err != nil {
+			t.Fatalf("power off: %v", err)
+		}
+		for i := 0; i < 5 && client.stsReplicas[prefix] != 0; i++ {
+			if _, err := newOwner.Reconcile(ctx, mineRequest); err != nil {
+				t.Fatalf("new owner reconcile: %v", err)
+			}
+		}
+		if client.stsReplicas[prefix] != 0 {
+			t.Fatalf("new owner did not scale the StatefulSet to 0: replicas = %d", client.stsReplicas[prefix])
+		}
+	})
+
+	res, err := stalled.Reconcile(context.Background(), mineRequest)
+	requireStalledScaleUpFenced(t, client, res, err, prefix)
+	got, gerr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if gerr != nil {
+		t.Fatalf("final read: %v", gerr)
+	}
+	if got.Spec.PowerState != "Stopped" {
+		t.Fatalf("powerState = %q, want Stopped", got.Spec.PowerState)
+	}
+}
+
+// TestReconcile_StalledReplicaDoesNotScaleUpAfterHibernate models a replica
+// that reads a Running controller in Provisioning and stalls. The new owner
+// hibernates the controller and scales the StatefulSet to 0. The stalled tick
+// must conflict instead of writing replicas 1.
+func TestReconcile_StalledReplicaDoesNotScaleUpAfterHibernate(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	setA, setB := sharding.NewShardSet(), sharding.NewShardSet()
+	setA.Add(shard)
+	setB.Add(shard)
+	stalled := shardedReplica(client, ring, setA)
+	newOwner := shardedReplica(client, ring, setB)
+	cr := provisioningStalledController()
+	crdstore.MustSeed(client.store, cr)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 1}
+	client.stsRV = map[string]int{prefix: 1}
+
+	stallAfterFirstRead(t, client, func() {
+		ctx := context.Background()
+		if _, err := client.SetHibernated(ctx, "mine", "ns", true); err != nil {
+			t.Fatalf("new owner hibernate: %v", err)
+		}
+		for i := 0; i < 5 && client.stsReplicas[prefix] != 0; i++ {
+			if _, err := newOwner.Reconcile(ctx, mineRequest); err != nil {
+				t.Fatalf("new owner reconcile: %v", err)
+			}
+		}
+		if client.stsReplicas[prefix] != 0 {
+			t.Fatalf("new owner did not scale the StatefulSet to 0: replicas = %d", client.stsReplicas[prefix])
+		}
+	})
+
+	res, err := stalled.Reconcile(context.Background(), mineRequest)
+	requireStalledScaleUpFenced(t, client, res, err, prefix)
+	got, gerr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if gerr != nil {
+		t.Fatalf("final read: %v", gerr)
+	}
+	if !got.Status.Hibernated {
+		t.Fatal("status.hibernated = false, want true after the hibernation")
+	}
+}
+
+// TestReconcile_ScaleUpConflictsWhenStatefulSetChangesAfterFence covers a
+// StatefulSet that changes between the tick fence and the scale-up write. The
+// StatefulSet write must conflict. The tick then requeues and reports no block.
+func TestReconcile_ScaleUpConflictsWhenStatefulSetChangesAfterFence(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	ring := sharding.NewRing(256)
+	shard := ring.ShardFor("ns/mine")
+	set := sharding.NewShardSet()
+	set.Add(shard)
+	rec := shardedReplica(client, ring, set)
+	cr := provisioningStalledController()
+	crdstore.MustSeed(client.store, cr)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 0}
+	client.stsRV = map[string]int{prefix: 0}
+	client.afterCreateFence = func() {
+		client.stsRV[prefix]++
+	}
+
+	res, err := rec.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.RequeueAfter != tickConflictRequeue {
+		t.Fatalf("RequeueAfter = %v, want %v", res.RequeueAfter, tickConflictRequeue)
+	}
+	if client.stsReplicas[prefix] != 0 {
+		t.Fatalf("StatefulSet replicas = %d, want 0", client.stsReplicas[prefix])
 	}
 	got, gerr := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
 	if gerr != nil {

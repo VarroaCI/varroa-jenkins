@@ -62,7 +62,7 @@ spec:
 	t.Logf("PodOverrides.Env = %+v", spec.PodOverrides.Env)
 	t.Logf("ResourceOverlay.StatefulSet = %q", spec.ResourceOverlay.StatefulSet)
 
-	err := c.CreateStatefulSet(context.Background(), spec)
+	err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence)
 	if err != nil {
 		t.Fatalf("CreateStatefulSet failed: %v", err)
 	}

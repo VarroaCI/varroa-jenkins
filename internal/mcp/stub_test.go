@@ -32,7 +32,7 @@ func (s *stubClient) CreateOrUpdateContentReadGrant(ctx context.Context, g contr
 func (s *stubClient) CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error {
 	return nil
 }
-func (s *stubClient) CreateStatefulSet(ctx context.Context, spec controller.StatefulSetSpec) error {
+func (s *stubClient) CreateStatefulSet(ctx context.Context, spec controller.StatefulSetSpec, _ func(context.Context) error) error {
 	return nil
 }
 func (s *stubClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv controller.JenkinsAuthEnv) error {

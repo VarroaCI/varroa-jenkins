@@ -112,7 +112,14 @@ type testClient struct {
 	// afterScaleFence runs after a successful fence, before the precondition
 	// check. It may call into the test client. The client holds no lock.
 	afterScaleFence func()
-	composedBundles map[string]*v1alpha1.ComposedBundle
+	// createFenceCalls counts the fence calls of CreateStatefulSet. The fence
+	// runs only on a create or a scale-up from 0.
+	createFenceCalls int
+	// afterCreateFence runs after a successful CreateStatefulSet fence, before
+	// the precondition check. It may call into the test client. The client
+	// holds no lock.
+	afterCreateFence func()
+	composedBundles  map[string]*v1alpha1.ComposedBundle
 
 	// profiles stores JenkinsVersionProfiles by name.
 	profiles map[string]*v1alpha1.JenkinsVersionProfile
@@ -467,7 +474,12 @@ func (t *testClient) CreateServiceAccountTokenSecret(_ context.Context, name, na
 	t.saTokenSecrets = append(t.saTokenSecrets, struct{ name, namespace, serviceAccount string }{name, namespace, serviceAccount})
 	return nil
 }
-func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) error {
+
+// CreateStatefulSet models the ClientsetClient contract on the test
+// StatefulSets. A create, or a scale-up from 0, runs the fence first and then
+// checks the StatefulSet resourceVersion. Like ScaleStatefulSetToZero, it takes
+// no mutex: a mutex held across afterCreateFence would deadlock.
+func (t *testClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error {
 	t.statefulSets = append(t.statefulSets, spec.Name)
 	t.stsSpecs = append(t.stsSpecs, spec)
 	if t.stsReplicas == nil {
@@ -479,6 +491,20 @@ func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) 
 	replicas := int32(1)
 	if spec.Replicas != nil {
 		replicas = *spec.Replicas
+	}
+	live, exists := t.stsReplicas[spec.Name]
+	if !exists || (live == 0 && replicas > 0) {
+		rv := t.stsRV[spec.Name]
+		t.createFenceCalls++
+		if err := fence(ctx); err != nil {
+			return err
+		}
+		if t.afterCreateFence != nil {
+			t.afterCreateFence()
+		}
+		if t.stsRV[spec.Name] != rv {
+			return apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, spec.Name, fmt.Errorf("resourceVersion changed"))
+		}
 	}
 	t.stsReplicas[spec.Name] = replicas
 	t.stsRV[spec.Name]++
@@ -7734,4 +7760,43 @@ func TestEnsureBootstrapToken_PodInstance(t *testing.T) {
 			t.Fatalf("secret = %q/%q, want a new token stamped with pod-2", got["token"], got["instance"])
 		}
 	})
+}
+
+// TestProvisioningSteadyTickSendsNoFenceWrite pins that a provisioning tick
+// whose StatefulSet already runs at 1 replica sends no tick fence write.
+func TestProvisioningSteadyTickSendsNoFenceWrite(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 1}
+	client.stsRV = map[string]int{prefix: 1}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if client.createFenceCalls != 0 {
+		t.Fatalf("create fence calls = %d, want 0 for a StatefulSet already at 1", client.createFenceCalls)
+	}
+}
+
+// TestProvisioningScaleUpFromZeroFencesOnce pins that a provisioning tick
+// that scales a StatefulSet up from 0 runs the tick fence exactly once.
+func TestProvisioningScaleUpFromZeroFencesOnce(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 0}
+	client.stsRV = map[string]int{prefix: 0}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if client.createFenceCalls != 1 {
+		t.Fatalf("create fence calls = %d, want 1", client.createFenceCalls)
+	}
+	if client.stsReplicas[prefix] != 1 {
+		t.Fatalf("StatefulSet replicas = %d, want 1", client.stsReplicas[prefix])
+	}
 }

@@ -974,7 +974,10 @@ type ResourceClient interface {
 	// Used to project a tenant agent's identity as a Jenkins credential
 	// (design D11).
 	CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error
-	CreateStatefulSet(ctx context.Context, spec StatefulSetSpec) error
+	// CreateStatefulSet creates or updates the StatefulSet. fence runs before
+	// a create, or before an update that scales up from 0; see
+	// ClientsetClient.CreateStatefulSet.
+	CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error
 	UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv JenkinsAuthEnv) error
 	EnsureStatefulSetPodLabel(ctx context.Context, namespace, stsName, key, value string) (bool, error)
 	IsStatefulSetReady(ctx context.Context, name, namespace string) (bool, error)
@@ -1570,6 +1573,21 @@ func (r *Reconciler) scaleTickToZero(ctx context.Context, cr *v1alpha1.Controlle
 		func(ctx context.Context) error { return r.writeTickStatus(ctx, cr) })
 	if err != nil {
 		fenceTick(ctx, err, "statefulset scale", cr.ResourceVersion)
+	}
+	return err
+}
+
+// createTickStatefulSet creates or updates the StatefulSet for a provisioning
+// tick. A create, or a scale-up from 0, runs writeTickStatus at cr.ResourceVersion
+// first. A steady tick, whose StatefulSet is already scaled up, sends no
+// fence write. A conflict cancels the tick through fenceTick. The same rule
+// as scaleTickToZero keeps a stalled replica from scaling up a controller that
+// a newer owner powered off.
+func (r *Reconciler) createTickStatefulSet(ctx context.Context, cr *v1alpha1.Controller, spec StatefulSetSpec) error {
+	err := r.client.CreateStatefulSet(ctx, spec,
+		func(ctx context.Context) error { return r.writeTickStatus(ctx, cr) })
+	if err != nil {
+		fenceTick(ctx, err, "statefulset scale-up", cr.ResourceVersion)
 	}
 	return err
 }
@@ -3579,9 +3597,12 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	}
 	{
 		_, span := tracer.Start(ctx, "provision.createStatefulSet")
-		err := r.client.CreateStatefulSet(ctx, stsSpec)
+		err := r.createTickStatefulSet(ctx, cr, stsSpec)
 		span.End()
 		if err != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedStatefulSetCreateFailed, err.Error())
 			return fmt.Errorf("create statefulset: %w", err)
 		}

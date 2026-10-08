@@ -241,7 +241,7 @@ func (f *fakeBroodClient) CreateOrUpdateContentReadGrant(_ context.Context, _ co
 func (f *fakeBroodClient) CreateServiceAccountTokenSecret(_ context.Context, _, _, _ string) error {
 	return nil
 }
-func (f *fakeBroodClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec) error {
+func (f *fakeBroodClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec, _ func(context.Context) error) error {
 	return nil
 }
 func (f *fakeBroodClient) UpdateStatefulSetOIDCEnv(_ context.Context, _, _ string, _ controller.JenkinsAuthEnv) error {

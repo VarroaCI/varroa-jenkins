@@ -115,7 +115,7 @@ func createdPodLabels(t *testing.T, spec StatefulSetSpec) map[string]string {
 		map[schema.GroupVersionResource]string{stsGVR: "StatefulSetList"},
 	)
 	c := &ClientsetClient{dynamic: dyn}
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("CreateStatefulSet: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace(spec.Namespace).Get(context.Background(), spec.Name, metav1.GetOptions{})

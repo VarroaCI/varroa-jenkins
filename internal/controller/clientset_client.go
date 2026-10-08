@@ -2103,14 +2103,24 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 	return m
 }
 
-// CreateStatefulSet creates a StatefulSet via the dynamic client.
+// CreateStatefulSet creates a StatefulSet via the dynamic client, or updates
+// it when it exists.
+//
+// The read of the live StatefulSet comes first. A missing StatefulSet runs
+// fence and then Create. An existing StatefulSet whose replica count is 0 runs
+// fence before an update that sets a count above 0; a StatefulSet already at
+// a count above 0 gets no fence. The update carries the resourceVersion that
+// was read before the fence, so a write since that read makes it conflict. A
+// fence error or a conflict is returned unchanged. A Create that answers
+// AlreadyExists adopts the peer's StatefulSet: it re-reads that object and
+// takes the update path, so the fence runs only for a scale-up from 0.
 //
 // Ordering:
 //  1. Build the base StatefulSet via buildStatefulSet (includes mite sidecar,
 //     OIDC env, init containers, volumes).
 //  2. Apply compiled PodOverrides patch (typed struct → strategic-merge YAML).
 //  3. Apply raw ResourceOverlay.StatefulSet YAML (overlay overrides podOverrides).
-//  4. Existing Create / AlreadyExists path with ownership-stamped image updates
+//  4. Read, then Create (missing) or update (existing), with ownership-stamped image updates
 //     (varroa.dev/computed-images): a live image is preserved only when it
 //     differs from the previous stamp (an out-of-band edit was made directly on
 //     the StatefulSet) AND the operator's own newly-computed value for that
@@ -2141,7 +2151,7 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 // UpdateStatefulSetOIDCEnv re-asserts VARROA_OIDC_* env vars LATER on the live
 // object, so a user overlay editing OIDC env is warned and then silently
 // overwritten — consistent with warn-but-allow.
-func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec) error {
+func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error {
 	sts := buildStatefulSet(spec)
 
 	// Apply compiled PodOverrides (typed → strategic-merge patch).
@@ -2261,12 +2271,25 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 	}
 
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
-	_, err = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Create(ctx, sts, metav1.CreateOptions{})
-	if err == nil {
-		return nil
+	existing, getErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(getErr) {
+		if err := fence(ctx); err != nil {
+			return err
+		}
+		_, createErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Create(ctx, sts, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// A peer tick created the StatefulSet after our read. Adopt it: the
+		// re-read below takes the update path, so a healthy Controller keeps
+		// its status.
+		existing, getErr = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return err
+	if getErr != nil {
+		return fmt.Errorf("get existing statefulset for update: %w", getErr)
 	}
 	// Update existing StatefulSet with ownership-stamped image updates
 	// (varroa.dev/computed-images): a live container image + pull policy is
@@ -2297,10 +2320,6 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 	// — reconcileContainerSpecRoll/reconcileVersionRoll use it only for the
 	// informational "preserved (out-of-band override)" note, not to decide
 	// whether to roll.
-	existing, getErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
-	if getErr != nil {
-		return fmt.Errorf("get existing statefulset for update: %w", getErr)
-	}
 	stampOld := parseComputedImagesAnnotation(existing) // nil => adopt
 	liveImages := stsImagesByName(existing)
 	livePullPolicies := stsPullPoliciesByName(existing)
@@ -2374,9 +2393,37 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		}
 	}
 
+	// A scale-up from 0 runs the fence. The update then carries the
+	// resourceVersion read above, so a write since that read conflicts.
+	if stsReplicaCount(existing) == 0 && stsReplicaCount(sts) > 0 {
+		if err := fence(ctx); err != nil {
+			return err
+		}
+	}
 	sts.SetResourceVersion(existing.GetResourceVersion())
 	_, err = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Update(ctx, sts, metav1.UpdateOptions{})
 	return err
+}
+
+// stsReplicaCount returns spec.replicas of obj. A missing or unreadable field
+// counts as 1, the API default. JSON decoding yields float64 numbers, so the
+// numeric kinds are all handled.
+func stsReplicaCount(obj *unstructured.Unstructured) int64 {
+	raw, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "replicas")
+	if !found {
+		return 1
+	}
+	switch v := raw.(type) {
+	case int64:
+		return v
+	case int32:
+		return int64(v)
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	}
+	return 1
 }
 
 // JenkinsAuthEnv holds the auth env vars the operator keeps in sync on the

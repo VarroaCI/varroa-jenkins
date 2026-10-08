@@ -157,7 +157,7 @@ sections describe.
     (**blocks** provisioning with an error if the ComposedBundle hasn't materialized
     yet — a core-only `plugins.txt` baked here would never self-heal once connected),
     runs `EvaluateCoreCompat` (`corecompat.go`) as a bake-time gate before any
-    StatefulSet work, then `CreateStatefulSet` (create-or-update semantics).
+    StatefulSet work, then `createTickStatefulSet` → `CreateStatefulSet` (create-or-update; a create or a scale-up from 0 runs the tick fence first, and the update carries the StatefulSet `resourceVersion` read before the fence).
   - `handleConnected`: syncs StatefulSet OIDC env vars every tick (idempotent, diffed
     against the live StatefulSet); retries a timed-out restart drain; tracks mite
     connectivity with a 3-tick grace period on disconnect (`staleMiteThreshold`-based);
@@ -507,7 +507,8 @@ sections describe.
   built from this same config (`cmd/operator/main.go`), so it inherits the setting. Pure desired-state derivation (STS spec build, plugin-
   roll gate, update-center gate, mite health) lives in `desiredstate.go` with table tests
   in `desiredstate_test.go`; the phase handlers gather → decide → apply.
-  `CreateStatefulSet`/`CreateService`/`CreateIngress` are create-or-update.
+  `CreateStatefulSet` takes a fence that runs before a create or a scale-up from 0.
+  `CreateService`/`CreateIngress` are create-or-update.
   `EnsureWakeEndpointSlice`/`DeleteWakeEndpointSlice` own the hibernation traffic flip;
   slice failures are warning-only and confirmed deletes are memoized for retry safety.
   The slice name is `<full-service-name>-wake`; retaining the full Service name as the
@@ -1260,6 +1261,9 @@ sections describe.
   The tick scales a StatefulSet down only through `scaleTickToZero`. It reads the
   StatefulSet, writes `writeTickStatus` as a fence, then patches with the StatefulSet
   `resourceVersion` it read. A StatefulSet at 0 gets no fence write.
+  The tick scales a StatefulSet up only through `createTickStatefulSet`, which passes
+  `writeTickStatus` as the fence to `CreateStatefulSet`. A create, or a scale-up from 0,
+  runs the fence. A StatefulSet already at 1 or more gets no fence write.
   `Reconcile` checks `tickFenced` after each write and after the phase machine:
   one Info line, requeue after 1s, no error. A new tick write to the
   Controller must use one of the three helpers. An approve waits at
