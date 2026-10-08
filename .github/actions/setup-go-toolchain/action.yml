@@ -3,7 +3,7 @@ description: >
   Installs the Go version go.mod's toolchain line names, through
   actions/setup-go's own GitHub-hosted download path. cmd/go otherwise
   fetches that toolchain itself, over the network, the first time any
-  go command runs — and the self-hosted runner node cannot always reach
+  go command runs, and the self-hosted runner node cannot always reach
   proxy.golang.org.
 
 runs:

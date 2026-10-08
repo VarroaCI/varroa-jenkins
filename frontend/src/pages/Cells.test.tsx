@@ -551,11 +551,11 @@ describe("Pools on more than one cluster", () => {
     const heads = screen.getAllByRole("heading", { level: 2 });
     expect(heads.map((h) => h.textContent)).toEqual(["core / p", "member-c / p"]);
     const coreBlock = heads[0].closest("div")?.parentElement?.parentElement as HTMLElement;
-    const member-cBlock = heads[1].closest("div")?.parentElement?.parentElement as HTMLElement;
+    const memberBlock = heads[1].closest("div")?.parentElement?.parentElement as HTMLElement;
     expect(within(coreBlock).getByRole("link", { name: "core-cell" })).toBeInTheDocument();
     expect(within(coreBlock).queryByRole("link", { name: "member-c-cell" })).toBeNull();
-    expect(within(member-cBlock).getByRole("link", { name: "member-c-cell" })).toBeInTheDocument();
-    expect(within(member-cBlock).queryByRole("link", { name: "core-cell" })).toBeNull();
+    expect(within(memberBlock).getByRole("link", { name: "member-c-cell" })).toBeInTheDocument();
+    expect(within(memberBlock).queryByRole("link", { name: "core-cell" })).toBeNull();
   });
 
   it("scales the member-c block on its own cluster", async () => {

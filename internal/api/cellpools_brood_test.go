@@ -188,14 +188,14 @@ func TestCellPools_UnreachableMemberDoesNotFailTheList(t *testing.T) {
 			t.Errorf("an unreachable member must add no item, got %s", it.Name)
 		}
 	}
-	var member-c *ClusterFanoutStatus
+	var member *ClusterFanoutStatus
 	for i := range body.Clusters {
 		if body.Clusters[i].Name == "member-c" {
-			member-c = &body.Clusters[i]
+			member = &body.Clusters[i]
 		}
 	}
-	if member-c == nil || member-c.OK || member-c.Error != "cluster member-c unreachable" {
-		t.Errorf("member-c status = %+v, want ok false naming member-c", member-c)
+	if member == nil || member.OK || member.Error != "cluster member-c unreachable" {
+		t.Errorf("member-c status = %+v, want ok false naming member-c", member)
 	}
 }
 

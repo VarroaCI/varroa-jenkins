@@ -31,22 +31,22 @@ func (poolBrood) IsKnown(_ context.Context, cluster string) bool {
 	return cluster == "core" || cluster == "member-c"
 }
 
-// member-cPools serves the member-c pool member-2-570 from memory.
-type member-cPools struct {
+// memberPools serves the member-c pool member-2-570 from memory.
+type memberPools struct {
 	api.ConfigBrood
 	pool        *v1alpha1.CellPool
 	unreachable bool
 	scaled      []string
 }
 
-func (d *member-cPools) ListCellPools(context.Context, string) ([]v1alpha1.CellPool, error) {
+func (d *memberPools) ListCellPools(context.Context, string) ([]v1alpha1.CellPool, error) {
 	if d.unreachable {
 		return nil, &api.ErrClusterUnreachable{Cluster: "member-c", Err: errors.New("no responders")}
 	}
 	return []v1alpha1.CellPool{*d.pool}, nil
 }
 
-func (d *member-cPools) GetCellPool(_ context.Context, _, name string) (*v1alpha1.CellPool, error) {
+func (d *memberPools) GetCellPool(_ context.Context, _, name string) (*v1alpha1.CellPool, error) {
 	if d.unreachable {
 		return nil, &api.ErrClusterUnreachable{Cluster: "member-c", Err: errors.New("no responders")}
 	}
@@ -56,7 +56,7 @@ func (d *member-cPools) GetCellPool(_ context.Context, _, name string) (*v1alpha
 	return d.pool, nil
 }
 
-func (d *member-cPools) ScaleCellPool(_ context.Context, cluster string, req bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error) {
+func (d *memberPools) ScaleCellPool(_ context.Context, cluster string, req bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error) {
 	if d.unreachable {
 		return nil, &api.ErrClusterUnreachable{Cluster: "member-c", Err: errors.New("no responders")}
 	}
@@ -69,10 +69,10 @@ func (d *member-cPools) ScaleCellPool(_ context.Context, cluster string, req bus
 	return updated, nil
 }
 
-func clusterPoolDeps(t *testing.T) (*api.Dependencies, *member-cPools, *recordingSink) {
+func clusterPoolDeps(t *testing.T) (*api.Dependencies, *memberPools, *recordingSink) {
 	t.Helper()
 	deps, _ := cellPoolDeps(t, "read", "update")
-	members := &member-cPools{pool: &v1alpha1.CellPool{
+	members := &memberPools{pool: &v1alpha1.CellPool{
 		ObjectMeta: metav1.ObjectMeta{Name: "member-2-570"},
 		Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-570", Warm: 1, MaxCells: 4, MaxTenantsPerCell: 4},
 	}}

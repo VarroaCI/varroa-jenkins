@@ -164,9 +164,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   stringData:
     username: git
     privateKey: |
-      -----BEGIN FIXTURE KEY-----
-      <key>
-      -----END FIXTURE KEY-----
+      <OpenSSH private key>
   ```
 
   A [runner](runners.md) credential uses the same data keys in its own labelled `Secret`. A cell trusts a git host key on the first connection, because an agent
