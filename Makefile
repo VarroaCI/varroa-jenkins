@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -71,6 +71,14 @@ check-crds:
 
 check-comments:
 	go run ./hack/checkcomments .
+
+# Runs the public and site export leak gates into a scratch directory.
+# The export scripts need a clean tree: they copy working-tree content.
+export-gate:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; rc=0; \
+	hack/export-public.sh "$$tmp/public" || rc=1; \
+	hack/export-site.sh "$$tmp/site" || rc=1; \
+	exit $$rc
 
 # Runs every chart golden test. The NATS subchart must be fetched first:
 # helm dependency build charts/varroa.
