@@ -6682,29 +6682,29 @@ func manualOperatorOwnedChange(status *v1alpha1.ControllerStatus, contentHash st
 }
 
 // tenantHomesHash answers a stable hash of a desired state's tenant home
-// entries. The entries and each map are sorted first, so two assemblies
-// of the same state answer the same hash.
+// entries. The entries are sorted by tenant, then slot, then role.
+// encoding/json sorts each JobHomes map and quotes every string, so a
+// control byte in a value cannot shift a field boundary.
 func tenantHomesHash(homes []*mitev1.TenantHomes) string {
 	if len(homes) == 0 {
 		return ""
 	}
 	sorted := make([]*mitev1.TenantHomes, len(homes))
 	copy(sorted, homes)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Tenant < sorted[j].Tenant })
-
-	h := sha256.New()
-	for _, entry := range sorted {
-		fmt.Fprintf(h, "%s\x00%d\x00%s\x00", entry.Tenant, entry.Slot, entry.Role)
-		paths := make([]string, 0, len(entry.JobHomes))
-		for path := range entry.JobHomes {
-			paths = append(paths, path)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Tenant != sorted[j].Tenant {
+			return sorted[i].Tenant < sorted[j].Tenant
 		}
-		sort.Strings(paths)
-		for _, path := range paths {
-			fmt.Fprintf(h, "%s\x00%d\x00", path, entry.JobHomes[path])
+		if sorted[i].Slot != sorted[j].Slot {
+			return sorted[i].Slot < sorted[j].Slot
 		}
+		return sorted[i].Role < sorted[j].Role
+	})
+	b, err := json.Marshal(sorted)
+	if err != nil {
+		return ""
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return sha256Hex(b)
 }
 
 // hasResultFailureForHash checks drained CommandResults for any failure

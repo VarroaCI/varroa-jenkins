@@ -700,6 +700,7 @@ sections describe.
     process-local `ucLastFullPass`) forces a full derive regardless; that field
     is a cost optimization only, never a correctness input, so losing it to a
     restart or leader change simply forces one full pass.
+    `ucSyncDigest` and `tenantHomesHash` encode their inputs with `encoding/json`, never with a joined separator.
     `ReconcileComposedBundle`'s
     drift loop has OCI branches parallel to the git branches: resolves creds via
     `OCIAuthFromSecret`, resolves manifest digest via `oci.RegistryStore.Resolve`,

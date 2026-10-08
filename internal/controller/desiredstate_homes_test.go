@@ -106,12 +106,12 @@ func TestComputeDesiredStateHash_FramesEachSection(t *testing.T) {
 
 // TestComputeDesiredStateHash_SeparatesContentFromHomes pins the boundary
 // between the content and the tenant homes. The JCasC text below is the
-// byte form that tenantHomesHash hashes for the homes entry. Without the
+// JSON form that tenantHomesHash hashes for the homes entry. Without the
 // frame, the JCasC hash and the homes hash are the same 64 characters in
 // the same place, so the two states answer the same composite hash.
 func TestComputeDesiredStateHash_SeparatesContentFromHomes(t *testing.T) {
 	homes := []*mitev1.TenantHomes{{Tenant: "payments", Slot: 0, Role: "active"}}
-	jcasc := "payments\x000\x00active\x00"
+	jcasc := `[{"tenant":"payments","role":"active"}]`
 	if sha256Hex([]byte(jcasc)) != tenantHomesHash(homes) {
 		t.Fatal("the JCasC text is not the byte form of the homes entry")
 	}
@@ -133,5 +133,71 @@ func TestComputeDesiredStateHash_ComposesContentAndHomes(t *testing.T) {
 	}
 	if computeDesiredStateHash(a) == computeDesiredStateHash(b) {
 		t.Fatal("a home move did not change the composite hash")
+	}
+}
+
+// TestTenantHomesHash pins the framing of the tenant homes hash. Each case
+// pairs two inputs that a joined separator encoding would have made equal.
+func TestTenantHomesHash(t *testing.T) {
+	t.Run("nul in a job path does not collide", func(t *testing.T) {
+		a := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active", JobHomes: map[string]int{"x\x001\x00y": 2}}})
+		b := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active", JobHomes: map[string]int{"x": 1, "y": 2}}})
+		if a == b {
+			t.Fatal("a NUL byte in a job path collides with two job entries")
+		}
+	})
+	t.Run("nul in a role does not collide", func(t *testing.T) {
+		a := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active\x00x\x001"}})
+		b := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active", JobHomes: map[string]int{"x": 1}}})
+		if a == b {
+			t.Fatal("a NUL byte in a role collides with a job entry")
+		}
+	})
+	t.Run("order is irrelevant", func(t *testing.T) {
+		a := &mitev1.TenantHomes{Tenant: "a", Role: "active", JobHomes: map[string]int{}}
+		a.JobHomes["j1"] = 0
+		a.JobHomes["j2"] = 1
+		a.JobHomes["j3"] = 2
+		b := &mitev1.TenantHomes{Tenant: "b", Role: "active", JobHomes: map[string]int{}}
+		b.JobHomes["j3"] = 2
+		b.JobHomes["j1"] = 0
+		b.JobHomes["j2"] = 1
+		want := tenantHomesHash([]*mitev1.TenantHomes{a, b})
+		reversed := []*mitev1.TenantHomes{b, a}
+		for i := 0; i < 50; i++ {
+			if got := tenantHomesHash([]*mitev1.TenantHomes{a, b}); got != want {
+				t.Fatalf("iteration %d: hash %q, want %q", i, got, want)
+			}
+			if got := tenantHomesHash(reversed); got != want {
+				t.Fatalf("iteration %d: reordered hash %q, want %q", i, got, want)
+			}
+		}
+	})
+	t.Run("nil and empty job homes agree", func(t *testing.T) {
+		nilHomes := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active"}})
+		emptyHomes := tenantHomesHash([]*mitev1.TenantHomes{{Tenant: "t", Role: "active", JobHomes: map[string]int{}}})
+		if nilHomes != emptyHomes {
+			t.Fatal("a nil JobHomes map and an empty one answer different hashes")
+		}
+	})
+	t.Run("empty answers empty", func(t *testing.T) {
+		if got := tenantHomesHash(nil); got != "" {
+			t.Fatalf("tenantHomesHash(nil) = %q, want empty", got)
+		}
+	})
+}
+
+// TestTenantHomesHash_GoldenValue pins the encoding. Changing it sends one
+// desired-state push to every cell controller.
+func TestTenantHomesHash_GoldenValue(t *testing.T) {
+	got := tenantHomesHash([]*mitev1.TenantHomes{{
+		Tenant:   "payments",
+		Slot:     1,
+		Role:     "active",
+		JobHomes: map[string]int{"build": 1, "deploy": 0},
+	}})
+	const want = "dab0964e04627c7938cd48df7e942e6b6c45d7c3e7e3274c92288f5bbc5214a6"
+	if got != want {
+		t.Errorf("tenantHomesHash = %s, want %s", got, want)
 	}
 }
