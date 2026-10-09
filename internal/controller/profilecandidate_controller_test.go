@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,14 +275,7 @@ func TestProfileCandidateReconciler_PluginsServableFalseHoldsPending(t *testing.
 	}
 	crdstore.MustSeed(client.store, uc)
 
-	ucSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/inventory" {
-			_, _ = w.Write([]byte(`{"plugins":[]}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer ucSrv.Close()
+	ucSrv := candidateUCServer(t, nil, map[string]ucServabilityResult{"git": {Reason: "pull-through-disabled"}}, 0, nil)
 
 	rec := NewProfileCandidateReconciler(client, client.store, profileReconcilerNamespace, ucSrv.URL, nil, testLogger())
 	rec.upstreamBaseURL = srv.URL
@@ -364,8 +358,8 @@ func TestProfileCandidateReconciler_PreflightMissingOnlyDoesNotFail(t *testing.T
 }
 
 // TestNewProfileCandidateReconciler_HTTPDoerHasTimeout guards the
-// constructor itself: TestFetchInventory_StalledEndpointDoesNotHang below
-// exercises fetchInventory against an httpDoer built directly in the test,
+// constructor itself: TestGetUCInventory_StalledEndpointDoesNotHang below
+// exercises getUCInventory against an httpDoer built directly in the test,
 // so it would keep passing even if NewProfileCandidateReconciler reverted to
 // an httpDoer with no timeout (e.g. http.DefaultClient). This test checks
 // the constructor's actual default instead.
@@ -380,13 +374,13 @@ func TestNewProfileCandidateReconciler_HTTPDoerHasTimeout(t *testing.T) {
 	}
 }
 
-// TestFetchInventory_StalledEndpointDoesNotHang covers the reconciler's
+// TestGetUCInventory_StalledEndpointDoesNotHang covers the reconciler's
 // leader-gated single-goroutine ticker: an update-center that accepts the
-// connection and then never responds must fail fetchInventory within
+// connection and then never responds must fail getUCInventory within
 // httpDoer's timeout rather than blocking the tick forever. The client here
 // carries a short injected timeout so the test doesn't wait out the
 // production candidateHTTPTimeout.
-func TestFetchInventory_StalledEndpointDoesNotHang(t *testing.T) {
+func TestGetUCInventory_StalledEndpointDoesNotHang(t *testing.T) {
 	block := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-block // held open until the test releases it below; the client timeout must win the race
@@ -398,19 +392,297 @@ func TestFetchInventory_StalledEndpointDoesNotHang(t *testing.T) {
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(block) })
 
-	rec := &ProfileCandidateReconciler{
-		ucBaseURL: srv.URL,
-		httpDoer:  &http.Client{Timeout: 50 * time.Millisecond},
-	}
-
 	start := time.Now()
-	_, err := rec.fetchInventory(context.Background())
+	_, _, err := getUCInventory(context.Background(), &http.Client{Timeout: 50 * time.Millisecond}, srv.URL)
 	elapsed := time.Since(start)
 
 	if err == nil {
 		t.Fatal("expected an error from a stalled endpoint, got nil")
 	}
 	if elapsed > 2*time.Second {
-		t.Fatalf("fetchInventory took %s to return; expected it to abort near the client's 50ms timeout, not hang", elapsed)
+		t.Fatalf("getUCInventory took %s to return; expected it to abort near the client's 50ms timeout, not hang", elapsed)
+	}
+}
+
+// candidateUCServer serves the update center's inventory and servability
+// routes for candidate tests. answers maps a plugin name to its servability
+// answer; a plugin absent from answers is servable. A non-zero status answers
+// the servability route with that status instead. posted, when non-nil,
+// collects every plugin the candidate posts.
+func candidateUCServer(t *testing.T, inventory []inventoryEntry, answers map[string]ucServabilityResult, status int, posted *[]ucServabilityPlugin) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			_ = json.NewEncoder(w).Encode(ucInventoryResponse{Plugins: inventory})
+		case "/api/v1/servability":
+			if status != 0 {
+				w.WriteHeader(status)
+				return
+			}
+			var req ucServabilityRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if posted != nil {
+				*posted = append(*posted, req.Plugins...)
+			}
+			resp := ucServabilityResponse{}
+			for _, p := range req.Plugins {
+				res := ucServabilityResult{Name: p.Name, Version: p.Version, Servable: true, Via: "pull-through"}
+				if a, ok := answers[p.Name]; ok {
+					res = a
+					res.Name, res.Version = p.Name, p.Version
+				}
+				resp.Plugins = append(resp.Plugins, res)
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// candidateServabilityRig seeds the candidate fixtures, an UpdateCenter with
+// the given pull-through setting, and a reconciler whose update-center base
+// URL is ucURL. The closure resolves to git@5.6.0.
+func candidateServabilityRig(t *testing.T, pullThrough bool, ucURL string) (*ProfileCandidateReconciler, *testClient, *v1alpha1.ProfileCandidate) {
+	t.Helper()
+	gitHPI := candidateFixtureHPI(t, "git", "5.6.0", "", "")
+	candidateFixtureHPIForRoot = candidateFixtureHPI(t, "varroa-mite-auth", "1.0", "2.400", "git:5.0")
+	upstream := candidateUpstreamServer(t, gitHPI)
+	t.Cleanup(upstream.Close)
+
+	client, candidate := newCandidateTestFixtures(t)
+	crdstore.MustSeed(client.store, &v1alpha1.UpdateCenter{
+		ObjectMeta: metav1.ObjectMeta{Name: updateCenterSingletonName},
+		Spec: v1alpha1.UpdateCenterSpec{
+			PullThrough: v1alpha1.UpdateCenterPullThrough{Enabled: pullThrough},
+		},
+	})
+	rec := newCandidateReconciler(client, upstream.URL)
+	rec.ucBaseURL = ucURL
+	return rec, client, candidate
+}
+
+// TestProfileCandidateReconciler_PullThroughServableReachesReady covers a
+// candidate whose unstored pin the update center serves by pull-through: the
+// candidate posts only that pin and reaches Ready.
+func TestProfileCandidateReconciler_PullThroughServableReachesReady(t *testing.T) {
+	var posted []ucServabilityPlugin
+	ucSrv := candidateUCServer(t, nil, nil, 0, &posted)
+	rec, _, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+		t.Fatalf("expected Phase Ready, got %q (conditions: %+v)", got.Status.Phase, got.Status.Conditions)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "AllPluginsServable" {
+		t.Fatalf("expected PluginsServable=True/AllPluginsServable, got %+v", cond)
+	}
+	if len(posted) != 1 || posted[0] != (ucServabilityPlugin{Name: "git", Version: "5.6.0"}) {
+		t.Fatalf("expected the servability endpoint to receive only git@5.6.0, got %+v", posted)
+	}
+}
+
+// TestProfileCandidateReconciler_StoredPinsSkipServability covers a closure
+// whose pins are all stored: the candidate reaches Ready without calling the
+// servability endpoint.
+func TestProfileCandidateReconciler_StoredPinsSkipServability(t *testing.T) {
+	var posted []ucServabilityPlugin
+	ucSrv := candidateUCServer(t, []inventoryEntry{{Name: "git", Version: "5.6.0"}}, nil, 0, &posted)
+	rec, _, candidate := candidateServabilityRig(t, false, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+		t.Fatalf("expected Phase Ready, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "AllPluginsServable" {
+		t.Fatalf("expected PluginsServable=True/AllPluginsServable, got %+v", cond)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("expected no servability call for a stored pin, got %+v", posted)
+	}
+}
+
+// TestProfileCandidateReconciler_NotListedHoldsPending covers a pin the update
+// center cannot serve at all: PluginsUnservable names it and the candidate
+// holds Pending.
+func TestProfileCandidateReconciler_NotListedHoldsPending(t *testing.T) {
+	ucSrv := candidateUCServer(t, nil, map[string]ucServabilityResult{"git": {Reason: "not-listed"}}, 0, nil)
+	rec, _, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	got, result := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Fatalf("expected Phase Pending, got %q", got.Status.Phase)
+	}
+	if result.RequeueAfter == 0 {
+		t.Error("expected a requeue while blocked on PluginsServable")
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "PluginsUnservable" {
+		t.Fatalf("expected PluginsServable=False/PluginsUnservable, got %+v", cond)
+	}
+	if !strings.Contains(cond.Message, "git@5.6.0 (NotListed)") {
+		t.Fatalf("expected the message to name git@5.6.0 (NotListed), got %q", cond.Message)
+	}
+}
+
+// TestProfileCandidateReconciler_SourcesDegradedHoldsPendingUnknown covers an
+// undecided answer: the candidate reports Unknown/ResolutionDegraded and holds
+// Pending.
+func TestProfileCandidateReconciler_SourcesDegradedHoldsPendingUnknown(t *testing.T) {
+	ucSrv := candidateUCServer(t, nil, map[string]ucServabilityResult{"git": {Reason: "sources-degraded"}}, 0, nil)
+	rec, _, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Fatalf("expected Phase Pending, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "ResolutionDegraded" {
+		t.Fatalf("expected PluginsServable=Unknown/ResolutionDegraded, got %+v", cond)
+	}
+}
+
+// TestProfileCandidateReconciler_ServabilityUnsupportedBlocks covers an update
+// center that does not route the servability endpoint: the candidate holds
+// Pending with InventoryUnavailable.
+func TestProfileCandidateReconciler_ServabilityUnsupportedBlocks(t *testing.T) {
+	ucSrv := candidateUCServer(t, nil, nil, http.StatusNotFound, nil)
+	rec, _, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Fatalf("expected Phase Pending, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "InventoryUnavailable" {
+		t.Fatalf("expected PluginsServable=False/InventoryUnavailable, got %+v", cond)
+	}
+}
+
+// TestProfileCandidateReconciler_ServabilityTransientErrorKeepsPrior covers a
+// transient servability failure: the prior PluginsServable value stays and the
+// candidate requeues instead of changing its verdict.
+func TestProfileCandidateReconciler_ServabilityTransientErrorKeepsPrior(t *testing.T) {
+	ucSrv := candidateUCServer(t, nil, nil, http.StatusServiceUnavailable, nil)
+	rec, client, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	prior := v1alpha1.ProfileCandidateCondition{
+		Type:               v1alpha1.ConditionCandidatePluginsServable,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "AllPluginsServable",
+		Message:            "prior verdict",
+	}
+	if err := crdstore.PatchStatus[v1alpha1.ProfileCandidate](context.Background(), client.store, candidate.Name, "", &v1alpha1.ProfileCandidateStatus{
+		Phase:      v1alpha1.ProfileCandidatePhasePending,
+		Conditions: []v1alpha1.ProfileCandidateCondition{prior},
+	}); err != nil {
+		t.Fatalf("seed prior status: %v", err)
+	}
+
+	got, result := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Fatalf("expected Phase Pending, got %q", got.Status.Phase)
+	}
+	if result.RequeueAfter == 0 {
+		t.Error("expected a requeue after a transient servability failure")
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Message != "prior verdict" {
+		t.Fatalf("expected the prior PluginsServable condition kept, got %+v", cond)
+	}
+}
+
+// TestProfileCandidateReconciler_EmptyUCBaseURLIsNoUpdateCenter covers a
+// reconciler with no update-center base URL: the check is skipped even when an
+// UpdateCenter CR exists.
+func TestProfileCandidateReconciler_EmptyUCBaseURLIsNoUpdateCenter(t *testing.T) {
+	rec, _, candidate := candidateServabilityRig(t, true, "")
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+		t.Fatalf("expected Phase Ready, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "NoUpdateCenter" {
+		t.Fatalf("expected PluginsServable=True/NoUpdateCenter, got %+v", cond)
+	}
+}
+
+// TestProfileCandidateReconciler_PartialInventoryHoldsUnknown covers an
+// inventory with an unreadable plugin-pack manifest: a pin the store may hold
+// is held undecided, never posted for a verdict the route cannot give.
+func TestProfileCandidateReconciler_PartialInventoryHoldsUnknown(t *testing.T) {
+	ucSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			_, _ = w.Write([]byte(`{"plugins":[],"skippedPacks":[{"ref":"git.hpi","error":"unreadable"}]}`))
+		case "/api/v1/servability":
+			t.Error("a partial inventory must not reach the servability endpoint")
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ucSrv.Close()
+	rec, _, candidate := candidateServabilityRig(t, false, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhasePending {
+		t.Fatalf("expected Phase Pending, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != "ResolutionDegraded" {
+		t.Fatalf("expected PluginsServable=Unknown/ResolutionDegraded, got %+v", cond)
+	}
+}
+
+// TestProfileCandidateReconciler_PartialInventoryPullThroughPostsNormally covers
+// an inventory with an unreadable plugin-pack manifest and pull-through on: the
+// update center answers from upstream metadata, so the unstored pin is posted
+// as normal and the candidate reaches True/AllPluginsServable.
+func TestProfileCandidateReconciler_PartialInventoryPullThroughPostsNormally(t *testing.T) {
+	var posted []ucServabilityPlugin
+	ucSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/inventory":
+			_, _ = w.Write([]byte(`{"plugins":[],"skippedPacks":[{"ref":"other.hpi","error":"unreadable"}]}`))
+		case "/api/v1/servability":
+			var req ucServabilityRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			posted = append(posted, req.Plugins...)
+			resp := ucServabilityResponse{}
+			for _, p := range req.Plugins {
+				resp.Plugins = append(resp.Plugins, ucServabilityResult{Name: p.Name, Version: p.Version, Servable: true, Via: "pull-through"})
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ucSrv.Close()
+	rec, _, candidate := candidateServabilityRig(t, true, ucSrv.URL)
+
+	got, _ := reconcileCandidate(t, rec, candidate.Name)
+	if got.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
+		t.Fatalf("expected Phase Ready, got %q", got.Status.Phase)
+	}
+	cond := candidateCondition(got, v1alpha1.ConditionCandidatePluginsServable)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != "AllPluginsServable" {
+		t.Fatalf("expected PluginsServable=True/AllPluginsServable, got %+v", cond)
+	}
+	if len(posted) != 1 || posted[0] != (ucServabilityPlugin{Name: "git", Version: "5.6.0"}) {
+		t.Fatalf("expected the unstored pin posted as normal, got %+v", posted)
 	}
 }

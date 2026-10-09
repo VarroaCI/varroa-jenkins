@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,7 +15,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -69,13 +67,6 @@ const (
 
 	// Max gaps and max unservable entries to surface.
 	maxGaps = 50
-
-	// servabilityTimeout bounds one servability round trip, including the
-	// upstream lookups the update center runs for the posted plugins.
-	servabilityTimeout = 45 * time.Second
-
-	// servabilityChunk matches the update center's per-request entry limit.
-	servabilityChunk = 2000
 )
 
 // UpdateCenterReconciler reconciles the singleton UpdateCenter CRD.
@@ -528,8 +519,7 @@ type declaredPlugin struct {
 // the second, and only PluginsServable gates Ready.
 func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alpha1.UpdateCenterStatus, logger *slog.Logger) {
 	// §3.4a — fetch inventory.
-	inventoryURL := r.ucBaseURL + "/api/v1/inventory"
-	inventory, skipped, err := r.fetchInventory(ctx, inventoryURL)
+	inventory, skipped, err := getUCInventory(ctx, r.httpDoer, r.ucBaseURL)
 	if err != nil {
 		logger.Warn("inventory fetch failed", "error", err)
 		r.setInventoryUnavailable(status, fmt.Sprintf("inventory unavailable: %v", err))
@@ -692,15 +682,8 @@ func (r *UpdateCenterReconciler) computeServability(ctx context.Context, status 
 		if res.Servable {
 			continue
 		}
-		var reason string
-		switch res.Reason {
-		case "pull-through-disabled":
-			reason = unservablePullThroughDisabled
-		case "not-listed":
-			reason = unservableNotListed
-		case "archive-disabled":
-			reason = unservableArchiveDisabled
-		default:
+		reason, isUndecided := classifyServability(res)
+		if isUndecided {
 			// sources-degraded: the negative is unprovable, so it is not listed.
 			undecided++
 			continue
@@ -773,114 +756,14 @@ func uniqueDeclared(declared []declaredPlugin) []declaredPlugin {
 	return out
 }
 
-// errServabilityUnsupported marks an update center that does not route the
-// servability endpoint, which happens when the image predates it.
-var errServabilityUnsupported = errors.New("update center has no servability endpoint")
-
-// ucServabilityPlugin is one entry of the servability request.
-type ucServabilityPlugin struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-// ucServabilityRequest is the POST body of /api/v1/servability.
-type ucServabilityRequest struct {
-	Plugins []ucServabilityPlugin `json:"plugins"`
-}
-
-// ucServabilityResult is one answer of the servability response.
-type ucServabilityResult struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Servable bool   `json:"servable"`
-	Via      string `json:"via,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-}
-
-// ucServabilityResponse is the response of /api/v1/servability.
-type ucServabilityResponse struct {
-	Plugins []ucServabilityResult `json:"plugins"`
-}
-
-// fetchServability POSTs the plugins to the update center's servability endpoint in
-// chunks and returns the answers in request order.
+// fetchServability posts the declared plugins to the update center's
+// servability endpoint through postServability.
 func (r *UpdateCenterReconciler) fetchServability(ctx context.Context, plugins []declaredPlugin) ([]ucServabilityResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, servabilityTimeout)
-	defer cancel()
-
-	url := r.ucBaseURL + "/api/v1/servability"
-	out := make([]ucServabilityResult, 0, len(plugins))
-	for start := 0; start < len(plugins); start += servabilityChunk {
-		end := min(start+servabilityChunk, len(plugins))
-		req := ucServabilityRequest{Plugins: make([]ucServabilityPlugin, 0, end-start)}
-		for _, dp := range plugins[start:end] {
-			req.Plugins = append(req.Plugins, ucServabilityPlugin{Name: dp.Name, Version: dp.Version})
-		}
-		body, err := json.Marshal(req)
-		if err != nil {
-			return nil, fmt.Errorf("encode servability request: %w", err)
-		}
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("create servability request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := r.httpDoer.Do(httpReq)
-		if err != nil {
-			return nil, fmt.Errorf("POST servability: %w", err)
-		}
-		var payload ucServabilityResponse
-		decodeErr := func() error {
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-				return fmt.Errorf("%w: HTTP %d", errServabilityUnsupported, resp.StatusCode)
-			}
-			if resp.StatusCode != http.StatusOK {
-				msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-				return fmt.Errorf("servability HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
-			}
-			if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload); err != nil {
-				return fmt.Errorf("parse servability JSON: %w", err)
-			}
-			return nil
-		}()
-		if decodeErr != nil {
-			return nil, decodeErr
-		}
-		if len(payload.Plugins) != end-start {
-			return nil, fmt.Errorf("servability answered %d of %d plugins", len(payload.Plugins), end-start)
-		}
-		out = append(out, payload.Plugins...)
+	req := make([]ucServabilityPlugin, 0, len(plugins))
+	for _, dp := range plugins {
+		req = append(req, ucServabilityPlugin{Name: dp.Name, Version: dp.Version})
 	}
-	return out, nil
-}
-
-// fetchInventory GETs the /api/v1/inventory endpoint and parses its response.
-// The second result names every plugin-pack manifest the update center could
-// not read (see ucInventoryResponse); it is empty on a fully complete scan.
-func (r *UpdateCenterReconciler) fetchInventory(ctx context.Context, url string) ([]inventoryEntry, []ucSkippedPack, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := r.httpDoer.Do(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GET inventory: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, nil, fmt.Errorf("inventory HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var payload ucInventoryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, nil, fmt.Errorf("parse inventory JSON: %w", err)
-	}
-	return payload.Plugins, payload.SkippedPacks, nil
+	return postServability(ctx, r.httpDoer, r.ucBaseURL, req)
 }
 
 // metadataConfigMapName is the operator-managed ConfigMap that carries the derived

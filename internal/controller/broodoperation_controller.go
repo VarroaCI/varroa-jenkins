@@ -833,6 +833,21 @@ func (r *BroodOperationReconciler) dispatchLoop(ctx context.Context, op *v1alpha
 			continue // wave gate: N+1 not yet open
 		}
 
+		// The upgrade servability verdict is read once here, before any status
+		// write. Only True reaches the Dispatched write.
+		if op.Spec.Action.Verb == v1alpha1.BroodVerbUpgrade {
+			verdict, message, pin := r.upgradeGate(ctx, op, t)
+			switch verdict {
+			case metav1.ConditionFalse:
+				r.failUpgradeTarget(op, t, "target profile not servable: "+message)
+				continue
+			case metav1.ConditionUnknown:
+				// Undecided: the target stays Pending and the next tick re-checks it.
+				continue
+			}
+			ctx = withUpgradeGatePassed(ctx, pin)
+		}
+
 		// Write-before-send: mark Dispatched.
 		t.State = v1alpha1.BroodTargetStateDispatched
 		dispatchedAt := metav1.NewTime(r.now())
@@ -999,8 +1014,20 @@ func (r *BroodOperationReconciler) dispatchUpgrade(ctx context.Context, op *v1al
 	// dispatch itself, that would actually consume the rejected plugin set.
 	// Running both checks once here, before the already-at-target branch is
 	// even evaluated, means the real-delta path below never re-runs them.
+	// dispatchLoop gates every upgrade target before it is persisted as Dispatched.
+	// The release must match the pin the gate decided for. A direct caller that
+	// skipped the loop reads the verdict here, and only False fails the target.
+	profileName := ""
 	if pinProfile != nil {
-		if servable, message := r.upgradeProfileServable(ctx, pinProfile); !servable {
+		profileName = pinProfile.Name
+	}
+	if gated, ok := upgradeGatePassed(ctx); ok {
+		if gated.version != pinVersion || gated.profile != profileName {
+			r.failUpgradeTarget(op, t, "target profile changed after its servability check; rerun the operation")
+			return nil
+		}
+	} else if pinProfile != nil {
+		if verdict, message := r.upgradeProfileServable(ctx, pinProfile); verdict == metav1.ConditionFalse {
 			r.failUpgradeTarget(op, t, "target profile not servable: "+message)
 			return nil
 		}
@@ -1091,14 +1118,67 @@ func (r *BroodOperationReconciler) upgradeAppliedImage(ctx context.Context, cr *
 	return applied, true
 }
 
-// upgradeProfileServable reports whether profile is blocked by an existing
-// ProfileCandidate's PluginsServable=False condition. A profile with no
-// ProfileCandidate is always servable as far as this check is concerned.
-func (r *BroodOperationReconciler) upgradeProfileServable(ctx context.Context, profile *v1alpha1.JenkinsVersionProfile) (bool, string) {
+// gatedPin is the version and profile name the servability gate decided for.
+type gatedPin struct {
+	version string
+	profile string
+}
+
+// upgradeGateKey marks a context whose upgrade target passed the servability gate.
+type upgradeGateKey struct{}
+
+// withUpgradeGatePassed records the pin that dispatchLoop gated.
+func withUpgradeGatePassed(ctx context.Context, pin gatedPin) context.Context {
+	return context.WithValue(ctx, upgradeGateKey{}, pin)
+}
+
+// upgradeGatePassed returns the pin dispatchLoop gated, if it gated the target.
+func upgradeGatePassed(ctx context.Context) (gatedPin, bool) {
+	pin, ok := ctx.Value(upgradeGateKey{}).(gatedPin)
+	return pin, ok
+}
+
+// upgradeGate reads the servability verdict of the target's pinned profile. It is
+// the single verdict read on the upgrade dispatch path, and it runs before the
+// target is marked Dispatched. A missing controller passes the gate, because
+// dispatchUpgrade cannot release it. Any other read failure is Unknown, so the
+// target waits for a later tick.
+func (r *BroodOperationReconciler) upgradeGate(ctx context.Context, op *v1alpha1.BroodOperation, t *v1alpha1.BroodTargetStatus) (metav1.ConditionStatus, string, gatedPin) {
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, t.Name, t.Namespace)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return metav1.ConditionTrue, "", gatedPin{}
+		}
+		return metav1.ConditionUnknown, fmt.Sprintf("controller read failed: %v", err), gatedPin{}
+	}
+	profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, r.store, "", "")
+	if err != nil {
+		return metav1.ConditionUnknown, fmt.Sprintf("version profile read failed: %v", err), gatedPin{}
+	}
+	pinVersion := cr.Spec.Version
+	if upgrade := op.Spec.Action.Upgrade; upgrade != nil && upgrade.TargetVersion != nil {
+		pinVersion = *upgrade.TargetVersion
+	}
+	pin := gatedPin{version: pinVersion}
+	pinProfile, _ := ResolveProfile(pinVersion, profiles)
+	if pinProfile == nil {
+		return metav1.ConditionTrue, "", pin
+	}
+	pin.profile = pinProfile.Name
+	verdict, message := r.upgradeProfileServable(ctx, pinProfile)
+	return verdict, message, pin
+}
+
+// upgradeProfileServable returns the profile's servability verdict from its open
+// ProfileCandidates. A False verdict wins over an Unknown one. A profile with no
+// open candidate verdict is True, so a profile with no ProfileCandidate is always
+// servable as far as this check is concerned.
+func (r *BroodOperationReconciler) upgradeProfileServable(ctx context.Context, profile *v1alpha1.JenkinsVersionProfile) (metav1.ConditionStatus, string) {
 	candidates, err := crdstore.List[v1alpha1.ProfileCandidate](ctx, r.store, "", "")
 	if err != nil {
-		return true, ""
+		return metav1.ConditionUnknown, fmt.Sprintf("profile candidate servability could not be read: %v", err)
 	}
+	unknownMsg, sawUnknown := "", false
 	for _, c := range candidates {
 		if c.Spec.ProfileRef != profile.Name {
 			continue
@@ -1109,13 +1189,28 @@ func (r *BroodOperationReconciler) upgradeProfileServable(ctx context.Context, p
 		if c.Status.Phase != v1alpha1.ProfileCandidatePhasePending && c.Status.Phase != v1alpha1.ProfileCandidatePhaseReady {
 			continue
 		}
+		found := false
 		for _, cond := range c.Status.Conditions {
-			if cond.Type == v1alpha1.ConditionCandidatePluginsServable && cond.Status == metav1.ConditionFalse {
-				return false, cond.Message
+			if cond.Type != v1alpha1.ConditionCandidatePluginsServable {
+				continue
+			}
+			found = true
+			switch cond.Status {
+			case metav1.ConditionFalse:
+				return metav1.ConditionFalse, cond.Message
+			case metav1.ConditionUnknown:
+				unknownMsg, sawUnknown = cond.Message, true
 			}
 		}
+		if !found {
+			// The candidate has not reached its servability check yet.
+			unknownMsg, sawUnknown = "profile candidate servability has not been evaluated", true
+		}
 	}
-	return true, ""
+	if sawUnknown {
+		return metav1.ConditionUnknown, unknownMsg
+	}
+	return metav1.ConditionTrue, ""
 }
 
 // upgradePluginSet resolves the plugin core set pinned to version, preferring

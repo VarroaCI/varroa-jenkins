@@ -126,9 +126,10 @@ sections describe.
   Succeeded, so a target is never marked done on the write alone. Either
   granularity runs `bundle.CheckPluginPins` against the target's own
   unresolved bundle content first, and checks the resolved profile's
-  `PluginsServable` condition when it has an open `ProfileCandidate`; either
-  failing fails just that target with a distinct reason before anything is
-  written.
+  `PluginsServable` condition when it has an open `ProfileCandidate`; a
+  `False` condition fails just that target with a distinct reason before
+  anything is written. An `Unknown` condition holds the target at `Pending`
+  and retries on a later tick.
 - `Reconciler` (`controller_controller.go`) is the `Controller` CRD's controller-runtime
   reconciler. `SetupWithManager` (`operator.go`) wires: `For(&Controller{})`; an
   `UpdateFunc` predicate that skips status-only updates and only reacts to
@@ -661,6 +662,10 @@ sections describe.
   controller that is not hibernated, so a `trigger_run` action needs no
   separate power-state read before it reaches a running controller.
 - Other controller-runtime / ticker reconcilers in this package:
+  - `ucservability.go` — `postServability` and `getUCInventory` are the only
+    operator clients of the update center's servability and inventory routes.
+    `UpdateCenterReconciler` and `ProfileCandidateReconciler` both call them.
+    The candidate posts only its unstored pins to the servability route.
   - `CatalogReconciler` (`catalog_controller.go`) — `CatalogSource` +
     `ComposedBundle`; `Reconcile` is a **three-way** dispatch: `repoURL` (git
     clone) vs `ociRef` (OCI pull via `oci.RegistryStore` + `Resolve` → digest as

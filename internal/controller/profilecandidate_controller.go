@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +35,13 @@ const maxPreflightFailures = 50
 
 // maxFailingControllerMessageLen caps ProfileCandidateFailingController.Message.
 const maxFailingControllerMessageLen = 200
+
+// Reasons of the PluginsServable condition that only the candidate sets. The
+// rest are shared with the UpdateCenter reconciler (updatecenter_controller.go).
+const (
+	reasonNoUpdateCenter         = "NoUpdateCenter"
+	reasonWaitingForUpdateCenter = "WaitingForUpdateCenter"
+)
 
 // candidateRequeueAfter is how soon a candidate stuck on a retryable
 // condition (ErrMetadataUnavailable, an unreadable in-cluster UC inventory)
@@ -97,7 +103,7 @@ func NewProfileCandidateReconciler(client ResourceClient, store crdstore.Backend
 		client:            client,
 		store:             store,
 		operatorNamespace: operatorNamespace,
-		ucBaseURL:         ucBaseURL,
+		ucBaseURL:         strings.TrimRight(ucBaseURL, "/"),
 		activityPublisher: activityPublisher,
 		logger:            logger,
 		httpDoer:          &http.Client{Timeout: candidateHTTPTimeout},
@@ -206,19 +212,20 @@ func (r *ProfileCandidateReconciler) Reconcile(ctx context.Context, req reconcil
 	case failed:
 		status.Phase = v1alpha1.ProfileCandidatePhaseFailed
 	case !pluginsServableChecked:
-		// Inventory fetch failed/timed out/unparseable: leave PluginsServable at
-		// its prior value and requeue rather than hard-failing.
+		// The inventory or servability call failed, timed out, or was
+		// unparseable: leave PluginsServable at its prior value and requeue
+		// rather than hard-failing.
 		if err := r.patchStatus(ctx, name, status); err != nil {
 			logger.Error("failed to patch status", "error", err)
 			return reconcile.Result{}, err
 		}
 		return reconcile.Result{RequeueAfter: candidateRequeueAfter}, nil
-	case pluginsServable:
+	case pluginsServable == metav1.ConditionTrue:
 		status.Phase = v1alpha1.ProfileCandidatePhaseReady
 	default:
-		// PluginsServable=False for either WaitingForUpdateCenter or
-		// PullThroughPending holds Pending: only Pending candidates are ever
-		// re-reconciled, so this is what makes the later re-check happen.
+		// PluginsServable=False or Unknown holds Pending. Only Pending
+		// candidates are re-reconciled, so this is what makes the later
+		// re-check happen.
 		status.Phase = v1alpha1.ProfileCandidatePhasePending
 	}
 
@@ -602,109 +609,153 @@ func (r *ProfileCandidateReconciler) verifyClosure(ctx context.Context, candidat
 	return failed
 }
 
-// checkPluginsServable checks whether the closure's plugins are all servable
-// from the in-cluster update center. The second return value is false only
-// when the inventory fetch itself failed/timed out/was unparseable — in that
-// case the caller must leave the condition at its prior value and requeue,
-// never treat it as a hard False.
-func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, closure pluginresolve.Closure, status *v1alpha1.ProfileCandidateStatus, logger *slog.Logger) (bool, bool) {
+// checkPluginsServable sets PluginsServable from the update center. It reads
+// the inventory first, so a stored pin is servable without a further call. It
+// posts only the unstored pins to the servability endpoint, which answers
+// whether pull-through can serve each one.
+//
+// The first result is the condition status to act on. The second is false
+// only when the check could not complete (the inventory or servability call
+// failed, or the UpdateCenter read failed). The caller then leaves the
+// condition at its prior value and requeues.
+func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, closure pluginresolve.Closure, status *v1alpha1.ProfileCandidateStatus, logger *slog.Logger) (metav1.ConditionStatus, bool) {
+	if r.ucBaseURL == "" {
+		r.setPluginsServable(status, metav1.ConditionTrue, reasonNoUpdateCenter, "no in-cluster update center configured")
+		return metav1.ConditionTrue, true
+	}
 	uc, err := crdstore.Get[v1alpha1.UpdateCenter](ctx, r.store, updateCenterSingletonName, "")
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			r.setCondition(status, v1alpha1.ProfileCandidateCondition{
-				Type:               v1alpha1.ConditionCandidatePluginsServable,
-				Status:             metav1.ConditionTrue,
-				LastTransitionTime: metav1.Now(),
-				Reason:             "NoUpdateCenter",
-				Message:            "no in-cluster update center configured",
-			})
-			return true, true
+			r.setPluginsServable(status, metav1.ConditionTrue, reasonNoUpdateCenter, "no in-cluster update center configured")
+			return metav1.ConditionTrue, true
 		}
 		logger.Warn("failed to fetch UpdateCenter for plugins-servable check", "error", err)
-		return false, false
+		return "", false
 	}
 
-	inventory, err := r.fetchInventory(ctx)
+	inventory, skipped, err := getUCInventory(ctx, r.httpDoer, r.ucBaseURL)
 	if err != nil {
 		logger.Warn("failed to fetch update center inventory", "error", err)
-		return false, false
+		return "", false
 	}
-
-	served := make(map[string]struct{}, len(inventory))
+	storedPins := make(map[string]struct{}, len(inventory))
+	storedNames := make(map[string]struct{}, len(inventory))
 	for _, e := range inventory {
-		served[e.Name+"@"+e.Version] = struct{}{}
+		storedPins[e.Name+"@"+e.Version] = struct{}{}
+		storedNames[e.Name] = struct{}{}
 	}
 
-	var missing []string
+	// An unpinned pin is stored when any version of the plugin is stored, as
+	// UpdateCenter gap analysis treats it.
+	var unstored []ucServabilityPlugin
 	for _, p := range closure.Plugins {
-		if _, ok := served[p.ArtifactID+"@"+p.Version]; !ok {
-			missing = append(missing, p.ArtifactID+"@"+p.Version)
+		if isUnpinnedPluginVersion(p.Version) {
+			if _, ok := storedNames[p.ArtifactID]; ok {
+				continue
+			}
+		} else if _, ok := storedPins[p.ArtifactID+"@"+p.Version]; ok {
+			continue
+		}
+		unstored = append(unstored, ucServabilityPlugin{Name: p.ArtifactID, Version: p.Version})
+	}
+
+	if len(unstored) == 0 {
+		r.setPluginsServable(status, metav1.ConditionTrue, reasonAllPluginsServable, "every resolved plugin is in the store")
+		return metav1.ConditionTrue, true
+	}
+
+	// A partial inventory (a plugin-pack manifest the update center could not read)
+	// can hide a stored pin. With pull-through off, the servability route answers
+	// pull-through-disabled for every pin it is sent, stored or not. Posting such a
+	// pin would then read as unservable, so the verdict is held undecided instead.
+	// With pull-through on, the route answers from upstream metadata, so posting is safe.
+	if len(skipped) > 0 && !uc.Spec.PullThrough.Enabled {
+		r.setPluginsServable(status, metav1.ConditionUnknown, reasonResolutionDegraded,
+			fmt.Sprintf("%d plugin-pack manifest(s) unreadable: %d plugin(s) cannot be checked against the store", len(skipped), len(unstored)))
+		return metav1.ConditionUnknown, true
+	}
+
+	answers, err := postServability(ctx, r.httpDoer, r.ucBaseURL, unstored)
+	if errors.Is(err, errServabilityUnsupported) {
+		logger.Warn("update center does not serve the servability endpoint", "error", err)
+		r.setPluginsServable(status, metav1.ConditionFalse, reasonInventoryUnavailable, fmt.Sprintf("servability unavailable: %v", err))
+		return metav1.ConditionFalse, true
+	}
+	if err != nil {
+		logger.Warn("servability check failed", "error", err)
+		return "", false
+	}
+
+	var (
+		listed       []string
+		undecided    int
+		hardBlocked  bool
+		pullDisabled bool
+	)
+	for i, res := range answers {
+		reason, isUndecided := classifyServability(res)
+		switch {
+		case isUndecided:
+			undecided++
+		case reason == "":
+			// Servable by pull-through: it does not block.
+		default:
+			listed = append(listed, fmt.Sprintf("%s@%s (%s)", unstored[i].Name, unstored[i].Version, reason))
+			if reason == unservablePullThroughDisabled {
+				pullDisabled = true
+			} else {
+				hardBlocked = true
+			}
 		}
 	}
 
-	if len(missing) == 0 {
-		r.setCondition(status, v1alpha1.ProfileCandidateCondition{
-			Type:               v1alpha1.ConditionCandidatePluginsServable,
-			Status:             metav1.ConditionTrue,
-			LastTransitionTime: metav1.Now(),
-			Reason:             "AllPluginsServable",
-			Message:            "all resolved plugins are servable from the in-cluster update center",
-		})
-		return true, true
+	switch {
+	case hardBlocked:
+		r.setPluginsServable(status, metav1.ConditionFalse, reasonPluginsUnservable, unservableMessage(listed, undecided))
+		return metav1.ConditionFalse, true
+	case pullDisabled:
+		r.setPluginsServable(status, metav1.ConditionFalse, reasonWaitingForUpdateCenter, unservableMessage(listed, undecided))
+		return metav1.ConditionFalse, true
+	case undecided > 0:
+		r.setPluginsServable(status, metav1.ConditionUnknown, reasonResolutionDegraded,
+			fmt.Sprintf("%d plugin(s) could not be checked: upstream metadata degraded", undecided))
+		return metav1.ConditionUnknown, true
+	default:
+		r.setPluginsServable(status, metav1.ConditionTrue, reasonAllPluginsServable,
+			fmt.Sprintf("%d of %d resolved plugins are servable by pull-through", len(unstored), len(closure.Plugins)))
+		return metav1.ConditionTrue, true
 	}
-
-	sort.Strings(missing)
-	const maxGaps = 10
-	shown := missing
-	suffix := ""
-	if len(shown) > maxGaps {
-		shown = shown[:maxGaps]
-		suffix = fmt.Sprintf(" and %d more", len(missing)-maxGaps)
-	}
-	gapMsg := fmt.Sprintf("%d plugin(s) not yet servable from the in-cluster update center: %s%s", len(missing), strings.Join(shown, ", "), suffix)
-
-	if !uc.Spec.PullThrough.Enabled {
-		r.setCondition(status, v1alpha1.ProfileCandidateCondition{
-			Type:               v1alpha1.ConditionCandidatePluginsServable,
-			Status:             metav1.ConditionFalse,
-			LastTransitionTime: metav1.Now(),
-			Reason:             "WaitingForUpdateCenter",
-			Message:            gapMsg,
-		})
-		return false, true
-	}
-
-	r.setCondition(status, v1alpha1.ProfileCandidateCondition{
-		Type:               v1alpha1.ConditionCandidatePluginsServable,
-		Status:             metav1.ConditionFalse,
-		LastTransitionTime: metav1.Now(),
-		Reason:             "PullThroughPending",
-		Message:            gapMsg,
-	})
-	return false, true
 }
 
-// fetchInventory GETs the update center's /api/v1/inventory, mirroring
-// CatalogReconciler.fetchUCInventory's own independent implementation.
-func (r *ProfileCandidateReconciler) fetchInventory(ctx context.Context) ([]inventoryEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.ucBaseURL+"/api/v1/inventory", nil)
-	if err != nil {
-		return nil, fmt.Errorf("build inventory request: %w", err)
+// maxServabilityMessagePlugins caps the plugin list in a PluginsServable message.
+const maxServabilityMessagePlugins = 10
+
+// unservableMessage lists the blocking plugins, sorted and capped. It names
+// the undecided count when some answers were undecided.
+func unservableMessage(listed []string, undecided int) string {
+	sort.Strings(listed)
+	shown := listed
+	suffix := ""
+	if len(shown) > maxServabilityMessagePlugins {
+		shown = shown[:maxServabilityMessagePlugins]
+		suffix = fmt.Sprintf(" and %d more", len(listed)-maxServabilityMessagePlugins)
 	}
-	resp, err := r.httpDoer.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch inventory: %w", err)
+	msg := fmt.Sprintf("%d plugin(s) not servable: %s%s", len(listed), strings.Join(shown, ", "), suffix)
+	if undecided > 0 {
+		msg += fmt.Sprintf(" (%d undecided: upstream metadata degraded)", undecided)
 	}
-	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("inventory request returned %d: %s", resp.StatusCode, string(body))
-	}
-	var payload ucInventoryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode inventory JSON: %w", err)
-	}
-	return payload.Plugins, nil
+	return msg
+}
+
+// setPluginsServable records the PluginsServable condition.
+func (r *ProfileCandidateReconciler) setPluginsServable(status *v1alpha1.ProfileCandidateStatus, st metav1.ConditionStatus, reason, msg string) {
+	r.setCondition(status, v1alpha1.ProfileCandidateCondition{
+		Type:               v1alpha1.ConditionCandidatePluginsServable,
+		Status:             st,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            msg,
+	})
 }
 
 // checkPreflight runs an advisory, never-blocking fleet check against every

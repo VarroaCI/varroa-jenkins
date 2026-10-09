@@ -72,6 +72,8 @@ The update center reports two signals about the declared plugins:
 | `ArchiveDisabled` | The version is an aged pin. Upstream metadata no longer lists it, and `updateCenter.pullThrough.archiveURL` is empty. |
 | `PullThroughDisabled` | The plugin is not stored, and pull-through is off. |
 
+A `ProfileCandidate` uses the same servability answers for its own closure.
+
 A plugin pinned at `latest` counts as stored when the store holds any version of it. The update center serves the version that `update-center.actual.json` advertises. When the store holds no version, pull-through fetches the newest version that upstream metadata lists. A `latest` pin that no source lists reports `NotListed`.
 
 `Ready` follows `PluginsServable`. An unservable plugin sets `Ready=False`, and the phase becomes `Degraded`. An `Unknown` `PluginsServable` does not block `Ready`. It means upstream could not answer for some plugins.
