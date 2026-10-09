@@ -437,7 +437,9 @@ func (s *Server) commitUpload(ctx context.Context, parsed parsedUpload, plan Pla
 		DisplayName:  parsed.manifest.LongName,
 		RequiredCore: parsed.manifest.RequiredCore,
 		Dependencies: parsed.manifest.Dependencies,
-		Content:      strings.NewReader(string(body)),
+		// The uploaded manifest parsed, so its dependency list is known.
+		DependenciesKnown: true,
+		Content:           strings.NewReader(string(body)),
 	}
 	ref := packRefFor("upload-", plugin.Name, plugin.Version)
 	cfg := oci.PackConfig{

@@ -2,6 +2,7 @@ package updatecenter
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -50,9 +51,23 @@ type testPlugin struct {
 	hpiBytes []byte
 }
 
-// newPluginBytes returns deterministic .hpi content for tests.
+// newPluginBytes returns deterministic .hpi content for tests. It is a real
+// plugin archive, so the metadata document can read its manifest. It panics on
+// error because it has no *testing.T.
 func newPluginBytes(name, version string) []byte {
-	return []byte(fmt.Sprintf("fake-hpi-content-for-%s-%s", name, version))
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintf(w, "Manifest-Version: 1.0\r\nShort-Name: %s\r\nPlugin-Version: %s\r\n\r\n", name, version); err != nil {
+		panic(err)
+	}
+	if err := zw.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
 // seedPluginPack builds and pushes a plugin pack to store.
@@ -220,8 +235,15 @@ func TestMetadata_ActualJSON(t *testing.T) {
 		t.Errorf("expected Content-Type application/json, got %s", ct)
 	}
 
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"dependencies":[]`)) {
+		t.Errorf("plugin with no dependencies must serve an empty array, body: %s", raw)
+	}
 	var uc updateCenterJSON
-	if err := json.NewDecoder(resp.Body).Decode(&uc); err != nil {
+	if err := json.Unmarshal(raw, &uc); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 

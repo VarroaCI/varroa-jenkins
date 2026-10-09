@@ -44,6 +44,14 @@ The value of `ProvisioningDefaults.spec.pluginUpdateCenterDownloadURL` must be `
 | `DownloadURLNotFound` | The download URL answers `404` or `410` for the first pin. |
 | `PluginArchiveFallback` | Some plugins came from the public archive. The message names the first one. |
 
+## Plugin dependencies
+
+The metadata document `update-center.actual.json` lists the dependencies of each served plugin. Each entry names a dependency, its minimum version, and whether it is optional. The list comes from the plugin's own manifest. The document also gives each plugin its required Jenkins core version. The served entry always carries `requiredCore`, which is an empty string when the plugin declares none.
+
+The Jenkins plugin installer reads these entries for the `latest` version of a plugin. For an explicit version, the installer does not read these entries from this document.
+
+A plugin whose manifest cannot be read is left out of the metadata document. The service logs a warning. The plugin stays downloadable at its explicit version.
+
 ## Check readiness
 
 ```bash

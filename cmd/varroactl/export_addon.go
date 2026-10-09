@@ -112,7 +112,9 @@ func runExportAddon(cmd *cobra.Command, _ []string) error {
 		Tags:         tags,
 		RequiredCore: mf.RequiredCore,
 		Dependencies: mf.Dependencies,
-		Content:      bytes.NewReader(data),
+		// The manifest parsed above, so its dependency list is known.
+		DependenciesKnown: true,
+		Content:           bytes.NewReader(data),
 	}
 	plugins := []oci.ResolvedPlugin{plugin}
 

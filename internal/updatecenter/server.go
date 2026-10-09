@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 
@@ -63,6 +64,14 @@ type Server struct {
 	// keyed by "name@version".
 	uploadLocks   map[string]*sync.Mutex
 	uploadLocksMu sync.Mutex
+	// depsCache holds the manifest-derived dependency lists of stored plugins,
+	// keyed by layer digest. A blob never changes, so an entry never expires.
+	depsCache map[string]storedDeps
+	depsMu    sync.Mutex
+	// depsGroup collapses concurrent manifest reads for one layer digest.
+	depsGroup singleflight.Group
+	// manifestReadTimeout bounds one shared stored-manifest read.
+	manifestReadTimeout time.Duration
 }
 
 // NewServer creates a new update center Server.
@@ -75,6 +84,8 @@ func NewServer(store oci.BlobStore, logger *slog.Logger, opts ...Option) *Server
 		maxImportTotalBytes: maxImportTotalBytes,
 		maxUploadBytes:      defaultMaxUploadBytes,
 		uploadLocks:         make(map[string]*sync.Mutex),
+		depsCache:           make(map[string]storedDeps),
+		manifestReadTimeout: defaultManifestReadTimeout,
 	}
 	for _, o := range opts {
 		o(s)
@@ -211,10 +222,11 @@ type pluginLayerInfo struct {
 	Description  string
 	Tags         []string
 	RequiredCore string
-	// Dependencies is the decoded dev.varroa.plugin.dependencies annotation. An
-	// absent annotation yields nil, which is ambiguous on its own — see
-	// packStoreLookup.Dependencies for the discriminator.
+	// Dependencies is the decoded dev.varroa.plugin.dependencies annotation.
 	Dependencies []hpi.Dependency
+	// DependenciesKnown is true only when the annotation was present and
+	// decoded. False means the list is unknown, not empty.
+	DependenciesKnown bool
 }
 
 // listPackInfos enumerates all plugin-pack manifests in the store and returns
@@ -328,6 +340,7 @@ func pluginLayersFromManifest(m oci.Manifest, logger *slog.Logger) []pluginLayer
 						Name: d.Name, Min: d.Min, Optional: d.Optional,
 					})
 				}
+				info.DependenciesKnown = true
 			}
 		}
 		plugins = append(plugins, info)

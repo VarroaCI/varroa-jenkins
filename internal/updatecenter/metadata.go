@@ -20,11 +20,20 @@ type updateCenterJSON struct {
 }
 
 type updateCenterPlugin struct {
-	Name         string   `json:"name"`
-	Version      string   `json:"version"`
-	URL          string   `json:"url"`
-	SHA256       string   `json:"sha256"`
-	Dependencies []string `json:"dependencies"`
+	Name         string                   `json:"name"`
+	Version      string                   `json:"version"`
+	URL          string                   `json:"url"`
+	SHA256       string                   `json:"sha256"`
+	RequiredCore string                   `json:"requiredCore"`
+	Dependencies []updateCenterDependency `json:"dependencies"`
+}
+
+// updateCenterDependency is one entry of a served plugin's dependency list.
+// Version is the manifest minimum, as Jenkins reads it.
+type updateCenterDependency struct {
+	Name     string `json:"name"`
+	Optional bool   `json:"optional"`
+	Version  string `json:"version"`
 }
 
 // handleMetadataPlain serves GET /update-center.actual.json.
@@ -58,8 +67,10 @@ func (s *Server) handleMetadataJSONP(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildMetadataPayload regenerates the update-center JSON per-request
-// from live store inventory. MVP: dependencies is always empty, core is
-// always "", updateCenterVersion is always "1".
+// from live store inventory. Each plugin lists its dependencies from its own
+// manifest. A plugin whose dependency list is unknown is left out of the
+// document, but it stays downloadable at its explicit version. core is always
+// "", and updateCenterVersion is always "1".
 func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 	uc := &updateCenterJSON{
 		UpdateCenterVersion: "1",
@@ -75,12 +86,21 @@ func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
 			continue
 		}
+		deps, known := s.pluginDependencies(r.Context(), winner)
+		if !known {
+			continue
+		}
+		served := make([]updateCenterDependency, 0, len(deps))
+		for _, d := range deps {
+			served = append(served, updateCenterDependency{Name: d.Name, Optional: d.Optional, Version: d.Min})
+		}
 		uc.Plugins[name] = updateCenterPlugin{
 			Name:         name,
 			Version:      winner.Version,
 			URL:          name + "/" + winner.Version + "/" + name + ".hpi",
 			SHA256:       base64.StdEncoding.EncodeToString(rawBytes),
-			Dependencies: []string{},
+			RequiredCore: winner.RequiredCore,
+			Dependencies: served,
 		}
 	}
 

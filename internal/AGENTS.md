@@ -303,14 +303,19 @@ reading each package's entry point):
   annotations (`tags`, `dependencies`); consumers must go through
   `ResolvedPlugin`'s typed fields rather than hand-rolling the JSON.
   `ApplyHPIMetadata` is the single implementation of the derived-annotation
-  contract every pack producer shares. The encoder OMITS empty values, so an
-  absent annotation means "empty", not "unknown"; the discriminator for a pack
-  that predates the annotation contract is `PackConfig.Kind` being unset.
+  contract every pack producer shares. The encoder writes `[]` for a
+  known-empty dependency list and OMITS the annotation only when the list is
+  unknown, so a missing annotation means "unknown", never "empty". The
+  discriminator for a pack that predates the annotation contract is
+  `PackConfig.Kind` being unset.
   `PackConfig.UploadedBy`/`UploadedAt` are provenance for an authenticated user
   upload and are empty for every other producer.
 - **`updatecenter/`** — the in-cluster Jenkins update center service behind
   `cmd/updatecenter`: metadata generation (`update-center.actual.json` +
-  JSONP wrapper), blob download with sha256-verified pull-through from
+  JSONP wrapper; each plugin's dependencies come from the layer annotation,
+  with a lazy read of the stored manifest as fallback, cached by layer digest;
+  a plugin whose list is unknown is left out of the metadata but stays
+  downloadable), blob download with sha256-verified pull-through from
   `updates.jenkins.io` (upstream sha256s are **base64** in update-center.json —
   not hex), Bearer-token OCI-layout-tarball import, and the `/api/v1/inventory`
   JSON consumed by the operator's gap reconciler and the BFF proxy.

@@ -62,6 +62,9 @@ func TestApplyHPIMetadata(t *testing.T) {
 	if len(p.Dependencies) != 2 || p.Dependencies[0].Min != "534.v1b_36f5864073" || !p.Dependencies[1].Optional {
 		t.Errorf("Dependencies = %+v", p.Dependencies)
 	}
+	if !p.DependenciesKnown {
+		t.Error("a parsed manifest must mark the dependency list known")
+	}
 }
 
 func TestApplyHPIMetadata_UnparseableIsSentinel(t *testing.T) {
@@ -73,7 +76,7 @@ func TestApplyHPIMetadata_UnparseableIsSentinel(t *testing.T) {
 	if !errors.Is(err, ErrHPIMetadata) {
 		t.Errorf("error does not wrap ErrHPIMetadata: %v", err)
 	}
-	if p.DisplayName != "" || p.RequiredCore != "" || p.Dependencies != nil {
+	if p.DisplayName != "" || p.RequiredCore != "" || p.Dependencies != nil || p.DependenciesKnown {
 		t.Errorf("a failed parse must leave the plugin untouched: %+v", p)
 	}
 	if !strings.Contains(err.Error(), "demo") {
@@ -323,5 +326,39 @@ func TestReadPluginPack_RejectsLegacyAndMalformed(t *testing.T) {
 				t.Fatalf("expected a malformed-annotation error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestBuildPluginPack_KnownEmptyDependenciesWritesEmptyArray(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewLayoutStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLayoutStore: %v", err)
+	}
+	content := []byte("no-deps-hpi")
+	plugins := []ResolvedPlugin{{
+		Name: "nodeps", Version: "1.0",
+		SHA256:            precomputeDigest(content),
+		DependenciesKnown: true,
+		Content:           bytes.NewReader(content),
+	}}
+	cfg := PackConfig{Kind: PackKindAddon, PluginCount: 1, LockHash: LockHash(plugins)}
+	if err := BuildPluginPack(ctx, store, "nodeps:v1", cfg, plugins); err != nil {
+		t.Fatalf("BuildPluginPack: %v", err)
+	}
+	m, err := store.Pull(ctx, "nodeps:v1")
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if got := m.Layers[0].Annotations[AnnPluginDependencies]; got != "[]" {
+		t.Errorf("known-empty dependencies annotation = %q, want %q", got, "[]")
+	}
+
+	_, back, err := ReadPluginPack(ctx, store, "nodeps:v1")
+	if err != nil {
+		t.Fatalf("ReadPluginPack: %v", err)
+	}
+	if len(back) != 1 || !back[0].DependenciesKnown || len(back[0].Dependencies) != 0 {
+		t.Errorf("round trip = %+v, want known and empty", back)
 	}
 }

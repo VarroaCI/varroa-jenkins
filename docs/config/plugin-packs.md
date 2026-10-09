@@ -69,7 +69,8 @@ trusted development networks.
 
 Consumers reject missing or unknown pack kinds, checksum mismatches, and
 malformed structured annotations. Dependency versions in addon metadata are
-minimums, not exact pins.
+minimums, not exact pins. An empty dependency list is written as `[]`. A missing
+dependencies annotation means the list is unknown, not empty.
 
 See [update center operations](../operations/update-center.md) for seeding and
 pull-through behavior.
