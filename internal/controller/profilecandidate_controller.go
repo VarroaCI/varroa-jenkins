@@ -649,7 +649,7 @@ func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, c
 	// UpdateCenter gap analysis treats it.
 	var unstored []ucServabilityPlugin
 	for _, p := range closure.Plugins {
-		if isUnpinnedPluginVersion(p.Version) {
+		if ucmeta.IsLatest(p.Version) {
 			if _, ok := storedNames[p.ArtifactID]; ok {
 				continue
 			}
