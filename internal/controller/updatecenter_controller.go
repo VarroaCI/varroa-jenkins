@@ -557,8 +557,10 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 
 	// Build inventory lookup set: "name@version" → true.
 	invSet := make(map[string]bool, len(inventory))
+	storedNames := make(map[string]bool, len(inventory))
 	for _, e := range inventory {
 		invSet[fmt.Sprintf("%s@%s", e.Name, e.Version)] = true
+		storedNames[e.Name] = true
 	}
 
 	// Set PluginCount and StoreBytes from the inventory response.
@@ -580,6 +582,14 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 	// Compute gaps: distinct declared − inventory.
 	var unstored []declaredPlugin
 	for _, dp := range uniqueDeclared(declared) {
+		// Served metadata advertises one stored version per plugin, so an unpinned
+		// pin is stored when any version of the plugin is stored.
+		if isUnpinnedPluginVersion(dp.Version) {
+			if !storedNames[dp.Name] {
+				unstored = append(unstored, dp)
+			}
+			continue
+		}
 		if !invSet[fmt.Sprintf("%s@%s", dp.Name, dp.Version)] {
 			unstored = append(unstored, dp)
 		}

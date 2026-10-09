@@ -314,6 +314,8 @@ reading each package's entry point):
   `updates.jenkins.io` (upstream sha256s are **base64** in update-center.json —
   not hex), Bearer-token OCI-layout-tarball import, and the `/api/v1/inventory`
   JSON consumed by the operator's gap reconciler and the BFF proxy.
+  `ResolveAvailable` resolves `latest` to the highest version a healthy metadata
+  source lists. `/download` resolves `latest` from the served metadata first.
   `POST /api/v1/plugins` (`upload.go` + `closure.go`) is the **push** supply
   tier: PARSE → declared-set precondition → D4 admission → PLAN → VALIDATE →
   COMMIT, writing nothing until every mandatory dependency resolves. It requires

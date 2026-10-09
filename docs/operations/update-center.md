@@ -62,6 +62,8 @@ The update center reports two signals about the declared plugins:
 | `ArchiveDisabled` | The version is an aged pin. Upstream metadata no longer lists it, and `updateCenter.pullThrough.archiveURL` is empty. |
 | `PullThroughDisabled` | The plugin is not stored, and pull-through is off. |
 
+A plugin pinned at `latest` counts as stored when the store holds any version of it. The update center serves the version that `update-center.actual.json` advertises. When the store holds no version, pull-through fetches the newest version that upstream metadata lists. A `latest` pin that no source lists reports `NotListed`.
+
 `Ready` follows `PluginsServable`. An unservable plugin sets `Ready=False`, and the phase becomes `Degraded`. An `Unknown` `PluginsServable` does not block `Ready`. It means upstream could not answer for some plugins.
 
 Resolve an unservable plugin by seeding the artifact, restoring the archive URL, or changing the version profile. A member cluster needs its own enabled and populated update center when its controllers cannot reach the core service.

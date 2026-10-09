@@ -27,6 +27,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -216,12 +217,29 @@ type Availability struct {
 	// ArchiveDisabled is set on NotListed when metadata lists the plugin at another
 	// version and the archive fallback is off, so a sidecar could have answered.
 	ArchiveDisabled bool
+	// Version is the concrete version that resolved. It equals the request except
+	// for a latest request. Set when Outcome == Resolved.
+	Version string
+}
+
+// IsLatest reports whether version asks for the newest version of a plugin. An
+// empty version and the word latest, in any case, both ask for it.
+func IsLatest(version string) bool {
+	v := strings.TrimSpace(version)
+	return v == "" || strings.EqualFold(v, "latest")
 }
 
 // ResolveAvailable resolves name@version through every path this resolver has: the
 // metadata sources in order, then the archive sidecar. It is the single entry point
 // for serving decisions; ResolveSHA256 delegates to it.
+//
+// A latest request (see IsLatest) resolves to the highest version any healthy
+// metadata source lists. It never consults the archive, because the archive
+// cannot enumerate versions. Availability.Version carries the concrete version.
 func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) Availability {
+	if IsLatest(version) {
+		return r.resolveLatest(ctx, name)
+	}
 	key := verKey{name: name, version: version}
 	var (
 		gav         string
@@ -235,7 +253,7 @@ func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) A
 		}
 		if sha, ok := entry.index[key]; ok {
 			pm := entry.byName[name]
-			return Availability{Outcome: Resolved, SHA256: sha, Via: ViaMetadata, Meta: &pm}
+			return Availability{Outcome: Resolved, SHA256: sha, Via: ViaMetadata, Meta: &pm, Version: version}
 		}
 		// Wrong version, but the listing still supplies a groupId, which is stable
 		// across a plugin's versions and is all the archive fallback needs.
@@ -267,7 +285,7 @@ func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) A
 	case err == nil:
 		r.logger.Debug("resolved checksum from archive fallback",
 			"name", name, "version", version)
-		return Availability{Outcome: Resolved, SHA256: sha, Via: ViaArchive}
+		return Availability{Outcome: Resolved, SHA256: sha, Via: ViaArchive, Version: version}
 	case errors.Is(err, errArchiveNotFound):
 		return Availability{Outcome: NotListed}
 	default:
@@ -275,6 +293,17 @@ func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) A
 			"name", name, "version", version, "error", err)
 		return Availability{Outcome: SourcesDegraded}
 	}
+}
+
+// resolveLatest answers a latest request. It takes the highest version any healthy
+// source lists for name and never consults the archive.
+func (r *Resolver) resolveLatest(ctx context.Context, name string) Availability {
+	res := r.resolve(ctx, name, func(PluginMeta) bool { return true })
+	if res.Outcome != Resolved {
+		return Availability{Outcome: res.Outcome}
+	}
+	m := res.Meta
+	return Availability{Outcome: Resolved, SHA256: m.SHA256, Via: ViaMetadata, Meta: &m, Version: m.Version}
 }
 
 // ResolveSHA256 returns the base64 SHA-256 for name@version from any path

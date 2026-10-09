@@ -1,6 +1,7 @@
 package updatecenter
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -66,13 +67,39 @@ func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 		Plugins:             make(map[string]updateCenterPlugin),
 	}
 
+	for name, winner := range s.servedPlugins(r.Context()) {
+		// Convert the stored hex digest ("sha256:<hex>") to base64 as
+		// Jenkins' update-center schema expects.
+		rawBytes, err := hex.DecodeString(stripDigestPrefix(winner.SHA256))
+		if err != nil {
+			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
+			continue
+		}
+		uc.Plugins[name] = updateCenterPlugin{
+			Name:         name,
+			Version:      winner.Version,
+			URL:          name + "/" + winner.Version + "/" + name + ".hpi",
+			SHA256:       base64.StdEncoding.EncodeToString(rawBytes),
+			Dependencies: []string{},
+		}
+	}
+
+	return uc
+}
+
+// servedPlugins returns the one version each stored plugin serves, keyed by name.
+// The metadata document and the latest download both read it, so a latest request
+// gets the version that update-center.actual.json advertises.
+func (s *Server) servedPlugins(ctx context.Context) map[string]pluginLayerInfo {
+	served := make(map[string]pluginLayerInfo)
+
 	// Skips are deliberately discarded: serving metadata for the packs that ARE
 	// readable is strictly better than failing the whole request because one
 	// unrelated manifest is unreachable. Only /api/v1/inventory fails closed.
-	packs, _, err := s.listPackInfos(r.Context())
+	packs, _, err := s.listPackInfos(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list pack infos for metadata", "error", err)
-		return uc
+		return served
 	}
 
 	// The declared set is advisory here: metadata serving must never fail because
@@ -91,27 +118,11 @@ func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 	}
 
 	for name, candidates := range byName {
-		winner, ok := selectServedVersion(name, candidates, declared)
-		if !ok {
-			continue
-		}
-		// Convert the stored hex digest ("sha256:<hex>") to base64 as
-		// Jenkins' update-center schema expects.
-		rawBytes, err := hex.DecodeString(stripDigestPrefix(winner.SHA256))
-		if err != nil {
-			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
-			continue
-		}
-		uc.Plugins[name] = updateCenterPlugin{
-			Name:         name,
-			Version:      winner.Version,
-			URL:          name + "/" + winner.Version + "/" + name + ".hpi",
-			SHA256:       base64.StdEncoding.EncodeToString(rawBytes),
-			Dependencies: []string{},
+		if winner, ok := selectServedVersion(name, candidates, declared); ok {
+			served[name] = winner
 		}
 	}
-
-	return uc
+	return served
 }
 
 // selectServedVersion applies the total version-precedence rule across every

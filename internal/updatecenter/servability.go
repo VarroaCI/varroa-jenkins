@@ -48,6 +48,8 @@ type servabilityResult struct {
 	Servable bool   `json:"servable"`
 	Via      string `json:"via,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	// ResolvedVersion is the concrete version a latest request resolved to.
+	ResolvedVersion string `json:"resolvedVersion,omitempty"`
 }
 
 type servabilityResponse struct {
@@ -118,6 +120,9 @@ func servabilityFor(ctx context.Context, res availabilityResolver, p servability
 	case ucmeta.Resolved:
 		out.Servable = true
 		out.Via = string(a.Via)
+		if ucmeta.IsLatest(p.Version) {
+			out.ResolvedVersion = a.Version
+		}
 	case ucmeta.NotListed:
 		out.Reason = servabilityReasonNotListed
 		if a.ArchiveDisabled {

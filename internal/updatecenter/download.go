@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // errChecksumMismatch is returned by doPullThrough when the downloaded HPI bytes
@@ -38,6 +39,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	name := parts[0]
 	version := parts[1]
 
+	if ucmeta.IsLatest(version) {
+		s.serveLatest(w, r, name)
+		return
+	}
+
 	// Try to find the plugin in the store and serve it.
 	digest := s.findPluginDigest(r.Context(), name, version)
 	if digest != "" {
@@ -53,6 +59,29 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Pull-through: fetch from upstream.
 	s.pullThroughPlugin(w, r, name, version)
+}
+
+// serveLatest answers GET /download/plugins/<name>/latest/<name>.hpi. It serves the
+// stored version that update-center.actual.json advertises, so the download matches
+// the metadata. With no stored version it pulls through the newest version that the
+// metadata sources list.
+func (s *Server) serveLatest(w http.ResponseWriter, r *http.Request, name string) {
+	if winner, ok := s.servedPlugins(r.Context())[name]; ok {
+		s.servePluginBlob(w, r, winner.LayerDigest, name, winner.Version)
+		return
+	}
+
+	if !s.pullThroughEnabled || s.resolver == nil {
+		writeError(w, http.StatusNotFound, "plugin not found")
+		return
+	}
+
+	a := s.resolver.ResolveAvailable(r.Context(), name, "latest")
+	if a.Outcome != ucmeta.Resolved {
+		writeError(w, http.StatusNotFound, "plugin not found upstream")
+		return
+	}
+	s.pullThroughPlugin(w, r, name, a.Version)
 }
 
 // findPluginDigest scans all pack manifests for a plugin matching name and version
@@ -143,6 +172,12 @@ type pullThroughResult struct {
 // doPullThrough fetches plugin metadata from upstream, downloads the HPI,
 // verifies the checksum, stores it, and returns the digest.
 func (s *Server) doPullThrough(ctx context.Context, name, version string) (pullThroughResult, error) {
+	// A pack must never store version latest. Callers resolve latest to a concrete
+	// version first (see serveLatest), so a latest request here is a bug.
+	if ucmeta.IsLatest(version) {
+		return pullThroughResult{}, fmt.Errorf("pull-through needs a concrete version")
+	}
+
 	// 1. Resolve the official sha256 across the configured metadata sources (weekly +
 	//    any LTS-line dynamic-stable sources). ErrVersionUnavailable is a non-checksum
 	//    error, so pullThroughPlugin maps it to a 404 (not found upstream).
