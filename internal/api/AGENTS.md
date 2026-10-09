@@ -527,7 +527,8 @@ federation, activity persistence, and SSE fanout.
   distinguishable via an explicit absent-key set.
 - `handlers_fleetplugins.go` serves `GET /fleet/plugins` and
   `GET /fleet/plugins/{name}` — the fleet-wide installed-plugin rollup and
-  per-plugin drilldown. The request pipeline runs in a fixed order: `GET`-only,
+  per-plugin drilldown. Both handlers pass the request context to `IsKnown` and
+  `ListAll`, so a client disconnect ends the fan-out. The request pipeline runs in a fixed order: `GET`-only,
   parse `affected` (`400` on malformed, present-but-blank rejected), validate
   cluster, nil-reader guard (`502`), unfiltered `Brood.ListAll` fan-out, mark
   non-local clusters not-covered (R22), deny-by-default authorization (`Authorizer`

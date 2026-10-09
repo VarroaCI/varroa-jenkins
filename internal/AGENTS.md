@@ -318,7 +318,9 @@ reading each package's entry point):
   a plugin whose list is unknown is left out of the metadata but stays
   downloadable), blob download with sha256-verified pull-through from
   `updates.jenkins.io` (upstream sha256s are **base64** in update-center.json —
-  not hex), Bearer-token OCI-layout-tarball import, and the `/api/v1/inventory`
+  not hex), Bearer-token OCI-layout-tarball import (the import refuses a whole
+  request with `400` when any plugin pack layer has a version that
+  `ucmeta.IsLatest` matches. It copies nothing.), and the `/api/v1/inventory`
   JSON consumed by the operator's gap reconciler and the BFF proxy.
   `ResolveAvailable` resolves `latest` to the highest version a healthy metadata
   source lists. `/download` resolves `latest` from the served metadata first.

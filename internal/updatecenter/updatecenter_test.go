@@ -659,6 +659,68 @@ func TestImport_ValidTarGz(t *testing.T) {
 	}
 }
 
+// postImportExpectRejected posts tarGz to /api/v1/import and checks for a 400
+// whose error body contains wantSubstr.
+func postImportExpectRejected(t *testing.T, ts *testServer, tarGz []byte, wantSubstr string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, ts.baseURL+"/api/v1/import", bytes.NewReader(tarGz))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer correct-token")
+	req.Header.Set("Content-Type", "application/gzip")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(body["error"], wantSubstr) {
+		t.Errorf("error %q does not contain %q", body["error"], wantSubstr)
+	}
+}
+
+func TestImport_RejectsLatestVersion(t *testing.T) {
+	for _, v := range []string{"latest", "LATEST", " latest "} {
+		t.Run(strings.TrimSpace(v), func(t *testing.T) {
+			store := newTestStore(t)
+			ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+			tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+				{name: "foo", version: v, hpiBytes: newPluginBytes("foo", "1.0.0")},
+			})
+			postImportExpectRejected(t, ts, tarGz, "foo")
+
+			if digest := ts.server.findPluginDigest(context.Background(), "foo", v); digest != "" {
+				t.Errorf("rejected plugin was stored with digest %q", digest)
+			}
+		})
+	}
+}
+
+func TestImport_LatestRejectsWholePack(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+		{name: "good", version: "1.0.0", hpiBytes: newPluginBytes("good", "1.0.0")},
+		{name: "foo", version: "LATEST", hpiBytes: newPluginBytes("foo", "1.0.0")},
+	})
+	postImportExpectRejected(t, ts, tarGz, "foo")
+
+	if digest := ts.server.findPluginDigest(context.Background(), "good", "1.0.0"); digest != "" {
+		t.Errorf("valid plugin from a rejected pack was stored with digest %q", digest)
+	}
+}
+
 func TestImport_MalformedBody(t *testing.T) {
 	store := newTestStore(t)
 	ts := newTestServer(t, store, WithImportToken("correct-token"))

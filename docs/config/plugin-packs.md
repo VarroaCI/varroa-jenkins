@@ -56,6 +56,10 @@ varroactl import \
   --to uc://update-center.example.com
 ```
 
+The update center rejects a pack that holds a plugin at `latest` or with no
+version. The error names the plugin. Export the pack again with a concrete
+version.
+
 Use `--registry-config` for registry credentials. Restrict `--insecure` to
 trusted development networks.
 

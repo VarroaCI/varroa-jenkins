@@ -61,7 +61,7 @@ func (s *Server) parseFleetPluginParams(w http.ResponseWriter, r *http.Request) 
 	claims := auth.ClaimsFromContext(r.Context())
 
 	// Step 3: Validate cluster against Brood.IsKnown.
-	ctx := context.Background()
+	ctx := r.Context()
 	if cluster != "" && s.deps.Brood != nil && !s.deps.Brood.IsKnown(ctx, cluster) {
 		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown cluster"})
 		return nil
@@ -272,8 +272,7 @@ func (s *Server) HandleFleetPlugins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
-	fr := s.fleetFanOut(ctx, p)
+	fr := s.fleetFanOut(r.Context(), p)
 
 	// Build fleetInput.
 	in := fleetInput{
@@ -325,8 +324,7 @@ func (s *Server) HandleFleetPluginDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx := context.Background()
-	fr := s.fleetFanOut(ctx, p)
+	fr := s.fleetFanOut(r.Context(), p)
 
 	// Build fleetInput.
 	in := fleetInput{

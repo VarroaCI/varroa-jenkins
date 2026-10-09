@@ -143,5 +143,6 @@ The controller should reach `Connected`. Run a build that creates an agent pod t
 | Update center not ready | PVC binding or internal registry reachability. |
 | Plugins cannot be served | `status.unservable` (reason per plugin) and imported profile packs. |
 | Import returns 401 | Import token and update-center Secret. |
+| Import returns 400 and names a plugin at latest | Export the pack again. A pack must hold concrete versions. |
 
 See [Update Center](../operations/update-center.md) and [Plugin packs](../config/plugin-packs.md).
