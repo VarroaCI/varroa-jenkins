@@ -23,9 +23,12 @@ import (
 
 // Dependencies holds the shared dependencies for API handlers.
 type Dependencies struct {
-	Client       controller.ResourceClient
-	Store        crdstore.Backend // generic CRD store
-	CRClient     client.Client    // controller-runtime client for read-only CRD operations
+	Client controller.ResourceClient
+	Store  crdstore.Backend // generic CRD store
+	// Controllers serves local Controller lists from the BFF informer cache.
+	// Nil lists through Store. Use LocalControllers, not this field, to read.
+	Controllers  ControllerLister
+	CRClient     client.Client // controller-runtime client for read-only CRD operations
 	Authorizer   *Authorizer
 	MiteRegistry transport.Transport
 	Auth         auth.Provider

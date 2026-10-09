@@ -70,7 +70,7 @@ func handleListJenkinsControllers(deps *api.Dependencies) func(ctx context.Conte
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		namespace, _ := getArgs(req)["namespace"].(string)
 
-		controllers, err := crdstore.List[v1alpha1.Controller](ctx, deps.Store, namespace, "")
+		controllers, err := deps.LocalControllers(ctx, namespace)
 		if err != nil {
 			return mcp.NewToolResultError("failed to list controllers: " + err.Error()), nil
 		}

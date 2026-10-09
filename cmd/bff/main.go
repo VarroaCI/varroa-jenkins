@@ -475,22 +475,13 @@ func main() {
 		},
 		&unstructured.Unstructured{},
 		0,
-		cache.Indexers{},
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
-	if err := controllerInformer.SetTransform(func(obj interface{}) (interface{}, error) {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			return obj, nil
-		}
-		ctrl := &v1alpha1.Controller{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, ctrl); err != nil {
-			return nil, err
-		}
-		return ctrl, nil
-	}); err != nil {
+	if err := controllerInformer.SetTransform(api.ControllerCacheTransform); err != nil {
 		logger.Error("failed to set transform on controller informer", "error", err)
 		os.Exit(1)
 	}
+	controllerLister := api.NewIndexerControllerLister(controllerInformer.GetIndexer())
 
 	// Team informer, built like the five above. It feeds the Team-membership
 	// path of tenant capability resolution (internal/rbac EffectiveTenantCapabilities).
@@ -633,6 +624,7 @@ func main() {
 		Authorizer:        authorizer,
 		Client:            client,
 		Store:             clientsetClient, // *ClientsetClient implements crdstore.Backend
+		Controllers:       controllerLister,
 		MiteRegistry:      miteTransport,
 		Broadcaster:       fanout, // bus-backed fanout replaces the in-process Broadcaster
 		RunFanout:         runFanout,
@@ -644,7 +636,7 @@ func main() {
 		DashboardHost:     dashboardHost,
 		DashboardURL:      *dashboardURL,
 		SecureCookies:     secureCookies,
-		Brood:             api.NewBusBrood(cluster, busConn, clusterDir, client, clientsetClient, logger),
+		Brood:             api.NewBusBrood(cluster, busConn, clusterDir, client, clientsetClient, controllerLister, logger),
 		BusConn:           busConn,
 		BroodOps:          api.NewBusBroodOps(cluster, busConn, clusterDir, client, clientsetClient, logger),
 		BroodSchedules:    api.NewBusBroodSchedules(cluster, busConn, clusterDir, logger),

@@ -546,6 +546,14 @@ federation, activity persistence, and SSE fanout.
   Each goroutine writes only its own `out[i]`. Keep the `fillCellSummary`
   caps resolver in the serial pass; it is not goroutine-safe.
 
+- **Cached local Controller lists**: every local Controller list goes through
+  `localControllers` or `Dependencies.LocalControllers`. In the BFF the
+  `controllers` informer serves it through `ControllerLister`. The informer
+  strips `managedFields` (`ControllerCacheTransform`), and the lister returns
+  sorted deep copies. Gets and write paths read the apiserver. Do not call
+  the generic list helper for Controllers directly in `internal/api` or
+  `internal/mcp`.
+
 ## Work Guidance
 
 - A new or changed HTTP path/payload shape must land in

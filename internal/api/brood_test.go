@@ -842,3 +842,29 @@ func TestBusBrood_DiscoverNamespaces_LocalCluster(t *testing.T) {
 		t.Fatal("expected error for local cluster call")
 	}
 }
+
+// The local list reads from the controller lister when one is set, so the
+// store must not be consulted.
+func TestBusBroodListLocalUsesLister(t *testing.T) {
+	lister := NewIndexerControllerLister(newTestControllerIndexer(t,
+		testController("team-a", "alpha"),
+		testController("team-b", "beta"),
+	))
+	bf := &busBrood{localCluster: "core", store: crdstore.NewFake(), controllers: lister, logger: slog.Default()}
+
+	rows, statuses, err := bf.ListAll(context.Background(), "", "core")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	for _, row := range rows {
+		if row.Cluster != "core" {
+			t.Errorf("row %s labelled %q, want core", row.CR.Name, row.Cluster)
+		}
+	}
+	if len(statuses) != 1 || !statuses[0].OK {
+		t.Errorf("statuses = %+v, want one OK local status", statuses)
+	}
+}

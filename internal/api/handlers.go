@@ -819,7 +819,7 @@ func (s *Server) controllerEndpoint(cr *v1alpha1.Controller) string {
 // ?namespace= param is enforced here, not trusted. Deny-by-default: when the Authorizer
 // is nil it returns an empty slice, never the unfiltered inventory.
 func (s *Server) visibleControllers(ctx context.Context, claims *auth.Claims, nsFilter string) ([]*v1alpha1.Controller, error) {
-	controllers, err := crdstore.List[v1alpha1.Controller](ctx, s.deps.Store, "", "") // cluster-wide; authz decides visibility
+	controllers, err := s.deps.LocalControllers(ctx, "") // cluster-wide; authz decides visibility
 	if err != nil {
 		return nil, err
 	}

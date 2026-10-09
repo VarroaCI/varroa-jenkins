@@ -14,6 +14,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -1197,5 +1199,95 @@ func TestHandleControllersSkipsUnreadableRemoteRow(t *testing.T) {
 	}
 	if envelope.Items[0]["name"] != "remote-a" || envelope.Items[1]["name"] != "remote-b" {
 		t.Errorf("valid rows = %v, %v", envelope.Items[0]["name"], envelope.Items[1]["name"])
+	}
+}
+
+// apiserverJSONStore stands in for the apiserver list path. Each ListObjects
+// call decodes the same prebuilt JSON list, as a real list response does.
+type apiserverJSONStore struct {
+	crdstore.Backend
+	raw []byte
+}
+
+func (s *apiserverJSONStore) ListObjects(_ context.Context, _ schema.GroupVersionResource, _, _ string) ([]unstructured.Unstructured, error) {
+	var list unstructured.UnstructuredList
+	if err := json.Unmarshal(s.raw, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// BenchmarkBroodListLocal400 compares a local controller list decoded from a
+// JSON apiserver response with the same list read from the informer cache.
+// Each CR carries a padded managedFields entry, as the apiserver returns.
+func BenchmarkBroodListLocal400(b *testing.B) {
+	const n = 400
+	padding := strings.Repeat("f:spec{}", 1200)
+	items := make([]any, 0, n)
+	for i := 0; i < n; i++ {
+		cr := &v1alpha1.Controller{
+			TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller"},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:       "team-a",
+				Name:            fmt.Sprintf("ctrl-%03d", i),
+				ResourceVersion: fmt.Sprint(i),
+				ManagedFields: []metav1.ManagedFieldsEntry{{
+					Manager:    "varroa-operator",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "varroa.dev/v1alpha1",
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:version":{}},"pad":"` + padding + `"}`)},
+				}},
+			},
+			Spec: v1alpha1.ControllerSpec{Version: "2.504.3"},
+		}
+		items = append(items, cr)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "ControllerList",
+		"metadata":   map[string]any{"resourceVersion": "1"},
+		"items":      items,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var decoded unstructured.UnstructuredList
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		b.Fatal(err)
+	}
+	idx := newTestControllerIndexer(b)
+	for i := range decoded.Items {
+		obj, err := ControllerCacheTransform(&decoded.Items[i])
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := idx.Add(obj); err != nil {
+			b.Fatal(err)
+		}
+	}
+	cached := &busBrood{localCluster: "core", store: crdstore.NewFake(), controllers: NewIndexerControllerLister(idx), logger: slog.Default()}
+	apiserver := &busBrood{localCluster: "core", store: &apiserverJSONStore{raw: raw}, logger: slog.Default()}
+
+	for _, tc := range []struct {
+		name string
+		bf   *busBrood
+	}{
+		{"apiserver-json", apiserver},
+		{"informer", cached},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				rows, _, err := tc.bf.ListAll(context.Background(), "", "core")
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(rows) != n {
+					b.Fatalf("got %d rows, want %d", len(rows), n)
+				}
+			}
+		})
 	}
 }

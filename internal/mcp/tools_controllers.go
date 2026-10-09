@@ -78,7 +78,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			}
 		} else {
 			// Fallback: direct local list.
-			controllers, err := crdstore.List[v1alpha1.Controller](ctx, deps.Store, ns, "")
+			controllers, err := deps.LocalControllers(ctx, ns)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
 			}

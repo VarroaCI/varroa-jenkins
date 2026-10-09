@@ -140,6 +140,7 @@ type busBrood struct {
 	membership   *bus.ClusterDirectory
 	client       controller.ResourceClient
 	store        crdstore.Backend
+	controllers  ControllerLister
 	logger       *slog.Logger
 
 	// request is the injectable NATS request function; defaults to conn.Request.
@@ -155,13 +156,14 @@ type busBrood struct {
 }
 
 // NewBusBrood creates a new bus-backed Brood.
-func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, client controller.ResourceClient, store crdstore.Backend, logger *slog.Logger) Brood {
+func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, client controller.ResourceClient, store crdstore.Backend, controllers ControllerLister, logger *slog.Logger) Brood {
 	return &busBrood{
 		localCluster: localCluster,
 		conn:         conn,
 		membership:   membership,
 		client:       client,
 		store:        store,
+		controllers:  controllers,
 		logger:       logger.With("component", "bus_brood"),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
@@ -310,7 +312,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 }
 
 func (f *busBrood) listLocal(ctx context.Context, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
-	items, err := crdstore.List[v1alpha1.Controller](ctx, f.store, ns, "")
+	items, err := localControllers(ctx, f.controllers, f.store, ns)
 	if err != nil {
 		return nil, []ClusterFanoutStatus{{Name: f.localCluster, OK: false, Error: err.Error()}}, err
 	}
