@@ -12,9 +12,8 @@ import type { UiSchema } from "@rjsf/utils";
  * which also excludes the dead `endpoint` field.
  *
  * The `ui:order` and `ui:title`s here replace RJSF's raw JSON property names
- * with a deliberate field order and human-readable labels. `ingressSpec.mode`
- * is `ui:readonly` because the CRD and the operator refuse a change after
- * create. `persistence` is *ineffective until teardown/recreate*, not
+ * with a deliberate field order and human-readable labels. `ingressSpec.mode` and `cell.enabled`
+ * are `ui:readonly` because the CRD refuses a change after create. `persistence` is *ineffective until teardown/recreate*, not
  * immutable, so it carries `ui:help` instead. Map fields (`resources.*`,
  * `ingressSpec.annotations`, `miteSpec.resources.*`) are free-form maps whose
  * key inputs get `ui:options.keySuggestions`, rendered as a non-restricting
@@ -69,9 +68,12 @@ export const CONTROLLER_SPEC_UI_SCHEMA: UiSchema = {
   cell: {
     "ui:title": "Cell",
     "ui:help":
-      "A cell hosts tenant pipelines for several Teams. cell.enabled cannot " +
-      "change after creation; maxTenants bounds placement.",
-    enabled: { "ui:title": "Enabled" },
+      "A cell hosts tenant pipelines for several Teams. maxTenants bounds placement.",
+    enabled: {
+      "ui:title": "Enabled",
+      "ui:readonly": true,
+      "ui:help": "The cell role cannot change after the controller is created.",
+    },
     maxTenants: { "ui:title": "Max tenants" },
   },
   backupSpec: {

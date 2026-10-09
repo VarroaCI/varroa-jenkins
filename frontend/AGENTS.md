@@ -55,7 +55,7 @@ TypeScript consumer of it.
 - **Spec Editor curated form** (`components/specform/`): the Form tab edits
   `ingressSpec` and `miteSpec`. `podOverrides` and `resourceOverlay` stay
   YAML tiers. A non-conflict save failure shows `ApiError.serverMessage` in a
-  card banner and keeps every draft. `ingressSpec.mode` is `ui:readonly`.
+  card banner and keeps every draft. `ingressSpec.mode` and `cell.enabled` are `ui:readonly`.
 - Coverage thresholds are enforced in `vite.config.ts` (`test.coverage`):
   lines 80 / branches 74.5 / functions 73.5 / statements 78.5, excluding
   `src/test/`, `src/vite-env.d.ts`, and the spec files themselves.

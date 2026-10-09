@@ -51,7 +51,7 @@ Open the controller, then select Configuration, then Spec Editor. The Form tab
 edits the typed fields: controller class, resources, persistence, RBAC, plugins,
 backups, cell, headless, ingress, and the mite sidecar. Map fields, such as
 resource limits and ingress annotations, accept any key. The Pod overrides tab
-and the Resource overlay tab edit YAML. The ingress routing mode is read-only.
+and the Resource overlay tab edit YAML. The ingress routing mode and the cell role are read-only.
 When the server refuses a save, the card shows the server message and keeps
 your edits.
 

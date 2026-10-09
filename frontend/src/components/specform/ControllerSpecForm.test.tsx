@@ -54,7 +54,27 @@ describe("ControllerSpecForm", () => {
     renderWithQuery(<ControllerSpecForm value={{ ingressSpec: { mode: "path" } }} />);
     const mode = document.getElementById("root_ingressSpec_mode") as HTMLInputElement;
     expect(mode).toBeDisabled();
-    expect(screen.getByText(/cannot change after the controller is created/)).toBeInTheDocument();
+    expect(screen.getByText(/routing mode cannot change after the controller is created/)).toBeInTheDocument();
+  });
+
+  it("renders cell.enabled read-only with its help text", () => {
+    renderWithQuery(<ControllerSpecForm value={{ cell: { enabled: true, maxTenants: 5 } }} />);
+    const enabled = document.getElementById("root_cell_enabled") as HTMLInputElement;
+    expect(enabled).toBeDisabled();
+    expect(enabled).toBeChecked();
+    expect(screen.getByText(/cell role cannot change after the controller is created/)).toBeInTheDocument();
+  });
+
+  it("keeps cell.maxTenants editable", () => {
+    renderWithQuery(<ControllerSpecForm value={{ cell: { enabled: true, maxTenants: 5 } }} />);
+    expect(document.getElementById("root_cell_maxTenants")).not.toBeDisabled();
+  });
+
+  it("renders cell.enabled read-only when the controller has no cell block", () => {
+    renderWithQuery(<ControllerSpecForm />);
+    const enabled = document.getElementById("root_cell_enabled") as HTMLInputElement;
+    expect(enabled).toBeDisabled();
+    expect(enabled).not.toBeChecked();
   });
 
   it("renders ingress annotation rows whose keys contain a prefix and a slash", () => {

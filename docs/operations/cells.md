@@ -8,8 +8,8 @@ Kubernetes agents.
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
 pod roll loses the Jenkins local state and the mite's identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation. `spec.cell.maxTenants` can; it caps the
-tenant count.
+`spec.cell.enabled` cannot change after creation. The Spec Editor shows it read-only.
+`spec.cell.maxTenants` can; it caps the tenant count.
 
 A cell accepts no ingress host. Tenant traffic arrives through the
 [tenant webhook door](#the-tenant-webhook-door).
