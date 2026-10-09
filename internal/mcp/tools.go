@@ -35,6 +35,19 @@ import (
 // Route every tool result through this helper rather than mcp.NewToolResultJSON
 // so neither invariant can regress.
 func resultJSON(v any) (*mcp.CallToolResult, error) {
+	// SanitizeObject walks one level: a top-level map is sanitized as a single
+	// object, so the values of a boxed result (items) must be sanitized here.
+	if m, ok := v.(map[string]any); ok {
+		boxed := make(map[string]any, len(m))
+		for k, val := range m {
+			s, err := api.SanitizeObject(val)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to encode result: %v", err)), nil
+			}
+			boxed[k] = s
+		}
+		v = boxed
+	}
 	sanitized, err := api.SanitizeObject(v)
 	if err != nil {
 		// A value that will not marshal cannot be sanitized, and emitting it raw

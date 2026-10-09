@@ -221,33 +221,6 @@ var cellPoolListOutputSchema = withClustersProperty(listOutputSchema("Default su
 	{Name: "poolReadyReason", Type: "string", Desc: "Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, or SecretsMissing."},
 }))
 
-// withClustersProperty adds the clusters property to a list output schema:
-// one read status for each cluster the list covered.
-func withClustersProperty(schema json.RawMessage) json.RawMessage {
-	var doc map[string]any
-	if err := json.Unmarshal(schema, &doc); err != nil {
-		panic("cell pool list schema: " + err.Error())
-	}
-	props, _ := doc["properties"].(map[string]any)
-	props["clusters"] = map[string]any{
-		"type":        "array",
-		"description": "One read status for each cluster the list covered. A cluster with ok false added no item.",
-		"items": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name":  map[string]any{"type": "string"},
-				"ok":    map[string]any{"type": "boolean"},
-				"error": map[string]any{"type": "string"},
-			},
-		},
-	}
-	out, err := json.Marshal(doc)
-	if err != nil {
-		panic("cell pool list schema: " + err.Error())
-	}
-	return out
-}
-
 // cellPoolDialsFromArgs reads the four dials off the call arguments. It
 // refuses a number that is not a whole int32 and a value below the CRD's
 // floor, so a bad call is refused before any request. The remaining rules,

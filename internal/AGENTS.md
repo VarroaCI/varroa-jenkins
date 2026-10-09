@@ -241,6 +241,7 @@ reading each package's entry point):
   mutation errors must be built with `broodFailureToolError` so
   the operator's failing preflight checks survive into the tool error instead
   of collapsing to a bare "preflight failed".
+  A list tool that fans out across clusters (`list_controllers`, `list_cell_pools`) adds `clusters`, the `api.ClusterFanoutStatus` rows, to `{items, count}`; `project.go`'s `withClustersProperty` declares it.
   Listing tools return a projection (`project.go`), not full CRs; a declared
   `outputSchema` covering more than one result shape must use `anyOf`, since
   `oneOf` requires exactly one match and the shapes overlap. Output schemas are

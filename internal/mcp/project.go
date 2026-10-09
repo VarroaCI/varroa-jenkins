@@ -132,7 +132,7 @@ func withListOutput(schema json.RawMessage) mcp.ToolOption {
 }
 
 // controllerListOutputSchema describes the result of list_controllers.
-var controllerListOutputSchema = listOutputSchema("Default summary projection.", []schemaField{
+var controllerListOutputSchema = withClustersProperty(listOutputSchema("Default summary projection.", []schemaField{
 	{Name: "name", Type: "string", Desc: "Controller name."},
 	{Name: "namespace", Type: "string", Desc: "Controller namespace."},
 	{Name: "cluster", Type: "string", Desc: "Cluster the controller lives on."},
@@ -141,4 +141,31 @@ var controllerListOutputSchema = listOutputSchema("Default summary projection.",
 	{Name: "powerState", Type: "string", Desc: "Running or hibernated."},
 	{Name: "createdAt", Type: "string", Desc: "Creation timestamp, RFC3339 UTC."},
 	{Name: "lastReconcileError", Type: "string", Desc: "Most recent reconcile error, if any."},
-})
+}))
+
+// withClustersProperty adds the clusters property to a list output schema.
+// Each row is the read status of one cluster that the list covered.
+func withClustersProperty(schema json.RawMessage) json.RawMessage {
+	var doc map[string]any
+	if err := json.Unmarshal(schema, &doc); err != nil {
+		panic("list output schema: " + err.Error())
+	}
+	props, _ := doc["properties"].(map[string]any)
+	props["clusters"] = map[string]any{
+		"type":        "array",
+		"description": "One read status for each cluster the list covered. A cluster with ok false added no item.",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name":  map[string]any{"type": "string"},
+				"ok":    map[string]any{"type": "boolean"},
+				"error": map[string]any{"type": "string"},
+			},
+		},
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		panic("list output schema: " + err.Error())
+	}
+	return out
+}

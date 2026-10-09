@@ -31,6 +31,12 @@ Collection tools return an object:
 {"items": [], "count": 0}
 ```
 
+`list_controllers` and `list_cell_pools` read every cluster of the brood. Their
+result also carries `clusters`, one read status for each cluster: `name`, `ok`,
+and `error`. A cluster with `ok: false` did not answer, and its rows are absent.
+When `cluster` names one member that does not answer, the result has no items
+and one `ok: false` row. When a brood is configured, an unknown `cluster` gives a tool error.
+
 Single-resource tools return the resource directly. List tools usually return
 compact summaries. Pass `verbose: true` where supported, or call the matching
 `get_*` tool for full detail.
