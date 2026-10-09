@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -866,5 +868,117 @@ func TestBusBroodListLocalUsesLister(t *testing.T) {
 	}
 	if len(statuses) != 1 || !statuses[0].OK {
 		t.Errorf("statuses = %+v, want one OK local status", statuses)
+	}
+}
+
+// seedPaddedRemoteControllers seeds n Controllers of about 9.5 KB each into a
+// fake store that a remote CommandCRUD reads.
+func seedPaddedRemoteControllers(store *crdstore.Fake, n int) {
+	pad := strings.Repeat("x", 9500)
+	for i := 0; i < n; i++ {
+		crdstore.MustSeed(store, &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("ctrl-%03d", i),
+				Namespace:   "team-a",
+				Annotations: map[string]string{"pad": pad},
+			},
+		})
+	}
+}
+
+func TestBusBrood_ListRemotePagesAboveOldCap(t *testing.T) {
+	remote := crdstore.NewFake()
+	seedPaddedRemoteControllers(remote, 150)
+	crud := &controller.CommandCRUD{Store: remote, Logger: slog.Default()}
+
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		return crud.HandleList(data), nil
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	remoteRows := 0
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			remoteRows++
+		}
+	}
+	if remoteRows != 150 {
+		t.Fatalf("expected 150 dev-cluster rows, got %d", remoteRows)
+	}
+	if calls < 2 {
+		t.Fatalf("expected at least 2 list calls, got %d", calls)
+	}
+	for _, st := range cs {
+		if st.Name == "dev-cluster" && !st.OK {
+			t.Fatalf("dev-cluster status not ok: %+v", st)
+		}
+	}
+}
+
+func TestBusBrood_ListRemotePageFailureDropsCluster(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			raw, _ := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "team-a"}})
+			return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{raw}, Next: "team-a/a"})
+		}
+		return nil, errors.New("timeout")
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows after a page failure, got %s", c.CR.Name)
+		}
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error == "" {
+		t.Fatalf("expected dev-cluster failed, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListRemoteCursorMustAdvance(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Next: "team-a/a"})
+	}
+
+	_, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || !strings.Contains(st.Error, "did not advance") {
+		t.Fatalf("expected cursor failure, got %+v", st)
 	}
 }

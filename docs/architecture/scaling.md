@@ -14,7 +14,7 @@ Scale the Varroa control plane independently from Jenkins workloads. Each `Contr
 | NATS | 3 servers | `nats.config.cluster.*` |
 | Update center | Storage-dependent | `updateCenter.replicas`, storage type, upload mode |
 
-The BFF reads the mite state of a controllers list with at most 16 concurrent NATS requests.
+The BFF reads the mite state of a controllers list with at most 16 concurrent NATS requests. A member operator answers its controllers list in pages of at most 900 KB, and the BFF reads every page.
 
 Gateway and BFF HPAs target 70 percent CPU. They need the Kubernetes metrics API and resource requests.
 

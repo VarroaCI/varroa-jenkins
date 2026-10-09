@@ -97,6 +97,8 @@ The dashboard **Clusters** page lists every registered cluster with its name (a 
 
 When two or more clusters are registered, the dashboard shows a cluster health strip, and the Controllers page adds a **Cluster** column plus per-cluster filter chips. The controller creation wizard offers a cluster picker that lists only healthy clusters and defaults to the core.
 
+If a member's controller list does not arrive, the dashboard and the Controllers page name that cluster and give the reason. The cluster card in the strip shows **list unavailable**. `varroactl get controllers` prints a warning on stderr for that cluster.
+
 Controllers on member clusters have these constraints:
 
 | Surface | Behavior |

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useControllers } from "../hooks/useControllers";
 import { deleteController } from "../api/client";
 import { BroodControllerPicker } from "../components/BroodControllerPicker";
+import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
 import { BroodOperationModal } from "../components/BroodOperationModal";
 import { Button } from "../components/Button";
 import { useAuth } from "../context/AuthContext";
@@ -65,6 +66,7 @@ export default function Controllers() {
         </div>
       )}
 
+      <ClusterFanoutNotice />
       <BroodControllerPicker selected={selected} onSelectionChange={setSelected} />
 
       {broodModalOpen && (

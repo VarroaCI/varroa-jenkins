@@ -10,6 +10,7 @@ import { stubVirtualViewport } from "./virtualViewport";
 const mockUseControllers = vi.fn();
 vi.mock("../hooks/useControllers", () => ({
   useControllers: () => mockUseControllers(),
+  useControllerFanoutFailures: () => ({ data: [] }),
 }));
 
 vi.mock("../hooks/useApi", () => ({

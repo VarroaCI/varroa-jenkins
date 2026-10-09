@@ -545,6 +545,10 @@ federation, activity persistence, and SSE fanout.
   `Snapshot`) with at most `listMiteReadConcurrency` (16) concurrent goroutines.
   Each goroutine writes only its own `out[i]`. Keep the `fillCellSummary`
   caps resolver in the serial pass; it is not goroutine-safe.
+- **Remote controllers list is paged**: `busBrood.listRemote` reads every
+  `controllers.list` page by `next`/`after` key, up to 128 pages. A failed
+  page, or a `next` that does not advance, drops the whole member: zero rows
+  and an `ok: false` status row. Never return a partial member.
 
 - **Cached local Controller lists**: every local Controller list goes through
   `localControllers` or `Dependencies.LocalControllers`. In the BFF the

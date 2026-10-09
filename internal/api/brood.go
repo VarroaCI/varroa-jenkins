@@ -26,6 +26,9 @@ const (
 	broodDeletePodTimeout  = 10 * time.Second
 	broodDrainTimeout      = 10 * time.Second
 	broodNamespacesTimeout = 3 * time.Second
+
+	// broodListMaxPages bounds the pages one remote controllers list reads.
+	broodListMaxPages = 128
 )
 
 // ClusterInfo is the API-facing cluster info struct: the KV heartbeat entry
@@ -244,7 +247,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		if clusterFilter == f.localCluster {
 			return f.listLocal(ctx, ns)
 		}
-		return f.listRemote(clusterFilter, ns)
+		return f.listRemote(ctx, clusterFilter, ns)
 	}
 
 	// Fan-out: local + all remote members.
@@ -283,7 +286,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		wg.Add(1)
 		go func(cluster string) {
 			defer wg.Done()
-			cl, st, err := f.listRemote(cluster, ns)
+			cl, st, err := f.listRemote(ctx, cluster, ns)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -323,28 +326,47 @@ func (f *busBrood) listLocal(ctx context.Context, ns string) ([]ClusterControlle
 	return cc, []ClusterFanoutStatus{{Name: f.localCluster, OK: true}}, nil
 }
 
-func (f *busBrood) listRemote(cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
-	req := bus.ControllersListRequest{Namespace: ns}
-	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
-	if err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
-	}
-	var resp bus.ControllersListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid response"}}, fmt.Errorf("list remote %s decode: %w", cluster, err)
-	}
-	if resp.Error != "" {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
-	}
-	cc := make([]ClusterController, 0, len(resp.Items))
-	for _, raw := range resp.Items {
-		var cr v1alpha1.Controller
-		if err := json.Unmarshal(raw, &cr); err != nil {
-			f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
-			continue
+func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	cc := make([]ClusterController, 0)
+	after := ""
+	for page := 0; ; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cancelled"}},
+				fmt.Errorf("list remote %s: %w", cluster, err)
 		}
-		cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
+		if page == broodListMaxPages {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list exceeds 128 pages"}},
+				fmt.Errorf("list remote %s: more than %d pages", cluster, broodListMaxPages)
+		}
+		req := bus.ControllersListRequest{Namespace: ns, After: after}
+		data, _ := json.Marshal(req)
+		respData, err := f.request(bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
+		if err != nil {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
+		}
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid response"}}, fmt.Errorf("list remote %s decode: %w", cluster, err)
+		}
+		if resp.Error != "" {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
+		}
+		for _, raw := range resp.Items {
+			var cr v1alpha1.Controller
+			if err := json.Unmarshal(raw, &cr); err != nil {
+				f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
+				continue
+			}
+			cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
+		}
+		if resp.Next == "" {
+			break
+		}
+		if resp.Next <= after {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cursor did not advance"}},
+				fmt.Errorf("list remote %s: cursor %q did not advance past %q", cluster, resp.Next, after)
+		}
+		after = resp.Next
 	}
 	return cc, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }

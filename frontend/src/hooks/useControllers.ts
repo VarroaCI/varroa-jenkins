@@ -82,10 +82,35 @@ export interface CellStatusProjection {
   previousInstanceLastSeen?: string;
 }
 
+/** One cluster's answer to the controllers fan-out. ok:false means its rows are absent. */
+export interface ClusterFanoutStatus {
+  name: string;
+  ok: boolean;
+  error?: string;
+}
+
+interface ControllersListBody {
+  items: ControllerListItem[];
+  clusters?: ClusterFanoutStatus[];
+}
+
+const fetchControllerList = () => bffFetch<ControllersListBody>("/controllers");
+
 export function useControllers() {
   return useQuery({
     queryKey: ["controllers"],
-    queryFn: () => bffFetch<{items: ControllerListItem[]}>("/controllers").then(r => r.items),
+    queryFn: fetchControllerList,
+    select: (r) => r.items,
+    refetchInterval: 15_000,
+  });
+}
+
+/** The clusters whose controllers did not arrive in the last list. Shares the controllers cache. */
+export function useControllerFanoutFailures() {
+  return useQuery({
+    queryKey: ["controllers"],
+    queryFn: fetchControllerList,
+    select: (r) => (r.clusters ?? []).filter((c) => !c.ok),
     refetchInterval: 15_000,
   });
 }

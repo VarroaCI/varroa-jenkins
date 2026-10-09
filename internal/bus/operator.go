@@ -186,17 +186,24 @@ type ApproveDeletionResponse struct {
 
 // --- Controller CRUD request/response types (§2) ---
 
+// ControllersListPageBudget bounds one controllers.list reply below the NATS 1 MiB max_payload.
+const ControllersListPageBudget = 900 * 1024
+
 // ControllersListRequest is the payload for operator.<cluster>.controllers.list.
 // Namespace is an optional narrow filter.
 type ControllersListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	// After is the Next key of the previous page. Empty requests the first page.
+	After string `json:"after,omitempty"`
 }
 
 // ControllersListResponse is the reply for operator.<cluster>.controllers.list.
 type ControllersListResponse struct {
 	Items []json.RawMessage `json:"items,omitempty"`
-	Error string            `json:"error,omitempty"`
-	Code  string            `json:"code,omitempty"`
+	// Next is the key of the last row on this page when more rows follow. Empty on the last page.
+	Next  string `json:"next,omitempty"`
+	Error string `json:"error,omitempty"`
+	Code  string `json:"code,omitempty"`
 }
 
 // ControllersGetRequest is the payload for operator.<cluster>.controllers.get.

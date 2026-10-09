@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { useControllers } from "../hooks/useControllers";
+import { useControllers, useControllerFanoutFailures } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
+import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
 import { age } from "../components/activityTimeline.util";
 import { bffFetch } from "../hooks/useApi";
 import { getUpdateCenterStatus } from "../api/client";
@@ -119,6 +120,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <ClusterFanoutNotice />
       <ClusterStrip clusters={clustersData} isLoading={clustersLoading} error={!!clustersError} />
 
       <div className={`${styles.grid} ${styles.metrics}`}>
@@ -186,21 +188,27 @@ export default function Dashboard() {
 }
 
 function ClusterStrip({ clusters, isLoading, error }: { clusters: ClusterEntry[] | undefined; isLoading: boolean; error: boolean }) {
+  const failedNames = new Set((useControllerFanoutFailures().data ?? []).map((f) => f.name));
   if (isLoading || error || (clusters?.length ?? 0) < 2) return null;
   const cls = [...(clusters ?? [])].sort((a, b) => (a.core ? -1 : b.core ? 1 : a.name.localeCompare(b.name)));
   return (
     <div className={styles.clusterStrip}>
-      {cls.map((c) => (
+      {cls.map((c) => {
+        const listFailed = failedNames.has(c.name);
+        return (
         <Link key={c.name} to={`/controllers?cluster=${encodeURIComponent(c.name)}`} className={styles.clusterCard}>
           <div className={styles.clusterCardHead}>
-            <span className={styles.clusterDot} data-health={c.healthy ? "ok" : "bad"} />
+            <span className={styles.clusterDot} data-health={c.healthy && !listFailed ? "ok" : "bad"} />
             <span className={styles.clusterName}>{c.name}</span>
             {c.core && <span className={styles.coreTag}>core</span>}
           </div>
-          <div className={styles.clusterCardStat}>{c.connectedCount}/{c.controllerCount} controllers</div>
+          <div className={styles.clusterCardStat}>
+            {listFailed ? "list unavailable" : `${c.connectedCount}/${c.controllerCount} controllers`}
+          </div>
           <div className={styles.clusterCardAge}>{age(c.lastHeartbeat, { variant: "heartbeat" })}</div>
         </Link>
-      ))}
+        );
+      })}
     </div>
   );
 }

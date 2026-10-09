@@ -910,32 +910,169 @@ func TestCommandCRUD_ListStripsManagedFields(t *testing.T) {
 	}
 }
 
-func TestCommandCRUD_ListOverBudget(t *testing.T) {
-	ct := newCommandCRUDTest(t)
-
-	bigAnn := make(map[string]string)
-	for i := 0; i < 100; i++ {
-		bigAnn[fmt.Sprintf("key-%d", i)] = strings.Repeat("x", 2000)
-	}
-	for i := 0; i < 50; i++ {
-		name := fmt.Sprintf("ctrl-%d", i)
+// seedPaddedControllers seeds n Controllers across two namespaces. Each row
+// carries a padding annotation of about 9.5 KB, so a page holds about 90 rows.
+func seedPaddedControllers(ct *commandCRUDTest, n int) {
+	pad := strings.Repeat("x", 9500)
+	for i := 0; i < n; i++ {
+		ns := "team-a"
+		if i%2 == 1 {
+			ns = "team-b"
+		}
 		ct.seedController(&v1alpha1.Controller{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a", Annotations: bigAnn},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("ctrl-%03d", i),
+				Namespace:   ns,
+				Annotations: map[string]string{"pad": pad},
+			},
+			Spec: v1alpha1.ControllerSpec{Version: "2.0"},
+		})
+	}
+}
+
+// walkControllersList reads every page of a controllers.list walk.
+func walkControllersList(t *testing.T, ct *commandCRUDTest, namespace string) (pages [][]byte, keys []string) {
+	t.Helper()
+	after := ""
+	for i := 0; i < 1000; i++ {
+		raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{Namespace: namespace, After: after}))
+		pages = append(pages, raw)
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal page: %v", err)
+		}
+		if resp.Code != "" {
+			t.Fatalf("page %d: code %q error %q", i, resp.Code, resp.Error)
+		}
+		for _, item := range resp.Items {
+			var cr v1alpha1.Controller
+			if err := json.Unmarshal(item, &cr); err != nil {
+				t.Fatalf("unmarshal item: %v", err)
+			}
+			keys = append(keys, cr.Namespace+"/"+cr.Name)
+		}
+		if resp.Next == "" {
+			return pages, keys
+		}
+		after = resp.Next
+	}
+	t.Fatal("list did not terminate")
+	return nil, nil
+}
+
+func TestCommandCRUD_ListPagesUnderBudget(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 150)
+
+	pages, keys := walkControllersList(t, ct, "")
+	if len(pages) < 2 {
+		t.Fatalf("expected at least 2 pages, got %d", len(pages))
+	}
+	for i, page := range pages {
+		if len(page) > bus.ControllersListPageBudget {
+			t.Fatalf("page %d is %d bytes, over budget %d", i, len(page), bus.ControllersListPageBudget)
+		}
+	}
+	if len(keys) != 150 {
+		t.Fatalf("expected 150 rows across pages, got %d", len(keys))
+	}
+	seen := make(map[string]bool, len(keys))
+	for i, k := range keys {
+		if seen[k] {
+			t.Fatalf("duplicate row %s", k)
+		}
+		seen[k] = true
+		if i > 0 && keys[i-1] >= k {
+			t.Fatalf("rows not in sorted order: %s before %s", keys[i-1], k)
+		}
+	}
+}
+
+func TestCommandCRUD_ListStripsManagedFieldsOnEveryPage(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 150)
+	for _, cr := range ct.client.controllers {
+		cr.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test", Operation: "Update"}}
+	}
+	pages, _ := walkControllersList(t, ct, "")
+	for _, page := range pages {
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(page, &resp); err != nil {
+			t.Fatalf("unmarshal page: %v", err)
+		}
+		for _, item := range resp.Items {
+			if strings.Contains(string(item), "managedFields") {
+				t.Fatal("expected managedFields to be stripped on every page")
+			}
+		}
+	}
+}
+
+func TestCommandCRUD_ListAfterSkipsEarlierRows(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	for i := 1; i <= 5; i++ {
+		ct.seedController(&v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("c%d", i), Namespace: "team-a"},
 			Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
 		})
 	}
+	raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{After: "team-a/c2"}))
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Items) != 3 {
+		t.Fatalf("expected rows 3 to 5, got %d items", len(resp.Items))
+	}
+	if resp.Next != "" {
+		t.Fatalf("expected last page, got next %q", resp.Next)
+	}
+	var first v1alpha1.Controller
+	if err := json.Unmarshal(resp.Items[0], &first); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if first.Name != "c3" {
+		t.Fatalf("expected first row c3, got %s", first.Name)
+	}
+}
 
-	req := bus.ControllersListRequest{}
-	resp := ct.crud.HandleList(mustMarshal(t, req))
-	var listResp bus.ControllersListResponse
-	if err := json.Unmarshal(resp, &listResp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+func TestCommandCRUD_ListSingleOversizedRow(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	ct.seedController(&v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "huge",
+			Namespace:   "team-a",
+			Annotations: map[string]string{"pad": strings.Repeat("x", 950*1024)},
+		},
+		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
+	})
+	raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{}))
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if listResp.Code != bus.CodeInternal {
-		t.Fatalf("expected code=%q (list too large), got %q", bus.CodeInternal, listResp.Code)
+	if resp.Code != bus.CodeInternal {
+		t.Fatalf("expected code %q, got %q", bus.CodeInternal, resp.Code)
 	}
-	if listResp.Error != "list too large" {
-		t.Fatalf("expected error 'list too large', got %q", listResp.Error)
+	if !strings.Contains(resp.Error, "team-a/huge") {
+		t.Fatalf("expected error to name the row, got %q", resp.Error)
+	}
+}
+
+func TestCommandCRUD_ListNamespaceFilterPages(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 200)
+	pages, keys := walkControllersList(t, ct, "team-b")
+	if len(pages) < 2 {
+		t.Fatalf("expected at least 2 pages for team-b, got %d", len(pages))
+	}
+	if len(keys) != 100 {
+		t.Fatalf("expected 100 team-b rows, got %d", len(keys))
+	}
+	for _, k := range keys {
+		if !strings.HasPrefix(k, "team-b/") {
+			t.Fatalf("namespace filter leaked row %s", k)
+		}
 	}
 }
 

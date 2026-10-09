@@ -5,8 +5,16 @@ import { renderWithProviders } from "../test/render-utils";
 import { createControllerListItem } from "../test/factories";
 
 const mockUseControllers = vi.fn();
+const mockFanoutFailures = vi.fn((): { name: string; ok: boolean; error?: string }[] => []);
 vi.mock("../hooks/useControllers", () => ({
   useControllers: () => mockUseControllers(),
+  useControllerFanoutFailures: () => ({ data: mockFanoutFailures() }),
+}));
+
+const mockUseClusters = vi.fn(() => ({ data: undefined, isLoading: false, error: null }));
+vi.mock("../hooks/useClusters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useClusters")>()),
+  useClusters: () => mockUseClusters(),
 }));
 
 vi.mock("../hooks/useApi", () => ({
@@ -439,5 +447,44 @@ describe("Dashboard brood health rollup", () => {
     expect(bar.querySelectorAll("[data-phase]")).toHaveLength(3);
     expect(container.querySelectorAll("[data-testid='health-row']")).toHaveLength(4);
     expect(screen.queryByText(/more ·/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Dashboard fan-out failures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+  });
+
+  const cluster = (name: string, core: boolean) => ({
+    name,
+    healthy: true,
+    core,
+    lastHeartbeat: new Date().toISOString(),
+    operatorVersion: "1.0.0",
+    k8sVersion: "1.30.0",
+    controllerCount: 3,
+    connectedCount: 2,
+    state: "active" as const,
+  });
+
+  it("names a cluster whose controller list did not arrive", () => {
+    mockFanoutFailures.mockReturnValue([{ name: "member-b", ok: false, error: "cluster unreachable" }]);
+    renderWithProviders(<Dashboard />);
+    expect(
+      screen.getByRole("status"),
+    ).toBeInTheDocument();
+  });
+
+  it("marks the strip card of a cluster whose list failed as list unavailable", () => {
+    mockUseClusters.mockReturnValue({
+      data: [cluster("core", true), cluster("member-b", false)],
+      isLoading: false,
+      error: null,
+    } as never);
+    mockFanoutFailures.mockReturnValue([{ name: "member-b", ok: false, error: "cluster unreachable" }]);
+    renderWithProviders(<Dashboard />);
+    expect(screen.getByText("list unavailable")).toBeInTheDocument();
+    expect(screen.getByText("2/3 controllers")).toBeInTheDocument();
   });
 });

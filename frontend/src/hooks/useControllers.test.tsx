@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../test/render-utils";
-import { useControllers, useController } from "./useControllers";
+import { useControllers, useControllerFanoutFailures, useController } from "./useControllers";
 import { createControllerListItem, createControllerDetail } from "../test/factories";
 
 // Mock bffFetch and bffFetchText so we control all network responses.
@@ -36,7 +36,23 @@ describe("useControllers", () => {
 
     expect(mockBffFetch).toHaveBeenCalledWith("/controllers");
     expect(result.current.data).toEqual([item]);
-    expect(qc.getQueryData(["controllers"])).toEqual([item]);
+    expect(qc.getQueryData(["controllers"])).toEqual({items: [item]});
+  });
+
+  it("useControllerFanoutFailures returns only ok:false rows", async () => {
+    const qc = createTestQueryClient();
+    mockBffFetch.mockResolvedValueOnce({
+      items: [],
+      clusters: [
+        { name: "core", ok: true },
+        { name: "member-b", ok: false, error: "cluster unreachable" },
+      ],
+    });
+
+    const { result } = renderHook(() => useControllerFanoutFailures(), { wrapper: createWrapper(qc) });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([{ name: "member-b", ok: false, error: "cluster unreachable" }]);
   });
 
   it("returns loading state while pending", () => {

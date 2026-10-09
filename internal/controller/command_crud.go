@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -142,6 +143,10 @@ func (c *CommandCRUD) preflightDeps() PreflightDepsInterface {
 // --- Handle* methods ---
 
 // HandleList handles operator.<cluster>.controllers.list.
+//
+// Rows sort by "namespace/name". A reply holds whole rows up to
+// bus.ControllersListPageBudget. Next names the last row of a full page, and
+// the caller passes it back as After to read the following rows.
 func (c *CommandCRUD) HandleList(data []byte) []byte {
 	var req bus.ControllersListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -156,30 +161,60 @@ func (c *CommandCRUD) HandleList(data []byte) []byte {
 		c.Logger.Error("list controllers failed", "namespace", req.Namespace, "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return controllerListKey(items[i]) < controllerListKey(items[j])
+	})
 
-	// Strip managedFields and marshal each CR to raw JSON.
-	rawItems := make([]json.RawMessage, 0, len(items))
+	// Reserve room for the envelope and the Next key.
+	budget := bus.ControllersListPageBudget - 1024
+	rawItems := make([]json.RawMessage, 0)
+	size := 0
+	next := ""
+	lastKey := ""
 	for _, cr := range items {
+		key := controllerListKey(cr)
+		if req.After != "" && key <= req.After {
+			continue
+		}
 		stripManagedFields(cr)
 		raw, err := json.Marshal(cr)
 		if err != nil {
 			c.Logger.Error("marshal controller failed", "name", cr.Name, "namespace", cr.Namespace, "error", err)
 			return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
+		if len(raw)+1 > budget {
+			if len(rawItems) == 0 {
+				return c.crudReply(bus.ControllersListResponse{
+					Code:  bus.CodeInternal,
+					Error: "controller " + key + " exceeds the list page budget",
+				})
+			}
+			next = lastKey
+			break
+		}
+		if size+len(raw)+1 > budget {
+			next = lastKey
+			break
+		}
 		rawItems = append(rawItems, raw)
+		size += len(raw) + 1
+		lastKey = key
 	}
 
-	// Marshal once: the same bytes serve both the size-budget check and the
-	// reply (the list is the hottest fan-out path).
-	reply, err := json.Marshal(bus.ControllersListResponse{Items: rawItems})
+	reply, err := json.Marshal(bus.ControllersListResponse{Items: rawItems, Next: next})
 	if err != nil {
 		c.Logger.Error("crud reply marshal failed", "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 	}
-	if len(reply) > 900*1024 {
-		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "list too large"})
+	if len(reply) > bus.ControllersListPageBudget {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "list page too large"})
 	}
 	return reply
+}
+
+// controllerListKey is the paging key of a Controller row.
+func controllerListKey(cr *v1alpha1.Controller) string {
+	return cr.Namespace + "/" + cr.Name
 }
 
 // HandleGet handles operator.<cluster>.controllers.get.
