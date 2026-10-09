@@ -306,6 +306,23 @@ func (r *Resolver) resolveLatest(ctx context.Context, name string) Availability 
 	return Availability{Outcome: Resolved, SHA256: m.SHA256, Via: ViaMetadata, Meta: &m, Version: m.Version}
 }
 
+// ResolveLatestForCore answers a latest request for a controller on core. It takes the
+// highest version a healthy source lists whose requiredCore is at or below core. An
+// empty core or an empty requiredCore accepts the entry. It never consults the archive.
+func (r *Resolver) ResolveLatestForCore(ctx context.Context, name, core string) Availability {
+	res := r.resolve(ctx, name, func(m PluginMeta) bool { return CoreCompatible(m.RequiredCore, core) })
+	if res.Outcome != Resolved {
+		return Availability{Outcome: res.Outcome}
+	}
+	m := res.Meta
+	return Availability{Outcome: Resolved, SHA256: m.SHA256, Via: ViaMetadata, Meta: &m, Version: m.Version}
+}
+
+// CoreCompatible reports whether a plugin that needs requiredCore runs on core.
+func CoreCompatible(requiredCore, core string) bool {
+	return core == "" || requiredCore == "" || pluginver.AtLeast(core, requiredCore)
+}
+
 // ResolveSHA256 returns the base64 SHA-256 for name@version from any path
 // ResolveAvailable consults. Returns ErrVersionUnavailable when the call does not
 // resolve, whether the answer is a provable negative or an unprovable one.

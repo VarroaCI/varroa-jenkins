@@ -68,8 +68,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveLatest(w http.ResponseWriter, r *http.Request, name string) {
 	// A stored winner whose dependency list is unknown is not advertised by the
 	// metadata, so it is not served as latest either. It stays downloadable at its
-	// explicit version.
-	if winner, ok := s.servedPlugins(r.Context())[name]; ok {
+	// explicit version. The download path carries no core version, so the winner is
+	// chosen without a core filter.
+	if winner, ok := s.servedPlugins(r.Context(), "")[name]; ok {
 		if _, known := s.pluginDependencies(r.Context(), winner); known {
 			s.servePluginBlob(w, r, winner.LayerDigest, name, winner.Version)
 			return

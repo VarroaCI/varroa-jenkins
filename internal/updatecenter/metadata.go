@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // updateCenterJSON is the shape of the Jenkins update-center JSON payload.
@@ -71,23 +73,37 @@ func (s *Server) handleMetadataJSONP(w http.ResponseWriter, r *http.Request) {
 // manifest. A plugin whose dependency list is unknown is left out of the
 // document, but it stays downloadable at its explicit version. core is always
 // "", and updateCenterVersion is always "1".
+//
+// A ?version=<core> query names the requesting controller's core. The document then
+// lists, for each plugin, the highest stored version that core runs. A declared
+// latest plugin with no compatible stored version takes the newest compatible
+// version from the upstream metadata sources, when pull-through is on. Without the
+// query, the served version does not depend on the core.
 func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 	uc := &updateCenterJSON{
 		UpdateCenterVersion: "1",
 		Core:                "",
 		Plugins:             make(map[string]updateCenterPlugin),
 	}
+	core := strings.TrimSpace(r.URL.Query().Get("version"))
 
-	for name, winner := range s.servedPlugins(r.Context()) {
+	winners := s.servedPlugins(r.Context(), core)
+	// withheld names a stored winner that the document omits. Its name must not
+	// be filled from upstream, because the stored bytes would not match the
+	// advertised digest.
+	withheld := make(map[string]bool)
+	for name, winner := range winners {
 		// Convert the stored hex digest ("sha256:<hex>") to base64 as
 		// Jenkins' update-center schema expects.
 		rawBytes, err := hex.DecodeString(stripDigestPrefix(winner.SHA256))
 		if err != nil {
 			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
+			withheld[name] = true
 			continue
 		}
 		deps, known := s.pluginDependencies(r.Context(), winner)
 		if !known {
+			withheld[name] = true
 			continue
 		}
 		served := make([]updateCenterDependency, 0, len(deps))
@@ -104,13 +120,28 @@ func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 		}
 	}
 
+	declared, _ := ReadDeclaredPlugins(s.declaredPluginsFile)
+	for _, name := range declaredLatestNames(declared) {
+		if winner, stored := winners[name]; stored {
+			// A stored winner that is withheld, compatible, or pinned by the declared
+			// set stays as it is. Only an incompatible stored winner is replaced.
+			if withheld[name] || ucmeta.CoreCompatible(winner.RequiredCore, core) || slices.Contains(declared[name], winner.Version) {
+				continue
+			}
+		}
+		if entry, ok := s.upstreamLatestEntry(r.Context(), name, core); ok {
+			uc.Plugins[name] = entry
+		}
+	}
+
 	return uc
 }
 
 // servedPlugins returns the one version each stored plugin serves, keyed by name.
 // The metadata document and the latest download both read it, so a latest request
-// gets the version that update-center.actual.json advertises.
-func (s *Server) servedPlugins(ctx context.Context) map[string]pluginLayerInfo {
+// gets the version that update-center.actual.json advertises. A non-empty core
+// restricts the choice to versions that core runs, when any such version is stored.
+func (s *Server) servedPlugins(ctx context.Context, core string) map[string]pluginLayerInfo {
 	served := make(map[string]pluginLayerInfo)
 
 	// Skips are deliberately discarded: serving metadata for the packs that ARE
@@ -138,7 +169,11 @@ func (s *Server) servedPlugins(ctx context.Context) map[string]pluginLayerInfo {
 	}
 
 	for name, candidates := range byName {
-		if winner, ok := selectServedVersion(name, candidates, declared); ok {
+		eligible := candidates
+		if !pinnedInStore(declared, name, candidates) {
+			eligible = preferCompatible(candidates, core)
+		}
+		if winner, ok := selectServedVersion(name, eligible, declared); ok {
 			served[name] = winner
 		}
 	}

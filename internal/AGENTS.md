@@ -323,6 +323,9 @@ reading each package's entry point):
   source lists. `/download` resolves `latest` from the served metadata first.
   The upload planner checks a `latest`-only declaration against the version it
   resolves to, and `DeclaredSet.Highest` ignores unpinned versions.
+  A metadata request with `?version=<core>` lists the highest stored version
+  that core runs, and `ResolveLatestForCore` supplies a compatible upstream entry
+  for a declared `latest` plugin (`corecompat.go`).
   `POST /api/v1/plugins` (`upload.go` + `closure.go`) is the **push** supply
   tier: PARSE → declared-set precondition → D4 admission → PLAN → VALIDATE →
   COMMIT, writing nothing until every mandatory dependency resolves. It requires
