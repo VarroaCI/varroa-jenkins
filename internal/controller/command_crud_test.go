@@ -1783,3 +1783,81 @@ func TestCommandCRUD_HandleUpdate_SetHibernatedFailureReturnsInternal(t *testing
 		t.Fatal("expected non-empty error")
 	}
 }
+
+// TestCommandCRUD_HandleUpdate_RefusesCellRoleChange: a patch that adds,
+// removes, or flips the cell role is refused before any apply. The stored
+// object keeps its cell block.
+func TestCommandCRUD_HandleUpdate_RefusesCellRoleChange(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.CellSpec
+		patch string
+	}{
+		{name: "add cell role to an ordinary controller", seed: nil, patch: `{"spec":{"cell":{"enabled":true}}}`},
+		{name: "remove cell role", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":null}}`},
+		{name: "flip cell role to false", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":{"enabled":false}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{Cell: tt.seed},
+			})
+			before := ct.client.controllers["team-a/ctrl1"].Spec.Cell.DeepCopy()
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Code != bus.CodeInvalid {
+				t.Fatalf("code = %q, want %q (error %q)", updateResp.Code, bus.CodeInvalid, updateResp.Error)
+			}
+			if updateResp.Error != "cell.enabled is immutable" {
+				t.Errorf("error = %q, want %q", updateResp.Error, "cell.enabled is immutable")
+			}
+			if got := ct.client.controllers["team-a/ctrl1"].Spec.Cell; !reflect.DeepEqual(got, before) {
+				t.Errorf("stored cell = %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit: a capacity edit is
+// accepted on a cell and on a block that stores no enabled key.
+func TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.CellSpec
+		patch string
+	}{
+		{name: "cell capacity edit", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":{"maxTenants":7}}}`},
+		{name: "block without enabled capacity edit", seed: &v1alpha1.CellSpec{MaxTenants: 3}, patch: `{"spec":{"cell":{"maxTenants":4}}}`},
+		{name: "ordinary controller capacity edit", seed: nil, patch: `{"spec":{"cell":{"maxTenants":3}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{Cell: tt.seed},
+			})
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Error != "" {
+				t.Fatalf("error = %q, want none", updateResp.Error)
+			}
+		})
+	}
+}

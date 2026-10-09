@@ -73,7 +73,12 @@ type Controller struct {
 	Status ControllerStatus `json:"status,omitempty"`
 }
 
+// The cell role rule sits on ControllerSpec, not on the cell field. A field
+// transition rule runs only when the old and the new object both carry the
+// field, so a patch that adds or removes the whole cell block would skip it.
+
 // ControllerSpec defines the desired state of Controller.
+// +kubebuilder:validation:XValidation:rule="(has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)",message="cell.enabled is immutable"
 type ControllerSpec struct {
 	// API endpoint URL for the controller.
 	Endpoint string `json:"endpoint,omitempty"`
@@ -153,10 +158,10 @@ type ControllerSpec struct {
 
 	// Cell configures this Controller as a cell: a disposable Jenkins JVM
 	// with no durable state that hosts many tenants as top-level folders.
-	// Enabled is immutable after creation, because a live StatefulSet never
-	// changes its storage shape. MaxTenants stays mutable: it changes
-	// placement capacity, never the storage shape.
-	// +kubebuilder:validation:XValidation:rule="self.enabled == oldSelf.enabled",message="cell.enabled is immutable"
+	// The cell role (enabled) cannot change after creation, and a patch cannot
+	// add or remove it either. A block without enabled is not a cell.
+	// MaxTenants stays mutable: it changes placement capacity, never the
+	// storage shape.
 	// +optional
 	Cell *CellSpec `json:"cell,omitempty"`
 }

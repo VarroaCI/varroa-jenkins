@@ -8,17 +8,23 @@ import (
 )
 
 // The functions below mirror the literal XValidation rule text on
-// ControllerSpec.Cell, TeamSpec, and CellPoolSpec in types.go. Keep each function
+// ControllerSpec (the cell role), TeamSpec, and CellPoolSpec in types.go. Keep each function
 // identical to its rule string. The apiserver evaluates the CEL text at
 // admission time; this package has no CEL evaluator, so these functions
 // are the only check that runs in `go test`. A live dry-run apply is the
 // only check on the CEL text itself.
 
-// evalCellEnabledImmutable mirrors:
+// evalCellRoleImmutable mirrors:
 //
-//	self.enabled == oldSelf.enabled
-func evalCellEnabledImmutable(oldSelf, self *CellSpec) bool {
-	return self.Enabled == oldSelf.Enabled
+//	(has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+func evalCellRoleImmutable(oldSelf, self *ControllerSpec) bool {
+	return cellRole(self) == cellRole(oldSelf)
+}
+
+// cellRole models the has()-guarded read of the cell role. A nil Cell models
+// a missing has(self.cell); a false Enabled models a missing enabled key.
+func cellRole(s *ControllerSpec) bool {
+	return s.Cell != nil && s.Cell.Enabled
 }
 
 // evalPipelinesProfileNonEmpty mirrors:
@@ -91,31 +97,68 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-func TestCellEnabledImmutableCEL(t *testing.T) {
+func TestCellRoleImmutableCEL(t *testing.T) {
+	spec := func(c *CellSpec) *ControllerSpec { return &ControllerSpec{Cell: c} }
 	tests := []struct {
 		name         string
-		oldSelf      *CellSpec
-		self         *CellSpec
+		oldSelf      *ControllerSpec
+		self         *ControllerSpec
 		wantAccepted bool
 	}{
 		{
-			name:         "enabled changed",
-			oldSelf:      &CellSpec{Enabled: false, MaxTenants: 3},
-			self:         &CellSpec{Enabled: true, MaxTenants: 3},
+			name:         "enabled flipped inside the block",
+			oldSelf:      spec(&CellSpec{Enabled: false, MaxTenants: 3}),
+			self:         spec(&CellSpec{Enabled: true, MaxTenants: 3}),
+			wantAccepted: false,
+		},
+		{
+			name:         "cell block added",
+			oldSelf:      spec(nil),
+			self:         spec(&CellSpec{Enabled: true}),
+			wantAccepted: false,
+		},
+		{
+			name:         "cell block removed",
+			oldSelf:      spec(&CellSpec{Enabled: true}),
+			self:         spec(nil),
 			wantAccepted: false,
 		},
 		{
 			name:         "maxTenants changed, enabled unchanged",
-			oldSelf:      &CellSpec{Enabled: true, MaxTenants: 3},
-			self:         &CellSpec{Enabled: true, MaxTenants: 10},
+			oldSelf:      spec(&CellSpec{Enabled: true, MaxTenants: 3}),
+			self:         spec(&CellSpec{Enabled: true, MaxTenants: 10}),
+			wantAccepted: true,
+		},
+		{
+			name:         "block without enabled, maxTenants changed",
+			oldSelf:      spec(&CellSpec{MaxTenants: 3}),
+			self:         spec(&CellSpec{MaxTenants: 4}),
+			wantAccepted: true,
+		},
+		{
+			name:         "block without enabled added",
+			oldSelf:      spec(nil),
+			self:         spec(&CellSpec{MaxTenants: 3}),
+			wantAccepted: true,
+		},
+		{
+			name:         "block without enabled removed",
+			oldSelf:      spec(&CellSpec{MaxTenants: 3}),
+			self:         spec(nil),
+			wantAccepted: true,
+		},
+		{
+			name:         "no block before or after",
+			oldSelf:      spec(nil),
+			self:         spec(nil),
 			wantAccepted: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := evalCellEnabledImmutable(tt.oldSelf, tt.self)
+			got := evalCellRoleImmutable(tt.oldSelf, tt.self)
 			if got != tt.wantAccepted {
-				t.Errorf("evalCellEnabledImmutable() = %v, want %v", got, tt.wantAccepted)
+				t.Errorf("evalCellRoleImmutable() = %v, want %v", got, tt.wantAccepted)
 			}
 		})
 	}

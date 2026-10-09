@@ -51,6 +51,11 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `types.go:370-372` (CPU/memory/storage quantities) — otherwise the
   apiserver rejects the CRD at apply time, only caught by a live dry-run
   apply, not `go vet`/`make lint`.
+
+  The `Controller` cell-role rule sits on `ControllerSpec`, not on `cell`: a field
+  transition rule skips an add or a remove of the block. Both reads are `has()`-guarded.
+  `CommandCRUD.HandleUpdate` mirrors the rule through `v1alpha1.IsCell`.
+
   `ControllerStatus` carries `PluginInventory` (`*PluginInventoryStatus`),
   a bounded summary of installed plugins with per-class counts, capped drift
   and version-drift lists, freshness/degradation flags, and an in-flight

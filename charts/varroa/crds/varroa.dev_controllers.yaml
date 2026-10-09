@@ -75,9 +75,10 @@ spec:
                 description: |-
                   Cell configures this Controller as a cell: a disposable Jenkins JVM
                   with no durable state that hosts many tenants as top-level folders.
-                  Enabled is immutable after creation, because a live StatefulSet never
-                  changes its storage shape. MaxTenants stays mutable: it changes
-                  placement capacity, never the storage shape.
+                  The cell role (enabled) cannot change after creation, and a patch cannot
+                  add or remove it either. A block without enabled is not a cell.
+                  MaxTenants stays mutable: it changes placement capacity, never the
+                  storage shape.
                 properties:
                   enabled:
                     description: Enabled marks this Controller as a cell.
@@ -89,9 +90,6 @@ spec:
                     format: int32
                     type: integer
                 type: object
-                x-kubernetes-validations:
-                - message: cell.enabled is immutable
-                  rule: self.enabled == oldSelf.enabled
               className:
                 description: |-
                   ClassName references a ControllerClass by name, layering its defaults
@@ -3987,6 +3985,10 @@ spec:
                 description: Controller version tag.
                 type: string
             type: object
+            x-kubernetes-validations:
+            - message: cell.enabled is immutable
+              rule: (has(self.cell) && has(self.cell.enabled) && self.cell.enabled)
+                == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
           status:
             description: ControllerStatus defines the observed state of Controller.
             properties:

@@ -581,6 +581,12 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "json unmarshal failed", Code: bus.CodeInternal})
 	}
 
+	// Validate cell role immutability. A cell has an emptyDir home and
+	// a different StatefulSet shape, so the role never changes in place.
+	if v1alpha1.IsCell(existing) != v1alpha1.IsCell(&updated) {
+		return c.crudReply(bus.ControllersUpdateResponse{Error: "cell.enabled is immutable", Code: bus.CodeInvalid})
+	}
+
 	// Validate ingress mode immutability.
 	if existing.Spec.IngressSpec.RoutingMode() != updated.Spec.IngressSpec.RoutingMode() {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "ingressSpec.mode is immutable", Code: bus.CodeInvalid})

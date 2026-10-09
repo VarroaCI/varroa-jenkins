@@ -1,29 +1,28 @@
 # Cells and Pipelines Tenants
 
-A cell is a shared Jenkins controller that runs many teams' pipelines as tenants, each with its own folder, build identity, and
-Kubernetes agents.
+A cell is a shared Jenkins controller that runs many teams' pipelines as tenants.
 
 ## What a cell is
 
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
-pod roll loses the Jenkins local state and the mite's identity. [Rehydration](#rehydration) restores build
+pod roll loses local state and the mite's identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation. The Spec Editor shows it read-only.
+`spec.cell.enabled` cannot change after creation. A patch cannot add or remove the cell role; it fails with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell. The Spec Editor shows it read-only.
 `spec.cell.maxTenants` can; it caps the tenant count.
 
-A cell accepts no ingress host. Tenant traffic arrives through the
+A cell accepts no ingress host. Tenant traffic uses the
 [tenant webhook door](#the-tenant-webhook-door).
 
 Six limitations apply:
 
 - A cell never auto-hibernates.
 - `powerState: Stopped` on a cell destroys every in-flight build.
-- Every branch source on a cell sees each delivered webhook. Only the job whose SCM matches
+- Every branch source on a cell sees each webhook. Only the job whose SCM matches
   the payload reacts.
 - A rehydrated run shows no stage view, culprit list, or test detail.
 - The role-strategy admin screen reports a tenant's service identity as unknown until its
   first build.
-- An ad-hoc job made in the Jenkins UI or script console does not survive a pod roll. Only a
+- An ad-hoc job from the Jenkins UI or script console does not survive a pod roll. Only a
   job in the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
@@ -65,7 +64,7 @@ Expect `"status":"True","reason":"Connected"`.
 
 ## Pools
 
-A `CellPool` sizes one pool of cells for a single version profile. An auto-created pool
+A `CellPool` sizes one pool of cells. An auto-created pool
 gets its cell template from `cells.cellTemplate`. See [Cell pools](cell-pools.md),
 [Cell views](cell-views.md).
 
