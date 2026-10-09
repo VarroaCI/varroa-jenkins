@@ -321,6 +321,8 @@ reading each package's entry point):
   JSON consumed by the operator's gap reconciler and the BFF proxy.
   `ResolveAvailable` resolves `latest` to the highest version a healthy metadata
   source lists. `/download` resolves `latest` from the served metadata first.
+  The upload planner checks a `latest`-only declaration against the version it
+  resolves to, and `DeclaredSet.Highest` ignores unpinned versions.
   `POST /api/v1/plugins` (`upload.go` + `closure.go`) is the **push** supply
   tier: PARSE → declared-set precondition → D4 admission → PLAN → VALIDATE →
   COMMIT, writing nothing until every mandatory dependency resolves. It requires

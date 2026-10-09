@@ -47,6 +47,10 @@ type ClosureEntry struct {
 	// depsUnverified is set when the pin resolved from the archive checksum
 	// sidecar, which carries no dependency list. The planner does not descend.
 	depsUnverified bool
+
+	// unpinned is set when the only declaration of the plugin is latest. Its
+	// status and warning describe the version latest resolves to.
+	unpinned bool
 }
 
 // OptionalDependency is a recorded-but-never-resolved optional dependency.
@@ -205,14 +209,23 @@ func (p *closurePlanner) planClosure(ctx context.Context, root hpi.PluginManifes
 		plan.Closure = append(plan.Closure, e)
 		switch e.Status {
 		case StatusLockTooOld:
+			msg := fmt.Sprintf("the declared version %s is older than the minimum %s this plugin requires; "+
+				"provisioning's plugin-version gate gets the final say", e.ResolvedVersion, e.Min)
+			if e.unpinned {
+				msg = fmt.Sprintf("the declared version latest resolves to %s, which is older than the minimum %s "+
+					"this plugin requires; provisioning's plugin-version gate gets the final say", e.ResolvedVersion, e.Min)
+			}
 			plan.Warnings = append(plan.Warnings, UploadWarning{
 				Code: StatusLockTooOld, Plugin: name, Min: e.Min,
-				Message: fmt.Sprintf("the declared version %s is older than the minimum %s this plugin requires; "+
-					"provisioning's plugin-version gate gets the final say", e.ResolvedVersion, e.Min),
+				Message: msg,
 			})
 		case StatusDeclaredNotYetStored:
 			msg := fmt.Sprintf("the declared version %s is not in the store yet; on-demand pull-through will "+
 				"fetch it at that exact version", e.ResolvedVersion)
+			if e.unpinned {
+				msg = fmt.Sprintf("the declared version latest is not in the store yet; on-demand pull-through will "+
+					"fetch %s, the newest version that upstream metadata lists", e.ResolvedVersion)
+			}
 			if e.depsUnverified {
 				msg += " Its own dependency list is not verified; provisioning installs the dependencies."
 			}
@@ -256,8 +269,12 @@ func (p *closurePlanner) resolveOne(ctx context.Context, name, minVersion string
 
 	// step 2 — declared. Upgrading a declared plugin is never the upload's
 	// decision, which is why this branch never falls through to step 3.
-	if vhi, declared := p.declared.Highest(name); declared {
+	if p.declared.Declared(name) {
 		entry.Source = sourceDeclared
+		if p.declared.Unpinned(name) {
+			return p.resolveUnpinned(ctx, entry, name, minVersion)
+		}
+		vhi, _ := p.declared.Highest(name)
 		entry.ResolvedVersion = vhi
 
 		if !pluginver.AtLeast(vhi, minVersion) {
@@ -321,6 +338,48 @@ func (p *closurePlanner) resolveOne(ctx context.Context, name, minVersion string
 	return entry, "", nil
 }
 
+// resolveUnpinned resolves a dependency whose only declaration is latest. It is
+// called from step 2 of resolveOne.
+//
+// A latest declaration resolves to the highest stored version, else to the newest
+// upstream version. The planner checks the minimum against that version. An
+// upload never fetches a declared plugin.
+func (p *closurePlanner) resolveUnpinned(ctx context.Context, entry ClosureEntry, name, minVersion string) (ClosureEntry, string, []hpi.Dependency) {
+	entry.unpinned = true
+
+	if stored, ok := p.highestStored(ctx, name); ok {
+		entry.Status = StatusLockTooOld
+		entry.ResolvedVersion = stored
+		deps, status := p.dependenciesOf(ctx, name, stored)
+		if status != "" {
+			return entry, "", nil
+		}
+		return entry, stored, deps
+	}
+	if !p.pullThrough {
+		entry.Status = StatusNotInStore
+		return entry, "", nil
+	}
+	switch res := p.resolver.ResolveAvailable(ctx, name, "latest"); res.Outcome {
+	case ucmeta.Resolved:
+		entry.ResolvedVersion = res.Version
+		entry.Status = StatusDeclaredNotYetStored
+		if !pluginver.AtLeast(res.Version, minVersion) {
+			entry.Status = StatusLockTooOld
+		}
+		if res.Meta == nil {
+			entry.depsUnverified = true
+			return entry, "", nil
+		}
+		return entry, res.Version, mandatoryOf(res.Meta.Dependencies)
+	case ucmeta.SourcesDegraded:
+		entry.Status = StatusMetadataUnavailable
+	default:
+		entry.Status = StatusUnreachable
+	}
+	return entry, "", nil
+}
+
 // dependenciesOf returns name@version's own mandatory dependency list, in the
 // mandated source order: the stored pack's annotation, then upstream metadata
 // for that exact version, then a rejecting status.
@@ -374,6 +433,9 @@ func (p *closurePlanner) diff(ctx context.Context, order []string, entries map[s
 		}
 		if v, ok := p.declared.Highest(name); ok {
 			row.FoundDeclared = &v
+		} else if p.declared.Declared(name) {
+			v := p.declared[name][0]
+			row.FoundDeclared = &v
 		}
 		if p.pullThrough {
 			if res := p.resolver.ResolveSatisfying(ctx, name, "0"); res.Best != nil {
@@ -392,7 +454,7 @@ func remediationFor(status, name, minVersion string, row UnresolvedDependency) s
 	case StatusNotInStore:
 		return fmt.Sprintf("pull-through is disabled; seed %s via spec.seed.refs or `varroactl import --to uc://…`", name)
 	case StatusUnreachable:
-		if row.FoundDeclared != nil {
+		if row.FoundDeclared != nil && !ucmeta.IsLatest(*row.FoundDeclared) {
 			return fmt.Sprintf("no metadata source lists the declared version %s of %s, and the archive checksum "+
 				"fallback has no sidecar for it or is disabled. Pre-seed it with `varroactl export`/`import` or "+
 				"spec.seed.refs, or refresh the pin", *row.FoundDeclared, name)

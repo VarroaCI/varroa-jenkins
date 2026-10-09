@@ -62,9 +62,17 @@ func (f *fakeResolver) ResolveAvailable(_ context.Context, name, version string)
 	if f.degraded[name] {
 		return ucmeta.Availability{Outcome: ucmeta.SourcesDegraded}
 	}
+	if ucmeta.IsLatest(version) {
+		m, ok := f.listed[name]
+		if !ok {
+			return ucmeta.Availability{Outcome: ucmeta.NotListed}
+		}
+		meta := m
+		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: m.SHA256, Via: ucmeta.ViaMetadata, Meta: &meta, Version: m.Version}
+	}
 	if m, ok := f.listed[name]; ok && m.Version == version {
 		meta := m
-		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: m.SHA256, Via: ucmeta.ViaMetadata, Meta: &meta}
+		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: m.SHA256, Via: ucmeta.ViaMetadata, Meta: &meta, Version: version}
 	}
 	if f.archive[name+"@"+version] {
 		return ucmeta.Availability{Outcome: ucmeta.Resolved, SHA256: "c2hhLWZha2U=", Via: ucmeta.ViaArchive}
@@ -226,6 +234,50 @@ func TestPlanClosure_DecisionTree(t *testing.T) {
 			resolver:    &fakeResolver{listed: map[string]ucmeta.PluginMeta{"dep": {Name: "dep", Version: "3.1"}}},
 			pullThrough: true,
 			min:         "9.0",
+			want:        StatusUnreachable,
+		},
+		{
+			name:        "latest-only, upstream satisfies",
+			declared:    DeclaredSet{"dep": {"latest"}},
+			resolver:    &fakeResolver{listed: map[string]ucmeta.PluginMeta{"dep": {Name: "dep", Version: "3.0"}}},
+			pullThrough: true,
+			min:         "1.0",
+			want:        StatusDeclaredNotYetStored,
+		},
+		{
+			name:     "latest-only, pull-through off",
+			declared: DeclaredSet{"dep": {"latest"}},
+			min:      "1.0",
+			want:     StatusNotInStore,
+		},
+		{
+			name:     "latest-only, stored copy below minimum",
+			store:    &fakeStore{versions: map[string][]string{"dep": {"1.0"}}, deps: map[string][]hpi.Dependency{"dep@1.0": nil}},
+			declared: DeclaredSet{"dep": {"latest"}},
+			min:      "2.0",
+			want:     StatusLockTooOld,
+		},
+		{
+			name:        "latest-only, upstream newest below minimum",
+			declared:    DeclaredSet{"dep": {"latest"}},
+			resolver:    &fakeResolver{listed: map[string]ucmeta.PluginMeta{"dep": {Name: "dep", Version: "1.5"}}},
+			pullThrough: true,
+			min:         "2.0",
+			want:        StatusLockTooOld,
+		},
+		{
+			name:        "latest-only, sources degraded",
+			declared:    DeclaredSet{"dep": {"latest"}},
+			resolver:    &fakeResolver{degraded: map[string]bool{"dep": true}},
+			pullThrough: true,
+			min:         "1.0",
+			want:        StatusMetadataUnavailable,
+		},
+		{
+			name:        "latest-only, listed nowhere",
+			declared:    DeclaredSet{"dep": {"latest"}},
+			pullThrough: true,
+			min:         "1.0",
 			want:        StatusUnreachable,
 		},
 	}
@@ -586,5 +638,88 @@ func TestPlanClosure_DiffListsEveryRejectingDependency(t *testing.T) {
 	code, status, _ := plan.envelope()
 	if code != ErrUnresolvedDependencies || status != 422 {
 		t.Fatalf("envelope = (%q,%d), want (unresolved-dependencies,422)", code, status)
+	}
+}
+
+// TestPlanClosure_LatestDeclaredResolvesConcreteVersion: a latest-only declaration
+// is checked against the version upstream lists. Its own dependencies are
+// descended, and nothing is fetched.
+func TestPlanClosure_LatestDeclaredResolvesConcreteVersion(t *testing.T) {
+	res := &fakeResolver{listed: map[string]ucmeta.PluginMeta{
+		"dep":    {Name: "dep", Version: "3.0", Dependencies: []ucmeta.Dep{{Name: "nested", Version: "1.0"}}},
+		"nested": {Name: "nested", Version: "2.0"},
+	}}
+	p := newPlanner(nil, DeclaredSet{"dep": {"latest"}}, res, true)
+	plan := p.planClosure(context.Background(), root(dep("dep", "1.0")))
+
+	var entry ClosureEntry
+	for _, e := range plan.Closure {
+		if e.Name == "dep" {
+			entry = e
+		}
+	}
+	if entry.ResolvedVersion != "3.0" || entry.Source != sourceDeclared {
+		t.Fatalf("dep entry = %+v, want resolvedVersion 3.0, source declared", entry)
+	}
+	for _, f := range plan.Fetches {
+		if f.Name == "dep" {
+			t.Fatalf("fetches = %+v, want no fetch of a declared plugin", plan.Fetches)
+		}
+	}
+	if statusOf(plan, "nested") == "" {
+		t.Fatalf("nested dependency of dep was not descended: %+v", plan.Closure)
+	}
+	if len(plan.Warnings) == 0 || !strings.Contains(plan.Warnings[0].Message, "latest") ||
+		!strings.Contains(plan.Warnings[0].Message, "3.0") {
+		t.Fatalf("warnings = %+v, want a message naming latest and 3.0", plan.Warnings)
+	}
+}
+
+// TestPlanClosure_MixedLatestAndPin: a pin takes precedence, so latest does not
+// lower the requirement check.
+func TestPlanClosure_MixedLatestAndPin(t *testing.T) {
+	ctx := context.Background()
+
+	p := newPlanner(nil, DeclaredSet{"x": {"latest", "1.0"}}, nil, false)
+	plan := p.planClosure(ctx, root(dep("x", "2.0")))
+	if got := statusOf(plan, "x"); got != StatusLockTooOld {
+		t.Fatalf("status = %q, want lock-too-old", got)
+	}
+	if plan.Closure[0].ResolvedVersion != "1.0" {
+		t.Fatalf("resolvedVersion = %q, want 1.0", plan.Closure[0].ResolvedVersion)
+	}
+
+	p = newPlanner(nil, DeclaredSet{"x": {"latest", "3.0"}}, nil, false)
+	plan = p.planClosure(ctx, root(dep("x", "2.0")))
+	if got := statusOf(plan, "x"); got != StatusNotInStore {
+		t.Fatalf("status = %q, want not-in-store", got)
+	}
+}
+
+// TestPlanClosure_LatestCaseInsensitive: LATEST is the same unpinned declaration.
+func TestPlanClosure_LatestCaseInsensitive(t *testing.T) {
+	res := &fakeResolver{listed: map[string]ucmeta.PluginMeta{"dep": {Name: "dep", Version: "3.0"}}}
+	p := newPlanner(nil, DeclaredSet{"dep": {"LATEST"}}, res, true)
+	plan := p.planClosure(context.Background(), root(dep("dep", "1.0")))
+	if got := statusOf(plan, "dep"); got != StatusDeclaredNotYetStored {
+		t.Fatalf("status = %q, want declared-not-yet-stored", got)
+	}
+}
+
+// TestPlanClosure_DiffLatestDeclaredUnreachable: a latest-only declaration that
+// no source lists reports latest as the found declaration, and the remediation
+// names the plugin rather than a version.
+func TestPlanClosure_DiffLatestDeclaredUnreachable(t *testing.T) {
+	p := newPlanner(nil, DeclaredSet{"x": {"latest"}}, nil, true)
+	plan := p.planClosure(context.Background(), root(dep("x", "1.0")))
+	if len(plan.Unresolved) != 1 {
+		t.Fatalf("unresolved = %+v, want one row", plan.Unresolved)
+	}
+	row := plan.Unresolved[0]
+	if row.FoundDeclared == nil || *row.FoundDeclared != "latest" {
+		t.Fatalf("foundDeclared = %v, want latest", row.FoundDeclared)
+	}
+	if !strings.Contains(row.Remediation, "lists x at all") {
+		t.Fatalf("remediation = %q, want the no-source-lists text", row.Remediation)
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 const (
@@ -584,7 +585,7 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 	for _, dp := range uniqueDeclared(declared) {
 		// Served metadata advertises one stored version per plugin, so an unpinned
 		// pin is stored when any version of the plugin is stored.
-		if isUnpinnedPluginVersion(dp.Version) {
+		if ucmeta.IsLatest(dp.Version) {
 			if !storedNames[dp.Name] {
 				unstored = append(unstored, dp)
 			}

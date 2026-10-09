@@ -31,6 +31,8 @@ varroactl upload plugin <file.hpi>
 varroactl import --from <source> --to <destination>
 ```
 
+An upload checks each mandatory dependency against the declared plugin set. A dependency declared only at `latest` is checked against the version it resolves to: the highest stored version, or else the newest version that upstream metadata lists. A result below the minimum gives a `lock-too-old` warning. A pinned declaration uses the highest pin.
+
 Enable pull-through only when the update center may reach its configured upstream and archive hosts. In an air-gapped environment, seed or import every required plugin before deploying controllers. See [Air-gapped installation](../install/air-gapped.md) and [Plugin packs](../config/plugin-packs.md).
 
 `seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace. It holds pull credentials for every ref in `seed.refs`, so it must contain exactly one registry entry.

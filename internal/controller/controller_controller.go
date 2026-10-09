@@ -54,6 +54,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 const (
@@ -3032,13 +3033,13 @@ func nonCorePluginEntries(cr *v1alpha1.Controller, resolved *bundle.Materialized
 func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) string {
 	locked := make(map[string]string, len(coreSet))
 	for _, e := range coreSet {
-		if e.ArtifactID != "" && !isUnpinnedPluginVersion(e.Version) {
+		if e.ArtifactID != "" && !ucmeta.IsLatest(e.Version) {
 			locked[e.ArtifactID] = e.Version
 		}
 	}
 	entries, pinSource := nonCorePluginEntries(cr, resolved)
 	for _, e := range entries {
-		if e.ArtifactId == "" || isUnpinnedPluginVersion(e.Version) {
+		if e.ArtifactId == "" || ucmeta.IsLatest(e.Version) {
 			continue
 		}
 		if lockedVersion, ok := locked[e.ArtifactId]; ok && lockedVersion != e.Version {
@@ -3046,11 +3047,6 @@ func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.Materialize
 		}
 	}
 	return ""
-}
-
-func isUnpinnedPluginVersion(version string) bool {
-	v := strings.TrimSpace(version)
-	return v == "" || strings.EqualFold(v, "latest")
 }
 
 // pluginChangeDiff computes the human-readable diff between new and old

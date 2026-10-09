@@ -722,3 +722,38 @@ func TestUpload_LockTooOldIsAWarning(t *testing.T) {
 		t.Fatalf("warnings = %+v, want lock-too-old", res.Warnings)
 	}
 }
+
+// TestUpload_LatestDeclaredDependencyIsNotLockTooOld: a dependency declared only
+// at latest is checked against the newest upstream version, and never fetched.
+func TestUpload_LatestDeclaredDependencyIsNotLockTooOld(t *testing.T) {
+	depBody := buildHPI(t, hpiSpec{shortName: "mailer", version: "472"})
+	up := upstreamServer(t,
+		map[string][]byte{"mailer": depBody},
+		map[string]string{"mailer": "472"},
+		nil,
+	)
+	store := newTestStore(t)
+	opts := append(uploadOpts(t, "mailer@latest"), pullThroughWithResolver(up.URL)...)
+	ts := newTestServer(t, store, opts...)
+
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "mailer:470"})
+	resp := ts.postUpload(t, body, "", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (%+v)", resp.StatusCode, decodeRejection(t, resp))
+	}
+	res := decodeResult(t, resp)
+	if len(res.Closure) != 1 || res.Closure[0].Status != StatusDeclaredNotYetStored {
+		t.Fatalf("closure = %+v, want declared-not-yet-stored", res.Closure)
+	}
+	if res.Closure[0].ResolvedVersion != "472" {
+		t.Fatalf("resolvedVersion = %q, want 472", res.Closure[0].ResolvedVersion)
+	}
+	for _, w := range res.Warnings {
+		if w.Code == StatusLockTooOld {
+			t.Fatalf("warnings = %+v, want no lock-too-old", res.Warnings)
+		}
+	}
+	if d, _ := ts.server.findPluginDigests(context.Background(), "mailer", "472"); len(d) != 0 {
+		t.Fatalf("mailer was fetched (%v) — a declared plugin must never be fetched by an upload", d)
+	}
+}

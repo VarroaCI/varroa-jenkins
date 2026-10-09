@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // DeclaredSet is the operator's view of every plugin any JenkinsVersionProfile or
@@ -22,21 +23,32 @@ type DeclaredSet map[string][]string // name -> versions, in file order
 // Declared reports whether the set names the plugin at any version.
 func (d DeclaredSet) Declared(name string) bool { return len(d[name]) > 0 }
 
-// Highest returns the highest declared version for name by pluginver ordering.
-// The tier is evaluated against the highest declared version, so a lack of
-// deduplication upstream needs no notion of a unique pin here.
+// Highest returns the highest pinned version for name by pluginver ordering.
+// An unpinned version (see ucmeta.IsLatest) satisfies any minimum, so it never
+// sets the highest pin. Highest reports false when name has no pinned version.
 func (d DeclaredSet) Highest(name string) (string, bool) {
-	versions := d[name]
-	if len(versions) == 0 {
-		return "", false
-	}
-	best := versions[0]
-	for _, v := range versions[1:] {
-		if pluginver.Compare(v, best) > 0 {
+	var best string
+	found := false
+	for _, v := range d[name] {
+		if ucmeta.IsLatest(v) {
+			continue
+		}
+		if !found || pluginver.Compare(v, best) > 0 {
 			best = v
+			found = true
 		}
 	}
-	return best, true
+	return best, found
+}
+
+// Unpinned reports whether the set names the plugin and no version of it is
+// pinned. Such a plugin is declared only at latest.
+func (d DeclaredSet) Unpinned(name string) bool {
+	if !d.Declared(name) {
+		return false
+	}
+	_, pinned := d.Highest(name)
+	return !pinned
 }
 
 // ReadDeclaredPlugins parses the newline-delimited "name@version" declared-plugins
