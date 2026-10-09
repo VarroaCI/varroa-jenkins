@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -44,7 +43,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	groups, err := crdstore.List[v1alpha1.Group](ctx, s.deps.Store, "", "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list groups")
@@ -160,7 +159,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Apply[v1alpha1.Group](ctx, s.deps.Store, group); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create group")
 		return
@@ -199,7 +198,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Delete[v1alpha1.Group](ctx, s.deps.Store, name, ""); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to delete group")
 		return

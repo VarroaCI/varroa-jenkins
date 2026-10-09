@@ -97,7 +97,7 @@ func (s *Server) HandleRunnerDoor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	placement, ok := s.resolveRunnerDoorPlacement(w, runner)
+	placement, ok := s.resolveRunnerDoorPlacement(w, r, runner)
 	if !ok {
 		return
 	}
@@ -162,8 +162,8 @@ func (s *Server) resolveRunnerDoorToken(w http.ResponseWriter, r *http.Request, 
 // placement.generation: that field fences a ledger claim in C6, where a
 // stale cell can still submit one; the door holds no long-lived placement
 // copy and simply re-reads on every attempt.
-func (s *Server) resolveRunnerDoorPlacement(w http.ResponseWriter, runner *v1alpha1.Runner) (*v1alpha1.TeamPlacementStatus, bool) {
-	ctx := context.Background()
+func (s *Server) resolveRunnerDoorPlacement(w http.ResponseWriter, r *http.Request, runner *v1alpha1.Runner) (*v1alpha1.TeamPlacementStatus, bool) {
+	ctx := r.Context()
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, runner.Spec.Team, "")
 	if err != nil {
 		http.Error(w, "503 service unavailable", http.StatusServiceUnavailable)

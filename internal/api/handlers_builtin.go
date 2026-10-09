@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -37,7 +36,7 @@ func (s *Server) HandleBuiltinRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	roles, err := crdstore.List[v1alpha1.VarroaRole](ctx, s.deps.Store, "", "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list roles")

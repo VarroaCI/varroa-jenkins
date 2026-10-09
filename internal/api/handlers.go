@@ -152,7 +152,7 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 	// Enrich with User CRD if it exists. Look up by subject-derived name
 	// rather than email so local users (named by username) are found.
 	if s.deps.OperatorNamespace != "" {
-		ctx := context.Background()
+		ctx := r.Context()
 		userName := identity.UserResourceName(claims,
 			auth.AuthMode(s.deps.IdentityConfig.Mode))
 		if userName != "" {
@@ -983,7 +983,7 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	cr, err := s.getController(context.Background(), cluster, namespace, name)
+	cr, err := s.getController(r.Context(), cluster, namespace, name)
 	if err != nil {
 		s.deps.Logger.Error("get controller failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
 		var fe *BroodError
@@ -1141,7 +1141,7 @@ func (s *Server) handleControllerYAML(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 
-	cr, err := s.getController(context.Background(), cluster, namespace, name)
+	cr, err := s.getController(r.Context(), cluster, namespace, name)
 	if err != nil {
 		s.deps.Logger.Error("get controller yaml failed", "cluster", cluster, "namespace", namespace, "name", name, "error", err)
 		var fe *BroodError
@@ -1539,7 +1539,7 @@ func (s *Server) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	ns := s.deps.OperatorNamespace
 	if ns == "" {
 		s.writeJSONError(w, http.StatusInternalServerError, "operator namespace not configured")

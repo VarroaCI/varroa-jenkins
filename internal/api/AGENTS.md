@@ -569,6 +569,7 @@ federation, activity persistence, and SSE fanout.
   `routeManifest` in `contract_test.go`.
 - New multi-cluster resources should route through `Brood`/`ConfigBrood` rather than
   hand-rolling per-cluster HTTP/NATS calls.
+- Every request handler passes `r.Context()` to its reads and writes. Use `context.Background()` only for detached work: a background goroutine, a shared registry, startup, or a write that must complete after the client leaves.
 
 ## Verification
 

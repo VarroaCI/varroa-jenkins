@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -214,7 +213,7 @@ func (s *Server) HandleRunners(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 
-	ctx := context.Background()
+	ctx := r.Context()
 	runners, err := crdstore.List[v1alpha1.Runner](ctx, s.deps.Store, "", "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list runners")
@@ -273,7 +272,7 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if _, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, req.Spec.Team, ""); err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, "spec.team names no Team")
 		return
@@ -322,7 +321,7 @@ func (s *Server) handleGetRunner(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	runner, err := crdstore.Get[v1alpha1.Runner](ctx, s.deps.Store, name, "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")
@@ -366,7 +365,7 @@ func (s *Server) handlePatchRunner(w http.ResponseWriter, r *http.Request, name 
 		}
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	existing, err := crdstore.Get[v1alpha1.Runner](ctx, s.deps.Store, name, "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")
@@ -429,7 +428,7 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	runner, err := crdstore.Get[v1alpha1.Runner](ctx, s.deps.Store, name, "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusNotFound, "runner not found")

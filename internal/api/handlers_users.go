@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -49,7 +48,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	users, err := crdstore.List[v1alpha1.User](ctx, s.deps.Store, s.deps.OperatorNamespace, "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list users")
@@ -171,7 +170,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Apply[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create user")
 		return
@@ -207,7 +206,7 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	ctx := context.Background()
+	ctx := r.Context()
 	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace)
 	if err != nil || user == nil {
 		s.writeJSONError(w, http.StatusNotFound, "user not found")
@@ -261,7 +260,7 @@ func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Fetch user before deletion for deprovision metadata.
 	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace)

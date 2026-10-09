@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -277,7 +276,7 @@ func (s *Server) handleListTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	teams, err := crdstore.List[v1alpha1.Team](ctx, s.deps.Store, "", "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list teams")
@@ -354,7 +353,7 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Apply[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create team")
 		return
@@ -426,7 +425,7 @@ func (s *Server) handleGetTeam(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, name, "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusNotFound, "team not found")
@@ -482,7 +481,7 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name s
 		},
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if !s.deps.Authorizer.IsAdmin(claims) {
 		// A tenant pipelines admin may change only spec.pipelines.exports.
 		// Every other field of the Team stays as stored, or the write is
@@ -513,7 +512,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Delete[v1alpha1.Team](ctx, s.deps.Store, name, ""); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to delete team")
 		return
