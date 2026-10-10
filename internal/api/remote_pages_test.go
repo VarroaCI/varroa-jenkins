@@ -68,6 +68,19 @@ func TestReadRemotePages_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestReadRemotePages_FetchErrorAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		cancel()
+		return "", errors.New("nats: timeout")
+	})
+	var be *BroodError
+	if !errors.As(err, &be) || be.Code != bus.CodeInternal || be.Msg != "list cancelled" {
+		t.Fatalf("err = %v, want list cancelled", err)
+	}
+}
+
 func TestReadRemotePages_FetchErrorUnchanged(t *testing.T) {
 	sentinel := errors.New("transport down")
 	err := readRemotePages(context.Background(), func(after string) (string, error) {

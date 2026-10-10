@@ -104,16 +104,22 @@ type busConfigBrood struct {
 	// request is the injectable NATS request function; defaults to conn.Request.
 	// Override in tests to avoid needing a live NATS connection.
 	request func(subject string, data []byte, timeout time.Duration) ([]byte, error)
+
+	// requestWithCtx is the context-aware request seam. NewBusConfigBrood wires
+	// it to conn.RequestWithContext. When nil, requestCtx runs request on a
+	// goroutine.
+	requestWithCtx func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 }
 
 // NewBusConfigBrood creates a new bus-backed ConfigBrood.
 func NewBusConfigBrood(localCluster string, conn *bus.Conn, client controller.ResourceClient, store crdstore.Backend, logger *slog.Logger) ConfigBrood {
 	return &busConfigBrood{
-		localCluster: localCluster,
-		conn:         conn,
-		client:       client,
-		store:        store,
-		logger:       logger.With("component", "bus_config_brood"),
+		localCluster:   localCluster,
+		conn:           conn,
+		client:         client,
+		store:          store,
+		logger:         logger.With("component", "bus_config_brood"),
+		requestWithCtx: connRequestWithContext(conn),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
 			if err != nil {
@@ -122,6 +128,29 @@ func NewBusConfigBrood(localCluster string, conn *bus.Conn, client controller.Re
 			return resp.Data, nil
 		},
 	}
+}
+
+// requestCtx sends a read. It ends when ctx ends.
+func (f *busConfigBrood) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
+}
+
+// readTo sends a read request. It ends when ctx ends and returns a
+// `request cancelled` error. A list walk reports that error as a
+// `list cancelled` error instead.
+func (f *busConfigBrood) readTo(ctx context.Context, subject string, req any, timeout time.Duration) ([]byte, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	resp, err := f.requestCtx(ctx, subject, data, timeout)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, &BroodError{Code: bus.CodeInternal, Msg: "request cancelled"}
+		}
+		return nil, &ErrClusterUnreachable{Cluster: clusterOfSubject(subject), Err: err}
+	}
+	return resp, nil
 }
 
 func (f *busConfigBrood) requestTo(subject string, req any, timeout time.Duration) ([]byte, error) {
@@ -168,7 +197,7 @@ func (f *busConfigBrood) listConfigPages(ctx context.Context, subject, ns, what 
 	var operatorNs string
 	err := readRemotePages(ctx, func(after string) (string, error) {
 		req := bus.ConfigListRequest{Namespace: ns, After: after}
-		respData, err := f.requestTo(subject, req, configListTimeout)
+		respData, err := f.readTo(ctx, subject, req, configListTimeout)
 		if err != nil {
 			return "", err
 		}
@@ -220,7 +249,7 @@ func (f *busConfigBrood) GetComposedBundle(ctx context.Context, cluster, ns, nam
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Namespace: ns, Name: name}
-	respData, err := f.requestTo(bus.OperatorBundlesSubject(cluster, "get"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorBundlesSubject(cluster, "get"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +326,7 @@ func (f *busConfigBrood) GetCatalogItem(ctx context.Context, cluster, ns, name s
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Namespace: ns, Name: name}
-	respData, err := f.requestTo(bus.OperatorCatalogSubject(cluster, "itemget"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorCatalogSubject(cluster, "itemget"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +369,7 @@ func (f *busConfigBrood) GetCatalogSource(ctx context.Context, cluster, ns, name
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Namespace: ns, Name: name}
-	respData, err := f.requestTo(bus.OperatorCatalogSubject(cluster, "sourceget"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorCatalogSubject(cluster, "sourceget"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +412,7 @@ func (f *busConfigBrood) GetJenkinsRole(ctx context.Context, cluster, name strin
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Name: name}
-	respData, err := f.requestTo(bus.OperatorRbacSubject(cluster, "roleget"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorRbacSubject(cluster, "roleget"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +455,7 @@ func (f *busConfigBrood) GetJenkinsRoleBinding(ctx context.Context, cluster, nam
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Name: name}
-	respData, err := f.requestTo(bus.OperatorRbacSubject(cluster, "bindingget"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorRbacSubject(cluster, "bindingget"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +478,7 @@ func (f *busConfigBrood) GetProvisioningDefaults(ctx context.Context, cluster, n
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Name: name}
-	respData, err := f.requestTo(bus.OperatorProvisioningDefaultsSubject(cluster, "get"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorProvisioningDefaultsSubject(cluster, "get"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +521,7 @@ func (f *busConfigBrood) GetVersionProfile(ctx context.Context, cluster, name st
 		return json.Marshal(cr)
 	}
 	req := bus.ConfigGetRequest{Name: name}
-	respData, err := f.requestTo(bus.OperatorVersionProfilesSubject(cluster, "get"), req, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorVersionProfilesSubject(cluster, "get"), req, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +539,7 @@ func (f *busConfigBrood) ViewVersionProfiles(ctx context.Context, cluster string
 	var views []bus.VersionProfileView
 	err := readRemotePages(ctx, func(after string) (string, error) {
 		req := bus.ConfigListRequest{After: after}
-		respData, err := f.requestTo(bus.OperatorVersionProfilesSubject(cluster, "view"), req, configListTimeout)
+		respData, err := f.readTo(ctx, bus.OperatorVersionProfilesSubject(cluster, "view"), req, configListTimeout)
 		if err != nil {
 			return "", err
 		}
@@ -812,7 +841,7 @@ func (f *busConfigBrood) DeleteJenkinsRoleBinding(ctx context.Context, cluster, 
 // ComposeBundle goes over the bus uniformly for all clusters with 60s timeout.
 func (f *busConfigBrood) ComposeBundle(ctx context.Context, cluster, ns string, spec json.RawMessage) (*bus.BundleComposePreview, error) {
 	req := bus.BundleComposeRequest{Namespace: ns, Spec: spec}
-	respData, err := f.requestTo(bus.OperatorBundlesSubject(cluster, "preview"), req, configComposeTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorBundlesSubject(cluster, "preview"), req, configComposeTimeout)
 	if err != nil {
 		return nil, err
 	}

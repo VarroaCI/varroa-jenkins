@@ -81,17 +81,23 @@ type busBroodOps struct {
 
 	// request is the injectable NATS request function; defaults to conn.Request.
 	request func(subject string, data []byte, timeout time.Duration) ([]byte, error)
+
+	// requestWithCtx is the context-aware request seam. NewBusBroodOps wires
+	// it to conn.RequestWithContext. When nil, requestCtx runs request on a
+	// goroutine.
+	requestWithCtx func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 }
 
 // NewBusBroodOps creates a new bus-backed BroodOps.
 func NewBusBroodOps(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, client controller.ResourceClient, store crdstore.Backend, logger *slog.Logger) BroodOps {
 	return &busBroodOps{
-		localCluster: localCluster,
-		conn:         conn,
-		membership:   membership,
-		client:       client,
-		store:        store,
-		logger:       logger.With("component", "bus_broodops"),
+		localCluster:   localCluster,
+		conn:           conn,
+		membership:     membership,
+		client:         client,
+		store:          store,
+		logger:         logger.With("component", "bus_broodops"),
+		requestWithCtx: connRequestWithContext(conn),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
 			if err != nil {
@@ -100,6 +106,11 @@ func NewBusBroodOps(localCluster string, conn *bus.Conn, membership *bus.Cluster
 			return resp.Data, nil
 		},
 	}
+}
+
+// requestCtx sends a read or a read-only preview. It ends when ctx ends.
+func (f *busBroodOps) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
 }
 
 // Create fans out broodops.create to the given clusters concurrently.
@@ -258,9 +269,11 @@ func (f *busBroodOps) listRemoteBus(ctx context.Context, cluster, ns string) ([]
 	err := readRemotePages(ctx, func(after string) (string, error) {
 		req := bus.BroodOpsListRequest{Namespace: ns, After: after}
 		data, _ := json.Marshal(req)
-		respData, err := f.request(bus.OperatorBroodOpsSubject(cluster, "list"), data, broodOpsListTimeout)
+		respData, err := f.requestCtx(ctx, bus.OperatorBroodOpsSubject(cluster, "list"), data, broodOpsListTimeout)
 		if err != nil {
-			reason = "cluster unreachable"
+			if ctx.Err() == nil {
+				reason = "cluster unreachable"
+			}
 			return "", fmt.Errorf("list remote %s: %w", cluster, err)
 		}
 		var resp bus.BroodOpsListResponse
@@ -333,10 +346,14 @@ func (f *busBroodOps) Get(ctx context.Context, ns, name string) ([]ClusterBroodO
 		wg.Add(1)
 		go func(cluster string) {
 			defer wg.Done()
-			cl, st, err := f.getRemoteBus(cluster, ns, name)
+			cl, st, err := f.getRemoteBus(ctx, cluster, ns, name)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
+				if ctx.Err() != nil {
+					statuses = append(statuses, st...)
+					return
+				}
 				statuses = append(statuses, ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()})
 				return
 			}
@@ -360,11 +377,14 @@ func (f *busBroodOps) Get(ctx context.Context, ns, name string) ([]ClusterBroodO
 	return ops, statuses, nil
 }
 
-func (f *busBroodOps) getRemoteBus(cluster, ns, name string) ([]ClusterBroodOp, []ClusterFanoutStatus, error) {
+func (f *busBroodOps) getRemoteBus(ctx context.Context, cluster, ns, name string) ([]ClusterBroodOp, []ClusterFanoutStatus, error) {
 	req := bus.BroodOpsGetRequest{Namespace: ns, Name: name}
 	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorBroodOpsSubject(cluster, "get"), data, broodOpsGetTimeout)
+	respData, err := f.requestCtx(ctx, bus.OperatorBroodOpsSubject(cluster, "get"), data, broodOpsGetTimeout)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "get cancelled"}}, fmt.Errorf("get remote %s: %w", cluster, ctx.Err())
+		}
 		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("get remote %s: %w", cluster, err)
 	}
 	var resp bus.BroodOpsOpResponse
@@ -485,10 +505,14 @@ func (f *busBroodOps) Preview(ctx context.Context, clusters []string, ns string,
 				Spec:      specRaw,
 			}
 			data, _ := json.Marshal(req)
-			respData, err := f.request(bus.OperatorBroodOpsSubject(c, "preview"), data, broodOpsPreviewTimeout)
+			respData, err := f.requestCtx(ctx, bus.OperatorBroodOpsSubject(c, "preview"), data, broodOpsPreviewTimeout)
 			if err != nil {
 				mu.Lock()
-				results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Error: fmt.Sprintf("cluster %s unreachable: %v", c, err)}
+				if ctx.Err() != nil {
+					results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Error: "preview cancelled"}
+				} else {
+					results[idx] = ClusterPreviewResult{Cluster: c, OK: false, Error: fmt.Sprintf("cluster %s unreachable: %v", c, err)}
+				}
 				mu.Unlock()
 				return
 			}

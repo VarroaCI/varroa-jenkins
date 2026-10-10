@@ -179,13 +179,7 @@ func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDir
 			}
 			return resp.Data, nil
 		},
-		requestWithCtx: func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
-			resp, err := conn.RequestWithContext(ctx, subject, data, timeout)
-			if err != nil {
-				return nil, err
-			}
-			return resp.Data, nil
-		},
+		requestWithCtx: connRequestWithContext(conn),
 	}
 }
 
@@ -352,24 +346,7 @@ func fanoutFailureStatus(cluster string, st []ClusterFanoutStatus, err error) Cl
 // cancelled when a context-aware seam is wired; otherwise f.request runs on
 // a goroutine and the caller returns early.
 func (f *busBrood) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
-	if f.requestWithCtx != nil {
-		return f.requestWithCtx(ctx, subject, data, timeout)
-	}
-	type result struct {
-		data []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		d, err := f.request(subject, data, timeout)
-		ch <- result{d, err}
-	}()
-	select {
-	case r := <-ch:
-		return r.data, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
 }
 
 func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {

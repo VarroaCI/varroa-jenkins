@@ -565,6 +565,17 @@ federation, activity persistence, and SSE fanout.
   `readRemotePages` (`remote_pages.go`), up to 128 pages. A failed page, or a
   `next` that does not advance, drops the whole member: zero rows and an
   `ok: false` status row.
+- The `busConfigBrood`, `busBroodOps`, and `busBroodSchedules` reads send
+  through `requestCtx`, which prefers the `requestWithCtx` seam
+  (`conn.RequestWithContext`) and falls back to the plain `request` seam on a
+  goroutine (`bus_request.go`). A client disconnect ends the read. A list walk
+  then fails with `list cancelled`; a config get or compose preview fails with
+  `request cancelled`; a brood-op get or preview fails with `get cancelled` or
+  `preview cancelled`; a brood-schedule get or list fails with
+  `get brood schedule on <cluster>: <ctx err>` or
+  `list brood schedules on <cluster>: <ctx err>`. Writes stay on the plain
+  `request` seam, so a disconnect does not hide the outcome of a write in
+  flight.
 
 - **Cached local Controller lists**: every local Controller list goes through
   `localControllers` or `Dependencies.LocalControllers`. In the BFF the

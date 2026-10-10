@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,52 @@ func pagedRequest(t *testing.T, pages map[string]any) (func(string, []byte, time
 
 func pagedBrood(request func(string, []byte, time.Duration) ([]byte, error)) *busConfigBrood {
 	return &busConfigBrood{localCluster: "core", logger: slog.Default(), request: request}
+}
+
+func TestConfigBrood_ListCancelStopsPaging(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondStarted := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var calls atomic.Int32
+	f := pagedBrood(func(_ string, _ []byte, _ time.Duration) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			return json.Marshal(bus.ConfigListResponse{
+				Items: []json.RawMessage{json.RawMessage(`{"name":"a"}`)},
+				Next:  "a",
+			})
+		}
+		close(secondStarted)
+		<-release
+		return nil, errors.New("released")
+	})
+	type result struct {
+		items []json.RawMessage
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		items, err := f.ListJenkinsRoles(ctx, "member-b")
+		done <- result{items, err}
+	}()
+	<-secondStarted
+	cancel()
+	select {
+	case got := <-done:
+		var be *BroodError
+		if !errors.As(got.err, &be) || be.Msg != "list cancelled" {
+			t.Fatalf("err = %v, want list cancelled", got.err)
+		}
+		if got.items != nil {
+			t.Fatalf("items = %v, want nil", got.items)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("list did not return after cancel")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2", calls.Load())
+	}
 }
 
 func TestConfigBrood_ListCatalogItemsReadsEveryPage(t *testing.T) {

@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,71 @@ func replyingBroodOps(replies ...bus.BroodOpsListResponse) (*busBroodOps, *[]str
 		},
 	}
 	return f, &afters
+}
+
+func TestBroodOps_ListRemoteCancelStopsPaging(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondStarted := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var calls atomic.Int32
+	f := &busBroodOps{
+		localCluster: "core",
+		logger:       slog.Default(),
+		request: func(_ string, _ []byte, _ time.Duration) ([]byte, error) {
+			if calls.Add(1) == 1 {
+				return json.Marshal(bus.BroodOpsListResponse{Ops: []json.RawMessage{opJSON("a")}, Next: "team-ns/a"})
+			}
+			close(secondStarted)
+			<-release
+			return nil, errors.New("released")
+		},
+	}
+	type result struct {
+		ops      []ClusterBroodOp
+		statuses []ClusterFanoutStatus
+	}
+	done := make(chan result, 1)
+	go func() {
+		ops, statuses, _ := f.List(ctx, "team-ns", "member-b")
+		done <- result{ops, statuses}
+	}()
+	<-secondStarted
+	cancel()
+	select {
+	case got := <-done:
+		if len(got.ops) != 0 {
+			t.Fatalf("ops = %+v, want none", got.ops)
+		}
+		if len(got.statuses) != 1 || got.statuses[0].Name != "member-b" || got.statuses[0].OK || got.statuses[0].Error != "list cancelled" {
+			t.Fatalf("statuses = %+v, want one list cancelled row", got.statuses)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("list did not return after cancel")
+	}
+}
+
+func TestBroodOps_GetRemoteCancelKeepsCancelStatus(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	f := &busBroodOps{
+		localCluster: "core",
+		logger:       slog.Default(),
+		request: func(_ string, _ []byte, _ time.Duration) ([]byte, error) {
+			<-release
+			return nil, errors.New("released")
+		},
+	}
+	cancel()
+	_, statuses, err := f.getRemoteBus(ctx, "member-b", "team-ns", "a")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(statuses) != 1 || statuses[0].Error != "get cancelled" {
+		t.Fatalf("statuses = %+v, want one get cancelled row", statuses)
+	}
 }
 
 func opJSON(name string) json.RawMessage {

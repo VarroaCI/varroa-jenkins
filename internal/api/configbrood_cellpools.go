@@ -42,11 +42,11 @@ func (f *busConfigBrood) ListCellPools(ctx context.Context, cluster string) ([]v
 	return pools, nil
 }
 
-func (f *busConfigBrood) GetCellPool(_ context.Context, cluster, name string) (*v1alpha1.CellPool, error) {
+func (f *busConfigBrood) GetCellPool(ctx context.Context, cluster, name string) (*v1alpha1.CellPool, error) {
 	if err := f.refuseLocalCellPools(cluster); err != nil {
 		return nil, err
 	}
-	respData, err := f.requestTo(bus.OperatorCellPoolsSubject(cluster, "get"), bus.ConfigGetRequest{Name: name}, configGetTimeout)
+	respData, err := f.readTo(ctx, bus.OperatorCellPoolsSubject(cluster, "get"), bus.ConfigGetRequest{Name: name}, configGetTimeout)
 	if err != nil {
 		return nil, err
 	}

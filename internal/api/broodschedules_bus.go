@@ -41,15 +41,21 @@ type busBroodSchedules struct {
 
 	// request is the injectable NATS request function; defaults to conn.Request.
 	request func(subject string, data []byte, timeout time.Duration) ([]byte, error)
+
+	// requestWithCtx is the context-aware request seam. NewBusBroodSchedules
+	// wires it to conn.RequestWithContext. When nil, requestCtx runs request on
+	// a goroutine.
+	requestWithCtx func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 }
 
 // NewBusBroodSchedules creates a new bus-backed BroodSchedules.
 func NewBusBroodSchedules(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, logger *slog.Logger) BroodSchedules {
 	return &busBroodSchedules{
-		localCluster: localCluster,
-		conn:         conn,
-		membership:   membership,
-		logger:       logger.With("component", "bus_broodschedules"),
+		localCluster:   localCluster,
+		conn:           conn,
+		membership:     membership,
+		logger:         logger.With("component", "bus_broodschedules"),
+		requestWithCtx: connRequestWithContext(conn),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
 			if err != nil {
@@ -58,6 +64,11 @@ func NewBusBroodSchedules(localCluster string, conn *bus.Conn, membership *bus.C
 			return resp.Data, nil
 		},
 	}
+}
+
+// requestCtx sends a read. It ends when ctx ends.
+func (f *busBroodSchedules) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
 }
 
 // targetCluster returns the effective cluster name, defaulting to local.
@@ -98,8 +109,11 @@ func (f *busBroodSchedules) Get(ctx context.Context, cluster, ns, name string) (
 	req := bus.BroodScheduleGetRequest{Namespace: ns, Name: name}
 	data, _ := json.Marshal(req)
 	target := f.targetCluster(cluster)
-	respData, err := f.request(bus.OperatorBroodSchedulesSubject(target, "get"), data, broodSchedulesGetTimeout)
+	respData, err := f.requestCtx(ctx, bus.OperatorBroodSchedulesSubject(target, "get"), data, broodSchedulesGetTimeout)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("get brood schedule on %s: %w", target, ctx.Err())
+		}
 		return nil, fmt.Errorf("cluster %s unreachable: %w", target, err)
 	}
 	var reply bus.BroodScheduleResponse
@@ -113,12 +127,19 @@ func (f *busBroodSchedules) Get(ctx context.Context, cluster, ns, name string) (
 	return &reply, nil
 }
 
-// List gathers schedules from all known clusters.
+// List gathers schedules from all known clusters. A cancelled ctx stops the
+// walk and returns the context error.
 func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, error) {
 	var all []bus.BroodScheduleResponse
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("list brood schedules: %w", err)
+	}
 
 	// Local cluster.
-	localItems, err := f.listCluster(f.localCluster, ns)
+	localItems, err := f.listCluster(ctx, f.localCluster, ns)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
+	}
 	if err != nil {
 		f.logger.Warn("broodschedules list local failed", "error", err)
 	} else {
@@ -138,7 +159,10 @@ func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodSch
 		if m.Name == f.localCluster {
 			continue
 		}
-		items, err := f.listCluster(m.Name, ns)
+		items, err := f.listCluster(ctx, m.Name, ns)
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
+		}
 		if err != nil {
 			f.logger.Warn("broodschedules list remote failed", "cluster", m.Name, "error", err)
 			continue
@@ -149,11 +173,14 @@ func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodSch
 	return all, nil
 }
 
-func (f *busBroodSchedules) listCluster(cluster, ns string) ([]bus.BroodScheduleResponse, error) {
+func (f *busBroodSchedules) listCluster(ctx context.Context, cluster, ns string) ([]bus.BroodScheduleResponse, error) {
 	req := bus.BroodScheduleListRequest{Namespace: ns}
 	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorBroodSchedulesSubject(cluster, "list"), data, broodSchedulesListTimeout)
+	respData, err := f.requestCtx(ctx, bus.OperatorBroodSchedulesSubject(cluster, "list"), data, broodSchedulesListTimeout)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("list brood schedules on %s: %w", cluster, ctx.Err())
+		}
 		return nil, fmt.Errorf("cluster %s unreachable: %w", cluster, err)
 	}
 	var resp bus.BroodScheduleListResponse

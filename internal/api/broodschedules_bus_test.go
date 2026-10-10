@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -15,6 +16,38 @@ func TestNewBusBroodSchedules(t *testing.T) {
 	svc := NewBusBroodSchedules("core", nil, nil, slog.Default())
 	if svc == nil {
 		t.Fatal("NewBusBroodSchedules returned nil")
+	}
+}
+
+func TestBusBroodSchedules_ListCancelReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	started := make(chan struct{})
+	f := &busBroodSchedules{
+		localCluster: "core",
+		logger:       slog.Default(),
+		request: func(_ string, _ []byte, _ time.Duration) ([]byte, error) {
+			close(started)
+			<-release
+			return nil, errors.New("released")
+		},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.List(ctx, "test-ns")
+		done <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("List did not return after cancel")
 	}
 }
 
