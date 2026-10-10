@@ -586,7 +586,9 @@ export interface TemplateCatalogCondition {
 }
 
 export interface CatalogSourceSpec {
-  repoURL: string;
+  // Exactly one of repoURL or ociRef; the reserved varroa-update-center source carries neither.
+  repoURL?: string;
+  ociRef?: string;
   revision?: string;
   path?: string;
   syncIntervalSeconds?: number;

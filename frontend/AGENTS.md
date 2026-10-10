@@ -190,6 +190,10 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   with no change sends no request. The control reports **every** refusal: a
   `409` keeps the conflict wording, and any other status renders the API
   error message, because a `400` on a dial bound is otherwise silent.
+  `CatalogSources.tsx` carries a source-type select (Git or OCI) that mirrors
+  the CRD's exactly-one-of rule: the form sends `repoURL` or `ociRef`, never
+  both, and an OCI source has no revision. The reserved `varroa-update-center`
+  row has no Edit, because the operator owns it (Sync and Delete stay).
   `TeamForm.tsx` carries an exports editor: each entry picks `job` or
   `locks` (a select, mirroring the CRD's exactly-one-of rule), the matching
   pattern input(s), and a `callers` list; client-side validation mirrors the

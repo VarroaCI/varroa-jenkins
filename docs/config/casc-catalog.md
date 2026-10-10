@@ -106,6 +106,15 @@ the argument is present: omit it to keep the stored value, pass an empty string
 to clear it. Setting `ociRef` clears `repoURL` and `revision`, and setting
 `repoURL` clears `ociRef`, keeping the exactly-one rule satisfied.
 
+### Manage sources in the dashboard
+
+The Catalog Sources page lists the location of each source. The location is
+the repository URL, the OCI reference, or the label "Update center" for the
+reserved `varroa-update-center` source. The New Source form has a source type
+select. The OCI type has no revision field. For an OCI source, the Revision
+column shows the resolved digest. The operator manages the reserved source, so
+the page has no Edit action for it.
+
 ## Consume an item
 
 ```yaml
