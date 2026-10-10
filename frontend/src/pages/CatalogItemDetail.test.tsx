@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import CatalogItemDetail from "./CatalogItemDetail";
 
@@ -332,13 +332,26 @@ describe("CatalogItemDetail — pipeline-template item", () => {
 
   it("copies the generated marker YAML to the clipboard", async () => {
     mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    let resolveWrite: () => void = () => {};
+    const writeText = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      }),
+    );
+    Object.assign(navigator, { clipboard: { writeText } });
     renderPage();
 
     await waitFor(() => expect(screen.getByText(/template: go-service/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("template: go-service"));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument());
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining("template: go-service"));
+    // The label reverts to "Copy" 1500 ms after the write resolves. The test
+    // resolves the write inside act and reads the label in the same tick, so
+    // a stalled runner cannot move the check past that window.
+    await act(async () => {
+      resolveWrite();
+    });
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
   });
 
   it("shows an error banner when the template content does not parse", async () => {
