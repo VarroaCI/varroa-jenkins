@@ -3084,6 +3084,11 @@ func (in *UpdateCenterStatus) DeepCopyInto(out *UpdateCenterStatus) {
 		*out = make([]UpdateCenterGap, len(*in))
 		copy(*out, *in)
 	}
+	if in.UnknownDependencies != nil {
+		in, out := &in.UnknownDependencies, &out.UnknownDependencies
+		*out = make([]UpdateCenterPluginRef, len(*in))
+		copy(*out, *in)
+	}
 	in.LastSyncTime.DeepCopyInto(&out.LastSyncTime)
 	if in.SeedImportedDigests != nil {
 		in, out := &in.SeedImportedDigests, &out.SeedImportedDigests
@@ -3122,6 +3127,19 @@ func (in *UpdateCenterCondition) DeepCopy() *UpdateCenterCondition {
 
 func (in *UpdateCenterGap) DeepCopyInto(out *UpdateCenterGap) {
 	*out = *in
+}
+
+func (in *UpdateCenterPluginRef) DeepCopyInto(out *UpdateCenterPluginRef) {
+	*out = *in
+}
+
+func (in *UpdateCenterPluginRef) DeepCopy() *UpdateCenterPluginRef {
+	if in == nil {
+		return nil
+	}
+	out := new(UpdateCenterPluginRef)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func (in *UpdateCenterGap) DeepCopy() *UpdateCenterGap {

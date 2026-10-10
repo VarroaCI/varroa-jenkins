@@ -4878,6 +4878,8 @@ func (c *ClientsetClient) PatchUpdateCenterStatus(ctx context.Context, name stri
 			"gapCount":                status.GapCount,
 			"unservable":              status.Unservable,
 			"unservableCount":         status.UnservableCount,
+			"unknownDependencies":     status.UnknownDependencies,
+			"unknownDependencyCount":  status.UnknownDependencyCount,
 			"pluginCount":             status.PluginCount,
 			"storeBytes":              status.StoreBytes,
 			"seedImportedDigests":     status.SeedImportedDigests,

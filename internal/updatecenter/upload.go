@@ -537,25 +537,24 @@ func (l *packStoreLookup) Versions(ctx context.Context, name string) []string {
 	return out
 }
 
+// Dependencies resolves name@version from the stored packs. An annotation on
+// any layer of the version answers first. Otherwise the stored manifests are
+// read. A false result means the list is unknown, and the planner then asks
+// upstream metadata.
 func (l *packStoreLookup) Dependencies(ctx context.Context, name, version string) ([]hpi.Dependency, bool) {
 	packs, _, err := l.srv.listPackInfos(ctx)
 	if err != nil {
 		return nil, false
 	}
+	var layers []pluginLayerInfo
 	for _, pack := range packs {
 		for _, p := range pack.Plugins {
-			if p.Name != name || p.Version != version {
-				continue
+			if p.Name == name && p.Version == version {
+				layers = append(layers, p)
 			}
-			// A pack config with no kind predates the annotation contract, so its
-			// silence about dependencies proves nothing.
-			if pack.Config.Kind == "" {
-				continue
-			}
-			return p.Dependencies, true
 		}
 	}
-	return nil, false
+	return l.srv.storedDependencies(ctx, layers)
 }
 
 // uploadResolver returns the metadata resolver, or nil when pull-through is off.

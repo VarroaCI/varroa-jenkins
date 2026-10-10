@@ -1282,7 +1282,9 @@ func TestUCSyncDigest_GoldenValue(t *testing.T) {
 	got := ucSyncDigest(entries,
 		[]ucSkippedPack{{Ref: "skip-ref"}},
 		[]ucProfile{{Name: "p", EffectiveCore: "2.5", Eligible: true, Lock: map[string]string{"x": "1", "y": "2"}}})
-	const want = "ebba1dd3efcd8167bf77339dbcd28c8354b794d2523633dceceb79f0451d76d9"
+	// The inventory entry now encodes dependenciesKnown, so the digest changes
+	// once on upgrade and every derived item resyncs.
+	const want = "ac8b66c1b7a7aaf63bafe6dbbc00b39bc17c4270d7d97b5e510979e00d6efb79"
 	if got != want {
 		t.Errorf("ucSyncDigest = %s, want %s", got, want)
 	}

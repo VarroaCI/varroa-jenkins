@@ -1361,6 +1361,11 @@ export interface UpdateCenterGap {
   reason?: string;
 }
 
+export interface UpdateCenterPluginRef {
+  plugin: string;
+  version: string;
+}
+
 export interface UpdateCenterStatus {
   enabled: boolean;
   phase: string;
@@ -1371,6 +1376,10 @@ export interface UpdateCenterStatus {
   gaps: UpdateCenterGap[];
   unservable: UpdateCenterGap[];
   unservableCount: number;
+  /** The first 50 stored plugin versions whose dependency list is unknown. */
+  unknownDependencies: UpdateCenterPluginRef[];
+  /** Every stored plugin version whose dependency list is unknown. Not truncated. */
+  unknownDependencyCount: number;
   lastSyncTime: string | null;
   storageType: string;
   pullThroughEnabled: boolean;

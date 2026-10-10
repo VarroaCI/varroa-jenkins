@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -529,5 +530,37 @@ func TestUpdateCenterStatusServability(t *testing.T) {
 	}
 	if len(resp.Gaps) != 1 || resp.Gaps[0].Core != "2.555.3" {
 		t.Errorf("Gaps = %+v, want bar with core 2.555.3", resp.Gaps)
+	}
+}
+
+// TestUpdateCenterStatusUnknownDependencies: the unknown-dependency fields map
+// through, and the list is a non-nil array so it is never null on the wire.
+func TestUpdateCenterStatusUnknownDependencies(t *testing.T) {
+	t.Parallel()
+
+	empty := updateCenterStatusResponseFromCR(&v1alpha1.UpdateCenter{})
+	if empty.UnknownDependencies == nil || len(empty.UnknownDependencies) != 0 {
+		t.Errorf("UnknownDependencies with no entries = %#v, want a non-nil empty slice", empty.UnknownDependencies)
+	}
+	raw, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"unknownDependencies":[]`) {
+		t.Errorf("wire shape = %s, want unknownDependencies:[]", raw)
+	}
+
+	uc := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
+		UnknownDependencyCount: 60,
+		UnknownDependencies: []v1alpha1.UpdateCenterPluginRef{
+			{Plugin: "acme", Version: "1.0"},
+		},
+	}}
+	resp := updateCenterStatusResponseFromCR(uc)
+	if resp.UnknownDependencyCount != 60 {
+		t.Errorf("UnknownDependencyCount = %d, want 60", resp.UnknownDependencyCount)
+	}
+	if len(resp.UnknownDependencies) != 1 || resp.UnknownDependencies[0].Plugin != "acme" || resp.UnknownDependencies[0].Version != "1.0" {
+		t.Errorf("UnknownDependencies = %+v, want acme 1.0", resp.UnknownDependencies)
 	}
 }

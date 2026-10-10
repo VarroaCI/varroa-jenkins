@@ -209,6 +209,37 @@ describe("SettingsUpdateCenterTab", () => {
     expect(screen.queryByText("Plugins the update center cannot serve")).not.toBeInTheDocument();
   });
 
+  it("renders the unknown-dependency table with a truncation note", async () => {
+    const statusUnknown = {
+      ...enabledStatus,
+      unknownDependencyCount: 60,
+      unknownDependencies: [
+        { plugin: "acme-lib", version: "1.0" },
+        { plugin: "beta-lib", version: "2.1" },
+      ],
+    };
+    createServer(
+      () => HttpResponse.json(statusUnknown),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins with an unknown dependency list")).toBeInTheDocument();
+    expect(screen.getByText("acme-lib")).toBeInTheDocument();
+    expect(screen.getByText("showing 2 of 60")).toBeInTheDocument();
+  });
+
+  it("does not render the unknown-dependency table when the list is empty", async () => {
+    createServer(
+      () => HttpResponse.json({ ...enabledStatus, unknownDependencies: [], unknownDependencyCount: 0 }),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins not yet stored")).toBeInTheDocument();
+    expect(screen.queryByText("Plugins with an unknown dependency list")).not.toBeInTheDocument();
+  });
+
   it("renders inventory plugins when enabled", async () => {
     createServer(
       () => HttpResponse.json(enabledStatus),

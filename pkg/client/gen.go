@@ -3946,6 +3946,12 @@ type ComponentsSchemasUpdateCenterPlugin struct {
 	Version   *string `json:"version,omitempty"`
 }
 
+// ComponentsSchemasUpdateCenterPluginRef defines model for components_schemas_UpdateCenterPluginRef.
+type ComponentsSchemasUpdateCenterPluginRef struct {
+	Plugin  *string `json:"plugin,omitempty"`
+	Version *string `json:"version,omitempty"`
+}
+
 // ComponentsSchemasUpdateCenterPlugins Update center plugin inventory response.
 type ComponentsSchemasUpdateCenterPlugins struct {
 	Enabled *bool                                  `json:"enabled,omitempty"`
@@ -3964,8 +3970,12 @@ type ComponentsSchemasUpdateCenterStatus struct {
 	PullThroughEnabled *bool                                     `json:"pullThroughEnabled,omitempty"`
 	StorageType        *string                                   `json:"storageType,omitempty"`
 	StoreBytes         *int64                                    `json:"storeBytes,omitempty"`
-	Unservable         *[]ComponentsSchemasUpdateCenterGap       `json:"unservable,omitempty"`
-	UnservableCount    *int                                      `json:"unservableCount,omitempty"`
+
+	// UnknownDependencies The first 50 stored plugin versions whose dependency list is unknown.
+	UnknownDependencies    *[]ComponentsSchemasUpdateCenterPluginRef `json:"unknownDependencies,omitempty"`
+	UnknownDependencyCount *int                                      `json:"unknownDependencyCount,omitempty"`
+	Unservable             *[]ComponentsSchemasUpdateCenterGap       `json:"unservable,omitempty"`
+	UnservableCount        *int                                      `json:"unservableCount,omitempty"`
 }
 
 // ComponentsSchemasUpdateCenterUnresolvedDependency One rejecting dependency. The foundInStore/foundDeclared/foundUpstream triple is what makes the diff actionable.

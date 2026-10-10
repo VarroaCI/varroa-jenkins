@@ -325,7 +325,17 @@ reading each package's entry point):
   `ResolveAvailable` resolves `latest` to the highest version a healthy metadata
   source lists. `/download` resolves `latest` from the served metadata first.
   The upload planner checks a `latest`-only declaration against the version it
-  resolves to, and `DeclaredSet.Highest` ignores unpinned versions.
+  resolves to, and `DeclaredSet.Highest` ignores unpinned versions. The planner
+  and the inventory take a dependency list in one order: the layer annotation
+  (an annotation of `[]` is a known empty list), then the stored manifest
+  (`storedDependencies`), then upstream metadata (planner only). A missing
+  annotation never means "no dependencies". `/api/v1/inventory` sets
+  `dependenciesKnown` on every entry. A consumer reads `dependencies` only when
+  it is true. One inventory request waits at most `inventoryDepsBudget` (15 s)
+  for stored-manifest reads, below the operator's 30 s inventory client
+  timeout. A digest unresolved at the budget is reported as unknown. A read
+  already started fills the dependency cache for the next request, and the
+  feed of reads not yet started stops at the budget.
   A metadata request with `?version=<core>` lists the highest stored version
   that core runs, and `ResolveLatestForCore` supplies a compatible upstream entry
   for a declared `latest` plugin (`corecompat.go`).

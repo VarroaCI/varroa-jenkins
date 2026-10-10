@@ -15,7 +15,15 @@ func dep(name, minVer string) pluginDep { return pluginDep{Name: name, Min: minV
 func optDep(name, minVer string) pluginDep { return pluginDep{Name: name, Min: minVer, Optional: true} }
 
 func entry(name, version string, deps ...pluginDep) inventoryEntry {
-	return inventoryEntry{Name: name, Version: version, SHA256: "sha256:" + name + version, Dependencies: deps}
+	return inventoryEntry{Name: name, Version: version, SHA256: "sha256:" + name + version, Dependencies: deps,
+		DependenciesKnown: true}
+}
+
+// unknownEntry is an entry whose dependency list the update center cannot read.
+func unknownEntry(name string) inventoryEntry {
+	e := entry(name, "1.0")
+	e.DependenciesKnown = false
+	return e
 }
 
 func mustResolve(t *testing.T, root inventoryEntry, entries []inventoryEntry, profiles []ucProfile) *ucClosure {
@@ -445,5 +453,30 @@ func TestClosureStatus_RecordsProvenanceAndMinimum(t *testing.T) {
 	}
 	if e := status[byID["root"]]; !e.Direct || e.Version != "1.0" {
 		t.Errorf("root entry = %+v", e)
+	}
+}
+
+// TestResolveClosure_RecordsUnknownDependencyMembers: an unknown list on a
+// selected member is recorded, sorted, and a known root is not listed.
+func TestResolveClosure_RecordsUnknownDependencyMembers(t *testing.T) {
+	root := entry("root", "1.0", dep("leaf", "1.0"), dep("aaa", "1.0"))
+	entries := []inventoryEntry{
+		root,
+		unknownEntry("leaf"),
+		unknownEntry("aaa"),
+	}
+	cl := mustResolve(t, root, entries, nil)
+	want := "aaa@1.0,leaf@1.0"
+	if got := strings.Join(cl.UnknownDeps, ","); got != want {
+		t.Fatalf("UnknownDeps = %q, want %q", got, want)
+	}
+}
+
+// TestResolveClosure_UnknownRootIsRecorded: the root's own unknown list counts.
+func TestResolveClosure_UnknownRootIsRecorded(t *testing.T) {
+	root := unknownEntry("root")
+	cl := mustResolve(t, root, []inventoryEntry{root}, nil)
+	if got := strings.Join(cl.UnknownDeps, ","); got != "root@1.0" {
+		t.Fatalf("UnknownDeps = %q, want root@1.0", got)
 	}
 }

@@ -216,6 +216,15 @@ func evaluateProfileCompat(cl *ucClosure, inv *ucInventory, p ucProfile) v1alpha
 		return res
 	}
 
+	// A blocking verdict above wins. An unknown list only keeps a closure from
+	// being judged complete.
+	if len(cl.UnknownDeps) > 0 {
+		res.Verdict = verdictUnknown
+		res.Message = fmt.Sprintf("dependency list unknown for %s; the closure may be incomplete",
+			strings.Join(cl.UnknownDeps, ", "))
+		return res
+	}
+
 	res.Verdict = verdictCompatible
 	return res
 }

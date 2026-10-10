@@ -248,6 +248,31 @@ spec:
                 description: StoreBytes is the total bytes stored.
                 format: int64
                 type: integer
+              unknownDependencies:
+                description: |-
+                  UnknownDependencies lists the first 50 stored plugin versions whose dependency
+                  list is unknown, sorted by name then version.
+                items:
+                  description: UpdateCenterPluginRef names one stored plugin version.
+                  properties:
+                    plugin:
+                      description: Plugin is the plugin short name.
+                      type: string
+                    version:
+                      description: Version is the plugin version.
+                      type: string
+                  required:
+                  - plugin
+                  - version
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              unknownDependencyCount:
+                description: |-
+                  UnknownDependencyCount is the number of distinct stored plugin versions whose
+                  dependency list is unknown. It is not truncated. UnknownDependencies lists
+                  the first 50 of them. Informational: it does not gate Ready.
+                type: integer
               unservable:
                 description: |-
                   Unservable lists the first 50 declared plugins that the update center cannot

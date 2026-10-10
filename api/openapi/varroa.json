@@ -12947,6 +12947,17 @@
         },
         "type": "object"
       },
+      "components_schemas_UpdateCenterPluginRef": {
+        "properties": {
+          "plugin": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "components_schemas_UpdateCenterPlugins": {
         "description": "Update center plugin inventory response.",
         "properties": {
@@ -13002,6 +13013,16 @@
           },
           "storeBytes": {
             "format": "int64",
+            "type": "integer"
+          },
+          "unknownDependencies": {
+            "description": "The first 50 stored plugin versions whose dependency list is unknown.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_UpdateCenterPluginRef"
+            },
+            "type": "array"
+          },
+          "unknownDependencyCount": {
             "type": "integer"
           },
           "unservable": {

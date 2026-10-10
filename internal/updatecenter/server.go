@@ -72,6 +72,9 @@ type Server struct {
 	depsGroup singleflight.Group
 	// manifestReadTimeout bounds one shared stored-manifest read.
 	manifestReadTimeout time.Duration
+	// inventoryDepsBudget bounds the wait of one inventory request for
+	// stored-manifest reads.
+	inventoryDepsBudget time.Duration
 }
 
 // NewServer creates a new update center Server.
@@ -86,6 +89,7 @@ func NewServer(store oci.BlobStore, logger *slog.Logger, opts ...Option) *Server
 		uploadLocks:         make(map[string]*sync.Mutex),
 		depsCache:           make(map[string]storedDeps),
 		manifestReadTimeout: defaultManifestReadTimeout,
+		inventoryDepsBudget: defaultInventoryDepsBudget,
 	}
 	for _, o := range opts {
 		o(s)

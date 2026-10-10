@@ -349,3 +349,46 @@ func TestResolveOne_LatestLockYieldsToConcreteLock(t *testing.T) {
 		t.Errorf("selection = %+v, want version 1.5 from a lock", sel)
 	}
 }
+
+// TestCompat_UnknownDependencyListYieldsUnknown: a closure with an unknown
+// member is judged unknown, not compatible.
+func TestCompat_UnknownDependencyListYieldsUnknown(t *testing.T) {
+	root := coreEntry("root", "1.0", "2.400.1", dep("leaf", "1.0"))
+	entries := []inventoryEntry{root, unknownEntry("leaf")}
+	inv := newUCInventory(entries)
+	profiles := []ucProfile{{Name: "p", Eligible: true, EffectiveCore: "2.555.3"}}
+	cl, err := resolveClosure(root, inv, profiles)
+	if err != nil {
+		t.Fatalf("resolveClosure: %v", err)
+	}
+
+	compat := evaluateCompat(cl, inv, profiles)
+	got := verdictFor(t, compat, "p")
+	if got.Verdict != verdictUnknown {
+		t.Fatalf("verdict = %q, want unknown", got.Verdict)
+	}
+	if !strings.Contains(got.Message, "leaf@1.0") {
+		t.Errorf("message %q does not name leaf@1.0", got.Message)
+	}
+	if cond := compatWarning(compat); cond.Status == metav1.ConditionTrue {
+		t.Errorf("unknown must not raise CompatWarning: %+v", cond)
+	}
+}
+
+// TestCompat_BlockingVerdictWinsOverUnknownDependencies: core-too-old outranks
+// an unknown dependency list.
+func TestCompat_BlockingVerdictWinsOverUnknownDependencies(t *testing.T) {
+	root := coreEntry("root", "1.0", "2.555.1", dep("leaf", "1.0"))
+	entries := []inventoryEntry{root, unknownEntry("leaf")}
+	inv := newUCInventory(entries)
+	profiles := []ucProfile{{Name: "old", Eligible: true, EffectiveCore: "2.479.3"}}
+	cl, err := resolveClosure(root, inv, profiles)
+	if err != nil {
+		t.Fatalf("resolveClosure: %v", err)
+	}
+
+	compat := evaluateCompat(cl, inv, profiles)
+	if got := verdictFor(t, compat, "old").Verdict; got != verdictCoreTooOld {
+		t.Fatalf("verdict = %q, want core-too-old", got)
+	}
+}

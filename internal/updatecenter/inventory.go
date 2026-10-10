@@ -5,9 +5,25 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
+	"time"
 
+	"github.com/varroaci/varroa-jenkins/internal/hpi"
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
 )
+
+// inventoryManifestWorkers bounds the concurrent stored-manifest reads one
+// inventory request starts. A cold store would otherwise exceed the operator's
+// HTTP timeout.
+const inventoryManifestWorkers = 8
+
+// defaultInventoryDepsBudget bounds the time one inventory request waits for
+// stored-manifest reads. The operator's inventory client gives up after 30
+// seconds, and one stalled read runs for the full manifestReadTimeout. The
+// budget must stay below the client timeout. A digest still unresolved at the
+// budget is reported as unknown. A read already started runs on to fill the
+// cache, and the reads not yet started wait for the next request.
+const defaultInventoryDepsBudget = 15 * time.Second
 
 // pluginDep is one declared dependency of a stored plugin, in the shape T1.1's
 // dev.varroa.plugin.dependencies annotation carries. Min is a MINIMUM, not a
@@ -24,6 +40,10 @@ type pluginDep struct {
 // "plugins" array. Every field past sizeBytes is optional: packs written
 // before T1.1's annotations existed carry only name/version/sha256/upstreamUrl,
 // and such a plugin must stay listable.
+//
+// dependenciesKnown is always present. A consumer reads dependencies only when
+// it is true. When it is true and dependencies is absent, the plugin has no
+// dependencies. When it is false, the list is unknown.
 type inventoryEntry struct {
 	Name         string      `json:"name"`
 	Version      string      `json:"version"`
@@ -34,6 +54,8 @@ type inventoryEntry struct {
 	Tags         []string    `json:"tags,omitempty"`
 	RequiredCore string      `json:"requiredCore,omitempty"`
 	Dependencies []pluginDep `json:"dependencies,omitempty"`
+	// DependenciesKnown is set by handleInventory, not by canonicalize.
+	DependenciesKnown bool `json:"dependenciesKnown"`
 }
 
 // skippedPackEntry is the JSON shape of one unreadable plugin-pack manifest
@@ -149,6 +171,12 @@ func compareEntries(a, b inventoryEntry) int {
 	if c := cmpStr(a.RequiredCore, b.RequiredCore); c != 0 {
 		return c
 	}
+	if a.DependenciesKnown != b.DependenciesKnown {
+		if !a.DependenciesKnown {
+			return -1
+		}
+		return 1
+	}
 	return cmpDeps(a.Dependencies, b.Dependencies)
 }
 
@@ -247,6 +275,8 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	// metadata both surface, and the caller treats that as a store integrity
 	// failure for that one plugin rather than the service silently picking a
 	// winner from an unordered manifest listing.
+	lazy := s.resolveInventoryDeps(r.Context(), packs)
+
 	seen := make(map[string]struct{})
 	entries := make([]inventoryEntry, 0, len(packs))
 	for _, pack := range packs {
@@ -261,11 +291,13 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 				Tags:         p.Tags,
 				RequiredCore: p.RequiredCore,
 			}
-			for _, d := range p.Dependencies {
+			deps, known := lazy.dependencies(p)
+			for _, d := range deps {
 				e.Dependencies = append(e.Dependencies, pluginDep{
 					Name: d.Name, Min: d.Min, Optional: d.Optional,
 				})
 			}
+			e.DependenciesKnown = known
 			e = e.canonicalize()
 			key := entryKey(e)
 			if _, dup := seen[key]; dup {
@@ -285,9 +317,128 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 // same total order used for sorting, so "collapses under dedupe" and "compares
 // equal in the sort" can never disagree.
 func entryKey(e inventoryEntry) string {
-	return fmt.Sprintf("%q|%q|%q|%d|%q|%q|%q|%q|%v",
+	return fmt.Sprintf("%q|%q|%q|%d|%q|%q|%q|%q|%v|%v",
 		e.Name, e.Version, e.SHA256, e.SizeBytes,
-		e.DisplayName, e.Description, e.Tags, e.RequiredCore, e.Dependencies)
+		e.DisplayName, e.Description, e.Tags, e.RequiredCore, e.DependenciesKnown, e.Dependencies)
+}
+
+// inventoryDeps holds the dependency lists one inventory request resolved. A
+// digest that an annotation covers is never read from the store.
+type inventoryDeps struct {
+	annotated map[string][]hpi.Dependency
+	stored    map[string]storedDeps
+}
+
+// dependencies returns the list of one layer and whether it is known. The
+// annotation wins, then an annotated layer with the same digest, then a
+// stored manifest read.
+func (d inventoryDeps) dependencies(p pluginLayerInfo) ([]hpi.Dependency, bool) {
+	if p.DependenciesKnown {
+		return p.Dependencies, true
+	}
+	if deps, ok := d.annotated[p.LayerDigest]; ok {
+		return deps, true
+	}
+	if r, ok := d.stored[p.LayerDigest]; ok && r.known {
+		return r.deps, true
+	}
+	return nil, false
+}
+
+// resolveInventoryDeps reads the stored manifests that no annotation covers.
+// Reads run on a fixed worker pool, and each digest is read once.
+func (s *Server) resolveInventoryDeps(ctx context.Context, packs []packInfo) inventoryDeps {
+	out := inventoryDeps{
+		annotated: make(map[string][]hpi.Dependency),
+		stored:    make(map[string]storedDeps),
+	}
+	for _, pack := range packs {
+		for _, p := range pack.Plugins {
+			if p.DependenciesKnown {
+				out.annotated[p.LayerDigest] = p.Dependencies
+			}
+		}
+	}
+	var pending []pluginLayerInfo
+	queued := make(map[string]struct{})
+	for _, pack := range packs {
+		for _, p := range pack.Plugins {
+			if p.DependenciesKnown || p.LayerDigest == "" {
+				continue
+			}
+			if _, ok := out.annotated[p.LayerDigest]; ok {
+				continue
+			}
+			if _, dup := queued[p.LayerDigest]; dup {
+				continue
+			}
+			queued[p.LayerDigest] = struct{}{}
+			pending = append(pending, p)
+		}
+	}
+	if len(pending) == 0 {
+		return out
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	work := make(chan pluginLayerInfo)
+	workers := inventoryManifestWorkers
+	if len(pending) < workers {
+		workers = len(pending)
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range work {
+				deps, known := s.pluginDependencies(ctx, p)
+				mu.Lock()
+				out.stored[p.LayerDigest] = storedDeps{deps: deps, known: known}
+				mu.Unlock()
+			}
+		}()
+	}
+	// The feeder runs apart from the wait, so a budget exit never leaves a
+	// worker blocked on a send that nobody completes. The stop signal ends the
+	// feed at that exit, so only the reads already started run on.
+	stopFeeding := make(chan struct{})
+	go func() {
+		defer close(work)
+		for _, p := range pending {
+			select {
+			case work <- p:
+			case <-stopFeeding:
+				return
+			}
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	timer := time.NewTimer(s.inventoryDepsBudget)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return out
+	case <-ctx.Done():
+	case <-timer.C:
+		s.logger.Warn("inventory manifest reads exceeded the budget; unresolved plugins are reported as unknown",
+			"budget", s.inventoryDepsBudget, "pending", len(pending))
+	}
+	close(stopFeeding)
+	// The workers still write to out.stored, so the caller gets a copy taken
+	// under the lock. A read that finishes later lands in the dependency cache.
+	snapshot := inventoryDeps{annotated: out.annotated, stored: make(map[string]storedDeps)}
+	mu.Lock()
+	for k, v := range out.stored {
+		snapshot.stored[k] = v
+	}
+	mu.Unlock()
+	return snapshot
 }
 
 // handleHealthz serves GET /healthz (always 200 once serving).

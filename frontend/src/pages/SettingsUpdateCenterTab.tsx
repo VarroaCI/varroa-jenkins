@@ -312,6 +312,35 @@ export default function SettingsUpdateCenterTab() {
         </>
       )}
 
+      {/* Unknown-dependency table: informational, does not gate readiness */}
+      {(status.unknownDependencies ?? []).length > 0 && (
+        <>
+          <h3 className={styles.sectionTitle}>Plugins with an unknown dependency list</h3>
+          <div className={styles.profileTableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Plugin</th><th>Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.unknownDependencies.map((p, i) => (
+                  <tr key={i}>
+                    <td><span className={`${styles.tableBadge} ${styles.eol}`}>{p.plugin}</span></td>
+                    <td>{p.version}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {status.unknownDependencyCount > status.unknownDependencies.length && (
+            <p className={styles.smallMuted}>
+              showing {status.unknownDependencies.length} of {status.unknownDependencyCount}
+            </p>
+          )}
+        </>
+      )}
+
       {/* Not-yet-stored table: informational while pull-through can fetch them */}
       {(status.gaps ?? []).length > 0 && (
         <>

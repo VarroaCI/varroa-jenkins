@@ -3768,6 +3768,13 @@ UpdateCenterStatus:
         $ref: '#/UpdateCenterGap'
     unservableCount:
       type: integer
+    unknownDependencyCount:
+      type: integer
+    unknownDependencies:
+      type: array
+      description: The first 50 stored plugin versions whose dependency list is unknown.
+      items:
+        $ref: '#/UpdateCenterPluginRef'
     lastSyncTime:
       type: string
       format: date-time
@@ -3776,6 +3783,14 @@ UpdateCenterStatus:
       type: string
     pullThroughEnabled:
       type: boolean
+
+UpdateCenterPluginRef:
+  type: object
+  properties:
+    plugin:
+      type: string
+    version:
+      type: string
 
 UpdateCenterCondition:
   type: object

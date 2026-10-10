@@ -2983,3 +2983,76 @@ func TestCreateStatefulSet_AdoptsPeerCreateOnAlreadyExists(t *testing.T) {
 		t.Fatalf("update resourceVersion = %q, want the peer's 3 from the re-read", updateRV)
 	}
 }
+
+// unknownDependencyFixture returns a client seeded with one UpdateCenter whose
+// status carries the given fields.
+func unknownDependencyFixture(t *testing.T, status map[string]interface{}) (*ClientsetClient, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status":     status,
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	return &ClientsetClient{dynamic: dyn}, dyn
+}
+
+// TestPatchUpdateCenterStatus_ZeroesUnknownDependencyCount guards the regression
+// where a store with no unknown dependency lists kept its last nonzero count.
+// The count carries omitempty, so a zero must be written explicitly.
+func TestPatchUpdateCenterStatus_ZeroesUnknownDependencyCount(t *testing.T) {
+	c, dyn := unknownDependencyFixture(t, map[string]interface{}{
+		"phase":                  "Ready",
+		"unknownDependencyCount": int64(60),
+	})
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready"})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+	n, found, _ := unstructured.NestedInt64(status, "unknownDependencyCount")
+	if !found || n != 0 {
+		t.Errorf("expected unknownDependencyCount=0 (found=%v), got: %d", found, n)
+	}
+}
+
+// TestPatchUpdateCenterStatus_ClearsStaleUnknownDependencies guards the
+// regression where a stale unknown-dependency list outlived the store state it
+// described.
+func TestPatchUpdateCenterStatus_ClearsStaleUnknownDependencies(t *testing.T) {
+	c, dyn := unknownDependencyFixture(t, map[string]interface{}{
+		"phase":                  "Ready",
+		"unknownDependencyCount": int64(1),
+		"unknownDependencies": []interface{}{
+			map[string]interface{}{"plugin": "acme", "version": "1.0"},
+		},
+	})
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready"})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+	if s, found := status["unknownDependencies"]; found && s != nil {
+		if sl, ok := s.([]interface{}); !ok || len(sl) > 0 {
+			t.Errorf("expected unknownDependencies cleared, got: %v", s)
+		}
+	}
+}

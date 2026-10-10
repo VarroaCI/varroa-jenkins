@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/hpi"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
@@ -135,6 +136,10 @@ func TestInventory_PreAnnotationPluginStillListed(t *testing.T) {
 	e := entries[0]
 	if e.DisplayName != "" || e.Description != "" || e.RequiredCore != "" || e.Tags != nil || e.Dependencies != nil {
 		t.Errorf("absent annotations should be omitted, got %+v", e)
+	}
+	// The manifest is readable and lists no dependencies, so the list is known.
+	if !e.DependenciesKnown {
+		t.Errorf("dependenciesKnown = false, want true for a readable manifest with no dependencies")
 	}
 	// omitempty must actually drop the keys, not emit nulls.
 	for _, k := range []string{"displayName", "description", "tags", "requiredCore", "dependencies"} {
@@ -504,5 +509,170 @@ func TestPartialStore_MetadataAndDownloadStillServe(t *testing.T) {
 	got, _ := io.ReadAll(dl.Body)
 	if !bytes.Equal(got, body) {
 		t.Errorf("download body mismatch")
+	}
+}
+
+// seedInventoryLayer stores name@version as a profile pack with one plugin
+// layer. known sets the dependency annotation to the given list, including an
+// empty list. Unknown writes no annotation at all.
+func seedInventoryLayer(t *testing.T, store oci.BlobStore, ref, name string, body []byte, known bool, deps []hpi.Dependency) {
+	t.Helper()
+	p := oci.ResolvedPlugin{
+		Name:              name,
+		Version:           "1.0",
+		SHA256:            digestOf(body),
+		Dependencies:      deps,
+		DependenciesKnown: known,
+		Content:           bytes.NewReader(body),
+	}
+	cfg := oci.PackConfig{
+		Kind:        oci.PackKindProfile,
+		Profile:     "test-profile",
+		PluginCount: 1,
+		LockHash:    oci.LockHash([]oci.ResolvedPlugin{p}),
+		CreatedAt:   "2026-01-01T00:00:00Z",
+	}
+	if err := oci.BuildPluginPack(context.Background(), store, ref, cfg, []oci.ResolvedPlugin{p}); err != nil {
+		t.Fatalf("seed inventory layer %s: %v", ref, err)
+	}
+}
+
+// findInventory returns the entry for name@version, or fails the test.
+func findInventory(t *testing.T, entries []inventoryEntry, name string) inventoryEntry {
+	t.Helper()
+	for _, e := range entries {
+		if e.Name == name && e.Version == "1.0" {
+			return e
+		}
+	}
+	t.Fatalf("inventory has no %s@1.0: %+v", name, entries)
+	return inventoryEntry{}
+}
+
+// TestInventory_KnownEmptyAndUnknownDiffer: a known-empty list and an unknown
+// list must not look the same. The key is present in both, with its own value.
+func TestInventory_KnownEmptyAndUnknownDiffer(t *testing.T) {
+	store := newTestStore(t)
+	seedInventoryLayer(t, store, "empty-pack", "empty",
+		buildHPI(t, hpiSpec{shortName: "empty", version: "1.0"}), true, nil)
+	seedInventoryLayer(t, store, "unknown-pack", "unknown", []byte("not-a-zip"), false, nil)
+
+	ts := newTestServer(t, store)
+	code, entries, _, body := getInventory(t, ts)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", code, body)
+	}
+	if !findInventory(t, entries, "empty").DependenciesKnown {
+		t.Errorf("known-empty entry: dependenciesKnown = false, want true")
+	}
+	if findInventory(t, entries, "unknown").DependenciesKnown {
+		t.Errorf("unknown entry: dependenciesKnown = true, want false")
+	}
+	if strings.Count(body, `"dependenciesKnown":true`) != 1 || strings.Count(body, `"dependenciesKnown":false`) != 1 {
+		t.Errorf("body must carry the key on both entries: %s", body)
+	}
+}
+
+// TestInventory_MissingAnnotationResolvedFromManifest: a layer with no
+// annotation takes its list from the readable stored manifest.
+func TestInventory_MissingAnnotationResolvedFromManifest(t *testing.T) {
+	store := newTestStore(t)
+	seedInventoryLayer(t, store, "manifest-pack", "acme",
+		buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "leaf:1.2"}), false, nil)
+
+	ts := newTestServer(t, store)
+	code, entries, _, body := getInventory(t, ts)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", code, body)
+	}
+	e := findInventory(t, entries, "acme")
+	if !e.DependenciesKnown {
+		t.Fatalf("dependenciesKnown = false, want true from the stored manifest")
+	}
+	if len(e.Dependencies) != 1 || e.Dependencies[0].Name != "leaf" {
+		t.Fatalf("dependencies = %+v, want one leaf entry", e.Dependencies)
+	}
+}
+
+// TestInventory_AnnotatedDigestSkipsManifestRead: when one pack annotates a
+// blob, another pack that stores the same bytes without an annotation needs no
+// manifest read for that digest.
+func TestInventory_AnnotatedDigestSkipsManifestRead(t *testing.T) {
+	inner := newTestStore(t)
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "leaf:1.2"})
+	seedInventoryLayer(t, inner, "annotated-pack", "acme", body, true,
+		[]hpi.Dependency{{Name: "leaf", Min: "1.2"}})
+	seedInventoryLayer(t, inner, "bare-pack", "acme", body, false, nil)
+
+	counting := newFetchCountingStore(inner)
+	ts := newTestServer(t, counting)
+	code, entries, _, raw := getInventory(t, ts)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", code, raw)
+	}
+	e := findInventory(t, entries, "acme")
+	if !e.DependenciesKnown || len(e.Dependencies) != 1 {
+		t.Fatalf("entry = %+v, want known with one dependency", e)
+	}
+	packs, _, err := ts.server.listPackInfos(context.Background())
+	if err != nil {
+		t.Fatalf("listPackInfos: %v", err)
+	}
+	for _, pk := range packs {
+		for _, p := range pk.Plugins {
+			if !p.DependenciesKnown {
+				if n := counting.fetchesOf(p.LayerDigest); n != 0 {
+					t.Fatalf("annotated digest read %d times, want 0", n)
+				}
+			}
+		}
+	}
+}
+
+// TestInventory_StalledManifestReadReportsUnknownWithinBudget: one stalled
+// manifest read must not hold the whole inventory past the wait budget. The
+// stalled plugin is reported as unknown, the other plugin as known, and the
+// read that finishes later fills the cache for the next request.
+func TestInventory_StalledManifestReadReportsUnknownWithinBudget(t *testing.T) {
+	inner := newTestStore(t)
+	stalled := buildHPI(t, hpiSpec{shortName: "stalled", version: "1.0", deps: "leaf:1.2"})
+	seedInventoryLayer(t, inner, "stalled-pack", "stalled", stalled, false, nil)
+	seedInventoryLayer(t, inner, "quick-pack", "quick",
+		buildHPI(t, hpiSpec{shortName: "quick", version: "1.0", deps: "leaf:1.2"}), false, nil)
+
+	store := newFetchCountingStore(inner)
+	store.blockFor[digestOf(stalled)] = 1
+	ts := newTestServer(t, store)
+	ts.server.inventoryDepsBudget = 50 * time.Millisecond
+	ts.server.manifestReadTimeout = 300 * time.Millisecond
+
+	start := time.Now()
+	code, entries, _, body := getInventory(t, ts)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", code, body)
+	}
+	if took := time.Since(start); took >= ts.server.manifestReadTimeout {
+		t.Fatalf("inventory took %v, want less than the manifest read timeout", took)
+	}
+	if e := findInventory(t, entries, "stalled"); e.DependenciesKnown {
+		t.Fatalf("stalled entry = %+v, want dependenciesKnown false at the budget", e)
+	}
+	if e := findInventory(t, entries, "quick"); !e.DependenciesKnown || len(e.Dependencies) != 1 {
+		t.Fatalf("quick entry = %+v, want known with one dependency", e)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		code, entries, _, body = getInventory(t, ts)
+		if code != http.StatusOK {
+			t.Fatalf("status = %d, body %s", code, body)
+		}
+		if e := findInventory(t, entries, "stalled"); e.DependenciesKnown {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stalled entry never became known after the read timed out and was retried")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

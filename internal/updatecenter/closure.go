@@ -107,14 +107,13 @@ type Plan struct {
 type storeLookup interface {
 	// Versions returns every version of name the store holds, in no order.
 	Versions(ctx context.Context, name string) []string
-	// Dependencies returns the dependency list recorded for name@version.
+	// Dependencies returns the dependency list for name@version.
 	//
-	// authoritative reports whether the answer can be trusted as complete. The
-	// dev.varroa.plugin.dependencies annotation is omitted when a plugin has no
-	// dependencies, so its absence alone cannot distinguish "no dependencies"
-	// from "a pack written before the annotation contract existed". The
-	// discriminator is the pack config's `kind`, which every post-contract pack
-	// carries and no legacy pack does.
+	// authoritative reports whether the answer is known. False means unknown.
+	// A stored layer without the dependencies annotation is unknown until its
+	// stored manifest is read. The annotation is written for every plugin with a
+	// known list, including an empty one, so a missing annotation never means
+	// "no dependencies".
 	Dependencies(ctx context.Context, name, version string) (deps []hpi.Dependency, authoritative bool)
 }
 
@@ -381,8 +380,9 @@ func (p *closurePlanner) resolveUnpinned(ctx context.Context, entry ClosureEntry
 }
 
 // dependenciesOf returns name@version's own mandatory dependency list, in the
-// mandated source order: the stored pack's annotation, then upstream metadata
-// for that exact version, then a rejecting status.
+// mandated source order: the stored pack's annotation, then the stored plugin
+// manifest, then upstream metadata for that exact version, then a rejecting
+// status.
 //
 // A degraded metadata source yields metadata-unavailable (retryable) rather than
 // closure-unverifiable (permanent): the list may well be determinable on the
@@ -467,7 +467,8 @@ func remediationFor(status, name, minVersion string, row UnresolvedDependency) s
 		return "one or more upstream metadata sources are unavailable; this is retryable"
 	case StatusClosureUnverifiable:
 		return fmt.Sprintf("%s's own dependency list cannot be determined: re-import it as a pack carrying the "+
-			"dependency annotation, or pre-seed a version upstream still lists", name)
+			"dependency annotation, or pre-seed a version upstream still lists, or ensure its stored bytes are a "+
+			"readable plugin", name)
 	default:
 		return ""
 	}

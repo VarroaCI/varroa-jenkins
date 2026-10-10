@@ -21,12 +21,11 @@ type storedDeps struct {
 	known bool
 }
 
-// pluginDependencies returns the dependency list the metadata document serves
-// for one stored plugin version. A layer that carries the dependencies
-// annotation answers from the annotation. A layer without it is read once from
-// its stored manifest, and the result is cached by layer digest. The second
-// result is false when the list is unknown. Only the metadata document
-// consults this function.
+// pluginDependencies returns the dependency list for one stored plugin version.
+// A layer that carries the dependencies annotation answers from the annotation.
+// A layer without it is read once from its stored manifest, and the result is
+// cached by layer digest. The second result is false when the list is unknown.
+// The metadata document, the inventory, and the upload planner share this order.
 func (s *Server) pluginDependencies(ctx context.Context, p pluginLayerInfo) ([]hpi.Dependency, bool) {
 	if p.DependenciesKnown {
 		return p.Dependencies, true
@@ -61,7 +60,7 @@ func (s *Server) pluginDependencies(ctx context.Context, p pluginLayerInfo) ([]h
 		return result, nil
 	})
 	if err != nil {
-		s.logger.Warn("plugin manifest unavailable; omitting it from update-center metadata",
+		s.logger.Warn("plugin manifest unavailable; its dependency list is unknown",
 			"name", p.Name, "version", p.Version, "digest", p.LayerDigest, "error", err)
 		return nil, false
 	}
@@ -97,7 +96,7 @@ func (s *Server) readManifestDeps(ctx context.Context, p pluginLayerInfo) ([]hpi
 
 	mf, err := hpi.ParseHPIFile(path)
 	if err != nil {
-		s.logger.Warn("plugin manifest unreadable; omitting it from update-center metadata",
+		s.logger.Warn("plugin manifest unreadable; its dependency list is unknown",
 			"name", p.Name, "version", p.Version, "digest", p.LayerDigest, "error", err)
 		return nil, false, nil
 	}
@@ -106,4 +105,30 @@ func (s *Server) readManifestDeps(ctx context.Context, p pluginLayerInfo) ([]hpi
 		deps = []hpi.Dependency{}
 	}
 	return deps, true, nil
+}
+
+// storedDependencies resolves the dependency list of one plugin version from
+// every layer that stores its bytes. An annotated layer answers first. Otherwise
+// the stored manifests are read in turn, one per distinct digest, until one
+// answers. The second result is false when no layer gives a known list.
+func (s *Server) storedDependencies(ctx context.Context, layers []pluginLayerInfo) ([]hpi.Dependency, bool) {
+	for _, l := range layers {
+		if l.DependenciesKnown {
+			return l.Dependencies, true
+		}
+	}
+	seen := make(map[string]struct{}, len(layers))
+	for _, l := range layers {
+		if l.LayerDigest == "" {
+			continue
+		}
+		if _, dup := seen[l.LayerDigest]; dup {
+			continue
+		}
+		seen[l.LayerDigest] = struct{}{}
+		if deps, known := s.pluginDependencies(ctx, l); known {
+			return deps, true
+		}
+	}
+	return nil, false
 }

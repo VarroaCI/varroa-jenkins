@@ -3289,6 +3289,16 @@ type UpdateCenterStatus struct {
 	// is not truncated. Unservable lists the first 50 of them.
 	// +optional
 	UnservableCount int `json:"unservableCount,omitempty"`
+	// UnknownDependencyCount is the number of distinct stored plugin versions whose
+	// dependency list is unknown. It is not truncated. UnknownDependencies lists
+	// the first 50 of them. Informational: it does not gate Ready.
+	// +optional
+	UnknownDependencyCount int `json:"unknownDependencyCount,omitempty"`
+	// UnknownDependencies lists the first 50 stored plugin versions whose dependency
+	// list is unknown, sorted by name then version.
+	// +optional
+	// +listType=atomic
+	UnknownDependencies []UpdateCenterPluginRef `json:"unknownDependencies,omitempty"`
 	// LastSyncTime is the last sync time.
 	// +optional
 	LastSyncTime metav1.Time `json:"lastSyncTime,omitempty"`
@@ -3301,6 +3311,14 @@ type UpdateCenterStatus struct {
 	// +optional
 	// +listType=atomic
 	ResolvedMetadataSources []string `json:"resolvedMetadataSources,omitempty"`
+}
+
+// UpdateCenterPluginRef names one stored plugin version.
+type UpdateCenterPluginRef struct {
+	// Plugin is the plugin short name.
+	Plugin string `json:"plugin"`
+	// Version is the plugin version.
+	Version string `json:"version"`
 }
 
 // UpdateCenterCondition is a status condition for an UpdateCenter.

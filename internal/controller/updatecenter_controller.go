@@ -496,6 +496,8 @@ type inventoryEntry struct {
 	Tags         []string    `json:"tags,omitempty"`
 	RequiredCore string      `json:"requiredCore,omitempty"`
 	Dependencies []pluginDep `json:"dependencies,omitempty"`
+	// DependenciesKnown is false when the update center cannot read the list.
+	DependenciesKnown bool `json:"dependenciesKnown"`
 }
 
 // pluginDep is one declared dependency, in the frozen wire shape of
@@ -564,6 +566,7 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 		totalBytes += e.SizeBytes
 	}
 	status.StoreBytes = totalBytes
+	r.applyUnknownDependencies(status, inventory)
 
 	// §3.4b — build declared set from JenkinsVersionProfiles and ComposedBundles.
 	declared, err := r.buildDeclaredSet(ctx, logger)
