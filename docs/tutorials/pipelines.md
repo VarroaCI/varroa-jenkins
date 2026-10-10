@@ -119,7 +119,7 @@ tabs: **Log**, **Artifacts**, **Tests**, and **Changes**.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
-A wide stage graph scrolls horizontally inside its card. Nested stages show under a heading with the name of their parent stage. Select the heading to show or hide them.
+A wide stage graph scrolls horizontally inside its card. A stage name longer than 22 characters shows cut short in its node; point at the node to read the full name. Nested stages show under a heading with the name of their parent stage. Select the heading to show or hide them.
 
 ## Read a log
 
