@@ -11,6 +11,12 @@ beforeEach(() => {
   window.location.hash = "";
 });
 
+function nodeY(id: string): number {
+  const g = document.getElementById(`node-stage-${id}`)?.closest("g");
+  const match = /translate\([^,]+,([^)]+)\)/.exec(g?.getAttribute("transform") ?? "");
+  return Number(match?.[1]);
+}
+
 describe("StageGraph", () => {
   it("renders two parallel branches with one nested stage as the expected node and anchor set", () => {
     const stages: RunStage[] = [
@@ -185,5 +191,100 @@ describe("StageGraph", () => {
 
     fireEvent.click(expandControl);
     expect(document.getElementById("node-stage-child-1")).toBeTruthy();
+  });
+  it("centers a 7-branch bundle so every node and its ring sit inside the viewBox", () => {
+    const stages: RunStage[] = [stage({ stageId: "1", name: "Trunk", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" })];
+    for (let i = 0; i < 7; i++) {
+      stages.push(
+        stage({
+          stageId: `b${i}`, name: `Branch ${i}`, status: "SUCCESS", parentId: "1", nodeType: "parallel",
+          startedAt: `2026-01-01T00:01:0${i}Z`,
+        }),
+      );
+    }
+    const { container } = render(<StageGraph stages={stages} terminal={false} />);
+    const viewBox = container.querySelector("svg")!.getAttribute("viewBox")!.split(" ").map(Number);
+    const height = viewBox[3];
+
+    for (let i = 0; i < 7; i++) {
+      const y = nodeY(`b${i}`);
+      expect(y - 19).toBeGreaterThanOrEqual(0);
+      expect(y + 15 + 18).toBeLessThanOrEqual(height);
+    }
+    expect(nodeY("b3")).toBe(height / 2);
+  });
+
+  it("draws at native size: the width and height attributes equal the viewBox", () => {
+    const stages: RunStage[] = [];
+    for (let i = 0; i < 24; i++) {
+      stages.push(stage({ stageId: `t${i}`, name: `Stage ${i}`, status: "SUCCESS", startedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}Z` }));
+    }
+    const { container } = render(<StageGraph stages={stages} terminal={false} />);
+    const svg = container.querySelector("svg")!;
+    const viewBox = svg.getAttribute("viewBox")!.split(" ");
+    expect(svg.getAttribute("width")).toBe(viewBox[2]);
+    expect(svg.getAttribute("height")).toBe(viewBox[3]);
+    expect(svg.getAttribute("width")).toBe(String(2 * 80 + 23 * 160));
+  });
+
+  it("truncates a long label and keeps the full name in the title and the accessible name", () => {
+    const long = "Image-Frontend-Build-Pipeline-Stage-Name";
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: long, status: "SUCCESS" }),
+      stage({ stageId: "2", name: "Branch: Image-Frontend", status: "SUCCESS", startedAt: "2026-01-01T00:00:01Z" }),
+    ];
+    render(<StageGraph stages={stages} terminal={false} />);
+    const link = document.getElementById("node-stage-1")!;
+    const label = link.querySelector("text")!;
+    expect(label.textContent!.endsWith("…")).toBe(true);
+    expect(label.textContent!.length).toBe(22);
+    expect(link.querySelector("title")?.textContent).toBe(`${long} — Passed`);
+    expect(link.getAttribute("aria-label")).toContain(long);
+
+    const short = document.getElementById("node-stage-2")!.querySelector("text")!;
+    expect(short.textContent).toBe("Branch: Image-Frontend");
+  });
+
+  it("shows a visible parent heading for each nested list", () => {
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: "Build", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" }),
+      stage({ stageId: "2", name: "Integration tests", status: "SUCCESS", parentId: "1", nodeType: "parallel", startedAt: "2026-01-01T00:01:00Z" }),
+      stage({ stageId: "2-1", name: "Setup", status: "SUCCESS", parentId: "2", nodeType: "step", startedAt: "2026-01-01T00:01:05Z" }),
+    ];
+    render(<StageGraph stages={stages} terminal={false} />);
+    const toggle = screen.getByRole("button", { name: /Toggle nested stages of Integration tests/ });
+    expect(toggle.textContent).toContain("Integration tests");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("collapses only the toggled nested list", () => {
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: "Build", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" }),
+      stage({ stageId: "a", name: "Branch A", status: "SUCCESS", parentId: "1", nodeType: "parallel", startedAt: "2026-01-01T00:01:00Z" }),
+      stage({ stageId: "a-1", name: "Step A", status: "SUCCESS", parentId: "a", nodeType: "step", startedAt: "2026-01-01T00:01:05Z" }),
+      stage({ stageId: "b", name: "Branch B", status: "SUCCESS", parentId: "1", nodeType: "parallel", startedAt: "2026-01-01T00:01:00Z" }),
+      stage({ stageId: "b-1", name: "Step B", status: "SUCCESS", parentId: "b", nodeType: "step", startedAt: "2026-01-01T00:01:05Z" }),
+    ];
+    render(<StageGraph stages={stages} terminal={false} />);
+    const toggleA = screen.getByRole("button", { name: "Toggle nested stages of Branch A" });
+
+    fireEvent.click(toggleA);
+    expect(screen.queryByLabelText("Branch A nested stages")).toBeNull();
+    expect(screen.getByLabelText("Branch B nested stages")).toBeInTheDocument();
+    expect(toggleA).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggleA);
+    expect(screen.getByLabelText("Branch A nested stages")).toBeInTheDocument();
+    expect(screen.getByLabelText("Branch B nested stages")).toBeInTheDocument();
+  });
+
+  it("draws no disclosure glyph inside the SVG", () => {
+    const stages: RunStage[] = [
+      stage({ stageId: "1", name: "Build", status: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" }),
+      stage({ stageId: "2", name: "Integration tests", status: "IN_PROGRESS", parentId: "1", nodeType: "parallel", startedAt: "2026-01-01T00:01:00Z" }),
+      stage({ stageId: "2-1", name: "Setup", status: "SUCCESS", parentId: "2", nodeType: "step", startedAt: "2026-01-01T00:01:05Z" }),
+    ];
+    const { container } = render(<StageGraph stages={stages} terminal={false} />);
+    expect(container.querySelector("svg [role=button][aria-label^='Toggle']")).toBeNull();
   });
 });

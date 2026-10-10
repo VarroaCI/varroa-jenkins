@@ -62,12 +62,25 @@ export function describeStageStatus(status: string | undefined): StatusDescripti
 }
 
 const LARGE_GRAPH_THRESHOLD = 200;
-const COLUMN_W = 140;
+const COLUMN_W = 160;
 const ROW_H = 64;
 const NESTED_STEP = 20;
 const NODE_R = 15;
-const PAD_X = 50;
+const PAD_X = COLUMN_W / 2;
 const PAD_Y = 40;
+const MAX_LABEL_CHARS = 22;
+
+/**
+ * Shortens a stage name to fit one column. The full name stays in the
+ * node's title and accessible name.
+ */
+export function truncateLabel(name: string): string {
+  // Array.from splits by code point, so a surrogate pair is never cut in two.
+  const characters = Array.from(name);
+  return characters.length > MAX_LABEL_CHARS
+    ? `${characters.slice(0, MAX_LABEL_CHARS - 1).join("")}…`
+    : name;
+}
 
 /** One stage rendered in the indented nested list, at its indentation depth. */
 interface NestedEntry {
@@ -185,10 +198,10 @@ function buildColumns(
   return columns;
 }
 
-function nodeCenter(n: TopNode): { x: number; y: number } {
+/** Centers each column on centerY, so a tall bundle stays inside the viewBox. */
+function nodeCenter(n: TopNode, centerY: number): { x: number; y: number } {
   const x = PAD_X + n.column * COLUMN_W;
-  const offset = (n.row - (n.rowsInColumn - 1) / 2) * ROW_H;
-  const y = PAD_Y + offset;
+  const y = centerY + (n.row - (n.rowsInColumn - 1) / 2) * ROW_H;
   return { x, y };
 }
 
@@ -205,7 +218,7 @@ function mergeStageEvent(prev: RunStage[], ev: RunLogStageEvent): RunStage[] {
 
 export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: StageGraphProps) {
   const [merged, setMerged] = useState<RunStage[]>(stages);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [expandedTrunkId, setExpandedTrunkId] = useState<string | null>(null);
 
   // The stage list is read from the run record on load; a later prop
@@ -239,14 +252,15 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
   const width = PAD_X * 2 + Math.max(0, columns.length - 1) * COLUMN_W;
   const maxRows = Math.max(1, ...topNodes.map((n) => n.rowsInColumn));
   const height = PAD_Y * 2 + Math.max(0, maxRows - 1) * ROW_H;
+  const centerY = height / 2;
 
   const connectors = useMemo(() => {
     const paths: { id: string; d: string; completed: boolean }[] = [];
     for (let i = 0; i < columns.length - 1; i++) {
       for (const a of columns[i]) {
         for (const b of columns[i + 1]) {
-          const p1 = nodeCenter(a);
-          const p2 = nodeCenter(b);
+          const p1 = nodeCenter(a, centerY);
+          const p2 = nodeCenter(b, centerY);
           const midX = (p1.x + p2.x) / 2;
           paths.push({
             id: `${a.stage.stageId}-${b.stage.stageId}`,
@@ -257,10 +271,10 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
       }
     }
     return paths;
-  }, [columns]);
+  }, [columns, centerY]);
 
   const toggleNested = (stageId: string) => {
-    setExpanded((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(stageId)) next.delete(stageId);
       else next.add(stageId);
@@ -285,109 +299,110 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
 
   return (
     <div className={styles.wrap}>
-      <svg
-        className={styles.svg}
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="Pipeline stages"
-      >
-        {connectors.map((c) => (
-          <path
-            key={c.id}
-            d={c.d}
-            className={c.completed ? styles.connOk : styles.connPlain}
-          />
-        ))}
-        {topNodes.map((n) => {
-          const desc = describeStageStatus(n.stage.status);
-          const { x, y } = nodeCenter(n);
-          const nestedOpen = expanded.has(n.stage.stageId) || expanded.size === 0;
-          return (
-            <g key={n.stage.stageId} transform={`translate(${x},${y})`}>
-              <a
-                href={`#stage-${n.stage.stageId}`}
-                id={`node-stage-${n.stage.stageId}`}
-                className={styles.nodeLink}
-                title={`${n.stage.name} — ${desc.label}`}
-                aria-label={`${n.stage.name} — ${desc.label}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  select(n.stage.stageId);
-                }}
-              >
-                {desc.running && <circle r={NODE_R + 4} className={styles.ring} />}
-                <circle r={NODE_R} className={styles[`tone_${desc.tone}`]} />
-                <text className={styles.label} y={NODE_R + 14} textAnchor="middle">
-                  {n.stage.name}
-                </text>
-              </a>
-              {n.nested.length > 0 && (
-                <text
-                  role="button"
-                  tabIndex={0}
-                  className={styles.disclosure}
-                  aria-expanded={nestedOpen}
-                  aria-label={`Toggle nested stages of ${n.stage.name}`}
-                  x={NODE_R + 6}
-                  y={-NODE_R}
-                  onClick={() => toggleNested(n.stage.stageId)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") toggleNested(n.stage.stageId);
+      <div className={styles.scroll}>
+        <svg
+          className={styles.svg}
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="Pipeline stages"
+        >
+          {connectors.map((c) => (
+            <path
+              key={c.id}
+              d={c.d}
+              className={c.completed ? styles.connOk : styles.connPlain}
+            />
+          ))}
+          {topNodes.map((n) => {
+            const desc = describeStageStatus(n.stage.status);
+            const { x, y } = nodeCenter(n, centerY);
+            return (
+              <g key={n.stage.stageId} transform={`translate(${x},${y})`}>
+                <a
+                  href={`#stage-${n.stage.stageId}`}
+                  id={`node-stage-${n.stage.stageId}`}
+                  className={styles.nodeLink}
+                  aria-label={`${n.stage.name} — ${desc.label}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    select(n.stage.stageId);
                   }}
                 >
-                  {nestedOpen ? "▾" : "▸"}
-                </text>
-              )}
-              {hasHiddenChildren(n.stage.stageId) && (
-                <text
-                  role="button"
-                  tabIndex={0}
-                  className={styles.expandTrunk}
-                  x={NODE_R + 6}
-                  y={-NODE_R}
-                  aria-label={`Expand ${n.stage.name}`}
-                  onClick={() => setExpandedTrunkId(n.stage.stageId)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") setExpandedTrunkId(n.stage.stageId);
-                  }}
-                >
-                  Expand
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      {topNodes
-        .filter((n) => n.nested.length > 0 && (expanded.has(n.stage.stageId) || expanded.size === 0))
-        .map((n) => (
-          <ul
-            key={`${n.stage.stageId}-nested`}
-            className={styles.nestedList}
-            aria-label={`${n.stage.name} nested stages`}
-          >
-            {n.nested.map(({ stage, depth }) => {
-              const desc = describeStageStatus(stage.status);
-              return (
-                <li key={stage.stageId} className={styles.nestedItem} style={{ paddingLeft: depth * NESTED_STEP }}>
-                  <a
-                    href={`#stage-${stage.stageId}`}
-                    id={`node-stage-${stage.stageId}`}
-                    title={`${stage.name} — ${desc.label}`}
-                    aria-label={`${stage.name} — ${desc.label}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      select(stage.stageId);
+                  <title>{`${n.stage.name} — ${desc.label}`}</title>
+                  {desc.running && <circle r={NODE_R + 4} className={styles.ring} />}
+                  <circle r={NODE_R} className={styles[`tone_${desc.tone}`]} />
+                  <text className={styles.label} y={NODE_R + 14} textAnchor="middle">
+                    {truncateLabel(n.stage.name)}
+                  </text>
+                </a>
+                {hasHiddenChildren(n.stage.stageId) && (
+                  <text
+                    role="button"
+                    tabIndex={0}
+                    className={styles.expandTrunk}
+                    x={0}
+                    y={-(NODE_R + 8)}
+                    textAnchor="middle"
+                    aria-label={`Expand ${n.stage.name}`}
+                    onClick={() => setExpandedTrunkId(n.stage.stageId)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") setExpandedTrunkId(n.stage.stageId);
                     }}
                   >
-                    {stage.name}
-                  </a>
-                  <span className={styles[`nestedTone_${desc.tone}`]}>{desc.label}</span>
-                </li>
-              );
-            })}
-          </ul>
-        ))}
+                    Expand
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {topNodes
+        .filter((n) => n.nested.length > 0)
+        .map((n) => {
+          const open = !collapsed.has(n.stage.stageId);
+          const listId = `nested-${n.stage.stageId}`;
+          return (
+            <section key={`${n.stage.stageId}-nested`} className={styles.nestedGroup}>
+              <button
+                type="button"
+                className={styles.nestedHead}
+                aria-expanded={open}
+                aria-controls={open ? listId : undefined}
+                aria-label={`Toggle nested stages of ${n.stage.name}`}
+                onClick={() => toggleNested(n.stage.stageId)}
+              >
+                <span aria-hidden="true">{open ? "▾" : "▸"}</span> {n.stage.name}
+              </button>
+              {open && (
+                <ul id={listId} className={styles.nestedList} aria-label={`${n.stage.name} nested stages`}>
+                  {n.nested.map(({ stage, depth }) => {
+                    const desc = describeStageStatus(stage.status);
+                    return (
+                      <li key={stage.stageId} className={styles.nestedItem} style={{ paddingLeft: depth * NESTED_STEP }}>
+                        <a
+                          href={`#stage-${stage.stageId}`}
+                          id={`node-stage-${stage.stageId}`}
+                          title={`${stage.name} — ${desc.label}`}
+                          aria-label={`${stage.name} — ${desc.label}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            select(stage.stageId);
+                          }}
+                        >
+                          {stage.name}
+                        </a>
+                        <span className={styles[`nestedTone_${desc.tone}`]}>{desc.label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          );
+        })}
     </div>
   );
 }

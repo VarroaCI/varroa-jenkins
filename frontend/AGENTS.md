@@ -229,7 +229,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   cover a whole burst of frames and `lastEvent` keeps only the last frame of
   that burst. A log frame arrives at the page through `options.onEvent`, not
   through `lastEvent`, so no frame of a burst is lost. `StageGraph.tsx` renders
-  a run's stages from `GetRun`'s stage list plus live `stage` frames.
+  a run's stages from `GetRun`'s stage list plus live `stage` frames. It draws
+  the SVG at its native size inside a horizontal scroll wrapper. Nested-stage
+  lists render as HTML groups under a parent-name toggle.
   `BuildPage.tsx` also renders one terminal card, in its own early return
   after the `!run` guard, for a run whose `result` is `TRIGGER_FAILED`: the
   record exists, so the `requested` and `notStarted` blocks never run for it.
