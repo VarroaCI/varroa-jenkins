@@ -3,37 +3,72 @@ name: PR
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'frontend/**'
-      - '**/*.md'
-      - 'docs/**'
-      - '*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    # GitHub-hosted on purpose: a docs-only PR must not wait for a runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.backend.outputs.backend }}
+      frontend: ${{ steps.frontend.outputs.frontend }}
+    steps:
+      # Every changed file must match every rule. The negated rules exclude
+      # the paths that never need the backend jobs.
+      - id: backend
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: every
+          filters: |
+            backend:
+              - '**'
+              - '!frontend/**'
+              - '!**/*.md'
+              - '!*.md'
+              - '!docs/**'
+      - id: frontend
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - 'api/openapi/**'
+              - '.github/workflows/pr.yaml'
+
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      # Pinned deliberately. With @latest, a golangci-lint release lands
-      # mid-week and every open PR goes red on pre-existing code nobody
-      # touched. Bump this on purpose, in its own PR, with the resulting
-      # findings fixed in the same change — and keep it in step with
-      # release.yaml so a push to main cannot fail a check a PR just passed.
+      # Pinned deliberately. With @latest, a golangci-lint release lands mid-week
+      # and every open PR goes red on pre-existing code nobody touched. Bump this
+      # on purpose, in its own PR, with the resulting findings fixed in the same
+      # change — and keep it in step with release.yaml so a push to main cannot
+      # fail a check a PR just passed.
       - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
       - run: golangci-lint run --timeout 10m ./...
 
   check-comments:
     name: Check comments
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -44,14 +79,20 @@ jobs:
 
   check-crds:
     name: Check CRDs
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - run: make check-crds
 
   check-proto:
     name: Check Proto
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,7 +103,10 @@ jobs:
 
   check-client:
     name: Check API client
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -73,7 +117,10 @@ jobs:
 
   check-bootstrap-deps:
     name: Check bootstrap closure
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -89,7 +136,10 @@ jobs:
 
   localdev-validate:
     name: Validate localdev assets
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Fetch chart dependencies
@@ -139,7 +189,10 @@ jobs:
 
   chart-tests:
     name: Chart tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-ci-tools
@@ -158,7 +211,10 @@ jobs:
 
   govulncheck:
     name: Vulncheck
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -170,7 +226,10 @@ jobs:
 
   test:
     name: Test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -184,8 +243,10 @@ jobs:
 
   build-backend:
     name: Build backend image
+    needs: [changes, lint, test]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -202,7 +263,10 @@ jobs:
 
   build-frontend:
     name: Build frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -222,3 +286,38 @@ jobs:
           tags: varroa-frontend:pr-${{ github.event.number || github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  frontend-test:
+    name: Frontend test
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run coverage
+      - run: npm run build
+
+  required:
+    name: Required checks
+    if: always()
+    needs: [changes, lint, check-comments, check-crds, check-proto, check-client, check-bootstrap-deps, chart-tests, test, frontend-test]
+    # GitHub-hosted: this job only reads the results of the jobs it needs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when a needed job did not succeed or skip
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"'
+          echo "$RESULTS" | jq -e '[.[] | select(.result != "success" and .result != "skipped")] | length == 0'

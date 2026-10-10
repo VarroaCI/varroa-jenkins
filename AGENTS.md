@@ -63,7 +63,7 @@ The golangci-lint version is pinned, and `.github/workflows/pr.yaml`, `.github/w
 
 ## CI
 
-GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, check-crds, check-proto, check-client, govulncheck, race tests, and docker builds on every PR; `pr-frontend.yaml` covers frontend-only changes; `release.yaml` publishes images and the Helm chart on tag pushes.
+GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, check-crds, check-proto, check-client, check-bootstrap-deps, check-comments, the chart golden tests, govulncheck, race tests, the frontend tests, and docker builds on every PR. It has no workflow-level paths filter. Its `Detect changes` job sets a filter output for each path group, and each job gates itself with `if:` on that output. Its `Required checks` job is the single aggregate context that branch protection requires. `release.yaml` publishes images and the Helm chart on tag pushes.
 
 Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
 
