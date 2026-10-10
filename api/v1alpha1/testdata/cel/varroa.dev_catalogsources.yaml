@@ -1,0 +1,76 @@
+# CEL cases for charts/varroa/crds/varroa.dev_catalogsources.yaml.
+# The reserved name varroa-update-center binds the object to the
+# update-center shape; every other name needs exactly one source.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: CatalogSource
+  metadata:
+    name: catalog-a
+  spec:
+    repoURL: https://example.com/catalog.git
+cases:
+  - name: reserved name with a repoURL refused
+    rule: |-
+      (has(self.metadata.name) && self.metadata.name == 'varroa-update-center') ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef))) : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))
+    field: ""
+    new: {metadata: {name: varroa-update-center}}
+    want: reject
+  - name: reserved name without a spec accepted
+    rule: |-
+      (has(self.metadata.name) && self.metadata.name == 'varroa-update-center') ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef))) : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))
+    field: ""
+    new: {metadata: {name: varroa-update-center}, spec: null}
+    want: accept
+  - name: ordinary name with neither source refused
+    rule: |-
+      (has(self.metadata.name) && self.metadata.name == 'varroa-update-center') ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef))) : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))
+    field: ""
+    new: {spec: {repoURL: null}}
+    want: reject
+  - name: ordinary name with a repoURL accepted
+    rule: |-
+      (has(self.metadata.name) && self.metadata.name == 'varroa-update-center') ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef))) : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))
+    field: ""
+    new: {spec: {repoURL: https://example.com/catalog.git}}
+    want: accept
+
+  - name: repoURL with an http scheme refused
+    rule: |-
+      !has(self.repoURL) || self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://') || self.repoURL.startsWith('git@')
+    field: spec
+    new: {spec: {repoURL: http://example.com/catalog.git}}
+    want: reject
+  - name: repoURL with an scp-style address accepted
+    rule: |-
+      !has(self.repoURL) || self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://') || self.repoURL.startsWith('git@')
+    field: spec
+    new: {spec: {repoURL: git@example.com:org/catalog.git}}
+    want: accept
+
+  # With both sources set, the reserved-name rule also fails at the root.
+  # The named rule still fires at spec.
+  - name: repoURL and ociRef both set refused
+    rule: |-
+      (has(self.repoURL)?1:0)+(has(self.ociRef)?1:0)<=1
+    field: spec
+    new: {spec: {repoURL: https://example.com/catalog.git, ociRef: oci://registry.example.com/catalog:1}}
+    want: reject
+  - name: one source accepted
+    rule: |-
+      (has(self.repoURL)?1:0)+(has(self.ociRef)?1:0)<=1
+    field: spec
+    new: {spec: {repoURL: null, ociRef: oci://registry.example.com/catalog:1}}
+    want: accept
+
+  - name: sync interval of ten seconds refused
+    rule: |-
+      self == 0 || (self >= 30 && self <= 31536000)
+    field: spec.syncIntervalSeconds
+    new: {spec: {syncIntervalSeconds: 10}}
+    want: reject
+  - name: sync interval of sixty seconds accepted
+    rule: |-
+      self == 0 || (self >= 30 && self <= 31536000)
+    field: spec.syncIntervalSeconds
+    new: {spec: {syncIntervalSeconds: 60}}
+    want: accept

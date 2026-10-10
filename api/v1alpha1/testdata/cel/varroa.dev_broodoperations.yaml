@@ -1,0 +1,176 @@
+# CEL cases for charts/varroa/crds/varroa.dev_broodoperations.yaml.
+# A merge patch replaces scalars and lists but merges objects. A case that
+# removes a key from a block sets it to null.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: BroodOperation
+  metadata:
+    name: op-a
+  spec:
+    action:
+      verb: restart
+    targets:
+      names: [ctl-a]
+cases:
+  # Transition rules on spec: an update may not change action, targets, or
+  # the presence of execution.
+  - name: action changed
+    rule: |-
+      self.action == oldSelf.action
+    field: spec
+    old: {}
+    new: {spec: {action: {verb: stop}}}
+    want: reject
+  - name: suspend changed with action unchanged
+    rule: |-
+      self.action == oldSelf.action
+    field: spec
+    old: {}
+    new: {spec: {suspend: true}}
+    want: accept
+
+  - name: targets changed
+    rule: |-
+      self.targets == oldSelf.targets
+    field: spec
+    old: {}
+    new: {spec: {targets: {names: [ctl-b]}}}
+    want: reject
+  - name: suspend changed with targets unchanged
+    rule: |-
+      self.targets == oldSelf.targets
+    field: spec
+    old: {}
+    new: {spec: {suspend: true}}
+    want: accept
+
+  - name: execution added on update
+    rule: |-
+      has(self.execution) == has(oldSelf.execution)
+    field: spec
+    old: {}
+    new: {spec: {execution: {maxParallel: 2}}}
+    want: reject
+  - name: execution kept on update
+    rule: |-
+      has(self.execution) == has(oldSelf.execution)
+    field: spec
+    old: {spec: {execution: {maxParallel: 1}}}
+    new: {spec: {execution: {maxParallel: 1}}}
+    want: accept
+
+  - name: execution block changed on update
+    rule: |-
+      self == oldSelf
+    field: spec.execution
+    old: {spec: {execution: {maxParallel: 1}}}
+    new: {spec: {execution: {maxParallel: 2}}}
+    want: reject
+  - name: execution block unchanged on update
+    rule: |-
+      self == oldSelf
+    field: spec.execution
+    old: {spec: {execution: {maxParallel: 1}}}
+    new: {spec: {execution: {maxParallel: 1}}}
+    want: accept
+
+  # Verb rules: executeGroovy needs groovy, every other verb forbids it.
+  - name: executeGroovy without a groovy block refused
+    rule: |-
+      self.verb == 'executeGroovy' ? has(self.groovy) : !has(self.groovy)
+    field: spec.action
+    new: {spec: {action: {verb: executeGroovy, groovy: null}}}
+    want: reject
+  - name: executeGroovy with a script accepted
+    rule: |-
+      self.verb == 'executeGroovy' ? has(self.groovy) : !has(self.groovy)
+    field: spec.action
+    new: {spec: {action: {verb: executeGroovy, groovy: {script: "println 'x'"}}}}
+    want: accept
+
+  - name: restart with a groovy block refused
+    rule: |-
+      self.verb == 'executeGroovy' ? has(self.groovy) : !has(self.groovy)
+    field: spec.action
+    new: {spec: {action: {verb: restart, groovy: {script: "println 'x'"}}}}
+    want: reject
+
+  - name: upgrade without an upgrade block refused
+    rule: |-
+      self.verb == 'upgrade' ? has(self.upgrade) : !has(self.upgrade)
+    field: spec.action
+    new: {spec: {action: {verb: upgrade, upgrade: null}}}
+    want: reject
+  - name: upgrade with a target version accepted
+    rule: |-
+      self.verb == 'upgrade' ? has(self.upgrade) : !has(self.upgrade)
+    field: spec.action
+    new: {spec: {action: {verb: upgrade, upgrade: {targetVersion: "2.555.1"}}}}
+    want: accept
+
+  # Exactly one groovy source.
+  - name: groovy block with neither source refused
+    rule: |-
+      (has(self.script) ? 1 : 0) + (has(self.itemRef) ? 1 : 0) == 1
+    field: spec.action.groovy
+    new: {spec: {action: {verb: executeGroovy, groovy: {}}}}
+    want: reject
+  - name: groovy block with a script accepted
+    rule: |-
+      (has(self.script) ? 1 : 0) + (has(self.itemRef) ? 1 : 0) == 1
+    field: spec.action.groovy
+    new: {spec: {action: {verb: executeGroovy, groovy: {script: "println 'x'"}}}}
+    want: accept
+
+  # Targets: names or selector, exactly one; namespaces need a selector.
+  - name: targets with neither names nor selector refused
+    rule: |-
+      has(self.names) != has(self.selector)
+    field: spec.targets
+    new: {spec: {targets: {names: null}}}
+    want: reject
+  - name: targets with names accepted
+    rule: |-
+      has(self.names) != has(self.selector)
+    field: spec.targets
+    new: {spec: {targets: {names: [ctl-a]}}}
+    want: accept
+
+  - name: names list empty refused
+    rule: |-
+      !has(self.names) || size(self.names) > 0
+    field: spec.targets
+    new: {spec: {targets: {names: []}}}
+    want: reject
+  - name: names list with one entry accepted
+    rule: |-
+      !has(self.names) || size(self.names) > 0
+    field: spec.targets
+    new: {spec: {targets: {names: [ctl-a]}}}
+    want: accept
+
+  - name: namespaces list empty refused
+    rule: |-
+      !has(self.namespaces) || size(self.namespaces) > 0
+    field: spec.targets
+    new: {spec: {targets: {names: null, namespaces: [], selector: {matchLabels: {app: a}}}}}
+    want: reject
+  - name: namespaces list with one entry accepted
+    rule: |-
+      !has(self.namespaces) || size(self.namespaces) > 0
+    field: spec.targets
+    new: {spec: {targets: {names: null, namespaces: [ns-a], selector: {matchLabels: {app: a}}}}}
+    want: accept
+
+  - name: namespaces without a selector refused
+    rule: |-
+      !has(self.namespaces) || has(self.selector)
+    field: spec.targets
+    new: {spec: {targets: {namespaces: [ns-a]}}}
+    want: reject
+  - name: namespaces with a selector accepted
+    rule: |-
+      !has(self.namespaces) || has(self.selector)
+    field: spec.targets
+    new: {spec: {targets: {names: null, namespaces: [ns-a], selector: {matchLabels: {app: a}}}}}
+    want: accept

@@ -110,6 +110,8 @@ A pipelines tenant grants another tenant access to one of its jobs or its fleet 
 ```yaml
 spec:
   pipelines:
+    profile: jenkins-lts
+    agentNamespace: team-platform
     exports:
       - job: "release/*"
         callers: ["payments", "search"]

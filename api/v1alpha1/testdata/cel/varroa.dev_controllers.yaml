@@ -1,0 +1,118 @@
+# CEL cases for charts/varroa/crds/varroa.dev_controllers.yaml.
+# Each rule has at least one accept and one reject case.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: Controller
+  metadata:
+    name: ctl-a
+  spec: {}
+cases:
+  # Cell role: the rule sits on spec and reads both sides with has().
+  - name: cell enabled flipped inside the block
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {spec: {cell: {enabled: false, maxTenants: 3}}}
+    new: {spec: {cell: {enabled: true, maxTenants: 3}}}
+    want: reject
+  - name: cell block added with enabled true
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {}
+    new: {spec: {cell: {enabled: true}}}
+    want: reject
+  - name: cell block removed while enabled
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {spec: {cell: {enabled: true}}}
+    new: {spec: {cell: null}}
+    want: reject
+  - name: cell maxTenants changed with enabled unchanged
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {spec: {cell: {enabled: true, maxTenants: 3}}}
+    new: {spec: {cell: {enabled: true, maxTenants: 10}}}
+    want: accept
+  - name: cell block without enabled, maxTenants changed
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {spec: {cell: {maxTenants: 3}}}
+    new: {spec: {cell: {maxTenants: 4}}}
+    want: accept
+  - name: cell block without enabled added
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {}
+    new: {spec: {cell: {maxTenants: 3}}}
+    want: accept
+  - name: cell block without enabled removed
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {spec: {cell: {maxTenants: 3}}}
+    new: {spec: {cell: null}}
+    want: accept
+  - name: no cell block before or after
+    rule: |-
+      (has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+    field: spec
+    old: {}
+    new: {spec: {headless: true}}
+    want: accept
+
+  # The field also carries minimum: 5, so the schema refuses 4 before CEL runs.
+  # The coverage test exempts this rule from the reject requirement.
+  - name: hibernation grace of five minutes
+    rule: |-
+      !has(self.gracePeriodMinutes) || self.gracePeriodMinutes >= 5
+    field: spec.hibernation
+    new: {spec: {hibernation: {enabled: true, gracePeriodMinutes: 5}}}
+    want: accept
+
+  # Ingress mode: an empty or absent mode counts as subdomain, so only a
+  # change between path and subdomain is refused.
+  - name: ingress mode changed from path to subdomain
+    rule: |-
+      (has(oldSelf.mode) ? (oldSelf.mode == 'path' ? 'path' : 'subdomain') : 'subdomain') == (has(self.mode) ? (self.mode == 'path' ? 'path' : 'subdomain') : 'subdomain')
+    field: spec.ingressSpec
+    old: {spec: {ingressSpec: {mode: path}}}
+    new: {spec: {ingressSpec: {mode: subdomain}}}
+    want: reject
+  - name: ingress mode unchanged while host changes
+    rule: |-
+      (has(oldSelf.mode) ? (oldSelf.mode == 'path' ? 'path' : 'subdomain') : 'subdomain') == (has(self.mode) ? (self.mode == 'path' ? 'path' : 'subdomain') : 'subdomain')
+    field: spec.ingressSpec
+    old: {spec: {ingressSpec: {mode: path}}}
+    new: {spec: {ingressSpec: {mode: path, host: a.example.com}}}
+    want: accept
+
+  - name: ingress annotation key with uppercase and space
+    rule: |-
+      !has(self.annotations) || self.annotations.all(k, k.matches(r'^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))
+    field: spec.ingressSpec
+    new: {spec: {ingressSpec: {annotations: {"Bad Key!": "x"}}}}
+    want: reject
+  - name: ingress annotation key with a prefix
+    rule: |-
+      !has(self.annotations) || self.annotations.all(k, k.matches(r'^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))
+    field: spec.ingressSpec
+    new: {spec: {ingressSpec: {annotations: {"example.com/foo": "x"}}}}
+    want: accept
+
+  - name: reconciliation interval below ten seconds
+    rule: |-
+      !has(self.interval) || duration(self.interval) >= duration('10s')
+    field: spec.reconciliationPolicy
+    new: {spec: {reconciliationPolicy: {interval: 5s}}}
+    want: reject
+  - name: reconciliation interval of thirty seconds
+    rule: |-
+      !has(self.interval) || duration(self.interval) >= duration('10s')
+    field: spec.reconciliationPolicy
+    new: {spec: {reconciliationPolicy: {interval: 30s}}}
+    want: accept

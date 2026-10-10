@@ -48,9 +48,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 - `types.go` — Spec/Status structs with kubebuilder markers. CEL
   `XValidation` rules embedding a regex with literal `\.` **must** use a raw
   CEL string (`r'...'`) — e.g. `types.go:346` (ingress annotation keys) and
-  `types.go:370-372` (CPU/memory/storage quantities) — otherwise the
-  apiserver rejects the CRD at apply time, only caught by a live dry-run
-  apply, not `go vet`/`make lint`.
+  `types.go:370-372` (CPU/memory/storage quantities). Otherwise the
+  apiserver rejects the CRD at apply time. `TestCRDManifestsPassAPIServerValidation`
+  reports it offline.
 
   The `Controller` cell-role rule sits on `ControllerSpec`, not on `cell`: a field
   transition rule skips an add or a remove of the block. Both reads are `has()`-guarded.
@@ -119,6 +119,17 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   entries, and that `job` never starts with `/`; the matching OpenAPI schema
   (`TeamExport` in `components/schemas.yaml`, referenced from
   `TeamPipelines.exports`) mirrors the same shape and requires `callers`.
+- CEL rule tests (`crd_cel_test.go`) load each generated CRD from
+  `charts/varroa/crds/` and run its `x-kubernetes-validations` through the
+  apiserver validator (`k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel`).
+  Every `XValidation` rule needs at least one `accept` and one `reject` case in
+  `testdata/cel/<crd file>`. `TestCRDValidationRuleCoverage` fails a rule with a
+  missing case. `schemaShadowed` lists the only rules exempt from a reject case:
+  the schema refuses the value first. Add an entry only with a reason.
+  A rule that reads an optional field without `has()` fails with `evaluating rule`.
+- `Profile` and `AgentNamespace` in `TeamPipelinesSpec`, and `Callers` in
+  `TeamExport`, are required in the CRD schema (`+kubebuilder:validation:Required`).
+  A pipelines block names a profile and an agent namespace. An export names callers.
 - `zz_generated.deepcopy.go` — header claims controller-gen, but **never run
   `controller-gen object`** — nukes this file on this type set. Hand-add
   `DeepCopyInto`/`DeepCopy` for new types/fields.
@@ -153,10 +164,12 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 - Edit `varroa.root.yaml`/`paths/`/`components/`, run `make generate-client`
   — never hand-edit generated bundle/client files.
 - Edit `types.go`, run `make generate-crds`, hand-update deepcopy.
-- CEL regex with `\.`: use `r'...'`; verify with a live dry-run apply.
+- CEL regex with `\.`: use `r'...'`.
+- A new or changed `XValidation` rule needs an accept and a reject case in
+  `testdata/cel/<crd file>`. Guard each optional read with `has()`.
 
 ## Verification
 
-- `go test ./api/...`
+- `go test ./api/...` runs the CEL fixture tests and the apiserver manifest check.
 - `make check-crds`
 - `make check-client`

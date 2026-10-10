@@ -169,6 +169,8 @@ spec:
                             type: string
                           maxItems: 64
                           type: array
+                      required:
+                      - callers
                       type: object
                       x-kubernetes-validations:
                       - message: exactly one of job or locks must be set
@@ -234,6 +236,9 @@ spec:
                     maximum: 8
                     minimum: 0
                     type: integer
+                required:
+                - agentNamespace
+                - profile
                 type: object
               provisionNamespaces:
                 description: |-

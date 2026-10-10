@@ -150,6 +150,8 @@ metadata:
 spec:
   namespaces: ["team-platform"]
   pipelines:
+    profile: jenkins-lts
+    agentNamespace: team-platform
     exports:
       - job: "release/*"
         callers: ["payments", "search"]

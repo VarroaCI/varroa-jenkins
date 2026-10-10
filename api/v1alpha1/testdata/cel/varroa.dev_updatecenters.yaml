@@ -1,0 +1,51 @@
+# CEL cases for charts/varroa/crds/varroa.dev_updatecenters.yaml.
+# The storage type selects exactly one backend block.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: UpdateCenter
+  metadata:
+    name: varroa-update-center
+  spec:
+    storage:
+      type: local
+      local:
+        size: 10Gi
+cases:
+  - name: oci type without an oci block refused
+    rule: |-
+      self.type != 'oci' || has(self.oci)
+    field: spec.storage
+    new: {spec: {storage: {type: oci, local: null}}}
+    want: reject
+  - name: oci type with an oci block accepted
+    rule: |-
+      self.type != 'oci' || has(self.oci)
+    field: spec.storage
+    new: {spec: {storage: {type: oci, local: null, oci: {ref: registry.example.com/update-center:1}}}}
+    want: accept
+
+  - name: local type without a local block refused
+    rule: |-
+      self.type != 'local' || has(self.local)
+    field: spec.storage
+    new: {spec: {storage: {local: null}}}
+    want: reject
+  - name: local type with a local block accepted
+    rule: |-
+      self.type != 'local' || has(self.local)
+    field: spec.storage
+    new: {spec: {storage: {local: {size: 20Gi}}}}
+    want: accept
+
+  - name: oci and local blocks both set refused
+    rule: |-
+      !(has(self.oci) && has(self.local))
+    field: spec.storage
+    new: {spec: {storage: {type: oci, oci: {ref: registry.example.com/update-center:1}}}}
+    want: reject
+  - name: one backend block accepted
+    rule: |-
+      !(has(self.oci) && has(self.local))
+    field: spec.storage
+    new: {spec: {storage: {type: oci, local: null, oci: {ref: registry.example.com/update-center:1}}}}
+    want: accept

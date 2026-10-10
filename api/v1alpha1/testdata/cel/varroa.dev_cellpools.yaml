@@ -1,0 +1,49 @@
+# CEL cases for charts/varroa/crds/varroa.dev_cellpools.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: CellPool
+  metadata:
+    name: pool-a
+  spec:
+    profileRef: lts-2-555
+    warm: 1
+cases:
+  - name: profileRef changed
+    rule: |-
+      self.profileRef == oldSelf.profileRef
+    field: spec
+    old: {}
+    new: {spec: {profileRef: lts-2-500}}
+    want: reject
+  - name: warm changed with profileRef unchanged
+    rule: |-
+      self.profileRef == oldSelf.profileRef
+    field: spec
+    old: {spec: {warm: 1}}
+    new: {spec: {warm: 4}}
+    want: accept
+
+  - name: cap below warm refused
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 2}}
+    want: reject
+  - name: cap equal to warm accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 3}}
+    want: accept
+  - name: unlimited cap accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 0}}
+    want: accept
+  - name: absent cap accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3}}
+    want: accept

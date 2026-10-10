@@ -155,6 +155,8 @@ On the producer tenant's `Team`, export the job to the caller:
 ```yaml
 spec:
   pipelines:
+    profile: jenkins-lts
+    agentNamespace: team-platform
     exports:
       - job: "release"
         callers: ["payments"]

@@ -1447,6 +1447,7 @@ type TeamSpec struct {
 type TeamPipelinesSpec struct {
 	// Profile names the JenkinsVersionProfile the placement pass resolves a
 	// cell against.
+	// +kubebuilder:validation:Required
 	Profile string `json:"profile,omitempty"`
 	// CellPool names the CellPool the placement pass selects a cell from.
 	// An empty value resolves to the profile's default pool: the pool whose
@@ -1456,6 +1457,7 @@ type TeamPipelinesSpec struct {
 	CellPool string `json:"cellPool,omitempty"`
 	// AgentNamespace is the Kubernetes namespace this tenant's agents run
 	// in. Must be one of spec.namespaces.
+	// +kubebuilder:validation:Required
 	AgentNamespace string `json:"agentNamespace,omitempty"`
 	// ComposedBundleRef names the ComposedBundle this tenant's items come
 	// from. Only its items.yaml is used. When set, its namespace must be
@@ -1565,6 +1567,7 @@ type TeamExport struct {
 
 	// Callers lists the Team names allowed to use this export. At least
 	// one entry is required.
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=253
