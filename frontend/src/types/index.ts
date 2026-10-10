@@ -2190,7 +2190,11 @@ export interface RunLogMetaEvent {
   firstErrorLine?: number;
 }
 
-/** A stage boundary. */
+/**
+ * A stage boundary. The viewer places a stage header from the stage ids on
+ * the lines, not from startLine or frame order. startLine and startOffset
+ * have no consumer in the viewer.
+ */
 export interface RunLogStageEvent {
   stageId: string;
   name: string;

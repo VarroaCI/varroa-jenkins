@@ -1,4 +1,5 @@
 import { createRef } from "react";
+import type { RunStage } from "../../types";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import {
@@ -21,6 +22,8 @@ vi.mock("@tanstack/react-virtual", () => ({
       getVirtualItems: () => items,
       getTotalSize: () => opts.count * opts.estimateSize(0),
       scrollToIndex: mockScrollToIndex,
+      scrollOffset: 0,
+      getVirtualItemForOffset: () => items[0],
       measureElement: () => {},
     };
   },
@@ -36,8 +39,15 @@ const metaFrame: RunLogViewerEvent = {
   data: { runId: "r1", chunkCount: 1, byteCount: 10, droppedBytes: 0, complete: true, status: "SUCCESS" },
 };
 
-function lineEvent(n: number, text: string): RunLogViewerEvent {
-  return { type: "line", data: { n, off: n * 10, ts: 1700000000000, text } };
+function lineEvent(n: number, text: string, stageId?: string): RunLogViewerEvent {
+  return { type: "line", data: { n, off: n * 10, ts: 1700000000000, text, stageId } };
+}
+
+function stageFrame(stageId: string, name: string): RunLogViewerEvent {
+  return {
+    type: "stage",
+    data: { stageId, name, status: "SUCCESS", startOffset: 0, startLine: 0 },
+  };
 }
 
 describe("RunLogViewer", () => {
@@ -71,8 +81,8 @@ describe("RunLogViewer", () => {
           lineEvent(1, "one"),
           lineEvent(2, "two"),
           { type: "stage", data: { stageId: "9", name: "Deploy", status: "IN_PROGRESS", startOffset: 200, startLine: 3 } },
-          lineEvent(3, "three"),
-          lineEvent(4, "four"),
+          lineEvent(3, "three", "9"),
+          lineEvent(4, "four", "9"),
         ]}
         version={1}
       />,
@@ -212,14 +222,16 @@ describe("RunLogViewer", () => {
     const { rerender } = render(
       <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
     );
-    rerender(<RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[stage]} version={1} />);
+    rerender(
+      <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[stage, lineEvent(1, "built", "1")]} version={1} />,
+    );
     expect(screen.getAllByText("Build — IN_PROGRESS").length).toBeGreaterThan(0);
 
     rerender(
       <RunLogViewer
         runId="r1"
         runTerminal={false} logFinalized={false}
-        frames={[stage, { type: "gap", data: { seq: 4, off: 100 } }]}
+        frames={[stage, lineEvent(1, "built", "1"), { type: "gap", data: { seq: 4, off: 100 } }]}
         version={2}
       />,
     );
@@ -369,11 +381,12 @@ describe("RunLogViewer", () => {
         runTerminal={false} logFinalized={false}
         frames={[
           { type: "stage", data: { stageId: "19", name: "Unit tests", status: "SUCCESS", startOffset: 0, startLine: 1 } },
+          lineEvent(1, "ran", "19"),
         ]}
         version={1}
       />,
     );
-    handleRef.current?.scrollToStage("19");
+    act(() => handleRef.current?.scrollToStage("19"));
     expect(mockScrollToIndex).toHaveBeenCalledWith(0, { align: "start" });
   });
 
@@ -387,6 +400,170 @@ describe("RunLogViewer", () => {
     expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("aria-pressed", "false");
     act(() => handleRef.current?.focusSearch());
     expect(screen.getByLabelText("Search the log")).toHaveFocus();
+  });
+
+  it("places stage headers from line attribution, not from stage frame order", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[
+          stageFrame("4", "Fan"),
+          stageFrame("8", "Branch: Alpha"),
+          stageFrame("12", "Alpha"),
+          stageFrame("14", "Bravo"),
+          stageFrame("16", "Charlie"),
+          lineEvent(1, "a1", "12"),
+          lineEvent(2, "a2", "12"),
+          lineEvent(3, "b1", "14"),
+          lineEvent(4, "c1", "16"),
+          lineEvent(5, "a3", "12"),
+          lineEvent(6, "b2", "14"),
+          lineEvent(7, "f1", "4"),
+          lineEvent(8, "c2", "16"),
+        ]}
+        version={1}
+      />,
+    );
+    const order = Array.from(document.querySelectorAll("[data-index]")).map(
+      (row) => row.firstElementChild?.id,
+    );
+    expect(order).toEqual([
+      "stage-12", "L1", "L2", "stage-14", "L3", "stage-16", "L4", "L5", "L6", "stage-4", "L7", "L8",
+    ]);
+  });
+
+  it("scrolls to a mid-log stage on selection", () => {
+    const handleRef = createRef<RunLogViewerHandle>();
+    render(
+      <RunLogViewer
+        ref={handleRef}
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), stageFrame("14", "Bravo"), lineEvent(2, "b1", "14")]}
+        version={1}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+    act(() => handleRef.current?.scrollToStage("14"));
+    expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "start" });
+  });
+
+  it("turns follow off after a stage selection, and later rows do not pull the view to the end", () => {
+    const handleRef = createRef<RunLogViewerHandle>();
+    const base: RunLogViewerEvent[] = [stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), lineEvent(2, "a2", "12")];
+    const { rerender } = render(
+      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} logFinalized={false} frames={base} version={1} />,
+    );
+    act(() => handleRef.current?.scrollToStage("12"));
+    expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("aria-pressed", "false");
+
+    mockScrollToIndex.mockClear();
+    rerender(
+      <RunLogViewer
+        ref={handleRef}
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[...base, lineEvent(3, "a3", "12"), lineEvent(4, "a4", "12")]}
+        version={2}
+      />,
+    );
+    expect(mockScrollToIndex).not.toHaveBeenCalledWith(expect.anything(), { align: "end" });
+  });
+
+  it("resolves a selection of a stage with no lines to its first descendant header", () => {
+    const handleRef = createRef<RunLogViewerHandle>();
+    const stages: RunStage[] = [
+      { stageId: "8", name: "Branch: Alpha", status: "SUCCESS" },
+      { stageId: "12", name: "Alpha", status: "SUCCESS", parentId: "8" },
+    ];
+    render(
+      <RunLogViewer
+        ref={handleRef}
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        stages={stages}
+        frames={[stageFrame("8", "Branch: Alpha"), stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), lineEvent(2, "a2", "12")]}
+        version={1}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+    act(() => handleRef.current?.scrollToStage("8"));
+    expect(mockScrollToIndex).toHaveBeenCalledWith(0, { align: "start" });
+  });
+
+  it("holds a stage selection until the stage's first line arrives (live)", () => {
+    const handleRef = createRef<RunLogViewerHandle>();
+    const first = [stageFrame("12", "Alpha"), lineEvent(1, "a1", "12")];
+    const { rerender } = render(
+      <RunLogViewer ref={handleRef} runId="r1" runTerminal={false} logFinalized={false} frames={first} version={1} />,
+    );
+    mockScrollToIndex.mockClear();
+    act(() => handleRef.current?.scrollToStage("14"));
+    expect(mockScrollToIndex).not.toHaveBeenCalledWith(expect.anything(), { align: "start" });
+
+    rerender(
+      <RunLogViewer
+        ref={handleRef}
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[...first, stageFrame("14", "Bravo"), lineEvent(2, "b1", "14")]}
+        version={2}
+      />,
+    );
+    expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "start" });
+  });
+
+  it("resolves a cold #stage-<id> fragment once rows arrive and scrolls the page", () => {
+    window.location.hash = "#stage-14";
+    const original = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const { rerender } = render(
+        <RunLogViewer runId="r1" runTerminal={false} logFinalized={false} frames={[]} version={0} />,
+      );
+      expect(mockScrollToIndex).not.toHaveBeenCalledWith(expect.anything(), { align: "start" });
+
+      rerender(
+        <RunLogViewer
+          runId="r1"
+          runTerminal={false} logFinalized={false}
+          frames={[stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), stageFrame("14", "Bravo"), lineEvent(2, "b1", "14")]}
+          version={1}
+        />,
+      );
+      expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "start" });
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("a #L permalink still resolves with stage headers present", () => {
+    window.location.hash = "#L2";
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[stageFrame("12", "Alpha"), lineEvent(1, "a1", "12"), lineEvent(2, "a2", "12")]}
+        version={1}
+      />,
+    );
+    expect(mockScrollToIndex).toHaveBeenCalledWith(2, { align: "center" });
+  });
+
+  it("renders the log when a #stage- fragment holds a malformed percent escape", () => {
+    window.location.hash = "#stage-%";
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal={false} logFinalized={false}
+        frames={[lineEvent(1, "still here")]}
+        version={1}
+      />,
+    );
+    expect(screen.getByText("still here")).toBeInTheDocument();
   });
 
   it("turns follow off and disables it for a finished log", () => {

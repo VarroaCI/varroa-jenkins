@@ -757,6 +757,7 @@ export default function BuildPage() {
           version={logVersion}
           runTerminal={isTerminal(run)}
           logFinalized={run.logFinalized === true}
+          stages={run.stages ?? EMPTY_STAGES}
         />
       )}
 

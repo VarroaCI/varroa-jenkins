@@ -129,12 +129,14 @@ Open the **Log** tab. The log viewer supports:
 - A **First error** jump to the first line matching `error`, `failed`, `failure`, or
   `exception`.
 - A **Timestamps** toggle.
-- A **Follow** toggle that keeps the view at the newest line. It turns off when you scroll up
-  or jump to a line with a permalink, a search, or **First error**. It is off and disabled when
-  the run has ended and its log is complete.
+- A **Follow** toggle that keeps the view at the newest line. It turns off when you scroll up,
+  select a stage, or jump to a line with a permalink, a search, or **First error**. It is off
+  and disabled when the run has ended and its log is complete.
 - A **Raw** link that opens the same log as plain text in a new tab.
 
-Select a stage in the stage graph to scroll the log to that stage's lines. Every line carries a
+Select a stage in the stage graph to scroll the log to that stage's header. A header sits before
+the first line of its stage. A parallel branch that has no lines of its own opens at its first
+nested stage. A `#stage-<id>` fragment in the URL does the same and also scrolls the page. Every line carries a
 permalink: append `#L<line number>` to the build page URL to open it scrolled to that line,
 highlighted.
 

@@ -268,7 +268,14 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   from showing the notice. A `#L<n>` fragment in the URL also scrolls the page
   to center the viewer; a search jump and the first-error jump do not. Follow is
   off and disabled once `runTerminal` is true and the log is finalized or the `end`
-  frame arrived (`logDone` in `RunLogViewer.tsx`).
+  frame arrived (`logDone` in `RunLogViewer.tsx`). The
+  viewer derives each stage header from the `stageId` of the lines, not from
+  frame order or `startLine`. It places a header before the first line of its
+  stage, and a stage with no lines gets none. A stage selection or a
+  `#stage-<id>` fragment holds as a pending jump until a header of that stage
+  or of a descendant exists, the same way `pendingLine` holds. A resolved
+  stage jump turns Follow off. The viewer reads the `stages` prop only for the
+  descendant walk. A `#stage-<id>` fragment also scrolls the page.
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
   through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.

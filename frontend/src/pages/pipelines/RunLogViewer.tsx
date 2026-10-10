@@ -11,6 +11,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search as SearchIcon } from "lucide-react";
 import { runLogUrl } from "../../api/client";
 import type {
+  RunStage,
   RunLogEndEvent,
   RunLogGapEvent,
   RunLogLineEvent,
@@ -19,6 +20,8 @@ import type {
   RunLogStageEvent,
 } from "../../types";
 import { parseAnsiLine } from "./ansi";
+import type { BodyRow, LogRow, StageInfo } from "./logRows";
+import { buildLogRows, stageJumpIds, stageJumpIndex, stickyStage } from "./logRows";
 import styles from "./RunLogViewer.module.css";
 
 /** The subset of useEventStream's frame shape RunLogViewer reads. */
@@ -49,6 +52,11 @@ export interface RunLogViewerProps {
    * keep a finished log from reading as still being written.
    */
   logFinalized: boolean;
+  /**
+   * The run record's stage list. The viewer reads it only to resolve a stage
+   * with no lines of its own to its descendants.
+   */
+  stages?: readonly RunStage[];
 }
 
 /** Commands the build page issues into the viewer: keyboard shortcuts and graph selection. */
@@ -60,32 +68,22 @@ export interface RunLogViewerHandle {
   scrollToStage(stageId: string): void;
 }
 
-type LogRow =
-  | { kind: "header"; stageId: string; name: string; status: string }
-  | {
-      kind: "line";
-      n: number;
-      off: number;
-      ts: number;
-      text: string;
-      stageId?: string;
-      nodeId?: string;
-    }
-  | { kind: "gap"; seq: number; off: number };
-
-function applyStageEvent(rows: LogRow[], ev: RunLogStageEvent): LogRow[] {
-  const idx = rows.findIndex((r) => r.kind === "header" && r.stageId === ev.stageId);
-  if (idx === -1) {
-    return [...rows, { kind: "header", stageId: ev.stageId, name: ev.name, status: ev.status }];
-  }
-  const next = rows.slice();
-  next[idx] = { kind: "header", stageId: ev.stageId, name: ev.name, status: ev.status };
-  return next;
-}
+const NO_STAGES: readonly RunStage[] = [];
 
 function permalinkLine(): number | null {
   const m = /^#L(\d+)$/.exec(window.location.hash);
   return m ? Number(m[1]) : null;
+}
+
+function stageFragment(): string | null {
+  const m = /^#stage-(.+)$/.exec(window.location.hash);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    // A malformed percent escape names no stage. The page still renders.
+    return null;
+  }
 }
 
 export function RunLogViewer({
@@ -94,9 +92,12 @@ export function RunLogViewer({
   version,
   runTerminal,
   logFinalized,
+  stages = NO_STAGES,
   ref,
 }: RunLogViewerProps & { ref?: Ref<RunLogViewerHandle> }) {
-  const [rows, setRows] = useState<LogRow[]>([]);
+  const [body, setBody] = useState<BodyRow[]>([]);
+  const [stageInfo, setStageInfo] = useState<Map<string, StageInfo>>(() => new Map());
+  const rows = useMemo<LogRow[]>(() => buildLogRows(body, stageInfo), [body, stageInfo]);
   const [meta, setMeta] = useState<RunLogMetaEvent | null>(null);
   const [live, setLive] = useState(false);
   const [ended, setEnded] = useState<RunLogEndEvent | null>(null);
@@ -112,6 +113,10 @@ export function RunLogViewer({
   // The line the URL fragment names. Only that jump also scrolls the page,
   // because the viewer can sit below the first screen of the build page.
   const urlLineRef = useRef<number | null>(pendingLine);
+  // A stage selection waits until a header of that stage, or of one of its
+  // descendants, exists. A cold #stage-<id> load starts the wait here.
+  const [pendingStage, setPendingStage] = useState<string | null>(() => stageFragment());
+  const urlStageRef = useRef<string | null>(pendingStage);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -136,8 +141,6 @@ export function RunLogViewer({
   const applyFrame = useCallback((frame: RunLogViewerEvent) => {
     if (frame.type === "meta") {
       setMeta(frame.data as RunLogMetaEvent);
-    } else if (frame.type === "stage") {
-      setRows((prev) => applyStageEvent(prev, frame.data as RunLogStageEvent));
     } else if (frame.type === "live") {
       setLive((frame.data as RunLogLiveEvent).active);
     } else if (frame.type === "end") {
@@ -153,16 +156,18 @@ export function RunLogViewer({
     const pending = frames.slice(appliedRef.current);
     appliedRef.current = frames.length;
 
-    // A run of line and gap frames becomes one rows commit. A remount
+    // A run of line and gap frames becomes one body commit. A remount
     // replays a whole log in one render, and one commit per frame would copy
-    // the row list once per frame. A stage frame commits the frames already
-    // collected before it, so its header lands after their rows.
-    let appended: LogRow[] = [];
+    // the row list once per frame. A stage frame does not place a header by
+    // its position in the stream. It updates the stage names, and the rows
+    // place each header before the first line that carries its stage.
+    let appended: BodyRow[] = [];
+    const stageFrames: RunLogStageEvent[] = [];
     const flush = () => {
       if (appended.length === 0) return;
       const batch = appended;
       appended = [];
-      setRows((prev) => [...prev, ...batch]);
+      setBody((prev) => [...prev, ...batch]);
     };
 
     for (const frame of pending) {
@@ -174,12 +179,25 @@ export function RunLogViewer({
         if (gapSeqsRef.current.has(ev.seq)) continue;
         gapSeqsRef.current.add(ev.seq);
         appended.push({ kind: "gap", seq: ev.seq, off: ev.off });
+      } else if (frame.type === "stage") {
+        stageFrames.push(frame.data as RunLogStageEvent);
       } else {
-        flush();
         applyFrame(frame);
       }
     }
     flush();
+    if (stageFrames.length > 0) {
+      setStageInfo((prev) => {
+        const next = new Map(prev);
+        for (const ev of stageFrames) {
+          next.set(ev.stageId, {
+            name: ev.name || prev.get(ev.stageId)?.name || ev.stageId,
+            status: ev.status,
+          });
+        }
+        return next;
+      });
+    }
   }, [version, frames, applyFrame]);
 
   // Follow keeps the viewport at the newest line as rows arrive.
@@ -213,6 +231,23 @@ export function RunLogViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, pendingLine]);
 
+  // A pending stage jump resolves once a header of that stage, or of one of
+  // its descendants, exists. A resolved jump turns Follow off, so the next
+  // batch of rows does not pull the view to the end.
+  useEffect(() => {
+    if (pendingStage == null) return;
+    const idx = stageJumpIndex(rows, stageJumpIds(pendingStage, stages));
+    if (idx === -1) return;
+    setFollow(false);
+    virtualizer.scrollToIndex(idx, { align: "start" });
+    if (urlStageRef.current === pendingStage) {
+      scrollRef.current?.scrollIntoView?.({ block: "center" });
+    }
+    urlStageRef.current = null;
+    setPendingStage(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, pendingStage, stages]);
+
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const top = e.currentTarget.scrollTop;
     if (top < lastScrollTopRef.current) setFollow(false);
@@ -221,6 +256,7 @@ export function RunLogViewer({
 
   const jumpToLine = useCallback((n: number) => {
     urlLineRef.current = null;
+    setPendingStage(null);
     setPendingLine(n);
   }, []);
 
@@ -241,24 +277,23 @@ export function RunLogViewer({
       },
       toggleTimestamps: () => setShowTimestamps((t) => !t),
       scrollToStage: (stageId: string) => {
-        const idx = rows.findIndex((r) => r.kind === "header" && r.stageId === stageId);
-        if (idx !== -1) virtualizer.scrollToIndex(idx, { align: "start" });
+        if (urlStageRef.current !== stageId) urlStageRef.current = null;
+        setPendingLine(null);
+        setPendingStage(stageId);
       },
     }),
-    [rows, virtualizer, logDone],
+    [logDone],
   );
 
-  // The header currently pinned at the top of the viewport, tracked from
-  // the first item the virtualizer currently renders.
-  const stickyHeader = useMemo(() => {
-    const items = virtualizer.getVirtualItems();
-    if (items.length === 0) return null;
-    for (let i = items[0].index; i >= 0; i--) {
-      const r = rows[i];
-      if (r?.kind === "header") return r;
-    }
-    return null;
-  }, [virtualizer, rows]);
+  // The stage that names the first row of the view. The overscan rows
+  // above the view do not count. The virtualizer instance is stable across
+  // renders, so this is computed on every render, not memoized: a scroll
+  // re-renders the viewer without changing rows or stageInfo.
+  const firstViewIndex =
+    virtualizer.getVirtualItemForOffset(virtualizer.scrollOffset ?? 0)?.index ??
+    virtualizer.getVirtualItems()[0]?.index;
+  const stickyHeader =
+    firstViewIndex === undefined ? null : stickyStage(rows, firstViewIndex, stageInfo);
 
   return (
     <div className={styles.wrap}>
