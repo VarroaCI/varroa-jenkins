@@ -101,6 +101,10 @@ export function RunLogViewer({
   const [live, setLive] = useState(false);
   const [ended, setEnded] = useState<RunLogEndEvent | null>(null);
   const [follow, setFollow] = useState(true);
+  // The log is done once the run is terminal and the log is finalized, or
+  // once the end frame arrives. A done log has nothing to follow.
+  const logDone = runTerminal && (logFinalized || ended !== null);
+  const followOn = follow && !logDone;
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [search, setSearch] = useState("");
   const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
@@ -180,13 +184,13 @@ export function RunLogViewer({
 
   // Follow keeps the viewport at the newest line as rows arrive.
   useEffect(() => {
-    if (follow && rows.length > 0) {
+    if (followOn && rows.length > 0) {
       virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
     }
     // virtualizer is a fresh object identity most renders; rows.length and
-    // follow are the only real triggers for this effect.
+    // followOn are the only real triggers for this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows.length, follow]);
+  }, [rows.length, followOn]);
 
   // A pending permalink or search jump resolves once its target row exists.
   useEffect(() => {
@@ -232,14 +236,16 @@ export function RunLogViewer({
     () => ({
       focusSearch: () => searchRef.current?.focus(),
       focusViewer: () => scrollRef.current?.focus(),
-      toggleFollow: () => setFollow((f) => !f),
+      toggleFollow: () => {
+        if (!logDone) setFollow((f) => !f);
+      },
       toggleTimestamps: () => setShowTimestamps((t) => !t),
       scrollToStage: (stageId: string) => {
         const idx = rows.findIndex((r) => r.kind === "header" && r.stageId === stageId);
         if (idx !== -1) virtualizer.scrollToIndex(idx, { align: "start" });
       },
     }),
-    [rows, virtualizer],
+    [rows, virtualizer, logDone],
   );
 
   // The header currently pinned at the top of the viewport, tracked from
@@ -286,7 +292,8 @@ export function RunLogViewer({
         </button>
         <button
           type="button"
-          aria-pressed={follow}
+          aria-pressed={followOn}
+          disabled={logDone}
           className={styles.toggle}
           onClick={() => setFollow((f) => !f)}
         >

@@ -76,7 +76,10 @@ TypeScript consumer of it.
   (light and dark) defines its own `-text` pair — see `styles/tokens.css`.
 - **Code-surface tokens**: `--code-bg` (#231910) and `--code-text` (#E8DCC8)
   are fixed (identical in both themes) and used by all YAML editors, overlay
-  editors, and the log console — never hardcode the palette.
+  editors, and the log console — never hardcode the palette. `tokens.css` sets
+  `color-scheme` per theme (`light` on `:root`, `dark` on `html[data-theme="dark"]`).
+  Every block that paints a `--code-bg` surface also declares `color-scheme: dark`,
+  so native scrollbars match the dark surface. `styleIntegrity.test.ts` enforces it.
 - **Style-integrity guard** (enforced by `src/styleIntegrity.test.ts`): the
   suite fails if any `styles.X` or `styles["X"]` reference in a `.tsx` file
   has no matching class in its imported `.module.css`, or if any `var(--X)`
@@ -252,7 +255,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   that flag false, after the `meta` frame and before the `end` frame. The
   stream sends `end` on its first poll tick, so the flag keeps a finished log
   from showing the notice. A `#L<n>` fragment in the URL also scrolls the page
-  to center the viewer; a search jump and the first-error jump do not.
+  to center the viewer; a search jump and the first-error jump do not. Follow is
+  off and disabled once `runTerminal` is true and the log is finalized or the `end`
+  frame arrived (`logDone` in `RunLogViewer.tsx`).
   `src/components/Console.tsx` is a different, generic log-line component and
   is not the log viewer for this page — do not route pipeline log rendering
   through it. `TeamCellCard.tsx` heads `TeamHome.tsx` with the team's own cell.

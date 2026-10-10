@@ -130,7 +130,8 @@ Open the **Log** tab. The log viewer supports:
   `exception`.
 - A **Timestamps** toggle.
 - A **Follow** toggle that keeps the view at the newest line. It turns off when you scroll up
-  or jump to a line with a permalink, a search, or **First error**.
+  or jump to a line with a permalink, a search, or **First error**. It is off and disabled when
+  the run has ended and its log is complete.
 - A **Raw** link that opens the same log as plain text in a new tab.
 
 Select a stage in the stage graph to scroll the log to that stage's lines. Every line carries a

@@ -1,5 +1,6 @@
 .console {
   background: var(--code-bg);
+  color-scheme: dark;
   border: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
   font-family: var(--mono);

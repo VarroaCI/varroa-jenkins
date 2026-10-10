@@ -1867,7 +1867,7 @@ export interface RunDetail {
   commandRefusal?: RunCommandRefusal;
   /** The one-line run summary. Absent until the run sets one. */
   summary?: string;
-  /** The run's failure digest. Each part is absent when the record omits it. */
+  /** The run's failure digest. Absent when no part has a value. */
   digest?: RunDigest;
   /** The run's pending input steps. Absent when the run holds none. */
   inputs?: RunInput[];

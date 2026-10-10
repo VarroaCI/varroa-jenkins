@@ -52,8 +52,8 @@ describe("Layout", () => {
 
   it("renders Topbar with breadcrumbs for the current route", () => {
     renderLayout("/test-route");
-    // The breadcrumb capitalized from the first path segment
-    expect(screen.getByText("Test-route")).toBeInTheDocument();
+    // The breadcrumb capitalized from the first path segment, with hyphens as spaces
+    expect(screen.getByText("Test route")).toBeInTheDocument();
   });
 
   it("renders child content via Outlet", () => {

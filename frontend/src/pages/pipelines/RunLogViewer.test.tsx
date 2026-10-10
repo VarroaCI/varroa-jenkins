@@ -388,4 +388,58 @@ describe("RunLogViewer", () => {
     act(() => handleRef.current?.focusSearch());
     expect(screen.getByLabelText("Search the log")).toHaveFocus();
   });
+
+  it("turns follow off and disables it for a finished log", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized
+        frames={[lineEvent(1, "one")]}
+        version={1}
+      />,
+    );
+    const follow = screen.getByRole("button", { name: "Follow" });
+    expect(follow).toBeDisabled();
+    expect(follow).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps follow on for a stopped run whose log is still being written", () => {
+    render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized={false}
+        frames={[lineEvent(1, "one")]}
+        version={1}
+      />,
+    );
+    const follow = screen.getByRole("button", { name: "Follow" });
+    expect(follow).toBeEnabled();
+    expect(follow).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("disables follow when the end frame arrives", () => {
+    const { rerender } = render(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized={false}
+        frames={[lineEvent(1, "one")]}
+        version={1}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Follow" })).toHaveAttribute("aria-pressed", "true");
+    rerender(
+      <RunLogViewer
+        runId="r1"
+        runTerminal logFinalized={false}
+        frames={[
+          lineEvent(1, "one"),
+          { type: "end", data: { result: "SUCCESS", logComplete: true } },
+        ]}
+        version={2}
+      />,
+    );
+    const follow = screen.getByRole("button", { name: "Follow" });
+    expect(follow).toBeDisabled();
+    expect(follow).toHaveAttribute("aria-pressed", "false");
+  });
 });

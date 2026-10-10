@@ -2,6 +2,7 @@
 /* Direct lift from mockups/varroa-redesign.html */
 
 :root {
+  color-scheme: light;
   /* Varroa-inspired: wax comb, honey, mite carapace, propolis, bee-wing */
   --bg: #FAF6EC;
   --surface: #FFFFFF;
@@ -59,6 +60,7 @@ html[data-accent="pollen"] { --accent: #D69214; --accent-soft: #FBEDC9; --accent
 html[data-accent="propolis"] { --accent: #7A4A1F; --accent-soft: #EEE1CE; --accent-strong: #583214; --accent-fill-hover: #4A2A11; }
 
 html[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #14100A; --surface: #1E1710; --surface-2: #241C12; --surface-3: #2E2316;
   --border: #332817; --border-strong: #473720;
   --text: #F3E8D6; --text-2: #BCA98C; --text-3: #7F6E56;

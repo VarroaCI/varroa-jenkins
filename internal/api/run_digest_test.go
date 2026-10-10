@@ -79,6 +79,7 @@ func putRawRunLogObject(t *testing.T, store blob.Store, key string, data []byte)
 // run whose result is not yet set, which is every queued or running run.
 func TestComputeRunDigest_PresenceRule(t *testing.T) {
 	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	one := int32(1)
 	cases := []struct {
 		name    string
 		result  *string
@@ -97,7 +98,8 @@ func TestComputeRunDigest_PresenceRule(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			run := recordstore.Run{RunID: "r1", Result: c.result, StartedAt: c.started}
+			// Each run reports one failed test, so every included case has a part.
+			run := recordstore.Run{RunID: "r1", Result: c.result, StartedAt: c.started, TestsFailed: &one}
 			got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
 			if (got != nil) != c.want {
 				t.Fatalf("digest present = %v, want %v", got != nil, c.want)
@@ -314,17 +316,21 @@ func TestComputeRunDigest_FailedTests(t *testing.T) {
 	skipped := int32(2)
 	total := int32(20)
 
+	// A FAILURE stage keeps the digest present, so each case reads the
+	// failedTests part alone.
+	failedStage := []recordstore.Stage{{RunID: "r1", StageID: "s1", Name: "Build", Status: "FAILURE"}}
+
 	t.Run("absentWhenTheRunRecordsNoFailedTest", func(t *testing.T) {
 		run := newDigestRun("r1", "FAILURE")
 		run.TestsFailed = &zero
-		got := computeRunDigest(context.Background(), nil, run, nil, runTestCaseRead{})
+		got := computeRunDigest(context.Background(), nil, run, failedStage, runTestCaseRead{})
 		if got.FailedTests != nil {
 			t.Fatalf("failedTests = %+v, want absent", got.FailedTests)
 		}
 	})
 
 	t.Run("absentWhenTheRunRecordsNoTestCount", func(t *testing.T) {
-		got := computeRunDigest(context.Background(), nil, newDigestRun("r1", "FAILURE"), nil, runTestCaseRead{})
+		got := computeRunDigest(context.Background(), nil, newDigestRun("r1", "FAILURE"), failedStage, runTestCaseRead{})
 		if got.FailedTests != nil {
 			t.Fatalf("failedTests = %+v, want absent", got.FailedTests)
 		}
@@ -589,4 +595,56 @@ func TestComputeRunDigest_LogTailHasNoANSIEscapes(t *testing.T) {
 	if strings.ContainsRune(got.LogTail, 0x1b) {
 		t.Fatalf("logTail = %q, want no escape byte", got.LogTail)
 	}
+}
+
+// TestComputeRunDigest_EmptyDigestIsAbsent proves a run with no part that
+// has a value answers no digest, so the build page draws no empty card.
+func TestComputeRunDigest_EmptyDigestIsAbsent(t *testing.T) {
+	ctx := context.Background()
+	if got := computeRunDigest(ctx, nil, newDigestRun("r1", "FAILURE"), nil, runTestCaseRead{}); got != nil {
+		t.Fatalf("digest without a store = %+v, want nil", got)
+	}
+	store := newRunLogTestStore(t)
+	if got := computeRunDigest(ctx, store, newDigestRun("r1", "FAILURE"), nil, runTestCaseRead{}); got != nil {
+		t.Fatalf("digest with an empty log = %+v, want nil", got)
+	}
+}
+
+// TestComputeRunDigest_InterruptedRunCarriesNoLogTail proves an interrupted
+// run keeps its failed stage and failed tests, and never a log tail.
+func TestComputeRunDigest_InterruptedRunCarriesNoLogTail(t *testing.T) {
+	ctx := context.Background()
+	const runID = "r1"
+	store := newRunLogTestStore(t)
+	putRunLogConsole(t, store, runID, []byte("apiVersion: v1\nkind: Pod\n"))
+
+	t.Run("noPartIsNil", func(t *testing.T) {
+		if got := computeRunDigest(ctx, store, newDigestRun(runID, "INTERRUPTED"), nil, runTestCaseRead{}); got != nil {
+			t.Fatalf("digest = %+v, want nil", got)
+		}
+	})
+
+	t.Run("failedStageKeepsTheStageAndDropsTheTail", func(t *testing.T) {
+		stages := []recordstore.Stage{digestStage(runID, "s1", "Deploy", "", "FAILURE", "", "", nil)}
+		got := computeRunDigest(ctx, store, newDigestRun(runID, "INTERRUPTED"), stages, runTestCaseRead{})
+		if got == nil || got.Stage != "Deploy" {
+			t.Fatalf("digest = %+v, want stage Deploy", got)
+		}
+		if got.LogTail != "" {
+			t.Fatalf("logTail = %q, want absent", got.LogTail)
+		}
+	})
+
+	t.Run("failedTestKeepsTheCountAndDropsTheTail", func(t *testing.T) {
+		run := newDigestRun(runID, "INTERRUPTED")
+		failed := int32(1)
+		run.TestsFailed = &failed
+		got := computeRunDigest(ctx, store, run, nil, runTestCaseRead{})
+		if got == nil || got.FailedTests == nil {
+			t.Fatalf("digest = %+v, want failedTests", got)
+		}
+		if got.LogTail != "" {
+			t.Fatalf("logTail = %q, want absent", got.LogTail)
+		}
+	})
 }

@@ -98,4 +98,19 @@ describe("Topbar", () => {
     // The "?" text appears in both the avatar button and the large avatar in the menu
     expect(screen.getAllByText("?").length).toBeGreaterThanOrEqual(1);
   });
+
+  it("labels an acronym area with its mapped name", () => {
+    renderTopbar("/api-keys");
+    expect(screen.getByText("API keys")).toBeInTheDocument();
+  });
+
+  it("capitalises a hyphenated area into words", () => {
+    renderTopbar("/brood-operations");
+    expect(screen.getByText("Brood operations")).toBeInTheDocument();
+  });
+
+  it("labels the CLI auth area with its mapped name", () => {
+    renderTopbar("/cli-auth");
+    expect(screen.getByText("CLI auth")).toBeInTheDocument();
+  });
 });

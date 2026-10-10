@@ -13,6 +13,9 @@
 // handler which reads console log or artifact bytes answers 503 when
 // deps.BlobStore is nil: GET /runs/{run} serves a complete response
 // with or without digest.logTail.
+//
+// The digest is absent when no part has a value. An INTERRUPTED run carries
+// no logTail, because its banner already names the reason.
 package api
 
 import (
@@ -257,9 +260,10 @@ func computeLogTail(ctx context.Context, store blob.Store, runID string, stageID
 }
 
 // computeRunDigest composes the digest a run detail carries, and nil
-// for a run that carries none. Every part is independently optional: a
-// run with no failed stage, no failed test, and an empty log still
-// answers a digest with every key absent.
+// for a run that carries none. Every part is independently optional. The
+// digest is nil when no part has a value, so a client never draws an
+// empty card. An INTERRUPTED run carries no log tail: its banner names
+// the reason, and the tail of a lost or rolled run names no failure.
 func computeRunDigest(ctx context.Context, store blob.Store, run recordstore.Run, stages []recordstore.Stage, cases runTestCaseRead) *runDigestJSON {
 	if !digestApplies(run) {
 		return nil
@@ -274,11 +278,17 @@ func computeRunDigest(ctx context.Context, store blob.Store, run recordstore.Run
 		}
 		stageIDs = stageSubtree(stages, failed.StageID)
 	}
+	// digestApplies guarantees a non-nil result, so the dereference is safe.
 	// The hard-failure flag is read and discarded: it only degrades
 	// logTail to absent, and the digest itself still stands.
-	tail, _ := computeLogTail(ctx, store, run.RunID, stageIDs)
-	if tail != nil {
-		d.LogTail = *tail
+	if *run.Result != "INTERRUPTED" {
+		tail, _ := computeLogTail(ctx, store, run.RunID, stageIDs)
+		if tail != nil {
+			d.LogTail = *tail
+		}
+	}
+	if d.Stage == "" && d.Error == "" && d.LogTail == "" && d.FailedTests == nil {
+		return nil
 	}
 	return d
 }

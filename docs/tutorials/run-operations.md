@@ -47,7 +47,8 @@ A run that fails leads with a **Digest** card, above the **Pipeline** card.
 
 These runs carry a card: `UNSTABLE`, `FAILURE`, `ABORTED`, `NOT_BUILT`, and a started
 `INTERRUPTED`. These runs carry no card: a run with no result yet, a successful run, a refused
-trigger, and an interrupted run that never started.
+trigger, and an interrupted run that never started. A started `INTERRUPTED` run carries a card
+only when it names a failed stage or failed tests.
 
 The card shows up to five parts. Each part appears on its own.
 
@@ -55,7 +56,7 @@ The card shows up to five parts. Each part appears on its own.
 |---|---|
 | Stage | The innermost failed stage, or a failed branch with no stage |
 | Error | That stage's own stored error text |
-| Log tail | The last 50 plain-text log lines of that stage and its nested stages |
+| Log tail | The last 50 plain-text log lines of that stage and its nested stages. An interrupted run has no log tail |
 | Failed tests | The failed, skipped, and total counts of the run's tests |
 | Failed cases | At most ten failed cases by class and test name. Each links to that case's history |
 
@@ -66,7 +67,7 @@ fallback.
 The card carries no log tail when the server cannot read the log. The **Log** tab then shows what
 the store holds.
 
-A record with none of the five parts shows an empty card.
+A run with none of the parts carries no card.
 
 ## Attach a summary line
 

@@ -5292,7 +5292,8 @@ RunDetail:
         Why a run that did not succeed failed. The server computes this
         object on every read, from the stored rows and the stored log.
         The field is absent for a run with no result, for a SUCCESS or
-        TRIGGER_FAILED result, or for a run with no start time.
+        TRIGGER_FAILED result, or for a run with no start time. The
+        field is also absent when no part has a value.
       additionalProperties: false
       properties:
         stage:
@@ -5315,7 +5316,7 @@ RunDetail:
             falls back to the last 50 lines of the whole log when no
             log-index entry names one of those stages. The lines carry
             no ANSI escape sequence. It is absent when the server holds no blob store and
-            when a log-index entry fails to decode.
+            when a log-index entry fails to decode. Absent for an INTERRUPTED run.
         failedTests:
           type: object
           description: >
