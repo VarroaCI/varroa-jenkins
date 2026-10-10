@@ -175,6 +175,10 @@ control plane's async transport — no other package talks to NATS directly.
   calls in flight. Use it only where one call can wait for a long time and
   the handler is safe for concurrent calls. Users: the operator's two
   approve responders and its two bundle compose responders.
+- **Request with context** (`conn.go`) — `RequestWithContext` cancels the
+  in-flight request when ctx ends. It uses `timeout` as an upper bound. It
+  returns `nats.ErrTimeout` when `timeout` ends the wait, and `ctx.Err()` when
+  ctx ends first.
 - **Test server** (`bustest/`) — `StartDenyServer(t, deny...)` runs an
   embedded NATS server whose restricted user may not subscribe to the deny
   list; `SetDeny` reloads it in place. It does not import `bus`, so the

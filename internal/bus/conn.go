@@ -380,25 +380,15 @@ func (c *Conn) Request(subject string, data []byte, timeout time.Duration) (*nat
 	return c.nc.Request(subject, data, timeout)
 }
 
-// RequestWithContext sends a request and waits for a response, respecting
-// context cancellation. If the context is cancelled before a response arrives,
-// RequestWithContext returns the context error.
+// RequestWithContext sends a request and waits for one reply. The wait ends at the first of timeout or the end of ctx. An ended ctx removes the pending reply and returns ctx.Err(). The end of timeout returns nats.ErrTimeout, as Request does.
 func (c *Conn) RequestWithContext(ctx context.Context, subject string, data []byte, timeout time.Duration) (*nats.Msg, error) {
-	type result struct {
-		msg *nats.Msg
-		err error
+	rctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	msg, err := c.nc.RequestWithContext(rctx, subject, data)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return nil, nats.ErrTimeout
 	}
-	ch := make(chan result, 1)
-	go func() {
-		msg, err := c.nc.Request(subject, data, timeout)
-		ch <- result{msg, err}
-	}()
-	select {
-	case r := <-ch:
-		return r.msg, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return msg, err
 }
 
 // IsNoReply reports whether a request error means that no subscriber
