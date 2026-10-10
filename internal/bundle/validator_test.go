@@ -519,3 +519,38 @@ func TestIsVarroaVar(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateContent_LatestVariantsWarn(t *testing.T) {
+	for _, v := range []string{"LATEST", " latest "} {
+		pluginsYAML := "plugins:\n- artifactId: git\n  version: \"" + v + "\"\n"
+		result := ValidateContent("jenkins:\n  systemMessage: hi", pluginsYAML, "", "", nil)
+		if !result.Valid {
+			t.Errorf("version %q: expected valid (warning only), got errors: %v", v, result.Errors)
+		}
+		warned := false
+		for _, w := range result.Warnings {
+			if strings.Contains(w, "non-deterministic") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Errorf("version %q: expected a non-deterministic warning, got %v", v, result.Warnings)
+		}
+	}
+}
+
+func TestValidateContent_BlankVersionIsError(t *testing.T) {
+	result := ValidateContent("jenkins:\n  systemMessage: hi", "plugins:\n- artifactId: git\n  version: \"  \"\n", "", "", nil)
+	if result.Valid {
+		t.Fatal("a whitespace-only version must not validate")
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "version is required") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a version-required error, got %v", result.Errors)
+	}
+}

@@ -1,9 +1,8 @@
 package bundle
 
 import (
-	"strings"
-
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // PinConflict is a bundle-pinned plugin whose version differs from the
@@ -26,12 +25,6 @@ type MissingPlugin struct {
 type PinPreflightReport struct {
 	Conflicts []PinConflict
 	Missing   []MissingPlugin
-}
-
-// isUnpinnedPluginVersion reports whether a bundle-pinned version should be
-// excluded from conflict comparison: empty or "latest" (case-insensitive).
-func isUnpinnedPluginVersion(version string) bool {
-	return version == "" || strings.EqualFold(version, "latest")
 }
 
 // CheckPluginPins compares a bundle's composed unresolved plugins.yaml
@@ -58,7 +51,7 @@ func CheckPluginPins(pluginsYAML string, set []pluginlock.PluginEntry) (PinPrefl
 			})
 			continue
 		}
-		if isUnpinnedPluginVersion(p.Version) {
+		if ucmeta.IsLatest(p.Version) {
 			continue
 		}
 		if p.Version != setVersion {

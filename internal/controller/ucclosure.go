@@ -7,6 +7,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // Provenance values recorded on a closure entry.
@@ -319,12 +320,18 @@ func resolveOne(name, m string, inv *ucInventory, profiles []ucProfile) (ucSelec
 		// mentions the plugin agrees on one non-poisoned version.
 		var pin string
 		var sources []string
+		sawLatest := false
 		for _, p := range profiles {
 			if !p.Eligible {
 				continue
 			}
 			v, ok := p.Lock[name]
-			if !ok || v == "" {
+			if !ok {
+				continue
+			}
+			if ucmeta.IsLatest(v) {
+				// A latest lock pin names no version. It yields to a concrete lock.
+				sawLatest = true
 				continue
 			}
 			if pin == "" {
@@ -350,6 +357,10 @@ func resolveOne(name, m string, inv *ucInventory, profiles []ucProfile) (ucSelec
 			return ucSelection{}, fmt.Errorf(
 				"dependency %q is absent from the update-center store and its unanimous profile-lock pin %s "+
 					"has conflicting store entries", name, pin)
+		}
+		if sawLatest {
+			return ucSelection{}, fmt.Errorf(
+				"dependency %q is absent from the update-center store and every profile lock that names it pins latest, which names no version", name)
 		}
 		if m != "" {
 			return ucSelection{}, fmt.Errorf(

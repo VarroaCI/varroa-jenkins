@@ -754,6 +754,7 @@ sections describe.
     it truncates at the first `-` and would make two distinct plugin releases
     compare equal. Verdicts are advisory: they never set `status.valid = false`,
     and `EvaluateCoreCompat`/`pluginVersionConflict` remain the only gates.
+    A lock pin that `ucmeta.IsLatest` matches sets no floor and names no version.
   - `GroupReconciler`, `UserReconciler`, `TeamReconciler` (`group_controller.go`,
     `user_controller.go`, `team_controller.go`) — Group/User/Team CRDs; Team also
     provisions/owns a namespace. A `Team` with `spec.pipelines` set is a

@@ -285,3 +285,67 @@ func TestCompat_VerdictsNeverInvalidateAnItem(t *testing.T) {
 		t.Fatalf("a warning verdict must not suppress content: %q", content)
 	}
 }
+
+func TestCompat_LatestLockPinIsNotLockTooOld(t *testing.T) {
+	entries := []inventoryEntry{
+		entry("root", "1.0", dep("mailer", "2.0")),
+		entry("mailer", "2.0"),
+	}
+	inv := newUCInventory(entries)
+	profiles := []ucProfile{
+		{Name: "floating", Eligible: true, EffectiveCore: "2.555.3", Lock: map[string]string{"mailer": "latest"}},
+	}
+	cl, err := resolveClosure(entries[0], inv, profiles)
+	if err != nil {
+		t.Fatalf("resolveClosure: %v", err)
+	}
+	compat := evaluateCompat(cl, inv, profiles)
+	if got := verdictFor(t, compat, "floating").Verdict; got == verdictLockTooOld {
+		t.Errorf("a latest lock pin must not report lock-too-old, got %q", got)
+	}
+}
+
+func TestCompat_LatestLockPinDoesNotHideStoreShortfall(t *testing.T) {
+	entries := []inventoryEntry{
+		entry("root", "1.0", dep("mailer", "2.0")),
+		entry("mailer", "1.0"),
+	}
+	inv := newUCInventory(entries)
+	profiles := []ucProfile{
+		{Name: "floating", Eligible: true, EffectiveCore: "2.555.3", Lock: map[string]string{"mailer": "latest"}},
+	}
+	cl, _ := resolveClosure(entries[0], inv, profiles)
+	compat := evaluateCompat(cl, inv, profiles)
+	if got := verdictFor(t, compat, "floating").Verdict; got != verdictDepBelowMinimum {
+		t.Errorf("verdict = %q, want %q: the store is below the minimum", got, verdictDepBelowMinimum)
+	}
+}
+
+func TestResolveOne_LatestLockPinNamesNoVersion(t *testing.T) {
+	inv := newUCInventory([]inventoryEntry{entry("root", "1.0")})
+	profiles := []ucProfile{
+		{Name: "floating", Eligible: true, EffectiveCore: "2.555.3", Lock: map[string]string{"absent": "latest"}},
+	}
+	_, err := resolveOne("absent", "", inv, profiles)
+	if err == nil {
+		t.Fatal("a lock that pins latest must not name a version for an absent dependency")
+	}
+	if !strings.Contains(err.Error(), "pins latest") {
+		t.Errorf("error = %v, want it to mention that the lock pins latest", err)
+	}
+}
+
+func TestResolveOne_LatestLockYieldsToConcreteLock(t *testing.T) {
+	inv := newUCInventory([]inventoryEntry{entry("root", "1.0")})
+	profiles := []ucProfile{
+		{Name: "floating", Eligible: true, EffectiveCore: "2.555.3", Lock: map[string]string{"absent": "latest"}},
+		{Name: "pinned", Eligible: true, EffectiveCore: "2.555.3", Lock: map[string]string{"absent": "1.5"}},
+	}
+	sel, err := resolveOne("absent", "", inv, profiles)
+	if err != nil {
+		t.Fatalf("resolveOne: %v", err)
+	}
+	if sel.Version != "1.5" || sel.Provenance != provenanceLock {
+		t.Errorf("selection = %+v, want version 1.5 from a lock", sel)
+	}
+}

@@ -31,7 +31,7 @@ varroactl export plugins \
   --to tar:///transfer/plugins-2-570.tar.gz
 ```
 
-The command resolves the plugin closure, downloads it, verifies checksums, and creates an OCI plugin pack. `--to` also accepts `oci://` and `dir://`. Use `--registry-config` for registry credentials. Use `--insecure` only for plain HTTP on a trusted isolated network.
+The command resolves the plugin closure, downloads it, verifies checksums, and creates an OCI plugin pack. The pack records concrete versions; a `latest` pin resolves at export time. `--to` also accepts `oci://` and `dir://`. Use `--registry-config` for registry credentials. Use `--insecure` only for plain HTTP on a trusted isolated network.
 
 ## Configure Internal Images
 

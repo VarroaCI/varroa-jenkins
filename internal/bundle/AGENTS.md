@@ -182,10 +182,12 @@ index parsing, and pre-apply content validation.
   is the single canonical validator for path-join call sites; don't add a
   second copy. `ValidateContent` (validator.go:123) is the
   materialize-time floor: YAML parseability, plugin `artifactId`/`version`
-  well-formedness (empty version = error, `"latest"` = warning), unresolved
+  well-formedness (blank version = error, `latest` in any case or with spaces
+  = warning, matched by `ucmeta.IsLatest`), unresolved
   `${var}` detection (skips `varroa_*` and `^${var}` JCasC escapes).
   `FindUnresolvedVariables` is the read-only sibling for callers wanting just
-  the missing-var list.
+  the missing-var list. `CheckPluginPins` skips every pin that `ucmeta.IsLatest`
+  matches.
 - **`catalog_validate.go`** — per-`CatalogItem.Spec.Type` content validation,
   run at catalog sync time (`ValidateItemContent`, one case per type). The
   `pipeline-template` case (`validatePipelineTemplateContent`) parses the

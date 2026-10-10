@@ -18,6 +18,8 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
 - **Entrypoint** — `main.go` just calls `run(os.Args[1:])` (`root.go`).
   `root.go` maps errors to exit codes: `usageError` / cobra parse errors → 2,
   other errors → 1, success → 0 (`isUsageError`, `run`).
+- **Latest pins** — `export plugins` resolves every `latest` entry through
+  `ResolveLatestForCore` before download, and a pack never carries `latest`.
 - **Command tree (root.go)** — two registration seams so noun files don't
   touch shared root/verb-parent files:
   - `registerNoun(nounRegistrar)` — attaches a noun (e.g. `controllers`,
