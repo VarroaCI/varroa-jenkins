@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -168,7 +169,7 @@ func (f *busBroodOps) List(ctx context.Context, ns, clusterFilter string) ([]Clu
 		if clusterFilter == f.localCluster {
 			return f.listLocal(ctx, ns)
 		}
-		return f.listRemoteBus(clusterFilter, ns)
+		return f.listRemoteBus(ctx, clusterFilter, ns)
 	}
 
 	var (
@@ -205,11 +206,11 @@ func (f *busBroodOps) List(ctx context.Context, ns, clusterFilter string) ([]Clu
 		wg.Add(1)
 		go func(cluster string) {
 			defer wg.Done()
-			cl, st, err := f.listRemoteBus(cluster, ns)
+			cl, st, err := f.listRemoteBus(ctx, cluster, ns)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				statuses = append(statuses, ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()})
+				statuses = append(statuses, st...)
 				return
 			}
 			ops = append(ops, cl...)
@@ -245,30 +246,54 @@ func (f *busBroodOps) listLocal(ctx context.Context, ns string) ([]ClusterBroodO
 	return cc, []ClusterFanoutStatus{{Name: f.localCluster, OK: true}}, nil
 }
 
-func (f *busBroodOps) listRemoteBus(cluster, ns string) ([]ClusterBroodOp, []ClusterFanoutStatus, error) {
-	req := bus.BroodOpsListRequest{Namespace: ns}
-	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorBroodOpsSubject(cluster, "list"), data, broodOpsListTimeout)
-	if err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
-	}
-	var resp bus.BroodOpsListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid response"}}, fmt.Errorf("list remote %s decode: %w", cluster, err)
-	}
-	if resp.Code != "" {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
-	}
-	cc := make([]ClusterBroodOp, len(resp.Ops))
-	for i, raw := range resp.Ops {
-		var op v1alpha1.BroodOperation
-		if err := json.Unmarshal(raw, &op); err != nil {
-			f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
-			continue
+// listRemoteBus reads every page of a member's broodops list. A failed page
+// fails the whole member: it returns no rows and one status row whose Error
+// names the reason. A row that does not decode is skipped, so no nil Op is
+// returned.
+func (f *busBroodOps) listRemoteBus(ctx context.Context, cluster, ns string) ([]ClusterBroodOp, []ClusterFanoutStatus, error) {
+	var (
+		ops    []ClusterBroodOp
+		reason string
+	)
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		req := bus.BroodOpsListRequest{Namespace: ns, After: after}
+		data, _ := json.Marshal(req)
+		respData, err := f.request(bus.OperatorBroodOpsSubject(cluster, "list"), data, broodOpsListTimeout)
+		if err != nil {
+			reason = "cluster unreachable"
+			return "", fmt.Errorf("list remote %s: %w", cluster, err)
 		}
-		cc[i] = ClusterBroodOp{Cluster: cluster, Op: &op}
+		var resp bus.BroodOpsListResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			reason = "invalid response"
+			return "", fmt.Errorf("list remote %s decode: %w", cluster, err)
+		}
+		if resp.Code != "" {
+			reason = resp.Error
+			return "", fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
+		}
+		for _, raw := range resp.Ops {
+			var op v1alpha1.BroodOperation
+			if err := json.Unmarshal(raw, &op); err != nil {
+				f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
+				continue
+			}
+			ops = append(ops, ClusterBroodOp{Cluster: cluster, Op: &op})
+		}
+		return resp.Next, nil
+	})
+	if err != nil {
+		if reason == "" {
+			var be *BroodError
+			if errors.As(err, &be) {
+				reason = be.Msg
+			} else {
+				reason = err.Error()
+			}
+		}
+		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: reason}}, fmt.Errorf("list remote %s: %w", cluster, err)
 	}
-	return cc, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
+	return ops, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }
 
 // Get fans out broodops.get to all known clusters.

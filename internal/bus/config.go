@@ -66,19 +66,29 @@ type CellPoolScaleRequest struct {
 // the subject encodes the kind.
 // ---------------------------------------------------------------------------
 
+// ListPageBudget bounds one list reply below the NATS 1 MiB max_payload.
+// The operator pages a config or brood-operation list to fit this budget.
+const ListPageBudget = 900 * 1024
+
 // ConfigListRequest is the payload for *list subjects (bundles.list,
-// catalog.itemlist, catalog.sourcelist, rbac.rolelist, rbac.bindinglist).
-// Namespace is ignored for cluster-scoped kinds (JenkinsRole, JenkinsRoleBinding).
+// catalog.itemlist, catalog.sourcelist, rbac.rolelist, rbac.bindinglist,
+// versionprofiles.list, versionprofiles.view, cellpools.list).
+// Namespace is ignored for cluster-scoped kinds (JenkinsRole, JenkinsRoleBinding,
+// JenkinsVersionProfile, CellPool).
+// After is the Next key of the previous page. Empty requests the first page.
 type ConfigListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	After     string `json:"after,omitempty"`
 }
 
 // ConfigListResponse is the reply for *list subjects.
 // OperatorNamespace is populated only for catalog.itemlist — the BFF echoes it
 // in the catalog-items HTTP response as operatorNamespace.
 // Empty for other kinds.
+// Next is the After key of the following page. Empty on the last page.
 type ConfigListResponse struct {
 	Items             []json.RawMessage `json:"items,omitempty"`
+	Next              string            `json:"next,omitempty"`
 	OperatorNamespace string            `json:"operatorNamespace,omitempty"`
 	Code              string            `json:"code,omitempty"`
 	Error             string            `json:"error,omitempty"`
@@ -186,10 +196,13 @@ type VersionProfileView struct {
 }
 
 // VersionProfileViewResponse is the reply for versionprofiles.view subjects.
+// Each element of Profiles is one marshalled VersionProfileView. Next is the
+// After key of the following page. Empty on the last page.
 type VersionProfileViewResponse struct {
-	Profiles []VersionProfileView `json:"profiles,omitempty"`
-	Code     string               `json:"code,omitempty"`
-	Error    string               `json:"error,omitempty"`
+	Profiles []json.RawMessage `json:"profiles,omitempty"`
+	Next     string            `json:"next,omitempty"`
+	Code     string            `json:"code,omitempty"`
+	Error    string            `json:"error,omitempty"`
 }
 
 // BundlePauseRequest is the payload for bundles.pause and bundles.resume.

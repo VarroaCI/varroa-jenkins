@@ -560,6 +560,11 @@ federation, activity persistence, and SSE fanout.
   stops the walk. An undecodable row fails the member with
   `invalid controller row`. The fan-out keeps the status row that
   `listRemote` returns, so the reason reaches the client.
+- **Remote config and brood-operation lists are paged**: `busConfigBrood.listConfigPages`,
+  `ViewVersionProfiles`, and `busBroodOps.listRemoteBus` read every page through
+  `readRemotePages` (`remote_pages.go`), up to 128 pages. A failed page, or a
+  `next` that does not advance, drops the whole member: zero rows and an
+  `ok: false` status row.
 
 - **Cached local Controller lists**: every local Controller list goes through
   `localControllers` or `Dependencies.LocalControllers`. In the BFF the

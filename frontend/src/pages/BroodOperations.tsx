@@ -118,8 +118,7 @@ export default function BroodOperations() {
     return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
   });
 
-  // Check for degraded clusters in the fan-out
-  const hasDegraded = clusterStatuses.some((s) => !s.ok);
+  const failedClusters = clusterStatuses.filter((s) => !s.ok);
 
   return (
     <div className={styles.page}>
@@ -134,11 +133,11 @@ export default function BroodOperations() {
       {isLoading && <p>Loading…</p>}
 			{error && <p className={styles.error}>Failed to load Brood Operations history</p>}
 
-      {hasDegraded && (
-        <div className={styles.degradedBanner}>
-          Some clusters are unreachable. Data may be incomplete.
+      {failedClusters.map((s) => (
+        <div key={s.cluster} className={styles.degradedBanner} role="status">
+          Brood operations of cluster <strong>{s.cluster}</strong> are absent from this list: {s.error || "the cluster did not answer"}.
         </div>
-      )}
+      ))}
 
       {!isLoading && sorted.length === 0 && (
         <div className={styles.empty}>

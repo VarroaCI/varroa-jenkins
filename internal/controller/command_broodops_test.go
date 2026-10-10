@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -224,16 +226,18 @@ func TestCommandBroodOps_List_StripsManagedFields(t *testing.T) {
 	}
 }
 
-func TestCommandBroodOps_List_TooLarge(t *testing.T) {
-	cl := fake.NewClientBuilder().WithScheme(testBroodScheme()).Build()
-	broodOps := NewCommandBroodOps(cl, "operator-ns", slog.Default())
-
-	// Verify that a modest list succeeds (the 900KB budget check is
-	// exercised by the marshal-then-compare in HandleList).
-	for i := 0; i < 20; i++ {
-		name := fmt.Sprintf("broodop-test-%d", i)
+// createBroodOpsForList stores count broodops named broodop-test-<i> in team-ns.
+// Each carries an annotation of padBytes so tests can exceed the page budget.
+func createBroodOpsForList(t *testing.T, cl client.Client, count, padBytes int) {
+	t.Helper()
+	pad := strings.Repeat("x", padBytes)
+	for i := 0; i < count; i++ {
 		op := &v1alpha1.BroodOperation{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-ns"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("broodop-test-%d", i),
+				Namespace:   "team-ns",
+				Annotations: map[string]string{"pad": pad},
+			},
 		}
 		op.APIVersion = "varroa.dev/v1alpha1"
 		op.Kind = "BroodOperation"
@@ -241,18 +245,67 @@ func TestCommandBroodOps_List_TooLarge(t *testing.T) {
 			t.Fatalf("create op: %v", err)
 		}
 	}
+}
 
-	req, _ := json.Marshal(bus.BroodOpsListRequest{Namespace: "team-ns"})
-	resp := broodOps.HandleList(req)
+func TestCommandBroodOps_List_PagesAboveBudget(t *testing.T) {
+	cl := fake.NewClientBuilder().WithScheme(testBroodScheme()).Build()
+	broodOps := NewCommandBroodOps(cl, "operator-ns", slog.Default())
+	const count = 10
+	createBroodOpsForList(t, cl, count, 100*1024)
+
+	var names []string
+	after := ""
+	pages := 0
+	for {
+		req, _ := json.Marshal(bus.BroodOpsListRequest{Namespace: "team-ns", After: after})
+		var reply bus.BroodOpsListResponse
+		if err := json.Unmarshal(broodOps.HandleList(req), &reply); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if reply.Code != "" {
+			t.Fatalf("page %d: code %q: %s", pages, reply.Code, reply.Error)
+		}
+		for _, raw := range reply.Ops {
+			var op v1alpha1.BroodOperation
+			if err := json.Unmarshal(raw, &op); err != nil {
+				t.Fatalf("decode op: %v", err)
+			}
+			names = append(names, op.Name)
+		}
+		pages++
+		if reply.Next == "" {
+			break
+		}
+		after = reply.Next
+		if pages > count {
+			t.Fatal("paging did not end")
+		}
+	}
+	if pages < 2 {
+		t.Fatalf("expected more than one page, got %d", pages)
+	}
+	if len(names) != count {
+		t.Fatalf("got %d ops across pages, want %d", len(names), count)
+	}
+	for i, name := range names {
+		if want := fmt.Sprintf("broodop-test-%d", i); name != want {
+			t.Fatalf("op %d = %q, want %q", i, name, want)
+		}
+	}
+}
+
+func TestCommandBroodOps_List_AfterKey(t *testing.T) {
+	cl := fake.NewClientBuilder().WithScheme(testBroodScheme()).Build()
+	broodOps := NewCommandBroodOps(cl, "operator-ns", slog.Default())
+	createBroodOpsForList(t, cl, 3, 10)
+
+	req, _ := json.Marshal(bus.BroodOpsListRequest{Namespace: "team-ns", After: "team-ns/broodop-test-0"})
 	var reply bus.BroodOpsListResponse
-	if err := json.Unmarshal(resp, &reply); err != nil {
+	if err := json.Unmarshal(broodOps.HandleList(req), &reply); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if reply.Code != "" {
-		t.Fatalf("expected empty code, got %q: %s", reply.Code, reply.Error)
-	}
-	if len(reply.Ops) != 20 {
-		t.Fatalf("expected 20 ops, got %d", len(reply.Ops))
+	if reply.Code != "" || len(reply.Ops) != 2 || reply.Next != "" {
+		t.Fatalf("code=%q ops=%d next=%q, want 2 ops and no next", reply.Code, len(reply.Ops), reply.Next)
 	}
 }
 

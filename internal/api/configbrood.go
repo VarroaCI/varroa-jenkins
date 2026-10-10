@@ -160,6 +160,37 @@ func (f *busConfigBrood) isLocal(cluster string) bool {
 
 // --- Read methods: local = direct k8s, remote = bus ---
 
+// listConfigPages reads every page of a config list from one member. what
+// names the list in decode errors. A failed page fails the whole list, and
+// the pages read before it are discarded.
+func (f *busConfigBrood) listConfigPages(ctx context.Context, subject, ns, what string) ([]json.RawMessage, string, error) {
+	var items []json.RawMessage
+	var operatorNs string
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		req := bus.ConfigListRequest{Namespace: ns, After: after}
+		respData, err := f.requestTo(subject, req, configListTimeout)
+		if err != nil {
+			return "", err
+		}
+		var resp bus.ConfigListResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			return "", fmt.Errorf("list %s decode: %w", what, err)
+		}
+		if resp.Code != "" {
+			return "", f.codeToErr(resp.Code, resp.Error)
+		}
+		items = append(items, resp.Items...)
+		if operatorNs == "" {
+			operatorNs = resp.OperatorNamespace
+		}
+		return resp.Next, nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return items, operatorNs, nil
+}
+
 func (f *busConfigBrood) ListComposedBundles(ctx context.Context, cluster, ns string) ([]json.RawMessage, error) {
 	if f.isLocal(cluster) {
 		items, err := crdstore.List[v1alpha1.ComposedBundle](ctx, f.store, ns, "")
@@ -176,19 +207,8 @@ func (f *busConfigBrood) ListComposedBundles(ctx context.Context, cluster, ns st
 		}
 		return raw, nil
 	}
-	req := bus.ConfigListRequest{Namespace: ns}
-	respData, err := f.requestTo(bus.OperatorBundlesSubject(cluster, "list"), req, configListTimeout)
-	if err != nil {
-		return nil, err
-	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list bundles decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Items, nil
+	items, _, err := f.listConfigPages(ctx, bus.OperatorBundlesSubject(cluster, "list"), ns, "bundles")
+	return items, err
 }
 
 func (f *busConfigBrood) GetComposedBundle(ctx context.Context, cluster, ns, name string) (json.RawMessage, error) {
@@ -231,19 +251,11 @@ func (f *busConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns strin
 			items[i] = r
 		}
 	} else {
-		req := bus.ConfigListRequest{Namespace: ns}
-		respData, err := f.requestTo(bus.OperatorCatalogSubject(cluster, "itemlist"), req, configListTimeout)
+		var err error
+		items, operatorNs, err = f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "itemlist"), ns, "items")
 		if err != nil {
 			return nil, "", err
 		}
-		var resp bus.ConfigListResponse
-		if err := json.Unmarshal(respData, &resp); err != nil {
-			return nil, "", fmt.Errorf("list items decode: %w", err)
-		}
-		if resp.Code != "" {
-			return nil, "", f.codeToErr(resp.Code, resp.Error)
-		}
-		items, operatorNs = resp.Items, resp.OperatorNamespace
 	}
 	if filter == (CatalogItemFilter{}) {
 		return items, operatorNs, nil
@@ -315,19 +327,8 @@ func (f *busConfigBrood) ListCatalogSources(ctx context.Context, cluster, ns str
 		}
 		return raw, nil
 	}
-	req := bus.ConfigListRequest{Namespace: ns}
-	respData, err := f.requestTo(bus.OperatorCatalogSubject(cluster, "sourcelist"), req, configListTimeout)
-	if err != nil {
-		return nil, err
-	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list sources decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Items, nil
+	items, _, err := f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "sourcelist"), ns, "sources")
+	return items, err
 }
 
 func (f *busConfigBrood) GetCatalogSource(ctx context.Context, cluster, ns, name string) (json.RawMessage, error) {
@@ -369,19 +370,8 @@ func (f *busConfigBrood) ListJenkinsRoles(ctx context.Context, cluster string) (
 		}
 		return raw, nil
 	}
-	req := bus.ConfigListRequest{}
-	respData, err := f.requestTo(bus.OperatorRbacSubject(cluster, "rolelist"), req, configListTimeout)
-	if err != nil {
-		return nil, err
-	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list roles decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Items, nil
+	items, _, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "rolelist"), "", "roles")
+	return items, err
 }
 
 func (f *busConfigBrood) GetJenkinsRole(ctx context.Context, cluster, name string) (json.RawMessage, error) {
@@ -423,19 +413,8 @@ func (f *busConfigBrood) ListJenkinsRoleBindings(ctx context.Context, cluster st
 		}
 		return raw, nil
 	}
-	req := bus.ConfigListRequest{}
-	respData, err := f.requestTo(bus.OperatorRbacSubject(cluster, "bindinglist"), req, configListTimeout)
-	if err != nil {
-		return nil, err
-	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list bindings decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Items, nil
+	items, _, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "bindinglist"), "", "bindings")
+	return items, err
 }
 
 func (f *busConfigBrood) GetJenkinsRoleBinding(ctx context.Context, cluster, name string) (json.RawMessage, error) {
@@ -500,19 +479,8 @@ func (f *busConfigBrood) ListVersionProfiles(ctx context.Context, cluster string
 		}
 		return raw, nil
 	}
-	req := bus.ConfigListRequest{}
-	respData, err := f.requestTo(bus.OperatorVersionProfilesSubject(cluster, "list"), req, configListTimeout)
-	if err != nil {
-		return nil, err
-	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list versionprofiles decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Items, nil
+	items, _, err := f.listConfigPages(ctx, bus.OperatorVersionProfilesSubject(cluster, "list"), "", "versionprofiles")
+	return items, err
 }
 
 func (f *busConfigBrood) GetVersionProfile(ctx context.Context, cluster, name string) (json.RawMessage, error) {
@@ -539,19 +507,33 @@ func (f *busConfigBrood) GetVersionProfile(ctx context.Context, cluster, name st
 }
 
 func (f *busConfigBrood) ViewVersionProfiles(ctx context.Context, cluster string) ([]bus.VersionProfileView, error) {
-	req := bus.ConfigListRequest{}
-	respData, err := f.requestTo(bus.OperatorVersionProfilesSubject(cluster, "view"), req, configListTimeout)
+	var views []bus.VersionProfileView
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		req := bus.ConfigListRequest{After: after}
+		respData, err := f.requestTo(bus.OperatorVersionProfilesSubject(cluster, "view"), req, configListTimeout)
+		if err != nil {
+			return "", err
+		}
+		var resp bus.VersionProfileViewResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			return "", fmt.Errorf("view versionprofiles decode: %w", err)
+		}
+		if resp.Code != "" {
+			return "", f.codeToErr(resp.Code, resp.Error)
+		}
+		for _, raw := range resp.Profiles {
+			var view bus.VersionProfileView
+			if err := json.Unmarshal(raw, &view); err != nil {
+				return "", fmt.Errorf("view versionprofiles decode item: %w", err)
+			}
+			views = append(views, view)
+		}
+		return resp.Next, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var resp bus.VersionProfileViewResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("view versionprofiles decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	return resp.Profiles, nil
+	return views, nil
 }
 
 // --- Mutation methods: all go over the bus uniformly ---

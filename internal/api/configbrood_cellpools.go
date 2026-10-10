@@ -23,23 +23,16 @@ func (f *busConfigBrood) refuseLocalCellPools(cluster string) error {
 	return nil
 }
 
-func (f *busConfigBrood) ListCellPools(_ context.Context, cluster string) ([]v1alpha1.CellPool, error) {
+func (f *busConfigBrood) ListCellPools(ctx context.Context, cluster string) ([]v1alpha1.CellPool, error) {
 	if err := f.refuseLocalCellPools(cluster); err != nil {
 		return nil, err
 	}
-	respData, err := f.requestTo(bus.OperatorCellPoolsSubject(cluster, "list"), bus.ConfigListRequest{}, configListTimeout)
+	items, _, err := f.listConfigPages(ctx, bus.OperatorCellPoolsSubject(cluster, "list"), "", "cellpools")
 	if err != nil {
 		return nil, err
 	}
-	var resp bus.ConfigListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("list cellpools decode: %w", err)
-	}
-	if resp.Code != "" {
-		return nil, f.codeToErr(resp.Code, resp.Error)
-	}
-	pools := make([]v1alpha1.CellPool, 0, len(resp.Items))
-	for _, raw := range resp.Items {
+	pools := make([]v1alpha1.CellPool, 0, len(items))
+	for _, raw := range items {
 		var pool v1alpha1.CellPool
 		if err := json.Unmarshal(raw, &pool); err != nil {
 			return nil, fmt.Errorf("list cellpools decode item: %w", err)

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -151,19 +152,28 @@ func catalogItemPluginName(cr *v1alpha1.CatalogItem) string {
 	return rest
 }
 
-// listBudgetReply marshals items; if the result exceeds 900KB, returns
-// a code:internal response with "list too large".
-func (c *ConfigCRUD) listBudgetReply(items []json.RawMessage, operatorNamespace string) []byte {
-	reply := bus.ConfigListResponse{Items: items, OperatorNamespace: operatorNamespace}
+// listPageReply marshals one page of a list. Next is the After key of the
+// following page. A reply over bus.ListPageBudget is a code:internal error.
+func (c *ConfigCRUD) listPageReply(rows []json.RawMessage, next, operatorNamespace string) []byte {
+	reply := bus.ConfigListResponse{Items: rows, Next: next, OperatorNamespace: operatorNamespace}
 	data, err := json.Marshal(reply)
 	if err != nil {
 		c.Logger.Error("list reply marshal failed", "error", err)
 		return c.configReply(bus.ConfigListResponse{Code: bus.CodeInternal, Error: "marshal error"})
 	}
-	if len(data) > 900*1024 {
-		return c.configReply(bus.ConfigListResponse{Code: bus.CodeInternal, Error: "list too large"})
+	if len(data) > bus.ListPageBudget {
+		return c.configReply(bus.ConfigListResponse{Code: bus.CodeInternal, Error: "list page too large"})
 	}
 	return data
+}
+
+// listPageErr maps a pageList error to the message of an internal reply.
+func listPageErr(err error) string {
+	var tooLarge *listRowTooLargeError
+	if errors.As(err, &tooLarge) {
+		return err.Error()
+	}
+	return "marshal error"
 }
 
 // k8sConfigErrToCode maps k8s err to bus code.
@@ -211,17 +221,18 @@ func (c *ConfigCRUD) HandleBundlesList(data []byte) []byte {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.ComposedBundle) (json.RawMessage, error) {
 		raw, err := marshalCR(cr)
 		if err != nil {
 			c.Logger.Error("marshal bundle failed", "name", cr.Name, "error", err)
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleBundlesGet handles operator.<cluster>.bundles.get.
@@ -291,17 +302,18 @@ func (c *ConfigCRUD) HandleSourcesList(data []byte) []byte {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.CatalogSource) (json.RawMessage, error) {
 		raw, err := marshalCR(cr)
 		if err != nil {
 			c.Logger.Error("marshal catalogsource failed", "name", cr.Name, "error", err)
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleSourcesGet handles operator.<cluster>.catalog.sourceget.
@@ -371,17 +383,18 @@ func (c *ConfigCRUD) HandleItemsList(data []byte) []byte {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.CatalogItem) (json.RawMessage, error) {
 		raw, err := marshalCR(ProjectCatalogItemSummary(cr))
 		if err != nil {
 			c.Logger.Error("marshal catalogitem failed", "name", cr.Name, "error", err)
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-
-	return c.listBudgetReply(rawItems, c.OperatorNamespace)
+	return c.listPageReply(rows, next, c.OperatorNamespace)
 }
 
 // HandleItemsGet handles operator.<cluster>.catalog.itemget.
@@ -431,17 +444,18 @@ func (c *ConfigCRUD) HandleRolesList(data []byte) []byte {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.JenkinsRole) (json.RawMessage, error) {
 		raw, err := marshalCR(cr)
 		if err != nil {
 			c.Logger.Error("marshal jenkinsrole failed", "name", cr.Name, "error", err)
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleRolesGet handles operator.<cluster>.rbac.roleget.
@@ -511,17 +525,18 @@ func (c *ConfigCRUD) HandleBindingsList(data []byte) []byte {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
 
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.JenkinsRoleBinding) (json.RawMessage, error) {
 		raw, err := marshalCR(cr)
 		if err != nil {
 			c.Logger.Error("marshal jenkinsrolebinding failed", "name", cr.Name, "error", err)
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleBindingsGet handles operator.<cluster>.rbac.bindingget.
@@ -631,15 +646,14 @@ func (c *ConfigCRUD) HandleVersionProfilesList(data []byte) []byte {
 	if err != nil {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
-		raw, err := marshalCR(cr)
-		if err != nil {
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
-		}
-		rawItems = append(rawItems, raw)
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.JenkinsVersionProfile) (json.RawMessage, error) {
+		return marshalCR(cr)
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleVersionProfilesGet handles operator.<cluster>.versionprofiles.get.
@@ -726,6 +740,7 @@ func (c *ConfigCRUD) HandleVersionProfilesDelete(data []byte) []byte {
 }
 
 // HandleVersionProfilesView handles operator.<cluster>.versionprofiles.view.
+// A page reads the plugins ConfigMap of its own rows only.
 func (c *ConfigCRUD) HandleVersionProfilesView(data []byte) []byte {
 	var req bus.ConfigListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -737,11 +752,10 @@ func (c *ConfigCRUD) HandleVersionProfilesView(data []byte) []byte {
 	if err != nil {
 		return c.configReply(bus.VersionProfileViewResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
-	profiles := make([]bus.VersionProfileView, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.JenkinsVersionProfile) (json.RawMessage, error) {
 		raw, err := marshalCR(cr)
 		if err != nil {
-			return c.configReply(bus.VersionProfileViewResponse{Error: "marshal error", Code: bus.CodeInternal})
+			return nil, err
 		}
 		view := bus.VersionProfileView{Item: raw, ResolveVersion: cr.Spec.ResolveVersion}
 		if cr.Status.ContentRef != "" {
@@ -753,15 +767,18 @@ func (c *ConfigCRUD) HandleVersionProfilesView(data []byte) []byte {
 				}
 			}
 		}
-		profiles = append(profiles, view)
+		return json.Marshal(view)
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.VersionProfileViewResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	reply := bus.VersionProfileViewResponse{Profiles: profiles}
-	replyData, err := json.Marshal(reply)
+	replyData, err := json.Marshal(bus.VersionProfileViewResponse{Profiles: rows, Next: next})
 	if err != nil {
 		return c.configReply(bus.VersionProfileViewResponse{Error: "marshal error", Code: bus.CodeInternal})
 	}
-	if len(replyData) > 900*1024 {
-		return c.configReply(bus.VersionProfileViewResponse{Error: "list too large", Code: bus.CodeInternal})
+	if len(replyData) > bus.ListPageBudget {
+		return c.configReply(bus.VersionProfileViewResponse{Error: "list page too large", Code: bus.CodeInternal})
 	}
 	return replyData
 }

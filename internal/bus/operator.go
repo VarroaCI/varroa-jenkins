@@ -352,8 +352,10 @@ type BroodOpsGetRequest struct {
 }
 
 // BroodOpsListRequest is the payload for operator.<cluster>.broodops.list.
+// After is the Next key of the previous page. Empty requests the first page.
 type BroodOpsListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	After     string `json:"after,omitempty"`
 }
 
 // BroodOpsCancelRequest is the payload for operator.<cluster>.broodops.cancel.
@@ -382,9 +384,11 @@ type BroodOpsOpResponse struct {
 	Error string          `json:"error,omitempty"`
 }
 
-// BroodOpsListResponse is the reply for list.
+// BroodOpsListResponse is the reply for list. Next is the After key of the
+// following page. Empty on the last page.
 type BroodOpsListResponse struct {
 	Ops   []json.RawMessage `json:"ops,omitempty"`
+	Next  string            `json:"next,omitempty"`
 	Code  string            `json:"code,omitempty"`
 	Error string            `json:"error,omitempty"`
 }

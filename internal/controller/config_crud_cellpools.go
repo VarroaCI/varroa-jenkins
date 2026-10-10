@@ -30,15 +30,14 @@ func (c *ConfigCRUD) HandleCellPoolsList(data []byte) []byte {
 	if err != nil {
 		return c.configReply(bus.ConfigListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
-		raw, err := marshalCR(cr)
-		if err != nil {
-			return c.configReply(bus.ConfigListResponse{Error: "marshal error", Code: bus.CodeInternal})
-		}
-		rawItems = append(rawItems, raw)
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.CellPool) (json.RawMessage, error) {
+		return marshalCR(cr)
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listBudgetReply(rawItems, "")
+	return c.listPageReply(rows, next, "")
 }
 
 // HandleCellPoolsGet handles operator.<cluster>.cellpools.get.

@@ -103,6 +103,25 @@ describe("BroodOperations", () => {
     expect(screen.getByText("ns1/op-done")).toBeInTheDocument();
   });
 
+  it("names each failed cluster and its error", async () => {
+    mockList.mockResolvedValue({
+      items: [runningRow],
+      clusters: [
+        { cluster: "core", ok: true },
+        { cluster: "member-b", ok: false, error: "cluster unreachable" },
+        { cluster: "member-c", ok: false },
+      ],
+    });
+    renderPage();
+    const notices = await screen.findAllByRole("status");
+    const memberB = notices.find((n) => n.textContent?.includes("member-b"));
+    const memberC = notices.find((n) => n.textContent?.includes("member-c"));
+    expect(memberB?.textContent).toContain("cluster unreachable");
+    expect(memberC?.textContent).toContain("the cluster did not answer");
+    expect(notices).toHaveLength(2);
+    expect(screen.queryByText(/Some clusters are unreachable/)).not.toBeInTheDocument();
+  });
+
   it("shows verb, phase, and summary columns", async () => {
     mockList.mockResolvedValue({ items: [runningRow], clusters: [] });
     renderPage();
