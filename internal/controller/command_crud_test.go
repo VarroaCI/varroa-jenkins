@@ -1828,6 +1828,86 @@ func TestCommandCRUD_HandleUpdate_RefusesCellRoleChange(t *testing.T) {
 	}
 }
 
+// TestCommandCRUD_HandleUpdate_RefusesIngressModeChange: the ingress mode
+// stays fixed through a patch that adds, removes, or edits the whole block.
+func TestCommandCRUD_HandleUpdate_RefusesIngressModeChange(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.IngressSpec
+		patch string
+	}{
+		{name: "flip path to subdomain", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "remove path block", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":null}}`},
+		{name: "remove mode key from path block", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"mode":null}}}`},
+		{name: "add path block to a controller with no block", seed: nil, patch: `{"spec":{"ingressSpec":{"mode":"path","host":"varroa.example.com"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: tt.seed},
+			})
+			before := ct.client.controllers["team-a/ctrl1"].Spec.IngressSpec.DeepCopy()
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Code != bus.CodeInvalid {
+				t.Fatalf("code = %q, want %q (error %q)", updateResp.Code, bus.CodeInvalid, updateResp.Error)
+			}
+			if updateResp.Error != "ingressSpec.mode is immutable" {
+				t.Errorf("error = %q, want %q", updateResp.Error, "ingressSpec.mode is immutable")
+			}
+			if got := ct.client.controllers["team-a/ctrl1"].Spec.IngressSpec; !reflect.DeepEqual(got, before) {
+				t.Errorf("stored ingressSpec = %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_AllowsEquivalentIngressMode: a change that
+// keeps the normalized mode (subdomain or path) passes.
+func TestCommandCRUD_HandleUpdate_AllowsEquivalentIngressMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.IngressSpec
+		patch string
+	}{
+		{name: "add block without mode", seed: nil, patch: `{"spec":{"ingressSpec":{"host":"ctrl1.example.com"}}}`},
+		{name: "add block with subdomain mode", seed: nil, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "remove subdomain block", seed: &v1alpha1.IngressSpec{Mode: "subdomain"}, patch: `{"spec":{"ingressSpec":null}}`},
+		{name: "empty mode rewritten to subdomain", seed: &v1alpha1.IngressSpec{Host: "a.example.com"}, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "path block host-only edit", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"ingressClassName":"nginx"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: tt.seed},
+			})
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Error != "" {
+				t.Fatalf("error = %q (code %q), want success", updateResp.Error, updateResp.Code)
+			}
+		})
+	}
+}
+
 // TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit: a capacity edit is
 // accepted on a cell and on a block that stores no enabled key.
 func TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit(t *testing.T) {

@@ -73,12 +73,14 @@ type Controller struct {
 	Status ControllerStatus `json:"status,omitempty"`
 }
 
-// The cell role rule sits on ControllerSpec, not on the cell field. A field
-// transition rule runs only when the old and the new object both carry the
-// field, so a patch that adds or removes the whole cell block would skip it.
+// The cell role rule and the ingress mode rule sit on ControllerSpec, not on
+// their fields. A field transition rule runs only when the old and the new
+// object both carry the field. A patch that adds or removes the whole block
+// would skip it.
 
 // ControllerSpec defines the desired state of Controller.
 // +kubebuilder:validation:XValidation:rule="(has(self.cell) && has(self.cell.enabled) && self.cell.enabled) == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)",message="cell.enabled is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')",message="ingressSpec.mode is immutable"
 type ControllerSpec struct {
 	// API endpoint URL for the controller.
 	Endpoint string `json:"endpoint,omitempty"`
@@ -380,7 +382,6 @@ type BackupSpec struct {
 }
 
 // IngressSpec defines ingress configuration.
-// +kubebuilder:validation:XValidation:rule="(has(oldSelf.mode) ? (oldSelf.mode == 'path' ? 'path' : 'subdomain') : 'subdomain') == (has(self.mode) ? (self.mode == 'path' ? 'path' : 'subdomain') : 'subdomain')",message="ingressSpec.mode is immutable"
 // +kubebuilder:validation:XValidation:rule="!has(self.annotations) || self.annotations.all(k, k.matches(r'^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$'))",message="ingressSpec.annotations keys must be valid Kubernetes annotation names (optional DNS-subdomain prefix + '/' + alphanumeric name)"
 type IngressSpec struct {
 	// Host is the ingress hostname.
@@ -389,7 +390,8 @@ type IngressSpec struct {
 	TLSSecretName string `json:"tlsSecretName,omitempty"`
 	// Mode selects how the controller is exposed: "subdomain" (default) gives the
 	// controller its own host; "path" serves it at /jenkins/<ns>/<name> on the
-	// shared host. Immutable after create.
+	// shared host. Immutable after create. A missing block or a missing mode
+	// counts as subdomain. A patch cannot remove or add the block to change the mode.
 	// +kubebuilder:validation:Enum="";subdomain;path
 	Mode string `json:"mode,omitempty"`
 	// Annotations adds/overrides ingress annotations for this controller only.

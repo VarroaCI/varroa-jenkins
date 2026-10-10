@@ -56,6 +56,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   transition rule skips an add or a remove of the block. Both reads are `has()`-guarded.
   `CommandCRUD.HandleUpdate` mirrors the rule through `v1alpha1.IsCell`.
 
+  The `Controller` ingress mode rule also sits on `ControllerSpec`, not on `ingressSpec`, for the same reason.
+  `CommandCRUD.HandleUpdate` mirrors it through `IngressSpec.RoutingMode()`.
+
   `ControllerStatus` carries `PluginInventory` (`*PluginInventoryStatus`),
   a bounded summary of installed plugins with per-class counts, capped drift
   and version-drift lists, freshness/degradation flags, and an in-flight

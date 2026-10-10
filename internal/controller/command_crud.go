@@ -562,7 +562,8 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "cell.enabled is immutable", Code: bus.CodeInvalid})
 	}
 
-	// Validate ingress mode immutability.
+	// Validate ingress mode immutability. A missing block counts as subdomain,
+	// the same as the CRD rule on ControllerSpec.
 	if existing.Spec.IngressSpec.RoutingMode() != updated.Spec.IngressSpec.RoutingMode() {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "ingressSpec.mode is immutable", Code: bus.CodeInvalid})
 	}

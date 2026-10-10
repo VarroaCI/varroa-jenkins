@@ -170,7 +170,8 @@ spec:
                     description: |-
                       Mode selects how the controller is exposed: "subdomain" (default) gives the
                       controller its own host; "path" serves it at /jenkins/<ns>/<name> on the
-                      shared host. Immutable after create.
+                      shared host. Immutable after create. A missing block or a missing mode
+                      counts as subdomain. A patch cannot remove or add the block to change the mode.
                     enum:
                     - ""
                     - subdomain
@@ -181,10 +182,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-validations:
-                - message: ingressSpec.mode is immutable
-                  rule: '(has(oldSelf.mode) ? (oldSelf.mode == ''path'' ? ''path''
-                    : ''subdomain'') : ''subdomain'') == (has(self.mode) ? (self.mode
-                    == ''path'' ? ''path'' : ''subdomain'') : ''subdomain'')'
                 - message: ingressSpec.annotations keys must be valid Kubernetes annotation
                     names (optional DNS-subdomain prefix + '/' + alphanumeric name)
                   rule: '!has(self.annotations) || self.annotations.all(k, k.matches(r''^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$''))'
@@ -3989,6 +3986,10 @@ spec:
             - message: cell.enabled is immutable
               rule: (has(self.cell) && has(self.cell.enabled) && self.cell.enabled)
                 == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+            - message: ingressSpec.mode is immutable
+              rule: (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode
+                == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode)
+                && oldSelf.ingressSpec.mode == 'path')
           status:
             description: ControllerStatus defines the observed state of Controller.
             properties:

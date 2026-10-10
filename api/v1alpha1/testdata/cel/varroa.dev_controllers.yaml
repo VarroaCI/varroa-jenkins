@@ -74,21 +74,77 @@ cases:
     new: {spec: {hibernation: {enabled: true, gracePeriodMinutes: 5}}}
     want: accept
 
-  # Ingress mode: an empty or absent mode counts as subdomain, so only a
-  # change between path and subdomain is refused.
-  - name: ingress mode changed from path to subdomain
+  # Ingress mode: the rule sits on spec. A missing block or a missing mode
+  # counts as subdomain, so only a change between path and not-path is refused.
+  - name: ingress mode flipped from path to subdomain
     rule: |-
-      (has(oldSelf.mode) ? (oldSelf.mode == 'path' ? 'path' : 'subdomain') : 'subdomain') == (has(self.mode) ? (self.mode == 'path' ? 'path' : 'subdomain') : 'subdomain')
-    field: spec.ingressSpec
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
     old: {spec: {ingressSpec: {mode: path}}}
     new: {spec: {ingressSpec: {mode: subdomain}}}
     want: reject
+  - name: ingress block removed while path
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {spec: {ingressSpec: {mode: path}}}
+    new: {spec: {ingressSpec: null}}
+    want: reject
+  - name: ingress mode key removed while path
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {spec: {ingressSpec: {mode: path}}}
+    new: {spec: {ingressSpec: {host: a.example.com}}}
+    want: reject
+  - name: ingress path block added to a controller with no block
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {}
+    new: {spec: {ingressSpec: {mode: path}}}
+    want: reject
   - name: ingress mode unchanged while host changes
     rule: |-
-      (has(oldSelf.mode) ? (oldSelf.mode == 'path' ? 'path' : 'subdomain') : 'subdomain') == (has(self.mode) ? (self.mode == 'path' ? 'path' : 'subdomain') : 'subdomain')
-    field: spec.ingressSpec
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
     old: {spec: {ingressSpec: {mode: path}}}
     new: {spec: {ingressSpec: {mode: path, host: a.example.com}}}
+    want: accept
+  - name: ingress subdomain block added without mode
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {}
+    new: {spec: {ingressSpec: {host: a.example.com}}}
+    want: accept
+  - name: ingress subdomain block added with mode subdomain
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {}
+    new: {spec: {ingressSpec: {mode: subdomain}}}
+    want: accept
+  - name: ingress empty mode rewritten to subdomain
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {spec: {ingressSpec: {mode: ''}}}
+    new: {spec: {ingressSpec: {mode: subdomain}}}
+    want: accept
+  - name: ingress subdomain block removed
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {spec: {ingressSpec: {mode: subdomain}}}
+    new: {spec: {ingressSpec: null}}
+    want: accept
+  - name: no ingress block before or after
+    rule: |-
+      (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode) && oldSelf.ingressSpec.mode == 'path')
+    field: spec
+    old: {}
+    new: {spec: {headless: true}}
     want: accept
 
   - name: ingress annotation key with uppercase and space

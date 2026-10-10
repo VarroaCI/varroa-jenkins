@@ -9,7 +9,7 @@ Helm creates the dashboard Ingress. The operator creates one Ingress for each co
 | `subdomain` | `https://<controller>.<root-domain>/` | Wildcard DNS and certificates are available. |
 | `path` | `https://<dashboard-host>/jenkins/<namespace>/<controller>/` | One hostname and shared ingress are preferred. |
 
-`subdomain` is the default. `spec.ingressSpec.mode` is immutable after controller creation. The dashboard Spec Editor shows the mode as read-only.
+`subdomain` is the default. `spec.ingressSpec.mode` is immutable after controller creation. The dashboard Spec Editor shows the mode as read-only. A missing `ingressSpec` block or a missing `mode` counts as `subdomain`. A patch cannot remove the block or add it with another mode. The API server refuses it with `ingressSpec.mode is immutable`.
 
 Path mode uses the dashboard host and its TLS configuration. Do not set `tlsSecretName` on a path-mode controller. Varroa configures the Jenkins URL prefix automatically.
 
