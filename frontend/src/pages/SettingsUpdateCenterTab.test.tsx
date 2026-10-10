@@ -180,6 +180,24 @@ describe("SettingsUpdateCenterTab", () => {
     expect(screen.getByText("showing 2 of 60")).toBeInTheDocument();
   });
 
+  it("shows the requesting core on a latest unservable row", async () => {
+    const statusCore = {
+      ...enabledStatus,
+      pullThroughEnabled: true,
+      unservableCount: 1,
+      unservable: [
+        { plugin: "core-bound", version: "latest", requiredBy: "profile-b", core: "2.555.3", reason: "NotListed" },
+      ],
+    };
+    createServer(
+      () => HttpResponse.json(statusCore),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("latest (core 2.555.3)")).toBeInTheDocument();
+  });
+
   it("does not render the unservable table when unservable is empty", async () => {
     createServer(
       () => HttpResponse.json(enabledStatus),

@@ -506,15 +506,28 @@ func TestUpdateCenterStatusServability(t *testing.T) {
 	uc := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
 		GapCount:        7,
 		UnservableCount: 1,
+		Gaps: []v1alpha1.UpdateCenterGap{
+			{Plugin: "bar", Version: "latest", RequiredBy: "bundle:ns/b", Core: "2.555.3"},
+		},
 		Unservable: []v1alpha1.UpdateCenterGap{
 			{Plugin: "foo", Version: "1.0", RequiredBy: "profile:p", Reason: "ArchiveDisabled"},
+			{Plugin: "baz", Version: "latest", RequiredBy: "profile:q", Core: "2.555.3", Reason: "NotListed"},
 		},
 	}}
 	resp := updateCenterStatusResponseFromCR(uc)
 	if resp.GapCount != 7 || resp.UnservableCount != 1 {
 		t.Errorf("counts = %d/%d, want 7/1", resp.GapCount, resp.UnservableCount)
 	}
-	if len(resp.Unservable) != 1 || resp.Unservable[0].Reason != "ArchiveDisabled" || resp.Unservable[0].Plugin != "foo" {
-		t.Errorf("Unservable = %+v, want foo with reason ArchiveDisabled", resp.Unservable)
+	if len(resp.Unservable) != 2 || resp.Unservable[0].Reason != "ArchiveDisabled" || resp.Unservable[0].Plugin != "foo" {
+		t.Errorf("Unservable = %+v, want foo with reason ArchiveDisabled first", resp.Unservable)
+	}
+	if resp.Unservable[0].Core != "" {
+		t.Errorf("pinned unservable core = %q, want empty", resp.Unservable[0].Core)
+	}
+	if resp.Unservable[1].Core != "2.555.3" {
+		t.Errorf("latest unservable core = %q, want 2.555.3", resp.Unservable[1].Core)
+	}
+	if len(resp.Gaps) != 1 || resp.Gaps[0].Core != "2.555.3" {
+		t.Errorf("Gaps = %+v, want bar with core 2.555.3", resp.Gaps)
 	}
 }

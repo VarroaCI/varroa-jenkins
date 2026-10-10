@@ -6098,8 +6098,15 @@ func defaultMiteImage() string {
 // plugin set agree by construction, and keeps this in step with
 // EvaluateCoreCompat, which reports both sentinels as baseline-backed.
 func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProfile) string {
+	return "jenkins/jenkins:" + deployedCore(version, profile)
+}
+
+// deployedCore returns the Jenkins core version a Controller runs for version and
+// profile. The profile's ResolveVersion wins. Otherwise the trimmed version is used,
+// and an empty version or "lts" resolves to the build-time baseline.
+func deployedCore(version string, profile *v1alpha1.JenkinsVersionProfile) string {
 	if profile != nil && profile.Spec.ResolveVersion != "" {
-		return "jenkins/jenkins:" + profile.Spec.ResolveVersion
+		return profile.Spec.ResolveVersion
 	}
 	// Trim to stay in step with ResolveProfile and EvaluateCoreCompat, which both
 	// normalize before matching. Without this, a whitespace-only spec.version
@@ -6107,9 +6114,9 @@ func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProf
 	// "jenkins/jenkins: " tag.
 	v := strings.TrimSpace(version)
 	if v == "" || v == "lts" {
-		return "jenkins/jenkins:" + pluginlock.Baseline()
+		return pluginlock.Baseline()
 	}
-	return "jenkins/jenkins:" + v
+	return v
 }
 
 // effectiveDesiredMiteImage returns the mite sidecar image that provisioning

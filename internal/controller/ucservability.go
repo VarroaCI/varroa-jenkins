@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // Every operator call to the update center's servability endpoint goes through
@@ -33,10 +35,12 @@ type ucHTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// ucServabilityPlugin is one entry of the servability request.
+// ucServabilityPlugin is one entry of the servability request. Core is the lowest
+// core that requests a latest entry. It is empty for a pinned version.
 type ucServabilityPlugin struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	Core    string `json:"core,omitempty"`
 }
 
 // ucServabilityRequest is the POST body of /api/v1/servability.
@@ -128,6 +132,27 @@ func classifyServability(res ucServabilityResult) (reason string, undecided bool
 	default:
 		return "", true
 	}
+}
+
+// inventoryByName groups the stored entries by plugin name.
+func inventoryByName(inv []inventoryEntry) map[string][]inventoryEntry {
+	out := make(map[string][]inventoryEntry, len(inv))
+	for _, e := range inv {
+		out[e.Name] = append(out[e.Name], e)
+	}
+	return out
+}
+
+// storedForCore reports whether the store holds a version of name that runs on
+// core. It is the one stored check for a latest pin. An empty core accepts any
+// stored version. An entry with no requiredCore runs on every core.
+func storedForCore(byName map[string][]inventoryEntry, name, core string) bool {
+	for _, e := range byName[name] {
+		if ucmeta.CoreCompatible(e.RequiredCore, core) {
+			return true
+		}
+	}
+	return false
 }
 
 // getUCInventory GETs the update center's /api/v1/inventory. The second result

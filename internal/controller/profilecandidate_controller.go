@@ -202,7 +202,7 @@ func (r *ProfileCandidateReconciler) Reconcile(ctx context.Context, req reconcil
 	failed := r.verifyClosure(ctx, candidate, closure, fetch, status, logger)
 
 	// --- Step 2: plugins-servable check ---
-	pluginsServable, pluginsServableChecked := r.checkPluginsServable(ctx, closure, status, logger)
+	pluginsServable, pluginsServableChecked := r.checkPluginsServable(ctx, closure, candidate.Spec.ResolveVersion, status, logger)
 
 	// --- Step 3: advisory fleet pre-flight (never blocking) ---
 	r.checkPreflight(ctx, candidate, profile, closure, status, logger)
@@ -614,11 +614,14 @@ func (r *ProfileCandidateReconciler) verifyClosure(ctx context.Context, candidat
 // posts only the unstored pins to the servability endpoint, which answers
 // whether pull-through can serve each one.
 //
+// A latest pin is stored when a stored version runs on core, the candidate's
+// resolveVersion, and it is posted with that core.
+//
 // The first result is the condition status to act on. The second is false
 // only when the check could not complete (the inventory or servability call
 // failed, or the UpdateCenter read failed). The caller then leaves the
 // condition at its prior value and requeues.
-func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, closure pluginresolve.Closure, status *v1alpha1.ProfileCandidateStatus, logger *slog.Logger) (metav1.ConditionStatus, bool) {
+func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, closure pluginresolve.Closure, core string, status *v1alpha1.ProfileCandidateStatus, logger *slog.Logger) (metav1.ConditionStatus, bool) {
 	if r.ucBaseURL == "" {
 		r.setPluginsServable(status, metav1.ConditionTrue, reasonNoUpdateCenter, "no in-cluster update center configured")
 		return metav1.ConditionTrue, true
@@ -639,20 +642,21 @@ func (r *ProfileCandidateReconciler) checkPluginsServable(ctx context.Context, c
 		return "", false
 	}
 	storedPins := make(map[string]struct{}, len(inventory))
-	storedNames := make(map[string]struct{}, len(inventory))
 	for _, e := range inventory {
 		storedPins[e.Name+"@"+e.Version] = struct{}{}
-		storedNames[e.Name] = struct{}{}
 	}
+	byName := inventoryByName(inventory)
 
-	// An unpinned pin is stored when any version of the plugin is stored, as
-	// UpdateCenter gap analysis treats it.
+	// A latest pin is stored when a stored version runs on the candidate's core,
+	// as UpdateCenter gap analysis treats it. The check posts the core for a latest pin.
 	var unstored []ucServabilityPlugin
 	for _, p := range closure.Plugins {
 		if ucmeta.IsLatest(p.Version) {
-			if _, ok := storedNames[p.ArtifactID]; ok {
+			if storedForCore(byName, p.ArtifactID, core) {
 				continue
 			}
+			unstored = append(unstored, ucServabilityPlugin{Name: p.ArtifactID, Version: "latest", Core: core})
+			continue
 		} else if _, ok := storedPins[p.ArtifactID+"@"+p.Version]; ok {
 			continue
 		}

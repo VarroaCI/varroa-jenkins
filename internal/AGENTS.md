@@ -329,6 +329,8 @@ reading each package's entry point):
   A metadata request with `?version=<core>` lists the highest stored version
   that core runs, and `ResolveLatestForCore` supplies a compatible upstream entry
   for a declared `latest` plugin (`corecompat.go`).
+  The servability route resolves a `latest` entry that carries `core` through
+  `ResolveLatestForCore`. A pinned entry ignores `core`.
   `POST /api/v1/plugins` (`upload.go` + `closure.go`) is the **push** supply
   tier: PARSE → declared-set precondition → D4 admission → PLAN → VALIDATE →
   COMMIT, writing nothing until every mandatory dependency resolves. It requires

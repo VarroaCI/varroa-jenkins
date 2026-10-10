@@ -107,7 +107,7 @@ func testLatestPinUnstoredPostedAsLatest(t *testing.T) {
 	if status.GapCount != 1 || len(status.Gaps) != 1 || status.Gaps[0].Plugin != "foo" || status.Gaps[0].Version != "latest" {
 		t.Fatalf("gaps = %d %+v, want one foo@latest gap", status.GapCount, status.Gaps)
 	}
-	if len(posted) != 1 || posted[0] != (ucServabilityPlugin{Name: "foo", Version: "latest"}) {
+	if len(posted) != 1 || posted[0] != (ucServabilityPlugin{Name: "foo", Version: "latest", Core: "2.479.1"}) {
 		t.Errorf("posted = %+v, want foo@latest", posted)
 	}
 	if rd := findUCCondition(status.Conditions, condTypeReady); rd == nil || rd.Status != metav1.ConditionTrue {

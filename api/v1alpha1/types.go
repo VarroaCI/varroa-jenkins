@@ -3323,6 +3323,9 @@ type UpdateCenterGap struct {
 	Version string `json:"version"`
 	// RequiredBy identifies the profile or bundle that requires this plugin.
 	RequiredBy string `json:"requiredBy"`
+	// Core is the lowest Jenkins core that requests a latest entry. Empty for a pinned version.
+	// +optional
+	Core string `json:"core,omitempty"`
 	// Reason explains why the plugin cannot be served. It is set only on
 	// status.unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled.
 	// +optional

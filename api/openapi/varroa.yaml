@@ -9686,6 +9686,10 @@ components:
       type: object
     components_schemas_UpdateCenterGap:
       properties:
+        core:
+          description: Lowest Jenkins core that requests a latest entry. Empty for
+            a pinned version.
+          type: string
         plugin:
           type: string
         reason:

@@ -3797,6 +3797,9 @@ UpdateCenterGap:
       type: string
     requiredBy:
       type: string
+    core:
+      type: string
+      description: Lowest Jenkins core that requests a latest entry. Empty for a pinned version.
     reason:
       type: string
 

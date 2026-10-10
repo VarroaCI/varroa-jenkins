@@ -3924,6 +3924,8 @@ type ComponentsSchemasUpdateCenterCondition struct {
 
 // ComponentsSchemasUpdateCenterGap defines model for components_schemas_UpdateCenterGap.
 type ComponentsSchemasUpdateCenterGap struct {
+	// Core Lowest Jenkins core that requests a latest entry. Empty for a pinned version.
+	Core       *string `json:"core,omitempty"`
 	Plugin     *string `json:"plugin,omitempty"`
 	Reason     *string `json:"reason,omitempty"`
 	RequiredBy *string `json:"requiredBy,omitempty"`

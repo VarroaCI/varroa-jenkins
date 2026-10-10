@@ -666,6 +666,8 @@ sections describe.
     operator clients of the update center's servability and inventory routes.
     `UpdateCenterReconciler` and `ProfileCandidateReconciler` both call them.
     The candidate posts only its unstored pins to the servability route.
+    `storedForCore` is the one stored check for a latest pin. Both reconcilers
+    post `core` for a latest entry.
   - `CatalogReconciler` (`catalog_controller.go`) — `CatalogSource` +
     `ComposedBundle`; `Reconcile` is a **three-way** dispatch: `repoURL` (git
     clone) vs `ociRef` (OCI pull via `oci.RegistryStore` + `Resolve` → digest as

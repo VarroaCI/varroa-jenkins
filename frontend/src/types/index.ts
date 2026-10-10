@@ -1354,6 +1354,8 @@ export interface UpdateCenterGap {
   plugin: string;
   version: string;
   requiredBy: string;
+  /** Lowest Jenkins core that requests a latest entry. Empty for a pinned version. */
+  core?: string;
   /** Set only on unservable entries: NotListed, ArchiveDisabled, or PullThroughDisabled. */
   reason?: string;
 }

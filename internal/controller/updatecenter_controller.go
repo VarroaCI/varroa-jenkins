@@ -26,7 +26,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/pluginver"
 	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
@@ -510,6 +512,8 @@ type declaredPlugin struct {
 	Name       string
 	Version    string
 	RequiredBy string
+	// Core is the lowest core that requests this plugin; empty when no controller requests it.
+	Core string
 }
 
 // computeGaps fetches the UC inventory, builds the declared set from profiles and
@@ -548,11 +552,10 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 
 	// Build inventory lookup set: "name@version" → true.
 	invSet := make(map[string]bool, len(inventory))
-	storedNames := make(map[string]bool, len(inventory))
 	for _, e := range inventory {
 		invSet[fmt.Sprintf("%s@%s", e.Name, e.Version)] = true
-		storedNames[e.Name] = true
 	}
+	byName := inventoryByName(inventory)
 
 	// Set PluginCount and StoreBytes from the inventory response.
 	status.PluginCount = len(inventory)
@@ -573,10 +576,10 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 	// Compute gaps: distinct declared − inventory.
 	var unstored []declaredPlugin
 	for _, dp := range uniqueDeclared(declared) {
-		// Served metadata advertises one stored version per plugin, so an unpinned
-		// pin is stored when any version of the plugin is stored.
+		// Served metadata advertises one stored version per plugin. A latest pin is
+		// stored when a stored version runs on the lowest core that requests it.
 		if ucmeta.IsLatest(dp.Version) {
-			if !storedNames[dp.Name] {
+			if !storedForCore(byName, dp.Name, dp.Core) {
 				unstored = append(unstored, dp)
 			}
 			continue
@@ -594,6 +597,7 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 			Plugin:     dp.Name,
 			Version:    dp.Version,
 			RequiredBy: dp.RequiredBy,
+			Core:       coreForLatest(dp),
 		})
 	}
 
@@ -692,6 +696,7 @@ func (r *UpdateCenterReconciler) computeServability(ctx context.Context, status 
 			Plugin:     unstored[i].Name,
 			Version:    unstored[i].Version,
 			RequiredBy: unstored[i].RequiredBy,
+			Core:       coreForLatest(unstored[i]),
 			Reason:     reason,
 		})
 	}
@@ -736,15 +741,21 @@ func (r *UpdateCenterReconciler) computeServability(ctx context.Context, status 
 
 // uniqueDeclared returns the distinct name@version entries, keeping the first
 // RequiredBy seen for each, sorted by plugin name and then version.
+//
+// A duplicate latest entry merges its Core with minCore, so the posted core is the
+// lowest core any source requests for that plugin.
 func uniqueDeclared(declared []declaredPlugin) []declaredPlugin {
-	seen := make(map[string]bool, len(declared))
+	index := make(map[string]int, len(declared))
 	out := make([]declaredPlugin, 0, len(declared))
 	for _, dp := range declared {
 		key := dp.Name + "@" + dp.Version
-		if seen[key] {
+		if i, dup := index[key]; dup {
+			if ucmeta.IsLatest(dp.Version) {
+				out[i].Core = minCore(out[i].Core, dp.Core)
+			}
 			continue
 		}
-		seen[key] = true
+		index[key] = len(out)
 		out = append(out, dp)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -761,7 +772,7 @@ func uniqueDeclared(declared []declaredPlugin) []declaredPlugin {
 func (r *UpdateCenterReconciler) fetchServability(ctx context.Context, plugins []declaredPlugin) ([]ucServabilityResult, error) {
 	req := make([]ucServabilityPlugin, 0, len(plugins))
 	for _, dp := range plugins {
-		req = append(req, ucServabilityPlugin{Name: dp.Name, Version: dp.Version})
+		req = append(req, ucServabilityPlugin{Name: dp.Name, Version: dp.Version, Core: coreForLatest(dp)})
 	}
 	return postServability(ctx, r.httpDoer, r.ucBaseURL, req)
 }
@@ -844,7 +855,9 @@ func (r *UpdateCenterReconciler) reconcileMetadataSources(ctx context.Context, u
 }
 
 // buildDeclaredPluginsValue renders the declared plugin set as the sorted,
-// newline-delimited "name@version" body of the declared-plugins key. It returns nil
+// newline-delimited "name@version" body of the declared-plugins key. Every entry
+// carries a version: buildDeclaredSet writes a version-less entry as "latest".
+// It returns nil
 // when the set could not be built, which the writer reads as "leave the key alone" —
 // the same leave-unchanged-on-failure invariant computeGaps applies to status.Gaps.
 //
@@ -861,7 +874,7 @@ func (r *UpdateCenterReconciler) buildDeclaredPluginsValue(ctx context.Context, 
 	seen := make(map[string]struct{}, len(declared))
 	lines := make([]string, 0, len(declared))
 	for _, dp := range declared {
-		if dp.Name == "" || dp.Version == "" {
+		if dp.Name == "" {
 			continue
 		}
 		line := dp.Name + "@" + dp.Version
@@ -954,6 +967,81 @@ func boundSources(sources []string) []string {
 	return out
 }
 
+// canonicalVersion maps every latest spelling (the empty string, or latest in any
+// case) to "latest". The declared set holds one spelling for a latest pin, so a
+// version-less entry and a latest entry collapse into one row.
+func canonicalVersion(v string) string {
+	if ucmeta.IsLatest(v) {
+		return "latest"
+	}
+	return v
+}
+
+// coreForLatest returns the requesting core of a latest entry, and "" for a pinned
+// version. A pinned version does not depend on the core.
+func coreForLatest(dp declaredPlugin) string {
+	if ucmeta.IsLatest(dp.Version) {
+		return dp.Core
+	}
+	return ""
+}
+
+// requestingCore returns the exact core a controller or profile deploys, without a
+// build suffix. It returns "" when the deployed version does not name an exact core.
+// A two-segment version is an exact core only on the weekly channel. The baseline
+// (an empty version or "lts", which have no profile) is the weekly 2.570 profile in
+// the lock file. On the LTS channel a two-segment version is a line. An empty core
+// accepts any stored version, which is the check the update center applied before
+// core-aware reporting.
+func requestingCore(version string, profile *v1alpha1.JenkinsVersionProfile) string {
+	segs, ok := jenkinsver.Core(deployedCore(version, profile))
+	if !ok {
+		return ""
+	}
+	v := strings.TrimSpace(version)
+	weekly := (profile != nil && profile.Spec.Channel == "weekly") || v == "" || v == "lts"
+	if len(segs) == 2 && weekly {
+		return fmt.Sprintf("%d.%d", segs[0], segs[1])
+	}
+	if len(segs) != 3 {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d", segs[0], segs[1], segs[2])
+}
+
+// minCore returns the lower of two cores. An empty core requests nothing, so it
+// loses to a non-empty core.
+func minCore(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	case pluginver.Compare(a, b) <= 0:
+		return a
+	default:
+		return b
+	}
+}
+
+// bundleMinCores maps each bundle key "namespace/name" to the lowest deployed core of
+// the Controllers that use that bundle. A bundle that no Controller uses has no entry.
+// Controllers in member clusters are not visible here, so their cores are not counted.
+func (r *UpdateCenterReconciler) bundleMinCores(ctx context.Context, profiles []*v1alpha1.JenkinsVersionProfile) (map[string]string, error) {
+	controllers, err := crdstore.List[v1alpha1.Controller](ctx, r.store, "", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string)
+	for _, cr := range controllers {
+		name, ns := v1alpha1.EffectiveBundleRef(cr, r.operatorNamespace)
+		prof, _ := ResolveProfile(cr.Spec.Version, profiles)
+		key := ns + "/" + name
+		out[key] = minCore(out[key], requestingCore(cr.Spec.Version, prof))
+	}
+	return out, nil
+}
+
 // buildDeclaredSet reads all JenkinsVersionProfiles' materialized plugin sets,
 // all ComposedBundles' plugin lines, and every open ProfileCandidate's
 // resolved closure to build the declared plugin union.
@@ -982,8 +1070,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactID,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("profile:%s", p.Name),
+				Core:       requestingCore(p.Spec.Version, p),
 			})
 		}
 	}
@@ -992,6 +1081,10 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 	bundles, err := crdstore.List[v1alpha1.ComposedBundle](ctx, r.store, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("list ComposedBundles: %w", err)
+	}
+	bundleCores, err := r.bundleMinCores(ctx, profiles)
+	if err != nil {
+		return nil, fmt.Errorf("list Controllers: %w", err)
 	}
 	for _, cb := range bundles {
 		if cb.Status.ContentRef == "" {
@@ -1014,8 +1107,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactId,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("bundle:%s/%s", cb.Namespace, cb.Name),
+				Core:       bundleCores[cb.Namespace+"/"+cb.Name],
 			})
 		}
 	}
@@ -1048,8 +1142,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactID,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("candidate:%s", c.Name),
+				Core:       c.Spec.ResolveVersion,
 			})
 		}
 	}

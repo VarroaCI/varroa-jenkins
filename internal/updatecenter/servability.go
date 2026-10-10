@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
@@ -31,11 +32,15 @@ const (
 // an interface so tests can drive concurrency and outcomes directly.
 type availabilityResolver interface {
 	ResolveAvailable(ctx context.Context, name, version string) ucmeta.Availability
+	ResolveLatestForCore(ctx context.Context, name, core string) ucmeta.Availability
 }
 
 type servabilityPlugin struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	// Core is the lowest core that requests a latest entry. It is ignored for a
+	// pinned version.
+	Core string `json:"core,omitempty"`
 }
 
 type servabilityRequest struct {
@@ -112,10 +117,17 @@ func (s *Server) answerServability(ctx context.Context, res availabilityResolver
 	wg.Wait()
 }
 
-// servabilityFor maps one lookup onto the wire shape.
+// servabilityFor maps one lookup onto the wire shape. A latest entry with a core
+// resolves against that core. A pinned version resolves the same way with or
+// without a core.
 func servabilityFor(ctx context.Context, res availabilityResolver, p servabilityPlugin) servabilityResult {
 	out := servabilityResult{Name: p.Name, Version: p.Version}
-	a := res.ResolveAvailable(ctx, p.Name, p.Version)
+	var a ucmeta.Availability
+	if ucmeta.IsLatest(p.Version) && strings.TrimSpace(p.Core) != "" {
+		a = res.ResolveLatestForCore(ctx, p.Name, p.Core)
+	} else {
+		a = res.ResolveAvailable(ctx, p.Name, p.Version)
+	}
 	switch a.Outcome {
 	case ucmeta.Resolved:
 		out.Servable = true

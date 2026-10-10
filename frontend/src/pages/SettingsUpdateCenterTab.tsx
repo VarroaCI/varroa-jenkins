@@ -296,7 +296,7 @@ export default function SettingsUpdateCenterTab() {
                 {status.unservable.map((g, i) => (
                   <tr key={i}>
                     <td><span className={`${styles.tableBadge} ${styles.eol}`}>{g.plugin}</span></td>
-                    <td>{g.version}</td>
+                    <td>{g.version}{g.core ? ` (core ${g.core})` : ""}</td>
                     <td>{g.requiredBy}</td>
                     <td>{unservableReasonLabel(g.reason)}</td>
                   </tr>
@@ -332,7 +332,7 @@ export default function SettingsUpdateCenterTab() {
                 {status.gaps.map((g, i) => (
                   <tr key={i}>
                     <td><span className={`${styles.tableBadge} ${styles.eol}`}>{g.plugin}</span></td>
-                    <td>{g.version}</td>
+                    <td>{g.version}{g.core ? ` (core ${g.core})` : ""}</td>
                     <td>{g.requiredBy}</td>
                   </tr>
                 ))}

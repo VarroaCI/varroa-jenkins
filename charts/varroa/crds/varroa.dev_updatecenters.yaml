@@ -187,6 +187,10 @@ spec:
                   description: UpdateCenterGap identifies a declared plugin that is
                     missing from the store.
                   properties:
+                    core:
+                      description: Core is the lowest Jenkins core that requests a
+                        latest entry. Empty for a pinned version.
+                      type: string
                     plugin:
                       description: Plugin is the plugin artifact ID.
                       type: string
@@ -252,6 +256,10 @@ spec:
                   description: UpdateCenterGap identifies a declared plugin that is
                     missing from the store.
                   properties:
+                    core:
+                      description: Core is the lowest Jenkins core that requests a
+                        latest entry. Empty for a pinned version.
+                      type: string
                     plugin:
                       description: Plugin is the plugin artifact ID.
                       type: string

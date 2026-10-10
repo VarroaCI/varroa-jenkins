@@ -35,6 +35,7 @@ type UpdateCenterGapDTO struct {
 	Plugin     string `json:"plugin"`
 	Version    string `json:"version"`
 	RequiredBy string `json:"requiredBy"`
+	Core       string `json:"core,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
 
@@ -112,6 +113,7 @@ func updateCenterStatusResponseFromCR(uc *v1alpha1.UpdateCenter) UpdateCenterSta
 				Plugin:     g.Plugin,
 				Version:    g.Version,
 				RequiredBy: g.RequiredBy,
+				Core:       g.Core,
 			}
 		}
 	} else {
@@ -126,6 +128,7 @@ func updateCenterStatusResponseFromCR(uc *v1alpha1.UpdateCenter) UpdateCenterSta
 				Plugin:     g.Plugin,
 				Version:    g.Version,
 				RequiredBy: g.RequiredBy,
+				Core:       g.Core,
 				Reason:     g.Reason,
 			}
 		}
