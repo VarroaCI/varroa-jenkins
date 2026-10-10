@@ -4710,14 +4710,18 @@ PipelineDependencyEdge:
     result threshold the edge fires on, and whether the producer's
     exports currently grant it. A declared edge whose grant is missing
     is not hidden; it appears with granted false.
-  required: [tenant, job, result, granted]
+  required: [tenant, job, jobPath, result, granted]
   properties:
     tenant:
       type: string
       description: The producer tenant's identifier.
     job:
       type: string
-      description: The producer job's path, relative to the producer tenant's folder.
+      description: The job's name, relative to the other tenant's folder.
+    jobPath:
+      type: string
+      description: >
+        The job's path with its tenant folder. The job page route takes this path.
     result:
       type: string
       description: The result threshold the edge fires on.

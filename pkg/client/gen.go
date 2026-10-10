@@ -2546,8 +2546,11 @@ type ComponentsSchemasPipelineDependencyEdge struct {
 	// Granted The grant evaluator's fanout-path verdict, read from the producer's exports.
 	Granted bool `json:"granted"`
 
-	// Job The producer job's path, relative to the producer tenant's folder.
+	// Job The job's name, relative to the other tenant's folder.
 	Job string `json:"job"`
+
+	// JobPath The job's path with its tenant folder. The job page route takes this path.
+	JobPath string `json:"jobPath"`
 
 	// Result The result threshold the edge fires on.
 	Result ComponentsSchemasPipelineDependencyEdgeResult `json:"result"`

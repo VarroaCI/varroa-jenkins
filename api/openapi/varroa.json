@@ -9691,7 +9691,11 @@
             "type": "boolean"
           },
           "job": {
-            "description": "The producer job's path, relative to the producer tenant's folder.",
+            "description": "The job's name, relative to the other tenant's folder.",
+            "type": "string"
+          },
+          "jobPath": {
+            "description": "The job's path with its tenant folder. The job page route takes this path.\n",
             "type": "string"
           },
           "result": {
@@ -9711,6 +9715,7 @@
         "required": [
           "tenant",
           "job",
+          "jobPath",
           "result",
           "granted"
         ],

@@ -154,12 +154,14 @@ type pipelineJobDetailJSON struct {
 
 // pipelineDependencyEdgeJSON is one cross-tenant dependency edge (design
 // D13): a producer tenant and job, the result threshold the edge fires
-// on, and whether the producer's exports currently grant it. Granted
-// false marks a declared edge whose grant is missing; it is never
-// dropped from the list.
+// on, and whether the producer's exports currently grant it. Job is
+// relative to the other tenant's folder. JobPath is the path the job
+// page route takes. Granted false marks a declared edge whose grant is
+// missing; it is never dropped from the list.
 type pipelineDependencyEdgeJSON struct {
 	Tenant  string `json:"tenant"`
 	Job     string `json:"job"`
+	JobPath string `json:"jobPath"`
 	Result  string `json:"result"`
 	Granted bool   `json:"granted"`
 }
@@ -180,12 +182,12 @@ func buildPipelineDependencies(deps recordstore.JobDependencies) pipelineDepende
 	}
 	for _, edge := range deps.Upstream {
 		out.Upstream = append(out.Upstream, pipelineDependencyEdgeJSON{
-			Tenant: edge.Tenant, Job: edge.Job, Result: edge.Result, Granted: edge.Granted,
+			Tenant: edge.Tenant, Job: edge.Job, JobPath: edge.JobPath, Result: edge.Result, Granted: edge.Granted,
 		})
 	}
 	for _, edge := range deps.Downstream {
 		out.Downstream = append(out.Downstream, pipelineDependencyEdgeJSON{
-			Tenant: edge.Tenant, Job: edge.Job, Result: edge.Result, Granted: edge.Granted,
+			Tenant: edge.Tenant, Job: edge.Job, JobPath: edge.JobPath, Result: edge.Result, Granted: edge.Granted,
 		})
 	}
 	return out

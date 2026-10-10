@@ -179,10 +179,13 @@ The API carries the same data:
 
 ```json
 "dependencies": {
-  "upstream":   [{"tenant": "platform", "job": "release", "result": "SUCCESS", "granted": true}],
-  "downstream": [{"tenant": "search", "job": "rebuild", "result": "SUCCESS", "granted": false}]
+  "upstream":   [{"tenant": "platform", "job": "release", "jobPath": "platform/release", "result": "SUCCESS", "granted": true}],
+  "downstream": [{"tenant": "search", "job": "rebuild", "jobPath": "search/rebuild", "result": "SUCCESS", "granted": false}]
 }
 ```
+
+`job` is the name in the other tenant's folder. `jobPath` is the full job path, and each row
+links to it.
 
 ## The fleet lock
 

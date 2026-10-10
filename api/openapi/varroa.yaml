@@ -7224,8 +7224,11 @@ components:
             The grant evaluator's fanout-path verdict, read from the producer's exports.
           type: boolean
         job:
-          description: The producer job's path, relative to the producer tenant's
-            folder.
+          description: The job's name, relative to the other tenant's folder.
+          type: string
+        jobPath:
+          description: |
+            The job's path with its tenant folder. The job page route takes this path.
           type: string
         result:
           description: The result threshold the edge fires on.
@@ -7240,6 +7243,7 @@ components:
       required:
       - tenant
       - job
+      - jobPath
       - result
       - granted
       type: object

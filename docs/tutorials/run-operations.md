@@ -181,7 +181,8 @@ starts the caller's job.
 
 Open either job's page and check the **Triggers** card. The caller's job shows an **Upstream**
 row naming the producer job; the producer's job shows a **Downstream** row naming the caller.
-Neither row carries **grant missing**, because the export covers the call.
+Neither row carries **grant missing**, because the export covers the call. Select an edge to
+open that job's page.
 
 A pipeline can also call another tenant's job directly, without a declared trigger, using
 `varroa.build`. A direct call runs once, on demand, and does not add a row to either job's

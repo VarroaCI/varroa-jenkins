@@ -3,20 +3,25 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 )
 
 // seedUpstreamTrigger inserts one varroa.job_schedules row carrying a
 // varroa-upstream trigger, so a dependency-edge test can build a
 // producer/subscriber fixture directly, without the ingest pipeline.
-func seedUpstreamTrigger(t *testing.T, db *sql.DB, cluster, tenant, jobPath, upstreamTenant, upstreamJob, upstreamResult string) {
+// The subscriber's tenant is the first segment of subscriberPath, its
+// folder. The producer is always alpha/release and the trigger fires on
+// SUCCESS.
+func seedUpstreamTrigger(t *testing.T, db *sql.DB, cluster, subscriberPath string) {
 	t.Helper()
+	tenant, _, _ := strings.Cut(subscriberPath, "/")
 	if _, err := db.Exec(`
 		INSERT INTO varroa.job_schedules
 			(cluster, namespace, cell, tenant, job_path, trigger_type, observed_at, payload,
 			 upstream_tenant, upstream_job, upstream_result)
-		VALUES ($1, 'jenkins', 'cell-a', $2, $3, 'varroa-upstream', now(), '{}', $4, $5, $6)
-	`, cluster, tenant, jobPath, upstreamTenant, upstreamJob, upstreamResult); err != nil {
+		VALUES ($1, 'jenkins', 'cell-a', $2, $3, 'varroa-upstream', now(), '{}', 'alpha', 'release', 'SUCCESS')
+	`, cluster, tenant, subscriberPath); err != nil {
 		t.Fatalf("seed upstream trigger row: %v", err)
 	}
 }
@@ -35,7 +40,7 @@ func TestJobDependencies_UpstreamAndDownstream(t *testing.T) {
 	seedGrantPlacement(t, db, testCluster, "alpha", "jenkins", "cell-alpha", 1,
 		`{"exports":[{"job":"release","callers":["beta"]}]}`)
 	seedGrantPlacement(t, db, testCluster, "beta", "jenkins", "cell-beta", 1, "{}")
-	seedUpstreamTrigger(t, db, testCluster, "beta", "beta/rebuild", "alpha", "release", "SUCCESS")
+	seedUpstreamTrigger(t, db, testCluster, "beta/rebuild")
 
 	subscriber, err := reader.JobDependencies(ctx, testCluster, "beta", "beta/rebuild")
 	if err != nil {
@@ -44,7 +49,7 @@ func TestJobDependencies_UpstreamAndDownstream(t *testing.T) {
 	if len(subscriber.Upstream) != 1 {
 		t.Fatalf("subscriber upstream = %+v, want one edge", subscriber.Upstream)
 	}
-	want := DependencyEdge{Tenant: "alpha", Job: "release", Result: "SUCCESS", Granted: true}
+	want := DependencyEdge{Tenant: "alpha", Job: "release", JobPath: "alpha/release", Result: "SUCCESS", Granted: true}
 	if subscriber.Upstream[0] != want {
 		t.Fatalf("subscriber upstream[0] = %+v, want %+v", subscriber.Upstream[0], want)
 	}
@@ -62,7 +67,7 @@ func TestJobDependencies_UpstreamAndDownstream(t *testing.T) {
 	if len(producer.Downstream) != 1 {
 		t.Fatalf("producer downstream = %+v, want one edge", producer.Downstream)
 	}
-	wantDownstream := DependencyEdge{Tenant: "beta", Job: "rebuild", Result: "SUCCESS", Granted: true}
+	wantDownstream := DependencyEdge{Tenant: "beta", Job: "rebuild", JobPath: "beta/rebuild", Result: "SUCCESS", Granted: true}
 	if producer.Downstream[0] != wantDownstream {
 		t.Fatalf("producer downstream[0] = %+v, want %+v", producer.Downstream[0], wantDownstream)
 	}
@@ -83,7 +88,7 @@ func TestJobDependencies_DownstreamSubscriberInAnotherCluster(t *testing.T) {
 	seedGrantPlacement(t, db, testCluster, "alpha", "jenkins", "cell-alpha", 1,
 		`{"exports":[{"job":"release","callers":["beta"]}]}`)
 	seedGrantPlacement(t, db, subscriberCluster, "beta", "jenkins", "cell-beta", 1, "{}")
-	seedUpstreamTrigger(t, db, subscriberCluster, "beta", "beta/rebuild", "alpha", "release", "SUCCESS")
+	seedUpstreamTrigger(t, db, subscriberCluster, "beta/rebuild")
 
 	producer, err := reader.JobDependencies(ctx, testCluster, "alpha", "alpha/release")
 	if err != nil {
@@ -92,7 +97,7 @@ func TestJobDependencies_DownstreamSubscriberInAnotherCluster(t *testing.T) {
 	if len(producer.Downstream) != 1 {
 		t.Fatalf("producer downstream = %+v, want one edge", producer.Downstream)
 	}
-	want := DependencyEdge{Tenant: "beta", Job: "rebuild", Result: "SUCCESS", Granted: true}
+	want := DependencyEdge{Tenant: "beta", Job: "rebuild", JobPath: "beta/rebuild", Result: "SUCCESS", Granted: true}
 	if producer.Downstream[0] != want {
 		t.Fatalf("producer downstream[0] = %+v, want %+v (a subscriber in another cluster must still resolve granted)",
 			producer.Downstream[0], want)
@@ -111,7 +116,7 @@ func TestJobDependencies_UngrantedEdgeStaysVisible(t *testing.T) {
 
 	seedGrantPlacement(t, db, testCluster, "alpha", "jenkins", "cell-alpha", 1, "{}")
 	seedGrantPlacement(t, db, testCluster, "beta", "jenkins", "cell-beta", 1, "{}")
-	seedUpstreamTrigger(t, db, testCluster, "beta", "beta/rebuild", "alpha", "release", "SUCCESS")
+	seedUpstreamTrigger(t, db, testCluster, "beta/rebuild")
 
 	subscriber, err := reader.JobDependencies(ctx, testCluster, "beta", "beta/rebuild")
 	if err != nil {
@@ -120,7 +125,7 @@ func TestJobDependencies_UngrantedEdgeStaysVisible(t *testing.T) {
 	if len(subscriber.Upstream) != 1 {
 		t.Fatalf("subscriber upstream = %+v, want one edge", subscriber.Upstream)
 	}
-	want := DependencyEdge{Tenant: "alpha", Job: "release", Result: "SUCCESS", Granted: false}
+	want := DependencyEdge{Tenant: "alpha", Job: "release", JobPath: "alpha/release", Result: "SUCCESS", Granted: false}
 	if subscriber.Upstream[0] != want {
 		t.Fatalf("subscriber upstream[0] = %+v, want %+v", subscriber.Upstream[0], want)
 	}
@@ -155,5 +160,42 @@ func TestJobDependencies_EmptyForNoEdge(t *testing.T) {
 	}
 	if deps.Downstream == nil || len(deps.Downstream) != 0 {
 		t.Fatalf("downstream = %+v, want an empty, non-nil slice", deps.Downstream)
+	}
+}
+
+// TestJobDependencies_JobPathCarriesTenantFolder asserts a nested job
+// keeps its tenant folder in JobPath while Job stays folder-relative.
+func TestJobDependencies_JobPathCarriesTenantFolder(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	seedGrantPlacement(t, db, testCluster, "alpha", "jenkins", "cell-alpha", 1,
+		`{"exports":[{"job":"release","callers":["beta"]}]}`)
+	seedGrantPlacement(t, db, testCluster, "beta", "jenkins", "cell-beta", 1, "{}")
+	seedUpstreamTrigger(t, db, testCluster, "beta/nested/rebuild")
+
+	producer, err := reader.JobDependencies(ctx, testCluster, "alpha", "alpha/release")
+	if err != nil {
+		t.Fatalf("JobDependencies(alpha/release): %v", err)
+	}
+	if len(producer.Downstream) != 1 {
+		t.Fatalf("producer downstream = %+v, want one edge", producer.Downstream)
+	}
+	if got := producer.Downstream[0]; got.Job != "nested/rebuild" || got.JobPath != "beta/nested/rebuild" {
+		t.Fatalf("producer downstream[0] = %+v, want Job nested/rebuild and JobPath beta/nested/rebuild", got)
+	}
+
+	subscriber, err := reader.JobDependencies(ctx, testCluster, "beta", "beta/nested/rebuild")
+	if err != nil {
+		t.Fatalf("JobDependencies(beta/nested/rebuild): %v", err)
+	}
+	if len(subscriber.Upstream) != 1 {
+		t.Fatalf("subscriber upstream = %+v, want one edge", subscriber.Upstream)
+	}
+	if got := subscriber.Upstream[0]; got.JobPath != "alpha/release" {
+		t.Fatalf("subscriber upstream[0] = %+v, want JobPath alpha/release", got)
 	}
 }

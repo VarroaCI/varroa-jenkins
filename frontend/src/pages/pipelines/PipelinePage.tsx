@@ -95,16 +95,20 @@ function renderTemplateRow(template: PipelineTemplateInfo) {
   );
 }
 
-function jobPageHref(tenant: string, job: string): string {
-  return `/pipelines/${enc(tenant)}/${enc(job)}`;
+/**
+ * jobPageHref links the job page at its folder-qualified path. The
+ * route takes the whole path, so the tenant folder stays in it.
+ */
+function jobPageHref(tenant: string, jobPath: string): string {
+  return `/pipelines/${enc(tenant)}/${enc(jobPath)}`;
 }
 
 /**
  * renderDependencyRow renders one direction of the Triggers card's
  * dependency edges: a dt/dd pair naming each edge as tenant/job with its
  * result threshold, and "grant missing" for an edge whose grant is
- * false. It renders nothing for an empty edge list, so the row does not
- * appear at all.
+ * false. Each link takes the edge's jobPath. It renders nothing for an
+ * empty edge list, so the row does not appear at all.
  */
 function renderDependencyRow(label: string, edges: PipelineDependencyEdge[]) {
   if (edges.length === 0) return null;
@@ -114,7 +118,7 @@ function renderDependencyRow(label: string, edges: PipelineDependencyEdge[]) {
       <dd>
         {edges.map((edge) => (
           <div key={`${edge.tenant}/${edge.job}`}>
-            <Link to={jobPageHref(edge.tenant, edge.job)}>
+            <Link to={jobPageHref(edge.tenant, edge.jobPath)}>
               {edge.tenant}/{edge.job}
             </Link>{" "}
             ({edge.result}

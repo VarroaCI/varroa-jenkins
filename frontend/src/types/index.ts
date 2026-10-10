@@ -1733,7 +1733,10 @@ export interface PipelineLast30Days {
  */
 export interface PipelineDependencyEdge {
   tenant: string;
+  /** The job's name, relative to the other tenant's folder. A display name. */
   job: string;
+  /** The job's path with its tenant folder. The job page link takes this path. */
+  jobPath: string;
   result: string;
   granted: boolean;
 }

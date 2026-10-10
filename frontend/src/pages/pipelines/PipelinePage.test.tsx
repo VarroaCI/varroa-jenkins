@@ -444,7 +444,7 @@ describe("PipelinePage — dependency edges", () => {
     mockGetPipelineJob.mockResolvedValue(
       jobDetail({
         dependencies: {
-          upstream: [{ tenant: "alpha", job: "release", result: "SUCCESS", granted: true }],
+          upstream: [{ tenant: "alpha", job: "release", jobPath: "alpha/release", result: "SUCCESS", granted: true }],
           downstream: [],
         },
       }),
@@ -456,7 +456,25 @@ describe("PipelinePage — dependency edges", () => {
     expect(row?.textContent).toContain("SUCCESS");
     expect(row?.textContent).not.toContain("grant missing");
     const link = within(row!).getByRole("link", { name: "alpha/release" });
-    expect(link.getAttribute("href")).toBe("/pipelines/alpha/release");
+    expect(link.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frelease");
+  });
+
+  it("links a downstream edge to the same URL the team home uses for that job", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        dependencies: {
+          upstream: [],
+          downstream: [
+            { tenant: "smoke-b", job: "xt-downstream", jobPath: "smoke-b/xt-downstream", result: "SUCCESS", granted: true },
+          ],
+        },
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Downstream")).toBeInTheDocument());
+    const row = triggersRow("Downstream");
+    const link = within(row!).getByRole("link", { name: "smoke-b/xt-downstream" });
+    expect(link.getAttribute("href")).toBe("/pipelines/smoke-b/smoke-b%2Fxt-downstream");
   });
 
   it("marks an ungranted downstream edge with grant missing, without hiding it", async () => {
@@ -464,7 +482,7 @@ describe("PipelinePage — dependency edges", () => {
       jobDetail({
         dependencies: {
           upstream: [],
-          downstream: [{ tenant: "search", job: "rebuild", result: "SUCCESS", granted: false }],
+          downstream: [{ tenant: "search", job: "rebuild", jobPath: "search/rebuild", result: "SUCCESS", granted: false }],
         },
       }),
     );

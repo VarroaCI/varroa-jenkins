@@ -426,8 +426,8 @@ func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
 	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
-		Upstream:   []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true}},
-		Downstream: []recordstore.DependencyEdge{{Tenant: "search", Job: "rebuild", Result: "SUCCESS", Granted: true}},
+		Upstream:   []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", JobPath: "alpha/build", Result: "SUCCESS", Granted: true}},
+		Downstream: []recordstore.DependencyEdge{{Tenant: "search", Job: "rebuild", JobPath: "search/rebuild", Result: "SUCCESS", Granted: true}},
 	})
 	srv := pipelinesTestServer(client, authz, reader, nil)
 
@@ -441,12 +441,26 @@ func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(detail.Dependencies.Upstream) != 1 || detail.Dependencies.Upstream[0] != (pipelineDependencyEdgeJSON{
-		Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true,
+		Tenant: "alpha", Job: "build", JobPath: "alpha/build", Result: "SUCCESS", Granted: true,
 	}) {
 		t.Errorf("upstream = %+v, want one granted alpha/build edge", detail.Dependencies.Upstream)
 	}
+	var raw struct {
+		Dependencies struct {
+			Upstream []map[string]any `json:"upstream"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Dependencies.Upstream) != 1 {
+		t.Fatalf("raw upstream = %+v, want one edge", raw.Dependencies.Upstream)
+	}
+	if got, ok := raw.Dependencies.Upstream[0]["jobPath"]; !ok || got != "alpha/build" {
+		t.Errorf("raw upstream[0].jobPath = %v (present %t), want alpha/build", got, ok)
+	}
 	if len(detail.Dependencies.Downstream) != 1 || detail.Dependencies.Downstream[0] != (pipelineDependencyEdgeJSON{
-		Tenant: "search", Job: "rebuild", Result: "SUCCESS", Granted: true,
+		Tenant: "search", Job: "rebuild", JobPath: "search/rebuild", Result: "SUCCESS", Granted: true,
 	}) {
 		t.Errorf("downstream = %+v, want one granted search/rebuild edge", detail.Dependencies.Downstream)
 	}

@@ -17,13 +17,15 @@ import (
 const varroaUpstreamTriggerType = "varroa-upstream"
 
 // DependencyEdge is one cross-tenant dependency edge on the pipelines
-// job detail page. Job is relative to the producer tenant's own folder,
-// the same convention a varroaUpstream declaration's job parameter
+// job detail page. Job is the job's name, relative to the edge tenant's
+// own folder. It is a display name, never a route. JobPath is the job's
+// path with its tenant folder, the path every pipelines read and route
 // uses. Granted is false, never omitted, when the producer's exports do
 // not cover the edge.
 type DependencyEdge struct {
 	Tenant  string
 	Job     string
+	JobPath string
 	Result  string
 	Granted bool
 }
@@ -98,6 +100,7 @@ func (r *pgReader) jobDependenciesUpstream(ctx context.Context, evaluator *Grant
 		return nil, fmt.Errorf("read job_schedules upstream row for %s/%s: %w", tenant, jobPath, err)
 	}
 
+	producerPath := upstreamTenant + "/" + upstreamJob
 	result, err := evaluator.Check(ctx, GrantInput{
 		PlacementInput: PlacementInput{
 			Path:    GrantPathFanout,
@@ -107,13 +110,13 @@ func (r *pgReader) jobDependenciesUpstream(ctx context.Context, evaluator *Grant
 		CallerTenant:    tenant,
 		TargetTenant:    upstreamTenant,
 		ResourceKind:    GrantResourceJob,
-		Resource:        upstreamTenant + "/" + upstreamJob,
+		Resource:        producerPath,
 		IntentKeyScheme: IntentSchemeUpstream,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("check upstream grant for %s/%s: %w", tenant, jobPath, err)
 	}
-	return append(edges, DependencyEdge{Tenant: upstreamTenant, Job: upstreamJob, Result: upstreamResult, Granted: result.Allow}), nil
+	return append(edges, DependencyEdge{Tenant: upstreamTenant, Job: upstreamJob, JobPath: producerPath, Result: upstreamResult, Granted: result.Allow}), nil
 }
 
 // jobDependenciesDownstream reads every varroa-upstream row naming
@@ -171,7 +174,7 @@ func (r *pgReader) jobDependenciesDownstream(ctx context.Context, evaluator *Gra
 		if !ok {
 			subJob = sub.jobPath
 		}
-		edges = append(edges, DependencyEdge{Tenant: sub.tenant, Job: subJob, Result: sub.result, Granted: result.Allow})
+		edges = append(edges, DependencyEdge{Tenant: sub.tenant, Job: subJob, JobPath: sub.jobPath, Result: sub.result, Granted: result.Allow})
 	}
 	return edges, nil
 }
