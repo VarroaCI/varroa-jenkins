@@ -199,6 +199,7 @@ func newCommandCRUDTest(t *testing.T) *commandCRUDTest {
 	crud := &CommandCRUD{
 		Client:            client,
 		Store:             store,
+		Controllers:       NewStoreControllerListSource(store),
 		OperatorNamespace: "varroa-system",
 		ManagedNamespaces: "",
 		Logger:            slog.Default(),
@@ -1859,5 +1860,60 @@ func TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit(t *testing.T) {
 				t.Fatalf("error = %q, want none", updateResp.Error)
 			}
 		})
+	}
+}
+
+// stubControllerSource returns fixed rows from ListControllers.
+type stubControllerSource struct {
+	items []*v1alpha1.Controller
+}
+
+func (s stubControllerSource) ListControllers(_ context.Context, _ string) ([]*v1alpha1.Controller, error) {
+	return s.items, nil
+}
+
+func TestCommandCRUD_ListReadsControllerSource(t *testing.T) {
+	src := stubControllerSource{items: []*v1alpha1.Controller{
+		{ObjectMeta: metav1.ObjectMeta{Name: "beta", Namespace: "team-b", ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubectl"}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "alpha", Namespace: "team-a", ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "varroa"}}}},
+	}}
+	crud := &CommandCRUD{Store: crdstore.NewFake(), Controllers: src, Logger: slog.Default()}
+
+	data, _ := json.Marshal(bus.ControllersListRequest{})
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(crud.HandleList(data), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("list error: %s (%s)", resp.Error, resp.Code)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("got %d rows, want 2", len(resp.Items))
+	}
+	wantOrder := []string{"team-a/alpha", "team-b/beta"}
+	for i, raw := range resp.Items {
+		var cr v1alpha1.Controller
+		if err := json.Unmarshal(raw, &cr); err != nil {
+			t.Fatalf("decode row %d: %v", i, err)
+		}
+		key := cr.Namespace + "/" + cr.Name
+		if key != wantOrder[i] {
+			t.Errorf("row %d = %s, want %s", i, key, wantOrder[i])
+		}
+		if cr.ManagedFields != nil {
+			t.Errorf("row %s kept managedFields", key)
+		}
+	}
+}
+
+func TestCommandCRUD_ListWithoutSourceFails(t *testing.T) {
+	crud := &CommandCRUD{Store: crdstore.NewFake(), Logger: slog.Default()}
+	data, _ := json.Marshal(bus.ControllersListRequest{})
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(crud.HandleList(data), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Code != bus.CodeInternal {
+		t.Fatalf("code = %q, want %q", resp.Code, bus.CodeInternal)
 	}
 }

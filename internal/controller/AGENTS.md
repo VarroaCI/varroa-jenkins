@@ -508,6 +508,11 @@ sections describe.
   built from this same config (`cmd/operator/main.go`), so it inherits the setting. Pure desired-state derivation (STS spec build, plugin-
   roll gate, update-center gate, mite health) lives in `desiredstate.go` with table tests
   in `desiredstate_test.go`; the phase handlers gather → decide → apply.
+- `CommandCRUD.HandleList` reads Controllers through `ListSource`
+  (`controller_list_source.go`). The operator wires the manager cache
+  (`NewCacheControllerListSource(mgr.GetCache())`). The cache syncs on every
+  replica, because the Controller reconciler is not leader-elected. Do not list
+  Controllers from the apiserver in a bus list handler.
   `CreateStatefulSet` takes a fence that runs before a create or a scale-up from 0.
   `CreateService`/`CreateIngress` are create-or-update.
   `EnsureWakeEndpointSlice`/`DeleteWakeEndpointSlice` own the hibernation traffic flip;

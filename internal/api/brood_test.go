@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -889,7 +890,11 @@ func seedPaddedRemoteControllers(store *crdstore.Fake, n int) {
 func TestBusBrood_ListRemotePagesAboveOldCap(t *testing.T) {
 	remote := crdstore.NewFake()
 	seedPaddedRemoteControllers(remote, 150)
-	crud := &controller.CommandCRUD{Store: remote, Logger: slog.Default()}
+	crud := &controller.CommandCRUD{
+		Store:       remote,
+		Controllers: controller.NewStoreControllerListSource(remote),
+		Logger:      slog.Default(),
+	}
 
 	fc := newFakeBroodClient()
 	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
@@ -954,8 +959,119 @@ func TestBusBrood_ListRemotePageFailureDropsCluster(t *testing.T) {
 			st = &cs[i]
 		}
 	}
-	if st == nil || st.OK || st.Error == "" {
-		t.Fatalf("expected dev-cluster failed, got %+v", st)
+	if st == nil || st.OK || st.Error != "cluster unreachable" {
+		t.Fatalf("expected dev-cluster failed with cluster unreachable, got %+v", st)
+	}
+}
+
+// listPageRaw marshals one Controller row for a fake list reply.
+func listPageRaw(t *testing.T, name string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}})
+	if err != nil {
+		t.Fatalf("marshal row: %v", err)
+	}
+	return raw
+}
+
+func TestBusBrood_ListRemoteMalformedRowFailsMember(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{
+			listPageRaw(t, "a"),
+			json.RawMessage(`{"metadata":"oops"}`),
+		}})
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows for a malformed page, got %s", c.CR.Name)
+		}
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "invalid controller row" {
+		t.Fatalf("expected dev-cluster failed with invalid controller row, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListRemoteCancelStopsPaging(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	secondStarted := make(chan struct{})
+	var calls atomic.Int32
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{listPageRaw(t, "a")}, Next: "team-a/a"})
+		}
+		close(secondStarted)
+		<-release
+		return nil, errors.New("late reply")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan []ClusterFanoutStatus, 1)
+	go func() {
+		_, cs, _ := bf.ListAll(ctx, "", "")
+		done <- cs
+	}()
+	<-secondStarted
+	cancel()
+
+	var cs []ClusterFanoutStatus
+	select {
+	case cs = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListAll did not return after the request context was cancelled")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("list calls = %d, want 2", got)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "list cancelled" {
+		t.Fatalf("expected dev-cluster list cancelled, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListAllKeepsRemoteStatusReason(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return nil, errors.New("nats: timeout")
+	}
+
+	_, cs, _ := bf.ListAll(context.Background(), "", "")
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "cluster unreachable" {
+		t.Fatalf("expected fan-out row cluster unreachable, got %+v", st)
 	}
 }
 

@@ -740,6 +740,7 @@ func main() {
 		ManagedNamespaces: managedNamespaces,
 		Lifecycle:         lifecycleStore,
 		Logger:            logger.With("component", "command_crud"),
+		Controllers:       controller.NewCacheControllerListSource(mgr.GetCache()),
 	}
 	crud.PreflightCheck = func(ctx context.Context, deps controller.PreflightDepsInterface, draft *v1alpha1.Controller, inlineBundle *v1alpha1.ComposedBundleSpec, opts controller.PreflightOptions) []bus.Check {
 		pres := preflight.Run(ctx, deps, draft, inlineBundle, preflight.Options{

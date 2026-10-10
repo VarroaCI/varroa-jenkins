@@ -150,6 +150,10 @@ type busBrood struct {
 	// Override in tests to avoid needing a live NATS connection.
 	request func(subject string, data []byte, timeout time.Duration) ([]byte, error)
 
+	// requestWithCtx is the context-aware request that NewBusBrood wires to
+	// conn.RequestWithContext. When nil, requestCtx runs request on a goroutine.
+	requestWithCtx func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
+
 	// membershipCache stores the last List() result (nil = no cache).
 	// Guarded by membershipMu: busBrood is a shared singleton hit by
 	// concurrent HTTP handlers.
@@ -170,6 +174,13 @@ func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDir
 		logger:       logger.With("component", "bus_brood"),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
+			if err != nil {
+				return nil, err
+			}
+			return resp.Data, nil
+		},
+		requestWithCtx: func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+			resp, err := conn.RequestWithContext(ctx, subject, data, timeout)
 			if err != nil {
 				return nil, err
 			}
@@ -266,7 +277,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
-			statuses = append(statuses, ClusterFanoutStatus{Name: f.localCluster, OK: false, Error: err.Error()})
+			statuses = append(statuses, fanoutFailureStatus(f.localCluster, localStatus, err))
 			return
 		}
 		controllers = append(controllers, local...)
@@ -290,7 +301,8 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				statuses = append(statuses, ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()})
+				f.logger.Warn("list remote failed", "cluster", cluster, "error", err)
+				statuses = append(statuses, fanoutFailureStatus(cluster, st, err))
 				return
 			}
 			controllers = append(controllers, cl...)
@@ -326,6 +338,40 @@ func (f *busBrood) listLocal(ctx context.Context, ns string) ([]ClusterControlle
 	return cc, []ClusterFanoutStatus{{Name: f.localCluster, OK: true}}, nil
 }
 
+// fanoutFailureStatus returns the status row for a member whose list failed.
+// It keeps the reason that the list produced. A list that returned no
+// status row gets the error text.
+func fanoutFailureStatus(cluster string, st []ClusterFanoutStatus, err error) ClusterFanoutStatus {
+	if len(st) > 0 {
+		return st[0]
+	}
+	return ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()}
+}
+
+// requestCtx sends a request that ends when ctx ends. The bus request is
+// cancelled when a context-aware seam is wired; otherwise f.request runs on
+// a goroutine and the caller returns early.
+func (f *busBrood) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+	if f.requestWithCtx != nil {
+		return f.requestWithCtx(ctx, subject, data, timeout)
+	}
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		d, err := f.request(subject, data, timeout)
+		ch <- result{d, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.data, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
 	cc := make([]ClusterController, 0)
 	after := ""
@@ -340,8 +386,12 @@ func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]Cluste
 		}
 		req := bus.ControllersListRequest{Namespace: ns, After: after}
 		data, _ := json.Marshal(req)
-		respData, err := f.request(bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
+		respData, err := f.requestCtx(ctx, bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cancelled"}},
+					fmt.Errorf("list remote %s: %w", cluster, ctx.Err())
+			}
 			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
 		}
 		var resp bus.ControllersListResponse
@@ -354,8 +404,8 @@ func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]Cluste
 		for _, raw := range resp.Items {
 			var cr v1alpha1.Controller
 			if err := json.Unmarshal(raw, &cr); err != nil {
-				f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
-				continue
+				return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid controller row"}},
+					fmt.Errorf("list remote %s: decode controller row: %w", cluster, err)
 			}
 			cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
 		}

@@ -84,6 +84,10 @@ type CommandCRUD struct {
 	// (typically cmd/operator/main.go wraps preflight.Run to break the
 	// import cycle). If nil, preflight is skipped.
 	PreflightCheck PreflightFunc
+
+	// Controllers reads Controller list pages for HandleList. The operator
+	// passes its informer cache, so a page sends no apiserver list request.
+	Controllers ListSource
 }
 
 // --- Shared helpers ---
@@ -146,17 +150,21 @@ func (c *CommandCRUD) preflightDeps() PreflightDepsInterface {
 //
 // Rows sort by "namespace/name". A reply holds whole rows up to
 // bus.ControllersListPageBudget. Next names the last row of a full page, and
-// the caller passes it back as After to read the following rows.
+// the caller passes it back as After to read the following rows. Rows come
+// from the operator's informer cache, not an apiserver list.
 func (c *CommandCRUD) HandleList(data []byte) []byte {
 	var req bus.ControllersListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return c.crudReply(bus.ControllersListResponse{Error: "invalid request", Code: bus.CodeInvalid})
 	}
+	if c.Controllers == nil {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "controller list source not set"})
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	items, err := crdstore.List[v1alpha1.Controller](ctx, c.Store, req.Namespace, "")
+	items, err := c.Controllers.ListControllers(ctx, req.Namespace)
 	if err != nil {
 		c.Logger.Error("list controllers failed", "namespace", req.Namespace, "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: err.Error(), Code: bus.CodeInternal})

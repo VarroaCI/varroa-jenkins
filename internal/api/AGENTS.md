@@ -550,6 +550,11 @@ federation, activity persistence, and SSE fanout.
   `controllers.list` page by `next`/`after` key, up to 128 pages. A failed
   page, or a `next` that does not advance, drops the whole member: zero rows
   and an `ok: false` status row. Never return a partial member.
+  `handleControllersFiltered` passes the request context into `ListAll`.
+  `listRemote` sends each page through `requestCtx`, so a client disconnect
+  stops the walk. An undecodable row fails the member with
+  `invalid controller row`. The fan-out keeps the status row that
+  `listRemote` returns, so the reason reaches the client.
 
 - **Cached local Controller lists**: every local Controller list goes through
   `localControllers` or `Dependencies.LocalControllers`. In the BFF the

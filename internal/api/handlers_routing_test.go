@@ -1164,8 +1164,9 @@ func BenchmarkHandleControllersList400(b *testing.B) {
 	}
 }
 
-// One malformed remote row must not drop the valid rows or panic the list.
-func TestHandleControllersSkipsUnreadableRemoteRow(t *testing.T) {
+// One malformed remote row fails its member: no rows from that member, and
+// the status row names the reason. The list does not panic.
+func TestHandleControllersFailsMemberOnUnreadableRow(t *testing.T) {
 	srv, _ := newRoutingTestServer()
 	fc := newFakeBroodClient()
 	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
@@ -1189,16 +1190,25 @@ func TestHandleControllersSkipsUnreadableRemoteRow(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var envelope struct {
-		Items []map[string]interface{} `json:"items"`
+		Items    []map[string]interface{} `json:"items"`
+		Clusters []ClusterFanoutStatus    `json:"clusters"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if len(envelope.Items) != 2 {
-		t.Fatalf("expected the 2 valid rows, got %+v", envelope.Items)
+	for _, item := range envelope.Items {
+		if item["cluster"] == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows, got %v", item["name"])
+		}
 	}
-	if envelope.Items[0]["name"] != "remote-a" || envelope.Items[1]["name"] != "remote-b" {
-		t.Errorf("valid rows = %v, %v", envelope.Items[0]["name"], envelope.Items[1]["name"])
+	var st *ClusterFanoutStatus
+	for i := range envelope.Clusters {
+		if envelope.Clusters[i].Name == "dev-cluster" {
+			st = &envelope.Clusters[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "invalid controller row" {
+		t.Fatalf("expected dev-cluster failed with invalid controller row, got %+v", st)
 	}
 }
 
@@ -1289,5 +1299,46 @@ func BenchmarkBroodListLocal400(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// ctxCaptureBrood records the context that the controllers handler passes to
+// ListAll, then delegates to the wrapped Brood.
+type ctxCaptureBrood struct {
+	Brood
+	got context.Context
+}
+
+func (b *ctxCaptureBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	b.got = ctx
+	return b.Brood.ListAll(ctx, ns, clusterFilter)
+}
+
+func TestHandleControllersPassesRequestContext(t *testing.T) {
+	type ctxKey struct{}
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{}
+	capture := &ctxCaptureBrood{Brood: newFakeBrood(client)}
+	srv := NewServer(&Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		Authorizer:        adminTestAuthorizer(),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		Brood:             capture,
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	ctx := context.WithValue(contextWithClaims(req.Context(), adminClaims), ctxKey{}, "marker")
+	srv.HandleControllers(w, req.WithContext(ctx))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if capture.got == nil {
+		t.Fatal("ListAll was not called")
+	}
+	if v, _ := capture.got.Value(ctxKey{}).(string); v != "marker" {
+		t.Fatalf("ListAll context lost the request context value, got %q", v)
 	}
 }

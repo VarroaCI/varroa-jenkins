@@ -860,7 +860,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 	namespace := r.URL.Query().Get("namespace")
 	claims := auth.ClaimsFromContext(r.Context())
 
-	ctx := context.Background()
+	ctx := r.Context()
 
 	// Validate cluster filter if set.
 	if clusterFilter != "" && s.deps.Brood != nil && !s.deps.Brood.IsKnown(ctx, clusterFilter) {
