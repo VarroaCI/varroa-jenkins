@@ -1317,7 +1317,7 @@ sections describe.
   A live capture may still close three gaps: no queue id, no commit author
   email, no affected paths anywhere upstream.
 - **Operator list replies are paged** by `pageList` in `list_page.go`, the one
-  paging path for controllers, config, and brood-operation lists. It sorts rows by
+  paging path for controllers, config, brood-operation, and brood-schedule lists. It sorts rows by
   `namespace/name`, skips keys at or below `After`, and fills a reply up to
   `bus.ListPageBudget` (900 KB). `Next` names the last kept row, and it is
   empty on the last page. A single row over the budget fails the list with

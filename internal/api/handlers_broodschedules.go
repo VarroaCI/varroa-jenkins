@@ -144,14 +144,15 @@ func (s *Server) handleBroodScheduleList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	items, err := scheds.List(r.Context(), ns)
+	items, statuses, err := scheds.List(r.Context(), ns)
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"items": items,
+		"items":    items,
+		"clusters": fanoutStatuses(statuses),
 	})
 }
 

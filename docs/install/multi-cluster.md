@@ -97,7 +97,7 @@ The dashboard **Clusters** page lists every registered cluster with its name (a 
 
 When two or more clusters are registered, the dashboard shows a cluster health strip, and the Controllers page adds a **Cluster** column plus per-cluster filter chips. The controller creation wizard offers a cluster picker that lists only healthy clusters and defaults to the core.
 
-If a member's controller list does not arrive, the dashboard and the Controllers page name that cluster and give the reason. The cluster card in the strip shows **list unavailable**. `varroactl get controllers` prints a warning on stderr for that cluster. The Brood Operations page and `varroactl broodop list` name a member whose list did not arrive, in the same way. The MCP `list_controllers` result names that cluster in `clusters` with `ok: false`. A member that returns a controller row that the core cannot read shows **invalid controller row**, and the core shows no rows for that member.
+If a member's controller list does not arrive, the dashboard and the Controllers page name that cluster and give the reason. The cluster card in the strip shows **list unavailable**. `varroactl get controllers` prints a warning on stderr for that cluster. The Brood Operations page and `varroactl broodop list` name a member whose list did not arrive, in the same way. The Schedules page and `varroactl broodschedule get` name a member whose list did not arrive, in the same way. The MCP `list_controllers` result names that cluster in `clusters` with `ok: false`. A member that returns a controller row that the core cannot read shows **invalid controller row**, and the core shows no rows for that member.
 
 Global search and `varroactl search` name each cluster whose results are incomplete.
 

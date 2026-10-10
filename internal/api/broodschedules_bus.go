@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -18,7 +19,7 @@ import (
 type BroodSchedules interface {
 	Create(ctx context.Context, cluster, ns, name string, spec v1alpha1.BroodScheduleSpec) (*bus.BroodScheduleResponse, error)
 	Get(ctx context.Context, cluster, ns, name string) (*bus.BroodScheduleResponse, error)
-	List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, error)
+	List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, []ClusterFanoutStatus, error)
 	Delete(ctx context.Context, cluster, ns, name string) error
 	Suspend(ctx context.Context, cluster, ns, name string, suspend bool) error
 }
@@ -127,19 +128,25 @@ func (f *busBroodSchedules) Get(ctx context.Context, cluster, ns, name string) (
 	return &reply, nil
 }
 
-// List gathers schedules from all known clusters. A cancelled ctx stops the
-// walk and returns the context error.
-func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, error) {
-	var all []bus.BroodScheduleResponse
+// List gathers schedules from all known clusters. It returns one status row
+// per cluster read. A cluster that fails contributes no rows and one row whose
+// Error names the reason. A cancelled ctx stops the walk and returns the
+// context error.
+func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, []ClusterFanoutStatus, error) {
+	var (
+		all      = make([]bus.BroodScheduleResponse, 0)
+		statuses []ClusterFanoutStatus
+	)
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("list brood schedules: %w", err)
+		return nil, nil, fmt.Errorf("list brood schedules: %w", err)
 	}
 
 	// Local cluster.
-	localItems, err := f.listCluster(ctx, f.localCluster, ns)
+	localItems, localStatus, err := f.listCluster(ctx, f.localCluster, ns)
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
+		return nil, nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
 	}
+	statuses = append(statuses, localStatus...)
 	if err != nil {
 		f.logger.Warn("broodschedules list local failed", "error", err)
 	} else {
@@ -159,10 +166,11 @@ func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodSch
 		if m.Name == f.localCluster {
 			continue
 		}
-		items, err := f.listCluster(ctx, m.Name, ns)
+		items, memberStatus, err := f.listCluster(ctx, m.Name, ns)
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
+			return nil, nil, fmt.Errorf("list brood schedules: %w", ctx.Err())
 		}
+		statuses = append(statuses, memberStatus...)
 		if err != nil {
 			f.logger.Warn("broodschedules list remote failed", "cluster", m.Name, "error", err)
 			continue
@@ -170,30 +178,60 @@ func (f *busBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodSch
 		all = append(all, items...)
 	}
 
-	return all, nil
+	return all, statuses, nil
 }
 
-func (f *busBroodSchedules) listCluster(ctx context.Context, cluster, ns string) ([]bus.BroodScheduleResponse, error) {
-	req := bus.BroodScheduleListRequest{Namespace: ns}
-	data, _ := json.Marshal(req)
-	respData, err := f.requestCtx(ctx, bus.OperatorBroodSchedulesSubject(cluster, "list"), data, broodSchedulesListTimeout)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("list brood schedules on %s: %w", cluster, ctx.Err())
+// listCluster reads every page of a cluster's brood-schedule list. A failed
+// page fails the whole cluster: it returns no rows and one status row whose
+// Error names the reason. A row that does not decode is skipped, so no
+// zero-value schedule is returned.
+func (f *busBroodSchedules) listCluster(ctx context.Context, cluster, ns string) ([]bus.BroodScheduleResponse, []ClusterFanoutStatus, error) {
+	var (
+		items  []bus.BroodScheduleResponse
+		reason string
+	)
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		req := bus.BroodScheduleListRequest{Namespace: ns, After: after}
+		data, _ := json.Marshal(req)
+		respData, err := f.requestCtx(ctx, bus.OperatorBroodSchedulesSubject(cluster, "list"), data, broodSchedulesListTimeout)
+		if err != nil {
+			if ctx.Err() == nil {
+				reason = "cluster unreachable"
+			}
+			return "", fmt.Errorf("list brood schedules on %s: %w", cluster, err)
 		}
-		return nil, fmt.Errorf("cluster %s unreachable: %w", cluster, err)
+		var resp bus.BroodScheduleListResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			reason = "invalid response"
+			return "", fmt.Errorf("list brood schedules on %s decode: %w", cluster, err)
+		}
+		if resp.Error != "" {
+			reason = resp.Error
+			return "", fmt.Errorf("list error: %s", resp.Error)
+		}
+		for _, raw := range resp.Items {
+			var sched bus.BroodScheduleResponse
+			if err := json.Unmarshal(raw, &sched); err != nil {
+				f.logger.Warn("list brood schedules unmarshal skip", "cluster", cluster, "error", err)
+				continue
+			}
+			sched.Cluster = cluster
+			items = append(items, sched)
+		}
+		return resp.Next, nil
+	})
+	if err != nil {
+		if reason == "" {
+			var be *BroodError
+			if errors.As(err, &be) {
+				reason = be.Msg
+			} else {
+				reason = err.Error()
+			}
+		}
+		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: reason}}, fmt.Errorf("list brood schedules on %s: %w", cluster, err)
 	}
-	var resp bus.BroodScheduleListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("invalid response: %w", err)
-	}
-	if resp.Error != "" {
-		return nil, fmt.Errorf("list error: %s", resp.Error)
-	}
-	for i := range resp.Items {
-		resp.Items[i].Cluster = cluster
-	}
-	return resp.Items, nil
+	return items, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }
 
 // Delete sends a delete request to the given cluster.

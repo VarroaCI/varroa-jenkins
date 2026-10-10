@@ -1338,6 +1338,7 @@ export interface CreateBroodScheduleRequest {
 
 export interface BroodScheduleListResponse {
   items?: BroodSchedule[];
+  clusters?: BroodRunClusterStatus[];
 }
 
 // ---- Update Center ----

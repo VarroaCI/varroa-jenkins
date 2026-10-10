@@ -36,7 +36,7 @@ func TestBusBroodSchedules_ListCancelReturnsPromptly(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.List(ctx, "test-ns")
+		_, _, err := f.List(ctx, "test-ns")
 		done <- err
 	}()
 	<-started
@@ -136,9 +136,13 @@ func TestBusBroodSchedules_GetWithError(t *testing.T) {
 }
 
 func TestBusBroodSchedules_List(t *testing.T) {
-	items := []bus.BroodScheduleResponse{
+	items := make([]json.RawMessage, 0, 2)
+	for _, s := range []bus.BroodScheduleResponse{
 		{Namespace: "ns1", Name: "sched-a"},
 		{Namespace: "ns1", Name: "sched-b"},
+	} {
+		raw, _ := json.Marshal(s)
+		items = append(items, raw)
 	}
 	resp := bus.BroodScheduleListResponse{Items: items}
 	respData, _ := json.Marshal(resp)
@@ -155,7 +159,7 @@ func TestBusBroodSchedules_List(t *testing.T) {
 		membership: nil,
 	}
 
-	got, err := f.List(context.Background(), "ns1")
+	got, statuses, err := f.List(context.Background(), "ns1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -170,6 +174,9 @@ func TestBusBroodSchedules_List(t *testing.T) {
 		if item.Cluster != "core" {
 			t.Errorf("Cluster = %q, want core", item.Cluster)
 		}
+	}
+	if len(statuses) != 1 || statuses[0] != (ClusterFanoutStatus{Name: "core", OK: true}) {
+		t.Errorf("statuses = %+v, want one ok row for core", statuses)
 	}
 }
 

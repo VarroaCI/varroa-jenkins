@@ -111,6 +111,10 @@ func (c *CommandBroodSchedules) HandleGet(data []byte) []byte {
 }
 
 // HandleList handles operator.<cluster>.broodschedules.list.
+//
+// Rows sort by "namespace/name". A reply holds whole rows up to
+// bus.ListPageBudget. Next names the last row of a full page, and the caller
+// passes it back as After to read the following rows.
 func (c *CommandBroodSchedules) HandleList(data []byte) []byte {
 	var req bus.BroodScheduleListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -129,19 +133,37 @@ func (c *CommandBroodSchedules) HandleList(data []byte) []byte {
 		return c.reply(bus.BroodScheduleListResponse{Error: err.Error()})
 	}
 
-	items := make([]bus.BroodScheduleResponse, 0, len(list.Items))
+	ptrs := make([]*v1alpha1.BroodSchedule, 0, len(list.Items))
 	for i := range list.Items {
-		specRaw, _ := json.Marshal(list.Items[i].Spec)
-		statusRaw, _ := json.Marshal(list.Items[i].Status)
-		items = append(items, bus.BroodScheduleResponse{
-			Namespace: list.Items[i].Namespace,
-			Name:      list.Items[i].Name,
+		ptrs = append(ptrs, &list.Items[i])
+	}
+	rows, next, err := pageList(ptrs, req.After, bus.ListPageBudget, func(s *v1alpha1.BroodSchedule) (json.RawMessage, error) {
+		specRaw, _ := json.Marshal(s.Spec)
+		statusRaw, _ := json.Marshal(s.Status)
+		raw, err := json.Marshal(bus.BroodScheduleResponse{
+			Namespace: s.Namespace,
+			Name:      s.Name,
 			Spec:      specRaw,
 			Status:    statusRaw,
 		})
+		if err != nil {
+			c.Logger.Error("marshal broodschedule failed", "name", s.Name, "namespace", s.Namespace, "error", err)
+		}
+		return raw, err
+	})
+	if err != nil {
+		return c.reply(bus.BroodScheduleListResponse{Error: listPageErr(err)})
 	}
 
-	return c.reply(bus.BroodScheduleListResponse{Items: items})
+	reply, err := json.Marshal(bus.BroodScheduleListResponse{Items: rows, Next: next})
+	if err != nil {
+		c.Logger.Error("broodschedules list reply marshal failed", "error", err)
+		return c.reply(bus.BroodScheduleListResponse{Error: "marshal error"})
+	}
+	if len(reply) > bus.ListPageBudget {
+		return c.reply(bus.BroodScheduleListResponse{Error: "list page too large"})
+	}
+	return reply
 }
 
 // HandleDelete handles operator.<cluster>.broodschedules.delete.

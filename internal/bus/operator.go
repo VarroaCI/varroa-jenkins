@@ -439,6 +439,8 @@ type BroodScheduleGetRequest struct {
 // BroodScheduleListRequest is the payload for operator.<cluster>.broodschedules.list.
 type BroodScheduleListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	// After is the Next key of the previous page. Empty requests the first page.
+	After string `json:"after,omitempty"`
 }
 
 // BroodScheduleDeleteRequest is the payload for operator.<cluster>.broodschedules.delete.
@@ -466,6 +468,9 @@ type BroodScheduleResponse struct {
 
 // BroodScheduleListResponse is the reply for list.
 type BroodScheduleListResponse struct {
-	Items []BroodScheduleResponse `json:"items,omitempty"`
-	Error string                  `json:"error,omitempty"`
+	// Items holds one BroodScheduleResponse JSON object per element.
+	Items []json.RawMessage `json:"items,omitempty"`
+	// Next is the After key of the following page. Empty on the last page.
+	Next  string `json:"next,omitempty"`
+	Error string `json:"error,omitempty"`
 }

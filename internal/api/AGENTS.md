@@ -561,8 +561,8 @@ federation, activity persistence, and SSE fanout.
   `invalid controller row`. A `readRemotePages` cancel, cap, or cursor error
   replaces the fetch's reason in the status row. The fan-out keeps the status
   row that `listRemote` returns, so the reason reaches the client.
-- **Remote config and brood-operation lists are paged**: `busConfigBrood.listConfigPages`,
-  `ViewVersionProfiles`, and `busBroodOps.listRemoteBus` read every page through
+- **Remote config, brood-operation, and brood-schedule lists are paged**: `busConfigBrood.listConfigPages`,
+  `ViewVersionProfiles`, `busBroodOps.listRemoteBus`, and `busBroodSchedules.listCluster` read every page through
   `readRemotePages` (`remote_pages.go`), up to 128 pages. A failed page, or a
   `next` that does not advance, drops the whole member: zero rows and an
   `ok: false` status row.

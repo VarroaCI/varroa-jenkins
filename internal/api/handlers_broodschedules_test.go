@@ -16,14 +16,15 @@ import (
 
 // stubBroodSchedules implements BroodSchedules for tests.
 type stubBroodSchedules struct {
-	createResp *bus.BroodScheduleResponse
-	createErr  error
-	getResp    *bus.BroodScheduleResponse
-	getErr     error
-	listResp   []bus.BroodScheduleResponse
-	listErr    error
-	deleteErr  error
-	suspendErr error
+	createResp   *bus.BroodScheduleResponse
+	createErr    error
+	getResp      *bus.BroodScheduleResponse
+	getErr       error
+	listResp     []bus.BroodScheduleResponse
+	listStatuses []ClusterFanoutStatus
+	listErr      error
+	deleteErr    error
+	suspendErr   error
 }
 
 func (s *stubBroodSchedules) Create(ctx context.Context, cluster, ns, name string, spec v1alpha1.BroodScheduleSpec) (*bus.BroodScheduleResponse, error) {
@@ -46,14 +47,14 @@ func (s *stubBroodSchedules) Get(ctx context.Context, cluster, ns, name string) 
 	return &bus.BroodScheduleResponse{Namespace: ns, Name: name}, nil
 }
 
-func (s *stubBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, error) {
+func (s *stubBroodSchedules) List(ctx context.Context, ns string) ([]bus.BroodScheduleResponse, []ClusterFanoutStatus, error) {
 	if s.listErr != nil {
-		return nil, s.listErr
+		return nil, nil, s.listErr
 	}
 	if s.listResp != nil {
-		return s.listResp, nil
+		return s.listResp, s.listStatuses, nil
 	}
-	return []bus.BroodScheduleResponse{}, nil
+	return []bus.BroodScheduleResponse{}, s.listStatuses, nil
 }
 
 func (s *stubBroodSchedules) Delete(ctx context.Context, cluster, ns, name string) error {
@@ -203,6 +204,42 @@ func TestBroodScheduleHandlers_List(t *testing.T) {
 	items, ok := resp["items"].([]interface{})
 	if !ok || len(items) != 1 {
 		t.Errorf("expected 1 item, got %+v", resp)
+	}
+	if _, ok := resp["clusters"].([]interface{}); !ok {
+		t.Errorf("expected a clusters array, got %+v", resp)
+	}
+}
+
+func TestBroodScheduleHandlers_ListNamesFailedCluster(t *testing.T) {
+	ss := &stubBroodSchedules{
+		listResp: []bus.BroodScheduleResponse{{Namespace: "ns1", Name: "sched-a"}},
+		listStatuses: []ClusterFanoutStatus{
+			{Name: "core", OK: true},
+			{Name: "member-b", OK: false, Error: "cluster unreachable"},
+		},
+	}
+	srv := newBroodScheduleTestServer(ss)
+
+	req := httptest.NewRequest(http.MethodGet, "/brood-schedules", nil)
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{Subject: "viewer", Groups: []string{"viewers"}}))
+	w := httptest.NewRecorder()
+	srv.handleBroodSchedules(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Clusters []map[string]interface{} `json:"clusters"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Clusters) != 2 {
+		t.Fatalf("clusters = %+v, want 2 rows", resp.Clusters)
+	}
+	got := resp.Clusters[1]
+	if got["cluster"] != "member-b" || got["ok"] != false || got["error"] != "cluster unreachable" {
+		t.Errorf("clusters[1] = %+v, want member-b failed with cluster unreachable", got)
 	}
 }
 

@@ -16797,7 +16797,8 @@ type ListBroodSchedulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasBroodScheduleResponse `json:"items"`
+		Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
+		Items    []ComponentsSchemasBroodScheduleResponse `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
@@ -22991,7 +22992,8 @@ func ParseListBroodSchedulesResponse(rsp *http.Response) (*ListBroodSchedulesRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasBroodScheduleResponse `json:"items"`
+			Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
+			Items    []ComponentsSchemasBroodScheduleResponse `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err

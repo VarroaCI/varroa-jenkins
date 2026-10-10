@@ -14298,6 +14298,12 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "clusters": {
+                      "items": {
+                        "$ref": "#/components/schemas/components_schemas_BroodRunClusterStatus"
+                      },
+                      "type": "array"
+                    },
                     "items": {
                       "items": {
                         "$ref": "#/components/schemas/components_schemas_BroodScheduleResponse"
@@ -14306,13 +14312,14 @@
                     }
                   },
                   "required": [
-                    "items"
+                    "items",
+                    "clusters"
                   ],
                   "type": "object"
                 }
               }
             },
-            "description": "Brood schedule list."
+            "description": "Brood schedule list with fan-out status."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"

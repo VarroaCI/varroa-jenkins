@@ -103,6 +103,24 @@ describe("BroodSchedules", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/brood-schedules/team-ns/my-sched");
   });
 
+  it("names each failed cluster and its error", async () => {
+    mockList.mockResolvedValue({
+      items: [scheduleRow],
+      clusters: [
+        { cluster: "core", ok: true },
+        { cluster: "member-b", ok: false, error: "cluster unreachable" },
+        { cluster: "member-c", ok: false },
+      ],
+    });
+    renderPage();
+    const notices = await screen.findAllByRole("status");
+    const memberB = notices.find((n) => n.textContent?.includes("member-b"));
+    const memberC = notices.find((n) => n.textContent?.includes("member-c"));
+    expect(memberB?.textContent).toContain("cluster unreachable");
+    expect(memberC?.textContent).toContain("the cluster did not answer");
+    expect(notices).toHaveLength(2);
+  });
+
   it("suspends and deletes schedules after confirmation", async () => {
     const user = userEvent.setup();
     mockList.mockResolvedValue({ items: [scheduleRow] });
