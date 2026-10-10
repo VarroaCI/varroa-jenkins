@@ -2,7 +2,6 @@ import { Link, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Waypoints } from "lucide-react";
 import { listPipelineTeams } from "../../api/client";
-import { usePermissions } from "../../hooks/usePermissions";
 import { RecoveryState } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import styles from "./PipelinesIndex.module.css";
@@ -10,29 +9,25 @@ import styles from "./PipelinesIndex.module.css";
 /**
  * PipelinesIndex is the /pipelines landing page. It lists the Teams the
  * caller may open (design ruling aa) and redirects when exactly one
- * qualifies. A Team qualifies through a GET /pipelines row, which covers
- * every pipelines Team of this cluster and of each member cluster that the
- * caller may read. The caller's `tenants` grants also add names: controller
- * tenants and Teams without spec.pipelines, which GET /pipelines does not
- * list. When the GET /pipelines read fails, the page lists the grants only.
+ * qualifies. Every name comes from a GET /pipelines row. That read covers
+ * the pipelines Teams of this cluster and of each member cluster, and the
+ * local Teams whose namespaces hold a controller the caller may read. A
+ * name in the caller's `tenants` grants that GET /pipelines does not
+ * answer is not listed. When the GET /pipelines read fails, the page shows
+ * an error with Retry and no link.
  */
 export default function PipelinesIndex() {
-  const { data: perms, isLoading: permsLoading, error: permsError } = usePermissions();
-
   const {
     data: pipelineTeams,
     isLoading: teamsLoading,
     isError: teamsErrored,
+    refetch: refetchTeams,
   } = useQuery({
     queryKey: ["pipelineTeams"],
     queryFn: listPipelineTeams,
   });
 
-  if (permsError) {
-    return <RecoveryState kind="error" title="Unable to load page" message="Varroa could not load this page." />;
-  }
-
-  if (permsLoading || teamsLoading) {
+  if (teamsLoading) {
     return (
       <div className={styles.page}>
         <div className={styles.loading}>Loading teams…</div>
@@ -40,13 +35,21 @@ export default function PipelinesIndex() {
     );
   }
 
+  if (teamsErrored) {
+    return (
+      <RecoveryState
+        kind="error"
+        title="Unable to load teams"
+        message="Varroa could not load the team list."
+        onRetry={() => void refetchTeams()}
+      />
+    );
+  }
+
   // One name that two member clusters hold answers two rows. Both rows
   // open the same URL, so the page shows the name once.
   const names = new Set<string>();
-  for (const t of perms?.tenants ?? []) names.add(t.tenant);
-  if (!teamsErrored) {
-    for (const t of pipelineTeams?.items ?? []) names.add(t.name);
-  }
+  for (const t of pipelineTeams?.items ?? []) names.add(t.name);
   const teams = Array.from(names).sort((a, b) => a.localeCompare(b));
 
   if (teams.length === 0) {

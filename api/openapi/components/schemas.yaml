@@ -4852,7 +4852,9 @@ PipelineTeam:
       type: string
       description: >
         The cluster that holds the tenant's cell. An unplaced local Team
-        names the local cluster.
+        names the local cluster. A local Team whose namespaces hold a
+        controller, and which has no spec.pipelines, also names the local
+        cluster.
     cell:
       type: string
       description: The slot-0 cell Controller that holds the tenant.
@@ -4861,7 +4863,9 @@ PipelineTeam:
       description: The namespace of that cell Controller.
     placed:
       type: boolean
-      description: True when a cell holds the tenant.
+      description: >
+        True when a cell holds the tenant. A controller-namespace Team
+        answers false.
   additionalProperties: false
 
 PipelineTeamList:

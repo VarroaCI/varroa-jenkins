@@ -355,9 +355,13 @@ federation, activity persistence, and SSE fanout.
   check. `canReadRun` builds its `RunTenantRow` from the run row's own `tenant` and
   `job_path` columns, so a run whose cell was deleted still resolves for a permitted
   caller. **`GET /pipelines` (`handlers_pipelines_list.go`) is the landing-page team
-  list**: every local Team with `spec.pipelines` plus every live placement row of
-  another cluster (`Reader.ListAllTenantPlacements`), filtered per name by
-  `CanReadPipeline` with no gate of its own. It is the one pipelines path that does not
+  list**: every local Team with `spec.pipelines`, every live placement row of
+  another cluster (`Reader.ListAllTenantPlacements`), each filtered per name by
+  `CanReadPipeline`, and each local Team without `spec.pipelines` whose
+  `spec.namespaces` resolve to a readable controller tenant (`teamNamespaceTenants`,
+  the design D1 step 2 core, with the same 20-tenant ceiling). A failed controller
+  list leaves the third source out and does not fail the read. The route has no
+  gate of its own. It is the one pipelines path that does not
   answer `503` without a record store: it answers the local rows with
   `recordStore: false`. **`GET /pipelines/{team}` filters every row of its response by the
   caller's `jobs` globs**: `handleListPipelines` calls

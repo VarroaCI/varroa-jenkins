@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useParams } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
@@ -55,21 +55,29 @@ describe("PipelinesIndex", () => {
     });
   });
 
-  it("lists every Team the caller's tenant grants name", async () => {
+  it("does not link a grant name that GET /pipelines does not answer", async () => {
     mockGetMyPermissions.mockResolvedValue({
       global: {},
       scopes: [],
       tenants: [
         { tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } },
         { tenant: "beta", jobs: [], capabilities: { pipelines: { read: true } } },
+        { tenant: "mt-tenant", jobs: [], capabilities: { pipelines: { read: true } } },
       ],
     });
-    mockListPipelineTeams.mockResolvedValue({ items: [], recordStore: true });
+    mockListPipelineTeams.mockResolvedValue({
+      items: [
+        { name: "acme", cluster: "core", placed: false },
+        { name: "beta", cluster: "core", placed: false },
+      ],
+      recordStore: true,
+    });
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole("link", { name: /acme/ })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: /beta/ })).toBeInTheDocument();
     });
+    expect(screen.queryByText("mt-tenant")).toBeNull();
   });
 
   it("lists a Team that a member cluster holds", async () => {
@@ -136,29 +144,21 @@ describe("PipelinesIndex", () => {
     });
   });
 
-  it("shows the error state when the permissions read fails, while the team list is pending", async () => {
-    mockGetMyPermissions.mockRejectedValue(new Error("boom"));
-    mockListPipelineTeams.mockReturnValue(new Promise(() => {}));
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("Unable to load page")).toBeInTheDocument();
-    });
-  });
-
-  it("still renders the caller's tenant Teams when listPipelineTeams fails", async () => {
+  it("shows an error state with Retry when listPipelineTeams fails", async () => {
     mockGetMyPermissions.mockResolvedValue({
       global: { pipelines: { read: true } },
       scopes: [],
-      tenants: [
-        { tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } },
-        { tenant: "gamma", jobs: [], capabilities: { pipelines: { read: true } } },
-      ],
+      tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { read: true } } }],
     });
     mockListPipelineTeams.mockRejectedValue(new Error("boom"));
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: /acme/ })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /gamma/ })).toBeInTheDocument();
+      expect(screen.getByText("Unable to load teams")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("link", { name: /acme/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => {
+      expect(mockListPipelineTeams).toHaveBeenCalledTimes(2);
     });
   });
 });

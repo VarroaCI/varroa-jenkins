@@ -2701,13 +2701,13 @@ type ComponentsSchemasPipelineTeam struct {
 	// CellNamespace The namespace of that cell Controller.
 	CellNamespace *string `json:"cellNamespace,omitempty"`
 
-	// Cluster The cluster that holds the tenant's cell. An unplaced local Team names the local cluster.
+	// Cluster The cluster that holds the tenant's cell. An unplaced local Team names the local cluster. A local Team whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.
 	Cluster string `json:"cluster"`
 
 	// Name The Team name, which is also its tenant name.
 	Name string `json:"name"`
 
-	// Placed True when a cell holds the tenant.
+	// Placed True when a cell holds the tenant. A controller-namespace Team answers false.
 	Placed bool `json:"placed"`
 }
 

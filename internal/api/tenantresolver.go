@@ -212,16 +212,22 @@ func (t *teamTenantResolver) namespaceTenants(ctx context.Context, obj *unstruct
 	if len(namespaces) == 0 {
 		return nil, nil
 	}
-	inScope := make(map[string]bool, len(namespaces))
-	for _, ns := range namespaces {
-		inScope[ns] = true
-	}
 
 	all, _, err := t.brood.ListAll(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
+	return teamNamespaceTenants(namespaces, all), nil
+}
 
+// teamNamespaceTenants returns one TenantRef for each controller in all
+// whose namespace namespaces names. It is the pure core of design D1 step
+// 2, shared with the landing-page list.
+func teamNamespaceTenants(namespaces []string, all []ClusterController) []TenantRef {
+	inScope := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		inScope[ns] = true
+	}
 	var refs []TenantRef
 	for _, row := range all {
 		if row.CR == nil || !inScope[row.CR.Namespace] {
@@ -229,7 +235,7 @@ func (t *teamTenantResolver) namespaceTenants(ctx context.Context, obj *unstruct
 		}
 		refs = append(refs, controllerTenant(row))
 	}
-	return refs, nil
+	return refs
 }
 
 // syntheticTenant applies design D1 steps 3 and 4: no Team named team

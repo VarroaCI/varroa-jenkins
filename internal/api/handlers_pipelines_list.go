@@ -33,9 +33,10 @@ type pipelineTeamListJSON struct {
 
 // handleListPipelineTeams serves GET /pipelines, the landing-page read.
 // It answers every pipelines Team the caller may read: each local Team
-// that carries spec.pipelines, and each live record-store placement row
-// of another cluster. It has no gate of its own; the tenant read check
-// drops each row the caller may not read.
+// that carries spec.pipelines, each live record-store placement row of
+// another cluster, and each local Team without spec.pipelines whose
+// namespaces hold a controller the caller may read. It has no gate of
+// its own; the tenant read check drops each row the caller may not read.
 func (s *Server) handleListPipelineTeams(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	body, err := s.listPipelineTeams(r.Context(), claims)
@@ -50,7 +51,9 @@ func (s *Server) handleListPipelineTeams(w http.ResponseWriter, r *http.Request)
 // listPipelineTeams builds the GET /pipelines body. A local Team hides a
 // placement row of the same name, because the tenant resolver opens the
 // local Team first for that name. One name placed on two other clusters
-// answers one row for each cluster.
+// answers one row for each cluster. A local Team without spec.pipelines
+// answers a row only when the tenant resolver would resolve it to a
+// readable controller tenant (design D1 step 2).
 func (s *Server) listPipelineTeams(ctx context.Context, claims *auth.Claims) (pipelineTeamListJSON, error) {
 	local := ""
 	if s.deps.Brood != nil {
@@ -58,6 +61,7 @@ func (s *Server) listPipelineTeams(ctx context.Context, claims *auth.Claims) (pi
 	}
 
 	var rows []pipelineTeamJSON
+	var fanOut []*v1alpha1.Team
 	localNames := make(map[string]bool)
 	if s.deps.Store != nil {
 		teams, err := crdstore.List[v1alpha1.Team](ctx, s.deps.Store, "", "")
@@ -67,6 +71,9 @@ func (s *Server) listPipelineTeams(ctx context.Context, claims *auth.Claims) (pi
 		for _, team := range teams {
 			localNames[team.Name] = true
 			if team.Spec.Pipelines == nil {
+				if len(team.Spec.Namespaces) > 0 {
+					fanOut = append(fanOut, team)
+				}
 				continue
 			}
 			rows = append(rows, localPipelineTeamRow(team, local))
@@ -103,6 +110,7 @@ func (s *Server) listPipelineTeams(ctx context.Context, claims *auth.Claims) (pi
 			items = append(items, row)
 		}
 	}
+	items = append(items, s.fanOutPipelineTeams(ctx, claims, fanOut, local)...)
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Name != items[j].Name {
 			return items[i].Name < items[j].Name
@@ -110,6 +118,38 @@ func (s *Server) listPipelineTeams(ctx context.Context, claims *auth.Claims) (pi
 		return items[i].Cluster < items[j].Cluster
 	})
 	return pipelineTeamListJSON{Items: items, RecordStore: recordStore}, nil
+}
+
+// fanOutPipelineTeams answers the local Teams without spec.pipelines that
+// the tenant resolver would fan out over controllers. A Team with no
+// readable controller tenant, or with more tenants than the resolver
+// admits, is left out, because the resolver answers 404 or 422 for it.
+// A failed controller list leaves these rows out; it does not fail the
+// read. The name-based readable filter does not apply: the check runs on
+// each controller tenant.
+func (s *Server) fanOutPipelineTeams(ctx context.Context, claims *auth.Claims, teams []*v1alpha1.Team, local string) []pipelineTeamJSON {
+	if len(teams) == 0 || s.deps.Brood == nil {
+		return nil
+	}
+	all, _, err := s.deps.Brood.ListAll(ctx, "", "")
+	if err != nil {
+		s.deps.Logger.Warn("list pipelines teams: list controllers", "error", err)
+		return nil
+	}
+	var rows []pipelineTeamJSON
+	for _, team := range teams {
+		refs := teamNamespaceTenants(team.Spec.Namespaces, all)
+		if len(refs) == 0 || len(refs) > maxTeamTenants {
+			continue
+		}
+		for _, ref := range refs {
+			if s.deps.Authorizer.CanReadPipeline(claims, ref, "") {
+				rows = append(rows, pipelineTeamJSON{Name: team.Name, Cluster: local, Placed: false})
+				break
+			}
+		}
+	}
+	return rows
 }
 
 // allTenantPlacements reads every placement row. It reports false, with

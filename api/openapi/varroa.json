@@ -10049,7 +10049,7 @@
             "type": "string"
           },
           "cluster": {
-            "description": "The cluster that holds the tenant's cell. An unplaced local Team names the local cluster.\n",
+            "description": "The cluster that holds the tenant's cell. An unplaced local Team names the local cluster. A local Team whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.\n",
             "type": "string"
           },
           "name": {
@@ -10057,7 +10057,7 @@
             "type": "string"
           },
           "placed": {
-            "description": "True when a cell holds the tenant.",
+            "description": "True when a cell holds the tenant. A controller-namespace Team answers false.\n",
             "type": "boolean"
           }
         },
@@ -18927,7 +18927,7 @@
     },
     "/api/v1/pipelines": {
       "get": {
-        "description": "Answers each local Team that carries spec.pipelines, and each live record-store placement row of another cluster. A row of the local cluster, a row with no cell, and a row at placement generation 0 are not listed. A name that a local Team holds lists only the local Team. One name placed on two other clusters lists one row for each cluster. The route has no gate of its own: the tenant read check drops each row the caller may not read, so a caller who can read no row gets an empty list. When the record store is off or its schema is too old, the list carries the local Teams alone and recordStore is false.\n",
+        "description": "Answers each local Team that carries spec.pipelines, and each live record-store placement row of another cluster. A row of the local cluster, a row with no cell, and a row at placement generation 0 are not listed. A name that a local Team holds lists only the local Team. One name placed on two other clusters lists one row for each cluster. It also answers each local Team without spec.pipelines whose spec.namespaces hold a controller the caller may read. The route has no gate of its own: the tenant read check drops each row the caller may not read, so a caller who can read no row gets an empty list. When the record store is off or its schema is too old, the list carries the local Teams alone and recordStore is false.\n",
         "operationId": "listPipelineTeams",
         "responses": {
           "200": {

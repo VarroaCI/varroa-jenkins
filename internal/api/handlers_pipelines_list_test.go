@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -218,4 +219,82 @@ func TestListPipelineTeams_OneNameOnTwoClustersAnswersTwoRows(t *testing.T) {
 		pipelineTeamJSON{Name: "shop", Cluster: "member-a", Cell: "cell-a", CellNamespace: "cells", Placed: true},
 		pipelineTeamJSON{Name: "shop", Cluster: "member-b", Cell: "cell-b", CellNamespace: "cells", Placed: true},
 	)
+}
+
+// nsTeam builds a local Team without spec.pipelines, naming namespaces.
+func nsTeam(name string, namespaces ...string) *v1alpha1.Team {
+	return &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.TeamSpec{Namespaces: namespaces},
+	}
+}
+
+// getPipelineTeamsWithControllers serves GET /pipelines with the given
+// Controllers in the brood, next to the local Teams.
+func getPipelineTeamsWithControllers(t *testing.T, authorizer *Authorizer, controllers []*v1alpha1.Controller, teams ...*v1alpha1.Team) pipelineTeamListJSON {
+	t.Helper()
+	store := crdstore.NewFake()
+	for _, team := range teams {
+		crdstore.MustSeed(store, team)
+	}
+	client := newFakeResourceClient()
+	client.controllers = make(map[string]*v1alpha1.Controller, len(controllers))
+	for _, cr := range controllers {
+		client.controllers[cr.Name] = cr.DeepCopy()
+	}
+	srv := NewServer(&Dependencies{
+		Store:      store,
+		Client:     client,
+		Brood:      newFakeBrood(client),
+		Authorizer: authorizer,
+		Logger:     slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/pipelines", nil)
+	req = req.WithContext(contextWithClaims(req.Context(), resolverClaims))
+	rec := httptest.NewRecorder()
+	srv.handleListPipelineTeams(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var body pipelineTeamListJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return body
+}
+
+func controllerIn(name, namespace string) *v1alpha1.Controller {
+	return &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+}
+
+func TestListPipelineTeams_TeamWithControllersInItsNamespacesIsListed(t *testing.T) {
+	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(),
+		[]*v1alpha1.Controller{controllerIn("svc-a", "team-pay")},
+		nsTeam("payments", "team-pay"))
+	assertPipelineTeams(t, body.Items,
+		pipelineTeamJSON{Name: "payments", Cluster: "core", Placed: false})
+}
+
+func TestListPipelineTeams_TeamWithNoControllersIsNotListed(t *testing.T) {
+	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(),
+		[]*v1alpha1.Controller{controllerIn("svc-a", "other")},
+		nsTeam("mt-tenant", "mt-tenant-ns"))
+	assertPipelineTeams(t, body.Items)
+}
+
+func TestListPipelineTeams_TeamWithUnreadableControllersIsNotListed(t *testing.T) {
+	body := getPipelineTeamsWithControllers(t, namespaceAuthorizer("other"),
+		[]*v1alpha1.Controller{controllerIn("svc-a", "team-pay")},
+		nsTeam("payments", "team-pay"))
+	assertPipelineTeams(t, body.Items)
+}
+
+func TestListPipelineTeams_TeamPastTheTenantCeilingIsNotListed(t *testing.T) {
+	var controllers []*v1alpha1.Controller
+	for i := 0; i <= maxTeamTenants; i++ {
+		controllers = append(controllers, controllerIn(fmt.Sprintf("svc-%02d", i), "team-big"))
+	}
+	body := getPipelineTeamsWithControllers(t, globalPipelinesAuthorizer(), controllers,
+		nsTeam("big", "team-big"))
+	assertPipelineTeams(t, body.Items)
 }

@@ -198,9 +198,10 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `usePermissions.ts`, `TenantScopeEditor.tsx`, and any future caller import
   it; a second browser implementation is not permitted.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
-  (`/pipelines`, merges `GET /pipelines` rows, which include member-cluster
-  Teams, with the caller's `tenants` grant names for every caller, and
-  redirects when exactly one name qualifies), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree, a Running
+  (`/pipelines`, lists the names of `GET /pipelines` rows only, which include
+  member-cluster Teams and controller-namespace Teams; it does not merge the
+  caller's `tenants` grant names, and a failed read shows an error with Retry;
+  it redirects when exactly one name qualifies), `TeamHome.tsx` (`/pipelines/:team`, the jobs folder tree, a Running
   now strip, and a `Locks` card that reads `GET /pipelines/{team}/locks`,
   refetches on a `lock` stream frame under the same 2-second window a `run` or
   a `stage` frame uses, and polls that read on the cells cadence, because a
