@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<AuthPhase>("loadingConfig");
   const [authError, setAuthError] = useState<string | undefined>();
-  const prevModeRef = useRef<string | undefined>();
+  const prevModeRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const unauthorized = () => {

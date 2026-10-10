@@ -482,7 +482,9 @@ describe("ControllerWizard", () => {
     }
     vi.stubGlobal("EventSource", MockEventSource);
 
-    const user = userEvent.setup();
+    // This test fills more than fifteen fields. The default per-action delay makes it
+    // too slow on a loaded CI runner, so it runs with no delay between actions.
+    const user = userEvent.setup({ delay: null });
     render(<ControllerWizard />);
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();

@@ -356,7 +356,7 @@ export default function ControllerWizard() {
   const [bundleSearch, setBundleSearch] = useState("");
   const [groups, setGroups] = useState<GroupEntry[]>([]);
   const [nameCollision, setNameCollision] = useState(false);
-  const collisionTimer = useRef<ReturnType<typeof setTimeout>>();
+  const collisionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [previewOutput, setPreviewOutput] = useState<string>("");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [unresolvedVars, setUnresolvedVars] = useState<string[]>([]);

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-React 18 + TypeScript + Vite dashboard for Varroa (Kubernetes-native Jenkins
+React 19 + TypeScript + Vite dashboard for Varroa (Kubernetes-native Jenkins
 operator). Talks to `varroa-bff` (`internal/bff` / `cmd/bff`) over REST +
 SSE. Built with `@tanstack/react-query` for server state, `react-router-dom`
 for routing, CSS Modules for styling, and OpenTelemetry web SDK for tracing.

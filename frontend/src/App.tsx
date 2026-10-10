@@ -86,7 +86,7 @@ function CatalogComposerRoute() {
 
 function useRouteChangeSpan() {
   const location = useLocation();
-  const prevRoute = useRef<string>();
+  const prevRoute = useRef<string | undefined>(undefined);
   useEffect(() => {
     const tracer = trace.getTracer("varroa-frontend");
     const span = tracer.startSpan("frontend.routeChange", {
