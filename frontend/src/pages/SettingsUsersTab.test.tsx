@@ -169,4 +169,15 @@ describe("SettingsUsersTab", () => {
     await userEvent.click(screen.getByRole("button", { name: "oidc-abc" }));
     expect(screen.queryByText(/Edit — oidc-abc/)).not.toBeInTheDocument();
   });
+
+  it("wraps the user table in a horizontal scroll container", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    m(client.listUsers).mockResolvedValue([
+      { name: "alice", email: "alice@example.com", displayName: "Alice", groups: [], managedBy: "local" },
+    ]);
+    renderTab();
+
+    await screen.findByText("alice");
+    expect(screen.getByRole("table").parentElement?.className).toMatch(/tableWrap/);
+  });
 });

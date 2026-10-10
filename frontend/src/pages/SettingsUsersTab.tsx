@@ -85,65 +85,67 @@ export default function SettingsUsersTab() {
         />
       )}
 
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Name</th><th>Email</th><th>Display Name</th><th>Groups</th><th>Last Login</th><th>Managed By</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {users?.map((u) => (
-            <tr key={u.name}>
-              <td>
-                <Button variant="ghost" size="sm" className={`${styles.linkBtn} ${styles.profileVersion}`} onClick={() => setSelectedUser(selectedUser?.name === u.name ? null : u)}>
-                  {u.name}
-                </Button>
-              </td>
-              <td>{u.email || "—"}</td><td>{u.displayName || "—"}</td><td>{u.groups?.join(", ") || "—"}</td><td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td><td>{u.purpose ? `${u.managedBy} · ${u.purpose}` : u.managedBy}</td>
-              <td>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`${styles.linkBtn} ${styles.dangerLink}`}
-                  onClick={async () => {
-                    setDeleteTarget(u);
-                    try {
-                      const vrbs = await listRoleBindings();
-                      // Intentionally core-scoped: this is an advisory preview of
-                      // bindings affected by deleting a user on the core-only user-
-                      // management page. User identity and VarroaRoleBindings are
-                      // core-side concepts, so no cluster selector belongs here.
-                      const jrbs = await listJenkinsRoleBindings("core");
-                      // Advisory preview: match by the identifiers a binding can
-                      // reference (name/email). Display name is not an identifier.
-                      const ids = new Set([u.name, u.email].filter(Boolean) as string[]);
-                      const removed: string[] = [];
-                      const empty: string[] = [];
-                      for (const rb of vrbs.items) {
-                        const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
-                        if (hasUser) {
-                          removed.push(`VarroaRoleBinding: ${rb.metadata.name}`);
-                          if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`VarroaRoleBinding: ${rb.metadata.name}`);
-                        }
-                      }
-                      for (const rb of jrbs.items) {
-                        const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
-                        if (hasUser) {
-                          removed.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
-                          if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
-                        }
-                      }
-                      setDeletePreview({ removedFrom: removed, empty });
-                    } catch { setDeletePreview(null); }
-                  }}
-                >
-                  Delete
-                </Button>
-              </td>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Name</th><th>Email</th><th>Display Name</th><th>Groups</th><th>Last Login</th><th>Managed By</th><th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {users?.map((u) => (
+              <tr key={u.name}>
+                <td>
+                  <Button variant="ghost" size="sm" className={`${styles.linkBtn} ${styles.profileVersion}`} onClick={() => setSelectedUser(selectedUser?.name === u.name ? null : u)}>
+                    {u.name}
+                  </Button>
+                </td>
+                <td>{u.email || "—"}</td><td>{u.displayName || "—"}</td><td>{u.groups?.join(", ") || "—"}</td><td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td><td>{u.purpose ? `${u.managedBy} · ${u.purpose}` : u.managedBy}</td>
+                <td>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`${styles.linkBtn} ${styles.dangerLink}`}
+                    onClick={async () => {
+                      setDeleteTarget(u);
+                      try {
+                        const vrbs = await listRoleBindings();
+                        // Intentionally core-scoped: this is an advisory preview of
+                        // bindings affected by deleting a user on the core-only user-
+                        // management page. User identity and VarroaRoleBindings are
+                        // core-side concepts, so no cluster selector belongs here.
+                        const jrbs = await listJenkinsRoleBindings("core");
+                        // Advisory preview: match by the identifiers a binding can
+                        // reference (name/email). Display name is not an identifier.
+                        const ids = new Set([u.name, u.email].filter(Boolean) as string[]);
+                        const removed: string[] = [];
+                        const empty: string[] = [];
+                        for (const rb of vrbs.items) {
+                          const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
+                          if (hasUser) {
+                            removed.push(`VarroaRoleBinding: ${rb.metadata.name}`);
+                            if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`VarroaRoleBinding: ${rb.metadata.name}`);
+                          }
+                        }
+                        for (const rb of jrbs.items) {
+                          const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
+                          if (hasUser) {
+                            removed.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
+                            if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
+                          }
+                        }
+                        setDeletePreview({ removedFrom: removed, empty });
+                      } catch { setDeletePreview(null); }
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {users?.length === 0 && (
         <p className={styles.noResults}>No users found.</p>

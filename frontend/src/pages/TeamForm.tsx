@@ -422,8 +422,13 @@ export default function TeamForm() {
   const rehydratedCond = condition(team, "Rehydrated");
 
   return (
-    <div className={styles.teamsPage}>
-      <h1>{isEdit ? "Edit Team" : "Create Team"}</h1>
+    <div className={styles.page}>
+      <div className={styles.pageHead}>
+        <div>
+          <h1 className={styles.pageTitle}>{isEdit ? "Edit Team" : "Create Team"}</h1>
+          <p className={styles.pageDesc}>Define the namespaces, role, and pipelines tenant of a team</p>
+        </div>
+      </div>
 
       {errors.length > 0 && (
         <div className={styles.errors}>
@@ -433,6 +438,7 @@ export default function TeamForm() {
         </div>
       )}
 
+      <Card>
       <div className={styles.form}>
         {!isEdit && (
           <div className={styles.field}>
@@ -811,81 +817,6 @@ export default function TeamForm() {
           </div>
         )}
 
-        {isEdit && team && (team.pipelines || team.placement || placedCond || warningsCond || rehydratedCond) && (
-          <Card title="Pipelines status">
-            <div className={styles.statusGrid}>
-              <div>
-                <span className={styles.statusLabel}>Placement status</span>
-                {placedCond ? (
-                  <span
-                    className={`${styles.statusBadge} ${
-                      placedCond.status === "True" ? styles.statusReady : styles.statusNotReady
-                    }`}
-                  >
-                    {placedCond.status === "True" ? "Placed" : placedCond.reason || "Unknown"}
-                  </span>
-                ) : (
-                  <span className={styles.statusMuted}>Not yet placed</span>
-                )}
-              </div>
-
-              <div>
-                <span className={styles.statusLabel}>Cell</span>
-                <span>
-                  {team.placement?.cell
-                    ? `${team.placement.cluster}/${team.placement.cellNamespace}/${team.placement.cell} (generation ${
-                        team.placement.generation ?? 0
-                      })`
-                    : "—"}
-                </span>
-              </div>
-
-              {team.placement?.members && team.placement.members.length > 0 && (
-                <div>
-                  <span className={styles.statusLabel}>Members</span>
-                  <span>
-                    {team.placement.members.map((member) => teamMemberLabel(member)).join(", ")}
-                  </span>
-                </div>
-              )}
-
-              <div>
-                <span className={styles.statusLabel}>Rehydration status</span>
-                {rehydratedCond ? (
-                  <span
-                    className={`${styles.statusBadge} ${
-                      rehydratedCond.status === "True" ? styles.statusReady : styles.statusNotReady
-                    }`}
-                  >
-                    {rehydratedCond.status === "True" ? "Rehydrated" : rehydratedCond.reason || "Unknown"}
-                  </span>
-                ) : (
-                  <span className={styles.statusMuted}>No rehydration recorded</span>
-                )}
-              </div>
-
-              {team.rehydration && (
-                <div>
-                  <span className={styles.statusLabel}>Rehydration records</span>
-                  <span>
-                    {team.rehydration.records ?? 0} record(s)
-                    {team.rehydration.truncated ? " (truncated)" : ""}
-                    {team.rehydration.unseededJobs ? `, ${team.rehydration.unseededJobs} job(s) unseeded` : ""}
-                  </span>
-                </div>
-              )}
-
-              {warningsCond?.status === "True" && (
-                <div className={styles.warningBox}>
-                  <span className={styles.statusLabel}>Tenant warnings</span>
-                  <div className={styles.warningReason}>{warningsCond.reason}</div>
-                  {warningsCond.message && <p className={styles.warningMessage}>{warningsCond.message}</p>}
-                </div>
-              )}
-            </div>
-          </Card>
-        )}
-
         <div className={styles.formActions}>
           <Button onClick={handleSubmit} disabled={saving}>
             {saving ? "Saving..." : isEdit ? "Update" : "Create"}
@@ -893,6 +824,85 @@ export default function TeamForm() {
           <Button onClick={() => navigate("/access/teams")}>Cancel</Button>
         </div>
       </div>
+      </Card>
+
+        {isEdit && team && (team.pipelines || team.placement || placedCond || warningsCond || rehydratedCond) && (
+          <div className={styles.statusSection}>
+            <Card title="Pipelines status">
+              <div className={styles.statusGrid}>
+                <div>
+                  <span className={styles.statusLabel}>Placement status</span>
+                  {placedCond ? (
+                    <span
+                      className={`${styles.statusBadge} ${
+                        placedCond.status === "True" ? styles.statusReady : styles.statusNotReady
+                      }`}
+                    >
+                      {placedCond.status === "True" ? "Placed" : placedCond.reason || "Unknown"}
+                    </span>
+                  ) : (
+                    <span className={styles.statusMuted}>Not yet placed</span>
+                  )}
+                </div>
+
+                <div>
+                  <span className={styles.statusLabel}>Cell</span>
+                  <span>
+                    {team.placement?.cell
+                      ? `${team.placement.cluster}/${team.placement.cellNamespace}/${team.placement.cell} (generation ${
+                          team.placement.generation ?? 0
+                        })`
+                      : "—"}
+                  </span>
+                </div>
+
+                {team.placement?.members && team.placement.members.length > 0 && (
+                  <div>
+                    <span className={styles.statusLabel}>Members</span>
+                    <span>
+                      {team.placement.members.map((member) => teamMemberLabel(member)).join(", ")}
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <span className={styles.statusLabel}>Rehydration status</span>
+                  {rehydratedCond ? (
+                    <span
+                      className={`${styles.statusBadge} ${
+                        rehydratedCond.status === "True" ? styles.statusReady : styles.statusNotReady
+                      }`}
+                    >
+                      {rehydratedCond.status === "True" ? "Rehydrated" : rehydratedCond.reason || "Unknown"}
+                    </span>
+                  ) : (
+                    <span className={styles.statusMuted}>No rehydration recorded</span>
+                  )}
+                </div>
+
+                {team.rehydration && (
+                  <div>
+                    <span className={styles.statusLabel}>Rehydration records</span>
+                    <span>
+                      {team.rehydration.records ?? 0} record(s)
+                      {team.rehydration.truncated ? " (truncated)" : ""}
+                      {team.rehydration.unseededJobs ? `, ${team.rehydration.unseededJobs} job(s) unseeded` : ""}
+                    </span>
+                  </div>
+                )}
+
+                {warningsCond?.status === "True" && (
+                  <div className={styles.warningBox}>
+                    <span className={styles.statusLabel}>Tenant warnings</span>
+                    <div className={styles.warningReason}>{warningsCond.reason}</div>
+                    {warningsCond.message && <p className={styles.warningMessage}>{warningsCond.message}</p>}
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+
     </div>
   );
 }

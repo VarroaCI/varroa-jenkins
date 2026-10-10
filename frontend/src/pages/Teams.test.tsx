@@ -135,4 +135,12 @@ describe("Teams", () => {
       expect(mockDeleteTeam).toHaveBeenCalledWith("alpha-team");
     });
   });
+
+  it("wraps the team table in a horizontal scroll container", async () => {
+    mockListTeams.mockResolvedValue([team1, team2]);
+    renderWithProviders(<Teams />);
+
+    await screen.findByText("alpha-team");
+    expect(screen.getByRole("table").parentElement?.className).toMatch(/tableWrap/);
+  });
 });

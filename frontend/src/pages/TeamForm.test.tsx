@@ -352,4 +352,36 @@ describe("TeamForm", () => {
     const body = mockCreateTeam.mock.calls[0][0];
     expect(body.pipelines).toBeUndefined();
   });
+
+  it("renders the create form inside a card with a description", () => {
+    render(<TeamForm />);
+
+    expect(screen.getByRole("heading", { name: "Create Team" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Define the namespaces, role, and pipelines tenant of a team"),
+    ).toBeInTheDocument();
+    const nameInput = screen.getByText("Name").nextElementSibling as HTMLElement;
+    expect(nameInput.closest('[class*="card"]')).not.toBeNull();
+  });
+
+  it("shows the pipelines status card after the form card on the edit view", async () => {
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: { profile: "lts-2.479", agentNamespace: "team-alpha" },
+      placement: { cluster: "core", cell: "cell-lts-0", cellNamespace: "varroa-cells", generation: 2 },
+      conditions: [{ type: "Placed", status: "True", reason: "TenantPlaced" }],
+    });
+
+    render(<TeamForm />);
+
+    const status = await screen.findByText("Pipelines status");
+    const updateButton = screen.getByRole("button", { name: "Update" });
+    const statusCard = status.closest('[class*="card"]');
+    expect(statusCard).not.toBeNull();
+    expect(statusCard!.contains(updateButton)).toBe(false);
+  });
 });

@@ -74,4 +74,13 @@ describe("Teams member list", () => {
 
     expect(await screen.findByText("core/cell-z")).toBeInTheDocument();
   });
+
+  it("keeps each placement member on one line", async () => {
+    mockListTeams.mockResolvedValue([multiSlotTeam]);
+    renderWithProviders(<Teams />);
+
+    const member = await screen.findByText("cell-a (slot 0)");
+    expect(member.closest("td")?.className).toMatch(/placementCell/);
+    expect(member.closest("ul")?.className).toMatch(/memberList/);
+  });
 });

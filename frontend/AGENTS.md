@@ -115,6 +115,7 @@ TypeScript consumer of it.
   duplicated per module rather than shared, matching the rest of
   `src/pages/`; a component like `SectionPage` that needs that pattern
   gets its own `SectionPage.module.css` rather than importing a page's.
+- **Lists inside a Card fit the Admin & access content width (706 px at a 1280 px viewport).** Wrap a `.dataTable` in an element that composes `tableScroll` from `src/pages/tables.module.css`. A CSS-grid list row uses `minmax(0, …)` tracks and a fixed-width actions track, so the header and every row align. A single-value `select` keeps the text-input height; only `select[multiple]` gets a taller box.
 
 ## Work Guidance
 

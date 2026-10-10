@@ -61,9 +61,11 @@
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
-  min-height: 80px;
   font-family: inherit;
 }
+
+/* A multi-select list box shows several options at once. A single select keeps the input height. */
+.formSelect[multiple] { min-height: 80px; }
 
 .formSelect:focus {
   outline: none;
