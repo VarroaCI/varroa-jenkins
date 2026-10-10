@@ -13,7 +13,7 @@ import {
   passesLane,
   passesSource,
   passesSelection,
-  ACTIVITY_TYPE_MAP,
+  activityTypeMeta,
   SOURCE_COLORS,
   SOURCE_LABELS,
   age,
@@ -170,10 +170,7 @@ export default function ActivityTimeline({
 
   // ── Render helpers ───────────────────────────────────────────────────────
   const renderControlRow = (event: ActivityEvent) => {
-    const { icon, style } = ACTIVITY_TYPE_MAP[event.type] ?? {
-      icon: "·",
-      style: "",
-    };
+    const { icon, style } = activityTypeMeta(event);
     const sourceLabel = SOURCE_LABELS[event.source] ?? event.source;
 
     return (

@@ -276,4 +276,31 @@ describe("ActivityTimeline", () => {
 
     expect(screen.queryByText("Out of scope", { exact: false })).not.toBeInTheDocument();
   });
+
+  it("renders no row for a live frame with no type", async () => {
+    mockSSELastEvent = {
+      type: "activity",
+      data: { event: "heartbeat", name: "c1", namespace: "ns", cluster: "core" } as unknown as ActivityEvent,
+    };
+    renderTimeline();
+
+    await waitFor(() => {
+      expect(screen.getByText(/No activity yet/)).toBeInTheDocument();
+    });
+    expect(document.querySelector('[title="Invalid Date"]')).toBeNull();
+  });
+
+  it("renders an icon for auth events", async () => {
+    mockBffFetch.mockResolvedValue({
+      items: [createEvent({ type: "auth.local.login", source: "user", message: "Signed in" })],
+    });
+    renderTimeline();
+
+    await waitFor(() => {
+      expect(screen.getByText("Signed in", { exact: false })).toBeInTheDocument();
+    });
+    const icon = document.querySelector('[data-style="softOk"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.textContent).not.toBe("·");
+  });
 });

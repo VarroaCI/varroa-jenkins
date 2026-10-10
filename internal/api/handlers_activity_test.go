@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -296,15 +298,15 @@ func TestIsAuthorizedActivityEvent_ScopedCaller(t *testing.T) {
 	claims := &auth.Claims{Subject: "test-user"}
 
 	// Authorized A event (matches ns-a scope).
-	if !srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: activity.Event{Namespace: "ns-a", Controller: "ctrl-a"}}) {
+	if !srv.isAuthorizedActivityEvent(claims, a, activity.Event{Namespace: "ns-a", Controller: "ctrl-a"}) {
 		t.Error("expected authorized for A event")
 	}
 	// Denied B event (different namespace).
-	if srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: activity.Event{Namespace: "ns-b", Controller: "ctrl-b"}}) {
+	if srv.isAuthorizedActivityEvent(claims, a, activity.Event{Namespace: "ns-b", Controller: "ctrl-b"}) {
 		t.Error("expected denied for B event")
 	}
 	// Denied global event (no cluster-wide caps).
-	if srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: activity.Event{Namespace: "", Controller: ""}}) {
+	if srv.isAuthorizedActivityEvent(claims, a, activity.Event{Namespace: "", Controller: ""}) {
 		t.Error("expected denied for global event")
 	}
 }
@@ -314,10 +316,10 @@ func TestIsAuthorizedActivityEvent_ClusterViewer(t *testing.T) {
 	srv := NewServer(&Dependencies{Authorizer: a})
 	claims := &auth.Claims{Subject: "test-user"}
 
-	if !srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: activity.Event{Namespace: "any", Controller: "any"}}) {
+	if !srv.isAuthorizedActivityEvent(claims, a, activity.Event{Namespace: "any", Controller: "any"}) {
 		t.Error("expected authorized for any controller")
 	}
-	if !srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: activity.Event{Namespace: "", Controller: ""}}) {
+	if !srv.isAuthorizedActivityEvent(claims, a, activity.Event{Namespace: "", Controller: ""}) {
 		t.Error("expected authorized for global event")
 	}
 }
@@ -326,19 +328,8 @@ func TestIsAuthorizedActivityEvent_NilAuthorizer(t *testing.T) {
 	srv := NewServer(&Dependencies{Authorizer: nil})
 	claims := &auth.Claims{Subject: "user"}
 
-	if srv.isAuthorizedActivityEvent(claims, nil, sse.Record{Data: activity.Event{Namespace: "ns-a", Controller: "ctrl-a"}}) {
+	if srv.isAuthorizedActivityEvent(claims, nil, activity.Event{Namespace: "ns-a", Controller: "ctrl-a"}) {
 		t.Error("expected denied with nil authorizer")
-	}
-}
-
-func TestIsAuthorizedActivityEvent_NonActivityRecord(t *testing.T) {
-	// Non-activity records (e.g. brood heartbeat) should pass through.
-	a := testAuthorizer(false, "")
-	srv := NewServer(&Dependencies{Authorizer: a})
-	claims := &auth.Claims{Subject: "user"}
-
-	if !srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: map[string]interface{}{"event": "heartbeat"}}) {
-		t.Error("expected non-activity record to pass through")
 	}
 }
 
@@ -370,7 +361,7 @@ func TestIsAuthorizedActivityEvent_ReevaluationViaResolver(t *testing.T) {
 	e := activity.Event{Namespace: "ns-a", Controller: "ctrl-a"}
 
 	// Initially authorized (ns-a scoped binding exists).
-	if !srv.isAuthorizedActivityEvent(claims, a, sse.Record{Data: e}) {
+	if !srv.isAuthorizedActivityEvent(claims, a, e) {
 		t.Error("expected authorized before modification")
 	}
 
@@ -383,8 +374,46 @@ func TestIsAuthorizedActivityEvent_ReevaluationViaResolver(t *testing.T) {
 	a2 := NewAuthorizer(r2, false)
 	srv2 := NewServer(&Dependencies{Authorizer: a2})
 
-	if srv2.isAuthorizedActivityEvent(claims, a2, sse.Record{Data: e}) {
+	if srv2.isAuthorizedActivityEvent(claims, a2, e) {
 		t.Error("expected denied after binding removal")
+	}
+}
+
+// fakeActivitySource is a sse.EventSource that serves one pre-filled channel.
+type fakeActivitySource struct {
+	ch <-chan sse.Record
+}
+
+func (f *fakeActivitySource) Subscribe(string) <-chan sse.Record    { return f.ch }
+func (f *fakeActivitySource) SubscribeAll() <-chan sse.Record       { return f.ch }
+func (f *fakeActivitySource) Unsubscribe(string, <-chan sse.Record) {}
+
+func TestHandleActivityStream_DropsNonActivityRecords(t *testing.T) {
+	ch := make(chan sse.Record, 2)
+	ch <- sse.Record{Event: "heartbeat", Data: map[string]interface{}{"event": "heartbeat", "name": "c1", "namespace": "ns", "cluster": "core"}}
+	ch <- sse.Record{Event: "auth.local.login", Data: activity.Event{Type: "auth.local.login", Source: "user", Namespace: "ns", Controller: "c1", Message: "m", Timestamp: time.Now()}}
+	close(ch)
+
+	srv := NewServer(&Dependencies{
+		Authorizer:  testAuthorizer(true, ""),
+		Broadcaster: &fakeActivitySource{ch: ch},
+		Logger:      slog.Default(),
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/stream", nil).
+		WithContext(authContext(&auth.Claims{Subject: "test-user"}))
+	w := httptest.NewRecorder()
+
+	srv.handleActivityStream(w, req)
+
+	body := w.Body.String()
+	if n := strings.Count(body, "event: activity\n"); n != 1 {
+		t.Fatalf("expected exactly one activity frame, got %d: %s", n, body)
+	}
+	if !strings.Contains(body, "auth.local.login") {
+		t.Errorf("expected auth.local.login frame, got: %s", body)
+	}
+	if strings.Contains(body, "heartbeat") {
+		t.Errorf("brood telemetry leaked into activity stream: %s", body)
 	}
 }
 

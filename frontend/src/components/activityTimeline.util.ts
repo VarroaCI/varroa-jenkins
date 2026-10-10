@@ -252,17 +252,12 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "provisioning.failed": { icon: "✘", style: "softBad" },
   "pod.replaced": { icon: "⟳", style: "softWarn" },
   "group.created": { icon: "➕", style: "softOk" },
-  "group.updated": { icon: "✏", style: "softInfo" },
   "group.deleted": { icon: "✗", style: "softBad" },
-  "settings.updated": { icon: "⚙", style: "softWarn" },
   login: { icon: "→", style: "softOk" },
   logout: { icon: "←", style: "softWarn" },
   "preferences.updated": { icon: "☰", style: "softInfo" },
   "build.started": { icon: "▶", style: "softInfo" },
   "build.completed": { icon: "⚑", style: "softInfo" },
-  "job.created": { icon: "➕", style: "softOk" },
-  "job.updated": { icon: "✏", style: "softInfo" },
-  "job.deleted": { icon: "✗", style: "softBad" },
   // ── MCP write-auditing types ─────────────────────────────────────────────
   "restart.approved": { icon: "⏻", style: "softWarn" },
   "catalogsource.synced": { icon: "⇄", style: "softInfo" },
@@ -291,7 +286,104 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "versionprofile.updated": { icon: "✏", style: "softInfo" },
   "versionprofile.deleted": { icon: "✗", style: "softBad" },
   "provisioningdefaults.updated": { icon: "✏", style: "softInfo" },
+  // ── Auth ─────────────────────────────────────────────────────────────────
+  "auth.local.login": { icon: "→", style: "softOk" },
+  "auth.local.login_failed": { icon: "⚠", style: "softWarn" },
+  // ── Controller lifecycle ─────────────────────────────────────────────────
+  "controller.breakglass.granted": { icon: "⚠", style: "softWarn" },
+  "controller.hibernated": { icon: "☾", style: "softMuted" },
+  "controller.woken": { icon: "☀", style: "softInfo" },
+  "controller.restarted": { icon: "⏻", style: "softWarn" },
+  "controller.reprovisioned": { icon: "⟳", style: "softWarn" },
+  // ── Approvals ────────────────────────────────────────────────────────────
+  "deletion.approved": { icon: "✗", style: "softBad" },
+  "pluginRoll.approved": { icon: "⇪", style: "softWarn" },
+  // ── Cells and tenants ────────────────────────────────────────────────────
+  "cell.rolled": { icon: "⟳", style: "softWarn" },
+  "tenant.placed": { icon: "⌂", style: "softOk" },
+  "tenant.moved": { icon: "⇄", style: "softInfo" },
+  "tenant.purge_failed": { icon: "✘", style: "softBad" },
+  "cellpool.updated": { icon: "✏", style: "softInfo" },
+  // ── Cluster drain ────────────────────────────────────────────────────────
+  "cluster.drain.started": { icon: "▼", style: "softWarn" },
+  "cluster.drain.completed": { icon: "✔", style: "softOk" },
+  "cluster.drain.canceled": { icon: "⊘", style: "softMuted" },
+  // ── Brood operations ─────────────────────────────────────────────────────
+  "broodop.run.started": { icon: "▶", style: "softInfo" },
+  "broodop.run.finished": { icon: "⚑", style: "softInfo" },
+  "broodop.target.finished": { icon: "⚑", style: "softInfo" },
+  // ── Commands ─────────────────────────────────────────────────────────────
+  "command.succeeded": { icon: "✔", style: "softOk" },
+  "command.failed": { icon: "✘", style: "softBad" },
+  // ── Build claims ─────────────────────────────────────────────────────────
+  "build.claim_vetoed": { icon: "⊘", style: "softWarn" },
+  "build.claim_abandoned": { icon: "◌", style: "softMuted" },
+  "build.claim_expired": { icon: "◌", style: "softMuted" },
+  "build.interrupted": { icon: "✘", style: "softBad" },
+  "build.scheduled.backstop": { icon: "◷", style: "softInfo" },
+  // ── Jenkins items ────────────────────────────────────────────────────────
+  "item.created": { icon: "➕", style: "softOk" },
+  "item.updated": { icon: "✏", style: "softInfo" },
+  "item.deleted": { icon: "✗", style: "softBad" },
+  "item.moved": { icon: "⇄", style: "softInfo" },
+  // ── Fleet locks ──────────────────────────────────────────────────────────
+  "fleetlock.force_released": { icon: "⊘", style: "softWarn" },
+  "fleetlock.force_release_unconfirmed": { icon: "⚠", style: "softWarn" },
+  // ── Pipelines ────────────────────────────────────────────────────────────
+  "pipeline.run_requested": { icon: "▶", style: "softInfo" },
+  "pipeline.run_replay_requested": { icon: "↻", style: "softInfo" },
+  "pipeline.run_input_proceeded": { icon: "✔", style: "softOk" },
+  "pipeline.run_input_aborted": { icon: "⊘", style: "softWarn" },
+  // ── Plugin conflicts ─────────────────────────────────────────────────────
+  "pluginConflict.detected": { icon: "⚠", style: "softWarn" },
+  "pluginPinConflict.detected": { icon: "⚠", style: "softWarn" },
+  // ── Update center ────────────────────────────────────────────────────────
+  "updatecenter.plugin.uploaded": { icon: "⇪", style: "softInfo" },
+  // ── Upgrade candidates ───────────────────────────────────────────────────
+  "upgrade.candidate.created": { icon: "➕", style: "softInfo" },
+  "upgrade.candidate.promoted": { icon: "✔", style: "softOk" },
+  "upgrade.candidate.superseded": { icon: "⊘", style: "softMuted" },
+  "upgrade.preflight.failed": { icon: "✘", style: "softBad" },
+  "upgrade.upstream.observed": { icon: "◉", style: "softInfo" },
+  // ── Webhooks ─────────────────────────────────────────────────────────────
+  "webhook.replay.rejected": { icon: "⊘", style: "softWarn" },
 };
+
+export const ACTIVITY_FALLBACK_ICON = "◆";
+
+// activityTypeMeta is the only type-to-icon source for every activity surface.
+// An unknown type never renders the "·" marker. It falls back to the auth
+// family icon, then to a generic glyph styled by severity.
+export function activityTypeMeta(
+  e: Pick<ActivityEvent, "type" | "severity">,
+): { icon: string; style: string } {
+  const exact = ACTIVITY_TYPE_MAP[e.type];
+  if (exact) return exact;
+  if (e.type.startsWith("auth.")) return { icon: "→", style: "softInfo" };
+  const style =
+    e.severity === "error" ? "softBad" : e.severity === "warning" ? "softWarn" : "softMuted";
+  return { icon: ACTIVITY_FALLBACK_ICON, style };
+}
+
+// isActivityEvent reports whether a live frame has the ActivityEvent shape.
+// Brood telemetry frames on the same stream lack these fields and must be dropped.
+export function isActivityEvent(x: unknown): x is ActivityEvent {
+  if (typeof x !== "object" || x === null) return false;
+  const v = x as Record<string, unknown>;
+  return (
+    typeof v.type === "string" &&
+    v.type !== "" &&
+    typeof v.source === "string" &&
+    typeof v.message === "string" &&
+    typeof v.timestamp === "string" &&
+    RFC3339_TIMESTAMP.test(v.timestamp)
+  );
+}
+
+// The BFF writes Go time.Time values. Their fractional seconds can carry up to
+// nine digits, which Date.parse does not accept in every engine.
+const RFC3339_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 export const SOURCE_COLORS: Record<string, string> = {
   mite: "var(--ok-soft)",

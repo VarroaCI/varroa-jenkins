@@ -12,6 +12,9 @@ import {
   passesLane,
   passesSource,
   ACTIVITY_TYPE_MAP,
+  ACTIVITY_FALLBACK_ICON,
+  activityTypeMeta,
+  isActivityEvent,
   SOURCE_COLORS,
   SOURCE_LABELS,
   GROUP_MAX,
@@ -406,7 +409,8 @@ describe("age", () => {
   });
 });
 
-const MCP_EMITTED_TYPES = [
+const BACKEND_EMITTED_TYPES = [
+  // Mutations recorded by MCP write tools and the operator.
   "reconcile.triggered", "restart.approved", "catalogsource.synced",
   "controller.created", "controller.updated", "controller.deleted", "pod.replaced",
   "catalogsource.created", "catalogsource.updated", "catalogsource.deleted",
@@ -419,11 +423,32 @@ const MCP_EMITTED_TYPES = [
   "group.created", "group.deleted",
   "versionprofile.created", "versionprofile.updated", "versionprofile.deleted",
   "provisioningdefaults.updated",
+  // Auth, controller lifecycle, approvals, and cells.
+  "auth.local.login", "auth.local.login_failed",
+  "controller.breakglass.granted", "controller.hibernated", "controller.woken",
+  "controller.restarted", "controller.reprovisioned",
+  "deletion.approved", "pluginRoll.approved",
+  "cell.rolled", "tenant.placed", "tenant.moved", "tenant.purge_failed", "cellpool.updated",
+  "cluster.drain.started", "cluster.drain.completed", "cluster.drain.canceled",
+  "broodop.run.started", "broodop.run.finished", "broodop.target.finished",
+  "command.succeeded", "command.failed",
+  // Build claims, items, locks, pipelines, plugins, upgrades, and webhooks.
+  "build.claim_vetoed", "build.claim_abandoned", "build.claim_expired",
+  "build.interrupted", "build.scheduled.backstop",
+  "item.created", "item.updated", "item.deleted", "item.moved",
+  "fleetlock.force_released", "fleetlock.force_release_unconfirmed",
+  "pipeline.run_requested", "pipeline.run_replay_requested",
+  "pipeline.run_input_proceeded", "pipeline.run_input_aborted",
+  "pluginConflict.detected", "pluginPinConflict.detected",
+  "updatecenter.plugin.uploaded",
+  "upgrade.candidate.created", "upgrade.candidate.promoted", "upgrade.candidate.superseded",
+  "upgrade.preflight.failed", "upgrade.upstream.observed",
+  "webhook.replay.rejected",
 ];
 
 describe("activity timeline maps", () => {
-  it("labels every MCP-emitted activity type", () => {
-    const missing = MCP_EMITTED_TYPES.filter((t) => !(t in ACTIVITY_TYPE_MAP));
+  it("labels every backend-published activity type", () => {
+    const missing = BACKEND_EMITTED_TYPES.filter((t) => !(t in ACTIVITY_TYPE_MAP));
     expect(missing).toEqual([]);
   });
 
@@ -432,3 +457,77 @@ describe("activity timeline maps", () => {
     expect(SOURCE_LABELS.mcp).toBeDefined();
   });
 });
+
+describe("isActivityEvent", () => {
+  const full = {
+    timestamp: "2025-01-01T00:00:00Z",
+    type: "auth.local.login",
+    source: "user",
+    message: "logged in",
+  };
+
+  it("accepts a full activity event", () => {
+    expect(isActivityEvent(full)).toBe(true);
+  });
+
+  it("rejects null and non-object values", () => {
+    expect(isActivityEvent(null)).toBe(false);
+    expect(isActivityEvent(undefined)).toBe(false);
+    expect(isActivityEvent("activity")).toBe(false);
+  });
+
+  it("rejects a brood telemetry payload", () => {
+    expect(
+      isActivityEvent({ event: "heartbeat", name: "c1", namespace: "ns", cluster: "core" }),
+    ).toBe(false);
+  });
+
+  it("rejects an empty type", () => {
+    expect(isActivityEvent({ ...full, type: "" })).toBe(false);
+  });
+
+  it("accepts a nanosecond-precision timestamp as the BFF writes it", () => {
+    expect(isActivityEvent({ ...full, timestamp: "2026-10-10T18:31:15.630993517Z" })).toBe(true);
+  });
+
+  it("rejects an unparseable timestamp", () => {
+    expect(isActivityEvent({ ...full, timestamp: "garbage" })).toBe(false);
+  });
+});
+
+describe("activityTypeMeta", () => {
+  it("returns the exact map entry for a known type", () => {
+    expect(activityTypeMeta({ type: "auth.local.login", severity: undefined })).toEqual({
+      icon: "→",
+      style: "softOk",
+    });
+  });
+
+  it("gives an unknown auth type the auth family icon", () => {
+    expect(activityTypeMeta({ type: "auth.x", severity: undefined })).toEqual({
+      icon: "→",
+      style: "softInfo",
+    });
+  });
+
+  it("gives an unknown error-severity type the generic glyph in the bad style", () => {
+    expect(activityTypeMeta({ type: "mystery.thing", severity: "error" })).toEqual({
+      icon: ACTIVITY_FALLBACK_ICON,
+      style: "softBad",
+    });
+  });
+
+  it("gives an unknown type with no severity the muted style", () => {
+    expect(activityTypeMeta({ type: "mystery.thing", severity: undefined })).toEqual({
+      icon: ACTIVITY_FALLBACK_ICON,
+      style: "softMuted",
+    });
+  });
+
+  it("never returns the middle-dot marker", () => {
+    for (const type of ["", "x", "auth.x", "controller.unknown"]) {
+      expect(activityTypeMeta({ type, severity: undefined }).icon).not.toBe("·");
+    }
+  });
+});
+

@@ -2587,13 +2587,10 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 
 // handleBroodStreamSSE serves the brood-wide SSE stream (mite connect/
 // disconnect/heartbeat/snapshot plus the global activity feed across every
-// controller in every namespace). Gated on CanReadGlobalActivity — the
-// existing "no-controller-scope, global feed" rule already used by the
-// activity feed — because the existing per-event filter
-// (isAuthorizedActivityEvent) explicitly passes non-activity.Event records
-// (brood/mite events) through unfiltered, so reusing it here would leave
-// the mite-telemetry half of the stream open; a connect-time gate closes
-// both halves at once.
+// controller in every namespace). Gated on CanReadGlobalActivity, the
+// "no-controller-scope, global feed" rule. The activity stream
+// (handleActivityStream) carries only activity events, so brood telemetry
+// is reachable only through this stream.
 func (s *Server) handleBroodStreamSSE(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadGlobalActivity(claims) {
@@ -2662,38 +2659,32 @@ func (s *Server) handleActivityStream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			// The activity stream carries only activity.Event records. Brood
+			// telemetry on the same fan-out key goes to /stream/brood only.
+			e, isEvent := record.Data.(activity.Event)
+			if !isEvent {
+				continue
+			}
 			// Per-event authorization: skip events the caller is not
 			// allowed to see. Deny-by-default when authorizer is nil.
-			if !s.isAuthorizedActivityEvent(claims, authz, record) {
+			if !s.isAuthorizedActivityEvent(claims, authz, e) {
 				continue
 			}
-			if e, eventOK := record.Data.(activity.Event); eventOK && !activity.Matches(e, filter) {
+			if !activity.Matches(e, filter) {
 				continue
 			}
-			js, _ := json.Marshal(record.Data)
+			js, _ := json.Marshal(e)
 			fmt.Fprintf(w, "event: activity\ndata: %s\n\n", js)
 			flusher.Flush()
 		}
 	}
 }
 
-// isAuthorizedActivityEvent checks whether the caller may see the activity
-// event contained in an SSE record. Returns false when the authorizer is nil
-// (deny-by-default).
-// TODO(add-activity-persistence): The handler-level gate is superseded when
-// /activity/stream migrates onto the filtered BusFanout path. That migration
-// MUST wire the SubscribeFiltered closure (capturing claims + Authorizer) and
-// gate persisted-history reads through CanReadActivityEvent (or per-controller
-// subject-scoped consumers + the global-event rule).
-func (s *Server) isAuthorizedActivityEvent(claims *auth.Claims, authz *Authorizer, record sse.Record) bool {
+// isAuthorizedActivityEvent reports whether the caller may see the activity
+// event e. Returns false when the authorizer is nil (deny-by-default).
+func (s *Server) isAuthorizedActivityEvent(claims *auth.Claims, authz *Authorizer, e activity.Event) bool {
 	if authz == nil {
 		return false
-	}
-	e, ok := record.Data.(activity.Event)
-	if !ok {
-		// Not an activity event (e.g. brood heartbeat) — let it through;
-		// non-activity events are not subject to activity authz rules.
-		return true
 	}
 	return authz.CanReadActivityEvent(claims, e)
 }

@@ -107,6 +107,9 @@ TypeScript consumer of it.
   never label a view with a time window the data does not cover. Relative
   ages use `age()` from `src/components/activityTimeline.util.ts`; it is the
   single relative-time helper.
+- **Activity icons**: `activityTypeMeta` in `src/components/activityTimeline.util.ts`
+  is the only type-to-icon source for every activity surface (timeline and
+  Dashboard). Live frames pass `isActivityEvent` before they reach the feed buffer.
 - **Fleet-scale rendering**: the Dashboard brood-health card renders a phase
   bar, at most eight rows, and a "View all" link. `BroodControllerPicker`
   renders its rows through `useVirtualizer` inside the scroll container

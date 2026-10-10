@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 import { useControllers, useControllerFanoutFailures } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
 import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
-import { age } from "../components/activityTimeline.util";
+import { age, activityTypeMeta } from "../components/activityTimeline.util";
 import { bffFetch } from "../hooks/useApi";
 import { getUpdateCenterStatus } from "../api/client";
-import type { UpdateCenterStatus } from "../types";
+import type { ActivityEvent, UpdateCenterStatus } from "../types";
 import { MetricCard } from "../components/MetricCard";
 import { Card } from "../components/Card";
 import { Pulse } from "../components/Pulse";
@@ -254,22 +254,6 @@ function HealthBar({ controller }: { controller: ControllerListItem }) {
   );
 }
 
-interface ActivityEvent {
-  timestamp: string;
-  type: string;
-  controller: string;
-  namespace: string;
-  cluster?: string;
-  message: string;
-}
-
-const ACTIVITY_TYPES: Record<string, { icon: string; style: string }> = {
-  connected: { icon: "⇡", style: "softInfo" },
-  disconnected: { icon: "⇣", style: "softBad" },
-  phase: { icon: "◴", style: "softWarn" },
-  reconciled: { icon: "✓", style: "softOk" },
-};
-
 function ActivityFeed() {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
@@ -278,8 +262,6 @@ function ActivityFeed() {
     queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity").then(r => r.items),
     refetchInterval: 10_000,
   });
-
-  const icons = (t: string) => ACTIVITY_TYPES[t] ?? { icon: "·", style: "" };
 
   return (
     <Card
@@ -292,7 +274,7 @@ function ActivityFeed() {
     >
       <div className={styles.activityList}>
         {events.slice(0, 5).map((e, i) => {
-          const { icon, style } = icons(e.type);
+          const { icon, style } = activityTypeMeta(e);
           return (
             <div key={i} className={styles.activityItem}>
               <div className={styles.activityIcon} data-style={style}>

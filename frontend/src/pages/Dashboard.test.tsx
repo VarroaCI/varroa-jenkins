@@ -270,6 +270,35 @@ describe("Dashboard", () => {
         ).toBeInTheDocument();
       });
     });
+
+    it("renders a mapped icon for an auth.local.login event", async () => {
+      mockUseControllers.mockReturnValue({
+        data: [],
+        isLoading: false,
+        error: null,
+      });
+      const authEvent = {
+        timestamp: new Date().toISOString(),
+        type: "auth.local.login",
+        source: "user",
+        controller: "",
+        namespace: "",
+        message: "Signed in",
+      };
+      // The feed refetches on mount, so the mocked /activity path must serve the event.
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) =>
+        Promise.resolve(path === "/activity" ? { items: [authEvent] } : { items: [] }),
+      );
+      try {
+        renderWithProviders(<Dashboard />);
+        await waitFor(() => {
+          expect(screen.getByText("→")).toBeInTheDocument();
+        });
+        expect(screen.queryByText("·")).not.toBeInTheDocument();
+      } finally {
+        vi.mocked(useApi.bffFetch).mockResolvedValue({ items: [] });
+      }
+    });
   });
 
   describe("Update Center gaps chip", () => {

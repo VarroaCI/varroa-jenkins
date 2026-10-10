@@ -475,7 +475,8 @@ federation, activity persistence, and SSE fanout.
 - SSE (`internal/api/sse/`): `Broadcaster` is process-local pub/sub for
   handler-driven events; `BusFanout` (`bus_fanout.go`) additionally subscribes
   `activity.>` and generic bus subjects and redelivers them as `Record`s to per-key
-  subscribers — this backs live tailing for `/activity/stream` and `/stream/brood`.
+  subscribers. `/activity/stream` writes only `activity.Event` records; brood
+  telemetry streams only on `/stream/brood`.
   `BusFanout` and `RunFanout` subscribe through `bus.Conn.Listen`, so they
   recover from a denied subscription without a restart. `NewRunFanout` takes
   a `metric.MeterProvider` and creates `bff.run_notify.unmatched` on its

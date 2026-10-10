@@ -177,6 +177,7 @@
 .activityIcon[data-style="softOk"] { background: var(--ok-soft); color: var(--ok-text); }
 .activityIcon[data-style="softWarn"] { background: var(--warn-soft); color: var(--warn-text); }
 .activityIcon[data-style="softBad"] { background: var(--bad-soft); color: var(--bad-text); }
+.activityIcon[data-style="softMuted"] { background: var(--surface-3); color: var(--text-2); }
 
 .activityContent { min-width: 0; }
 
