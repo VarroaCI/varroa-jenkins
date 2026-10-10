@@ -186,9 +186,6 @@ type ApproveDeletionResponse struct {
 
 // --- Controller CRUD request/response types (§2) ---
 
-// ControllersListPageBudget bounds one controllers.list reply below the NATS 1 MiB max_payload.
-const ControllersListPageBudget = 900 * 1024
-
 // ControllersListRequest is the payload for operator.<cluster>.controllers.list.
 // Namespace is an optional narrow filter.
 type ControllersListRequest struct {

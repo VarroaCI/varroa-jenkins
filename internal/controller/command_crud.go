@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"sort"
 	"strings"
 	"time"
 
@@ -149,9 +148,10 @@ func (c *CommandCRUD) preflightDeps() PreflightDepsInterface {
 // HandleList handles operator.<cluster>.controllers.list.
 //
 // Rows sort by "namespace/name". A reply holds whole rows up to
-// bus.ControllersListPageBudget. Next names the last row of a full page, and
-// the caller passes it back as After to read the following rows. Rows come
-// from the operator's informer cache, not an apiserver list.
+// bus.ListPageBudget. pageList in list_page.go builds the page. Next names the
+// last row of a full page, and the caller passes it back as After to read the
+// following rows. Rows come from the operator's informer cache, not an
+// apiserver list.
 func (c *CommandCRUD) HandleList(data []byte) []byte {
 	var req bus.ControllersListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -169,60 +169,27 @@ func (c *CommandCRUD) HandleList(data []byte) []byte {
 		c.Logger.Error("list controllers failed", "namespace", req.Namespace, "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return controllerListKey(items[i]) < controllerListKey(items[j])
-	})
-
-	// Reserve room for the envelope and the Next key.
-	budget := bus.ControllersListPageBudget - 1024
-	rawItems := make([]json.RawMessage, 0)
-	size := 0
-	next := ""
-	lastKey := ""
-	for _, cr := range items {
-		key := controllerListKey(cr)
-		if req.After != "" && key <= req.After {
-			continue
-		}
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.Controller) (json.RawMessage, error) {
 		stripManagedFields(cr)
 		raw, err := json.Marshal(cr)
 		if err != nil {
 			c.Logger.Error("marshal controller failed", "name", cr.Name, "namespace", cr.Namespace, "error", err)
-			return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		if len(raw)+1 > budget {
-			if len(rawItems) == 0 {
-				return c.crudReply(bus.ControllersListResponse{
-					Code:  bus.CodeInternal,
-					Error: "controller " + key + " exceeds the list page budget",
-				})
-			}
-			next = lastKey
-			break
-		}
-		if size+len(raw)+1 > budget {
-			next = lastKey
-			break
-		}
-		rawItems = append(rawItems, raw)
-		size += len(raw) + 1
-		lastKey = key
+		return raw, err
+	})
+	if err != nil {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: listPageErr(err)})
 	}
 
-	reply, err := json.Marshal(bus.ControllersListResponse{Items: rawItems, Next: next})
+	reply, err := json.Marshal(bus.ControllersListResponse{Items: rows, Next: next})
 	if err != nil {
 		c.Logger.Error("crud reply marshal failed", "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 	}
-	if len(reply) > bus.ControllersListPageBudget {
+	if len(reply) > bus.ListPageBudget {
 		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "list page too large"})
 	}
 	return reply
-}
-
-// controllerListKey is the paging key of a Controller row.
-func controllerListKey(cr *v1alpha1.Controller) string {
-	return cr.Namespace + "/" + cr.Name
 }
 
 // HandleGet handles operator.<cluster>.controllers.get.

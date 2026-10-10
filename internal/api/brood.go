@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -26,9 +27,6 @@ const (
 	broodDeletePodTimeout  = 10 * time.Second
 	broodDrainTimeout      = 10 * time.Second
 	broodNamespacesTimeout = 3 * time.Second
-
-	// broodListMaxPages bounds the pages one remote controllers list reads.
-	broodListMaxPages = 128
 )
 
 // ClusterInfo is the API-facing cluster info struct: the KV heartbeat entry
@@ -349,51 +347,48 @@ func (f *busBrood) requestCtx(ctx context.Context, subject string, data []byte, 
 	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
 }
 
+// listRemote reads every page of a member's controllers list through
+// readRemotePages. A failed page fails the whole member: it returns no rows
+// and one status row whose Error names the reason. A row that does not
+// decode fails the member with "invalid controller row".
 func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
 	cc := make([]ClusterController, 0)
-	after := ""
-	for page := 0; ; page++ {
-		if err := ctx.Err(); err != nil {
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cancelled"}},
-				fmt.Errorf("list remote %s: %w", cluster, err)
-		}
-		if page == broodListMaxPages {
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list exceeds 128 pages"}},
-				fmt.Errorf("list remote %s: more than %d pages", cluster, broodListMaxPages)
-		}
-		req := bus.ControllersListRequest{Namespace: ns, After: after}
-		data, _ := json.Marshal(req)
+	reason := ""
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		data, _ := json.Marshal(bus.ControllersListRequest{Namespace: ns, After: after})
 		respData, err := f.requestCtx(ctx, bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cancelled"}},
-					fmt.Errorf("list remote %s: %w", cluster, ctx.Err())
-			}
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
+			reason = "cluster unreachable"
+			return "", err
 		}
 		var resp bus.ControllersListResponse
 		if err := json.Unmarshal(respData, &resp); err != nil {
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid response"}}, fmt.Errorf("list remote %s decode: %w", cluster, err)
+			reason = "invalid response"
+			return "", fmt.Errorf("decode: %w", err)
 		}
 		if resp.Error != "" {
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
+			reason = resp.Error
+			return "", fmt.Errorf("error: %s", resp.Error)
 		}
 		for _, raw := range resp.Items {
 			var cr v1alpha1.Controller
 			if err := json.Unmarshal(raw, &cr); err != nil {
-				return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid controller row"}},
-					fmt.Errorf("list remote %s: decode controller row: %w", cluster, err)
+				reason = "invalid controller row"
+				return "", fmt.Errorf("decode controller row: %w", err)
 			}
 			cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
 		}
-		if resp.Next == "" {
-			break
+		return resp.Next, nil
+	})
+	if err != nil {
+		var be *BroodError
+		switch {
+		case errors.As(err, &be):
+			reason = be.Msg
+		case reason == "":
+			reason = err.Error()
 		}
-		if resp.Next <= after {
-			return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "list cursor did not advance"}},
-				fmt.Errorf("list remote %s: cursor %q did not advance past %q", cluster, resp.Next, after)
-		}
-		after = resp.Next
+		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: reason}}, fmt.Errorf("list remote %s: %w", cluster, err)
 	}
 	return cc, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }

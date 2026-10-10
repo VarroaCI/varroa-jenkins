@@ -970,8 +970,8 @@ func TestCommandCRUD_ListPagesUnderBudget(t *testing.T) {
 		t.Fatalf("expected at least 2 pages, got %d", len(pages))
 	}
 	for i, page := range pages {
-		if len(page) > bus.ControllersListPageBudget {
-			t.Fatalf("page %d is %d bytes, over budget %d", i, len(page), bus.ControllersListPageBudget)
+		if len(page) > bus.ListPageBudget {
+			t.Fatalf("page %d is %d bytes, over budget %d", i, len(page), bus.ListPageBudget)
 		}
 	}
 	if len(keys) != 150 {

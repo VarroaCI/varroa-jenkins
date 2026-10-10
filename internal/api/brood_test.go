@@ -1098,3 +1098,32 @@ func TestBusBrood_ListRemoteCursorMustAdvance(t *testing.T) {
 		t.Fatalf("expected cursor failure, got %+v", st)
 	}
 }
+
+func TestBusBrood_ListRemotePageCap(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		return json.Marshal(bus.ControllersListResponse{Next: fmt.Sprintf("team-a/%06d", calls)})
+	}
+
+	_, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "list exceeds 128 pages" {
+		t.Fatalf("expected page cap failure, got %+v", st)
+	}
+	if calls != 128 {
+		t.Fatalf("expected 128 list calls, got %d", calls)
+	}
+}

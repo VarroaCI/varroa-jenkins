@@ -67,7 +67,7 @@ type CellPoolScaleRequest struct {
 // ---------------------------------------------------------------------------
 
 // ListPageBudget bounds one list reply below the NATS 1 MiB max_payload.
-// The operator pages a config or brood-operation list to fit this budget.
+// The operator pages a controllers, config, or brood-operation list to fit this budget.
 const ListPageBudget = 900 * 1024
 
 // ConfigListRequest is the payload for *list subjects (bundles.list,
