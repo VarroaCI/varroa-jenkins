@@ -109,6 +109,8 @@ describe("TeamForm", () => {
     await user.type(screen.getAllByPlaceholderText("Namespace")[0], "team-gamma");
 
     await user.click(screen.getByLabelText(/Pipelines tenant/));
+    await user.type(screen.getByPlaceholderText("JenkinsVersionProfile name"), "lts");
+    await user.selectOptions(screen.getByText("Select a namespace").closest("select")!, "team-gamma");
 
     await user.type(screen.getByPlaceholderText("10"), "5");
     await user.type(screen.getByPlaceholderText("30m"), "45m");
@@ -219,6 +221,8 @@ describe("TeamForm", () => {
     await user.type(screen.getAllByPlaceholderText("Namespace")[0], "ns1");
 
     await user.click(screen.getByLabelText(/Pipelines tenant/));
+    await user.type(screen.getByPlaceholderText("JenkinsVersionProfile name"), "lts");
+    await user.selectOptions(screen.getByText("Select a namespace").closest("select")!, "ns1");
     await user.click(screen.getByText("+ Add export"));
     await user.type(screen.getByPlaceholderText("release/*"), "release/*");
     await user.type(screen.getByPlaceholderText("Team name"), "search");
@@ -242,6 +246,8 @@ describe("TeamForm", () => {
     await user.type(screen.getAllByPlaceholderText("Namespace")[0], "ns1");
 
     await user.click(screen.getByLabelText(/Pipelines tenant/));
+    await user.type(screen.getByPlaceholderText("JenkinsVersionProfile name"), "lts");
+    await user.selectOptions(screen.getByText("Select a namespace").closest("select")!, "ns1");
     await user.click(screen.getByText("+ Add export"));
     await user.selectOptions(screen.getByText("Job pattern").closest("select")!, "locks");
     await user.type(screen.getByPlaceholderText("deploy-prod"), "deploy-prod");
@@ -254,6 +260,33 @@ describe("TeamForm", () => {
     });
     const body = mockCreateTeam.mock.calls[0][0];
     expect(body.pipelines.exports).toEqual([{ locks: ["deploy-prod"], callers: ["alpha"] }]);
+  });
+
+  it("refuses a pipelines tenant with no version profile or agent namespace", async () => {
+    const user = userEvent.setup();
+    render(<TeamForm />);
+
+    const nameInput = screen.getByText("Name").nextElementSibling as HTMLInputElement;
+    await user.type(nameInput, "payments");
+    await user.type(screen.getAllByPlaceholderText("Username")[0], "alice");
+    await user.type(screen.getAllByPlaceholderText("Namespace")[0], "ns1");
+
+    await user.click(screen.getByLabelText(/Pipelines tenant/));
+    await user.click(screen.getByText("Create"));
+
+    expect(await screen.findByText("Version profile is required")).toBeInTheDocument();
+    expect(screen.getByText("Agent namespace is required")).toBeInTheDocument();
+    expect(mockCreateTeam).not.toHaveBeenCalled();
+  });
+
+  it("marks the version profile and agent namespace as required", async () => {
+    const user = userEvent.setup();
+    render(<TeamForm />);
+
+    await user.click(screen.getByLabelText(/Pipelines tenant/));
+
+    expect(screen.getByPlaceholderText("JenkinsVersionProfile name")).toHaveAttribute("aria-required", "true");
+    expect(screen.getByText("Select a namespace").closest("select")).toHaveAttribute("aria-required", "true");
   });
 
   it("rejects a submitted export that names neither a job pattern nor a caller", async () => {

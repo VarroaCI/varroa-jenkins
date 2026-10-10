@@ -130,6 +130,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 - `Profile` and `AgentNamespace` in `TeamPipelinesSpec`, and `Callers` in
   `TeamExport`, are required in the CRD schema (`+kubebuilder:validation:Required`).
   A pipelines block names a profile and an agent namespace. An export names callers.
+  The OpenAPI `TeamPipelines` schema requires both, with `minLength: 1`, and `TeamExport`
+  requires `callers`.
 - `zz_generated.deepcopy.go` — header claims controller-gen, but **never run
   `controller-gen object`** — nukes this file on this type set. Hand-add
   `DeepCopyInto`/`DeepCopy` for new types/fields.

@@ -95,6 +95,8 @@ describe("Teams", () => {
       {
         ...team2,
         pipelines: {
+          profile: "lts",
+          agentNamespace: "ns1",
           exports: [
             { job: "release/*", callers: ["payments", "search"] },
             { locks: ["deploy-prod"], callers: ["alpha"] },

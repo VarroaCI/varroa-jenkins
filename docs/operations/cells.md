@@ -86,6 +86,7 @@ spec:
 ```
 
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
+A `pipelines` block requires `profile` and `agentNamespace`.
 `pipelines.profile` must name an existing `JenkinsVersionProfile`. An unset
 `pipelines.composedBundleRef` places the tenant with an empty folder. An unset
 `pipelines.cellPool` resolves to the profile's own pool. For a dedicated cell, name a

@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
@@ -339,6 +344,7 @@ func TestTeamHandlers_PipelinesLedgerSettingsRoundTrip(t *testing.T) {
 		"namespaces": ["ns1"],
 		"pipelines": {
 			"profile": "lts",
+			"agentNamespace": "ns1",
 			"rehydrateBuilds": 5,
 			"rehydrateDeadline": "45m0s",
 			"interruptedRetry": "automatic",
@@ -749,4 +755,106 @@ func TestTeamHandlers_UpdateExports_TenantAdminCannotChangeOtherFields(t *testin
 	if len(stored.Spec.Members) != 1 || stored.Spec.RoleRef != "" {
 		t.Fatalf("stored spec changed: %+v", stored.Spec)
 	}
+}
+
+// TestTeamHandlers_PipelinesRequiredFields asserts that a pipelines block
+// missing a required field is refused with a 400 that names the field, and
+// that nothing is written.
+func TestTeamHandlers_PipelinesRequiredFields(t *testing.T) {
+	const complete = `"pipelines": {"profile": "lts", "agentNamespace": "ns1"%s}`
+	cases := []struct {
+		name     string
+		pipeline string
+		wantMsg  string
+	}{
+		{"no profile", `"pipelines": {"agentNamespace": "ns1"}`, "pipelines.profile"},
+		{"no agentNamespace", `"pipelines": {"profile": "lts"}`, "pipelines.agentNamespace"},
+		{"agentNamespace outside namespaces", `"pipelines": {"profile": "lts", "agentNamespace": "other"}`, "must be one of namespaces"},
+		{"export without callers", `"pipelines": {"profile": "lts", "agentNamespace": "ns1", "exports": [{"job": "a/*"}]}`, "pipelines.exports[0].callers"},
+	}
+	for _, tc := range cases {
+		t.Run("POST "+tc.name, func(t *testing.T) {
+			srv, store, ctx := adminTeamTestServer(t)
+			body := `{"name": "payments", "members": ["alice"], "namespaces": ["ns1"], ` + tc.pipeline + `}`
+			req := httptest.NewRequest(http.MethodPost, "/teams", bytes.NewReader([]byte(body))).WithContext(ctx)
+			w := httptest.NewRecorder()
+			srv.HandleTeams(w, req)
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Fatalf("POST status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.wantMsg) {
+				t.Errorf("POST body = %s, want it to name %q", w.Body.String(), tc.wantMsg)
+			}
+			if _, err := crdstore.Get[v1alpha1.Team](context.Background(), store, "payments", ""); err == nil {
+				t.Error("refused POST stored a Team")
+			}
+		})
+		t.Run("PUT "+tc.name, func(t *testing.T) {
+			srv, store, ctx := adminTeamTestServer(t)
+			crdstore.MustSeed(store, &v1alpha1.Team{
+				ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+				Spec:       v1alpha1.TeamSpec{Members: []string{"alice"}, Namespaces: []string{"ns1"}},
+			})
+			body := `{"name": "payments", "members": ["alice"], "namespaces": ["ns1"], ` + tc.pipeline + `}`
+			req := httptest.NewRequest(http.MethodPut, "/teams/payments", bytes.NewReader([]byte(body))).WithContext(ctx)
+			w := httptest.NewRecorder()
+			srv.HandleTeamDispatch(w, req)
+			if w.Result().StatusCode != http.StatusBadRequest {
+				t.Fatalf("PUT status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.wantMsg) {
+				t.Errorf("PUT body = %s, want it to name %q", w.Body.String(), tc.wantMsg)
+			}
+		})
+	}
+
+	t.Run("complete block is accepted", func(t *testing.T) {
+		srv, _, ctx := adminTeamTestServer(t)
+		body := `{"name": "payments", "members": ["alice"], "namespaces": ["ns1"], ` +
+			strings.Replace(complete, "%s", `, "exports": [{"job": "a/*", "callers": ["ops"]}]`, 1) + `}`
+		req := httptest.NewRequest(http.MethodPost, "/teams", bytes.NewReader([]byte(body))).WithContext(ctx)
+		w := httptest.NewRecorder()
+		srv.HandleTeams(w, req)
+		if w.Result().StatusCode != http.StatusCreated {
+			t.Fatalf("POST status = %d, want 201; body=%s", w.Result().StatusCode, w.Body.String())
+		}
+	})
+}
+
+// TestTeamHandlers_ApiserverInvalidAnswers400 asserts that an apiserver
+// validation refusal becomes a 400 with its message, and that any other
+// store failure stays a 500.
+func TestTeamHandlers_ApiserverInvalidAnswers400(t *testing.T) {
+	gvr, err := crdstore.GVRFor[v1alpha1.Team]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	body := `{"name": "payments", "members": ["alice"], "namespaces": ["ns1"], "pipelines": {"profile": "lts", "agentNamespace": "ns1"}}`
+
+	t.Run("Invalid becomes 400", func(t *testing.T) {
+		srv, store, ctx := adminTeamTestServer(t)
+		store.FailNext("create", gvr, apierrors.NewInvalid(
+			schema.GroupKind{Group: "varroa.dev", Kind: "Team"}, "payments",
+			field.ErrorList{field.Required(field.NewPath("spec", "pipelines", "profile"), "")}))
+		req := httptest.NewRequest(http.MethodPost, "/teams", bytes.NewReader([]byte(body))).WithContext(ctx)
+		w := httptest.NewRecorder()
+		srv.HandleTeams(w, req)
+		if w.Result().StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "spec.pipelines.profile") {
+			t.Errorf("body = %s, want it to name spec.pipelines.profile", w.Body.String())
+		}
+	})
+
+	t.Run("other store failure stays 500", func(t *testing.T) {
+		srv, store, ctx := adminTeamTestServer(t)
+		store.FailNext("create", gvr, errors.New("boom"))
+		req := httptest.NewRequest(http.MethodPost, "/teams", bytes.NewReader([]byte(body))).WithContext(ctx)
+		w := httptest.NewRecorder()
+		srv.HandleTeams(w, req)
+		if w.Result().StatusCode != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body=%s", w.Result().StatusCode, w.Body.String())
+		}
+	})
 }

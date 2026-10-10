@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,9 +46,9 @@ type teamEntry struct {
 // *metav1.Duration type: it marshals to and parses from a plain duration
 // string on its own, so no hand-written conversion is needed here.
 type teamPipelinesEntry struct {
-	Profile           string                      `json:"profile,omitempty"`
+	Profile           string                      `json:"profile"`
 	CellPool          string                      `json:"cellPool,omitempty"`
-	AgentNamespace    string                      `json:"agentNamespace,omitempty"`
+	AgentNamespace    string                      `json:"agentNamespace"`
 	ComposedBundleRef *teamComposedBundleRefEntry `json:"composedBundleRef,omitempty"`
 
 	RehydrateBuilds   *int32           `json:"rehydrateBuilds,omitempty"`
@@ -166,9 +168,9 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 		return nil
 	}
 	spec := &v1alpha1.TeamPipelinesSpec{
-		Profile:           e.Profile,
+		Profile:           strings.TrimSpace(e.Profile),
 		CellPool:          e.CellPool,
-		AgentNamespace:    e.AgentNamespace,
+		AgentNamespace:    strings.TrimSpace(e.AgentNamespace),
 		RehydrateBuilds:   e.RehydrateBuilds,
 		RehydrateDeadline: e.RehydrateDeadline,
 		InterruptedRetry:  e.InterruptedRetry,
@@ -193,6 +195,30 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 		})
 	}
 	return spec
+}
+
+// validateTeamPipelines checks the spec.pipelines rules that a caller breaks
+// by omission. The apiserver enforces the same rules. This check names the
+// field in a 400 before the write. It returns "" for a valid or absent block.
+func validateTeamPipelines(p *teamPipelinesEntry, namespaces []string) string {
+	if p == nil {
+		return ""
+	}
+	if strings.TrimSpace(p.Profile) == "" {
+		return "pipelines.profile is required"
+	}
+	if strings.TrimSpace(p.AgentNamespace) == "" {
+		return "pipelines.agentNamespace is required"
+	}
+	if !slices.Contains(namespaces, strings.TrimSpace(p.AgentNamespace)) {
+		return "pipelines.agentNamespace must be one of namespaces"
+	}
+	for i, exp := range p.Exports {
+		if len(exp.Callers) == 0 {
+			return fmt.Sprintf("pipelines.exports[%d].callers is required", i)
+		}
+	}
+	return ""
 }
 
 // teamPlacementEntryFromStatus maps status.placement onto the wire shape.
@@ -337,6 +363,10 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "roleRef 'admin' is not permitted on a Team")
 		return
 	}
+	if msg := validateTeamPipelines(req.Pipelines, req.Namespaces); msg != "" {
+		s.writeJSONError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	team := &v1alpha1.Team{
 		ObjectMeta: metav1.ObjectMeta{
@@ -355,6 +385,10 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	if err := crdstore.Apply[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
+		if k8sErrorToHTTP(err) == http.StatusBadRequest {
+			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create team")
 		return
 	}
@@ -465,6 +499,10 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name s
 		s.writeJSONError(w, http.StatusBadRequest, "roleRef 'admin' is not permitted on a Team")
 		return
 	}
+	if msg := validateTeamPipelines(req.Pipelines, req.Namespaces); msg != "" {
+		s.writeJSONError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	team := &v1alpha1.Team{
 		ObjectMeta: metav1.ObjectMeta{
@@ -498,6 +536,10 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name s
 		}
 	}
 	if err := crdstore.Apply[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
+		if k8sErrorToHTTP(err) == http.StatusBadRequest {
+			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to update team")
 		return
 	}

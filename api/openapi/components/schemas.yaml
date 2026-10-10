@@ -306,10 +306,14 @@ TeamPipelines:
     A Team's pipelines tenancy declaration (spec.pipelines). A Team that
     sets this becomes a pipelines tenant: one top-level folder on exactly
     one cell.
+  required: [profile, agentNamespace]
   properties:
     profile:
       type: string
-      description: JenkinsVersionProfile the placement pass resolves a cell against.
+      minLength: 1
+      description: >-
+        JenkinsVersionProfile the placement pass resolves a cell against.
+        Required when pipelines is set.
     cellPool:
       type: string
       description: >-
@@ -319,9 +323,10 @@ TeamPipelines:
         is 1.
     agentNamespace:
       type: string
+      minLength: 1
       description: >-
         Kubernetes namespace this tenant's agents run in. Must be one of
-        the team's own namespaces.
+        the team's own namespaces. Required when pipelines is set.
     composedBundleRef:
       $ref: '#/ComposedBundleRef'
       description: >-

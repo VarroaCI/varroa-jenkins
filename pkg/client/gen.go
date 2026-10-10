@@ -3698,8 +3698,8 @@ type ComponentsSchemasTeamNamespaceState struct {
 
 // ComponentsSchemasTeamPipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
 type ComponentsSchemasTeamPipelines struct {
-	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces.
-	AgentNamespace *string `json:"agentNamespace,omitempty"`
+	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required when pipelines is set.
+	AgentNamespace string `json:"agentNamespace"`
 
 	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
 	CellPool *string `json:"cellPool,omitempty"`
@@ -3728,8 +3728,8 @@ type ComponentsSchemasTeamPipelines struct {
 	// Members The number of active slots this tenant runs. Each slot holds one cell, and a job runs only on its home slot's holder. Default 1. This field is not spec.members, which lists local usernames.
 	Members *int32 `json:"members,omitempty"`
 
-	// Profile JenkinsVersionProfile the placement pass resolves a cell against.
-	Profile *string `json:"profile,omitempty"`
+	// Profile JenkinsVersionProfile the placement pass resolves a cell against. Required when pipelines is set.
+	Profile string `json:"profile"`
 
 	// RehydrateBuilds How many of a job's newest completed builds the operator seeds when this tenant's cell changes. The newest successful build is always seeded in addition. Default 10.
 	RehydrateBuilds *int32 `json:"rehydrateBuilds,omitempty"`

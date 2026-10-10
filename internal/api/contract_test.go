@@ -380,7 +380,7 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 	// for the response schema to check.
 	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
 		ObjectMeta: metav1.ObjectMeta{Name: "contract-tenant"},
-		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TeamPipelinesSpec{}},
+		Spec:       v1alpha1.TeamSpec{Namespaces: []string{"test-ns"}, Pipelines: &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "test-ns"}},
 		Status: v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{
 			Cluster: "core", Cell: "test-cell", CellNamespace: "test-ns", Generation: 1,
 		}},

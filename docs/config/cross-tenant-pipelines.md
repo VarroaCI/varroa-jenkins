@@ -160,7 +160,7 @@ spec:
 ```
 
 Each entry names exactly one of two kinds, a `job` glob or a `locks` glob, plus `callers`, the Team
-names allowed to use it. A `job` glob matches the tenant's own job paths. A `locks` glob matches
+names allowed to use it. `callers` is required and holds at least one Team name. A `job` glob matches the tenant's own job paths. A `locks` glob matches
 the bare names of the tenant's own locks. Three metacharacters apply: `*` matches any characters
 except `/`, `**` crosses `/`, and `?` matches one character.
 

@@ -325,6 +325,8 @@ export default function TeamForm() {
     const hasNs = form.namespaces.some((n) => n.trim());
     if (!hasNs) errs.push("At least one namespace is required");
     if (form.roleRef === "admin") errs.push("Role 'admin' is not permitted");
+    if (form.pipelinesEnabled && !form.pipelinesProfile.trim()) errs.push("Version profile is required");
+    if (form.pipelinesEnabled && !form.pipelinesAgentNamespace.trim()) errs.push("Agent namespace is required");
     if (form.pipelinesEnabled && form.pipelinesAgentNamespace) {
       const managed = form.namespaces.map((n) => n.trim()).filter(Boolean);
       if (!managed.includes(form.pipelinesAgentNamespace)) {
@@ -370,9 +372,9 @@ export default function TeamForm() {
         provisionNamespaces: form.provisionNamespaces,
         pipelines: form.pipelinesEnabled
           ? {
-              profile: form.pipelinesProfile.trim() || undefined,
+              profile: form.pipelinesProfile.trim(),
               cellPool: form.pipelinesCellPool.trim() || undefined,
-              agentNamespace: form.pipelinesAgentNamespace.trim() || undefined,
+              agentNamespace: form.pipelinesAgentNamespace.trim(),
               composedBundleRef: form.pipelinesBundleName
                 ? { name: form.pipelinesBundleName, namespace: form.pipelinesBundleNamespace }
                 : undefined,
@@ -571,12 +573,13 @@ export default function TeamForm() {
         {form.pipelinesEnabled && (
           <div className={styles.pipelinesSection}>
             <div className={styles.field}>
-              <label>Version profile</label>
+              <label>Version profile (required)</label>
               <input
                 type="text"
                 value={form.pipelinesProfile}
                 onChange={(e) => updateField("pipelinesProfile", e.target.value)}
                 placeholder="JenkinsVersionProfile name"
+                aria-required="true"
               />
             </div>
 
@@ -595,10 +598,11 @@ export default function TeamForm() {
             </div>
 
             <div className={styles.field}>
-              <label>Agent namespace</label>
+              <label>Agent namespace (required)</label>
               <select
                 value={form.pipelinesAgentNamespace}
                 onChange={(e) => updateField("pipelinesAgentNamespace", e.target.value)}
+                aria-required="true"
               >
                 <option value="">Select a namespace</option>
                 {form.namespaces

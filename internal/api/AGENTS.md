@@ -493,6 +493,8 @@ federation, activity persistence, and SSE fanout.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.
+  `validateTeamPipelines` refuses a pipelines block without `profile`, `agentNamespace`, or
+  export `callers` with `400` before the write. An apiserver validation refusal also answers `400`.
 - **Controller diff read** — `handleControllerDiff` passes the `jcasc` and `items`
   text of both sides through `internal/secretredact`. No caller gets an unredacted
   credential value, whatever its grants. The mite redacts its own answer too; the

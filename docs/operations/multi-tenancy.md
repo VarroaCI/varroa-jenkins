@@ -55,7 +55,7 @@ spec:
       namespace: team-payments
 ```
 
-`pipelines.agentNamespace` must be one of `spec.namespaces`. A placement reconciler binds the
+`pipelines.agentNamespace` must be one of `spec.namespaces`. A `pipelines` block requires `profile` and `agentNamespace`. The API refuses a block without either field with `400`, and the error names the field. A placement reconciler binds the
 `Team` to a cell that matches `pipelines.profile`, and the `Team`'s `Placed` condition reports
 the result. See [Cells and pipelines tenants](cells.md) for the cell prerequisites, what a tenant
 gets, and how to troubleshoot a placement or a cell that will not accept it.

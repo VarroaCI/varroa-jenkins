@@ -1135,6 +1135,7 @@ describe("Teams API", () => {
       namespaces: ["ns1"],
       pipelines: {
         profile: "lts",
+        agentNamespace: "ns1",
         rehydrateBuilds: 5,
         rehydrateDeadline: "45m0s",
         interruptedRetry: "automatic",
@@ -1159,6 +1160,7 @@ describe("Teams API", () => {
     expect(url).toBe("/teams/payments");
     expect(result.pipelines).toEqual({
       profile: "lts",
+      agentNamespace: "ns1",
       rehydrateBuilds: 5,
       rehydrateDeadline: "45m0s",
       interruptedRetry: "automatic",
@@ -1186,6 +1188,8 @@ describe("Teams API", () => {
       namespaces: ["ns1"],
       members: ["alice"],
       pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
         rehydrateBuilds: 20,
         rehydrateDeadline: "1h0m0s",
         interruptedRetry: "automatic",
@@ -1199,6 +1203,8 @@ describe("Teams API", () => {
     expect(url).toBe("/teams");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body).pipelines).toEqual({
+      profile: "lts",
+      agentNamespace: "ns1",
       rehydrateBuilds: 20,
       rehydrateDeadline: "1h0m0s",
       interruptedRetry: "automatic",
@@ -1215,12 +1221,16 @@ describe("Teams API", () => {
       name: "payments",
       namespaces: ["ns1"],
       members: ["alice"],
-      pipelines: { concurrency: "allow" },
+      pipelines: { profile: "lts", agentNamespace: "ns1", concurrency: "allow" },
     });
     const [url, opts] = mockBffFetch.mock.calls[0];
     expect(url).toBe("/teams/payments");
     expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body).pipelines).toEqual({ concurrency: "allow" });
+    expect(JSON.parse(opts.body).pipelines).toEqual({
+      profile: "lts",
+      agentNamespace: "ns1",
+      concurrency: "allow",
+    });
   });
 
   it("deleteTeam DELETEs /teams/{name}", async () => {
@@ -1257,6 +1267,8 @@ describe("Teams API", () => {
       namespaces: ["ns1"],
       members: ["alice"],
       pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
         exports: [{ job: "release/*", callers: ["search"] }],
       },
     });

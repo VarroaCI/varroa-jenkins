@@ -435,16 +435,16 @@ export interface JenkinsRoleBindingList {
  * this becomes a pipelines tenant: one top-level folder on exactly one cell.
  */
 export interface TeamPipelines {
-  /** JenkinsVersionProfile the placement pass resolves a cell against. */
-  profile?: string;
+  /** JenkinsVersionProfile the placement pass resolves a cell against. Required. */
+  profile: string;
   /**
    * The CellPool the placement pass selects a cell from. Empty means the
    * profile's default pool: the pool whose name equals profile. A tenant
    * that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
    */
   cellPool?: string;
-  /** Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. */
-  agentNamespace?: string;
+  /** Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required. */
+  agentNamespace: string;
   /**
    * The ComposedBundle this tenant's items come from. A Team is
    * cluster-scoped and has no namespace to default to, so the caller sets
