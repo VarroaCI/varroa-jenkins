@@ -20,6 +20,15 @@ TypeScript consumer of it.
   this harness (an rtk hook can reset it to repo root mid-session). Never
   assume you're already in `frontend/` — always anchor:
   `cd "$(git rev-parse --show-toplevel)/frontend" && npm ...`.
+- **Image build context is `frontend/` and `.dockerignore` keeps the local
+  tree out of it.** `Dockerfile` runs `npm ci` and then `COPY . .`. Without
+  the ignore file a local `node_modules` replaces the installed packages, so
+  the image ships whatever React the developer machine holds. The symptom is
+  a feature that passes `npm test` and is absent live, for example a `ref`
+  prop that never attaches. Keep `node_modules`, `dist`, and `coverage` in
+  `frontend/.dockerignore`. The ignore file also drops `.env`: a built image
+  takes its BFF address at run time from `entrypoint.sh` (`VARROA_API_HOST`),
+  so a local `.env` never reaches an image.
 - **Backend wiring**: set `VITE_VARROA_BFF_URL=http://localhost:8080/api/v1`
   in `frontend/.env` (see `.env.example`) to point the built app at a local
   BFF directly. Alternatively, export `VARROA_API_URL` before running
