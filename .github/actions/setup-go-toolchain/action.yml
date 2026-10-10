@@ -6,6 +6,12 @@ description: >
   go command runs, and the self-hosted runner node cannot always reach
   proxy.golang.org.
 
+inputs:
+  cache:
+    description: '"true" turns on the built-in cache of actions/setup-go. A job that uses ./.github/actions/go-cache sets "false".'
+    required: false
+    default: "true"
+
 runs:
   using: composite
   steps:
@@ -20,4 +26,4 @@ runs:
     - uses: actions/setup-go@v5
       with:
         go-version: ${{ steps.version.outputs.version }}
-        cache: true
+        cache: ${{ inputs.cache }}
