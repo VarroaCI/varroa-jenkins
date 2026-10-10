@@ -51,6 +51,8 @@ is capped at five results, and unused kind slots do not go to another kind.
 Authorization runs before a result enters the list, so a hidden controller,
 job, or run never appears. The last three kinds need the record store; when
 it is not wired, `search` still returns the first four.
+The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
+A cluster with `ok: false` returned incomplete results.
 
 The MCP server also exposes nine pipeline tools: `run_pipeline`, `list_runs`,
 `get_run`, `get_run_log`, `list_fleet_locks`, `release_fleet_lock`,

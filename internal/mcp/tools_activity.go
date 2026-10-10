@@ -70,7 +70,9 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithDescription("Search every resource kind the caller may read: controller, "+
 			"namespace, group, catalogitem, job, run, and activity. The four live kinds match "+
 			"by case-insensitive substring; job, run, and activity match by Postgres full text "+
-			"when the record store is wired. Capped at five results per kind, seven kinds total."),
+			"when the record store is wired. Capped at five results per kind, seven kinds total. "+
+			"The result also carries clusters, one read status for each cluster the search read. "+
+			"A cluster with ok false returned incomplete results."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query string")),
 		mcp.WithString("namespace", mcp.Description("Optional namespace filter, applied to every kind that carries a namespace")),
 		withListOutput(searchListOutputSchema),
@@ -100,11 +102,11 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 		// api.Server.Search applies namespace before its per-kind response
 		// cap, so a match in the requested namespace cannot be pushed out
 		// by higher-ranked rows from another namespace.
-		results, err := api.NewServer(deps).Search(ctx, claims, query, namespace)
+		resp, err := api.NewServer(deps).Search(ctx, claims, query, namespace)
 		if err != nil {
 			return mcp.NewToolResultError("search failed: " + err.Error()), nil
 		}
-		return resultJSON(results)
+		return resultJSON(map[string]any{"items": resp.Items, "count": len(resp.Items), "clusters": resp.Clusters})
 	})
 
 	meTool := mcp.NewTool("get_me",
@@ -168,11 +170,11 @@ var activityListOutputSchema = listOutputSchema("Activity event.", []schemaField
 
 // searchListOutputSchema describes the result of search: api.SearchResult
 // serializes directly, so there is no separate summary struct.
-var searchListOutputSchema = listOutputSchema("Search result.", []schemaField{
+var searchListOutputSchema = withClustersProperty(listOutputSchema("Search result.", []schemaField{
 	{Name: "type", Type: "string", Desc: "Kind: controller, namespace, group, catalogitem, job, run, or activity."},
 	{Name: "cluster", Type: "string", Desc: "Cluster the result belongs to, if any."},
 	{Name: "namespace", Type: "string", Desc: "Namespace the result belongs to, if any."},
 	{Name: "name", Type: "string", Desc: "Display name."},
 	{Name: "description", Type: "string", Desc: "Short supporting detail, if any."},
 	{Name: "link", Type: "string", Desc: "Frontend route for this result."},
-})
+}))

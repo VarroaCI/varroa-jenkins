@@ -1,8 +1,8 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -13,8 +13,21 @@ func TestHandleSearchWithoutAuthorizerReturnsNoInventory(t *testing.T) {
 
 	server.handleSearch(response, request)
 
-	if response.Code != 200 || strings.TrimSpace(response.Body.String()) != `{"items":[]}` {
-		t.Fatalf("response = %d %s, want empty items", response.Code, response.Body.String())
+	if response.Code != 200 {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Items    []SearchResult        `json:"items"`
+		Clusters []ClusterFanoutStatus `json:"clusters"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %s: %v", response.Body.String(), err)
+	}
+	if body.Items == nil || len(body.Items) != 0 {
+		t.Fatalf("items = %s, want []", response.Body.String())
+	}
+	if body.Clusters == nil || len(body.Clusters) != 0 {
+		t.Fatalf("clusters = %s, want []", response.Body.String())
 	}
 }
 

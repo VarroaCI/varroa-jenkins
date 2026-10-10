@@ -20104,7 +20104,8 @@ type SearchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasSearchResult `json:"items"`
+		Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+		Items    []ComponentsSchemasSearchResult        `json:"items"`
 	}
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
@@ -29048,7 +29049,8 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasSearchResult `json:"items"`
+			Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+			Items    []ComponentsSchemasSearchResult        `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err

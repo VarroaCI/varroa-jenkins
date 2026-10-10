@@ -3,7 +3,7 @@
   get:
     operationId: search
     tags: [streams]
-    summary: Search authorized controllers, namespaces, groups, and catalog items.
+    summary: Search authorized resources across every kind.
     parameters:
       - name: q
         in: query
@@ -13,17 +13,21 @@
           type: string
     responses:
       "200":
-        description: Search results (N6 envelope).
+        description: Search results and the read status of each cluster.
         content:
           application/json:
             schema:
               type: object
-              required: [items]
+              required: [items, clusters]
               properties:
                 items:
                   type: array
                   items:
                     $ref: '../components/schemas.yaml#/SearchResult'
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ClusterFanoutStatus'
               additionalProperties: false
       "400":
         $ref: '../components/responses.yaml#/BadRequest'

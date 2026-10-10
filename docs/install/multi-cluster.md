@@ -99,6 +99,8 @@ When two or more clusters are registered, the dashboard shows a cluster health s
 
 If a member's controller list does not arrive, the dashboard and the Controllers page name that cluster and give the reason. The cluster card in the strip shows **list unavailable**. `varroactl get controllers` prints a warning on stderr for that cluster. The MCP `list_controllers` result names that cluster in `clusters` with `ok: false`.
 
+Global search and `varroactl search` name each cluster whose results are incomplete.
+
 Controllers on member clusters have these constraints:
 
 | Surface | Behavior |

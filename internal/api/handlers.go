@@ -2052,12 +2052,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	results, err := s.Search(r.Context(), claims, r.URL.Query().Get("q"), "")
+	resp, err := s.Search(r.Context(), claims, r.URL.Query().Get("q"), "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusServiceUnavailable, "search unavailable")
 		return
 	}
-	s.writeJSON(w, http.StatusOK, itemsEnvelope(results))
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 // errSearchUnavailable means every search source failed: GET /search and
@@ -2084,21 +2084,27 @@ var errSearchUnavailable = errors.New("search unavailable")
 // omitted from the result; it never turns into errSearchUnavailable,
 // which stays reserved for a total live-source failure, matching the
 // rule before this change.
-func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, namespace string) ([]SearchResult, error) {
+//
+// The response also carries one read status per cluster. A failed
+// controller read appears as an ok false row. A failed catalog-item
+// read marks that cluster's row ok false as well, so a caller can tell
+// which clusters returned incomplete results.
+func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, namespace string) (SearchResponse, error) {
 	q := strings.ToLower(strings.TrimSpace(rawQuery))
 	results := make([]SearchResult, 0, 20)
 	if q == "" {
-		return results, nil
+		return SearchResponse{Items: []SearchResult{}, Clusters: []ClusterFanoutStatus{}}, nil
 	}
 	if s.deps.Authorizer == nil {
-		return results, nil
+		return SearchResponse{Items: []SearchResult{}, Clusters: []ClusterFanoutStatus{}}, nil
 	}
 
 	controllers, statuses, err := s.deps.Brood.ListAll(ctx, namespace, "")
 	if err != nil {
 		s.deps.Logger.Error("search controller fan-out failed", "error", err)
-		return nil, errSearchUnavailable
+		return SearchResponse{}, errSearchUnavailable
 	}
+	fanout := append(make([]ClusterFanoutStatus, 0, len(statuses)), statuses...)
 	for _, status := range statuses {
 		if !status.OK {
 			s.deps.Logger.Warn("search cluster unavailable", "cluster", status.Name, "error", status.Error)
@@ -2137,12 +2143,18 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 		clusters, clusterErr := s.deps.Brood.Clusters(ctx)
 		if clusterErr != nil {
 			s.deps.Logger.Warn("search catalog clusters failed", "error", clusterErr)
+			// The cluster list is unknown, so no catalog read ran for
+			// any cluster. Every row already in the response is incomplete.
+			for _, row := range append([]ClusterFanoutStatus{}, fanout...) {
+				markClusterIncomplete(&fanout, row.Name, "catalog items: "+clusterErr.Error())
+			}
 		} else {
 			succeeded := 0
 			for _, cluster := range clusters {
 				rawItems, _, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, namespace, CatalogItemFilter{})
 				if listErr != nil {
 					s.deps.Logger.Warn("search catalog cluster failed", "cluster", cluster.Name, "error", listErr)
+					markClusterIncomplete(&fanout, cluster.Name, "catalog items: "+listErr.Error())
 					continue
 				}
 				succeeded++
@@ -2155,7 +2167,7 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 				}
 			}
 			if len(clusters) > 0 && succeeded == 0 {
-				return nil, errSearchUnavailable
+				return SearchResponse{}, errSearchUnavailable
 			}
 		}
 	}
@@ -2164,7 +2176,40 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 		results = append(results, s.searchRecords(ctx, claims, q, namespace)...)
 	}
 
-	return rankSearchResults(results, q), nil
+	items := rankSearchResults(results, q)
+	if items == nil {
+		items = []SearchResult{}
+	}
+	return SearchResponse{Items: items, Clusters: fanout}, nil
+}
+
+// markClusterIncomplete records a failed catalog-item read on the
+// cluster's row. A row that already reads ok gains ok false and the
+// message. A row that already failed keeps its message and gains the
+// new one after a semicolon. A cluster with no row gets one.
+func markClusterIncomplete(rows *[]ClusterFanoutStatus, name, msg string) {
+	for i := range *rows {
+		if (*rows)[i].Name != name {
+			continue
+		}
+		row := &(*rows)[i]
+		if row.OK {
+			row.OK = false
+			row.Error = msg
+		} else {
+			row.Error += "; " + msg
+		}
+		return
+	}
+	*rows = append(*rows, ClusterFanoutStatus{Name: name, OK: false, Error: msg})
+}
+
+// SearchResponse is the body of GET /search and the MCP search tool.
+// Items holds the matches. Clusters holds one read status per cluster
+// that a search read. Both fields are always non-nil.
+type SearchResponse struct {
+	Items    []SearchResult        `json:"items"`
+	Clusters []ClusterFanoutStatus `json:"clusters"`
 }
 
 // SearchResult is one row of a search response: GET /search's "items"

@@ -14584,21 +14584,26 @@ paths:
               schema:
                 additionalProperties: false
                 properties:
+                  clusters:
+                    items:
+                      $ref: '#/components/schemas/components_schemas_ClusterFanoutStatus'
+                    type: array
                   items:
                     items:
                       $ref: '#/components/schemas/components_schemas_SearchResult'
                     type: array
                 required:
                 - items
+                - clusters
                 type: object
-          description: Search results (N6 envelope).
+          description: Search results and the read status of each cluster.
         "400":
           $ref: '#/components/responses/components_responses_BadRequest'
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
-      summary: Search authorized controllers, namespaces, groups, and catalog items.
+      summary: Search authorized resources across every kind.
       tags:
       - streams
   /api/v1/stream/brood:

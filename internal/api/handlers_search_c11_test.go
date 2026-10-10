@@ -142,11 +142,11 @@ func TestSearch_RecordStoreFailureIsLoggedNotUnavailable(t *testing.T) {
 		Brood:       &stubBrood{localCluster: "core"},
 		RecordStore: erroringSearchReader{},
 	})
-	results, err := server.Search(context.Background(), nsScopedClaims, "query", "")
+	resp, err := server.Search(context.Background(), nsScopedClaims, "query", "")
 	if err != nil {
 		t.Fatalf("Search returned %v, want nil (a record-store failure must not be errSearchUnavailable)", err)
 	}
-	for _, r := range results {
+	for _, r := range resp.Items {
 		if r.Type == "job" || r.Type == "run" || r.Type == "activity" {
 			t.Fatalf("got a %q result after a record-store failure, want the three kinds omitted", r.Type)
 		}
