@@ -225,14 +225,66 @@ describe("BuildPage — test cases and the test report", () => {
     const suiteTable = screen.getByRole("table", { name: "Test suites" });
     expect(caseTable.compareDocumentPosition(suiteTable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-    const rows = within(caseTable).getAllByRole("row").slice(1);
-    expect(rows.map((r) => within(r).getAllByRole("cell")[2].textContent)).toEqual(["zeta", "mu", "alpha"]);
+    // The suite header row holds a row header; the body rows do not.
+    const rows = within(caseTable)
+      .getAllByRole("row")
+      .filter((r) => within(r).queryByRole("rowheader") === null)
+      .slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["zeta", "mu", "alpha"]);
     const first = within(rows[0]).getAllByRole("cell").map((c) => c.textContent);
-    expect(first).toEqual(["unit", "com.example.ZedTest", "zeta", "FAILED", "1s", "expected 1 but was 2"]);
+    expect(first).toEqual(["com.example.ZedTest", "zeta", "FAILED", "1s", "expected 1 but was 2"]);
     // A value the record omits renders nothing.
     const second = within(rows[1]).getAllByRole("cell").map((c) => c.textContent);
+    expect(second[3]).toBe("");
     expect(second[4]).toBe("");
-    expect(second[5]).toBe("");
+    // The fixture holds one suite, so one header row names it.
+    expect(within(caseTable).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["unit"]);
+  });
+
+  it("puts each suite in a header row and hides the class column when each suite holds one class", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    mockListRunTests.mockResolvedValue(
+      testsRead({
+        items: [],
+        cases: [
+          {
+            suite: "github.com/x/alpha",
+            className: "github.com/x/alpha",
+            name: "TestA",
+            status: "FAILED",
+            caseKey: "github.com/x/alpha/TestA",
+          },
+          {
+            suite: "github.com/x/beta",
+            className: "github.com/x/beta",
+            name: "TestB",
+            status: "SKIPPED",
+            caseKey: "github.com/x/beta/TestB",
+          },
+        ],
+      }),
+    );
+    renderPage();
+    await openTestsTab();
+
+    const caseTable = await screen.findByRole("table", { name: "Test cases" });
+    expect(within(caseTable).queryByRole("columnheader", { name: "Class" })).toBeNull();
+    expect(within(caseTable).getAllByRole("columnheader")[0].textContent).toBe("Test");
+    expect(within(caseTable).getAllByRole("rowheader").map((h) => h.textContent)).toEqual([
+      "github.com/x/alpha",
+      "github.com/x/beta",
+    ]);
+  });
+
+  it("puts each tests-tab table in a horizontal scroll container", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    mockListRunTests.mockResolvedValue(testsRead());
+    renderPage();
+    await openTestsTab();
+
+    const caseTable = await screen.findByRole("table", { name: "Test cases" });
+    expect(caseTable.parentElement?.className).toMatch(/tableScroll/);
+    expect(screen.getByRole("table", { name: "Test suites" }).parentElement?.className).toMatch(/tableScroll/);
   });
 
   it("links each case row to that case's history with the encoded case key", async () => {

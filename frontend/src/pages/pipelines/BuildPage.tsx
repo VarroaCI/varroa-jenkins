@@ -39,6 +39,8 @@ import type {
 } from "../../types";
 import { stripTenantFolder, testCaseHref, type TestCaseLinkState } from "./jobPath";
 import { formatDuration } from "./JobTree";
+import { breakablePath } from "./breakablePath";
+import { groupTestCases } from "./testCaseGroups";
 import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import { PendingInputCard } from "./PendingInputCard";
@@ -495,6 +497,7 @@ export default function BuildPage() {
   // The response carries the failed cases first and the skipped cases
   // after. The tab keeps that order and sorts no row.
   const caseRows = testsQuery.data?.cases ?? [];
+  const caseGroups = useMemo(() => groupTestCases(caseRows), [caseRows]);
   const testReport = testsQuery.data?.report;
 
   if (status === "loading") {
@@ -758,33 +761,35 @@ export default function BuildPage() {
       )}
 
       {activeTab === "artifacts" && (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Path</th>
-              <th>Size</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {(artifactsQuery.data?.items ?? []).map((a) => (
-              <tr key={a.path}>
-                <td>{a.path}</td>
-                <td>{a.sizeBytes} bytes</td>
-                <td>
-                  <button
-                    type="button"
-                    disabled={!a.downloadable}
-                    title={a.downloadable ? undefined : "Stored locally by Jenkins; not downloadable"}
-                    onClick={() => downloadArtifact(a.path)}
-                  >
-                    Download
-                  </button>
-                </td>
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Size</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(artifactsQuery.data?.items ?? []).map((a) => (
+                <tr key={a.path}>
+                  <td>{breakablePath(a.path)}</td>
+                  <td>{a.sizeBytes} bytes</td>
+                  <td>
+                    <button
+                      type="button"
+                      disabled={!a.downloadable}
+                      title={a.downloadable ? undefined : "Stored locally by Jenkins; not downloadable"}
+                      onClick={() => downloadArtifact(a.path)}
+                    >
+                      Download
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {activeTab === "tests" && (
@@ -809,58 +814,74 @@ export default function BuildPage() {
             </div>
           )}
           {caseRows.length > 0 && team && job && (
-            <table className={styles.table} aria-label="Test cases">
+            <div className={styles.tableScroll}>
+              <table className={styles.table} aria-label="Test cases">
+                <thead>
+                  <tr>
+                    {caseGroups.showClassColumn && <th>Class</th>}
+                    <th>Test</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Error details</th>
+                  </tr>
+                </thead>
+                {caseGroups.groups.map((group, index) => (
+                  <tbody key={`${group.suite}/${index}`}>
+                    <tr className={styles.groupRow}>
+                      <th scope="rowgroup" colSpan={caseGroups.showClassColumn ? 5 : 4}>
+                        {breakablePath(group.label)}
+                        {group.secondary !== undefined && (
+                          <span className={styles.groupSecondary}>{breakablePath(group.secondary)}</span>
+                        )}
+                      </th>
+                    </tr>
+                    {group.rows.map((c) => (
+                      <tr key={`${c.suite}/${c.caseKey}`}>
+                        {caseGroups.showClassColumn && (
+                          <td className={styles.mono}>{breakablePath(c.className)}</td>
+                        )}
+                        <td>
+                          <Link
+                            to={testCaseHref(team, job, c.caseKey)}
+                            state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
+                          >
+                            {breakablePath(c.name)}
+                          </Link>
+                        </td>
+                        <td>{c.status}</td>
+                        <td>{typeof c.durationMs === "number" ? formatDuration(c.durationMs) : null}</td>
+                        <td>
+                          {c.errorDetails ? <pre className={`${styles.mono} ${styles.caseError}`}>{c.errorDetails}</pre> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ))}
+              </table>
+            </div>
+          )}
+          <div className={styles.tableScroll}>
+            <table className={styles.table} aria-label="Test suites">
               <thead>
                 <tr>
                   <th>Suite</th>
-                  <th>Class</th>
-                  <th>Test</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>Error details</th>
+                  <th>Total</th>
+                  <th>Failed</th>
+                  <th>Skipped</th>
                 </tr>
               </thead>
               <tbody>
-                {caseRows.map((c) => (
-                  <tr key={`${c.suite}/${c.caseKey}`}>
-                    <td>{c.suite}</td>
-                    <td className={styles.mono}>{c.className}</td>
-                    <td>
-                      <Link
-                        to={testCaseHref(team, job, c.caseKey)}
-                        state={{ className: c.className, name: c.name } satisfies TestCaseLinkState}
-                      >
-                        {c.name}
-                      </Link>
-                    </td>
-                    <td>{c.status}</td>
-                    <td>{typeof c.durationMs === "number" ? formatDuration(c.durationMs) : null}</td>
-                    <td>{c.errorDetails ? <pre className={`${styles.mono} ${styles.caseError}`}>{c.errorDetails}</pre> : null}</td>
+                {suiteRows.map((s) => (
+                  <tr key={s.suite}>
+                    <td>{breakablePath(s.suite)}</td>
+                    <td>{s.total}</td>
+                    <td>{s.failed}</td>
+                    <td>{s.skipped}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-          <table className={styles.table} aria-label="Test suites">
-            <thead>
-              <tr>
-                <th>Suite</th>
-                <th>Total</th>
-                <th>Failed</th>
-                <th>Skipped</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suiteRows.map((s) => (
-                <tr key={s.suite}>
-                  <td>{s.suite}</td>
-                  <td>{s.total}</td>
-                  <td>{s.failed}</td>
-                  <td>{s.skipped}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          </div>
         </div>
       )}
 

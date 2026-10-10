@@ -10,6 +10,7 @@ import { age } from "../../components/activityTimeline.util";
 import { holderOf, holdsLock } from "../../lib/fleetLocks";
 import type { FleetLock, RunNotification, RunnerEntry, RunningRun } from "../../types";
 import JobTree, { formatDuration } from "./JobTree";
+import { breakablePath } from "./breakablePath";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
 import styles from "./TeamHome.module.css";
@@ -140,10 +141,10 @@ function LockRow({ items, row }: { items: FleetLock[]; row: FleetLock }) {
  * states its job path as plain text.
  */
 function HolderRun({ row }: { row: FleetLock }) {
-  if (!row.runLink) return <span className={styles.lockJob}>{row.jobPath}</span>;
+  if (!row.runLink) return <span className={styles.lockJob}>{breakablePath(row.jobPath)}</span>;
   return (
     <Link to={row.runLink} className={styles.lockJob}>
-      {row.jobPath}
+      {breakablePath(row.jobPath)}
     </Link>
   );
 }
@@ -361,22 +362,24 @@ export default function TeamHome() {
         </div>
       ) : (
         <Card>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Pipeline</th>
-                <th>Health</th>
-                <th>Last build</th>
-                <th>Branch</th>
-                <th>Duration, last 8</th>
-                <th>Queue wait</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              <JobTree team={team!} rows={rows} openPaths={openPaths} onToggle={toggleFold} />
-            </tbody>
-          </table>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Pipeline</th>
+                  <th>Health</th>
+                  <th>Last build</th>
+                  <th>Branch</th>
+                  <th>Duration, last 8</th>
+                  <th>Queue wait</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                <JobTree team={team!} rows={rows} openPaths={openPaths} onToggle={toggleFold} />
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 
@@ -389,21 +392,23 @@ export default function TeamHome() {
         <div className={styles.empty}>The tenant holds no lock and waits on none.</div>
       ) : (
         <Card>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Lock</th>
-                <th>State</th>
-                <th>Holder</th>
-                <th>Since</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lockItems.map((row) => (
-                <LockRow key={`${row.name}/${row.runId}`} items={lockItems} row={row} />
-              ))}
-            </tbody>
-          </table>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Lock</th>
+                  <th>State</th>
+                  <th>Holder</th>
+                  <th>Since</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lockItems.map((row) => (
+                  <LockRow key={`${row.name}/${row.runId}`} items={lockItems} row={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 
@@ -416,23 +421,25 @@ export default function TeamHome() {
         <div className={styles.empty}>No runners registered for this team yet.</div>
       ) : (
         <Card>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Launcher</th>
-                <th>Labels</th>
-                <th>Cell</th>
-                <th>Connected</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runnersQuery.data.map((item) => (
-                <RunnerRow key={item.name} item={item} />
-              ))}
-            </tbody>
-          </table>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Launcher</th>
+                  <th>Labels</th>
+                  <th>Cell</th>
+                  <th>Connected</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runnersQuery.data.map((item) => (
+                  <RunnerRow key={item.name} item={item} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
     </div>

@@ -227,7 +227,11 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   renders a pending input step in `PendingInputCard.tsx`, which has its own
   `PendingInputCard.module.css`, in a `Pending input` card between the
   `Digest` card and the `Pipeline` card; its `Tests` tab shows the report
-  line, then the case table in the response order, then the suite table),
+  line, then the case table, grouped under a suite header row each time the
+  suite changes, in the response order (`testCaseGroups.ts`; the Class column
+  shows only when a suite holds two or more classes), then the suite table),
+  `breakablePath.tsx` inserts break opportunities in a path. A pipelines table
+  never uses `overflow-wrap: anywhere` on a cell,
   and `TestCaseHistory.tsx` (`/pipelines/:team/:job/tests/:case`, the recent
   outcomes of one test case). A case key is opaque: `testCaseHref` in
   `jobPath.ts` encodes it as one segment, and no page parses it. The

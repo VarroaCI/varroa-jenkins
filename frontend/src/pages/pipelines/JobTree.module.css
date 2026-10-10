@@ -57,7 +57,12 @@
 
 .nodeName {
   color: var(--text);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+
+/* The branch name breaks at its separators, so the column stays narrow. */
+.branchCell {
+  overflow-wrap: break-word;
 }
 
 .counts {

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ChevronRight, CloudRain, CloudSun, Sun, type LucideIcon } from "lucide-react";
 import { age } from "../../components/activityTimeline.util";
 import type { PipelineHealth, PipelineSummary } from "../../types";
+import { breakablePath } from "./breakablePath";
 import { isFoldable, type JobTreeNode } from "./jobTree";
 import styles from "./JobTree.module.css";
 
@@ -174,7 +175,9 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
           <span className={styles.dim}>—</span>
         )}
       </td>
-      <td>{item.lastBuild?.branch ?? <span className={styles.dim}>—</span>}</td>
+      <td className={styles.branchCell}>
+        {item.lastBuild?.branch ? breakablePath(item.lastBuild.branch) : <span className={styles.dim}>—</span>}
+      </td>
       <td>
         <div className={styles.durationCell}>
           {item.durationTrendMs && item.durationTrendMs.length > 0 && <Sparkline values={item.durationTrendMs} />}

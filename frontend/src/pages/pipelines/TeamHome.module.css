@@ -1,6 +1,8 @@
 .table { composes: dataTable from "../tables.module.css"; }
 .nameCell { composes: nameCell from "../tables.module.css"; }
 
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+
 .page {
   animation: fade 0.3s ease;
   max-width: 1080px;
@@ -174,7 +176,7 @@
 
 /* A job path is long and wraps rather than widening the table. */
 .lockJob {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* The elapsed time is a number that reads in a column. */

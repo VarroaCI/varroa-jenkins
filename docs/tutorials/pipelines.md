@@ -163,6 +163,9 @@ for the storage modes that make an artifact downloadable.
 The tab omits the files Varroa archives for its own use under `.varroa/`. Download the test
 report from the **Tests** tab.
 
+The **Tests** tab lists the failed and skipped cases, at most 500, under one header row per suite.
+The **Class** column shows only when a suite holds more than one class.
+
 ## Run a job with parameters
 
 On the pipeline page, select **Run**. This control is present only for a caller who holds the

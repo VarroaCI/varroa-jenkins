@@ -94,7 +94,8 @@ describe("TeamHome — the Locks card", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText("payments/smoke-lock")).toBeInTheDocument());
-    const link = screen.getByRole("link", { name: "payments/holder-job" });
+    const link = screen.getByRole("link", { name: /holder-job/ });
+    expect(link.textContent).toBe("payments/holder-job");
     expect(link).toHaveAttribute("href", "/pipelines/payments/payments%2Fholder-job/run-1");
   });
 
@@ -125,7 +126,8 @@ describe("TeamHome — the Locks card", () => {
       "href",
       "/pipelines/payments/payments%2Fholder-job/run-1",
     );
-    const waiterHolder = within(rows[2]).getByRole("link", { name: "payments/holder-job" });
+    const waiterHolder = within(rows[2]).getByRole("link", { name: /holder-job/ });
+    expect(waiterHolder.textContent).toBe("payments/holder-job");
     expect(waiterHolder).toHaveAttribute("href", "/pipelines/payments/payments%2Fholder-job/run-1");
   });
 

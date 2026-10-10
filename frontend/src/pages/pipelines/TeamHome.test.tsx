@@ -7,7 +7,7 @@ import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-rou
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { ApiError } from "../../hooks/useApi";
-import { createPipelineSummary, createRunningRun } from "../../test/factories";
+import { createFleetLock, createPipelineSummary, createRunningRun } from "../../test/factories";
 import type { RunNotification } from "../../types";
 import TeamHome from "./TeamHome";
 
@@ -444,6 +444,8 @@ describe("TeamHome — Runners section", () => {
   beforeEach(() => {
     mockListPipelines.mockReset();
     mockListRunners.mockReset();
+    mockListFleetLocks.mockReset();
+    mockListFleetLocks.mockResolvedValue({ items: [] });
     mockGetTeamCell.mockReset();
     mockListPipelines.mockResolvedValue({ items: [], runningNow: [], truncated: false });
     mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
@@ -473,6 +475,25 @@ describe("TeamHome — Runners section", () => {
     expect(screen.getByText("windows, msbuild")).toBeInTheDocument();
     expect(screen.getByText("acme-cell-1")).toBeInTheDocument();
     expect(screen.getByText("Connected", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("puts the pipelines, locks, and runners tables in a horizontal scroll container", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("acme", ["acme/release/eu"]));
+    mockListFleetLocks.mockResolvedValue({ items: [createFleetLock({ name: "acme/smoke-lock" })] });
+    mockListRunners.mockResolvedValue([
+      {
+        name: "win-1",
+        spec: { team: "acme", launcher: "ssh", labels: [], remoteFS: "C:\\J" },
+        status: { nodeName: "acme-win-1", cell: "acme-cell-1", connected: true, lastSeen: new Date().toISOString() },
+      },
+    ]);
+    renderPage();
+    await waitFor(() => {
+      expect(document.querySelectorAll("table")).toHaveLength(3);
+    });
+    for (const table of Array.from(document.querySelectorAll("table"))) {
+      expect(table.parentElement?.className).toMatch(/tableScroll/);
+    }
   });
 
   it("renders an unconnected runner with dashes for its unset fields", async () => {
