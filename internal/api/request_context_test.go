@@ -314,3 +314,138 @@ func TestControllerDetailAndYAMLPassRequestContext(t *testing.T) {
 		}
 	}
 }
+
+// reqCtxDefaults returns the varroa-defaults object that gives controllers a
+// root-domain endpoint.
+func reqCtxDefaults() *v1alpha1.ProvisioningDefaults {
+	return &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.test"},
+	}
+}
+
+// reqCtxController returns a non-headless controller with no host and no
+// Status.Endpoint, so its endpoint comes from the root domain.
+func reqCtxController(name string) *v1alpha1.Controller {
+	return &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns1"}}
+}
+
+// defaultsGetCounter counts the reads of varroa-defaults.
+type defaultsGetCounter struct {
+	crdstore.Backend
+	mu sync.Mutex
+	n  int
+}
+
+func (b *defaultsGetCounter) GetObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (*unstructured.Unstructured, error) {
+	if gvr.Resource == "provisioningdefaults" {
+		b.mu.Lock()
+		b.n++
+		b.mu.Unlock()
+	}
+	return b.Backend.GetObject(ctx, gvr, namespace, name)
+}
+
+func TestControllerEndpointCallersPassRequestContext(t *testing.T) {
+	t.Run("list", func(t *testing.T) {
+		fake := crdstore.NewFake()
+		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"))
+		store := &reqCtxStore{Backend: fake}
+		srv := reqCtxServer(store)
+		w := httptest.NewRecorder()
+		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "https://c1.example.test") {
+			t.Errorf("body lacks the root-domain endpoint: %s", w.Body.String())
+		}
+		store.assertMarked(t)
+	})
+
+	t.Run("detail", func(t *testing.T) {
+		fake := crdstore.NewFake()
+		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"))
+		store := &reqCtxStore{Backend: fake}
+		srv := reqCtxServer(store)
+		w := httptest.NewRecorder()
+		srv.handleControllerDetail(w, reqCtxRequest(http.MethodGet, "/", ""), "", "ns1", "c1")
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "https://c1.example.test") {
+			t.Errorf("body lacks the root-domain endpoint: %s", w.Body.String())
+		}
+		store.assertMarked(t)
+	})
+
+	t.Run("break-glass", func(t *testing.T) {
+		srv, client, _ := newBreakGlassTestServer(t)
+		crdstore.MustSeed(client.crdStore, reqCtxDefaults(), &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "reachable", Namespace: "team-a", UID: "54c62aff-0000-0000-0000-000000000001"},
+		})
+		spy := &reqCtxStore{Backend: srv.deps.Store}
+		srv.deps.Store = spy
+		w := httptest.NewRecorder()
+		srv.handleBreakGlass(w, reqCtxRequest(http.MethodPost, "/", `{"reason":"incident"}`), "core", "team-a", "reachable")
+		if w.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "https://reachable.example.test") {
+			t.Errorf("body lacks the root-domain endpoint: %s", w.Body.String())
+		}
+		spy.assertMarked(t)
+	})
+}
+
+func TestControllerListReadsProvisioningDefaultsOnce(t *testing.T) {
+	t.Run("no host on any row", func(t *testing.T) {
+		fake := crdstore.NewFake()
+		crdstore.MustSeed(fake, reqCtxDefaults(), reqCtxController("c1"), reqCtxController("c2"), reqCtxController("c3"))
+		counter := &defaultsGetCounter{Backend: fake}
+		srv := reqCtxServer(&reqCtxStore{Backend: counter})
+		w := httptest.NewRecorder()
+		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		if counter.n != 1 {
+			t.Errorf("varroa-defaults reads = %d, want 1", counter.n)
+		}
+	})
+
+	t.Run("every row has a host", func(t *testing.T) {
+		fake := crdstore.NewFake()
+		hosted := func(name string) *v1alpha1.Controller {
+			cr := reqCtxController(name)
+			cr.Spec.IngressSpec = &v1alpha1.IngressSpec{Host: name + ".example.test"}
+			return cr
+		}
+		crdstore.MustSeed(fake, reqCtxDefaults(), hosted("c1"), hosted("c2"), hosted("c3"))
+		counter := &defaultsGetCounter{Backend: fake}
+		srv := reqCtxServer(&reqCtxStore{Backend: counter})
+		w := httptest.NewRecorder()
+		srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		if counter.n != 0 {
+			t.Errorf("varroa-defaults reads = %d, want 0", counter.n)
+		}
+	})
+}
+
+func TestControllerListReadsMissingDefaultsOnce(t *testing.T) {
+	fake := crdstore.NewFake()
+	crdstore.MustSeed(fake, reqCtxController("c1"), reqCtxController("c2"), reqCtxController("c3"))
+	counter := &defaultsGetCounter{Backend: fake}
+	srv := reqCtxServer(&reqCtxStore{Backend: counter})
+	w := httptest.NewRecorder()
+	srv.HandleControllers(w, reqCtxRequest(http.MethodGet, "/controllers", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if counter.n != 1 {
+		t.Errorf("varroa-defaults reads = %d, want 1 when the object is absent", counter.n)
+	}
+}

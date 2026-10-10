@@ -783,7 +783,46 @@ type RolloutJSON struct {
 // IngressSpec: subdomain mode -> "https://<Host>", path mode -> "https://<Host>/jenkins/<ns>/<name>/".
 // A headless controller has no reachable external URL, so this always
 // returns the empty string for one, even when Status.Endpoint is set.
-func (s *Server) controllerEndpoint(cr *v1alpha1.Controller) string {
+// The ProvisioningDefaults read uses ctx, so a cancelled request stops it.
+func (s *Server) controllerEndpoint(ctx context.Context, cr *v1alpha1.Controller) string {
+	return s.endpoints(ctx).resolve(cr)
+}
+
+// endpointResolver derives controller endpoints for one request. It reads
+// ProvisioningDefaults at most once, and only when a controller needs the
+// root domain. It is not safe for concurrent use.
+type endpointResolver struct {
+	s          *Server
+	ctx        context.Context
+	read       bool
+	rootDomain string
+}
+
+// endpoints starts a resolver bound to one request context.
+func (s *Server) endpoints(ctx context.Context) *endpointResolver {
+	return &endpointResolver{s: s, ctx: ctx}
+}
+
+// defaultRootDomain returns the root domain from varroa-defaults. A read that
+// finds the object, or finds nothing, is cached. Any other read error is not
+// cached, so the next row retries it.
+func (e *endpointResolver) defaultRootDomain() string {
+	if e.read {
+		return e.rootDomain
+	}
+	d, err := crdstore.Get[v1alpha1.ProvisioningDefaults](e.ctx, e.s.deps.Store, "varroa-defaults", "")
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return ""
+	}
+	e.read = true
+	if d != nil {
+		e.rootDomain = d.Spec.RootDomain
+	}
+	return e.rootDomain
+}
+
+// resolve returns the endpoint for cr. See controllerEndpoint for the rules.
+func (e *endpointResolver) resolve(cr *v1alpha1.Controller) string {
 	if v1alpha1.IsHeadless(cr) {
 		return ""
 	}
@@ -795,11 +834,10 @@ func (s *Server) controllerEndpoint(cr *v1alpha1.Controller) string {
 		host = cr.Spec.IngressSpec.Host
 	}
 	if host == "" {
-		defaults, _ := crdstore.Get[v1alpha1.ProvisioningDefaults](context.Background(), s.deps.Store, "varroa-defaults", "")
-		if defaults != nil && defaults.Spec.RootDomain != "" {
-			isSubdomain := cr.Spec.IngressSpec == nil || cr.Spec.IngressSpec.Mode == "" || cr.Spec.IngressSpec.Mode == "subdomain"
-			if isSubdomain {
-				host = cr.Name + "." + defaults.Spec.RootDomain
+		isSubdomain := cr.Spec.IngressSpec == nil || cr.Spec.IngressSpec.Mode == "" || cr.Spec.IngressSpec.Mode == "subdomain"
+		if isSubdomain {
+			if rd := e.defaultRootDomain(); rd != "" {
+				host = cr.Name + "." + rd
 			}
 		}
 	}
@@ -897,6 +935,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 
 	out := make([]controllerResponse, len(allControllers))
 	caps := s.cellCaps(r.Context())
+	eps := s.endpoints(ctx)
 	// localIdx lists the rows whose mite state is read from the local KV. The
 	// reads run after this serial pass, so the caps resolver stays serial.
 	var localIdx []int
@@ -910,7 +949,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			Namespace:         cr.Namespace,
 			Cluster:           cluster,
 			Phase:             string(cr.Status.Phase),
-			Endpoint:          s.controllerEndpoint(cr),
+			Endpoint:          eps.resolve(cr),
 			Headless:          v1alpha1.IsHeadless(cr),
 			Version:           cr.Spec.Version,
 			ComposedBundleRef: cr.Spec.ComposedBundleRef,
@@ -1000,7 +1039,7 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	resp := s.controllerDetail(cr, cluster)
+	resp := s.controllerDetail(r.Context(), cr, cluster)
 	// Detail-only enrichment on top of the shared projection.
 	resp.DesiredStateHash = cr.Status.DesiredStateHash
 	resp.ConfigHash = cr.Status.ConfigHash
@@ -1817,7 +1856,7 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 
 	if !v1alpha1.IsHeadless(cr) {
 		s.writeJSONError(w, http.StatusConflict,
-			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(cr)))
+			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(r.Context(), cr)))
 		return
 	}
 
@@ -2900,7 +2939,7 @@ func (s *Server) handleCreateController(w http.ResponseWriter, r *http.Request, 
 			Message:    fmt.Sprintf("controller %s/%s created by %s", namespace, cr.Name, ActorFrom(claims)),
 		})
 	}
-	s.writeJSON(w, http.StatusCreated, s.controllerDetail(created, cluster))
+	s.writeJSON(w, http.StatusCreated, s.controllerDetail(ctx, created, cluster))
 }
 
 // handleDeleteController handles DELETE /controllers/{ns}/{name}.
@@ -2995,7 +3034,7 @@ func (s *Server) handleUpdateController(w http.ResponseWriter, r *http.Request, 
 		}
 		return
 	}
-	detail := s.controllerDetail(updated, cluster)
+	detail := s.controllerDetail(ctx, updated, cluster)
 	detail.UnappliedRemovals = unapplied
 	s.writeJSON(w, http.StatusOK, detail)
 }

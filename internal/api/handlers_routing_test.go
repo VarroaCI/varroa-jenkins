@@ -87,11 +87,29 @@ func TestControllerEndpoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := srv.controllerEndpoint(tt.cr); got != tt.want {
+			if got := srv.controllerEndpoint(context.Background(), tt.cr); got != tt.want {
 				t.Errorf("controllerEndpoint() = %q, want %q", got, tt.want)
 			}
 		})
 	}
+
+	t.Run("root-domain fallback in subdomain mode", func(t *testing.T) {
+		fcDefaults := newFakeResourceClient()
+		crdstore.MustSeed(storeFromFake(fcDefaults), &v1alpha1.ProvisioningDefaults{
+			ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+			Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.test"},
+		})
+		withDefaults := NewServer(&Dependencies{
+			Client:            fcDefaults,
+			Store:             storeFromFake(fcDefaults),
+			OperatorNamespace: "test-ns",
+			Logger:            slog.Default(),
+		})
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
+		if got, want := withDefaults.controllerEndpoint(context.Background(), cr), "https://ci.example.test"; got != want {
+			t.Errorf("controllerEndpoint() = %q, want %q", got, want)
+		}
+	})
 }
 
 func newRoutingTestServer() (*Server, *fakeResourceClient) {

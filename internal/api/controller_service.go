@@ -117,15 +117,15 @@ func (s *Server) controllerSvc() *ControllerService {
 
 // controllerDetail is the single projection from a Controller CR to the
 // ControllerDetail response shape, shared by the detail, create, and update
-// handlers (both brood and local paths).
-func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) controllerDetailResponse {
+// handlers (both brood and local paths). The endpoint read uses ctx.
+func (s *Server) controllerDetail(ctx context.Context, cr *v1alpha1.Controller, cluster string) controllerDetailResponse {
 	resp := controllerDetailResponse{
 		Spec:              cr.Spec,
 		Name:              cr.Name,
 		Namespace:         cr.Namespace,
 		Cluster:           cluster,
 		Phase:             string(cr.Status.Phase),
-		Endpoint:          s.controllerEndpoint(cr),
+		Endpoint:          s.controllerEndpoint(ctx, cr),
 		Headless:          v1alpha1.IsHeadless(cr),
 		Version:           cr.Spec.Version,
 		PowerState:        cr.Spec.PowerState,

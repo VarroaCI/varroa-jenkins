@@ -212,7 +212,7 @@ func TestControllerDetail_CarriesAttention(t *testing.T) {
 			}},
 		},
 	}
-	resp := s.controllerDetail(cr, "core")
+	resp := s.controllerDetail(context.Background(), cr, "core")
 	if resp.Attention == nil {
 		t.Fatal("detail response carries no attention")
 	}
@@ -248,7 +248,7 @@ func TestControllerDetail_CellProjection(t *testing.T) {
 			},
 		},
 	}
-	resp := s.controllerDetail(cr, "core")
+	resp := s.controllerDetail(context.Background(), cr, "core")
 	if resp.Kind != "cell" {
 		t.Fatalf("Kind = %q, want cell", resp.Kind)
 	}
@@ -304,7 +304,7 @@ func TestControllerDetail_StatefulCarriesNoCell(t *testing.T) {
 		Store:  crdstore.NewFake(),
 	}}
 	cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "plain", Namespace: "ns1"}}
-	resp := s.controllerDetail(cr, "core")
+	resp := s.controllerDetail(context.Background(), cr, "core")
 	if resp.Kind != "stateful" {
 		t.Fatalf("Kind = %q, want stateful", resp.Kind)
 	}
