@@ -1,6 +1,6 @@
 // Command validate-oci-layout validates that hack/localdev/pluginpack-fixture/
 // is a structurally valid OCI image-layout. It is invoked by CI (the
-// localdev-validate job) to check the checked-in fixture after generation.
+// Checks job) to check the checked-in fixture after generation.
 //
 // Usage:
 //

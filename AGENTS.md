@@ -53,7 +53,7 @@ Backend components are split: `varroa-operator` reconciles controllers, `varroa-
 - **Waiting on cluster state**: a short retry/backoff loop beats a fixed sleep for anything waiting on reconciliation to converge: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
 - **Frontend commands**: always run `npm` commands from `frontend/`; don't assume the shell's cwd already points there.
 
-- **Comments carry constraints, not history.** A Go comment may state a constraint the code cannot show. It may not cite a GitHub issue or PR number, narrate the next line, or argue correctness at a reviewer; git history holds why a change was made. The **Check comments** job (`make check-comments`, `hack/checkcomments/`) blocks citations on every PR.
+- **Comments carry constraints, not history.** A Go comment may state a constraint the code cannot show. It may not cite a GitHub issue or PR number, narrate the next line, or argue correctness at a reviewer; git history holds why a change was made. The comment check in the **Checks** job (`make check-comments`, `hack/checkcomments/`) blocks citations on every PR.
 
 ## Linting
 
@@ -63,7 +63,7 @@ The golangci-lint version is pinned, and `.github/workflows/pr.yaml`, `.github/w
 
 ## CI
 
-GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, check-crds, check-proto, check-client, check-bootstrap-deps, check-comments, the chart golden tests, govulncheck, race tests, the frontend tests, and docker builds on every PR. It has no workflow-level paths filter. Its `Detect changes` job sets a filter output for each path group, and each job gates itself with `if:` on that output. Its `Required checks` job is the single aggregate context that branch protection requires. `release.yaml` publishes images and the Helm chart on tag pushes.
+GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, the **Checks** job (comment, proto, API client, bootstrap closure, CRD, and localdev checks), the chart golden tests, govulncheck, race tests, the frontend tests, and docker builds. It has no workflow-level paths filter. Its `Detect changes` job sets the outputs `go`, `charts`, `docker`, and `frontend`, and each job gates itself with `if:` on one output. A draft pull request skips every job, and `Required checks` fails on a draft. Its `Required checks` job is the single aggregate context that branch protection requires. `release.yaml` publishes images and the Helm chart on tag pushes.
 
 Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
 

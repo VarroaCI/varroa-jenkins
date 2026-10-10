@@ -3,7 +3,10 @@ name: PR
 on:
   pull_request:
     branches: [main]
+    # A draft is the local review phase. Only a ready pull request runs CI.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
+# One group per pull request. A new push cancels the run of the previous head.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -11,6 +14,8 @@ concurrency:
 jobs:
   changes:
     name: Detect changes
+    # A draft skips this job, so every job that needs it also skips.
+    if: github.event.pull_request.draft == false
     # GitHub-hosted on purpose: a docs-only PR must not wait for a runner.
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -18,26 +23,49 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      backend: ${{ steps.backend.outputs.backend }}
-      frontend: ${{ steps.frontend.outputs.frontend }}
+      go: ${{ steps.base.outputs.go == 'true' || steps.paths.outputs.goextra == 'true' }}
+      charts: ${{ steps.paths.outputs.charts }}
+      docker: ${{ steps.paths.outputs.docker }}
+      frontend: ${{ steps.paths.outputs.frontend }}
     steps:
-      # Every changed file must match every rule. The negated rules exclude
-      # the paths that never need the backend jobs.
-      - id: backend
+      # A changed file sets "go" only when it matches every rule. The negated
+      # rules exclude the paths that no Go build, test, or lint reads.
+      - id: base
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: every
           filters: |
-            backend:
+            go:
               - '**'
               - '!frontend/**'
               - '!**/*.md'
               - '!*.md'
               - '!docs/**'
-      - id: frontend
+              - '!charts/**'
+      # A changed file sets an output here when it matches one rule.
+      # goextra lists the files under excluded paths that Go code reads.
+      # Every docker path must also set "go": the image build needs Lint and Test.
+      - id: paths
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
+            goextra:
+              - 'charts/varroa/values.yaml'
+              - 'charts/varroa/crds/**'
+            charts:
+              - 'charts/**'
+              - 'frontend/nginx.conf'
+              - 'Makefile'
+              - '.github/actions/**'
+              - '.github/workflows/pr.yaml'
+            docker:
+              - 'Dockerfile*'
+              - '.dockerignore'
+              - 'go.mod'
+              - 'go.sum'
+              - 'cmd/**'
+              - 'plugin/**'
+              - '.github/workflows/pr.yaml'
             frontend:
               - 'frontend/**'
               - 'api/openapi/**'
@@ -46,7 +74,7 @@ jobs:
   lint:
     name: Lint
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,10 +91,10 @@ jobs:
       - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
       - run: golangci-lint run --timeout 10m ./...
 
-  check-comments:
-    name: Check comments
+  checks:
+    name: Checks
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -75,74 +103,29 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go run ./hack/checkcomments .
-
-  check-crds:
-    name: Check CRDs
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - run: make check-crds
-
-  check-proto:
-    name: Check Proto
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: make check-proto
-
-  check-client:
-    name: Check API client
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: make check-client
-
-  check-bootstrap-deps:
-    name: Check bootstrap closure
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      # Offline: re-verifies the committed bootstrap block against the committed
-      # plugin set. A lock edit that drops or moves a varroa-mite-auth
-      # dependency breaks authentication on every controller, and this is where
-      # that gets caught instead of at Jenkins boot. Recomputing the closure
-      # needs network + a built HPI, which is plugin-lock-refresh's job.
-      - run: go run ./cmd/bootstrapdeps --check
-
-  localdev-validate:
-    name: Validate localdev assets
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
+      # Each check step also runs after a failed check, so one failure does not hide the next.
+      - name: Check comments
+        run: go run ./hack/checkcomments .
+      - name: Check Proto
+        if: ${{ !cancelled() }}
+        run: make check-proto
+      - name: Check API client
+        if: ${{ !cancelled() }}
+        run: make check-client
+      - name: Check bootstrap closure
+        if: ${{ !cancelled() }}
+        # Offline: re-verifies the committed bootstrap block against the committed
+        # plugin set. A lock edit that drops or moves a varroa-mite-auth
+        # dependency breaks authentication on every controller, and this is where
+        # that gets caught instead of at Jenkins boot. Recomputing the closure
+        # needs network + a built HPI, which is plugin-lock-refresh's job.
+        run: go run ./cmd/bootstrapdeps --check
+      # check-crds runs before "helm dependency build", which writes under charts/varroa/charts/.
+      - name: Check CRDs
+        if: ${{ !cancelled() }}
+        run: make check-crds
       - name: Fetch chart dependencies
+        if: ${{ !cancelled() }}
         # charts/varroa/charts/ is gitignored — the NATS subchart must be
         # fetched (pinned by Chart.lock) before lint/template. helm v3 needs
         # the repo registered first.
@@ -150,8 +133,10 @@ jobs:
           helm repo add nats https://nats-io.github.io/k8s/helm/charts/ --force-update
           helm dependency build charts/varroa
       - name: Helm lint (localdev overlay)
+        if: ${{ !cancelled() }}
         run: helm lint charts/varroa -f charts/varroa/values-localdev.yaml
       - name: Helm template (localdev overlay renders)
+        if: ${{ !cancelled() }}
         run: |
           helm template varroa charts/varroa \
             -f charts/varroa/values-localdev.yaml \
@@ -162,12 +147,10 @@ jobs:
           # NOTE: bare `helm template` mints fresh random NATS credentials each
           # run (no cluster for lookup()) — expected, render-only validation.
       - name: Shellcheck localdev driver
+        if: ${{ !cancelled() }}
         run: shellcheck hack/localdev/localdev.sh
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
       - name: Validate localdev manifests
+        if: ${{ !cancelled() }}
         # Core resources are schema-validated by kubeconform; Varroa CRs
         # (varroa.dev/v1alpha1) use -ignore-missing-schemas because deriving
         # JSON schemas from charts/varroa/crds/ in CI is brittle — CR field
@@ -180,6 +163,7 @@ jobs:
             echo '---'
           done | "$(go env GOPATH)/bin/kubeconform" -strict -summary -ignore-missing-schemas
       - name: Validate OCI-layout fixture structure
+        if: ${{ !cancelled() }}
         # Structural check: hack/localdev/pluginpack-fixture/ must be a valid
         # OCI image-layout (if present). Skips gracefully when the fixture
         # hasn't been generated yet. Requires no live cluster or registry.
@@ -190,7 +174,7 @@ jobs:
   chart-tests:
     name: Chart tests
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -212,7 +196,7 @@ jobs:
   govulncheck:
     name: Vulncheck
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -227,7 +211,7 @@ jobs:
   test:
     name: Test
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -244,7 +228,7 @@ jobs:
   build-backend:
     name: Build backend image
     needs: [changes, lint, test]
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -310,11 +294,17 @@ jobs:
   required:
     name: Required checks
     if: always()
-    needs: [changes, lint, check-comments, check-crds, check-proto, check-client, check-bootstrap-deps, chart-tests, test, frontend-test]
+    needs: [changes, lint, checks, chart-tests, test, frontend-test]
     # GitHub-hosted: this job only reads the results of the jobs it needs.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # A draft skips every job. A pass here could merge a pull request before CI runs.
+      - name: Fail on a draft pull request
+        if: github.event.pull_request.draft
+        run: |
+          echo "This pull request is a draft. CI runs when the pull request is ready for review."
+          exit 1
       - name: Fail when a needed job did not succeed or skip
         env:
           RESULTS: ${{ toJSON(needs) }}
