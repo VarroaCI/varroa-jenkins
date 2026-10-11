@@ -8,7 +8,7 @@ import { ApiError } from "../hooks/useApi";
 import { previewComposedBundle, createComposedBundle, getComposedBundle, updateController, updateComposedBundle, validateComposedBundle } from "../api/client";
 import { useToast } from "../components/Toast";
 import { Button } from "../components/Button";
-import { Tabs } from "../components/Tabs";
+import { Tabs, tabPanelProps } from "../components/Tabs";
 import type { ComposedBundlePreview } from "../types";
 import type { EditTarget } from "./ComposedBundleEdit";
 import styles from "./ComposerTray.module.css";
@@ -477,8 +477,14 @@ export default function ComposerTray({ open, onClose, editTarget }: ComposerTray
                 </div>
               )}
 
-              <Tabs tabs={PREVIEW_TABS} activeTab={previewTab} onSelect={setPreviewTab} />
-              <pre className={styles.yamlBlock}>{getPreviewYaml()}</pre>
+              <Tabs
+                tabs={PREVIEW_TABS}
+                activeTab={previewTab}
+                onSelect={setPreviewTab}
+                idBase="composer-preview"
+                ariaLabel="Preview"
+              />
+              <pre className={styles.yamlBlock} {...tabPanelProps("composer-preview", previewTab)}>{getPreviewYaml()}</pre>
             </div>
           )}
 

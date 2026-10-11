@@ -17,7 +17,7 @@ import { upgradeInfo, versionsDiffer } from "../lib/versionCatalog";
 import { pluginDiff } from "../lib/pluginDiff";
 import { unappliedRemovalNotice } from "../lib/unappliedRemovals";
 import { Card } from "../components/Card";
-import { Tabs } from "../components/Tabs";
+import { Tabs, tabPanelProps } from "../components/Tabs";
 import { age } from "../components/activityTimeline.util";
 import { KVGrid } from "../components/KVGrid";
 import { Button } from "../components/Button";
@@ -482,8 +482,11 @@ export default function ControllerDetail() {
         tabs={cellTabVisible ? TABS : TABS.filter((t) => t.id !== "cell")}
         activeTab={active}
         onSelect={setActiveTab}
+        idBase="controller-detail"
+        ariaLabel="Controller sections"
       />
 
+      <div {...tabPanelProps("controller-detail", active)}>
       {active === "overview" && (
         <OverviewTab
           ctrl={ctrl}
@@ -524,6 +527,7 @@ export default function ControllerDetail() {
           activityReady={feed.readyState}
         />
       )}
+      </div>
     </div>
   );
 }

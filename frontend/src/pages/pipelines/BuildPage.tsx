@@ -23,7 +23,7 @@ import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissi
 import { useToast } from "../../components/Toast";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
-import { Tabs } from "../../components/Tabs";
+import { Tabs, tabPanelProps } from "../../components/Tabs";
 import { ForbiddenPage, GenericErrorPage, RecoveryState } from "../../components/RecoveryState";
 import type {
   RunCommandRefusal,
@@ -746,8 +746,15 @@ export default function BuildPage() {
         />
       </Card>
 
-      <Tabs tabs={tabs} activeTab={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
+      <Tabs
+        tabs={tabs}
+        activeTab={activeTab}
+        onSelect={(id) => setActiveTab(id as TabId)}
+        idBase="run"
+        ariaLabel="Run output"
+      />
 
+      <div {...tabPanelProps("run", activeTab)}>
       {activeTab === "log" && (
         <RunLogViewer
           key={run.runId}
@@ -893,6 +900,7 @@ export default function BuildPage() {
           ))}
         </ul>
       )}
+      </div>
 
       {/* The replay response reports no outcome. The page opens the new
           run in the requested state, the path the re-run control takes. */}

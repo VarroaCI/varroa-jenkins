@@ -212,7 +212,7 @@ describe("BuildPage — test cases and the test report", () => {
 
   async function openTestsTab() {
     await screen.findByText(/Build #42/);
-    fireEvent.click(screen.getByRole("button", { name: /^Tests/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
   }
 
   it("renders the case rows in the response order, above the suite table", async () => {
@@ -407,19 +407,19 @@ describe("BuildPage — record and recovery states", () => {
     renderPage();
     await screen.findByText(/Build #42/);
 
-    expect(screen.getByRole("button", { name: /^Log/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Artifacts/ }));
+    expect(screen.getByRole("tab", { name: /^Log/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^Artifacts/ }));
     expect(await screen.findByText("build/out.jar")).toBeInTheDocument();
     const downloadButtons = screen.getAllByRole("button", { name: "Download" });
     expect(downloadButtons[1]).toBeDisabled();
     expect(downloadButtons[0]).not.toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Tests/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
     expect(await screen.findByText(/failed and skipped cases the run reported, at most 500/)).toBeInTheDocument();
     expect(screen.getByText(/test report holds every case, including each passed case/)).toBeInTheDocument();
     expect(screen.getByText("unit")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Changes/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Changes/ }));
   });
 });
 
@@ -633,14 +633,14 @@ describe("BuildPage — stage graph identity across re-renders", () => {
     // Any state change re-renders BuildPage and hands StageGraph the
     // stage event via lastEvent, matching the log-stream-resume tests above.
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Artifacts/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /^Artifacts/ }));
     });
     expect(document.getElementById("node-stage-s1")).toBeTruthy();
 
     // A second, unrelated re-render — the same lastEvent, a different tab
     // click — must not wipe the stage the live event already merged.
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Tests/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
     });
     expect(document.getElementById("node-stage-s1")).toBeTruthy();
   });

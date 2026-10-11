@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import { Card } from "../components/Card";
-import { Tabs } from "../components/Tabs";
+import { Tabs, tabPanelProps } from "../components/Tabs";
 import SettingsProvisioningTab from "./SettingsProvisioningTab";
 import SettingsVersionsTab from "./SettingsVersionsTab";
 import SettingsIdentityTab from "./SettingsIdentityTab";
@@ -61,15 +61,23 @@ export default function Settings() {
         </div>
       </div>
 
-      <Tabs tabs={tabs} activeTab={active} onSelect={(id) => setActive(id as TabId)} />
+      <Tabs
+        tabs={tabs}
+        activeTab={active}
+        onSelect={(id) => setActive(id as TabId)}
+        idBase="settings"
+        ariaLabel="Settings sections"
+      />
 
       <Card>
-        {active === "provisioning" && <SettingsProvisioningTab />}
-        {active === "versions" && <SettingsVersionsTab />}
-        {active === "identity" && <SettingsIdentityTab />}
-        {active === "users" && <SettingsUsersTab />}
-        {active === "groups" && <SettingsGroupsTab />}
-        {active === "builtin-roles" && <SettingsBuiltinRolesTab />}
+        <div {...tabPanelProps("settings", active)}>
+          {active === "provisioning" && <SettingsProvisioningTab />}
+          {active === "versions" && <SettingsVersionsTab />}
+          {active === "identity" && <SettingsIdentityTab />}
+          {active === "users" && <SettingsUsersTab />}
+          {active === "groups" && <SettingsGroupsTab />}
+          {active === "builtin-roles" && <SettingsBuiltinRolesTab />}
+        </div>
       </Card>
     </div>
   );

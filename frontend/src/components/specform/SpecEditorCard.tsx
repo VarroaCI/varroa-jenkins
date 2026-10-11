@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { parse as parseYAML, stringify as stringifyYAML } from "yaml";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "../Card";
-import { Tabs } from "../Tabs";
+import { Tabs, tabPanelProps } from "../Tabs";
 import { Button } from "../Button";
 import { DiffView, OVERLAY_RESOURCES } from "../OverlayEditor";
 import { useToast } from "../Toast";
@@ -862,9 +862,15 @@ export default function SpecEditorCard({
         title="Spec Editor"
         headerRight={<span className={styles.cardNote}>Saving rolls the pod</span>}
       >
-        <Tabs tabs={SPEC_TABS} activeTab={activeTab} onSelect={setActiveTab} />
+        <Tabs
+          tabs={SPEC_TABS}
+          activeTab={activeTab}
+          onSelect={setActiveTab}
+          idBase="spec-editor"
+          ariaLabel="Spec editor tiers"
+        />
 
-        <div className={styles.tabContent}>
+        <div className={styles.tabContent} {...tabPanelProps("spec-editor", activeTab)}>
           {/* Tier 1: Generated form */}
           {activeTab === "form" && (
             <KeyEditContext.Provider value={reportFormKeyEditing}>
@@ -909,8 +915,10 @@ export default function SpecEditorCard({
                 tabs={OVERLAY_TABS}
                 activeTab={overlaySubTab}
                 onSelect={setOverlaySubTab}
+                idBase="spec-overlay"
+                ariaLabel="Overlay resource"
               />
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 12 }} {...tabPanelProps("spec-overlay", overlaySubTab)}>
                 <YamlTierEditor
                   // One editor serves all three overlay kinds. It builds its
                   // document and its change listener once, at mount, so
