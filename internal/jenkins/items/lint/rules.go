@@ -86,6 +86,10 @@ func credentialScope(c items.FolderCredential) string {
 		return c.SecretText.Scope
 	case c.BasicSSHUserPrivateKey != nil:
 		return c.BasicSSHUserPrivateKey.Scope
+	case c.File != nil:
+		return c.File.Scope
+	case c.Certificate != nil:
+		return c.Certificate.Scope
 	default:
 		return ""
 	}

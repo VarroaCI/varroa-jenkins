@@ -915,6 +915,35 @@ type credentialListXML struct {
 	UsernamePassword       []*usernamePasswordCredXML       `xml:"com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl,omitempty"`
 	SecretText             []*secretTextCredXML             `xml:"org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl,omitempty"`
 	BasicSSHUserPrivateKey []*basicSSHUserPrivateKeyCredXML `xml:"com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey,omitempty"`
+	File                   []*fileCredXML                   `xml:"org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl,omitempty"`
+	Certificate            []*certificateCredXML            `xml:"com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl,omitempty"`
+}
+
+// uploadedKeyStoreSourceClass is the XStream class of an uploaded keystore
+// source. Jenkins cannot read the keystore source without it.
+const uploadedKeyStoreSourceClass = "com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl$UploadedKeyStoreSource"
+
+type fileCredXML struct {
+	Scope       string `xml:"scope"`
+	ID          string `xml:"id"`
+	Description string `xml:"description,omitempty"`
+	FileName    string `xml:"fileName"`
+	SecretBytes string `xml:"secretBytes"`
+}
+
+// certificateCredXML always renders the password element, so XStream reads
+// an empty Secret and never a null field.
+type certificateCredXML struct {
+	Scope          string            `xml:"scope"`
+	ID             string            `xml:"id"`
+	Description    string            `xml:"description,omitempty"`
+	KeyStoreSource keyStoreSourceXML `xml:"keyStoreSource"`
+	Password       string            `xml:"password"`
+}
+
+type keyStoreSourceXML struct {
+	Class                 string `xml:"class,attr"`
+	UploadedKeystoreBytes string `xml:"uploadedKeystoreBytes"`
 }
 
 // directEntryPrivateKeySourceClass is the XStream class of a direct-entry
@@ -1053,6 +1082,29 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 								PrivateKey: k.PrivateKeySource.DirectEntry.PrivateKey,
 							},
 							Passphrase: k.Passphrase,
+						})
+					case c.File != nil:
+						creds.File = append(creds.File, &fileCredXML{
+							Scope:       c.File.Scope,
+							ID:          c.File.ID,
+							Description: c.File.Description,
+							FileName:    c.File.FileName,
+							SecretBytes: c.File.SecretBytes,
+						})
+					case c.Certificate != nil:
+						k := c.Certificate
+						if k.KeyStoreSource.Uploaded == nil {
+							return nil, fmt.Errorf("certificate credential %q has no uploaded keystore source", k.ID)
+						}
+						creds.Certificate = append(creds.Certificate, &certificateCredXML{
+							Scope:       k.Scope,
+							ID:          k.ID,
+							Description: k.Description,
+							KeyStoreSource: keyStoreSourceXML{
+								Class:                 uploadedKeyStoreSourceClass,
+								UploadedKeystoreBytes: k.KeyStoreSource.Uploaded.UploadedKeystore,
+							},
+							Password: k.Password,
 						})
 					default:
 						return nil, fmt.Errorf("folder credential entry has no recognized credential type")

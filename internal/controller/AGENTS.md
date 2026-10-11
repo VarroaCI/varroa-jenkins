@@ -1055,9 +1055,12 @@ sections describe.
     `assembleCellContent` projects onto a separate folder item and carries
     the result on `assembleCellState.FolderCredentials`, never in the merged
     items. It skips and warns on a
-    malformed, unknown-kind, or duplicate-id Secret; the kinds are
-    `usernamePassword`, `secretText`, and `sshPrivateKey`, which becomes a
-    `basicSSHUserPrivateKey` with a direct-entry key).
+    malformed, unknown-kind, or duplicate-id Secret; the five kinds are
+    `usernamePassword`, `secretText`, `sshPrivateKey` (a
+    `basicSSHUserPrivateKey` with a direct-entry key), `secretFile` (a
+    `file` credential), and `certificate` (a PKCS#12 `certificate`). A
+    `secretFile` or `certificate` value over 64 KiB is skipped, because the
+    desired state is one NATS request with a 1 MiB limit.)
   - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's eight
     cell-related environment variables into `CellsConfig` (warm-pool
     enable/per-profile, `MaxTenantsPerCell`, `UnreadyGracePeriod`,

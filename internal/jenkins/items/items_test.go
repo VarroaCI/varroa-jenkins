@@ -1234,6 +1234,169 @@ items: []
 	}
 }
 
+func fileCertificateFolder(file *FileCredential, cert *CertificateCredential) Item {
+	creds := []FolderCredential{}
+	if file != nil {
+		creds = append(creds, FolderCredential{File: file})
+	}
+	if cert != nil {
+		creds = append(creds, FolderCredential{Certificate: cert})
+	}
+	return Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{Credentials: creds}},
+			}},
+		},
+	}
+}
+
+func TestFileCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{File: &FileCredential{
+		ID:          "kubeconfig",
+		Scope:       "GLOBAL",
+		FileName:    "kubeconfig",
+		SecretBytes: "RklMRQ==",
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	file, _ := doc["file"].(map[string]any)
+	if file == nil {
+		t.Fatalf("marshalled YAML has no file key:\n%s", out)
+	}
+	if file["id"] != "kubeconfig" || file["scope"] != "GLOBAL" || file["fileName"] != "kubeconfig" || file["secretBytes"] != "RklMRQ==" {
+		t.Errorf("unexpected file credential fields: %v", file)
+	}
+	if _, ok := file["description"]; ok {
+		t.Errorf("an empty description must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.File == nil || back.File.SecretBytes != "RklMRQ==" || back.File.FileName != "kubeconfig" {
+		t.Errorf("round trip lost the file: %+v", back)
+	}
+}
+
+func TestCertificateCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{Certificate: &CertificateCredential{
+		ID:             "signing",
+		Scope:          "GLOBAL",
+		KeyStoreSource: KeyStoreSource{Uploaded: &UploadedKeyStoreSource{UploadedKeystore: "MIIBAv8="}},
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	cert, _ := doc["certificate"].(map[string]any)
+	if cert == nil {
+		t.Fatalf("marshalled YAML has no certificate key:\n%s", out)
+	}
+	source, _ := cert["keyStoreSource"].(map[string]any)
+	uploaded, _ := source["uploaded"].(map[string]any)
+	if uploaded == nil || uploaded["uploadedKeystore"] != "MIIBAv8=" {
+		t.Errorf("keyStoreSource.uploaded.uploadedKeystore is not MIIBAv8=:\n%s", out)
+	}
+	if _, ok := cert["password"]; ok {
+		t.Errorf("an empty password must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Certificate == nil || back.Certificate.KeyStoreSource.Uploaded == nil ||
+		back.Certificate.KeyStoreSource.Uploaded.UploadedKeystore != "MIIBAv8=" {
+		t.Errorf("round trip lost the keystore: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_FileCredential(t *testing.T) {
+	item := fileCertificateFolder(&FileCredential{
+		ID:          "kubeconfig",
+		Scope:       "GLOBAL",
+		Description: "cluster <&> file",
+		FileName:    "kubeconfig",
+		SecretBytes: "RklMRQ==",
+	}, nil)
+	got, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(got, "<org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl>") {
+		t.Fatalf("config.xml lacks the FileCredentialsImpl element:\n%s", got)
+	}
+	if !strings.Contains(got, "cluster &lt;&amp;&gt; file") {
+		t.Errorf("description is not XML-escaped:\n%s", got)
+	}
+	last := -1
+	for _, el := range []string{
+		"<scope>GLOBAL</scope>",
+		"<id>kubeconfig</id>",
+		"<description>cluster",
+		"<fileName>kubeconfig</fileName>",
+		"<secretBytes>RklMRQ==</secretBytes>",
+	} {
+		idx := strings.Index(got, el)
+		if idx <= last {
+			t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+		}
+		last = idx
+	}
+}
+
+func TestBuildFolderProperties_CertificateCredential(t *testing.T) {
+	cases := []struct {
+		name     string
+		password string
+		wantPass string
+	}{
+		{"with password", "s3cret", "<password>s3cret</password>"},
+		{"no password", "", "<password></password>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := fileCertificateFolder(nil, &CertificateCredential{
+				ID:          "signing",
+				Scope:       "GLOBAL",
+				Description: "signing cert",
+				Password:    tc.password,
+				KeyStoreSource: KeyStoreSource{Uploaded: &UploadedKeyStoreSource{
+					UploadedKeystore: "MIIBAv8=",
+				}},
+			})
+			got, err := GenerateConfigXML(item)
+			if err != nil {
+				t.Fatalf("GenerateConfigXML: %v", err)
+			}
+			for _, want := range []string{
+				"<com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl>",
+				`<keyStoreSource class="com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl$UploadedKeyStoreSource">`,
+				"<uploadedKeystoreBytes>MIIBAv8=</uploadedKeystoreBytes>",
+				tc.wantPass,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("config.xml lacks %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 // folderLibraryItem returns a folder item that holds one folder library.
 func folderLibraryItem(lib LibraryConfiguration) Item {
 	return Item{
@@ -1361,6 +1524,14 @@ func TestValidateFolderLibraries(t *testing.T) {
 				t.Fatalf("Validate: error %q does not contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestBuildFolderProperties_CertificateCredentialNoKeyStoreSource(t *testing.T) {
+	item := fileCertificateFolder(nil, &CertificateCredential{ID: "signing", Scope: "GLOBAL"})
+	_, err := GenerateConfigXML(item)
+	if err == nil || !strings.Contains(err.Error(), `certificate credential "signing"`) {
+		t.Fatalf("expected an error naming the credential id, got %v", err)
 	}
 }
 

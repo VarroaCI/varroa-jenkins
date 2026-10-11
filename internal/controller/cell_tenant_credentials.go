@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -12,17 +14,25 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
-// Tenant-credential Secret label, annotations, and the three credential kinds.
+// Tenant-credential Secret label, annotations, and the five credential kinds.
 const (
 	tenantCredentialLabelSelector = "varroa.dev/tenant-credential=true"
 
 	annotationCredentialID          = "varroa.dev/credential-id"
 	annotationCredentialKind        = "varroa.dev/credential-kind"
 	annotationCredentialDescription = "varroa.dev/credential-description"
+	annotationCredentialFilename    = "varroa.dev/credential-filename"
 
 	credentialKindUsernamePassword = "usernamePassword"
 	credentialKindSecretText       = "secretText"
 	credentialKindSSHPrivateKey    = "sshPrivateKey"
+	credentialKindSecretFile       = "secretFile"
+	credentialKindCertificate      = "certificate"
+
+	// maxBinaryCredentialBytes caps a secretFile or certificate value. The
+	// cell desired state travels as one NATS request with a 1 MiB limit, so
+	// one large file must not block the push for every tenant.
+	maxBinaryCredentialBytes = 64 * 1024
 )
 
 // projectTenantCredentials lists agentNamespace's tenant-credential Secrets
@@ -141,6 +151,52 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 				DirectEntry: &items.DirectEntryPrivateKeySource{PrivateKey: string(privateKey)},
 			},
 		}
+	case credentialKindSecretFile:
+		content := data["file"]
+		if len(content) == 0 {
+			return nil, skip("secretFile secret missing the file data key")
+		}
+		if len(content) > maxBinaryCredentialBytes {
+			return nil, skip(fmt.Sprintf("secretFile secret file data key exceeds %d bytes", maxBinaryCredentialBytes))
+		}
+		fileName := ann[annotationCredentialFilename]
+		if fileName == "" {
+			fileName = name
+		}
+		if !validCredentialFilename(fileName) {
+			return nil, skip(fmt.Sprintf("secretFile secret has an invalid credential-filename %q", fileName))
+		}
+		cred.File = &items.FileCredential{
+			ID:          id,
+			Scope:       "GLOBAL",
+			Description: ann[annotationCredentialDescription],
+			FileName:    fileName,
+			SecretBytes: base64.StdEncoding.EncodeToString(content),
+		}
+	case credentialKindCertificate:
+		keystore := data["keystore"]
+		if len(keystore) == 0 {
+			return nil, skip("certificate secret missing the keystore data key")
+		}
+		if len(keystore) > maxBinaryCredentialBytes {
+			return nil, skip(fmt.Sprintf("certificate secret keystore data key exceeds %d bytes", maxBinaryCredentialBytes))
+		}
+		// A PKCS12 keystore is a DER SEQUENCE, so its first byte is 0x30.
+		if keystore[0] != 0x30 {
+			return nil, skip("certificate secret keystore data key is not a binary PKCS#12 keystore")
+		}
+		// An empty or missing password means a keystore with no password.
+		cred.Certificate = &items.CertificateCredential{
+			ID:          id,
+			Scope:       "GLOBAL",
+			Description: ann[annotationCredentialDescription],
+			Password:    string(data["password"]),
+			KeyStoreSource: items.KeyStoreSource{
+				Uploaded: &items.UploadedKeyStoreSource{
+					UploadedKeystore: base64.StdEncoding.EncodeToString(keystore),
+				},
+			},
+		}
 	default:
 		return nil, skip(fmt.Sprintf("unknown credential-kind %q", kind))
 	}
@@ -150,6 +206,12 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 	}
 	seenIDs[id] = true
 	return &cred, nil
+}
+
+// validCredentialFilename reports whether s is one plain file name, so the
+// file binding cannot write outside its temporary directory.
+func validCredentialFilename(s string) bool {
+	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\\\x00")
 }
 
 // folderCredentialsPropertyOf returns folder's FolderCredentialsProperty,

@@ -31,17 +31,29 @@ func TestItems_RedactsFolderCredentialValues(t *testing.T) {
                           -----BEGIN FIXTURE KEY-----
                           a2V5LWJvZHk
                           -----END FIXTURE KEY-----
+                - file:
+                    id: kube-file-id
+                    scope: GLOBAL
+                    fileName: kube-file-name
+                    secretBytes: ZmlsZS1zZWNyZXQ=
+                - certificate:
+                    id: cert-id
+                    scope: GLOBAL
+                    password: cert-pass
+                    keyStoreSource:
+                      uploaded:
+                        uploadedKeystore: a2V5c3RvcmUtc2VjcmV0
 `
 	out := Items(in)
-	for _, secret := range []string{"s3cret-pw", "abc${def}", "key-pass", "a2V5LWJvZHk"} {
+	for _, secret := range []string{"s3cret-pw", "abc${def}", "key-pass", "a2V5LWJvZHk", "ZmlsZS1zZWNyZXQ=", "cert-pass", "a2V5c3RvcmUtc2VjcmV0"} {
 		if strings.Contains(out, secret) {
 			t.Errorf("secret %q survived redaction:\n%s", secret, out)
 		}
 	}
-	if got := strings.Count(out, Marker); got != 4 {
-		t.Errorf("want 4 markers, got %d:\n%s", got, out)
+	if got := strings.Count(out, Marker); got != 8 {
+		t.Errorf("want 8 markers, got %d:\n%s", got, out)
 	}
-	for _, visible := range []string{"user-pass", "admin", "username: git", "scope: GLOBAL", "name: payments"} {
+	for _, visible := range []string{"user-pass", "admin", "username: git", "scope: GLOBAL", "name: payments", "kube-file-id", "cert-id"} {
 		if !strings.Contains(out, visible) {
 			t.Errorf("non-secret %q is missing:\n%s", visible, out)
 		}

@@ -409,6 +409,42 @@ items:
                                         RklYVFVSRS1PTkxZLU5PVC1BLVJFQUwtS0VZ
                                         -----END FIXTURE KEY-----
     - kind: folder
+      name: challenge-credential-type-file
+      items:
+        - kind: folder
+          name: credential-type-file
+          displayName: Folder with a file credential
+          description: Folder with a file credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - file:
+                            id: kubeconfig
+                            scope: GLOBAL
+                            description: Cluster kubeconfig
+                            fileName: kubeconfig
+                            secretBytes: RklYVFVSRS1GSUxF
+    - kind: folder
+      name: challenge-credential-type-certificate
+      items:
+        - kind: folder
+          name: credential-type-certificate
+          displayName: Folder with a certificate credential
+          description: Folder with a certificate credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - certificate:
+                            id: signing-cert
+                            scope: GLOBAL
+                            description: Signing certificate
+                            password: fixture-password
+                            keyStoreSource:
+                                uploaded:
+                                    uploadedKeystore: MIIBAv8=
+    - kind: folder
       name: challenge-folder-libraries-git-source
       items:
         - kind: folder

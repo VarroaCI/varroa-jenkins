@@ -189,3 +189,42 @@ func TestDisallowedFieldNames_AllowsEveryAllowListedName(t *testing.T) {
 		t.Errorf("expected every allow-listed name to pass, got %+v", got)
 	}
 }
+
+func fileCertificateTenantFolder(scope string) items.Item {
+	return items.Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []items.Property{
+			{FolderCredentialsProperty: &items.FolderCredentialsProperty{
+				FolderCredentials: []items.FolderCredentialEntry{{
+					Credentials: []items.FolderCredential{
+						{File: &items.FileCredential{ID: "kubeconfig", Scope: scope, FileName: "kubeconfig", SecretBytes: "RklMRQ=="}},
+						{Certificate: &items.CertificateCredential{
+							ID:             "signing",
+							Scope:          scope,
+							KeyStoreSource: items.KeyStoreSource{Uploaded: &items.UploadedKeyStoreSource{UploadedKeystore: "MIIBAv8="}},
+						}},
+					},
+				}},
+			}},
+		},
+	}
+}
+
+func TestNoGlobalCredentialsRule_RejectsFileAndCertificateSystemScope(t *testing.T) {
+	findings := NoGlobalCredentialsRule{}.Check(fileCertificateTenantFolder("SYSTEM"), "tenant")
+	if len(findings) != 2 {
+		t.Fatalf("expected one finding per credential, got %d: %+v", len(findings), findings)
+	}
+	for _, f := range findings {
+		if f.Rule != "no-global-credentials" {
+			t.Errorf("unexpected rule id: %q", f.Rule)
+		}
+	}
+}
+
+func TestNoGlobalCredentialsRule_AllowsFileAndCertificateGlobalScope(t *testing.T) {
+	if findings := (NoGlobalCredentialsRule{}).Check(fileCertificateTenantFolder("GLOBAL"), "tenant"); len(findings) != 0 {
+		t.Errorf("expected no findings for GLOBAL file and certificate credentials, got %+v", findings)
+	}
+}

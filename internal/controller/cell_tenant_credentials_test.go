@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -550,5 +552,244 @@ func TestInjectTenantFolderCredentials_NoCredentialsKeepsTheText(t *testing.T) {
 	out, err := injectTenantFolderCredentials(in, nil)
 	if err != nil || out != in {
 		t.Fatalf("inject with no credentials = %q, %v; want the input unchanged", out, err)
+	}
+}
+
+func secretFileAnnotations(id string) map[string]string {
+	return map[string]string{
+		"varroa.dev/credential-id":          id,
+		"varroa.dev/credential-kind":        "secretFile",
+		"varroa.dev/credential-description": "cluster kubeconfig",
+	}
+}
+
+func TestProjectTenantCredentials_SecretFile(t *testing.T) {
+	content := []byte("apiVersion: v1\x00\xff\xfe binary")
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "kube",
+		map[string]string{
+			"varroa.dev/credential-id":          "payments-kubeconfig",
+			"varroa.dev/credential-kind":        "secretFile",
+			"varroa.dev/credential-description": "cluster kubeconfig",
+			"varroa.dev/credential-filename":    "kubeconfig",
+		},
+		map[string][]byte{"file": content},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].File == nil {
+		t.Fatalf("expected one file credential, got %+v", creds)
+	}
+	got := creds[0].File
+	if got.ID != "payments-kubeconfig" || got.Scope != "GLOBAL" || got.Description != "cluster kubeconfig" ||
+		got.FileName != "kubeconfig" {
+		t.Errorf("unexpected credential: %+v", got)
+	}
+	want := base64.StdEncoding.EncodeToString(content)
+	if got.SecretBytes != want {
+		t.Errorf("secretBytes = %q, want base64 %q", got.SecretBytes, want)
+	}
+}
+
+func TestProjectTenantCredentials_SecretFileDefaultFilename(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "service-account", secretFileAnnotations("sa-json"),
+		map[string][]byte{"file": []byte("{}")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].File == nil || creds[0].File.FileName != "service-account" {
+		t.Fatalf("expected the Secret name as the file name, got %+v", creds)
+	}
+}
+
+func TestProjectTenantCredentials_SecretFileSkipped(t *testing.T) {
+	cases := map[string]struct {
+		filename string
+		data     map[string][]byte
+		reason   string
+	}{
+		"missing file key": {
+			data:   map[string][]byte{"other": []byte("x")},
+			reason: "secretFile secret missing the file data key",
+		},
+		"empty file key": {
+			data:   map[string][]byte{"file": {}},
+			reason: "secretFile secret missing the file data key",
+		},
+		"parent traversal filename": {
+			filename: "../x",
+			data:     map[string][]byte{"file": []byte("x")},
+			reason:   `secretFile secret has an invalid credential-filename "../x"`,
+		},
+		"slash in filename": {
+			filename: "a/b",
+			data:     map[string][]byte{"file": []byte("x")},
+			reason:   `secretFile secret has an invalid credential-filename "a/b"`,
+		},
+		"dot-dot filename": {
+			filename: "..",
+			data:     map[string][]byte{"file": []byte("x")},
+			reason:   `secretFile secret has an invalid credential-filename ".."`,
+		},
+		"over 64 KiB": {
+			data:   map[string][]byte{"file": bytes.Repeat([]byte{'a'}, maxBinaryCredentialBytes+1)},
+			reason: "secretFile secret file data key exceeds 65536 bytes",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			ann := secretFileAnnotations("kube")
+			if tc.filename != "" {
+				ann["varroa.dev/credential-filename"] = tc.filename
+			}
+			seedTenantCredentialSecret(t, client, "kube-secret", ann, tc.data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			want := `secret "kube-secret": ` + tc.reason
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+			}
+			if creds := projectedCredentials(t, folder); len(creds) != 0 {
+				t.Errorf("expected no projected credential, got %+v", creds)
+			}
+		})
+	}
+}
+
+func TestProjectTenantCredentials_SecretFileDuplicateID(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "cred-a",
+		map[string]string{"varroa.dev/credential-id": "dup", "varroa.dev/credential-kind": "secretText"},
+		map[string][]byte{"secret": []byte("one")},
+	)
+	seedTenantCredentialSecret(t, client, "cred-b", secretFileAnnotations("dup"),
+		map[string][]byte{"file": []byte("two")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	want := `secret "cred-b": duplicate credential id "dup"`
+	if len(warnings) != 1 || warnings[0].Message != want {
+		t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].SecretText == nil || creds[0].File != nil {
+		t.Fatalf("expected only the earlier secretText credential, got %+v", creds)
+	}
+}
+
+func certificateAnnotations(id string) map[string]string {
+	return map[string]string{
+		"varroa.dev/credential-id":          id,
+		"varroa.dev/credential-kind":        "certificate",
+		"varroa.dev/credential-description": "signing certificate",
+	}
+}
+
+func TestProjectTenantCredentials_Certificate(t *testing.T) {
+	keystore := []byte{0x30, 0x82, 0x01, 0x02, 0xff}
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "signing", certificateAnnotations("signing-cert"),
+		map[string][]byte{"keystore": keystore, "password": []byte("pw")},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].Certificate == nil {
+		t.Fatalf("expected one certificate credential, got %+v", creds)
+	}
+	got := creds[0].Certificate
+	if got.ID != "signing-cert" || got.Scope != "GLOBAL" || got.Description != "signing certificate" || got.Password != "pw" {
+		t.Errorf("unexpected credential: %+v", got)
+	}
+	if got.KeyStoreSource.Uploaded == nil || got.KeyStoreSource.Uploaded.UploadedKeystore != base64.StdEncoding.EncodeToString(keystore) {
+		t.Errorf("unexpected keystore source: %+v", got.KeyStoreSource)
+	}
+}
+
+func TestProjectTenantCredentials_CertificateNoPassword(t *testing.T) {
+	cases := map[string]map[string][]byte{
+		"no password key": {"keystore": {0x30, 0x03}},
+		"empty password":  {"keystore": {0x30, 0x03}, "password": {}},
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "signing", certificateAnnotations("signing-cert"), data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			if len(warnings) != 0 {
+				t.Fatalf("expected no warnings, got %+v", warnings)
+			}
+			creds := projectedCredentials(t, folder)
+			if len(creds) != 1 || creds[0].Certificate == nil || creds[0].Certificate.Password != "" {
+				t.Fatalf("expected one certificate credential with no password, got %+v", creds)
+			}
+		})
+	}
+}
+
+func TestProjectTenantCredentials_CertificateSkipped(t *testing.T) {
+	cases := map[string]struct {
+		data   map[string][]byte
+		reason string
+	}{
+		"missing keystore key": {
+			data:   map[string][]byte{"password": []byte("pw")},
+			reason: "certificate secret missing the keystore data key",
+		},
+		"empty keystore key": {
+			data:   map[string][]byte{"keystore": {}},
+			reason: "certificate secret missing the keystore data key",
+		},
+		"text keystore": {
+			data:   map[string][]byte{"keystore": []byte("MIIB...")},
+			reason: "certificate secret keystore data key is not a binary PKCS#12 keystore",
+		},
+		"over 64 KiB": {
+			data:   map[string][]byte{"keystore": append([]byte{0x30}, bytes.Repeat([]byte{0}, maxBinaryCredentialBytes)...)},
+			reason: "certificate secret keystore data key exceeds 65536 bytes",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "signing", certificateAnnotations("signing-cert"), tc.data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			want := `secret "signing": ` + tc.reason
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+			}
+			if creds := projectedCredentials(t, folder); len(creds) != 0 {
+				t.Errorf("expected no projected credential, got %+v", creds)
+			}
+		})
 	}
 }

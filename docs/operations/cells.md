@@ -5,10 +5,10 @@ A cell is a shared Jenkins controller that runs many teams' pipelines as tenants
 ## What a cell is
 
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
-pod roll loses local state and the mite's identity. [Rehydration](#rehydration) restores build
+pod roll loses local state and mite identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation. A patch cannot add or remove the cell role; it fails with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell. The Spec Editor shows it read-only.
-`spec.cell.maxTenants` can; it caps the tenant count.
+`spec.cell.enabled` cannot change after creation; a patch fails with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell.
+`spec.cell.maxTenants` can; it caps tenants.
 
 A cell accepts no ingress host. Tenant traffic uses the
 [tenant webhook door](#the-tenant-webhook-door).
@@ -17,13 +17,11 @@ Six limitations apply:
 
 - A cell never auto-hibernates.
 - `powerState: Stopped` on a cell destroys every in-flight build.
-- Every branch source on a cell sees each webhook. Only the job whose SCM matches
-  the payload reacts.
+- Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
 - A rehydrated run shows no stage view, culprit list, or test detail.
-- The role-strategy admin screen reports a tenant's service identity as unknown until its
-  first build.
-- An ad-hoc job from the Jenkins UI or script console does not survive a pod roll. Only a
-  job in the tenant's [`items.yaml`](../config/items.md) bundle does.
+- The role-strategy screen shows a tenant's service identity as unknown until its first build.
+- An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
+  the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
 
@@ -102,7 +100,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 ## What composes a tenant
 
-- **Folder.** The tenant's `items.yaml` goes under one top-level folder named after the `Team`.
+- **Folder.** The tenant's `items.yaml` goes under one top-level folder named for the `Team`.
   The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md). A job the bundle no longer declares leaves the
   folder, and its next trigger fails with `JOB_NOT_FOUND`. See
@@ -116,14 +114,14 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   - the bundle is missing or has no content yet.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until you fix the fault.
-- **Item role.** The operator synthesizes a role scoped to the folder's subtree, granting build,
-  read, and replay permissions, bound to the tenant's service identity.
-- **Service identity.** Every build in the folder runs as `svc-<team>`, an identity the plugin
-  synthesizes with no Jenkins user record.
+  folder until the fault is fixed.
+- **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
+  read, and replay permissions to the service identity.
+- **Service identity.** Builds in the folder run as `svc-<team>`, a plugin-synthesized identity
+  with no Jenkins user record.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
   `spec.pipelines.agentNamespace`. The folder permits only that cloud. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
-  `agent any` lands on the cell's default cloud, which the agent fence refuses.
+  `agent any` lands on the default cloud, which the agent fence refuses.
 - **Projected credentials.** A `Secret` labelled `varroa.dev/tenant-credential: "true"` in the
   agent namespace becomes a folder-scoped Jenkins credential:
 
@@ -143,11 +141,20 @@ Expect `"status":"True","reason":"TenantPlaced"`.
     secret: <token>
   ```
 
-  `varroa.dev/credential-kind` is `usernamePassword` (data keys `username` and `password`),
-  `secretText` (data key `secret`), or `sshPrivateKey` (data keys `privateKey` and `username`,
-  optional `passphrase`). Varroa skips a `Secret` with a missing key, an unknown kind, or a
-  duplicate id, and the `Team`'s `TenantWarnings` condition records it. A value reaches Jenkins as
-  written, `${` included. The controller diff drops comments and shows each credential as
+  `varroa.dev/credential-kind` selects one of these kinds:
+
+  | Kind | Data keys | Notes |
+  |---|---|---|
+  | `usernamePassword` | `username`, `password` | |
+  | `secretText` | `secret` | |
+  | `sshPrivateKey` | `privateKey`, `username`, optional `passphrase` | |
+  | `secretFile` | `file` | Annotation `varroa.dev/credential-filename`, default the Secret name |
+  | `certificate` | `keystore` (binary PKCS#12), optional `password` | Put the keystore under `data` |
+
+  Varroa skips a `Secret` with a missing key, an unknown kind, or a duplicate id, and records
+  it in `TenantWarnings`. It also skips a `secretFile` or `certificate` value over
+  64 KiB, and a keystore that is not binary PKCS#12. A value reaches Jenkins as written, `${`
+  included. The controller diff drops comments and shows each credential as
   `<redacted>`, so a rotation shows no change. A GitHub deploy key:
 
   ```yaml
@@ -167,7 +174,21 @@ Expect `"status":"True","reason":"TenantPlaced"`.
       <OpenSSH private key>
   ```
 
-  A [runner](runners.md) credential uses the same data keys in its own labelled `Secret`. A cell trusts a git host key on the first connection, because an agent
+  Example with `kubectl`:
+
+  ```bash
+  kubectl -n team-payments create secret generic payments-kubeconfig --from-file=file=./kubeconfig
+  kubectl -n team-payments label secret payments-kubeconfig varroa.dev/tenant-credential=true
+  kubectl -n team-payments annotate secret payments-kubeconfig \
+    varroa.dev/credential-id=payments-kubeconfig varroa.dev/credential-kind=secretFile
+  kubectl -n team-payments create secret generic payments-signing \
+    --from-file=keystore=./signing.p12 --from-literal=password=<password>
+  kubectl -n team-payments label secret payments-signing varroa.dev/tenant-credential=true
+  kubectl -n team-payments annotate secret payments-signing \
+    varroa.dev/credential-id=payments-signing varroa.dev/credential-kind=certificate
+  ```
+
+  A [runner](runners.md) credential uses the same data keys as `sshPrivateKey` in its own labelled `Secret`. A cell trusts a git host key on the first connection, because an agent
   pod has no `known_hosts` file. To pin host keys, set
   `security.gitHostKeyVerificationConfiguration.sshHostKeyVerificationStrategy` in the cell's own
   bundle.

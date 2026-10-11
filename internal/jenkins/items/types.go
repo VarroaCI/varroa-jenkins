@@ -664,6 +664,36 @@ type FolderCredential struct {
 	UsernamePassword       *UsernamePasswordCredential       `yaml:"usernamePassword,omitempty"`
 	SecretText             *SecretTextCredential             `yaml:"secretText,omitempty"`
 	BasicSSHUserPrivateKey *BasicSSHUserPrivateKeyCredential `yaml:"basicSSHUserPrivateKey,omitempty"`
+	File                   *FileCredential                   `yaml:"file,omitempty"`
+	Certificate            *CertificateCredential            `yaml:"certificate,omitempty"`
+}
+
+// FileCredential is a secret file credential. SecretBytes is the base64 of the file content.
+type FileCredential struct {
+	ID          string `yaml:"id"`
+	Scope       string `yaml:"scope,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	FileName    string `yaml:"fileName"`
+	SecretBytes string `yaml:"secretBytes"`
+}
+
+// CertificateCredential is a PKCS12 certificate credential.
+type CertificateCredential struct {
+	ID             string         `yaml:"id"`
+	Scope          string         `yaml:"scope,omitempty"`
+	Description    string         `yaml:"description,omitempty"`
+	Password       string         `yaml:"password,omitempty"`
+	KeyStoreSource KeyStoreSource `yaml:"keyStoreSource"`
+}
+
+// KeyStoreSource is a union of keystore sources; only an uploaded keystore is supported.
+type KeyStoreSource struct {
+	Uploaded *UploadedKeyStoreSource `yaml:"uploaded,omitempty"`
+}
+
+// UploadedKeyStoreSource holds the base64 of the PKCS12 keystore bytes.
+type UploadedKeyStoreSource struct {
+	UploadedKeystore string `yaml:"uploadedKeystore"`
 }
 
 // BasicSSHUserPrivateKeyCredential is an SSH username and private key credential.
