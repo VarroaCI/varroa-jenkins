@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
+  <displayName>Apps</displayName>
+  <description>Folder with a private git shared library</description>
+  <properties>
+    <org.jenkinsci.plugins.workflow.libs.FolderLibraries>
+      <libraries>
+        <org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
+          <name>platform-lib</name>
+          <retriever class="org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever">
+            <scm class="jenkins.plugins.git.GitSCMSource" plugin="git">
+              <remote>https://gitlab.example.com/platform/jenkins-lib.git</remote>
+              <credentialsId>gitlab-lib</credentialsId>
+              <traits>
+                <jenkins.plugins.git.traits.BranchDiscoveryTrait></jenkins.plugins.git.traits.BranchDiscoveryTrait>
+                <jenkins.plugins.git.traits.TagDiscoveryTrait></jenkins.plugins.git.traits.TagDiscoveryTrait>
+              </traits>
+            </scm>
+          </retriever>
+          <defaultVersion>v1.0.0</defaultVersion>
+          <allowVersionOverride>true</allowVersionOverride>
+        </org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
+      </libraries>
+    </org.jenkinsci.plugins.workflow.libs.FolderLibraries>
+  </properties>
+</com.cloudbees.hudson.plugins.folder.Folder>

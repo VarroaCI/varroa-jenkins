@@ -7,6 +7,7 @@
     <data>
       <jenkins.branch.BranchSource>
         <source class="org.jenkinsci.plugins.github_branch_source.GitHubSCMSource" plugin="github-branch-source">
+          <credentialsId>github-cred</credentialsId>
           <repoOwner>fake-org</repoOwner>
           <repository>fake-repo</repository>
         </source>

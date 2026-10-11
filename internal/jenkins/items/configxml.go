@@ -767,14 +767,15 @@ func skipInitialBuildStrategies() *buildStrategiesXML {
 // branchSourceSourceXML holds either a git or github SCM source.
 // Only one is populated; omitempty ensures clean XML.
 type branchSourceSourceXML struct {
-	Class           string `xml:"class,attr"`
-	Plugin          string `xml:"plugin,attr,omitempty"`
-	Remote          string `xml:"remote,omitempty"`
-	CredentialsID   string `xml:"credentialsId,omitempty"`
-	RepoOwner       string `xml:"repoOwner,omitempty"`
-	Repository      string `xml:"repository,omitempty"`
-	RepositoryURL   string `xml:"repositoryUrl,omitempty"`
-	ConfiguredByURL bool   `xml:"configuredByUrl,omitempty"`
+	Class           string               `xml:"class,attr"`
+	Plugin          string               `xml:"plugin,attr,omitempty"`
+	Remote          string               `xml:"remote,omitempty"`
+	CredentialsID   string               `xml:"credentialsId,omitempty"`
+	RepoOwner       string               `xml:"repoOwner,omitempty"`
+	Repository      string               `xml:"repository,omitempty"`
+	RepositoryURL   string               `xml:"repositoryUrl,omitempty"`
+	ConfiguredByURL bool                 `xml:"configuredByUrl,omitempty"`
+	Traits          *gitLibraryTraitsXML `xml:"traits,omitempty"`
 }
 
 type mbFactoryXML struct {
@@ -805,6 +806,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Repository:      entry.BranchSource.Source.GitHub.Repository,
 					RepositoryURL:   entry.BranchSource.Source.GitHub.RepositoryURL,
 					ConfiguredByURL: entry.BranchSource.Source.GitHub.ConfiguredByURL,
+					CredentialsID:   entry.BranchSource.Source.GitHub.CredentialsID,
 				},
 				BuildStrategies: skipInitialBuildStrategies(),
 			})
@@ -954,20 +956,31 @@ type folderLibrariesXML struct {
 	Libraries []libraryEntryXML `xml:"libraries>org.jenkinsci.plugins.workflow.libs.LibraryConfiguration"`
 }
 
+// libraryEntryXML renders one folder library. AllowVersionOverride has no
+// omitempty so that false is written: XStream does not run the Java field
+// initialiser for a missing element.
 type libraryEntryXML struct {
 	Name                 string        `xml:"name"`
 	Retriever            *retrieverXML `xml:"retriever,omitempty"`
+	DefaultVersion       string        `xml:"defaultVersion,omitempty"`
 	Implicit             bool          `xml:"implicit,omitempty"`
-	AllowVersionOverride bool          `xml:"allowVersionOverride,omitempty"`
+	AllowVersionOverride bool          `xml:"allowVersionOverride"`
 	IncludeInChangesets  bool          `xml:"includeInChangesets,omitempty"`
 }
 
-// retrieverXML renders a shared-library retriever. Only the modern-SCM
-// retriever is modeled; its scm element reuses the same source shape as a
-// multibranch branch source.
+// retrieverXML renders a shared-library retriever. The class selects the
+// retriever: SCMSourceRetriever for a modern source (scm holds a branch
+// source), or SCMRetriever for the legacy form (scm holds a git SCM block).
 type retrieverXML struct {
-	Class string                 `xml:"class,attr"`
-	SCM   *branchSourceSourceXML `xml:"scm"`
+	Class string `xml:"class,attr"`
+	SCM   any    `xml:"scm"`
+}
+
+// gitLibraryTraitsXML holds the discovery traits of a git library source.
+// Both traits are fixed so that every branch and tag resolves as a version.
+type gitLibraryTraitsXML struct {
+	Branch *struct{} `xml:"jenkins.plugins.git.traits.BranchDiscoveryTrait"`
+	Tag    *struct{} `xml:"jenkins.plugins.git.traits.TagDiscoveryTrait"`
 }
 
 type itemRestrictionsXML struct {
@@ -1063,6 +1076,7 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 				entries = append(entries, libraryEntryXML{
 					Name:                 cfg.Name,
 					Retriever:            retriever,
+					DefaultVersion:       cfg.DefaultVersion,
 					Implicit:             cfg.Implicit,
 					AllowVersionOverride: cfg.AllowVersionOverride,
 					IncludeInChangesets:  cfg.IncludeInChangesets,
@@ -1077,29 +1091,60 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 	return props, nil
 }
 
-// libraryRetrieverXML renders a shared-library retriever. Only the
-// modern-SCM retriever is modeled today, and only its GitHub source, which
-// mirrors the multibranch branch-source model already rendered elsewhere in
-// this file.
+// libraryRetrieverXML renders a shared-library retriever. A GitHub or git
+// modern source uses SCMSourceRetriever with a branch-source element. A
+// legacy source uses SCMRetriever with a git SCM element. The validator
+// rejects every other shape before this runs; the errors remain as a backstop.
 func libraryRetrieverXML(r LibraryRetriever) (*retrieverXML, error) {
-	if r.ModernSCM == nil {
-		return nil, fmt.Errorf("retriever names no source (only modernSCM is supported)")
+	switch {
+	case r.ModernSCM != nil && r.LegacySCM != nil:
+		return nil, fmt.Errorf("retriever must set exactly one of modernSCM and legacySCM")
+	case r.LegacySCM != nil:
+		git := r.LegacySCM.SCM.GitSCM
+		if git == nil {
+			return nil, fmt.Errorf("legacySCM retriever names no gitSCM")
+		}
+		return &retrieverXML{
+			Class: "org.jenkinsci.plugins.workflow.libs.SCMRetriever",
+			SCM:   convertGitSCM(git),
+		}, nil
+	case r.ModernSCM == nil:
+		return nil, fmt.Errorf("retriever names no source (set modernSCM or legacySCM)")
 	}
-	if r.ModernSCM.SCM.GitHub == nil {
-		return nil, fmt.Errorf("retriever modernSCM: only a github source is supported")
+	s := r.ModernSCM.SCM
+	const retrieverClass = "org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever"
+	switch {
+	case s.GitHub != nil && s.Git != nil:
+		return nil, fmt.Errorf("modernSCM.scm must set exactly one of github and git")
+	case s.GitHub != nil:
+		gh := s.GitHub
+		return &retrieverXML{
+			Class: retrieverClass,
+			SCM: &branchSourceSourceXML{
+				Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
+				Plugin:          "github-branch-source",
+				RepoOwner:       gh.RepoOwner,
+				Repository:      gh.Repository,
+				RepositoryURL:   gh.RepositoryURL,
+				ConfiguredByURL: gh.ConfiguredByURL,
+				CredentialsID:   gh.CredentialsID,
+			},
+		}, nil
+	case s.Git != nil:
+		g := s.Git
+		return &retrieverXML{
+			Class: retrieverClass,
+			SCM: &branchSourceSourceXML{
+				Class:         "jenkins.plugins.git.GitSCMSource",
+				Plugin:        "git",
+				Remote:        g.Remote,
+				CredentialsID: g.CredentialsID,
+				Traits:        &gitLibraryTraitsXML{Branch: &struct{}{}, Tag: &struct{}{}},
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("modernSCM.scm must set exactly one of github and git")
 	}
-	gh := r.ModernSCM.SCM.GitHub
-	return &retrieverXML{
-		Class: "org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever",
-		SCM: &branchSourceSourceXML{
-			Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-			Plugin:          "github-branch-source",
-			RepoOwner:       gh.RepoOwner,
-			Repository:      gh.Repository,
-			RepositoryURL:   gh.RepositoryURL,
-			ConfiguredByURL: gh.ConfiguredByURL,
-		},
-	}, nil
 }
 
 // ---- Organization Folder ----

@@ -171,8 +171,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   pod has no `known_hosts` file. To pin host keys, set
   `security.gitHostKeyVerificationConfiguration.sshHostKeyVerificationStrategy` in the cell's own
   bundle.
-- **Folder libraries.** A tenant bundle may declare `folderLibraries` on the folder item, with
-  the source retriever pipeline-groovy-lib needs.
+- **Folder libraries.** A tenant folder can load shared libraries. See [Tenant shared libraries](tenant-libraries.md).
 
 ## Isolation controls
 

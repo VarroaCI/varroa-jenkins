@@ -64,3 +64,52 @@ func TestAssembleItemsPassesForSeededProfile(t *testing.T) {
 		t.Errorf("expected no refusal when the resolved plugin set holds the plugin, got: %v", err)
 	}
 }
+
+const folderLibraryItemsYAML = `items:
+  - kind: folder
+    name: apps
+    properties:
+      - folderLibraries:
+          libraries:
+            - libraryConfiguration:
+                name: platform-lib
+                defaultVersion: v1.0.0
+                retriever:
+                  modernSCM:
+                    scm:
+                      git:
+                        remote: https://gitlab.example.com/platform/jenkins-lib.git
+`
+
+func TestFolderLibraryPlugins_RefusesMissingPlugin(t *testing.T) {
+	err := checkFolderLibraryPlugins(folderLibraryItemsYAML, nil)
+	if err == nil {
+		t.Fatal("expected a refusal for a library with no plugins pinned")
+	}
+	for _, want := range []string{"pipeline-groovy-lib", `"apps"`, "platform-lib"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+func TestFolderLibraryPlugins_RefusesMissingGitPlugin(t *testing.T) {
+	coreSet := []pluginlock.PluginEntry{{ArtifactID: "pipeline-groovy-lib", Version: "1"}}
+	err := checkFolderLibraryPlugins(folderLibraryItemsYAML, coreSet)
+	if err == nil {
+		t.Fatal("expected a refusal for a git library without the git plugin")
+	}
+	if !strings.Contains(err.Error(), `"git"`) {
+		t.Errorf("error %q does not name the git plugin", err)
+	}
+}
+
+func TestFolderLibraryPlugins_PassesWhenPinned(t *testing.T) {
+	coreSet := []pluginlock.PluginEntry{
+		{ArtifactID: "pipeline-groovy-lib", Version: "1"},
+		{ArtifactID: "git", Version: "1"},
+	}
+	if err := checkFolderLibraryPlugins(folderLibraryItemsYAML, coreSet); err != nil {
+		t.Fatalf("expected no refusal, got %v", err)
+	}
+}

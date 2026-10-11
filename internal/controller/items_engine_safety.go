@@ -50,3 +50,36 @@ func checkBranchBuildStrategiesManifest(manifest *items.Manifest, coreSet []plug
 	}
 	return nil
 }
+
+// checkFolderLibraryPlugins refuses a manifest whose folder libraries need a
+// plugin that coreSet omits. A parse failure returns no error, as in
+// checkBranchBuildStrategiesPlugin.
+func checkFolderLibraryPlugins(itemsYAML string, coreSet []pluginlock.PluginEntry) error {
+	manifest, err := items.Parse(itemsYAML)
+	if err != nil {
+		return nil //nolint:nilerr // a parse failure is reported through the caller's own error path, not this check
+	}
+	return checkFolderLibraryPluginsManifest(manifest, coreSet)
+}
+
+// checkFolderLibraryPluginsManifest is checkFolderLibraryPlugins for a
+// manifest that is already parsed. It checks each library's RequiredPlugins
+// in item order and reports the first plugin that coreSet omits.
+func checkFolderLibraryPluginsManifest(manifest *items.Manifest, coreSet []pluginlock.PluginEntry) error {
+	for _, ip := range manifest.Flatten() {
+		for _, p := range ip.Item.Properties {
+			if p.FolderLibraries == nil {
+				continue
+			}
+			for _, lc := range p.FolderLibraries.Libraries {
+				for _, plugin := range lc.LibraryConfiguration.RequiredPlugins() {
+					if !pluginPinned(coreSet, plugin) {
+						return fmt.Errorf("item %q: folder library %q needs plugin %q, which the resolved plugin set omits",
+							ip.Path, lc.LibraryConfiguration.Name, plugin)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}

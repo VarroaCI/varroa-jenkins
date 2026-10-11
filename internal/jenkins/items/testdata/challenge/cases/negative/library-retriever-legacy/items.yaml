@@ -2,15 +2,21 @@ items:
   - kind: folder
     name: library-retriever-legacy
     displayName: "Folder with Legacy Library Retriever"
-    description: "Folder with folderLibraries and a modern-SCM retriever carrying no traits"
+    description: "Folder with a folderLibraries entry that uses the legacy SCM retriever over git"
     properties:
       - folderLibraries:
           libraries:
             - libraryConfiguration:
                 name: legacy-lib
+                defaultVersion: main
                 retriever:
-                  modernSCM:
+                  legacySCM:
                     scm:
-                      github:
-                        repoOwner: fake-org
-                        repository: legacy-lib-repo
+                      gitSCM:
+                        userRemoteConfigs:
+                          - userRemoteConfig:
+                              url: https://git.example.com/platform/legacy-lib.git
+                              credentialsId: git-lib
+                        branches:
+                          - branchSpec:
+                              name: "main"

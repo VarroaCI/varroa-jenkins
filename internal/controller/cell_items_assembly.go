@@ -142,15 +142,22 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 				// unresolved-variable check, which run on ItemsYAML after this.
 				projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
 				warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
-				if prop := folderCredentialsPropertyOf(projected); len(prop.FolderCredentials) > 0 {
-					folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
+				prop := folderCredentialsPropertyOf(projected)
+				// A library names a credential that its folder cannot see.
+				// That tenant is held, and none of its content is carried.
+				if err := checkFolderLibraryCredentials(rerooted, prop.FolderCredentials); err != nil {
+					hold(team.Name, err)
+				} else {
+					if len(prop.FolderCredentials) > 0 {
+						folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
+					}
+
+					folder.Properties = append(folder.Properties, items.Property{
+						Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
+					})
+
+					manifests = append(manifests, rerooted)
 				}
-
-				folder.Properties = append(folder.Properties, items.Property{
-					Kubernetes: &items.KubernetesFolderProperty{PermittedClouds: []string{team.Name}},
-				})
-
-				manifests = append(manifests, rerooted)
 			}
 
 			// A tenant held for its items keeps its template fragment, so
@@ -282,6 +289,9 @@ func materializeTenantManifest(team string, data map[string]string, coreSet []pl
 		return nil, fmt.Errorf("items lint failed: %s", findingsSummary(findings))
 	}
 	if err := checkBranchBuildStrategiesManifest(rerooted, coreSet); err != nil {
+		return nil, err
+	}
+	if err := checkFolderLibraryPluginsManifest(rerooted, coreSet); err != nil {
 		return nil, err
 	}
 	return rerooted, nil

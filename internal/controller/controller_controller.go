@@ -655,6 +655,13 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
 	}
 
+	// Refuse to assemble items when a folder library needs a plugin that the
+	// resolved plugin set omits (git, github-branch-source, or
+	// pipeline-groovy-lib). A cell ran it on each tenant's items as well.
+	if err := checkFolderLibraryPlugins(mat.ItemsYAML, coreSet); err != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+	}
+
 	// Resolve variables in all content. mat.PipelineTemplatesYAML and
 	// mat.CellTemplateFragments are absent from this pass, and from the
 	// unresolved-variable check below. A template body holds its own

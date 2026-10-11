@@ -720,12 +720,15 @@ type LibraryConfiguration struct {
 	AllowVersionOverride bool             `yaml:"allowVersionOverride,omitempty"`
 	Retriever            LibraryRetriever `yaml:"retriever"`
 	Name                 string           `yaml:"name"`
+	DefaultVersion       string           `yaml:"defaultVersion,omitempty"`
 	IncludeInChangesets  bool             `yaml:"includeInChangesets,omitempty"`
 }
 
-// LibraryRetriever defines how the library is retrieved.
+// LibraryRetriever defines how the library is retrieved. Exactly one of
+// ModernSCM and LegacySCM is set.
 type LibraryRetriever struct {
 	ModernSCM *ModernSCMRetriever `yaml:"modernSCM,omitempty"`
+	LegacySCM *LegacySCMRetriever `yaml:"legacySCM,omitempty"`
 }
 
 // ModernSCMRetriever retrieves a library from SCM.
@@ -733,19 +736,70 @@ type ModernSCMRetriever struct {
 	SCM LibrarySCM `yaml:"scm"`
 }
 
-// LibrarySCM defines the SCM for a shared library.
-type LibrarySCM struct {
-	GitHub *LibraryGitHubSCM `yaml:"github,omitempty"`
+// LegacySCMRetriever retrieves a library through the legacy SCM retriever,
+// which takes a plain git SCM block.
+type LegacySCMRetriever struct {
+	SCM SCM `yaml:"scm"`
 }
 
-// LibraryGitHubSCM for library retrieval from GitHub.
-type LibraryGitHubSCM struct {
-	RepoOwner       string        `yaml:"repoOwner"`
-	ID              string        `yaml:"id,omitempty"`
-	Repository      string        `yaml:"repository"`
-	ConfiguredByURL bool          `yaml:"configuredByUrl,omitempty"`
-	RepositoryURL   string        `yaml:"repositoryUrl,omitempty"`
-	Traits          []GitHubTrait `yaml:"traits,omitempty"`
+// LibrarySCM defines the SCM for a shared library. Exactly one of GitHub
+// and Git is set.
+type LibrarySCM struct {
+	GitHub *GitHubSCMSource `yaml:"github,omitempty"`
+	Git    *GitSCMSource    `yaml:"git,omitempty"`
+}
+
+// LibraryCredentialRef names one credential a folder library needs and the
+// credential kinds its source accepts.
+type LibraryCredentialRef struct {
+	ID    string
+	Kinds []string
+}
+
+// RequiredPlugins returns the Jenkins plugin IDs that the library needs.
+// pipeline-groovy-lib is always required.
+func (c LibraryConfiguration) RequiredPlugins() []string {
+	plugins := []string{"pipeline-groovy-lib"}
+	if m := c.Retriever.ModernSCM; m != nil {
+		if m.SCM.GitHub != nil {
+			plugins = append(plugins, "github-branch-source")
+		}
+		if m.SCM.Git != nil {
+			plugins = append(plugins, "git")
+		}
+	}
+	if c.Retriever.LegacySCM != nil {
+		plugins = append(plugins, "git")
+	}
+	return plugins
+}
+
+// CredentialRefs returns every non-empty credential ID the library names,
+// with the credential kinds its source accepts. The kind strings match the
+// credentialKind constants in internal/controller.
+func (c LibraryConfiguration) CredentialRefs() []LibraryCredentialRef {
+	const userPass = "usernamePassword"
+	const sshKey = "sshPrivateKey"
+	var refs []LibraryCredentialRef
+	add := func(id string, kinds ...string) {
+		if id != "" {
+			refs = append(refs, LibraryCredentialRef{ID: id, Kinds: kinds})
+		}
+	}
+	if m := c.Retriever.ModernSCM; m != nil {
+		if m.SCM.GitHub != nil {
+			add(m.SCM.GitHub.CredentialsID, userPass)
+		}
+		if m.SCM.Git != nil {
+			add(m.SCM.Git.CredentialsID, userPass, sshKey)
+		}
+	}
+	if l := c.Retriever.LegacySCM; l != nil && l.SCM.GitSCM != nil {
+		for _, urc := range l.SCM.GitSCM.UserRemoteConfigs {
+			add(urc.UserRemoteConfig.CredentialsID, userPass, sshKey)
+		}
+	}
+	return refs
 }
 
 // ItemRestrictionsProperty restricts which item types can be created in a folder.
@@ -950,6 +1004,9 @@ func (i *Item) Validate() error {
 	if err := validateDurabilityHints(i.Name, i.Kind, i.Properties); err != nil {
 		return err
 	}
+	if err := validateFolderLibraries(*i); err != nil {
+		return err
+	}
 	switch i.Kind {
 	case "folder", "freeStyle":
 		return nil
@@ -990,6 +1047,70 @@ func (i *Item) Validate() error {
 	default:
 		return fmt.Errorf("item %q: unknown kind %q", i.Name, i.Kind)
 	}
+}
+
+// validateFolderLibraries checks every folder library of an item before any
+// renderer runs. A malformed retriever then holds the tenant with a reason.
+func validateFolderLibraries(i Item) error {
+	for _, p := range i.Properties {
+		if p.FolderLibraries == nil {
+			continue
+		}
+		if i.Kind != "folder" {
+			return fmt.Errorf("item %q: folderLibraries is only valid on kind=folder, not kind=%s", i.Name, i.Kind)
+		}
+		for _, lc := range p.FolderLibraries.Libraries {
+			if err := validateLibrary(i.Name, lc.LibraryConfiguration); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateLibrary checks one folder library. Every message names the item
+// and the library.
+func validateLibrary(itemName string, c LibraryConfiguration) error {
+	prefix := fmt.Sprintf("item %q: folder library %q: ", itemName, c.Name)
+	if strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("item %q: a folder library has no name", itemName)
+	}
+	r := c.Retriever
+	if (r.ModernSCM == nil) == (r.LegacySCM == nil) {
+		return fmt.Errorf("%sretriever must set exactly one of modernSCM and legacySCM", prefix)
+	}
+	if m := r.ModernSCM; m != nil {
+		s := m.SCM
+		if (s.GitHub == nil) == (s.Git == nil) {
+			return fmt.Errorf("%smodernSCM.scm must set exactly one of github and git", prefix)
+		}
+		if gh := s.GitHub; gh != nil {
+			if gh.ConfiguredByURL {
+				if gh.RepositoryURL == "" {
+					return fmt.Errorf("%smodernSCM.scm.github with configuredByUrl requires repositoryUrl", prefix)
+				}
+			} else if gh.RepoOwner == "" || gh.Repository == "" {
+				return fmt.Errorf("%smodernSCM.scm.github requires repoOwner and repository", prefix)
+			}
+		}
+		if g := s.Git; g != nil && g.Remote == "" {
+			return fmt.Errorf("%smodernSCM.scm.git requires remote", prefix)
+		}
+	}
+	if l := r.LegacySCM; l != nil {
+		if l.SCM.GitSCM == nil || len(l.SCM.GitSCM.UserRemoteConfigs) == 0 {
+			return fmt.Errorf("%slegacySCM.scm requires gitSCM with at least one userRemoteConfig", prefix)
+		}
+		for _, urc := range l.SCM.GitSCM.UserRemoteConfigs {
+			if urc.UserRemoteConfig.URL == "" {
+				return fmt.Errorf("%slegacySCM.scm.gitSCM userRemoteConfig requires url", prefix)
+			}
+		}
+	}
+	if c.DefaultVersion == "" && !c.AllowVersionOverride {
+		return fmt.Errorf("%ssets neither defaultVersion nor allowVersionOverride, so no @Library line can load it", prefix)
+	}
+	return nil
 }
 
 // IsFolder returns true if the item is a folder (can contain nested items).

@@ -1,5 +1,5 @@
 cases:
-  # Breadth (22, supported)
+  # Breadth (23, supported)
   - name: freestyle-scm-extensions
     tier: breadth
     status: supported
@@ -64,6 +64,9 @@ cases:
     tier: breadth
     status: supported
   - name: credential-type-sshprivatekey
+    tier: breadth
+    status: supported
+  - name: folder-libraries-git-source
     tier: breadth
     status: supported
 

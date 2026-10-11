@@ -409,6 +409,26 @@ items:
                                         RklYVFVSRS1PTkxZLU5PVC1BLVJFQUwtS0VZ
                                         -----END FIXTURE KEY-----
     - kind: folder
+      name: challenge-folder-libraries-git-source
+      items:
+        - kind: folder
+          name: apps
+          displayName: Apps
+          description: Folder with a private git shared library
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        allowVersionOverride: true
+                        retriever:
+                            modernSCM:
+                                scm:
+                                    git:
+                                        remote: https://gitlab.example.com/platform/jenkins-lib.git
+                                        credentialsId: gitlab-lib
+                        name: platform-lib
+                        defaultVersion: v1.0.0
+    - kind: folder
       name: challenge-deep-nested-folders
       items:
         - kind: folder
@@ -575,7 +595,7 @@ items:
         - kind: folder
           name: folder-libraries
           displayName: Folder with Libraries
-          description: Folder with folderLibraries property and a modern-SCM retriever
+          description: Folder with folderLibraries property and a modern-SCM GitHub retriever
           properties:
             - folderLibraries:
                 libraries:
@@ -587,6 +607,7 @@ items:
                                     github:
                                         repoOwner: fake-org
                                         repository: shared-library
+                                        credentialsId: github-lib
                                         traits:
                                             - gitHubBranchDiscovery:
                                                 strategyId: 3
@@ -597,15 +618,21 @@ items:
         - kind: folder
           name: library-retriever-legacy
           displayName: Folder with Legacy Library Retriever
-          description: Folder with folderLibraries and a modern-SCM retriever carrying no traits
+          description: Folder with a folderLibraries entry that uses the legacy SCM retriever over git
           properties:
             - folderLibraries:
                 libraries:
                     - libraryConfiguration:
                         retriever:
-                            modernSCM:
+                            legacySCM:
                                 scm:
-                                    github:
-                                        repoOwner: fake-org
-                                        repository: legacy-lib-repo
+                                    gitSCM:
+                                        userRemoteConfigs:
+                                            - userRemoteConfig:
+                                                url: https://git.example.com/platform/legacy-lib.git
+                                                credentialsId: git-lib
+                                        branches:
+                                            - branchSpec:
+                                                name: main
                         name: legacy-lib
+                        defaultVersion: main

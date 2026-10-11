@@ -1233,3 +1233,286 @@ items: []
 		t.Errorf("expected an empty cache, got %v", saved)
 	}
 }
+
+// folderLibraryItem returns a folder item that holds one folder library.
+func folderLibraryItem(lib LibraryConfiguration) Item {
+	return Item{
+		Kind: "folder",
+		Name: "apps",
+		Properties: []Property{{
+			FolderLibraries: &FolderLibrariesProperty{
+				Libraries: []LibraryConfig{{LibraryConfiguration: lib}},
+			},
+		}},
+	}
+}
+
+func TestValidateFolderLibraries(t *testing.T) {
+	gitSCM := &ModernSCMRetriever{SCM: LibrarySCM{Git: &GitSCMSource{Remote: "https://gitlab.example.com/x.git"}}}
+	ghSCM := &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "lib"}}}
+	legacy := &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+		UserRemoteConfigs: []UserRemoteConfig{{UserRemoteConfig: RemoteConfig{URL: "https://git.example.com/l.git"}}},
+	}}}
+	tests := []struct {
+		name    string
+		item    Item
+		wantErr string
+	}{
+		{
+			name: "valid github source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: ghSCM}}),
+		},
+		{
+			name: "valid git source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", AllowVersionOverride: true, Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+		},
+		{
+			name: "valid legacy source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{LegacySCM: legacy}}),
+		},
+		{
+			name:    "library on a pipeline",
+			item:    Item{Kind: "pipeline", Name: "p", Properties: []Property{{FolderLibraries: &FolderLibrariesProperty{}}}},
+			wantErr: `folderLibraries is only valid on kind=folder, not kind=pipeline`,
+		},
+		{
+			name:    "empty name",
+			item:    folderLibraryItem(LibraryConfiguration{DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+			wantErr: "a folder library has no name",
+		},
+		{
+			name:    "no retriever",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main"}),
+			wantErr: "retriever must set exactly one of modernSCM and legacySCM",
+		},
+		{
+			name: "both retrievers",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				ModernSCM: gitSCM, LegacySCM: legacy,
+			}}),
+			wantErr: "retriever must set exactly one of modernSCM and legacySCM",
+		},
+		{
+			name:    "modern source with no scm",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{}}}),
+			wantErr: "modernSCM.scm must set exactly one of github and git",
+		},
+		{
+			name: "modern source with both github and git",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "o", Repository: "r"}, Git: &GitSCMSource{Remote: "r"}},
+			}}}),
+			wantErr: "modernSCM.scm must set exactly one of github and git",
+		},
+		{
+			name: "github without repository",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "o"}},
+			}}}),
+			wantErr: "modernSCM.scm.github requires repoOwner and repository",
+		},
+		{
+			name: "github configured by url without repositoryUrl",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{ConfiguredByURL: true}},
+			}}}),
+			wantErr: "modernSCM.scm.github with configuredByUrl requires repositoryUrl",
+		},
+		{
+			name: "git without remote",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{Git: &GitSCMSource{}},
+			}}}),
+			wantErr: "modernSCM.scm.git requires remote",
+		},
+		{
+			name: "legacy without gitSCM",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				LegacySCM: &LegacySCMRetriever{},
+			}}),
+			wantErr: "legacySCM.scm requires gitSCM with at least one userRemoteConfig",
+		},
+		{
+			name: "legacy remote without url",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{UserRemoteConfigs: []UserRemoteConfig{{}}}}},
+			}}),
+			wantErr: "legacySCM.scm.gitSCM userRemoteConfig requires url",
+		},
+		{
+			name:    "no version and no override",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+			wantErr: "sets neither defaultVersion nor allowVersionOverride, so no @Library line can load it",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.item.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate: want error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Validate: error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitSource(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "platform-lib", DefaultVersion: "v1.0.0", AllowVersionOverride: true,
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{Git: &GitSCMSource{
+			Remote: "https://gitlab.example.com/platform/jenkins-lib.git", CredentialsID: "gitlab-lib",
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`<scm class="jenkins.plugins.git.GitSCMSource" plugin="git">`,
+		"<remote>https://gitlab.example.com/platform/jenkins-lib.git</remote>",
+		"<credentialsId>gitlab-lib</credentialsId>",
+		"<jenkins.plugins.git.traits.BranchDiscoveryTrait>",
+		"<jenkins.plugins.git.traits.TagDiscoveryTrait>",
+		"<defaultVersion>v1.0.0</defaultVersion>",
+		"<allowVersionOverride>true</allowVersionOverride>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryLegacySCM(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "legacy-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+			UserRemoteConfigs: []UserRemoteConfig{{UserRemoteConfig: RemoteConfig{
+				URL: "https://git.example.com/platform/legacy-lib.git", CredentialsID: "git-lib",
+			}}},
+			Branches: []BranchSpec{{BranchSpec: BranchSpecConfig{Name: "main"}}},
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`<retriever class="org.jenkinsci.plugins.workflow.libs.SCMRetriever">`,
+		`<scm class="hudson.plugins.git.GitSCM" plugin="git">`,
+		"<url>https://git.example.com/platform/legacy-lib.git</url>",
+		"<credentialsId>git-lib</credentialsId>",
+		"<name>main</name>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitHubCredentials(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "gh-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "lib", CredentialsID: "github-lib",
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<credentialsId>github-lib</credentialsId>") {
+		t.Errorf("config.xml missing GitHub library credentialsId:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_MultibranchGitHubCredentials(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", CredentialsID: "github-cred"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<credentialsId>github-cred</credentialsId>") {
+		t.Errorf("multibranch config.xml missing GitHub source credentialsId:\n%s", xml)
+	}
+}
+
+func TestLibraryConfiguration_RequiredPlugins(t *testing.T) {
+	tests := []struct {
+		name string
+		lib  LibraryConfiguration
+		want []string
+	}{
+		{
+			name: "github",
+			lib: LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{}},
+			}}},
+			want: []string{"pipeline-groovy-lib", "github-branch-source"},
+		},
+		{
+			name: "git",
+			lib: LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{Git: &GitSCMSource{}},
+			}}},
+			want: []string{"pipeline-groovy-lib", "git"},
+		},
+		{
+			name: "legacy",
+			lib:  LibraryConfiguration{Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{}}},
+			want: []string{"pipeline-groovy-lib", "git"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.lib.RequiredPlugins()
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("RequiredPlugins() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLibraryConfiguration_CredentialRefs(t *testing.T) {
+	lib := LibraryConfiguration{Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+		UserRemoteConfigs: []UserRemoteConfig{
+			{UserRemoteConfig: RemoteConfig{URL: "u1", CredentialsID: "legacy-a"}},
+			{UserRemoteConfig: RemoteConfig{URL: "u2"}},
+		},
+	}}}}}
+	refs := lib.CredentialRefs()
+	if len(refs) != 1 || refs[0].ID != "legacy-a" {
+		t.Fatalf("CredentialRefs() = %+v, want one ref to legacy-a", refs)
+	}
+	if strings.Join(refs[0].Kinds, ",") != "usernamePassword,sshPrivateKey" {
+		t.Fatalf("legacy kinds = %v, want usernamePassword and sshPrivateKey", refs[0].Kinds)
+	}
+
+	gh := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+		SCM: LibrarySCM{GitHub: &GitHubSCMSource{CredentialsID: "gh-cred"}},
+	}}}
+	ghRefs := gh.CredentialRefs()
+	if len(ghRefs) != 1 || strings.Join(ghRefs[0].Kinds, ",") != "usernamePassword" {
+		t.Fatalf("GitHub CredentialRefs() = %+v, want usernamePassword only", ghRefs)
+	}
+
+	none := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+		SCM: LibrarySCM{Git: &GitSCMSource{Remote: "r"}},
+	}}}
+	if refs := none.CredentialRefs(); len(refs) != 0 {
+		t.Fatalf("CredentialRefs() with no credential = %+v, want none", refs)
+	}
+}

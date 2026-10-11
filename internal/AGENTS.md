@@ -106,10 +106,12 @@ reading each package's entry point):
   `KubernetesFolderProperty` (`kubernetes.permittedClouds`) restricts which
   kubernetes-plugin clouds a folder's items may use — the cell assembly
   pass sets it to the tenant's own cloud name. `FolderLibrariesProperty`
-  (`folderLibraries`) render was repaired: it used to emit the wrong
-  upstream XML class and no retriever, so it never actually worked; it now
-  renders `org.jenkinsci.plugins.workflow.libs.FolderLibraries` with a
-  GitHub modern-SCM retriever, the only retriever shape modeled today.
+  (`folderLibraries`) renders `org.jenkinsci.plugins.workflow.libs.FolderLibraries`.
+  A library takes one retriever: `modernSCM` with a GitHub or git source, or
+  `legacySCM` with a gitSCM block. `defaultVersion` is written through.
+  `Item.Validate` (`validateFolderLibraries`) refuses a malformed library
+  before any renderer runs. `LibraryConfiguration.RequiredPlugins` and
+  `CredentialRefs` feed the controller's plugin and credential checks.
   `configxml.go` also injects a fixed skip-initial-build `buildStrategies`
   element onto every `multibranch` item and `organizationFolder` item, so a
   branch scan starts no build; the element needs plugin

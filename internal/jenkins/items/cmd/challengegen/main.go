@@ -140,6 +140,7 @@ jenkins:
 		"git",
 		"git-client",
 		"github-branch-source",
+		"pipeline-groovy-lib",
 		"pipeline-model-definition",
 		"credentials",
 		"plain-credentials",

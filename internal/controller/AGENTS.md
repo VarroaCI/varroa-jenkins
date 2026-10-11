@@ -359,7 +359,9 @@ sections describe.
   also resolve; computes `coreSetForCr` once and passes it to the cell's own
   tenant merge (`applyCellContent`); after that merge and still
   before `ResolveVars`, calls `checkBranchBuildStrategiesPlugin`
-  (`items_engine_safety.go`, design D12) and fails the resolve when the items
+  (`items_engine_safety.go`, design D12) and `checkFolderLibraryPlugins`
+  (refuses a folder library whose `RequiredPlugins` the resolved set omits),
+  and fails the resolve when the items
   content holds a `multibranch` or `organizationFolder` item and the resolved
   plugin set omits `basic-branch-build-strategies` — a missing class would
   make XStream drop the rendered `buildStrategies` element or fail the item
@@ -1017,8 +1019,12 @@ sections describe.
     runs `findUnresolvedVars`, `items.Parse`, `items.ReRoot`, `lint.Run`
     against `cellLintRules` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
     `NoControllerConfigDependencyRule`), and
-    `checkBranchBuildStrategiesManifest`; the tenant's template fragment
-    must also load (`bundle.InjectPipelineTemplates`) against the base
+    `checkBranchBuildStrategiesManifest`, and `checkFolderLibraryPluginsManifest`
+    (every folder library's `RequiredPlugins` must be pinned); after the
+    tenant's credentials project, `checkFolderLibraryCredentials`
+    (`cell_library_credentials.go`) holds the tenant when a library names a
+    credential its folder cannot see or one of a kind its source rejects; the tenant's
+    template fragment must also load (`bundle.InjectPipelineTemplates`) against the base
     `applyCellContent` builds: the cell's `jenkins.yaml` with the cell
     bundle's own templates in it. A failed
     check **holds** the tenant: its folder is left out of

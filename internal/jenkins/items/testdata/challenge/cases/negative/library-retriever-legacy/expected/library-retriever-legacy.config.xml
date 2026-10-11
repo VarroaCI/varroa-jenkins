@@ -2,18 +2,30 @@
 
 <com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
   <displayName>Folder with Legacy Library Retriever</displayName>
-  <description>Folder with folderLibraries and a modern-SCM retriever carrying no traits</description>
+  <description>Folder with a folderLibraries entry that uses the legacy SCM retriever over git</description>
   <properties>
     <org.jenkinsci.plugins.workflow.libs.FolderLibraries>
       <libraries>
         <org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
           <name>legacy-lib</name>
-          <retriever class="org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever">
-            <scm class="org.jenkinsci.plugins.github_branch_source.GitHubSCMSource" plugin="github-branch-source">
-              <repoOwner>fake-org</repoOwner>
-              <repository>legacy-lib-repo</repository>
+          <retriever class="org.jenkinsci.plugins.workflow.libs.SCMRetriever">
+            <scm class="hudson.plugins.git.GitSCM" plugin="git">
+              <configVersion>2</configVersion>
+              <userRemoteConfigs>
+                <hudson.plugins.git.UserRemoteConfig>
+                  <url>https://git.example.com/platform/legacy-lib.git</url>
+                  <credentialsId>git-lib</credentialsId>
+                </hudson.plugins.git.UserRemoteConfig>
+              </userRemoteConfigs>
+              <branches>
+                <hudson.plugins.git.BranchSpec>
+                  <name>main</name>
+                </hudson.plugins.git.BranchSpec>
+              </branches>
             </scm>
           </retriever>
+          <defaultVersion>main</defaultVersion>
+          <allowVersionOverride>false</allowVersionOverride>
         </org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
       </libraries>
     </org.jenkinsci.plugins.workflow.libs.FolderLibraries>

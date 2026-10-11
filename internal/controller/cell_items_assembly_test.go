@@ -12,6 +12,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
+	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
@@ -1124,5 +1125,87 @@ func TestAssembleCellContent_UnmaterializedBundleHoldsTenant(t *testing.T) {
 	}
 	if !strings.Contains(heldMessage(state.Warnings, "pending"), "not materialized") {
 		t.Errorf("expected an ItemsHeld warning for pending, got %+v", state.Warnings)
+	}
+}
+
+// libraryTenantItemsYAML is a tenant items.yaml with one folder library on
+// a folder the tenant declares. The library's git source names gitlab-lib.
+const libraryTenantItemsYAML = `items:
+  - kind: folder
+    name: apps
+    properties:
+      - folderLibraries:
+          libraries:
+            - libraryConfiguration:
+                name: platform-lib
+                defaultVersion: v1.0.0
+                retriever:
+                  modernSCM:
+                    scm:
+                      git:
+                        remote: https://gitlab.example.com/platform/jenkins-lib.git
+                        credentialsId: gitlab-lib
+`
+
+// libraryCoreSet pins the three plugins that the library needs.
+var libraryCoreSet = []pluginlock.PluginEntry{
+	{ArtifactID: "pipeline-groovy-lib", Version: "1"},
+	{ArtifactID: "git", Version: "1"},
+	{ArtifactID: "github-branch-source", Version: "1"},
+}
+
+func TestAssembleCellContent_LibraryWithoutPluginHoldsTenant(t *testing.T) {
+	msg := assertHeldAlone(t, libraryTenantItemsYAML)
+	if !strings.Contains(msg, "pipeline-groovy-lib") {
+		t.Errorf("expected the hold to name pipeline-groovy-lib, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_LibraryUnknownCredentialHoldsTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+	payments := pipelinesTeam("payments")
+	seedTenantBundle(client, payments, "payments-bundle", libraryTenantItemsYAML)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{payments}, libraryCoreSet, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if got := topLevelNames(parseCellItems(t, state.ItemsYAML)); len(got) != 0 {
+		t.Errorf("expected no pushed folder, got %v", got)
+	}
+	msg := heldMessage(state.Warnings, "payments")
+	if !strings.Contains(msg, "gitlab-lib") {
+		t.Fatalf("expected a hold naming gitlab-lib, got %q", msg)
+	}
+	if len(state.FolderCredentials) != 0 {
+		t.Errorf("expected no folder credentials carried, got %+v", state.FolderCredentials)
+	}
+}
+
+func TestAssembleCellContent_LibraryProjectedCredentialPasses(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "gitlab-cred",
+		map[string]string{
+			"varroa.dev/credential-id":   "gitlab-lib",
+			"varroa.dev/credential-kind": "usernamePassword",
+		},
+		map[string][]byte{"username": []byte("bob"), "password": []byte("hunter2")},
+	)
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+	payments := pipelinesTeam("payments")
+	seedTenantBundle(client, payments, "payments-bundle", libraryTenantItemsYAML)
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{payments}, libraryCoreSet, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if msg := heldMessage(state.Warnings, "payments"); msg != "" {
+		t.Fatalf("expected no hold, got %q", msg)
+	}
+	if !strings.Contains(state.ItemsYAML, "credentialsId: gitlab-lib") {
+		t.Errorf("expected ItemsYAML to name gitlab-lib:\n%s", state.ItemsYAML)
 	}
 }
