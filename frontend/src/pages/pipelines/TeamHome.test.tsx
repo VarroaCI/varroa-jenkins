@@ -143,6 +143,12 @@ describe("TeamHome", () => {
     expect(screen.getByText(/Loading pipelines/)).toBeInTheDocument();
   });
 
+  it("sets the document title from the team", async () => {
+    mockListPipelines.mockResolvedValue({ items: [], runningNow: [], truncated: false });
+    renderPage();
+    await waitFor(() => expect(document.title).toBe("acme · Pipelines"));
+  });
+
   it("shows the empty state for a team with no running builds and no pipelines", async () => {
     mockListPipelines.mockResolvedValue({ items: [], runningNow: [], truncated: false });
     renderPage();

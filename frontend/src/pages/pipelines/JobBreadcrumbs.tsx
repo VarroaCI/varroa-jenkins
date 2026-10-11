@@ -19,8 +19,10 @@ function teamHomeHref(team: string, openPaths: string[]): string {
 
 /**
  * JobBreadcrumbs names the tenant, then every folder between the tenant
- * folder and the job, then the job. The job crumb is the current page and
- * is not a link.
+ * folder and the job, then the job. Without a current label, the job crumb
+ * is the current page and is not a link. With a current label, the job crumb
+ * links to the job page, and the label is the last crumb and the current
+ * page. The label names a build or a test case.
  *
  * The first crumb carries the {team} URL segment, never the response's
  * tenant value: a controller tenant reports "<namespace>/<controller>"
@@ -30,10 +32,12 @@ export default function JobBreadcrumbs({
   team,
   tenantFolder,
   jobPath,
+  current,
 }: {
   team: string;
   tenantFolder: string;
   jobPath: string;
+  current?: string;
 }) {
   const relative = stripTenantFolder(tenantFolder ?? "", jobPath);
   const segments = relative === "" ? [] : relative.split("/");
@@ -61,10 +65,24 @@ export default function JobBreadcrumbs({
           <span aria-hidden="true" className={styles.separator}>
             /
           </span>
-          <span aria-current="page" className={styles.current}>
-            {jobName}
-          </span>
+          {current === undefined ? (
+            <span aria-current="page" className={styles.current}>
+              {jobName}
+            </span>
+          ) : (
+            <Link to={`/pipelines/${enc(team)}/${enc(jobPath)}`}>{jobName}</Link>
+          )}
         </li>
+        {current !== undefined && (
+          <li className={styles.crumb}>
+            <span aria-hidden="true" className={styles.separator}>
+              /
+            </span>
+            <span aria-current="page" className={styles.current}>
+              {current}
+            </span>
+          </li>
+        )}
       </ol>
     </nav>
   );

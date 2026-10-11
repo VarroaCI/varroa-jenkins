@@ -102,9 +102,11 @@ Select a job's name to open its pipeline page.
 
 ## Open a build
 
-The pipeline page carries a breadcrumb trail under the job name. It names the team, then each
-folder, then the job. Every crumb except the last is a link. Select a folder crumb to open the
-team page with that folder, and every folder above it, already unfolded.
+The pipeline page, the build page, and the test case page each carry a breadcrumb trail. The
+trail names the team, then each folder, then the job. Select a folder crumb to open the team
+page with that folder, and every folder above it, already unfolded. On the build page and the
+test case page, the job crumb links to the pipeline page. The last crumb names the build or the
+test.
 
 The **Defined by** card states where the job's script comes from. A job that reads a Jenkinsfile
 from source control shows the repository and the last built commit. A job whose bundle item
@@ -115,7 +117,13 @@ The page lists the job's builds, with filters for branch, result, actor, and cau
 stays in the page URL, so a filtered view is shareable and survives a reload.
 
 Select a build number to open its build page, which shows the status, the stage graph, and four
-tabs: **Log**, **Artifacts**, **Tests**, and **Changes**.
+tabs: **Log**, **Artifacts**, **Tests**, and **Changes**. The **Older** and **Newer** buttons
+beside the build number open the adjacent builds. The buttons work inside the newest 100 builds
+of the job. The page keeps the active tab in the `tab` URL parameter, so a link opens the same
+tab.
+
+Each pipelines page sets the browser tab title. A build title starts with the build state, so
+the state stays visible in a narrow tab.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
@@ -154,6 +162,9 @@ These keys work on the build page, outside the search box.
 | `/` | Focus the log search box |
 | `f` | Toggle follow |
 | `t` | Toggle timestamps |
+| `?` | Show or hide the shortcut list |
+
+Select **Shortcuts** to show the same list.
 
 ## Download an artifact
 

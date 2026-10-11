@@ -240,6 +240,13 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   line, then the case table, grouped under a suite header row each time the
   suite changes, in the response order (`testCaseGroups.ts`; the Class column
   shows only when a suite holds two or more classes), then the suite table),
+  `JobBreadcrumbs.tsx` draws the trail on the pipeline, build, and test case
+  pages; its optional `current` prop adds the last crumb (the build or the
+  test) and links the job crumb to the pipeline page. `BuildPage.tsx` keeps
+  the active tab in the `tab` query parameter (the `ControllerDetail` pattern),
+  and its j/k keys keep that parameter. `ShortcutLegend.tsx` owns the build
+  page key list (`BUILD_PAGE_SHORTCUTS`); no other file lists those keys.
+  `pageTitles.ts` is the only title formatter for the pipelines pages.
   `breakablePath.tsx` inserts break opportunities in a path. A pipelines table
   never uses `overflow-wrap: anywhere` on a cell,
   and `TestCaseHistory.tsx` (`/pipelines/:team/:job/tests/:case`, the recent
@@ -353,6 +360,8 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
 - `src/hooks/` — data-fetching hooks wrapping React Query
   (`useControllers`, `useCatalog`, `useClusters`, `useActivityFeed`,
   `useEventStream` for SSE, `usePermissions`, `useFleetPlugins`, `useCells`).
+  `useDocumentTitle` is the only writer of `document.title`; it restores the
+  previous title on unmount.
   `useEventStream`'s optional `options.resumeUrl` callback is read on a
   reconnect only, never the first connect: a returned URL replaces
   `baseUrl` for that attempt, so a caller tracking a resume position (a

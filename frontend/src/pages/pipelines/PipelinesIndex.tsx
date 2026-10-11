@@ -4,6 +4,8 @@ import { ChevronRight, Waypoints } from "lucide-react";
 import { listPipelineTeams } from "../../api/client";
 import { RecoveryState } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
+import { indexTitle } from "./pageTitles";
 import styles from "./PipelinesIndex.module.css";
 
 /**
@@ -26,6 +28,8 @@ export default function PipelinesIndex() {
     queryKey: ["pipelineTeams"],
     queryFn: listPipelineTeams,
   });
+
+  useDocumentTitle(indexTitle());
 
   if (teamsLoading) {
     return (

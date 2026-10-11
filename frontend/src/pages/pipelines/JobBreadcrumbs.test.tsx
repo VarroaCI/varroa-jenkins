@@ -49,6 +49,19 @@ describe("JobBreadcrumbs", () => {
     expect(crumbTexts()).toEqual(["payments", "build"]);
   });
 
+  it("links the job crumb to the job page and marks the current label when a current label is set", () => {
+    render(
+      <MemoryRouter>
+        <JobBreadcrumbs team="payments" tenantFolder="payments" jobPath="payments/release/eu/deploy" current="#42" />
+      </MemoryRouter>,
+    );
+    expect(crumbTexts()).toEqual(["payments", "release", "eu", "deploy", "#42"]);
+    const job = screen.getByRole("link", { name: "deploy" });
+    expect(job).toHaveAttribute("href", "/pipelines/payments/payments%2Frelease%2Feu%2Fdeploy");
+    expect(job).not.toHaveAttribute("aria-current");
+    expect(screen.getByText("#42")).toHaveAttribute("aria-current", "page");
+  });
+
   it("hides every separator from a screen reader", () => {
     renderTrail("payments", "payments", "payments/release/eu");
     const trail = screen.getByRole("navigation", { name: "Job path" });

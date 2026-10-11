@@ -62,11 +62,11 @@ function run(): RunDetail {
   };
 }
 
-function renderPage() {
+function renderPage(entry = "/pipelines/payments/checkout-api%2Fmain/run-1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/pipelines/payments/checkout-api%2Fmain/run-1"]}>
+      <MemoryRouter initialEntries={[entry]}>
         <BuildPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -142,5 +142,92 @@ describe("BuildPage keyboard shortcuts", () => {
     search.focus();
     fireEvent.keyDown(search, { key: "j" });
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("BuildPage keyboard shortcut list", () => {
+  it("? opens and closes the shortcut list", async () => {
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("Escape closes the list and returns focus to the Shortcuts button", async () => {
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const shortcuts = screen.getByRole("button", { name: "Shortcuts" });
+    fireEvent.click(shortcuts);
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(shortcuts).toHaveFocus();
+  });
+
+  it("? closes the list and returns focus to the Shortcuts button", async () => {
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const shortcuts = screen.getByRole("button", { name: "Shortcuts" });
+    fireEvent.click(shortcuts);
+    fireEvent.keyDown(document.body, { key: "?" });
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(shortcuts).toHaveFocus();
+  });
+
+  it("? does nothing while the command palette is open", async () => {
+    const palette = document.createElement("div");
+    palette.setAttribute("role", "dialog");
+    palette.setAttribute("aria-label", "Global search");
+    document.body.appendChild(palette);
+    try {
+      renderPage();
+      await screen.findByText(/Build #42/);
+      fireEvent.keyDown(document.body, { key: "?" });
+      expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    } finally {
+      palette.remove();
+    }
+  });
+
+  it("j does nothing while the list is open", async () => {
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.keyDown(document.body, { key: "?" });
+    fireEvent.keyDown(document.body, { key: "j" });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("j keeps the tab parameter", async () => {
+    renderPage("/pipelines/payments/checkout-api%2Fmain/run-1?tab=tests");
+    await screen.findByText(/Build #42/);
+    fireEvent.keyDown(document.body, { key: "j" });
+    expect(mockNavigate).toHaveBeenCalledWith("/pipelines/payments/checkout-api%2Fmain/run-0?tab=tests");
+  });
+
+  it("the Older and Newer buttons open the adjacent builds", async () => {
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("button", { name: /Older/ }));
+    expect(mockNavigate).toHaveBeenLastCalledWith("/pipelines/payments/checkout-api%2Fmain/run-0");
+    fireEvent.click(screen.getByRole("button", { name: /Newer/ }));
+    expect(mockNavigate).toHaveBeenLastCalledWith("/pipelines/payments/checkout-api%2Fmain/run-2");
+  });
+
+  it("disables Newer on the newest build", async () => {
+    mockGetRun.mockResolvedValue({ ...run(), runId: "run-2", buildNumber: 43 });
+    renderPage("/pipelines/payments/checkout-api%2Fmain/run-2");
+    await screen.findByText(/Build #43/);
+    expect(screen.getByRole("button", { name: /Newer/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Older/ })).toBeEnabled();
+  });
+
+  it("disables both controls when the run is outside the newest 100 builds", async () => {
+    mockGetRun.mockResolvedValue({ ...run(), runId: "run-9", buildNumber: 9 });
+    renderPage("/pipelines/payments/checkout-api%2Fmain/run-9");
+    await screen.findByText(/Build #9/);
+    expect(screen.getByRole("button", { name: /Older/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Newer/ })).toBeDisabled();
   });
 });

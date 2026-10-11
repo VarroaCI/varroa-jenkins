@@ -112,6 +112,12 @@ describe("PipelinePage", () => {
     vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
   });
 
+  it("sets the document title from the job", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    renderPage();
+    await waitFor(() => expect(document.title).toBe("payments/checkout-api/main · acme"));
+  });
+
   it("shows a loading state before the job response arrives", () => {
     mockGetPipelineJob.mockReturnValue(new Promise(() => {}));
     renderPage();

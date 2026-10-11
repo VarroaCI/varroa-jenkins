@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Repeat, RotateCcw, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Keyboard, Repeat, RotateCcw, XCircle } from "lucide-react";
 import {
   abortRunInput,
   cancelRun,
@@ -38,6 +38,10 @@ import type {
   RunStage,
 } from "../../types";
 import { stripTenantFolder, testCaseHref, type TestCaseLinkState } from "./jobPath";
+import { buildTitle, notStartedTitle, relativeJob } from "./pageTitles";
+import JobBreadcrumbs from "./JobBreadcrumbs";
+import { ShortcutLegend } from "./ShortcutLegend";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
 import { groupTestCases } from "./testCaseGroups";
@@ -233,11 +237,17 @@ function isPaletteOpen(): boolean {
 }
 
 type TabId = "log" | "artifacts" | "tests" | "changes";
+const TAB_IDS = ["log", "artifacts", "tests", "changes"] as const;
+
+function isTabId(v: string | null): v is TabId {
+  return v !== null && (TAB_IDS as readonly string[]).includes(v);
+}
 
 export default function BuildPage() {
   const { team, job, run: runId } = useParams<{ team: string; job: string; run: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const requested = !!(location.state as { requested?: boolean } | null)?.requested;
 
@@ -341,7 +351,37 @@ export default function BuildPage() {
   }, [streamOpen, refetch]);
 
   const logViewerRef = useRef<RunLogViewerHandle>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("log");
+  // The query parameter is the single source of the active tab, so Back
+  // changes the tab. A missing or unknown value shows the Log tab.
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = isTabId(tabParam) ? tabParam : "log";
+  const setActiveTab = useCallback(
+    (id: TabId) =>
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", id);
+        return next;
+      }),
+    [setSearchParams],
+  );
+  useEffect(() => {
+    if (tabParam !== null && !isTabId(tabParam)) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("tab");
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [tabParam, setSearchParams]);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const shortcutsButtonRef = useRef<HTMLButtonElement>(null);
+  const closeLegend = useCallback(() => {
+    setLegendOpen(false);
+    shortcutsButtonRef.current?.focus();
+  }, []);
 
   const artifactsQuery = useQuery({
     queryKey: ["run-artifacts", run?.runId],
@@ -437,17 +477,27 @@ export default function BuildPage() {
     [run, toast],
   );
 
+  // The neighbours are the builds next to this one in the newest-first list.
+  // Outside that list, both are undefined and the controls stay disabled.
+  const neighbors = useMemo(() => {
+    const items = neighborsQuery.data?.items ?? [];
+    const idx = run ? items.findIndex((r) => r.runId === run.runId) : -1;
+    return idx === -1
+      ? { older: undefined, newer: undefined }
+      : { older: items[idx + 1], newer: items[idx - 1] };
+  }, [neighborsQuery.data, run]);
+
   const openAdjacentBuild = useCallback(
     (direction: "older" | "newer") => {
       if (!run || !team || !job) return;
-      const items = neighborsQuery.data?.items ?? [];
-      const idx = items.findIndex((r) => r.runId === run.runId);
-      if (idx === -1) return;
-      const target = items[direction === "older" ? idx + 1 : idx - 1];
+      const target = neighbors[direction];
       if (!target) return;
-      navigate(`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(target.runId)}`);
+      const tabSuffix = isTabId(tabParam) ? `?tab=${tabParam}` : "";
+      navigate(
+        `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(target.runId)}${tabSuffix}`,
+      );
     },
-    [run, team, job, neighborsQuery.data, navigate],
+    [run, team, job, neighbors, tabParam, navigate],
   );
 
   useEffect(() => {
@@ -458,6 +508,16 @@ export default function BuildPage() {
         if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
       }
       if (isPaletteOpen()) return;
+      if (e.key === "?") {
+        if (legendOpen) closeLegend();
+        else setLegendOpen(true);
+        return;
+      }
+      // While the list is open, no other key acts. Escape closes it.
+      if (legendOpen) {
+        if (e.key === "Escape") closeLegend();
+        return;
+      }
       switch (e.key) {
         case "j":
           openAdjacentBuild("older");
@@ -484,7 +544,7 @@ export default function BuildPage() {
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [openAdjacentBuild]);
+  }, [openAdjacentBuild, legendOpen, closeLegend]);
 
   const totalsRow = useMemo(
     () => testsQuery.data?.items.find((i) => i.suite === "_total"),
@@ -499,6 +559,14 @@ export default function BuildPage() {
   const caseRows = testsQuery.data?.cases ?? [];
   const caseGroups = useMemo(() => groupTestCases(caseRows), [caseRows]);
   const testReport = testsQuery.data?.report;
+
+  const docTitle =
+    !run || !team
+      ? null
+      : run.result === "TRIGGER_FAILED"
+        ? notStartedTitle(team, run.tenantFolder, run.jobPath)
+        : buildTitle(team, run, describeRunState(run).label);
+  useDocumentTitle(docTitle);
 
   if (status === "loading") {
     return (
@@ -558,6 +626,9 @@ export default function BuildPage() {
   if (run.result === "TRIGGER_FAILED") {
     return (
       <div className={styles.page}>
+        {team && (
+          <JobBreadcrumbs team={team} tenantFolder={run.tenantFolder} jobPath={run.jobPath} current="Not started" />
+        )}
         <div className={styles.triggerFailed} role="alert">
           <h1>Build not started</h1>
           <p>{TRIGGER_REASON_SENTENCES[run.triggerReasonCode ?? ""] ?? TRIGGER_REASON_FALLBACK}</p>
@@ -586,6 +657,8 @@ export default function BuildPage() {
   const cancelable = !isTerminal(run);
   const replayable = canWrite && isTerminal(run) && scriptQuery.data?.replayable === true;
 
+  const jobLeaf = relativeJob(run.tenantFolder, run.jobPath).split("/").pop();
+
   const tabs = [
     { id: "log", label: "Log" },
     { id: "artifacts", label: `Artifacts${artifactsQuery.data ? ` (${artifactsQuery.data.items.length})` : ""}` },
@@ -596,12 +669,52 @@ export default function BuildPage() {
   return (
     <div className={styles.page}>
       <div className={styles.head}>
+        {team && (
+          <JobBreadcrumbs
+            team={team}
+            tenantFolder={run.tenantFolder}
+            jobPath={run.jobPath}
+            current={`#${run.buildNumber ?? "?"}`}
+          />
+        )}
         <div className={styles.headTop}>
           <h1 className={styles.title}>
-            Build #{run.buildNumber ?? "?"}
-            {run.cause ? <span className={styles.commitMessage}> — {run.cause}</span> : null}
+            {jobLeaf} · Build #{run.buildNumber ?? "?"}
           </h1>
           <span className={`${styles.statusPill} ${styles[`tone_${desc.tone}`]}`}>{desc.label}</span>
+          <nav aria-label="Build navigation" className={styles.buildNav}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-keyshortcuts="j"
+              onClick={() => openAdjacentBuild("older")}
+              disabled={!neighbors.older}
+            >
+              <ChevronLeft size={14} aria-hidden="true" /> Older
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-keyshortcuts="k"
+              onClick={() => openAdjacentBuild("newer")}
+              disabled={!neighbors.newer}
+            >
+              Newer <ChevronRight size={14} aria-hidden="true" />
+            </Button>
+            <span className={styles.shortcutsAnchor}>
+              <Button
+                ref={shortcutsButtonRef}
+                variant="ghost"
+                size="sm"
+                aria-keyshortcuts="?"
+                aria-expanded={legendOpen}
+                onClick={() => (legendOpen ? closeLegend() : setLegendOpen(true))}
+              >
+                <Keyboard size={14} aria-hidden="true" /> Shortcuts
+              </Button>
+              <ShortcutLegend open={legendOpen} onClose={closeLegend} />
+            </span>
+          </nav>
         </div>
         <div className={styles.meta}>
           {run.branch && <span>{run.branch}</span>}

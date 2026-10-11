@@ -1,11 +1,14 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getTestCaseHistory } from "../../api/client";
+import { getPipelineJob, getTestCaseHistory } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { formatDuration } from "./JobTree";
+import JobBreadcrumbs from "./JobBreadcrumbs";
+import { relativeJob, testCaseTitle } from "./pageTitles";
 import type { TestCaseLinkState } from "./jobPath";
 import styles from "./TestCaseHistory.module.css";
 
@@ -54,6 +57,22 @@ export default function TestCaseHistory() {
     enabled: !!team && !!job && !!caseKey,
   });
 
+  // The job read builds the trail. It shares the cache entry of the job page,
+  // and a failed read keeps the plain job link.
+  const jobQuery = useQuery({
+    queryKey: ["pipelineJob", team, job],
+    queryFn: () => getPipelineJob(team!, job!),
+    enabled: !!team && !!job,
+  });
+
+  const title = caseTitle(location.state, caseKey ?? "");
+  const jobDetail = jobQuery.data;
+  useDocumentTitle(
+    team && job && caseKey
+      ? testCaseTitle(team, jobDetail ? relativeJob(jobDetail.tenantFolder, jobDetail.jobPath) : job, title.name)
+      : null,
+  );
+
   if (history.isLoading) {
     return (
       <div className={styles.page}>
@@ -69,15 +88,23 @@ export default function TestCaseHistory() {
   if (err) return <GenericErrorPage onRetry={() => void history.refetch()} />;
   if (!team || !job || !caseKey || !history.data) return <NotFoundPage />;
 
-  const title = caseTitle(location.state, caseKey);
   const items = history.data.items;
 
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
-        <Link to={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}`} className={styles.jobLink}>
-          {job}
-        </Link>
+        {jobDetail ? (
+          <JobBreadcrumbs
+            team={team}
+            tenantFolder={jobDetail.tenantFolder}
+            jobPath={jobDetail.jobPath}
+            current={title.name}
+          />
+        ) : (
+          <Link to={`/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}`} className={styles.jobLink}>
+            {job}
+          </Link>
+        )}
         <h1 className={styles.pageTitle}>
           {title.className && <span className={styles.className}>{title.className}</span>}
           <span className={styles.testName}>{title.name}</span>

@@ -9,7 +9,9 @@ import { Card } from "../../components/Card";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
 import { age } from "../../components/activityTimeline.util";
 import { stripTenantFolder } from "./jobPath";
+import { jobTitle } from "./pageTitles";
 import JobBreadcrumbs from "./JobBreadcrumbs";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
 import type {
@@ -214,6 +216,10 @@ export default function PipelinePage() {
     queryFn: () => getPipelineJob(team!, job!),
     enabled: !!team && !!job,
   });
+
+  useDocumentTitle(
+    jobQuery.data && team ? jobTitle(team, jobQuery.data.tenantFolder, jobQuery.data.jobPath) : null,
+  );
 
   const runsFilter: ListRunsParams = {
     branch: branch || undefined,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
 import BuildPage from "./BuildPage";
@@ -762,7 +762,7 @@ describe("BuildPage — a refused build trigger", () => {
 
     expect(await screen.findByText("The job does not exist on the controller.")).toBeInTheDocument();
     expect(screen.queryByText("Requested")).not.toBeInTheDocument();
-    expect(screen.queryByText("Not started")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Not started" })).not.toBeInTheDocument();
   });
 
   it("shows the same card on a cold load", async () => {
@@ -774,6 +774,102 @@ describe("BuildPage — a refused build trigger", () => {
   });
 });
 
+/** LocationProbe writes the router's current search string into the DOM. */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.search}</div>;
+}
+
+function renderWithProbe(entry: InitialEntry) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[entry]}>
+        <BuildPage />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("BuildPage — orientation", () => {
+  it("renders the trail from the team to the build", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({ tenantFolder: "payments", jobPath: "payments/checkout-api/main" }),
+    );
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    const trail = screen.getByRole("navigation", { name: "Job path" });
+    expect(within(trail).getByRole("link", { name: "payments" })).toHaveAttribute("href", "/pipelines/payments");
+    expect(within(trail).getByRole("link", { name: "checkout-api" })).toHaveAttribute(
+      "href",
+      "/pipelines/payments?open=checkout-api",
+    );
+    expect(within(trail).getByRole("link", { name: "main" })).toHaveAttribute(
+      "href",
+      "/pipelines/payments/payments%2Fcheckout-api%2Fmain",
+    );
+    expect(within(trail).getByText("#42")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("names the build in the heading and the state first in the document title", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "main · Build #42" })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Passed · #42 checkout-api/main · payments"));
+  });
+
+  it("starts the document title with Running while the build runs", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ status: "RUNNING", result: undefined }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    await waitFor(() => expect(document.title).toMatch(/^Running · #42 /));
+  });
+
+  it("opens the tab the URL names", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderPage("/pipelines/payments/checkout-api%2Fmain/run-1?tab=tests");
+    await screen.findByText(/Build #42/);
+    expect(screen.getByRole("tab", { name: /Tests/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Log/ })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("writes the selected tab to the URL", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderWithProbe("/pipelines/payments/checkout-api%2Fmain/run-1");
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("tab", { name: /Artifacts/ }));
+    expect(screen.getByTestId("location")).toHaveTextContent("?tab=artifacts");
+    expect(screen.getByRole("tab", { name: /Artifacts/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("falls back to the Log tab and drops an unknown tab value", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    renderWithProbe("/pipelines/payments/checkout-api%2Fmain/run-1?tab=bogus");
+    await screen.findByText(/Build #42/);
+    expect(screen.getByRole("tab", { name: /Log/ })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^$/));
+  });
+
+  it("shows the trail on a refused trigger card", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        result: "TRIGGER_FAILED",
+        buildNumber: undefined,
+        durationMs: undefined,
+        startedAt: undefined,
+        triggerReasonCode: "JOB_NOT_FOUND",
+      }),
+    );
+    renderPage();
+    await screen.findByText("The job does not exist on the controller.");
+    const trail = screen.getByRole("navigation", { name: "Job path" });
+    expect(within(trail).getByText("Not started")).toHaveAttribute("aria-current", "page");
+    expect(document.title).toMatch(/^Not started · /);
+  });
+});
+
 describe("BuildPage — the header's source facts", () => {
   it("renders the branch, the short commit, and the record's own cause on the meta line", async () => {
     mockGetRun.mockResolvedValue(
@@ -782,11 +878,12 @@ describe("BuildPage — the header's source facts", () => {
     renderPage();
     await screen.findByText(/Build #42/);
 
-    expect(screen.getByText("main")).toBeInTheDocument();
-    expect(screen.getByText("abcdef12")).toBeInTheDocument();
-    // The title keeps the cause as the commit message line, so the cause
-    // string itself appears on the meta line alone.
-    expect(screen.getByText("Push")).toBeInTheDocument();
+    // The trail also names the job "main", so the branch is read from the meta line.
+    const meta = screen.getByText("abcdef12").parentElement!;
+    expect(within(meta).getByText("main")).toBeInTheDocument();
+    expect(within(meta).getByText("abcdef12")).toBeInTheDocument();
+    // The heading carries no cause, so the cause string appears on the meta line alone.
+    expect(within(meta).getByText("Push")).toBeInTheDocument();
     expect(screen.queryByText("abcdef1234567890")).not.toBeInTheDocument();
   });
 

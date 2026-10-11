@@ -3,6 +3,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTeamCell, listFleetLocks, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { useEventStream } from "../../hooks/useEventStream";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
@@ -13,6 +14,7 @@ import JobTree, { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
+import { teamTitle } from "./pageTitles";
 import styles from "./TeamHome.module.css";
 
 /** DEFAULT_OPEN_LEVELS is how many folder levels a first load unfolds. The
@@ -296,6 +298,8 @@ export default function TeamHome() {
     }
     setSearchParams(params, { replace: true });
   };
+
+  useDocumentTitle(team ? teamTitle(team) : null);
 
   if (isLoading) {
     return (

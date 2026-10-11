@@ -39,6 +39,13 @@ describe("PipelinesIndex", () => {
     mockListPipelineTeams.mockReset();
   });
 
+  it("sets the document title to Pipelines while the team list loads", () => {
+    mockGetMyPermissions.mockResolvedValue(noGrants);
+    mockListPipelineTeams.mockReturnValue(new Promise(() => {}));
+    renderPage();
+    expect(document.title).toBe("Pipelines");
+  });
+
   it("redirects to the single Team the caller may open", async () => {
     mockGetMyPermissions.mockResolvedValue({
       global: {},

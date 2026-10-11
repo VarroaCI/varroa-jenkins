@@ -41,9 +41,17 @@
   margin: 0;
 }
 
-.commitMessage {
-  font-weight: 400;
-  color: var(--text-2);
+.buildNav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* The anchor holds the Shortcuts legend, which hangs below the button. */
+.shortcutsAnchor {
+  position: relative;
 }
 
 .statusPill {
