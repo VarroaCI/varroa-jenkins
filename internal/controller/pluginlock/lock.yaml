@@ -21,6 +21,7 @@ sets:
       - basic-branch-build-strategies
       - ssh-slaves
       - pipeline-graph-analysis
+      - pipeline-githubnotify-step
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -168,6 +169,8 @@ sets:
         version: "465.v25d9fdc88c26"
       - artifactId: pipeline-build-step
         version: "601.v6d4c6d1a_9dc7"
+      - artifactId: pipeline-githubnotify-step
+        version: "49.vf37bf92d2bc8"
       - artifactId: pipeline-graph-analysis
         version: "254.v0f63a_a_447dca_"
       - artifactId: pipeline-groovy-lib
@@ -406,6 +409,7 @@ sets:
       - basic-branch-build-strategies
       - ssh-slaves
       - pipeline-graph-analysis
+      - pipeline-githubnotify-step
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -553,6 +557,8 @@ sets:
         version: "465.v25d9fdc88c26"
       - artifactId: pipeline-build-step
         version: "601.v6d4c6d1a_9dc7"
+      - artifactId: pipeline-githubnotify-step
+        version: "49.vf37bf92d2bc8"
       - artifactId: pipeline-graph-analysis
         version: "254.v0f63a_a_447dca_"
       - artifactId: pipeline-groovy-lib

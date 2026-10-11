@@ -30,11 +30,12 @@
 #   hack/gen-plugin-lock.sh                 full regeneration (needs docker + net)
 #   hack/gen-plugin-lock.sh --validate-only validate the manifest only, no docker
 #
-# Core seed plugins are the plugins Varroa pins:
+# Core seed plugins are the plugins Varroa pins (CORE_PLUGINS below is the full list):
 #   configuration-as-code, role-strategy, instance-identity, kubernetes,
 #   workflow-aggregator, workflow-cps-global-lib, mcp-server, job-dsl,
 #   docker-workflow, github-branch-source, git, nodejs, jdk-tool,
-#   maven-plugin, config-file-provider, basic-branch-build-strategies
+#   maven-plugin, config-file-provider, basic-branch-build-strategies,
+#   pipeline-githubnotify-step (commit status for plain jobs)
 # The two pipeline-family seeds (workflow-aggregator, workflow-cps-global-lib)
 # pull in and pin the full pipeline plugin stack so the operator overrides
 # stale bundle-supplied pipeline versions.
@@ -52,7 +53,7 @@ OUTFILE="${REPO_ROOT}/internal/controller/pluginlock/lock.yaml"
 MANIFEST="${REPO_ROOT}/hack/version-profiles.yaml"
 SEED_DIR="${REPO_ROOT}/internal/controller/pluginlock/seed"
 
-CORE_PLUGINS="configuration-as-code role-strategy instance-identity kubernetes workflow-aggregator workflow-cps-global-lib mcp-server job-dsl docker-workflow github-branch-source git nodejs jdk-tool maven-plugin config-file-provider artifact-manager-s3 basic-branch-build-strategies ssh-slaves pipeline-graph-analysis"
+CORE_PLUGINS="configuration-as-code role-strategy instance-identity kubernetes workflow-aggregator workflow-cps-global-lib mcp-server job-dsl docker-workflow github-branch-source git nodejs jdk-tool maven-plugin config-file-provider artifact-manager-s3 basic-branch-build-strategies ssh-slaves pipeline-graph-analysis pipeline-githubnotify-step"
 
 # --- yq v4 prerequisite ---------------------------------------------------
 if ! command -v yq >/dev/null 2>&1; then

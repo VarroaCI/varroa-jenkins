@@ -95,9 +95,10 @@ func TestParsedLock_SeedMembership(t *testing.T) {
 				"basic-branch-build-strategies": false,
 				"ssh-slaves":                    false,
 
-				"pipeline-graph-analysis": false,
-				"maven-plugin":            false,
-				"config-file-provider":    false,
+				"pipeline-graph-analysis":    false,
+				"pipeline-githubnotify-step": false,
+				"maven-plugin":               false,
+				"config-file-provider":       false,
 			}
 			for _, id := range s.Core {
 				if _, exists := seed[id]; !exists {
