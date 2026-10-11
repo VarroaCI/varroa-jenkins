@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -16,6 +17,9 @@ type Claims struct {
 	Name              string   `json:"name"`
 	PreferredUsername string   `json:"preferred_username"`
 	Groups            []string `json:"groups"`
+
+	// IssuedAt is the session token issue time. It is zero when the credential has no session token.
+	IssuedAt time.Time `json:"-"`
 }
 
 // UserValues returns the values of the configured user claims.
@@ -188,6 +192,7 @@ func (v *Validator) VerifyToken(ctx context.Context, rawToken string) (*Claims, 
 	if err := idToken.Claims(claims); err != nil {
 		return nil, fmt.Errorf("parse claims: %w", err)
 	}
+	claims.IssuedAt = idToken.IssuedAt
 
 	return claims, nil
 }
@@ -202,6 +207,7 @@ func (v *Validator) VerifyTokenQuiet(ctx context.Context, rawToken string) (*Cla
 	if err := idToken.Claims(claims); err != nil {
 		return nil, err
 	}
+	claims.IssuedAt = idToken.IssuedAt
 	return claims, nil
 }
 

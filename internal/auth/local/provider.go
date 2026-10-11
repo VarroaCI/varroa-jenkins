@@ -320,13 +320,17 @@ func (p *Provider) Verify(ctx context.Context, rawToken string) (*auth.Claims, e
 		return nil, ErrExpiredToken
 	}
 
-	return &auth.Claims{
+	claims := &auth.Claims{
 		Subject:           lc.Sub,
 		Email:             lc.Email,
 		Name:              lc.Name,
 		PreferredUsername: lc.PreferredUsername,
 		Groups:            lc.Groups,
-	}, nil
+	}
+	if lc.Iat > 0 {
+		claims.IssuedAt = time.Unix(lc.Iat, 0)
+	}
+	return claims, nil
 }
 
 // --- Password helpers (used by API handlers in Phase 6) ---

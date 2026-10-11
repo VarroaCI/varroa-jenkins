@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1120,4 +1122,68 @@ func (f *fakeResourceClient) GetUpdateCenter(_ context.Context, _ string) (*v1al
 
 func (f *fakeResourceClient) GetPVC(_ context.Context, _, _ string) (*corev1.PersistentVolumeClaim, error) {
 	return nil, nil
+}
+
+func TestHandleMe_SignedInAtFromClaims(t *testing.T) {
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Auth:              &stubProvider{mode: auth.AuthModeLocal},
+	}
+	srv := NewServer(deps)
+
+	issued := time.Date(2026, 10, 10, 8, 15, 0, 0, time.FixedZone("CEST", 2*3600))
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	claims := &auth.Claims{Subject: "local:admin", IssuedAt: issued}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+
+	w := httptest.NewRecorder()
+	srv.HandleMe(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp meResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.SignedInAt == nil {
+		t.Fatal("expected signedInAt to be populated")
+	}
+	if want := issued.UTC(); !resp.SignedInAt.Equal(want) {
+		t.Errorf("signedInAt = %v, want %v", resp.SignedInAt, want)
+	}
+	if resp.SignedInAt.Location() != time.UTC {
+		t.Errorf("signedInAt location = %v, want UTC", resp.SignedInAt.Location())
+	}
+}
+
+func TestHandleMe_NoSignedInAtWithoutIssuedAt(t *testing.T) {
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Auth:              &stubProvider{mode: auth.AuthModeLocal},
+	}
+	srv := NewServer(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	claims := &auth.Claims{Subject: "local:admin"}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+
+	w := httptest.NewRecorder()
+	srv.HandleMe(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"signedInAt"`) {
+		t.Errorf("expected no signedInAt key, got %s", w.Body.String())
+	}
 }

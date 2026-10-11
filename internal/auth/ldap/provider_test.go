@@ -106,6 +106,29 @@ func TestLogin_DirectBind_Success(t *testing.T) {
 	}
 }
 
+func TestVerify_CarriesIssuedAt(t *testing.T) {
+	conn := newMockConn()
+	conn.binds["uid=alice,ou=people,dc=test:secret"] = nil
+
+	cfg := Config{BindDNTemplate: "uid=%s,ou=people,dc=test"}
+	p := newTestProvider(t, cfg, conn)
+
+	tok, _, err := p.Login(context.Background(), "alice", "secret")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	claims, err := p.Verify(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.IssuedAt.IsZero() {
+		t.Fatal("expected IssuedAt from the iat claim")
+	}
+	if d := time.Since(claims.IssuedAt); d < -time.Minute || d > time.Minute {
+		t.Errorf("IssuedAt = %v, want within a minute of now", claims.IssuedAt)
+	}
+}
+
 func TestLogin_DirectBind_WrongPassword(t *testing.T) {
 	conn := newMockConn()
 

@@ -2393,7 +2393,10 @@ type ComponentsSchemasMe struct {
 	// Preferences User UI preferences.
 	Preferences       *ComponentsSchemasPreferences `json:"preferences,omitempty"`
 	PreferredUsername *string                       `json:"preferredUsername,omitempty"`
-	Subject           string                        `json:"subject"`
+
+	// SignedInAt Issue time of the session token. Absent for an API key caller.
+	SignedInAt *time.Time `json:"signedInAt,omitempty"`
+	Subject    string     `json:"subject"`
 }
 
 // ComponentsSchemasMeAuthMode Source of this session. A local account beside OIDC reports local.

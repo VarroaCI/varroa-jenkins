@@ -125,6 +125,10 @@ Me:
     lastLogin:
       type: string
       description: ISO 8601 last login time, absent if never logged in.
+    signedInAt:
+      type: string
+      format: date-time
+      description: Issue time of the session token. Absent for an API key caller.
   additionalProperties: false
 
 Preferences:

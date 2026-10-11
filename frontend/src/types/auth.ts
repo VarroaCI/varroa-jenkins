@@ -52,6 +52,8 @@ export interface MeResponse {
   /** Source of this session. A local account beside OIDC reports "local". */
   authMode?: "oidc" | "local" | "ldap";
   lastLogin?: string;
+  /** Issue time of the session token. Absent for an API key caller. */
+  signedInAt?: string;
 }
 
 /** Shape of GET /api/v1/auth-config (unauthenticated). */

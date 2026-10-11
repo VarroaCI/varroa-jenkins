@@ -176,6 +176,12 @@ func TestProvider_Login_Success(t *testing.T) {
 	if claims.Email != "alice@example.com" {
 		t.Errorf("expected email=alice@example.com, got %s", claims.Email)
 	}
+	if claims.IssuedAt.IsZero() {
+		t.Fatal("expected IssuedAt from the iat claim")
+	}
+	if d := time.Since(claims.IssuedAt); d < -time.Minute || d > time.Minute {
+		t.Errorf("IssuedAt = %v, want within a minute of now", claims.IssuedAt)
+	}
 	if signer.KID() == "" {
 		t.Error("expected non-empty kid in signer")
 	}

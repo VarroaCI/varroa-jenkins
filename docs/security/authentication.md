@@ -133,7 +133,7 @@ spec:
   password: <initial-password>
 ```
 
-An account needs `purpose` and signs in as `local:<name>`.
+An account needs `purpose` and signs in as `local:<name>`. The profile page shows such a session as `via local account`.
 Each sign-in writes an `auth.local.login` event. A failed attempt on a declared
 account writes `auth.local.login_failed`. An unknown name writes no event.
 

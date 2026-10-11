@@ -93,6 +93,7 @@ type meResponse struct {
 	Preferences       *userPreferences `json:"preferences,omitempty"`
 	AuthMode          string           `json:"authMode"`
 	LastLogin         *time.Time       `json:"lastLogin,omitempty"`
+	SignedInAt        *time.Time       `json:"signedInAt,omitempty"`
 }
 
 type userPreferences struct {
@@ -147,6 +148,10 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if auth.IsLocalSession(claims) {
 		resp.AuthMode = string(auth.AuthModeLocal)
+	}
+	if !claims.IssuedAt.IsZero() {
+		t := claims.IssuedAt.UTC()
+		resp.SignedInAt = &t
 	}
 
 	// Enrich with User CRD if it exists. Look up by subject-derived name

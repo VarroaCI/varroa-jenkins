@@ -78,7 +78,8 @@ federation, activity persistence, and SSE fanout.
   (warning for break-glass, info for service) and `auth.local.login_failed` only
   for an existing `User` with a purpose, never for an unknown name. `GET /me`
   reports `authMode: local` for a local session, and logout of a local session
-  never sends the token to the IdP end-session endpoint.
+  never sends the token to the IdP end-session endpoint. `GET /me` reports
+  `signedInAt` from the session token `iat` when the token has one.
 - **Cell pools** (`handlers_cellpools.go`, `cellpools_service.go`) serve
   `GET /cellpools`, `GET /cellpools/{name}`, and `PATCH /cellpools/{name}`
   over the cluster-scoped `CellPool` CRD of **every cluster of the brood**.

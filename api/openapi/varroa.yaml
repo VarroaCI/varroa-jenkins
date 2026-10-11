@@ -1838,6 +1838,10 @@ components:
           $ref: '#/components/schemas/components_schemas_Preferences'
         preferredUsername:
           type: string
+        signedInAt:
+          description: Issue time of the session token. Absent for an API key caller.
+          format: date-time
+          type: string
         subject:
           type: string
       required:
@@ -6949,6 +6953,10 @@ components:
         preferences:
           $ref: '#/components/schemas/components_schemas_Preferences'
         preferredUsername:
+          type: string
+        signedInAt:
+          description: Issue time of the session token. Absent for an API key caller.
+          format: date-time
           type: string
         subject:
           type: string
