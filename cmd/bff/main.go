@@ -698,6 +698,15 @@ func main() {
 				apiDeps.FleetLockReleaser = api.NewBusFleetLockReleaser(busConn)
 			}
 
+			apiDeps.RecordStoreRunRetention = 365 * 24 * time.Hour
+			if raw := os.Getenv("VARROA_RETENTION_RUNS"); raw != "" {
+				if d, err := recordstore.ParseRetention(raw); err == nil {
+					apiDeps.RecordStoreRunRetention = d
+				} else {
+					logger.Warn("VARROA_RETENTION_RUNS is invalid; using the 365d default", "value", raw, "error", err)
+				}
+			}
+
 			if blobURL := os.Getenv("VARROA_BLOBSTORE_URL"); blobURL != "" {
 				store, err := blob.Open(context.Background(), blobURL, rsPool)
 				if err != nil {

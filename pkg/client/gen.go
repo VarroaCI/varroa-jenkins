@@ -2649,6 +2649,18 @@ type ComponentsSchemasPipelineJobDetail struct {
 // ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
 type ComponentsSchemasPipelineJobDetailHealth string
 
+// ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines team.
+type ComponentsSchemasPipelineJobRetention struct {
+	// Days The window the rule names, in days, before the store cap.
+	Days int `json:"days"`
+
+	// EffectiveDays The window the rule gives, in days, after the store cap.
+	EffectiveDays int `json:"effectiveDays"`
+
+	// Job The folder-relative job glob.
+	Job string `json:"job"`
+}
+
 // ComponentsSchemasPipelineLast30Days The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
 type ComponentsSchemasPipelineLast30Days struct {
 	// Builds Every run created in the window, whatever its status.
@@ -2669,7 +2681,10 @@ type ComponentsSchemasPipelineLast30Days struct {
 
 // ComponentsSchemasPipelineListResponse GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
 type ComponentsSchemasPipelineListResponse struct {
-	Items      []ComponentsSchemasPipelineSummary `json:"items"`
+	Items []ComponentsSchemasPipelineSummary `json:"items"`
+
+	// Retention The record-store windows that apply to one pipelines team.
+	Retention  ComponentsSchemasPipelineRetention `json:"retention"`
 	RunningNow []ComponentsSchemasRunningRun      `json:"runningNow"`
 
 	// TenantFolder The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
@@ -2719,6 +2734,21 @@ type ComponentsSchemasPipelineParameterKind string
 
 // ComponentsSchemasPipelineParameterUiWidget defines model for ComponentsSchemasPipelineParameter.UiWidget.
 type ComponentsSchemasPipelineParameterUiWidget string
+
+// ComponentsSchemasPipelineRetention The record-store windows that apply to one pipelines team.
+type ComponentsSchemasPipelineRetention struct {
+	// EffectiveDays The window a job without a matching rule gets, in days.
+	EffectiveDays int `json:"effectiveDays"`
+
+	// Jobs The per-job rules, in match order.
+	Jobs []ComponentsSchemasPipelineJobRetention `json:"jobs"`
+
+	// StoreDays The store-wide runs window, in days. It caps every other window.
+	StoreDays int `json:"storeDays"`
+
+	// TenantDays The tenant window, in days. Absent when the tenant sets none.
+	TenantDays *int `json:"tenantDays,omitempty"`
+}
 
 // ComponentsSchemasPipelineSlowestStage The stage with the greatest median duration across the window's runs.
 type ComponentsSchemasPipelineSlowestStage struct {
@@ -3745,6 +3775,15 @@ type ComponentsSchemasTeamExport struct {
 	Locks *[]string `json:"locks,omitempty"`
 }
 
+// ComponentsSchemasTeamJobRetention A run window for the jobs that match a folder-relative glob.
+type ComponentsSchemasTeamJobRetention struct {
+	// Job Folder-relative job glob. It must not start with /.
+	Job string `json:"job"`
+
+	// Runs The job window, in whole days, such as 7d.
+	Runs string `json:"runs"`
+}
+
 // ComponentsSchemasTeamMember One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.
 type ComponentsSchemasTeamMember struct {
 	// Applied True when the member's cell reports this tenant applied.
@@ -3813,6 +3852,9 @@ type ComponentsSchemasTeamPipelines struct {
 	// RehydrateDeadline How long the operator keeps retrying a deferred rehydration seed before it stops and reports RehydrationFailed. Default 30m, range 1m to 24h.
 	RehydrateDeadline *string `json:"rehydrateDeadline,omitempty"`
 
+	// Retention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
+	Retention *ComponentsSchemasTeamPipelinesRetention `json:"retention,omitempty"`
+
 	// Standby The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.
 	Standby *int32 `json:"standby,omitempty"`
 }
@@ -3825,6 +3867,15 @@ type ComponentsSchemasTeamPipelinesCronCatchUp string
 
 // ComponentsSchemasTeamPipelinesInterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
 type ComponentsSchemasTeamPipelinesInterruptedRetry string
+
+// ComponentsSchemasTeamPipelinesRetention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
+type ComponentsSchemasTeamPipelinesRetention struct {
+	// Jobs Per-job windows. The first rule whose job glob matches sets the window of that job.
+	Jobs *[]ComponentsSchemasTeamJobRetention `json:"jobs,omitempty"`
+
+	// Runs The tenant window, in whole days, such as 30d. It shortens the store-wide window and never lengthens it.
+	Runs *string `json:"runs,omitempty"`
+}
 
 // ComponentsSchemasTeamPlacement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
 type ComponentsSchemasTeamPlacement struct {

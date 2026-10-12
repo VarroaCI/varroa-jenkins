@@ -849,6 +849,11 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.Retention != nil {
+		in, out := &in.Retention, &out.Retention
+		*out = new(TeamPipelinesRetention)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Members != nil {
 		in, out := &in.Members, &out.Members
 		*out = new(int32)
@@ -892,6 +897,41 @@ func (in *TeamExport) DeepCopy() *TeamExport {
 		return nil
 	}
 	out := new(TeamExport)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamPipelinesRetention.
+func (in *TeamPipelinesRetention) DeepCopyInto(out *TeamPipelinesRetention) {
+	*out = *in
+	if in.Jobs != nil {
+		in, out := &in.Jobs, &out.Jobs
+		*out = make([]TeamJobRetention, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamPipelinesRetention.
+func (in *TeamPipelinesRetention) DeepCopy() *TeamPipelinesRetention {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamPipelinesRetention)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamJobRetention.
+func (in *TeamJobRetention) DeepCopyInto(out *TeamJobRetention) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of TeamJobRetention.
+func (in *TeamJobRetention) DeepCopy() *TeamJobRetention {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamJobRetention)
 	in.DeepCopyInto(out)
 	return out
 }

@@ -44,6 +44,9 @@ type fakeRecordReader struct {
 	windowStats    map[string]recordstore.JobWindowStats
 	windowStatsErr error
 
+	// retention is keyed by "<cluster>/<tenant>", for TenantRetention.
+	retention map[string]recordstore.TenantRetentionPolicy
+
 	// jobDependencies is keyed by "<cluster>/<tenant>/<jobPath>", for
 	// JobDependencies. An unset key answers the zero value: two empty,
 	// non-nil edge lists.
@@ -158,6 +161,7 @@ func newFakeRecordReader() *fakeRecordReader {
 		jobDependencies: map[string]recordstore.JobDependencies{},
 		locksByTenant:   map[string][]recordstore.FleetLock{},
 		testCases:       map[string][]recordstore.TestCase{},
+		retention:       map[string]recordstore.TenantRetentionPolicy{},
 		caseHistory:     map[string][]recordstore.TestCaseOutcome{},
 	}
 }

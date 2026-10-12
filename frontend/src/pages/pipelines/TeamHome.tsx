@@ -320,6 +320,23 @@ export default function TeamHome() {
       <div className={styles.pageHead}>
         <h1 className={styles.pageTitle}>{team}</h1>
         <div className={styles.pageDesc}>Pipelines for this team</div>
+        {data.retention && (
+          <div className={styles.retention} data-testid="team-retention">
+            Build history kept {data.retention.effectiveDays} days
+            {data.retention.tenantDays !== undefined &&
+              data.retention.tenantDays < data.retention.storeDays &&
+              ` (store limit ${data.retention.storeDays} days)`}
+            {data.retention.jobs.length > 0 && (
+              <ul className={styles.retentionJobs}>
+                {data.retention.jobs.map((rule) => (
+                  <li key={rule.job}>
+                    {rule.job}: {rule.effectiveDays} days
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {/* A failed refetch keeps the last data, so the isError test hides
             the pill then, as TeamCellCard hides its own card. */}
         {cellQuery.data && !cellQuery.isError && cellQuery.data.state !== "notCellHosted" && (

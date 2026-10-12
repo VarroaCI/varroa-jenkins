@@ -78,6 +78,48 @@ job concurrency, and the backstop scheduler:
 
 See [Cells and pipelines tenants](cells.md#rehydration) for what each setting controls.
 
+A tenant can also keep its runs for a shorter time than the store. The section below describes the rules.
+
+## Tenant and job retention windows
+
+A pipelines tenant can keep its runs for less time than the store-wide `runs` window. An operator
+sets the window on the `Team`:
+
+```yaml
+spec:
+  pipelines:
+    retention:
+      runs: 30d
+      jobs:
+        - job: "pr-*"
+          runs: 7d
+        - job: "release/**"
+          runs: 365d
+```
+
+The effective window of one run follows these rules:
+
+- A job rule whose glob matches the job path sets the window. The first matching rule wins.
+- Without a matching rule, the tenant `runs` window applies.
+- Without a tenant window, the store-wide `runs` window applies.
+- The store-wide `runs` window caps every result. A longer window never keeps a run past the store
+  limit.
+
+Job globs use the export grammar. `*` matches within one folder level, `**` crosses folders, and
+`?` matches one character. The glob names the job without its tenant folder.
+
+The tenant and job windows delete single runs. A deleted run takes its stages, tests, test cases,
+artifacts, log, and run state with it. Logs and artifacts never outlive their run. The hourly
+retention round deletes at most 1000 runs for each job and 10000 runs in total. A large backlog
+drains over several rounds. The build-number watermark and the claim ledger stay, so no build
+number is reused.
+
+The team home page shows the effective window for the team and for each job rule. Only an
+operator can change `retention`. A pipelines administrator of the tenant cannot.
+
+On a cell, `buildDiscarder` on a job does not change the record store. Use `retention` instead.
+
+
 ## Narrow a tenant grant to some of its jobs
 
 A `VarroaRoleBinding` scoped to a tenant accepts an optional `jobs` list of

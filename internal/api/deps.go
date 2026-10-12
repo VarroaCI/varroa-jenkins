@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -121,6 +122,11 @@ type Dependencies struct {
 	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
 	// check for nil before use.
 	RecordStore recordstore.Reader
+
+	// RecordStoreRunRetention is the store-wide runs window, from
+	// VARROA_RETENTION_RUNS. It caps every tenant and job window. Zero
+	// means the 365d default.
+	RecordStoreRunRetention time.Duration
 
 	// BlobStore reads a run's console log and artifact bytes. Nil when
 	// VARROA_BLOBSTORE_URL is unset, so a handler on the log or artifact

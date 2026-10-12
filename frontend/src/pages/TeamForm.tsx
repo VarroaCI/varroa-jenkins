@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getTeam, createTeam, updateTeam, listRoles, listComposedBundles } from "../api/client";
 import type { TeamEntry } from "../api/client";
-import type { ComposedBundle } from "../types";
+import type { ComposedBundle, TeamPipelines } from "../types";
 import { teamMemberLabel } from "../types";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
@@ -53,6 +53,8 @@ interface FormData {
   pipelinesCronCatchUp: "one" | "none";
   pipelinesCronGrace: string;
   pipelinesExports: ExportFormEntry[];
+  /** Kept only so a UI save does not erase a retention set with kubectl. */
+  pipelinesRetention?: TeamPipelines["retention"];
 }
 
 function emptyForm(): FormData {
@@ -110,6 +112,7 @@ function formFromTeam(team: TeamEntry): FormData {
       locks: exp.locks && exp.locks.length > 0 ? exp.locks : [""],
       callers: exp.callers && exp.callers.length > 0 ? exp.callers : [""],
     })),
+    pipelinesRetention: team.pipelines?.retention,
   };
 }
 
@@ -398,6 +401,7 @@ export default function TeamForm() {
                           },
                     )
                   : undefined,
+              retention: form.pipelinesRetention,
             }
           : undefined,
       };

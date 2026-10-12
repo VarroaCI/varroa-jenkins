@@ -27,14 +27,15 @@ const tenantSyncRequestTimeout = 10 * time.Second
 // stores. An absent or nil Exports omits the key, matching "an absent
 // list exports nothing".
 type syncPolicyWire struct {
-	RehydrateBuilds   int32                 `json:"rehydrateBuilds"`
-	RehydrateDeadline string                `json:"rehydrateDeadline"`
-	InterruptedRetry  string                `json:"interruptedRetry"`
-	Concurrency       string                `json:"concurrency"`
-	CronBackstop      bool                  `json:"cronBackstop"`
-	CronCatchUp       string                `json:"cronCatchUp"`
-	CronGrace         string                `json:"cronGrace"`
-	Exports           []v1alpha1.TeamExport `json:"exports,omitempty"`
+	RehydrateBuilds   int32                            `json:"rehydrateBuilds"`
+	RehydrateDeadline string                           `json:"rehydrateDeadline"`
+	InterruptedRetry  string                           `json:"interruptedRetry"`
+	Concurrency       string                           `json:"concurrency"`
+	CronBackstop      bool                             `json:"cronBackstop"`
+	CronCatchUp       string                           `json:"cronCatchUp"`
+	CronGrace         string                           `json:"cronGrace"`
+	Exports           []v1alpha1.TeamExport            `json:"exports,omitempty"`
+	Retention         *v1alpha1.TeamPipelinesRetention `json:"retention,omitempty"`
 }
 
 // marshalSyncPolicy encodes a cells.SyncPolicy for the wire. The zero
@@ -52,6 +53,7 @@ func marshalSyncPolicy(p cells.SyncPolicy) (json.RawMessage, error) {
 		CronCatchUp:       p.CronCatchUp,
 		CronGrace:         p.CronGrace.String(),
 		Exports:           p.Exports,
+		Retention:         p.Retention,
 	}
 	return json.Marshal(wire)
 }

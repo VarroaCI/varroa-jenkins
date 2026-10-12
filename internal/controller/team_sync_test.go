@@ -288,3 +288,32 @@ func TestNewNATSPurgeRequester_CarriesTeamDeleted(t *testing.T) {
 		t.Fatalf("request = %v, want team_deleted true and incarnation uid-a", raw)
 	}
 }
+
+func TestMarshalSyncPolicyRetention(t *testing.T) {
+	p := cells.SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{
+		Retention: &v1alpha1.TeamPipelinesRetention{
+			Runs: "30d",
+			Jobs: []v1alpha1.TeamJobRetention{{Job: "release/**", Runs: "365d"}},
+		},
+	})
+	raw, err := marshalSyncPolicy(p)
+	if err != nil {
+		t.Fatalf("marshalSyncPolicy: %v", err)
+	}
+	var got struct {
+		Retention struct {
+			Runs string `json:"runs"`
+			Jobs []struct {
+				Job  string `json:"job"`
+				Runs string `json:"runs"`
+			} `json:"jobs"`
+		} `json:"retention"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode policy: %v", err)
+	}
+	if got.Retention.Runs != "30d" || len(got.Retention.Jobs) != 1 ||
+		got.Retention.Jobs[0].Job != "release/**" || got.Retention.Jobs[0].Runs != "365d" {
+		t.Fatalf("retention on the wire = %+v", got.Retention)
+	}
+}

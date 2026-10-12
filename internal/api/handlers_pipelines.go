@@ -92,6 +92,8 @@ type pipelineListResponse struct {
 	// globs removed: such a count is itself a disclosure.
 	TenantFolder string `json:"tenantFolder"`
 	Truncated    bool   `json:"truncated"`
+	// Retention reports the record-store windows that apply to this team.
+	Retention pipelineRetentionJSON `json:"retention"`
 }
 
 // pipelineDefinitionJSON is the Defined by card's data. Source names
@@ -572,11 +574,23 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		return runningOut[i].RunID < runningOut[j].RunID
 	})
 
+	// The retention block reads the first tenant's policy. Every tenant
+	// one team resolves to shares one placement policy in practice.
+	var policy recordstore.TenantRetentionPolicy
+	if len(refs) > 0 {
+		p, err := s.deps.RecordStore.TenantRetention(ctx, refs[0].Cluster, refs[0].Tenant)
+		if s.handleReaderError(w, err, "read tenant retention") {
+			return
+		}
+		policy = p
+	}
+
 	s.writeJSON(w, http.StatusOK, pipelineListResponse{
 		Items:        items,
 		RunningNow:   runningOut,
 		TenantFolder: tenantFolder,
 		Truncated:    truncated,
+		Retention:    buildPipelineRetention(s.deps.RecordStoreRunRetention, policy),
 	})
 }
 

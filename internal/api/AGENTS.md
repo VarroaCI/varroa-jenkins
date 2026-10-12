@@ -145,6 +145,12 @@ federation, activity persistence, and SSE fanout.
   `rbac.TenantGrantSourcesTruncated`), reads no record store, and therefore
   answers no `503`. `jobs` carries `omitempty` and is never an empty array:
   an absent list narrows nothing.
+- **Retention** (`handlers_pipelines_retention.go`): `GET /pipelines/{team}`
+  carries a required `retention` block (store, tenant, and effective days,
+  plus the job rules). It reads `Reader.TenantRetention` for the first
+  resolved tenant. The store window comes from `VARROA_RETENTION_RUNS`
+  (`deps.RecordStoreRunRetention`, default 365d). `spec.pipelines.retention`
+  round-trips through `teamPipelinesEntry`. Validation rejects a bad window.
 - **Fleet locks** (`handleListTeamFleetLocks`/`handleListAllFleetLocks`,
   `handlers_pipelines.go`; `Server.ListFleetLocks`, `pipelines_service.go`)
   serves `GET /pipelines/{team}/locks` and `GET /locks` over

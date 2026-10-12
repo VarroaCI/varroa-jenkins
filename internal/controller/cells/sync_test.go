@@ -502,3 +502,31 @@ func TestPlace_Reannounce_TenMinuteResync(t *testing.T) {
 		t.Fatalf("expected the ten-minute resync to fire, got %d calls", calls)
 	}
 }
+
+func TestSyncPolicyFromPipelinesCarriesRetention(t *testing.T) {
+	spec := &v1alpha1.TeamPipelinesSpec{
+		Retention: &v1alpha1.TeamPipelinesRetention{
+			Runs: "30d",
+			Jobs: []v1alpha1.TeamJobRetention{{Job: "pr-*", Runs: "7d"}},
+		},
+	}
+	got := SyncPolicyFromPipelines(spec)
+	if got.Retention == nil || got.Retention.Runs != "30d" || len(got.Retention.Jobs) != 1 {
+		t.Fatalf("Retention = %+v, want runs 30d and one pr-* rule", got.Retention)
+	}
+}
+
+func TestSyncPolicyEqualDetectsRetentionChange(t *testing.T) {
+	base := SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{
+		Retention: &v1alpha1.TeamPipelinesRetention{Runs: "30d"},
+	})
+	changed := SyncPolicyFromPipelines(&v1alpha1.TeamPipelinesSpec{
+		Retention: &v1alpha1.TeamPipelinesRetention{Runs: "14d"},
+	})
+	if base.Equal(changed) {
+		t.Fatalf("Equal = true for policies whose retention differs")
+	}
+	if !base.Equal(base) {
+		t.Fatalf("Equal = false for an identical policy")
+	}
+}

@@ -949,6 +949,14 @@ of the fleet's audit activity, once a controller becomes disposable.
   `deleteExpiredChildRows` (`retention_childrows.go`) deletes `run_stages`,
   `run_tests`, and `run_test_cases` rows past the `retention.runs` cutoff,
   in bounded batches.
+  `deleteTenantExpiredRuns` (`retention_tenant.go`) runs before the runs
+  partition drop. It reads each tenant's `retention` key from
+  `tenant_placements.policy` (`retention_tenant_policy.go`,
+  `EffectiveRunRetention`). It deletes terminal runs past a tenant or job
+  window, at most 1000 runs per job and 10000 per round. It deletes blobs
+  first, then the child rows and the run in one transaction. It never
+  touches `run_intents` or `job_numbers`. A job rule replaces the tenant
+  window. The store-wide `retention.runs` caps both.
   `deleteExpiredRunState` is the mesh's hourly backstop: it removes the
   run-state objects of every run terminal for more than an hour, except
   the kept build.xml, over its own bounded query, because the log step

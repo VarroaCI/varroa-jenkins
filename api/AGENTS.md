@@ -117,6 +117,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   the disagreement is invisible until someone bypasses the BFF. Every such
   method must be nil-receiver safe: the CRDs carrying them are optional, and
   absence must mean the permissive default.
+  `TeamPipelinesSpec.Retention` (`*TeamPipelinesRetention`) sets the
+  record-store run windows: a tenant `runs` window and up to 64 `jobs`
+  rules (`TeamJobRetention`). Only an operator may write it.
   `TeamPipelinesSpec.Exports` (`[]TeamExport`, at most 64 entries) lists the
   grants a pipelines tenant makes to other tenants: each entry names exactly
   one of `job` (a folder-relative job glob) or `locks` (bare

@@ -143,6 +143,36 @@ describe("TeamHome", () => {
     expect(screen.getByText(/Loading pipelines/)).toBeInTheDocument();
   });
 
+  it("shows the effective retention window", async () => {
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      truncated: false,
+      retention: { storeDays: 365, tenantDays: 30, effectiveDays: 30, jobs: [] },
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("team-retention")).toHaveTextContent(
+        "Build history kept 30 days (store limit 365 days)",
+      ),
+    );
+  });
+
+  it("lists job retention rules", async () => {
+    mockListPipelines.mockResolvedValue({
+      items: [],
+      runningNow: [],
+      truncated: false,
+      retention: {
+        storeDays: 365,
+        effectiveDays: 365,
+        jobs: [{ job: "pr-*", days: 7, effectiveDays: 7 }],
+      },
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText("pr-*: 7 days")).toBeInTheDocument());
+  });
+
   it("sets the document title from the team", async () => {
     mockListPipelines.mockResolvedValue({ items: [], runningNow: [], truncated: false });
     renderPage();

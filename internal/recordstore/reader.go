@@ -39,6 +39,10 @@ type Reader interface {
 	ListRuns(ctx context.Context, q RunQuery) (RunPage, error)
 	GetRun(ctx context.Context, runID string) (Run, []Stage, error)
 
+	// TenantRetention answers the tenant's record-store windows. A tenant
+	// with no placement row, or no retention key, answers the zero policy.
+	TenantRetention(ctx context.Context, cluster, tenant string) (TenantRetentionPolicy, error)
+
 	// CurrentStages answers the name of the top-level stage in progress
 	// for each run in runIDs, keyed by run id. A run that holds no
 	// top-level stage in progress carries no entry. One call answers every

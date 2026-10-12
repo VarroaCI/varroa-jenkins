@@ -2011,6 +2011,8 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_PipelineSummary'
           type: array
+        retention:
+          $ref: '#/components/schemas/components_schemas_PipelineRetention'
         runningNow:
           items:
             $ref: '#/components/schemas/components_schemas_RunningRun'
@@ -2028,6 +2030,7 @@ components:
       - runningNow
       - truncated
       - tenantFolder
+      - retention
       type: object
     PipelineParameter:
       additionalProperties: false
@@ -7401,6 +7404,24 @@ components:
       - tenant
       - dependencies
       type: object
+    components_schemas_PipelineJobRetention:
+      additionalProperties: false
+      description: One per-job window rule of a pipelines team.
+      properties:
+        days:
+          description: The window the rule names, in days, before the store cap.
+          type: integer
+        effectiveDays:
+          description: The window the rule gives, in days, after the store cap.
+          type: integer
+        job:
+          description: The folder-relative job glob.
+          type: string
+      required:
+      - job
+      - days
+      - effectiveDays
+      type: object
     components_schemas_PipelineLast30Days:
       additionalProperties: false
       description: The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
@@ -7444,6 +7465,8 @@ components:
           items:
             $ref: '#/components/schemas/components_schemas_PipelineSummary'
           type: array
+        retention:
+          $ref: '#/components/schemas/components_schemas_PipelineRetention'
         runningNow:
           items:
             $ref: '#/components/schemas/components_schemas_RunningRun'
@@ -7461,6 +7484,7 @@ components:
       - runningNow
       - truncated
       - tenantFolder
+      - retention
       type: object
     components_schemas_PipelineMarkerFinding:
       additionalProperties: false
@@ -7535,6 +7559,29 @@ components:
       - name
       - kind
       - schema
+      type: object
+    components_schemas_PipelineRetention:
+      additionalProperties: false
+      description: The record-store windows that apply to one pipelines team.
+      properties:
+        effectiveDays:
+          description: The window a job without a matching rule gets, in days.
+          type: integer
+        jobs:
+          description: The per-job rules, in match order.
+          items:
+            $ref: '#/components/schemas/components_schemas_PipelineJobRetention'
+          type: array
+        storeDays:
+          description: The store-wide runs window, in days. It caps every other window.
+          type: integer
+        tenantDays:
+          description: The tenant window, in days. Absent when the tenant sets none.
+          type: integer
+      required:
+      - storeDays
+      - effectiveDays
+      - jobs
       type: object
     components_schemas_PipelineSlowestStage:
       additionalProperties: false
@@ -9409,6 +9456,24 @@ components:
       required:
       - callers
       type: object
+    components_schemas_TeamJobRetention:
+      additionalProperties: false
+      description: A run window for the jobs that match a folder-relative glob.
+      properties:
+        job:
+          description: Folder-relative job glob. It must not start with /.
+          maxLength: 512
+          minLength: 1
+          pattern: ^[^/]
+          type: string
+        runs:
+          description: The job window, in whole days, such as 7d.
+          pattern: ^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$
+          type: string
+      required:
+      - job
+      - runs
+      type: object
     components_schemas_TeamMember:
       additionalProperties: false
       description: 'One member of a pipelines tenant (status.placement.members). Response-only:
@@ -9528,6 +9593,8 @@ components:
             seed before it stops and reports RehydrationFailed. Default 30m, range
             1m to 24h.
           type: string
+        retention:
+          $ref: '#/components/schemas/components_schemas_TeamPipelinesRetention'
         standby:
           description: The number of warm members this tenant keeps. A standby holds
             the folder and no slot. It takes a slot whose holder dies. Default 0.
@@ -9538,6 +9605,25 @@ components:
       required:
       - profile
       - agentNamespace
+      type: object
+    components_schemas_TeamPipelinesRetention:
+      additionalProperties: false
+      description: Record-store windows for this tenant's runs. A job rule replaces
+        the tenant window for the jobs it matches. The store-wide window caps both.
+        Only an operator may set it.
+      properties:
+        jobs:
+          description: Per-job windows. The first rule whose job glob matches sets
+            the window of that job.
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamJobRetention'
+          maxItems: 64
+          type: array
+        runs:
+          description: The tenant window, in whole days, such as 30d. It shortens
+            the store-wide window and never lengthens it.
+          pattern: ^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$
+          type: string
       type: object
     components_schemas_TeamPlacement:
       additionalProperties: false

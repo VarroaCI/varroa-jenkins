@@ -2,7 +2,10 @@ package recordstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // TenantPlacement is the slot-0 coordinate of one tenant_placements row.
@@ -64,4 +67,25 @@ func (r *pgReader) queryTenantPlacements(ctx context.Context, query string, args
 		return nil, fmt.Errorf("list tenant placements: %w", err)
 	}
 	return out, nil
+}
+
+// TenantRetention answers the record-store windows of one tenant from its
+// tenant_placements.policy. A missing row answers the zero policy with a
+// nil error.
+func (r *pgReader) TenantRetention(ctx context.Context, cluster, tenant string) (TenantRetentionPolicy, error) {
+	if err := r.checkSchema(ctx); err != nil {
+		return TenantRetentionPolicy{}, err
+	}
+	var raw []byte
+	err := r.pool.QueryRow(ctx, `
+		SELECT policy FROM varroa.tenant_placements
+		WHERE cluster = $1 AND tenant = $2
+	`, cluster, tenant).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TenantRetentionPolicy{}, nil
+	}
+	if err != nil {
+		return TenantRetentionPolicy{}, fmt.Errorf("read tenant retention: %w", err)
+	}
+	return decodeRetention(raw), nil
 }

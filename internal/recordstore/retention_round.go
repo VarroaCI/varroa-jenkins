@@ -113,7 +113,7 @@ func RunMaintenanceRound(ctx context.Context, pool *pgxpool.Pool, cfg Maintenanc
 // RunMaintenance calls it every tick regardless of which replica holds
 // the advisory lock, because it is idempotent and every replica
 // benefits from running it as soon as the client role appears.
-func runMaintenanceSteps(ctx context.Context, db maintDB, cfg MaintenanceConfig) error {
+func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfig) error {
 	now := cfg.now()
 
 	if err := EnsurePartitions(ctx, db, now, cfg.ActivityRetention); err != nil {
@@ -149,6 +149,13 @@ func runMaintenanceSteps(ctx context.Context, db maintDB, cfg MaintenanceConfig)
 	// Step 5b: drop a fully expired activity partition.
 	if _, err := dropExpiredPartitions(ctx, db, "activity", activityCutoff); err != nil {
 		return fmt.Errorf("drop expired activity partitions: %w", err)
+	}
+
+	// Step 5c: delete terminal runs that a tenant or job window expired.
+	// It runs before the runs partition drop, so a window shorter than
+	// the store-wide one still removes each run's blobs and rows.
+	if _, err := deleteTenantExpiredRuns(ctx, db, cfg.LogStore, now, cfg.RunRetention, tenantRetentionRoundBudget); err != nil {
+		return fmt.Errorf("delete tenant expired runs: %w", err)
 	}
 
 	// The retained script replica leaves on the record cutoff, before the

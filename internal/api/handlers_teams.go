@@ -13,6 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // teamEntry is the JSON shape for GET /teams entries. Pipelines carries
@@ -70,6 +71,11 @@ type teamPipelinesEntry struct {
 	// pipelines:admin capability. Neither check is controller-scoped,
 	// because a grant belongs to a tenant, not to a cell.
 	Exports []teamExportEntry `json:"exports,omitempty"`
+	// Retention carries spec.pipelines.retention: the record-store windows
+	// for this tenant's runs. Only an operator may write it, so the
+	// tenant-admin path rejects a change to it the same way it rejects any
+	// other change outside the exports.
+	Retention *v1alpha1.TeamPipelinesRetention `json:"retention,omitempty"`
 }
 
 // teamExportEntry is the JSON shape of one spec.pipelines.exports entry.
@@ -156,6 +162,7 @@ func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEnt
 			Callers: exp.Callers,
 		})
 	}
+	e.Retention = p.Retention
 	return e
 }
 
@@ -194,6 +201,7 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 			Callers: exp.Callers,
 		})
 	}
+	spec.Retention = e.Retention
 	return spec
 }
 
@@ -216,6 +224,19 @@ func validateTeamPipelines(p *teamPipelinesEntry, namespaces []string) string {
 	for i, exp := range p.Exports {
 		if len(exp.Callers) == 0 {
 			return fmt.Sprintf("pipelines.exports[%d].callers is required", i)
+		}
+	}
+	if r := p.Retention; r != nil {
+		if _, err := recordstore.ParseRetention(r.Runs); r.Runs != "" && err != nil {
+			return "pipelines.retention.runs is invalid"
+		}
+		for i, job := range r.Jobs {
+			if strings.TrimSpace(job.Job) == "" || strings.HasPrefix(job.Job, "/") {
+				return fmt.Sprintf("pipelines.retention.jobs[%d].job is invalid", i)
+			}
+			if _, err := recordstore.ParseRetention(job.Runs); err != nil {
+				return fmt.Sprintf("pipelines.retention.jobs[%d].runs is invalid", i)
+			}
 		}
 	}
 	return ""

@@ -93,14 +93,16 @@ recordStore:
     artifacts: 30d
 ```
 
-Each value is a day count with a `d` suffix, from `1d` through `3650d`. `runs` controls how long
-a build's row, stages, and test summary stay queryable; `logs` and `artifacts` control their blob
-content independently.
+Each value is a day count from `1d` to `3650d`. `runs` controls how long
+a build's row and stages stay queryable. `logs` and `artifacts` control blobs.
 
-Retention rounds up to a month boundary, because the recorder drops a whole monthly partition,
-not single rows. A `runs` value of `365d` keeps a build for 365 to 396 days.
+Store-wide retention rounds up to a month, because the recorder drops whole monthly partitions.
+A `runs` value of `365d` keeps a build 365 to 396 days. The build-number watermark
+is permanent.
 
-The build-number watermark is permanent: no build number is reused.
+## Tenant and job windows
+
+Set a shorter window per tenant or job. See [Tenant and job retention windows](multi-tenancy.md#tenant-and-job-retention-windows).
 
 ## A trigger that fails
 

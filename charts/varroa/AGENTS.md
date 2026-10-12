@@ -293,7 +293,8 @@ the packaged CRDs. Does not own the Go source it packages
   `recordstore-guard.yaml` failure mode, including the retired `activity`
   values block. `recordStore.retention.activity` (default `30d`) replaced the
   old `activity.retention` dial: the recorder gets `VARROA_RETENTION_ACTIVITY`,
-  the BFF gets `VARROA_ACTIVITY_RETENTION_DAYS` (both gated on
+  the BFF gets `VARROA_ACTIVITY_RETENTION_DAYS` and `VARROA_RETENTION_RUNS`
+  (the store-wide runs cap for tenant windows; all gated on
   `recordStore.enabled`), and `nats-auth-config.yaml` moved the
   `varroa_activity` JetStream grants from the BFF to the recorder — the BFF
   keeps only the core `activity.>` publish/subscribe grant.

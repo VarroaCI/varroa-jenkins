@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -857,4 +858,69 @@ func TestTeamHandlers_ApiserverInvalidAnswers400(t *testing.T) {
 			t.Fatalf("status = %d, want 500; body=%s", w.Result().StatusCode, w.Body.String())
 		}
 	})
+}
+
+func TestTeamPipelinesRetentionRoundTrip(t *testing.T) {
+	spec := &v1alpha1.TeamPipelinesSpec{
+		Profile:        "p",
+		AgentNamespace: "ns",
+		Retention: &v1alpha1.TeamPipelinesRetention{
+			Runs: "30d",
+			Jobs: []v1alpha1.TeamJobRetention{{Job: "release/**", Runs: "365d"}},
+		},
+	}
+	raw, err := json.Marshal(teamPipelinesEntryFromSpec(spec))
+	if err != nil {
+		t.Fatalf("marshal entry: %v", err)
+	}
+	var entry teamPipelinesEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal entry: %v", err)
+	}
+	back := teamPipelinesSpecFromEntry(&entry)
+	if !reflect.DeepEqual(back.Retention, spec.Retention) {
+		t.Fatalf("retention after round trip = %+v, want %+v", back.Retention, spec.Retention)
+	}
+}
+
+func TestValidateTeamPipelinesRejectsBadRetention(t *testing.T) {
+	base := func(r *v1alpha1.TeamPipelinesRetention) *teamPipelinesEntry {
+		return &teamPipelinesEntry{Profile: "p", AgentNamespace: "ns", Retention: r}
+	}
+	namespaces := []string{"ns"}
+	tests := []struct {
+		name string
+		r    *v1alpha1.TeamPipelinesRetention
+		want string
+	}{
+		{
+			name: "valid windows pass",
+			r: &v1alpha1.TeamPipelinesRetention{Runs: "30d",
+				Jobs: []v1alpha1.TeamJobRetention{{Job: "pr-*", Runs: "7d"}}},
+			want: "",
+		},
+		{name: "bad tenant window", r: &v1alpha1.TeamPipelinesRetention{Runs: "thirty"}, want: "pipelines.retention.runs is invalid"},
+		{
+			name: "bad job window",
+			r:    &v1alpha1.TeamPipelinesRetention{Jobs: []v1alpha1.TeamJobRetention{{Job: "pr-*", Runs: "0d"}}},
+			want: "pipelines.retention.jobs[0].runs is invalid",
+		},
+		{
+			name: "empty job glob",
+			r:    &v1alpha1.TeamPipelinesRetention{Jobs: []v1alpha1.TeamJobRetention{{Job: "", Runs: "7d"}}},
+			want: "pipelines.retention.jobs[0].job is invalid",
+		},
+		{
+			name: "job glob with a leading slash",
+			r:    &v1alpha1.TeamPipelinesRetention{Jobs: []v1alpha1.TeamJobRetention{{Job: "/pr-*", Runs: "7d"}}},
+			want: "pipelines.retention.jobs[0].job is invalid",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateTeamPipelines(base(tt.r), namespaces); got != tt.want {
+				t.Fatalf("validateTeamPipelines() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

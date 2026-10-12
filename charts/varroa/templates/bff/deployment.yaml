@@ -140,6 +140,8 @@ spec:
 {{- if .Values.recordStore.enabled }}
             - name: VARROA_ACTIVITY_RETENTION_DAYS
               value: {{ trimSuffix "d" .Values.recordStore.retention.activity | quote }}
+            - name: VARROA_RETENTION_RUNS
+              value: {{ .Values.recordStore.retention.runs | quote }}
             - name: VARROA_RECORDSTORE_DSN
               valueFrom:
                 secretKeyRef:

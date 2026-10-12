@@ -491,6 +491,24 @@ export interface TeamPipelines {
    * list exports nothing.
    */
   exports?: TeamExport[];
+  /** Record-store windows for this tenant's runs. Only an operator sets it. */
+  retention?: TeamPipelinesRetention;
+}
+
+/** The tenant window and the per-job rules of spec.pipelines.retention. */
+export interface TeamPipelinesRetention {
+  /** Tenant window in whole days, such as "30d". Shortens the store window only. */
+  runs?: string;
+  /** Per-job windows. The first matching glob sets the window of that job. */
+  jobs?: TeamJobRetention[];
+}
+
+/** One per-job window rule of spec.pipelines.retention. */
+export interface TeamJobRetention {
+  /** Folder-relative job glob. It must not start with /. */
+  job: string;
+  /** Job window in whole days, such as "7d". */
+  runs: string;
 }
 
 /**
@@ -1616,6 +1634,29 @@ export interface PipelineListResponse {
    * controller tenant. The field is always present. */
   tenantFolder: string;
   truncated: boolean;
+  /** The record-store windows that apply to this team. */
+  retention: PipelineRetention;
+}
+
+/** The record-store run windows of one pipelines team, in whole days. */
+export interface PipelineRetention {
+  /** The store-wide window. It caps every other window. */
+  storeDays: number;
+  /** The tenant window. Absent when the tenant sets none. */
+  tenantDays?: number;
+  /** The window a job without a matching rule gets. */
+  effectiveDays: number;
+  /** The per-job rules, in match order. */
+  jobs: PipelineJobRetention[];
+}
+
+/** One per-job window rule, with the days it names and the days it gives. */
+export interface PipelineJobRetention {
+  job: string;
+  /** The window the rule names, before the store cap. */
+  days: number;
+  /** The window the rule gives, after the store cap. */
+  effectiveDays: number;
 }
 
 /**

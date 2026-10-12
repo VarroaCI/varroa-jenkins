@@ -31,12 +31,16 @@ type SyncPolicy struct {
 	// admits. Nil for a controller with no cell role, or for a tenant
 	// that exports nothing.
 	Exports []v1alpha1.TeamExport
+
+	// Retention carries the tenant's record-store windows (the tenant
+	// window and the per-job rules). Nil for a tenant that sets none.
+	Retention *v1alpha1.TeamPipelinesRetention
 }
 
 // Equal reports whether p and other announce the same policy. SyncPolicy
-// carries a slice field, so the == operator cannot compare two values;
-// Equal compares the seven scalar settings directly and Exports with
-// reflect.DeepEqual.
+// carries slice and pointer fields, so the == operator cannot compare two
+// values; Equal compares the seven scalar settings directly and Exports
+// and Retention with reflect.DeepEqual.
 func (p SyncPolicy) Equal(other SyncPolicy) bool {
 	return p.RehydrateBuilds == other.RehydrateBuilds &&
 		p.RehydrateDeadline == other.RehydrateDeadline &&
@@ -45,7 +49,8 @@ func (p SyncPolicy) Equal(other SyncPolicy) bool {
 		p.CronBackstop == other.CronBackstop &&
 		p.CronCatchUp == other.CronCatchUp &&
 		p.CronGrace == other.CronGrace &&
-		reflect.DeepEqual(p.Exports, other.Exports)
+		reflect.DeepEqual(p.Exports, other.Exports) &&
+		reflect.DeepEqual(p.Retention, other.Retention)
 }
 
 // SyncPolicyFromPipelines reads the seven settings and the export grants
@@ -66,6 +71,7 @@ func SyncPolicyFromPipelines(p *v1alpha1.TeamPipelinesSpec) SyncPolicy {
 		CronCatchUp:       p.EffectiveCronCatchUp(),
 		CronGrace:         p.EffectiveCronGrace(),
 		Exports:           p.Exports,
+		Retention:         p.Retention,
 	}
 }
 

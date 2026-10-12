@@ -1530,6 +1530,12 @@ type TeamPipelinesSpec struct {
 	// +optional
 	Exports []TeamExport `json:"exports,omitempty"`
 
+	// Retention shortens how long the record store keeps this tenant's
+	// runs. A job rule replaces the tenant window. The store-wide
+	// recordStore.retention.runs caps both. Only an operator sets it.
+	// +optional
+	Retention *TeamPipelinesRetention `json:"retention,omitempty"`
+
 	// Members sets the number of active slots this tenant runs. Each slot
 	// holds one cell. A job runs only on its home slot's holder. This field
 	// is not spec.members, which lists local usernames.
@@ -1578,6 +1584,38 @@ type TeamExport struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=253
 	Callers []string `json:"callers,omitempty"`
+}
+
+// TeamPipelinesRetention sets how long the record store keeps a
+// pipelines tenant's runs. Runs is the tenant window. Jobs holds per-job
+// windows, checked in order; the first match wins.
+type TeamPipelinesRetention struct {
+	// Runs is the tenant window, in whole days, such as "30d". It shortens
+	// the store-wide window and never lengthens it.
+	// +kubebuilder:validation:Pattern=`^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$`
+	// +optional
+	Runs string `json:"runs,omitempty"`
+	// Jobs lists per-job windows. The first rule whose job glob matches
+	// a run's job path sets that run's window.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Jobs []TeamJobRetention `json:"jobs,omitempty"`
+}
+
+// TeamJobRetention sets the run window for the jobs that match a glob.
+type TeamJobRetention struct {
+	// Job is a folder-relative job glob. It must not start with /.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	// +kubebuilder:validation:Pattern=`^[^/]`
+	Job string `json:"job"`
+	// Runs is the job window, in whole days, such as "7d". It replaces
+	// the tenant window for the matching jobs. The store-wide window
+	// still caps it.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$`
+	Runs string `json:"runs"`
 }
 
 // TeamStatus defines the observed state of a Team.
