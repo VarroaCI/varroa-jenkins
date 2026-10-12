@@ -33,6 +33,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import jenkins.branch.MultiBranchProject;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import jenkins.model.lazy.LazyBuildMixIn;
@@ -333,6 +334,132 @@ public class VarroaRunTriggerAction implements RootAction {
             writeAccepted(rsp, runId, droppedParameters);
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doReplay caught exception", e);
+            try {
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
+     * Handles {@code POST /varroa-run/scan}. Reads {@code scanId}, {@code
+     * jobPath}, and {@code actingUser}, narrows the named item to a
+     * multibranch project, and then, inside the acting user's own
+     * authentication, checks {@link Item#BUILD} and schedules one folder
+     * computation. {@link VarroaBranchScans} records the scan before the
+     * computation starts and reports its result.
+     *
+     * <p>Answers {@code 405} for a method other than {@code POST}, {@code 403}
+     * without the mite authority or for an acting user without {@link Item#BUILD}
+     * (the refusal is recorded), {@code 400} for a body that does not decode or
+     * names no scan, job, or acting user, {@code 404} for no item at the job path,
+     * {@code 409} for an item that is not a multibranch project or a queue that
+     * refuses the computation, and {@code 202} on success.
+     */
+    public void doScan(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String scanId = body.optString("scanId", "");
+            String jobPath = body.optString("jobPath", "");
+            VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
+            if (scanId.isEmpty() || jobPath.isEmpty() || actingUser == null) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no scan, no job, or no acting user");
+                return;
+            }
+
+            Item rawItem = Jenkins.get().getItemByFullName(jobPath);
+            if (rawItem == null) {
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no item named " + jobPath);
+                return;
+            }
+            if (!(rawItem instanceof MultiBranchProject)) {
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is not a multibranch project");
+                return;
+            }
+            MultiBranchProject project = (MultiBranchProject) rawItem;
+            String actor = VarroaUserCause.normalizeActor(actingUser.getName());
+
+            // The first request of a scan reserves its identifier, atomically.
+            // A redelivered request then answers 202 before the permission
+            // check, so a permission change made after the first accept cannot
+            // overwrite the running scan, and no second computation starts.
+            int claimed = VarroaBranchScans.claim(jobPath, scanId);
+            if (claimed == VarroaBranchScans.CLAIM_IN_FLIGHT) {
+                // The first request has not decided yet. Answering 202 here
+                // would acknowledge a scan that may still fail.
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: the scan " + scanId + " is already being requested");
+                return;
+            }
+            if (claimed == VarroaBranchScans.CLAIM_ACCEPTED) {
+                JSONObject repeat = new JSONObject();
+                repeat.put("scanId", scanId);
+                rsp.setContentType("application/json");
+                rsp.setStatus(202);
+                rsp.getWriter().write(repeat.toString());
+                return;
+            }
+
+            boolean queued = false;
+            try {
+            try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                // Every refusal below releases the reservation through
+                // recordRefused, so a later delivery of the same scan can retry.
+                if (!project.hasPermission(Item.BUILD)) {
+                    VarroaBranchScans.recordRefused(jobPath, scanId, actor,
+                            "the acting user may not scan this job");
+                    PlainTextRefusal.refuse(rsp, 403, "Forbidden: the acting user may not scan this job");
+                    return;
+                }
+                List<Action> actions = new ArrayList<>();
+                if (!actor.isEmpty()) {
+                    actions.add(new CauseAction(new VarroaUserCause(actor)));
+                }
+                VarroaBranchScans.arm(project, scanId, actor);
+                Object scheduled = project.scheduleBuild2(0, actions.toArray(new Action[0]));
+                if (scheduled == null) {
+                    VarroaBranchScans.recordRefused(jobPath, scanId, actor,
+                            "the queue refused to scan " + jobPath);
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the queue refused to scan " + jobPath);
+                    return;
+                }
+                queued = true;
+                VarroaBranchScans.markAccepted(jobPath, scanId);
+            }
+            } catch (RuntimeException | Error e) {
+                // A failure before the queue took the scan releases the
+                // reservation, so a later delivery can retry. After that, the
+                // scan is accepted and its reservation stays.
+                if (!queued) {
+                    VarroaBranchScans.recordRefused(jobPath, scanId, actor,
+                            "the scan failed before the queue answered");
+                }
+                throw e;
+            }
+
+            JSONObject out = new JSONObject();
+            out.put("scanId", scanId);
+            rsp.setContentType("application/json");
+            rsp.setStatus(202);
+            rsp.getWriter().write(out.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doScan caught exception", e);
             try {
                 PlainTextRefusal.refuse(rsp, 500, "Internal server error");
             } catch (Exception ignored) {

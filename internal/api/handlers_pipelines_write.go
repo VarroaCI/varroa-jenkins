@@ -598,6 +598,94 @@ func (s *Server) handleReplayRun(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusAccepted, runActionResponse{RunID: runID, IntentKey: intentKey, State: "requested"})
 }
 
+// --- Scan a multibranch job: POST /pipelines/{team}/jobs/{job}/scan ---
+
+// scanMultibranchRequest is the optional body of the scan route. An empty
+// body names no cluster, and the team's one write-admitted tenant answers.
+type scanMultibranchRequest struct {
+	Cluster string `json:"cluster,omitempty"`
+}
+
+// scanRequestedResponse answers the scan route with the scan identifier
+// the inventory row carries as lastScan.scanId.
+type scanRequestedResponse struct {
+	ScanID string `json:"scanId"`
+	State  string `json:"state"`
+}
+
+// scanMultibranch publishes one SCAN_MULTIBRANCH command for a multibranch
+// job. It resolves the team to one write-admitted tenant, runs the tenant
+// write check, and mints a fresh UUIDv7 scan identifier. The command goes
+// to the member that holds the job's home slot, so the scan runs where the
+// job's builds run. It answers the cluster the command reached, so the
+// caller's activity audit names it.
+//
+// The route reports no outcome. The plugin records the scan's state, and
+// the branch inventory carries it.
+func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string) (scanID string, target TenantRef, serr *ServiceError) {
+	if s.deps.RecordStore == nil {
+		return "", TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
+	refs, serr := s.resolveTeamTenants(ctx, claims, team)
+	if serr != nil {
+		return "", TenantRef{}, serr
+	}
+	ref, jobPath, serr := selectWriteTenant(refs, team, jobPath, cluster)
+	if serr != nil {
+		return "", TenantRef{}, serr
+	}
+	if !s.canWritePipeline(claims, ref, jobPath) {
+		return "", TenantRef{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
+	}
+
+	id, mintErr := uuid.NewV7()
+	if mintErr != nil {
+		s.deps.Logger.Error("mint scan id", "error", mintErr)
+		return "", TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "mint scan id failed"}
+	}
+	scanID = id.String()
+
+	target, homeErr := s.homeRef(ctx, ref, jobPath)
+	if homeErr != nil {
+		return "", TenantRef{}, homeErr
+	}
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: "scan-multibranch-" + scanID,
+		Type:      mitev1.CommandTypeScanMultibranch,
+		ScanMultibranch: &mitev1.ScanMultibranchPayload{
+			ScanId:     scanID,
+			JobPath:    jobPath,
+			ActingUser: actingUserFrom(claims),
+		},
+	}
+	if err := s.publishImperative(ctx, target, cmd); err != nil {
+		s.deps.Logger.Error("publish scan multibranch", "job_path", jobPath, "error", err)
+		return "", TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "publish scan multibranch failed"}
+	}
+	return scanID, target, nil
+}
+
+// handleScanMultibranch answers POST /pipelines/{team}/jobs/{job}/scan. It
+// answers 202 with the scan identifier and the state "requested".
+func (s *Server) handleScanMultibranch(w http.ResponseWriter, r *http.Request) {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return
+	}
+	var req scanMultibranchRequest
+	if err := decodeJSONBody(http.MaxBytesReader(w, r.Body, replayRunMaxBodyBytes), &req); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	claims := auth.ClaimsFromContext(r.Context())
+	scanID, _, serr := s.scanMultibranch(r.Context(), claims, r.PathValue("team"), r.PathValue("job"), req.Cluster)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return
+	}
+	s.writeJSON(w, http.StatusAccepted, scanRequestedResponse{ScanID: scanID, State: "requested"})
+}
+
 // --- The two run input routes ---
 
 // proceedRunInputRequest is the proceed route's body: one optional

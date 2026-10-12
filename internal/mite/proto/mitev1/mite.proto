@@ -828,6 +828,7 @@ enum CommandType {
   ABORT_INPUT = 9;
   REPLAY_BUILD = 10;
   RESTART_BUILD = 11;
+  SCAN_MULTIBRANCH = 12;
 }
 
 message ImperativeCommand {
@@ -846,6 +847,7 @@ message ImperativeCommand {
   AbortInputPayload abort_input = 11;
   ReplayBuildPayload replay_build = 12;
   RestartBuildPayload restart_build = 13;
+  ScanMultibranchPayload scan_multibranch = 14;
 }
 
 message ReplayWebhookPayload {
@@ -895,6 +897,14 @@ message AbortInputPayload {
   // @required
   string input_id = 4;
   ActingUser acting_user = 5;
+}
+
+message ScanMultibranchPayload {
+  // @required
+  string scan_id = 1;
+  // @required
+  string job_path = 2;
+  ActingUser acting_user = 3;
 }
 
 message ReplayBuildPayload {

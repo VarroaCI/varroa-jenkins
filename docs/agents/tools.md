@@ -54,10 +54,11 @@ it is not wired, `search` still returns the first four.
 The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
 A cluster with `ok: false` returned incomplete results.
 
-The MCP server also exposes ten pipeline tools: `run_pipeline`, `list_runs`,
+The MCP server also exposes twelve pipeline tools: `run_pipeline`, `list_runs`,
 `get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
-`proceed_run_input`, `abort_run_input`, and `replay_run`. They operate on the
-build record store. The `run_pipeline` tool starts a build and returns a
+`proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, and `scan_multibranch`. They operate on the
+build record store. The `scan_multibranch` tool starts a scan of a multibranch job and returns
+a `scanId` and the state `requested`. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
 `runId` and an `intentKey`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's

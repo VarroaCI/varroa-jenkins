@@ -230,6 +230,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   the refusal. A refused replay publishes `run.trigger_failed` for the
   **new** run id the replay named, through `publishTriggerFailed`, so the
   new run's page shows **Build not started**. A success publishes nothing.
+  A refused `SCAN_MULTIBRANCH` logs one Warn line and publishes nothing; the plugin's
+  `VarroaBranchScans` tracker reports the refusal through the branch inventory.
   `RESTART_BUILD` (`ImperativeCommand.restart_build`, type 11) follows the same path: `cmd/mite`
   calls `jenkins.Client.RestartBuild`, which posts to `/varroa-run/restart`. A refused restart
   publishes `run.trigger_failed` for the new run id, and the command stays pending when that publish

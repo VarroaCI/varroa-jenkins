@@ -4541,9 +4541,32 @@ JobBranchHead:
       $ref: '#/RunSummary'
   additionalProperties: false
 
+ScanMultibranchRequest:
+  type: object
+  description: POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+  properties:
+    cluster:
+      type: string
+      description: >
+        Breaks a tie when the job path lies in more than one surviving
+        tenant.
+  additionalProperties: false
+
+BranchScanResponse:
+  type: object
+  description: 202 response for a scan request. The scan identifier is the lastScan.scanId of the branch inventory.
+  required: [scanId, state]
+  properties:
+    scanId:
+      type: string
+    state:
+      type: string
+      enum: [requested]
+  additionalProperties: false
+
 BranchScan:
   type: object
-  description: The last requested scan of a multibranch job. The inventory export does not fill it yet.
+  description: The last requested scan of a multibranch job. Absent until a scan runs.
   required: [scanId, state, newHeads, changedHeads, orphanedHeads]
   properties:
     scanId:

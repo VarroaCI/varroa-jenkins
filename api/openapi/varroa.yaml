@@ -3922,8 +3922,8 @@ components:
       type: object
     components_schemas_BranchScan:
       additionalProperties: false
-      description: The last requested scan of a multibranch job. The inventory export
-        does not fill it yet.
+      description: The last requested scan of a multibranch job. Absent until a scan
+        runs.
       properties:
         actor:
           type: string
@@ -3965,6 +3965,21 @@ components:
       - newHeads
       - changedHeads
       - orphanedHeads
+      type: object
+    components_schemas_BranchScanResponse:
+      additionalProperties: false
+      description: 202 response for a scan request. The scan identifier is the lastScan.scanId
+        of the branch inventory.
+      properties:
+        scanId:
+          type: string
+        state:
+          enum:
+          - requested
+          type: string
+      required:
+      - scanId
+      - state
       type: object
     components_schemas_BreakGlassRequest:
       additionalProperties: false
@@ -9576,6 +9591,15 @@ components:
       - jobPath
       - status
       type: object
+    components_schemas_ScanMultibranchRequest:
+      additionalProperties: false
+      description: POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+      properties:
+        cluster:
+          description: |
+            Breaks a tie when the job path lies in more than one surviving tenant.
+          type: string
+      type: object
     components_schemas_ScopedCapabilities:
       additionalProperties: false
       description: The capability set granted by bindings that carry one scope, plus
@@ -14545,6 +14569,41 @@ paths:
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Requests a new build. Fire and forget — the BFF does not claim the
         build number.
+      tags:
+      - Pipelines
+  /api/v1/pipelines/{team}/jobs/{job}/scan:
+    post:
+      description: |
+        The command goes to the cell that holds the job's home slot. The route reports no outcome. The result arrives in lastScan of the branch inventory, within about one minute during the fifteen minutes after the request.
+      operationId: scanMultibranch
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - $ref: '#/components/parameters/components_parameters_job'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_ScanMultibranchRequest'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_BranchScanResponse'
+          description: The scan request was published. The state is requested.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Requests a scan of a multibranch job's branches and pull requests.
       tags:
       - Pipelines
   /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:

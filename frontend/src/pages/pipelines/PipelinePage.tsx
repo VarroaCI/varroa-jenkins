@@ -519,7 +519,7 @@ export default function PipelinePage() {
       </div>
 
       {jobDetail.kind === "multibranch" ? (
-        <MultibranchCard team={team!} jobPath={jobDetail.jobPath} />
+        <MultibranchCard team={team!} jobPath={jobDetail.jobPath} canScan={canRun} />
       ) : runsQuery.isLoading ? (
         <div className={styles.loading}>Loading builds…</div>
       ) : runs.length === 0 ? (

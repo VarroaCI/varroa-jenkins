@@ -198,6 +198,19 @@ func (s *Server) ReplayRun(ctx context.Context, claims *auth.Claims, runID, scri
 	return s.replayRun(ctx, claims, runID, script)
 }
 
+// ScanMultibranch is the scan_multibranch MCP tool's entry into POST
+// /pipelines/{team}/jobs/{job}/scan. It authorizes with the tenant write
+// check, exactly as the HTTP path does. targetCluster is the cluster of the
+// home member the command reached, for the caller's own activity audit; it
+// is empty whenever serr is set.
+func (s *Server) ScanMultibranch(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string) (scanID, targetCluster string, serr *ServiceError) {
+	scanID, target, serr := s.scanMultibranch(ctx, claims, team, jobPath, cluster)
+	if serr != nil {
+		return "", "", serr
+	}
+	return scanID, target.Cluster, nil
+}
+
 // ProceedRunInput is the proceed_run_input MCP tool's entry into the
 // proceed route. It authorizes with the tenant write check on the run's
 // own tenant, exactly as POST /runs/{run}/inputs/{input}/proceed does,

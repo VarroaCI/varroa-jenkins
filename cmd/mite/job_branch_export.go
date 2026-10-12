@@ -37,15 +37,81 @@ type jobBranchChangeRequestRow struct {
 	URL          string `json:"url"`
 }
 
+// branchScanFastWindow is how long the poller uses its minimum interval
+// after a scan is accepted. A scan result reaches the export within one
+// minimum interval inside this window.
+const branchScanFastWindow = 15 * time.Minute
+
+// jobBranchScanRow is the last scan of a multibranch project in the
+// plugin's branch-inventory response. The plugin sends lastScan as null
+// until a scan is requested.
+type jobBranchScanRow struct {
+	ScanID        string   `json:"scanId"`
+	State         string   `json:"state"`
+	Actor         string   `json:"actor"`
+	RequestedAt   string   `json:"requestedAt"`
+	EndedAt       string   `json:"endedAt"`
+	Result        string   `json:"result"`
+	NewHeads      []string `json:"newHeads"`
+	ChangedHeads  []string `json:"changedHeads"`
+	OrphanedHeads []string `json:"orphanedHeads"`
+	Message       string   `json:"message"`
+}
+
 // jobBranchProjectRow is one multibranch project of the plugin's
-// branch-inventory response. The plugin sends lastScan as null until the
-// scan path fills it, so the mite does not read that key yet.
+// branch-inventory response.
 type jobBranchProjectRow struct {
 	JobPath        string             `json:"jobPath"`
 	IndexedAt      string             `json:"indexedAt"`
 	IndexResult    string             `json:"indexResult"`
 	Heads          []jobBranchHeadRow `json:"heads"`
 	HeadsTruncated bool               `json:"headsTruncated"`
+	LastScan       *jobBranchScanRow  `json:"lastScan"`
+}
+
+// wakeSchedulePoller wakes the schedule poller at once. A wake that finds
+// the channel full changes nothing, because one pending wake already polls.
+func (a *Agent) wakeSchedulePoller() {
+	select {
+	case a.jobSchedulePollNow <- struct{}{}:
+	default:
+	}
+}
+
+// openBranchScanWindow starts the fast-poll window after a scan is
+// accepted and wakes the poller, so the first poll of the window runs now.
+func (a *Agent) openBranchScanWindow(now time.Time) {
+	a.jobScheduleMu.Lock()
+	a.branchScanFastUntil = now.Add(branchScanFastWindow)
+	a.jobScheduleMu.Unlock()
+	a.wakeSchedulePoller()
+}
+
+// branchScanFast reports whether now falls inside the fast-poll window.
+func (a *Agent) branchScanFast(now time.Time) bool {
+	a.jobScheduleMu.Lock()
+	defer a.jobScheduleMu.Unlock()
+	return now.Before(a.branchScanFastUntil)
+}
+
+// lastScanProto converts the plugin's last scan. A nil row answers nil,
+// which the set carries as an absent scan.
+func lastScanProto(row *jobBranchScanRow) *mitev1.BranchScanResult {
+	if row == nil {
+		return nil
+	}
+	return &mitev1.BranchScanResult{
+		ScanId:        row.ScanID,
+		State:         row.State,
+		Actor:         row.Actor,
+		RequestedAt:   row.RequestedAt,
+		EndedAt:       row.EndedAt,
+		Result:        row.Result,
+		NewHeads:      row.NewHeads,
+		ChangedHeads:  row.ChangedHeads,
+		OrphanedHeads: row.OrphanedHeads,
+		Message:       row.Message,
+	}
 }
 
 // jobBranchResponse is the JSON envelope the branches endpoint returns.
@@ -118,6 +184,7 @@ func (a *Agent) pollJobBranches(ctx context.Context) (*mitev1.JobBranchSet, erro
 			IndexResult:    p.IndexResult,
 			Heads:          heads,
 			HeadsTruncated: p.HeadsTruncated,
+			LastScan:       lastScanProto(p.LastScan),
 		})
 	}
 

@@ -1243,6 +1243,37 @@ func (c *Client) ReplayBuild(ctx context.Context, req ReplayBuildRequest) (int, 
 	return resp.StatusCode, nil
 }
 
+// ScanMultibranchRequest is the body posted to the Varroa plugin's
+// /varroa-run/scan route.
+type ScanMultibranchRequest struct {
+	ScanID     string      `json:"scanId"`
+	JobPath    string      `json:"jobPath"`
+	ActingUser *ActingUser `json:"actingUser,omitempty"`
+}
+
+// ScanMultibranch starts a scan of the multibranch job through the Varroa
+// plugin's /varroa-run/scan route. The plugin records the heads of the job
+// before the scan, so a later inventory row carries the result.
+//
+// It returns the Jenkins HTTP status beside the error, the way ReplayBuild
+// does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ScanMultibranch(ctx context.Context, req ScanMultibranchRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("scan multibranch %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/scan", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("scan multibranch %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("scan multibranch %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
 // RestartBuildRequest is the body posted to the Varroa plugin's
 // /varroa-run/restart route.
 type RestartBuildRequest struct {

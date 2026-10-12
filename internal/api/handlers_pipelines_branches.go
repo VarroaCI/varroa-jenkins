@@ -107,10 +107,6 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 	}
 	out.IndexResult = project.IndexResult
 	out.Truncated = project.HeadsTruncated
-	if project.LastScan != nil {
-		out.LastScan = branchScanOf(*project.LastScan)
-	}
-
 	// Each head meets the read grant on its own job path, as a run row
 	// does. A head the caller may not read never reaches the response.
 	grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
@@ -120,6 +116,17 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 			continue
 		}
 		admitted = append(admitted, head)
+	}
+
+	if project.LastScan != nil {
+		scan := branchScanOf(*project.LastScan)
+		canRead := func(path string) bool {
+			return granted && grantsAllow(grants, ref.Folder, path, "read")
+		}
+		scan.NewHeads = scanNamesVisibleTo(scan.NewHeads, project.Heads, canRead)
+		scan.ChangedHeads = scanNamesVisibleTo(scan.ChangedHeads, project.Heads, canRead)
+		scan.OrphanedHeads = scanNamesVisibleTo(scan.OrphanedHeads, project.Heads, canRead)
+		out.LastScan = scan
 	}
 
 	paths := make([]string, 0, len(admitted))
@@ -189,6 +196,39 @@ func changeRequestIDLess(a, b jobBranchHeadJSON) bool {
 		return numA < numB
 	}
 	return idA < idB
+}
+
+// scanNamesVisibleTo keeps the head names of a scan result that the caller
+// may read. A name is tested on the job path of the inventory head that
+// holds it. A name with no inventory head is dropped, because its job path
+// cannot be rebuilt from the name: Jenkins encodes a slash in a head name.
+// The result therefore omits a head that the scan deleted. Showing it would
+// need the job path stored on the scan.
+func scanNamesVisibleTo(names []string, heads []recordstore.JobBranchHead, canRead func(string) bool) []string {
+	// A branch, a tag, and a pull request can share one name. The name is
+	// visible only when the caller reads every head that holds it.
+	paths := make(map[string][]string, len(heads))
+	for _, head := range heads {
+		paths[head.Name] = append(paths[head.Name], head.JobPath)
+	}
+	out := []string{}
+	for _, name := range names {
+		held, ok := paths[name]
+		if !ok {
+			continue
+		}
+		visible := true
+		for _, path := range held {
+			if !canRead(path) {
+				visible = false
+				break
+			}
+		}
+		if visible {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // branchScanOf converts a stored scan into its response shape.

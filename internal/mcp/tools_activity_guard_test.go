@@ -324,6 +324,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		"proceed_run_input":  {"run": obj, "input": "in-1"},
 		"abort_run_input":    {"run": obj, "input": "in-1"},
 		"replay_run":         {"run": guardReplayRunID, "script": "echo 'edited'"},
+		"scan_multibranch":   {"team": "team-a", "job": "build"},
 		"restart_run":        {"run": guardReplayRunID, "stage": "deploy"},
 		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
 		// CellPools (cluster-scoped, direct store)

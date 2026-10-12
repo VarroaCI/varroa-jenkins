@@ -47,6 +47,7 @@ import type {
   PipelineListResponse,
   PipelineJobDetail,
   JobBranchList,
+  ScanRequestedResponse,
   RunListResponse,
   CreateRunRequest,
   RunActionResponse,
@@ -1151,6 +1152,17 @@ export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJ
  * multibranch job. The inventory can be up to ten minutes stale. */
 export function listJobBranches(team: string, jobPath: string): Promise<JobBranchList> {
   return bffFetch<JobBranchList>(`${jobBase(team, jobPath)}/branches`);
+}
+
+/** scanMultibranch requests a scan of a multibranch job's branches and pull
+ * requests. The 202 answer carries the scan identifier; the inventory's
+ * lastScan.scanId repeats it once the scan reports. */
+export function scanMultibranch(team: string, jobPath: string, cluster?: string): Promise<ScanRequestedResponse> {
+  return bffFetchJSON<ScanRequestedResponse>(`${jobBase(team, jobPath)}/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cluster ? { cluster } : {}),
+  });
 }
 
 /**

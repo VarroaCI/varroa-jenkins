@@ -242,6 +242,9 @@ type Agent struct {
 	jobBranchLastSentHash string
 	jobBranchLastSendTime time.Time
 	jobBranchForceSend    bool
+	// branchScanFastUntil ends the window in which the poller uses its
+	// minimum interval, so a requested scan reaches the export sooner.
+	branchScanFastUntil time.Time
 
 	// tenantHomes caches the tenant_homes field of the newest applied
 	// desired state. The loopback route GET /v1/homes serves it. The mite
@@ -1794,6 +1797,35 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			} else {
 				success = true
 			}
+		case mitev1.CommandTypeScanMultibranch:
+			payload := cmd.ScanMultibranch
+			if payload == nil {
+				errStr = "scan_multibranch payload is nil"
+				break
+			}
+			// A scan takes the items gate alone. It runs on the home member,
+			// so the tenant gate of the job's tenant adds nothing to it.
+			if readyErr := a.awaitScanReady(cctx, w.mailbox); readyErr != nil {
+				errStr = fmt.Sprintf("scan multibranch %s: %v", payload.JobPath, readyErr)
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			scanStatus, scanErr := a.getJenkinsClient().ScanMultibranch(cctx, jenkins.ScanMultibranchRequest{
+				ScanID:     payload.ScanId,
+				JobPath:    payload.JobPath,
+				ActingUser: acting,
+			})
+			httpStatus = scanStatus
+			if scanErr != nil {
+				errStr = scanErr.Error()
+			} else {
+				success = true
+				a.openBranchScanWindow(time.Now())
+			}
 		case mitev1.CommandTypeRestartBuild:
 			payload := cmd.RestartBuild
 			if payload == nil {
@@ -1864,6 +1896,25 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 // open, builds can run, so the inline apply keeps the idle deferral. A nil
 // mb waits for the gates alone.
 func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPath string) error {
+	return a.awaitRunReady(ctx, mb, jobPath, true)
+}
+
+// awaitScanReady runs the wait of awaitTriggerReady with the items gate
+// alone. A scan names no tenant gate: the job's home member answers it
+// once the items are applied, whatever tenant set the cell holds.
+func (a *Agent) awaitScanReady(ctx context.Context, mb *commandMailbox) error {
+	return a.awaitRunReady(ctx, mb, "", false)
+}
+
+// awaitRunReady is the shared wait. When tenantGate is false, the wait
+// ends at the items gate alone and jobPath is not read.
+func (a *Agent) awaitRunReady(ctx context.Context, mb *commandMailbox, jobPath string, tenantGate bool) error {
+	ready := func() bool {
+		if tenantGate {
+			return a.tenantItemsReady(jobPath)
+		}
+		return a.itemsApplied()
+	}
 	wait := a.triggerReadyWait
 	if wait <= 0 {
 		wait = triggerReadyWaitDefault
@@ -1876,7 +1927,7 @@ func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPa
 	if !a.itemsApplied() {
 		a.openItemsGateFromMarker(wctx)
 	}
-	if a.tenantItemsReady(jobPath) {
+	if ready() {
 		return nil
 	}
 	tenant := jobTenant(jobPath)
@@ -1904,7 +1955,7 @@ func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPa
 	recheckTimer.Stop()
 	defer recheckTimer.Stop()
 	for {
-		if a.tenantItemsReady(jobPath) {
+		if ready() {
 			return nil
 		}
 		var recheckC <-chan time.Time
@@ -1945,7 +1996,7 @@ func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPa
 		case <-signal:
 		case <-recheckC:
 		case <-wctx.Done():
-			if a.tenantItemsReady(jobPath) {
+			if ready() {
 				return nil
 			}
 			return waitErr()
@@ -2097,6 +2148,8 @@ func imperativeCommandSubject(cmd *mitev1.ImperativeCommand) (jobPath, runID str
 		return cmd.AbortInput.JobPath, cmd.AbortInput.RunId
 	case cmd.ReplayBuild != nil:
 		return cmd.ReplayBuild.JobPath, cmd.ReplayBuild.RunId
+	case cmd.ScanMultibranch != nil:
+		return cmd.ScanMultibranch.JobPath, ""
 	case cmd.RestartBuild != nil:
 		return cmd.RestartBuild.JobPath, cmd.RestartBuild.RunId
 	case cmd.Target != "":
@@ -2120,6 +2173,8 @@ func imperativeCommandActor(cmd *mitev1.ImperativeCommand) string {
 		return actingUserName(cmd.AbortInput.ActingUser)
 	case cmd.ReplayBuild != nil:
 		return actingUserName(cmd.ReplayBuild.ActingUser)
+	case cmd.ScanMultibranch != nil:
+		return actingUserName(cmd.ScanMultibranch.ActingUser)
 	case cmd.RestartBuild != nil:
 		return actingUserName(cmd.RestartBuild.ActingUser)
 	}

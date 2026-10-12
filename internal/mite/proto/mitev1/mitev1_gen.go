@@ -414,19 +414,20 @@ type IdleGauges struct {
 }
 
 type ImperativeCommand struct {
-	CommandId       string                `json:"command_id"`
-	Type            CommandType           `json:"type"`
-	Target          string                `json:"target,omitempty"`
-	DeadlineSec     int64                 `json:"deadline_sec,omitempty"`
-	DrainTimeoutSec int64                 `json:"drain_timeout_sec,omitempty"`
-	ReplayWebhook   *ReplayWebhookPayload `json:"replay_webhook,omitempty"`
-	TriggerBuild    *TriggerBuildPayload  `json:"trigger_build,omitempty"`
-	CancelBuild     *CancelBuildPayload   `json:"cancel_build,omitempty"`
-	ResumeBuild     *ResumeBuildPayload   `json:"resume_build,omitempty"`
-	ProceedInput    *ProceedInputPayload  `json:"proceed_input,omitempty"`
-	AbortInput      *AbortInputPayload    `json:"abort_input,omitempty"`
-	ReplayBuild     *ReplayBuildPayload   `json:"replay_build,omitempty"`
-	RestartBuild    *RestartBuildPayload  `json:"restart_build,omitempty"`
+	CommandId       string                  `json:"command_id"`
+	Type            CommandType             `json:"type"`
+	Target          string                  `json:"target,omitempty"`
+	DeadlineSec     int64                   `json:"deadline_sec,omitempty"`
+	DrainTimeoutSec int64                   `json:"drain_timeout_sec,omitempty"`
+	ReplayWebhook   *ReplayWebhookPayload   `json:"replay_webhook,omitempty"`
+	TriggerBuild    *TriggerBuildPayload    `json:"trigger_build,omitempty"`
+	CancelBuild     *CancelBuildPayload     `json:"cancel_build,omitempty"`
+	ResumeBuild     *ResumeBuildPayload     `json:"resume_build,omitempty"`
+	ProceedInput    *ProceedInputPayload    `json:"proceed_input,omitempty"`
+	AbortInput      *AbortInputPayload      `json:"abort_input,omitempty"`
+	ReplayBuild     *ReplayBuildPayload     `json:"replay_build,omitempty"`
+	RestartBuild    *RestartBuildPayload    `json:"restart_build,omitempty"`
+	ScanMultibranch *ScanMultibranchPayload `json:"scan_multibranch,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -1298,6 +1299,12 @@ type RunStateResponse struct {
 	Error       string  `json:"error,omitempty"`
 }
 
+type ScanMultibranchPayload struct {
+	ScanId     string      `json:"scan_id"`
+	JobPath    string      `json:"job_path"`
+	ActingUser *ActingUser `json:"acting_user,omitempty"`
+}
+
 type StateSnapshot struct {
 	ActualStateHash   string               `json:"actual_state_hash,omitempty"`
 	ConfigHash        string               `json:"config_hash,omitempty"`
@@ -1371,6 +1378,7 @@ const (
 	CommandTypeAbortInput             CommandType = 9
 	CommandTypeReplayBuild            CommandType = 10
 	CommandTypeRestartBuild           CommandType = 11
+	CommandTypeScanMultibranch        CommandType = 12
 )
 
 // MiteServer is the server-side interface for the Mite service.

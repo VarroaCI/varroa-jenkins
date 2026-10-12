@@ -581,6 +581,14 @@ the root AGENTS.md greenfield rule.
   permission check, because a repeat schedules nothing. The recorder writes
   `VarroaReplayCause`'s source run into `replay_of` on the `STARTED` event
   alone. `replay` holds one word, so the route needs no `@WebMethod`.
+  `POST /varroa-run/scan` (`doScan`, one word, no `@WebMethod`) reads `scanId`, `jobPath`, and
+  `actingUser`. It answers `404` for no item, `409` for an item that is not a `MultiBranchProject`
+  or a queue that refuses the computation, `403` without `Item.BUILD` for the acting user (the
+  refusal is recorded), and `202` on success. `VarroaBranchScans` (static, in-memory, no
+  `@Extension`) keeps one scan per job full name: `arm` snapshots the heads, a `Timer` task checks
+  every 3 seconds whether the folder computation ended, `diff` names new, changed, and orphaned
+  heads (each list capped at 200), and a scan past 30 minutes becomes `timeout`. `lastScanJson`
+  fills the `lastScan` key of each `/varroa-activity/branches` row. The route list pin is nine.
   `POST /varroa-run/restart` (`VarroaRunTriggerAction.doRestart`) reruns a completed declarative
   build from one stage as the acting user. It keeps the source build's parameter values. It refuses
   `409` when the job's home moved off this cell (`VarroaHomeCache.forwardSlotFor`), when the source

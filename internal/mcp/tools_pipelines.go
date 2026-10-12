@@ -15,14 +15,14 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (11): run_pipeline, list_runs, get_run, get_run_log,
+// Pipeline tools (12): run_pipeline, list_runs, get_run, get_run_log,
 // list_job_branches, list_fleet_locks, release_fleet_lock, proceed_run_input,
-// abort_run_input, replay_run, restart_run
+// abort_run_input, replay_run, restart_run, scan_multibranch
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
 // GetRun, GetRunLog, ListJobBranches, ListFleetLocks, ReleaseFleetLock,
-// ProceedRunInput, AbortRunInput, ReplayRun, RestartRun), so
+// ProceedRunInput, AbortRunInput, ReplayRun, RestartRun, ScanMultibranch), so
 // each tool authorizes and reads exactly as its HTTP counterpart does.
 // No tool here calls a controller-scoped check; the authorization table
 // lives in specs/pipelines-api.
@@ -51,6 +51,7 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerProceedRunInputTool(mcpServer, deps)
 	registerAbortRunInputTool(mcpServer, deps)
 	registerReplayRunTool(mcpServer, deps)
+	registerScanMultibranchTool(mcpServer, deps)
 	registerRestartRunTool(mcpServer, deps)
 }
 
@@ -124,6 +125,44 @@ func registerReplayRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 			Message: fmt.Sprintf("Replay of run %s requested (run %s)", run, runID),
 		})
 		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
+	})
+}
+
+// registerScanMultibranchTool registers scan_multibranch: it starts a scan
+// of a multibranch job's branches as the calling user. The command goes to
+// the job's home member, and the tool reports no outcome. The branch
+// inventory of list_job_branches carries the scan's result.
+func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	scanTool := mcp.NewTool("scan_multibranch",
+		mcp.WithDescription("Start a scan of a multibranch job's branches and pull requests, as the calling user. "+
+			"The scan runs on the job's home member and reports no outcome here. Use list_job_branches to follow "+
+			"its result in lastScan."),
+		mcp.WithString("team", mcp.Required(), mcp.Description("Team name")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("Multibranch job path, as the job page names it")),
+		mcp.WithString("cluster", mcp.Description("Cluster to select, when team and job resolve to more than one tenant")),
+	)
+	addTool(mcpServer, kindAction, scanTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		team := strArg(args, "team")
+		job := strArg(args, "job")
+		if team == "" || job == "" {
+			return mcp.NewToolResultError("team and job are required"), nil
+		}
+		scanID, targetCluster, serr := api.NewServer(deps).ScanMultibranch(ctx, claims, team, job, strArg(args, "cluster"))
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		// One activity event records the request, on the cluster the
+		// command reached, which can differ from the cluster this BFF serves.
+		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+			Type:    "pipeline.branch_scan_requested",
+			Message: fmt.Sprintf("Scan of %s requested (scan %s)", job, scanID),
+		})
+		return resultJSON(map[string]any{"scanId": scanID, "state": "requested"})
 	})
 }
 

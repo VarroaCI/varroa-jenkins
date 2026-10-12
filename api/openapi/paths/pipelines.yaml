@@ -124,6 +124,45 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{team}/jobs/{job}/scan:
+  post:
+    operationId: scanMultibranch
+    tags: [Pipelines]
+    summary: Requests a scan of a multibranch job's branches and pull requests.
+    description: >
+      The command goes to the cell that holds the job's home slot. The
+      route reports no outcome. The result arrives in lastScan of the
+      branch inventory, within about one minute during the fifteen
+      minutes after the request.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ScanMultibranchRequest'
+    responses:
+      "202":
+        description: The scan request was published. The state is requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/BranchScanResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{team}/jobs/{job}/runs:
   get:
     operationId: listRuns

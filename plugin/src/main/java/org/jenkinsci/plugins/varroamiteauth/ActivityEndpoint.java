@@ -9,7 +9,6 @@ import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.mixin.ChangeRequestSCMHead;
 import jenkins.scm.api.mixin.TagSCMHead;
-import net.sf.json.JSONNull;
 import hudson.model.Computer;
 import hudson.model.Executor;
 import hudson.model.Item;
@@ -476,7 +475,7 @@ public class ActivityEndpoint implements RootAction {
         row.put("indexResult", indexResult);
         row.put("heads", heads);
         row.put("headsTruncated", headsTruncated);
-        row.put("lastScan", JSONNull.getInstance());
+        row.put("lastScan", VarroaBranchScans.lastScanJson(project.getFullName()));
         return row;
     }
 
@@ -509,7 +508,7 @@ public class ActivityEndpoint implements RootAction {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private static String revisionOf(BranchProjectFactory factory, Job job) {
+    static String revisionOf(BranchProjectFactory factory, Job job) {
         SCMRevision revision = factory.getLastSeenRevision(job);
         if (revision == null) {
             return "";

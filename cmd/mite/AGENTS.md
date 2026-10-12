@@ -106,7 +106,12 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     the apply answers the plugin's `404` (`JOB_NOT_FOUND`). Every imperative `CommandResult` carries
     `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
     and `actor` (`imperativeCommandActor`: the trigger's or cancel's
-    `actor`, or the `acting_user.name` of an input answer or a replay).
+    `actor`, or the `acting_user.name` of an input answer, a replay, or a scan).
+    `SCAN_MULTIBRANCH` (`ScanMultibranch` in `jenkins/client.go`) waits for the items gate only
+    (`awaitScanReady`), never the tenant gate; the job's home member answers it. An accepted scan
+    opens a 15-minute fast-poll window (`openBranchScanWindow`): the schedule poller uses its
+    minimum interval, so the branch export sends the scan result sooner. The inventory row
+    carries `lastScan` to the gateway through `lastScanProto`.
     A cancel carries the plugin's HTTP status like every other run
     command. `logImperativeResult` logs each result at info on success and
     at warn on failure.

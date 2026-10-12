@@ -39,6 +39,8 @@ func TestRecordCommandOutcome_RefusedRunCommandsLog(t *testing.T) {
 			AbortInput: &mitev1.AbortInputPayload{RunId: "r1", JobPath: "acme/app", InputId: "i"}}, "run input command refused"},
 		{"replay", &mitev1.ImperativeCommand{CommandId: "replay-r1", Type: mitev1.CommandTypeReplayBuild,
 			ReplayBuild: &mitev1.ReplayBuildPayload{RunId: "r1", JobPath: "acme/app"}}, "replay build command refused"},
+		{"scan", &mitev1.ImperativeCommand{CommandId: "scan-s1", Type: mitev1.CommandTypeScanMultibranch,
+			ScanMultibranch: &mitev1.ScanMultibranchPayload{ScanId: "s1", JobPath: "acme/app"}}, "multibranch scan command refused"},
 	}
 	for _, tc := range cases {
 		for _, storeEnabled := range []bool{false, true} {

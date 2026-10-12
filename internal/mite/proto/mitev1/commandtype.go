@@ -14,6 +14,7 @@ var commandTypeLabels = map[CommandType]string{
 	CommandTypeAbortInput:             "abort_input",
 	CommandTypeReplayBuild:            "replay_build",
 	CommandTypeRestartBuild:           "restart_build",
+	CommandTypeScanMultibranch:        "scan_multibranch",
 }
 
 // Label answers the command type's lower-case name. An unspecified or

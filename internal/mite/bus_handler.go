@@ -635,6 +635,11 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 			h.publishCommandRefused(ns, name, refusedCommandAbort, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
 		}
 		return true
+	case mitev1.CommandTypeScanMultibranch:
+		// A scan writes no record. The plugin tracker reports its own
+		// refusals through the branch inventory.
+		h.logRefusedRunCommand("multibranch scan command refused", ns, name, result)
+		return true
 	case mitev1.CommandTypeReplayBuild:
 		// A refused replay leaves no build. The failure record of the new
 		// run is the only record the run's reader can find.

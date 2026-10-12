@@ -1625,6 +1625,12 @@ export interface JobBranchHead {
   lastRun?: RunSummary;
 }
 
+/** The 202 answer of the scan route. */
+export interface ScanRequestedResponse {
+  scanId: string;
+  state: "requested";
+}
+
 /** The last requested scan of a multibranch job. */
 export interface BranchScan {
   scanId: string;

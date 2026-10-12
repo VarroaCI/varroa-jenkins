@@ -101,6 +101,9 @@ func (a *Agent) startJobSchedulePoller(ctx context.Context) {
 			if earliest, ok := a.pollJobSchedulesOnce(ctx, logger); ok {
 				retry = retryBase
 				delay = nextJobSchedulePollDelay(earliest, time.Now(), interval, minInterval)
+				if a.branchScanFast(time.Now()) {
+					delay = minInterval
+				}
 			} else {
 				delay = min(retry, interval)
 				retry = min(2*retry, minInterval)

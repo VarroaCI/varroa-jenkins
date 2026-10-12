@@ -322,6 +322,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1branches'
   /api/v1/pipelines/{team}/jobs/{job}/runs:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
+  /api/v1/pipelines/{team}/jobs/{job}/scan:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1scan'
   /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1tests~1{case}'
   /api/v1/pipelines/{team}/locks:

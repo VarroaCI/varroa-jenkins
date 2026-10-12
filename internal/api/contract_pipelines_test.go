@@ -133,6 +133,13 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "scanMultibranch-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/pipelines/payments/jobs/checkout-api/scan",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "replayRun-recordStoreDisabled",
 			Method:     "POST",
 			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/replay",

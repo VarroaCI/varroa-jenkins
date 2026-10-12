@@ -57,6 +57,11 @@ const (
 	ComponentsSchemasBranchScanStateTimeout   ComponentsSchemasBranchScanState = "timeout"
 )
 
+// Defines values for ComponentsSchemasBranchScanResponseState.
+const (
+	ComponentsSchemasBranchScanResponseStateRequested ComponentsSchemasBranchScanResponseState = "requested"
+)
+
 // Defines values for ComponentsSchemasBroodOperationDetailSpecActionVerb.
 const (
 	ComponentsSchemasBroodOperationDetailSpecActionVerbExecuteGroovy ComponentsSchemasBroodOperationDetailSpecActionVerb = "executeGroovy"
@@ -429,7 +434,7 @@ const (
 
 // Defines values for ComponentsSchemasRunActionResponseState.
 const (
-	ComponentsSchemasRunActionResponseStateRequested ComponentsSchemasRunActionResponseState = "requested"
+	Requested ComponentsSchemasRunActionResponseState = "requested"
 )
 
 // Defines values for ComponentsSchemasRunCommandRefusalCommand.
@@ -713,7 +718,7 @@ type ComponentsSchemasBindingFederationStatus struct {
 // ComponentsSchemasBindingFederationStatusState defines model for ComponentsSchemasBindingFederationStatus.State.
 type ComponentsSchemasBindingFederationStatusState string
 
-// ComponentsSchemasBranchScan The last requested scan of a multibranch job. The inventory export does not fill it yet.
+// ComponentsSchemasBranchScan The last requested scan of a multibranch job. Absent until a scan runs.
 type ComponentsSchemasBranchScan struct {
 	Actor         *string                          `json:"actor,omitempty"`
 	ChangedHeads  []string                         `json:"changedHeads"`
@@ -729,6 +734,15 @@ type ComponentsSchemasBranchScan struct {
 
 // ComponentsSchemasBranchScanState defines model for ComponentsSchemasBranchScan.State.
 type ComponentsSchemasBranchScanState string
+
+// ComponentsSchemasBranchScanResponse 202 response for a scan request. The scan identifier is the lastScan.scanId of the branch inventory.
+type ComponentsSchemasBranchScanResponse struct {
+	ScanId string                                   `json:"scanId"`
+	State  ComponentsSchemasBranchScanResponseState `json:"state"`
+}
+
+// ComponentsSchemasBranchScanResponseState defines model for ComponentsSchemasBranchScanResponse.State.
+type ComponentsSchemasBranchScanResponseState string
 
 // ComponentsSchemasBreakGlassRequest Request body for a break-glass grant.
 type ComponentsSchemasBreakGlassRequest struct {
@@ -2479,7 +2493,7 @@ type ComponentsSchemasJobBranchList struct {
 	IndexedAt *time.Time `json:"indexedAt,omitempty"`
 	JobPath   string     `json:"jobPath"`
 
-	// LastScan The last requested scan of a multibranch job. The inventory export does not fill it yet.
+	// LastScan The last requested scan of a multibranch job. Absent until a scan runs.
 	LastScan *ComponentsSchemasBranchScan `json:"lastScan,omitempty"`
 
 	// ObservedAt When the cell last exported this job. Absent before the first export.
@@ -3861,6 +3875,12 @@ type ComponentsSchemasRunningRun struct {
 	TypicalDurationMs *int64 `json:"typicalDurationMs,omitempty"`
 }
 
+// ComponentsSchemasScanMultibranchRequest POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+type ComponentsSchemasScanMultibranchRequest struct {
+	// Cluster Breaks a tie when the job path lies in more than one surviving tenant.
+	Cluster *string `json:"cluster,omitempty"`
+}
+
 // ComponentsSchemasScopedCapabilities The capability set granted by bindings that carry one scope, plus the scope descriptor. Scoped grants are never flattened into the global partition.
 type ComponentsSchemasScopedCapabilities struct {
 	// Capabilities Resource-to-verb-to-allowed capability map.
@@ -5142,6 +5162,9 @@ type UpdateMyPreferencesJSONRequestBody = ComponentsSchemasPreferences
 // CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
 type CreateRunJSONRequestBody = ComponentsSchemasCreateRunRequest
 
+// ScanMultibranchJSONRequestBody defines body for ScanMultibranch for application/json ContentType.
+type ScanMultibranchJSONRequestBody = ComponentsSchemasScanMultibranchRequest
+
 // ValidatePipelineMarkerJSONRequestBody defines body for ValidatePipelineMarker for application/json ContentType.
 type ValidatePipelineMarkerJSONRequestBody = ComponentsSchemasPipelineMarkerValidateRequest
 
@@ -6097,6 +6120,11 @@ type ClientInterface interface {
 	CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ScanMultibranchWithBody request with any body
+	ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListJobTestCaseHistory request
 	ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8041,6 +8069,30 @@ func (c *Client) CreateRunWithBody(ctx context.Context, team ComponentsParameter
 
 func (c *Client) CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateRunRequest(c.Server, team, job, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequestWithBody(c.Server, team, job, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequest(c.Server, team, job, body)
 	if err != nil {
 		return nil, err
 	}
@@ -14459,6 +14511,60 @@ func NewCreateRunRequestWithBody(server string, team ComponentsParametersTeam, j
 	return req, nil
 }
 
+// NewScanMultibranchRequest calls the generic ScanMultibranch builder with application/json body
+func NewScanMultibranchRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewScanMultibranchRequestWithBody(server, team, job, "application/json", bodyReader)
+}
+
+// NewScanMultibranchRequestWithBody generates requests for ScanMultibranch with any type of body
+func NewScanMultibranchRequestWithBody(server string, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/scan", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListJobTestCaseHistoryRequest generates requests for ListJobTestCaseHistory
 func NewListJobTestCaseHistoryRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams) (*http.Request, error) {
 	var err error
@@ -17146,6 +17252,11 @@ type ClientWithResponsesInterface interface {
 	CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
 
 	CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+
+	// ScanMultibranchWithBodyWithResponse request with any body
+	ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
+
+	ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
 
 	// ListJobTestCaseHistoryWithResponse request
 	ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
@@ -20188,6 +20299,34 @@ func (r CreateRunResponse) StatusCode() int {
 	return 0
 }
 
+type ScanMultibranchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasBranchScanResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ScanMultibranchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ScanMultibranchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListJobTestCaseHistoryResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -22907,6 +23046,23 @@ func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, team Co
 		return nil, err
 	}
 	return ParseCreateRunResponse(rsp)
+}
+
+// ScanMultibranchWithBodyWithResponse request with arbitrary body returning *ScanMultibranchResponse
+func (c *ClientWithResponses) ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranchWithBody(ctx, team, job, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScanMultibranchResponse(rsp)
+}
+
+func (c *ClientWithResponses) ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranch(ctx, team, job, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScanMultibranchResponse(rsp)
 }
 
 // ListJobTestCaseHistoryWithResponse request returning *ListJobTestCaseHistoryResponse
@@ -28689,6 +28845,74 @@ func ParseCreateRunResponse(rsp *http.Response) (*CreateRunResponse, error) {
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseScanMultibranchResponse parses an HTTP response from a ScanMultibranchWithResponse call
+func ParseScanMultibranchResponse(rsp *http.Response) (*ScanMultibranchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ScanMultibranchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasBranchScanResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
