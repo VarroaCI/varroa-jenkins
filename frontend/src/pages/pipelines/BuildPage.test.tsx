@@ -879,7 +879,7 @@ describe("BuildPage — the header's source facts", () => {
     await screen.findByText(/Build #42/);
 
     // The trail also names the job "main", so the branch is read from the meta line.
-    const meta = screen.getByText("abcdef12").parentElement!;
+    const meta = screen.getByText("abcdef12").closest("div")!;
     expect(within(meta).getByText("main")).toBeInTheDocument();
     expect(within(meta).getByText("abcdef12")).toBeInTheDocument();
     // The heading carries no cause, so the cause string appears on the meta line alone.

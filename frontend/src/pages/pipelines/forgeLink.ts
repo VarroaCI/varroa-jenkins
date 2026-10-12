@@ -1,6 +1,6 @@
 /** ForgeMatch names one recognized repository host and its two path
  * segments. */
-interface ForgeMatch {
+export interface ForgeMatch {
   host: "github.com" | "gitlab.com";
   owner: string;
   repo: string;
@@ -42,4 +42,11 @@ export function fileHref(match: ForgeMatch, revision: string, path: string): str
   return match.host === "github.com"
     ? `https://github.com/${match.owner}/${match.repo}/blob/${revision}/${path}`
     : `https://gitlab.com/${match.owner}/${match.repo}/-/blob/${revision}/${path}`;
+}
+
+/** commitHref builds the "view this commit" link for a forge match. */
+export function commitHref(match: ForgeMatch, sha: string): string {
+  return match.host === "github.com"
+    ? `https://github.com/${match.owner}/${match.repo}/commit/${sha}`
+    : `https://gitlab.com/${match.owner}/${match.repo}/-/commit/${sha}`;
 }

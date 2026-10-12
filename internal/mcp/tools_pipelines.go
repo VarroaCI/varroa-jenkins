@@ -276,7 +276,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, test counts, stages, and the newest refused cancel or input answer."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, and the newest refused cancel or input answer."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 	)
 	addTool(mcpServer, kindRead, getRunTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -344,6 +344,8 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "scmRevision", Type: "string", Desc: "SCM revision, if any."},
 	{Name: "actor", Type: "string", Desc: "User who started the run, if any."},
 	{Name: "cause", Type: "string", Desc: "Short cause description."},
+	{Name: "scmUrl", Type: "string", Desc: "Repository URL, if any."},
+	{Name: "triggerSource", Type: "string", Desc: "Kind of cause: user, webhook, cron, upstream, replay, scm, or other. Absent when unknown."},
 	{Name: "queuedAt", Type: "string", Desc: "Queue time, RFC3339."},
 	{Name: "startedAt", Type: "string", Desc: "Start time, RFC3339."},
 	{Name: "endedAt", Type: "string", Desc: "End time, RFC3339."},

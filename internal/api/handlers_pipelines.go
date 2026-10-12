@@ -37,19 +37,21 @@ const crossTenantExhaustedCursor = "exhausted"
 // --- Response shapes (api/openapi/components/schemas.yaml) ---
 
 type runSummaryJSON struct {
-	RunID       string     `json:"runId"`
-	BuildNumber int64      `json:"buildNumber,omitempty"`
-	JobPath     string     `json:"jobPath,omitempty"`
-	Status      string     `json:"status"`
-	Result      string     `json:"result,omitempty"`
-	Branch      string     `json:"branch,omitempty"`
-	SCMRevision string     `json:"scmRevision,omitempty"`
-	Actor       string     `json:"actor,omitempty"`
-	Cause       string     `json:"cause,omitempty"`
-	QueuedAt    *time.Time `json:"queuedAt,omitempty"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	EndedAt     *time.Time `json:"endedAt,omitempty"`
-	DurationMs  int64      `json:"durationMs,omitempty"`
+	RunID         string     `json:"runId"`
+	BuildNumber   int64      `json:"buildNumber,omitempty"`
+	JobPath       string     `json:"jobPath,omitempty"`
+	Status        string     `json:"status"`
+	Result        string     `json:"result,omitempty"`
+	Branch        string     `json:"branch,omitempty"`
+	SCMRevision   string     `json:"scmRevision,omitempty"`
+	Actor         string     `json:"actor,omitempty"`
+	Cause         string     `json:"cause,omitempty"`
+	SCMURL        string     `json:"scmUrl,omitempty"`
+	TriggerSource string     `json:"triggerSource,omitempty"`
+	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	EndedAt       *time.Time `json:"endedAt,omitempty"`
+	DurationMs    int64      `json:"durationMs,omitempty"`
 }
 
 type runningRunJSON struct {
@@ -289,6 +291,7 @@ func buildRunSummary(run recordstore.Run) runSummaryJSON {
 		s.Actor = *run.Actor
 	}
 	s.Cause = causeSummary(run.Cause)
+	s.SCMURL, s.TriggerSource = runOriginOf(run.Payload)
 	s.QueuedAt = run.QueuedAt
 	s.StartedAt = run.StartedAt
 	s.EndedAt = run.EndedAt

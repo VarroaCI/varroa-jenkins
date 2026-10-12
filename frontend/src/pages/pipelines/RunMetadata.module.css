@@ -1,0 +1,27 @@
+/* The meta line: branch, commit, actor, cause, start, duration, queue wait. */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* A labelled row under the meta line: parameters, the run definition, the replay origin. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.rowLabel {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mono {
+  font-family: var(--mono);
+}

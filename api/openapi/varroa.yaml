@@ -2652,6 +2652,10 @@ components:
           type: string
         scmRevision:
           type: string
+        scmUrl:
+          description: Repository URL of the run, from the SCM source. Absent when
+            Jenkins reports none.
+          type: string
         source:
           additionalProperties: false
           description: |
@@ -2728,6 +2732,18 @@ components:
             that no build claim followed. CLAIM_ABANDONED names a granted build claim
             that started no build. The last four name a build claim that the record
             store refused. Set only when result is TRIGGER_FAILED.
+          type: string
+        triggerSource:
+          description: Kind of cause that started the run. Absent when Jenkins reports
+            no cause list.
+          enum:
+          - user
+          - webhook
+          - cron
+          - upstream
+          - replay
+          - scm
+          - other
           type: string
       required:
       - runId
@@ -2928,10 +2944,26 @@ components:
           type: string
         scmRevision:
           type: string
+        scmUrl:
+          description: Repository URL of the run, from the SCM source. Absent when
+            Jenkins reports none.
+          type: string
         startedAt:
           format: date-time
           type: string
         status:
+          type: string
+        triggerSource:
+          description: Kind of cause that started the run. Absent when Jenkins reports
+            no cause list.
+          enum:
+          - user
+          - webhook
+          - cron
+          - upstream
+          - replay
+          - scm
+          - other
           type: string
       required:
       - runId
@@ -8399,6 +8431,10 @@ components:
           type: string
         scmRevision:
           type: string
+        scmUrl:
+          description: Repository URL of the run, from the SCM source. Absent when
+            Jenkins reports none.
+          type: string
         source:
           additionalProperties: false
           description: |
@@ -8475,6 +8511,18 @@ components:
             that no build claim followed. CLAIM_ABANDONED names a granted build claim
             that started no build. The last four name a build claim that the record
             store refused. Set only when result is TRIGGER_FAILED.
+          type: string
+        triggerSource:
+          description: Kind of cause that started the run. Absent when Jenkins reports
+            no cause list.
+          enum:
+          - user
+          - webhook
+          - cron
+          - upstream
+          - replay
+          - scm
+          - other
           type: string
       required:
       - runId
@@ -8675,10 +8723,26 @@ components:
           type: string
         scmRevision:
           type: string
+        scmUrl:
+          description: Repository URL of the run, from the SCM source. Absent when
+            Jenkins reports none.
+          type: string
         startedAt:
           format: date-time
           type: string
         status:
+          type: string
+        triggerSource:
+          description: Kind of cause that started the run. Absent when Jenkins reports
+            no cause list.
+          enum:
+          - user
+          - webhook
+          - cron
+          - upstream
+          - replay
+          - scm
+          - other
           type: string
       required:
       - runId

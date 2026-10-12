@@ -785,3 +785,53 @@ describe("PipelinePage — provenance rows", () => {
     expect(row.textContent).toBe("https://github.com/example/app @ 9f1c2d3");
   });
 });
+
+describe("PipelinePage — run table links", () => {
+  beforeEach(() => {
+    mockGetPipelineJob.mockReset();
+    mockListRuns.mockReset();
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+  });
+
+  const oneRun = (overrides: Record<string, unknown> = {}) => ({
+    runId: "run-1",
+    buildNumber: 42,
+    status: "COMPLETED",
+    result: "SUCCESS",
+    branch: "main",
+    scmRevision: "9f1c2d3aaaaaaaaa",
+    cause: "Push",
+    queuedAt: "2026-10-11T10:00:00Z",
+    startedAt: "2026-10-11T10:00:30Z",
+    durationMs: 60000,
+    ...overrides,
+  });
+
+  it("links the commit cell to the forge commit for a GitHub scmUrl", async () => {
+    mockListRuns.mockResolvedValue({ items: [oneRun({ scmUrl: "https://github.com/example/app" })] });
+    renderPage();
+    const link = await screen.findByRole("link", { name: "9f1c2d3" });
+    expect(link).toHaveAttribute("href", "https://github.com/example/app/commit/9f1c2d3aaaaaaaaa");
+  });
+
+  it("shows a copy button for a non-forge commit", async () => {
+    mockListRuns.mockResolvedValue({ items: [oneRun({ scmUrl: "https://git.example.org/x/y" })] });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Copy commit 9f1c2d3aaaaaaaaa" })).toBeInTheDocument();
+  });
+
+  it("links the branch cell to the branch-filtered job page", async () => {
+    mockListRuns.mockResolvedValue({ items: [oneRun()] });
+    renderPage();
+    const link = await screen.findByRole("link", { name: "main" });
+    expect(link).toHaveAttribute("href", "/pipelines/acme/payments%2Fcheckout-api%2Fmain?branch=main");
+  });
+
+  it("shows the queue wait column", async () => {
+    mockListRuns.mockResolvedValue({ items: [oneRun()] });
+    renderPage();
+    const header = await screen.findByRole("columnheader", { name: "Queue" });
+    const cell = header.closest("table")!.querySelector("tbody tr td:nth-child(7)")!;
+    expect(cell.textContent).toBe("30s");
+  });
+});

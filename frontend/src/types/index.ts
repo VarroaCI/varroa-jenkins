@@ -1544,6 +1544,9 @@ export interface FleetPluginDrilldown {
 
 export type PipelineHealth = "clear" | "cloudy" | "rain" | "unknown";
 
+/** TriggerSource names the kind of cause that started a run. */
+export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "scm" | "other";
+
 /** One run, condensed for a list or a card. */
 export interface RunSummary {
   runId: string;
@@ -1555,6 +1558,8 @@ export interface RunSummary {
   scmRevision?: string;
   actor?: string;
   cause?: string;
+  scmUrl?: string;
+  triggerSource?: TriggerSource;
   queuedAt?: string;
   startedAt?: string;
   endedAt?: string;
@@ -1844,6 +1849,8 @@ export interface RunDetail {
   durationMs?: number;
   actor?: string;
   cause?: string;
+  scmUrl?: string;
+  triggerSource?: TriggerSource;
   params?: Record<string, string>;
   testsTotal?: number;
   testsFailed?: number;

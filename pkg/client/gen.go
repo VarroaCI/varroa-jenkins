@@ -423,10 +423,32 @@ const (
 	ProceedInput ComponentsSchemasRunCommandRefusalCommand = "proceed_input"
 )
 
+// Defines values for ComponentsSchemasRunDetailTriggerSource.
+const (
+	ComponentsSchemasRunDetailTriggerSourceCron     ComponentsSchemasRunDetailTriggerSource = "cron"
+	ComponentsSchemasRunDetailTriggerSourceOther    ComponentsSchemasRunDetailTriggerSource = "other"
+	ComponentsSchemasRunDetailTriggerSourceReplay   ComponentsSchemasRunDetailTriggerSource = "replay"
+	ComponentsSchemasRunDetailTriggerSourceScm      ComponentsSchemasRunDetailTriggerSource = "scm"
+	ComponentsSchemasRunDetailTriggerSourceUpstream ComponentsSchemasRunDetailTriggerSource = "upstream"
+	ComponentsSchemasRunDetailTriggerSourceUser     ComponentsSchemasRunDetailTriggerSource = "user"
+	ComponentsSchemasRunDetailTriggerSourceWebhook  ComponentsSchemasRunDetailTriggerSource = "webhook"
+)
+
 // Defines values for ComponentsSchemasRunScriptDefinitionKind.
 const (
 	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
 	ComponentsSchemasRunScriptDefinitionKindTemplate ComponentsSchemasRunScriptDefinitionKind = "template"
+)
+
+// Defines values for ComponentsSchemasRunSummaryTriggerSource.
+const (
+	ComponentsSchemasRunSummaryTriggerSourceCron     ComponentsSchemasRunSummaryTriggerSource = "cron"
+	ComponentsSchemasRunSummaryTriggerSourceOther    ComponentsSchemasRunSummaryTriggerSource = "other"
+	ComponentsSchemasRunSummaryTriggerSourceReplay   ComponentsSchemasRunSummaryTriggerSource = "replay"
+	ComponentsSchemasRunSummaryTriggerSourceScm      ComponentsSchemasRunSummaryTriggerSource = "scm"
+	ComponentsSchemasRunSummaryTriggerSourceUpstream ComponentsSchemasRunSummaryTriggerSource = "upstream"
+	ComponentsSchemasRunSummaryTriggerSourceUser     ComponentsSchemasRunSummaryTriggerSource = "user"
+	ComponentsSchemasRunSummaryTriggerSourceWebhook  ComponentsSchemasRunSummaryTriggerSource = "webhook"
 )
 
 // Defines values for ComponentsSchemasRunnerSpecLauncher.
@@ -3207,6 +3229,9 @@ type ComponentsSchemasRunDetail struct {
 	RunId       string  `json:"runId"`
 	ScmRevision *string `json:"scmRevision,omitempty"`
 
+	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+	ScmUrl *string `json:"scmUrl,omitempty"`
+
 	// Source How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.
 	Source *struct {
 		// DefinitionPath The pipeline script path in the run's own repository. A run that a template defines reports no value here.
@@ -3246,7 +3271,13 @@ type ComponentsSchemasRunDetail struct {
 
 	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
+
+	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+	TriggerSource *ComponentsSchemasRunDetailTriggerSource `json:"triggerSource,omitempty"`
 }
+
+// ComponentsSchemasRunDetailTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+type ComponentsSchemasRunDetailTriggerSource string
 
 // ComponentsSchemasRunDetailTestReport The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
 type ComponentsSchemasRunDetailTestReport struct {
@@ -3352,9 +3383,18 @@ type ComponentsSchemasRunSummary struct {
 	Result      *string    `json:"result,omitempty"`
 	RunId       string     `json:"runId"`
 	ScmRevision *string    `json:"scmRevision,omitempty"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	Status      string     `json:"status"`
+
+	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+	ScmUrl    *string    `json:"scmUrl,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    string     `json:"status"`
+
+	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+	TriggerSource *ComponentsSchemasRunSummaryTriggerSource `json:"triggerSource,omitempty"`
 }
+
+// ComponentsSchemasRunSummaryTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+type ComponentsSchemasRunSummaryTriggerSource string
 
 // ComponentsSchemasRunTestCase One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.
 type ComponentsSchemasRunTestCase struct {

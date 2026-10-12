@@ -68,14 +68,6 @@
 .tone_warn { background: var(--warn-soft); color: var(--warn-text); }
 .tone_idle { background: var(--idle-soft); color: var(--idle-text); }
 
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  color: var(--text-2);
-  font-size: 13px;
-}
-
 /* The "Ran with" row sits under the meta line. */
 .ranWith {
   display: flex;

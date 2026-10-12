@@ -427,6 +427,9 @@ federation, activity persistence, and SSE fanout.
   response field. `runDetailJSON` (`handlers_runs.go`) and `RunDetail`
   (`pipelines_service.go`) must carry the same JSON tags, because
   `convertJSON` matches them by tag.
+  The run detail and the run summary carry `scmUrl` and `triggerSource`, read from `runs.payload`
+  by `runOriginOf` (`run_origin.go`). `scmUrl` prefers the `run.source` copy over the `run.started` copy.
+  `triggerSource` classifies `cause_types` in a fixed order; an empty list yields no value.
 - **Item manifest source** (`controllerItemManifest`) — a placed Team
   (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
   (`teamPipelineBundleContent`) and re-roots it under the Team folder with

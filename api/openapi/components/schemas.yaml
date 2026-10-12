@@ -4354,6 +4354,13 @@ RunSummary:
       type: string
     cause:
       type: string
+    scmUrl:
+      type: string
+      description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    triggerSource:
+      type: string
+      enum: [user, webhook, cron, upstream, replay, scm, other]
+      description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
     queuedAt:
       type: string
       format: date-time
@@ -5208,6 +5215,13 @@ RunDetail:
       type: string
     cause:
       type: string
+    scmUrl:
+      type: string
+      description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    triggerSource:
+      type: string
+      enum: [user, webhook, cron, upstream, replay, scm, other]
+      description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
     params:
       type: object
       additionalProperties:

@@ -101,6 +101,8 @@ type runDetailJSON struct {
 	DurationMs        int64             `json:"durationMs,omitempty"`
 	Actor             string            `json:"actor,omitempty"`
 	Cause             string            `json:"cause,omitempty"`
+	SCMURL            string            `json:"scmUrl,omitempty"`
+	TriggerSource     string            `json:"triggerSource,omitempty"`
 	Params            map[string]string `json:"params,omitempty"`
 	TestsTotal        int32             `json:"testsTotal,omitempty"`
 	TestsFailed       int32             `json:"testsFailed,omitempty"`
@@ -439,6 +441,7 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		d.Actor = *run.Actor
 	}
 	d.Cause = causeSummary(run.Cause)
+	d.SCMURL, d.TriggerSource = runOriginOf(run.Payload)
 	// The column holds snake_case keys, so decode it into the store shape.
 	// buildRunSource then maps the three fields one by one. A NULL column
 	// and a malformed column both leave the pointer nil.

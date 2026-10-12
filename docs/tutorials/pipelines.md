@@ -116,6 +116,14 @@ template, when the job has one, and the version profile of the controller.
 The page lists the job's builds, with filters for branch, result, actor, and cause. Each filter
 stays in the page URL, so a filtered view is shareable and survives a reload.
 
+The commit opens on GitHub or GitLab. For another host, a button copies the full commit identifier.
+The branch opens the pipeline page filtered to that branch. The **Queue** column shows how long
+each build waited before it started.
+
+The build page shows the parameters that the build ran with. A masked value appears as four dots.
+A replayed build names the build that it copied, with a link. A queue wait longer than five seconds
+appears on the meta line. Point at the actor to see the trigger source, such as a schedule or a webhook.
+
 Select a build number to open its build page, which shows the status, the stage graph, and four
 tabs: **Log**, **Artifacts**, **Tests**, and **Changes**. The **Older** and **Newer** buttons
 beside the build number open the adjacent builds. The buttons work inside the newest 100 builds

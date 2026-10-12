@@ -3603,6 +3603,10 @@
           "scmRevision": {
             "type": "string"
           },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
           "source": {
             "additionalProperties": false,
             "description": "How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.\n",
@@ -3693,6 +3697,19 @@
           },
           "triggerReasonCode": {
             "description": "Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.",
+            "type": "string"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "scm",
+              "other"
+            ],
             "type": "string"
           }
         },
@@ -3943,11 +3960,28 @@
           "scmRevision": {
             "type": "string"
           },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
           "startedAt": {
             "format": "date-time",
             "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "scm",
+              "other"
+            ],
             "type": "string"
           }
         },
@@ -11262,6 +11296,10 @@
           "scmRevision": {
             "type": "string"
           },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
           "source": {
             "additionalProperties": false,
             "description": "How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.\n",
@@ -11352,6 +11390,19 @@
           },
           "triggerReasonCode": {
             "description": "Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.",
+            "type": "string"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "scm",
+              "other"
+            ],
             "type": "string"
           }
         },
@@ -11602,11 +11653,28 @@
           "scmRevision": {
             "type": "string"
           },
+          "scmUrl": {
+            "description": "Repository URL of the run, from the SCM source. Absent when Jenkins reports none.",
+            "type": "string"
+          },
           "startedAt": {
             "format": "date-time",
             "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "triggerSource": {
+            "description": "Kind of cause that started the run. Absent when Jenkins reports no cause list.",
+            "enum": [
+              "user",
+              "webhook",
+              "cron",
+              "upstream",
+              "replay",
+              "scm",
+              "other"
+            ],
             "type": "string"
           }
         },

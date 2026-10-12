@@ -37,6 +37,7 @@ import type {
   RunNotification,
   RunStage,
 } from "../../types";
+import { RunMetadata } from "./RunMetadata";
 import { stripTenantFolder, testCaseHref, type TestCaseLinkState } from "./jobPath";
 import { buildTitle, notStartedTitle, relativeJob } from "./pageTitles";
 import JobBreadcrumbs from "./JobBreadcrumbs";
@@ -716,14 +717,7 @@ export default function BuildPage() {
             </span>
           </nav>
         </div>
-        <div className={styles.meta}>
-          {run.branch && <span>{run.branch}</span>}
-          {run.scmRevision && <span className={styles.mono}>{run.scmRevision.slice(0, 8)}</span>}
-          {run.actor && <span>{run.actor}</span>}
-          {run.cause && <span>{run.cause}</span>}
-          {run.startedAt && <span>{new Date(run.startedAt).toLocaleString()}</span>}
-          {typeof run.durationMs === "number" && <span>{formatDuration(run.durationMs)}</span>}
-        </div>
+        <RunMetadata run={run} team={team} job={job} />
         {/* The summary row renders the run's own summary line. It hides
             itself when the record carries no summary. */}
         {run.summary && (
@@ -732,24 +726,6 @@ export default function BuildPage() {
             <span>{run.summary}</span>
           </div>
         )}
-        {/* The row lists how the run was defined. It hides itself when the
-            record carries no definition path, no library, and no pod template. */}
-        {run.source &&
-          !!(run.source.definitionPath || run.source.libraries?.length || run.source.podTemplates?.length) && (
-            <div className={styles.ranWith}>
-              <span className={styles.ranWithLabel}>Ran with</span>
-              {run.source.definitionPath && <span className={styles.mono}>{run.source.definitionPath}</span>}
-              {(run.source.libraries ?? []).map((lib, i) => (
-                <span key={`lib-${i}-${lib.name}`}>
-                  {lib.version ? `${lib.name}@${lib.version}` : lib.name}
-                  {lib.revision ? ` ${lib.revision.slice(0, 8)}` : ""}
-                </span>
-              ))}
-              {(run.source.podTemplates ?? []).map((pod, i) => (
-                <span key={`pod-${i}-${pod.name}`}>{pod.image ? `${pod.name} (${pod.image})` : pod.name}</span>
-              ))}
-            </div>
-          )}
         {canWrite && (
           <div className={styles.actions}>
             {cancelable && (

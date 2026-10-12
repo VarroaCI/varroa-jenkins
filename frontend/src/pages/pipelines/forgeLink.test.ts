@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
+import { matchForgeShape, repositoryHref, fileHref, commitHref } from "./forgeLink";
 
 describe("matchForgeShape", () => {
   it("recognizes the https form for both hosts", () => {
@@ -108,6 +108,20 @@ describe("fileHref", () => {
   it("builds the GitLab blob link", () => {
     expect(fileHref({ host: "gitlab.com", owner: "group", repo: "app" }, "9f1c2d3", "ci/Jenkinsfile")).toBe(
       "https://gitlab.com/group/app/-/blob/9f1c2d3/ci/Jenkinsfile",
+    );
+  });
+});
+
+describe("commitHref", () => {
+  it("builds a GitHub commit URL", () => {
+    expect(commitHref({ host: "github.com", owner: "example", repo: "app" }, "abc123")).toBe(
+      "https://github.com/example/app/commit/abc123",
+    );
+  });
+
+  it("builds a GitLab commit URL", () => {
+    expect(commitHref({ host: "gitlab.com", owner: "group", repo: "app" }, "abc123")).toBe(
+      "https://gitlab.com/group/app/-/commit/abc123",
     );
   });
 });

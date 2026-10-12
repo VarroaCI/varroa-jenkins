@@ -14,6 +14,8 @@ import JobBreadcrumbs from "./JobBreadcrumbs";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
+import { RevisionLink } from "./RevisionLink";
+import { TRIGGER_LABEL, queueWaitMs } from "./runMeta";
 import type {
   RunNotification,
   PipelineTemplateInfo,
@@ -481,6 +483,7 @@ export default function PipelinePage() {
                 <th>Commit</th>
                 <th>Cause</th>
                 <th>Duration</th>
+                <th>Queue</th>
                 <th>When</th>
               </tr>
             </thead>
@@ -494,10 +497,25 @@ export default function PipelinePage() {
                     <ResultBadge result={run.result} />
                     {run.result === "INTERRUPTED" && <div className={styles.interruptedNote}>Interrupted</div>}
                   </td>
-                  <td>{run.branch ?? <span className={styles.dim}>—</span>}</td>
-                  <td>{run.scmRevision ? run.scmRevision.slice(0, 7) : <span className={styles.dim}>—</span>}</td>
-                  <td>{run.cause ?? <span className={styles.dim}>—</span>}</td>
+                  <td>
+                    {run.branch ? (
+                      <Link to={`/pipelines/${enc(team!)}/${enc(job!)}?branch=${enc(run.branch)}`}>{run.branch}</Link>
+                    ) : (
+                      <span className={styles.dim}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    {run.scmRevision ? (
+                      <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} length={7} />
+                    ) : (
+                      <span className={styles.dim}>—</span>
+                    )}
+                  </td>
+                  <td title={run.triggerSource ? `Triggered by ${TRIGGER_LABEL[run.triggerSource]}` : undefined}>
+                    {run.cause ?? <span className={styles.dim}>—</span>}
+                  </td>
                   <td>{formatDuration(run.durationMs)}</td>
+                  <td>{formatDuration(queueWaitMs(run))}</td>
                   <td>
                     {run.endedAt ? age(run.endedAt) : run.startedAt ? age(run.startedAt) : <span className={styles.dim}>—</span>}
                   </td>
