@@ -209,7 +209,7 @@ networkPolicy:
   apiServerEgress:
     cidrs: []
     ports: [443, 6443]
-  # Dex connector egress (GitHub/OIDC :443; add 636 for LDAP).
+  # Dex connector egress (GitHub/Gitea/OIDC :443; add 636 for LDAP).
   dexConnectorEgress:
     enabled: true
     ports: [443]
@@ -352,9 +352,9 @@ dex:
     staticClients: []
     connectors: []
     # ── Connector Configuration ──────────────────────────────────────────
-    # Each connector needs a "claims" mapping so Dex copies upstream group
-    # data into its own ID token. Without this, groups=[] and Jenkins RBAC
-    # group-based permissions will not apply.
+    # Dex copies the upstream groups into its ID token when the client
+    # requests the "groups" scope. The BFF requests it by default. The OIDC
+    # connector also needs insecureEnableGroups: true to forward groups.
     #
     # Example — GitHub (OAuth):
     # connectors:
@@ -367,8 +367,22 @@ dex:
     #       orgs:
     #         - name: your-github-org
     #       loadAllGroups: true
-    #       claims:
-    #         groups: ["groups"]
+    #
+    # Example — Forgejo or Gitea (gitea connector):
+    # Groups arrive as "<org>" and "<org>:<team>", for example "acme:Owners".
+    # A user on no team of an org gets no group for that org.
+    # useLoginAsID makes the forge login the identity.
+    # connectors:
+    #   - type: gitea
+    #     id: forgejo
+    #     name: Forgejo
+    #     config:
+    #       baseURL: https://forge.example.com
+    #       clientID: <forge-oauth-client-id>
+    #       clientSecret: <forge-oauth-client-secret>
+    #       redirectURI: https://dex.example.com/callback
+    #       loadAllGroups: true
+    #       useLoginAsID: true
     #
     # Example — Generic OIDC (Okta, Keycloak, Azure AD, etc.):
     # connectors:
@@ -379,8 +393,7 @@ dex:
     #       issuer: https://idp.example.com
     #       clientID: <oidc-client-id>
     #       clientSecret: <oidc-client-secret>
-    #       claims:
-    #         groups: ["groups"]
+    #       insecureEnableGroups: true
     #
     # Example — LDAP:
     # connectors:
@@ -403,8 +416,6 @@ dex:
     #         userAttr: DN
     #         groupAttr: member
     #         nameAttr: cn
-    #       claims:
-    #         groups: ["groups"]
 
 # ---------------------------------------------------------------------------
 # Authentication — global auth mode shared by the operator and BFF.

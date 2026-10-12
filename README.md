@@ -173,8 +173,6 @@ dex:
           orgs:
             - name: your-github-org
           loadAllGroups: true
-          claims:
-            groups: ["groups"]
 
 ingress:
   enabled: true

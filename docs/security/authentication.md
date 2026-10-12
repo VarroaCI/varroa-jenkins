@@ -58,6 +58,34 @@ dex:
 
 Add the connector under `dex.config`.
 
+### Connect a Forgejo or Gitea host
+
+Use the Dex `gitea` connector for a Forgejo or Gitea host.
+Create an OAuth2 application on the forge.
+Set its redirect URI to the Dex callback, `<dex issuer>/callback`.
+
+```yaml
+dex:
+  config:
+    connectors:
+      - type: gitea
+        id: forgejo
+        name: Forgejo
+        config:
+          baseURL: https://forge.example.com
+          clientID: <forge-oauth-client-id>
+          clientSecret: <forge-oauth-client-secret>
+          redirectURI: https://dex.varroa.example.com/callback
+          loadAllGroups: true
+          useLoginAsID: true
+```
+
+Dex sends one group for each organization, `<org>`, and one for each team, `<org>:<team>`.
+A user on no team of an organization gets no group for it.
+A `Team` or a `VarroaRoleBinding` can bind either string, for example `acme` or `acme:Owners`.
+With `useLoginAsID`, the forge login is the user identity.
+If the forge does not listen on port 443, add its port to `networkPolicy.dexConnectorEgress.ports`.
+
 ## Use LDAP
 
 ```yaml
