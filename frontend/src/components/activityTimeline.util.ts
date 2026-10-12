@@ -333,6 +333,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   // ── Pipelines ────────────────────────────────────────────────────────────
   "pipeline.run_requested": { icon: "▶", style: "softInfo" },
   "pipeline.run_replay_requested": { icon: "↻", style: "softInfo" },
+  "pipeline.run_restart_requested": { icon: "⏭", style: "softInfo" },
   "pipeline.run_input_proceeded": { icon: "✔", style: "softOk" },
   "pipeline.run_input_aborted": { icon: "⊘", style: "softWarn" },
   // ── Plugin conflicts ─────────────────────────────────────────────────────

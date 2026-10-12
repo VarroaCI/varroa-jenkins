@@ -130,6 +130,14 @@ type runDetailJSON struct {
 	// ReplayOf names the run a replayed build copied its script from. It
 	// is absent for a build that is not a replay.
 	ReplayOf string `json:"replayOf,omitempty"`
+	// RestartOf names the run a restarted build reran from, and
+	// RestartStage names the stage the restart began at. Both are absent
+	// for a build that is not a restart.
+	RestartOf    string `json:"restartOf,omitempty"`
+	RestartStage string `json:"restartStage,omitempty"`
+	// Restart is the run's restart answer. It is absent for a run that is
+	// not terminal.
+	Restart *RunRestart `json:"restart,omitempty"`
 	// CommandRefusal is the newest cancel or input answer the plugin
 	// refused for this run. It is absent when no such refusal exists. A
 	// later successful command does not clear it.
@@ -487,6 +495,12 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	}
 	if run.ReplayOf != nil {
 		d.ReplayOf = run.ReplayOf.String()
+	}
+	if run.RestartOf != nil {
+		d.RestartOf = run.RestartOf.String()
+	}
+	if run.RestartStage != nil {
+		d.RestartStage = *run.RestartStage
 	}
 	if len(run.Params) > 0 {
 		var params map[string]string

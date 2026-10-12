@@ -52,7 +52,7 @@ func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Ru
 		return recordstore.Run{
 			RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
 			Tenant: "team-a/obj", JobPath: "build", Status: "COMPLETED", BuildNumber: &buildNumber,
-			Payload: json.RawMessage(`{"mesh":{"files":[{"relpath":"build/builds/7/build.xml","bytes":200,"seq":1,"state_gen":1,"epoch":1}]}}`),
+			Payload: json.RawMessage(`{"mesh":{"files":[{"relpath":"build/builds/7/build.xml","bytes":200,"seq":1,"state_gen":1,"epoch":1}]},"run.completed":{"payload":{"restart_stages":["deploy"]}}}`),
 		}, nil, nil
 	}
 	return recordstore.Run{
@@ -324,6 +324,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		"proceed_run_input":  {"run": obj, "input": "in-1"},
 		"abort_run_input":    {"run": obj, "input": "in-1"},
 		"replay_run":         {"run": guardReplayRunID, "script": "echo 'edited'"},
+		"restart_run":        {"run": guardReplayRunID, "stage": "deploy"},
 		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},

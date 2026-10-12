@@ -49,7 +49,8 @@ func imperativeOutcome(res *mitev1.CommandResult) string {
 func personSentRunCommand(res *mitev1.CommandResult) bool {
 	switch res.CommandType {
 	case mitev1.CommandTypeCancelBuild, mitev1.CommandTypeProceedInput,
-		mitev1.CommandTypeAbortInput, mitev1.CommandTypeReplayBuild:
+		mitev1.CommandTypeAbortInput, mitev1.CommandTypeReplayBuild,
+		mitev1.CommandTypeRestartBuild:
 	default:
 		return false
 	}

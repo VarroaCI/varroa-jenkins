@@ -15,13 +15,14 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (8): run_pipeline, list_runs, get_run, get_run_log,
-// list_fleet_locks, proceed_run_input, abort_run_input, replay_run
+// Pipeline tools (11): run_pipeline, list_runs, get_run, get_run_log,
+// list_job_branches, list_fleet_locks, release_fleet_lock, proceed_run_input,
+// abort_run_input, replay_run, restart_run
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
-// GetRun, GetRunLog, ListFleetLocks, ReleaseFleetLock, ProceedRunInput,
-// AbortRunInput, ReplayRun), so
+// GetRun, GetRunLog, ListJobBranches, ListFleetLocks, ReleaseFleetLock,
+// ProceedRunInput, AbortRunInput, ReplayRun, RestartRun), so
 // each tool authorizes and reads exactly as its HTTP counterpart does.
 // No tool here calls a controller-scoped check; the authorization table
 // lives in specs/pipelines-api.
@@ -50,6 +51,44 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerProceedRunInputTool(mcpServer, deps)
 	registerAbortRunInputTool(mcpServer, deps)
 	registerReplayRunTool(mcpServer, deps)
+	registerRestartRunTool(mcpServer, deps)
+}
+
+// registerRestartRunTool registers restart_run: it reruns a completed
+// declarative build from one stage as the calling user, publishes one
+// RESTART_BUILD command, and reports no outcome. The stage names come from
+// the restart object of get_run.
+func registerRestartRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	restartTool := mcp.NewTool("restart_run",
+		mcp.WithDescription("Rerun a completed declarative build from one stage, as the calling "+
+			"user. The build must still sit on the cell that ran it, and the stage must be in the "+
+			"restart object of get_run. The BFF mints a fresh run identifier and publishes a "+
+			"RESTART_BUILD command; it does not wait for the build to start. Use get_run to follow it."),
+		mcp.WithString("run", mcp.Required(), mcp.Description("Run identifier of the build to restart")),
+		mcp.WithString("stage", mcp.Required(), mcp.Description("The stage the restart begins at, as named in the restart object of get_run")),
+	)
+	addTool(mcpServer, kindAction, restartTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		run := strArg(args, "run")
+		if run == "" {
+			return mcp.NewToolResultError("run is required"), nil
+		}
+		runID, intentKey, targetCluster, serr := api.NewServer(deps).RestartRun(ctx, claims, run, strArg(args, "stage"))
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		// One activity event records the request, on the cluster the
+		// command reached, which can differ from the cluster this BFF serves.
+		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+			Type:    "pipeline.run_restart_requested",
+			Message: fmt.Sprintf("Restart of run %s requested (run %s)", run, runID),
+		})
+		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
+	})
 }
 
 // registerReplayRunTool registers replay_run: it runs a completed build
@@ -391,7 +430,7 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "actor", Type: "string", Desc: "User who started the run, if any."},
 	{Name: "cause", Type: "string", Desc: "Short cause description."},
 	{Name: "scmUrl", Type: "string", Desc: "Repository URL, if any."},
-	{Name: "triggerSource", Type: "string", Desc: "Kind of cause: user, webhook, cron, upstream, replay, scm, or other. Absent when unknown."},
+	{Name: "triggerSource", Type: "string", Desc: "Kind of cause: user, webhook, cron, upstream, replay, restart, scm, or other. Absent when unknown."},
 	{Name: "changeRequest", Type: "object", Desc: "Change request of the run: id, title, sourceBranch, targetBranch, url. Absent for a branch run."},
 	{Name: "queuedAt", Type: "string", Desc: "Queue time, RFC3339."},
 	{Name: "startedAt", Type: "string", Desc: "Start time, RFC3339."},

@@ -824,6 +824,7 @@ public final class VarroaRunRecorder {
                 LogSummary logSummary = finishLogStorage(runId);
                 b.logSummary(endedByRestart ? restartLogSummary() : logSummary);
                 applyTemplateFields(b, run);
+                applyRestartFields(b, run);
                 // The completion reads the run's own action and never the
                 // cached value, so a run that lost its heartbeat still
                 // reports its summary.
@@ -1037,6 +1038,50 @@ public final class VarroaRunRecorder {
         return "";
     }
 
+    /**
+     * Reads the source run identifier of a restarted build from {@code run}'s
+     * causes: the first {@link VarroaRestartCause}'s value, or the empty
+     * string when the run carries none.
+     */
+    static String restartSourceOf(Run<?, ?> run) {
+        for (Cause cause : run.getCauses()) {
+            if (cause instanceof VarroaRestartCause) {
+                return ((VarroaRestartCause) cause).getSourceRunId();
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Reads the stage a restarted build began at from {@code run}'s causes,
+     * or the empty string when the run carries no {@link VarroaRestartCause}.
+     */
+    static String restartStageOf(Run<?, ?> run) {
+        for (Cause cause : run.getCauses()) {
+            if (cause instanceof VarroaRestartCause) {
+                return ((VarroaRestartCause) cause).getStage();
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Records the restart choices of a completed declarative run: the stages
+     * it can restart from, or the reason it cannot. Only a {@link WorkflowRun}
+     * carries them, so a freestyle or other run sets no field.
+     */
+    static void applyRestartFields(BuildEvent.Builder b, Run<?, ?> run) {
+        if (!(run instanceof WorkflowRun)) {
+            return;
+        }
+        VarroaDeclarativeRestart.Outcome outcome = VarroaDeclarativeRestart.inspect(run);
+        if (outcome.getRefusal() != null) {
+            b.restartRefusal(outcome.getRefusal());
+        } else {
+            b.restartStages(outcome.getStages());
+        }
+    }
+
     /** Builds a {@code STARTED} event from {@code run}'s current state. Does not emit it. */
     private static BuildEvent.Builder startedEventBuilder(Run<?, ?> run, RunState state, VarroaIntentAction action) {
         BuildEvent.Builder b = BuildEvent.builder()
@@ -1050,6 +1095,8 @@ public final class VarroaRunRecorder {
                 .deliveryId(action.getDeliveryId())
                 .scmRevision(truncate(action.getRevision(), MAX_FIELD_512))
                 .replayOf(replaySourceOf(run))
+                .restartOf(restartSourceOf(run))
+                .restartStage(restartStageOf(run))
                 .grantedBuildNumber(action.getGrantedNumber());
         applyCommonMetadata(b, run, false);
         b.changeRequest(resolveChangeRequest(run));
@@ -2462,6 +2509,12 @@ public final class VarroaRunRecorder {
         }
         while (serializedSize(current) > MAX_EVENT_BYTES && !current.getTestCases().isEmpty()) {
             current = current.toBuilder().testCases(dropLast(current.getTestCases())).build();
+        }
+        // The restart list is the first to go: the restart route still
+        // checks the stage against the run's own record, so a dropped list
+        // only hides the restart choices.
+        if (serializedSize(current) > MAX_EVENT_BYTES && !current.getRestartStages().isEmpty()) {
+            current = current.toBuilder().restartStages(List.of()).build();
         }
         while (serializedSize(current) > MAX_EVENT_BYTES && !current.getStages().isEmpty()) {
             current = current.toBuilder().stages(dropOldest(current.getStages())).build();

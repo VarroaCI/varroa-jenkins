@@ -10,6 +10,7 @@ const (
 	triggerSourceCron     = "cron"
 	triggerSourceUpstream = "upstream"
 	triggerSourceReplay   = "replay"
+	triggerSourceRestart  = "restart"
 	triggerSourceSCM      = "scm"
 	triggerSourceOther    = "other"
 )
@@ -21,6 +22,7 @@ var triggerCauseClasses = []struct {
 	source  string
 	classes []string
 }{
+	{triggerSourceRestart, []string{"VarroaRestartCause", "RestartDeclarativePipelineCause"}},
 	{triggerSourceReplay, []string{"VarroaReplayCause", "ReplayCause"}},
 	{triggerSourceUpstream, []string{"UpstreamCause", "BuildUpstreamCause"}},
 	{triggerSourceUser, []string{"UserIdCause", "UserCause", "VarroaUserCause"}},

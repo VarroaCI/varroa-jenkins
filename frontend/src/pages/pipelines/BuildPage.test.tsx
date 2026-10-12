@@ -18,7 +18,9 @@ const mockProceedRunInput = vi.fn();
 const mockAbortRunInput = vi.fn();
 const mockDownloadRunArtifact = vi.fn();
 const mockGetRunScript = vi.fn();
+const mockGetRunRestart = vi.fn();
 const mockReplayRun = vi.fn();
+const mockRestartRun = vi.fn();
 
 // jsdom cannot run a real EditorView. The mock view answers the text the
 // test sets in editorText.
@@ -68,7 +70,9 @@ vi.mock("../../api/client", async () => {
     abortRunInput: (...args: unknown[]) => mockAbortRunInput(...args),
     downloadRunArtifact: (...args: unknown[]) => mockDownloadRunArtifact(...args),
     getRunScript: (...args: unknown[]) => mockGetRunScript(...args),
+    getRunRestart: (...args: unknown[]) => mockGetRunRestart(...args),
     replayRun: (...args: unknown[]) => mockReplayRun(...args),
+    restartRun: (...args: unknown[]) => mockRestartRun(...args),
   };
 });
 
@@ -169,6 +173,7 @@ beforeEach(() => {
     replayable: false,
     reason: "not a cell run",
   });
+  mockGetRunRestart.mockResolvedValue({ restartable: false, stages: [], reason: "not-declarative" });
 });
 
 describe("BuildPage — test cases and the test report", () => {
@@ -1434,6 +1439,44 @@ describe("BuildPage — pending inputs", () => {
     await screen.findByText(/Build #42/);
 
     expect(screen.queryByText("Pending input")).toBeNull();
+  });
+});
+
+describe("BuildPage — restart from stage", () => {
+  it("shows the Restart from stage control for a finished run that restarts", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunRestart.mockResolvedValue({ restartable: true, stages: ["build", "deploy"] });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /Restart from stage/ })).toBeInTheDocument();
+    expect(mockGetRunRestart).toHaveBeenCalledWith("run-1");
+  });
+
+  it("shows no Restart from stage control for a run that does not restart", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunRestart.mockResolvedValue({ restartable: false, stages: [], reason: "not-declarative" });
+    renderPage();
+    await screen.findByText(/Build #42/);
+    await waitFor(() => expect(mockGetRunRestart).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: /Restart from stage/ })).toBeNull();
+  });
+
+  it("reads no restart answer without the write grant", async () => {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "payments", jobs: [], capabilities: { pipelines: { read: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+    mockGetRun.mockResolvedValue(baseRun());
+    mockGetRunRestart.mockResolvedValue({ restartable: true, stages: ["build"] });
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(mockGetRunRestart).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Restart from stage/ })).toBeNull();
   });
 });
 

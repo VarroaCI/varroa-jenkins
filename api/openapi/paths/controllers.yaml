@@ -373,6 +373,7 @@
               action:
                 type: string
                 enum: [reload, restart, approve, force, force-restart, plugin-roll]
+                x-enum-varnames: [ApproveControllerJSONBodyActionReload, ApproveControllerJSONBodyActionRestart, ApproveControllerJSONBodyActionApprove, ApproveControllerJSONBodyActionForce, ApproveControllerJSONBodyActionForceRestart, ApproveControllerJSONBodyActionPluginRoll]
                 description: The action to approve.
               expectedContentHash:
                 type: string

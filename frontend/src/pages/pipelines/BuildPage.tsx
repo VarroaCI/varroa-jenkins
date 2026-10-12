@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Keyboard, Repeat, RotateCcw, XCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Keyboard, Repeat, RotateCcw, StepForward, XCircle } from "lucide-react";
 import {
   abortRunInput,
   cancelRun,
   getRun,
+  getRunRestart,
   getRunScript,
   listRunArtifacts,
   listRunChanges,
@@ -50,6 +51,7 @@ import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import { PendingInputCard } from "./PendingInputCard";
 import { ReplayDrawer } from "./ReplayDrawer";
+import { RestartDrawer } from "./RestartDrawer";
 import { RunLinksCard } from "./RunLinksCard";
 import styles from "./BuildPage.module.css";
 
@@ -412,6 +414,15 @@ export default function BuildPage() {
     enabled: !!run && isTerminal(run) && canWrite,
   });
   const [replayOpen, setReplayOpen] = useState(false);
+  // The restart read gates the Restart from stage control, like the script
+  // read gates Replay. It runs only for a finished run and a caller with the
+  // write grant. A failed read shows no control.
+  const restartQuery = useQuery({
+    queryKey: ["run-restart", run?.runId],
+    queryFn: () => getRunRestart(run!.runId),
+    enabled: !!run && isTerminal(run) && canWrite,
+  });
+  const [restartOpen, setRestartOpen] = useState(false);
   const neighborsQuery = useQuery({
     queryKey: ["run-neighbors", team, job],
     queryFn: () => listRuns(team!, job!, { limit: 100 }),
@@ -661,6 +672,7 @@ export default function BuildPage() {
   const rerunDisabled = !!run.retryRunId || !isTerminal(run);
   const cancelable = !isTerminal(run);
   const replayable = canWrite && isTerminal(run) && scriptQuery.data?.replayable === true;
+  const restartable = canWrite && isTerminal(run) && restartQuery.data?.restartable === true;
 
   const jobLeaf = relativeJob(run.tenantFolder, run.jobPath).split("/").pop();
 
@@ -748,6 +760,11 @@ export default function BuildPage() {
             {replayable && (
               <Button variant="ghost" size="sm" onClick={() => setReplayOpen(true)}>
                 <Repeat size={14} aria-hidden="true" /> Replay
+              </Button>
+            )}
+            {restartable && (
+              <Button variant="ghost" size="sm" onClick={() => setRestartOpen(true)}>
+                <StepForward size={14} aria-hidden="true" /> Restart from stage
               </Button>
             )}
           </div>
@@ -1016,6 +1033,22 @@ export default function BuildPage() {
 
       {/* The replay response reports no outcome. The page opens the new
           run in the requested state, the path the re-run control takes. */}
+      {restartOpen && restartable && restartQuery.data && (
+        <RestartDrawer
+          runId={run.runId}
+          stages={restartQuery.data.stages}
+          onClose={() => setRestartOpen(false)}
+          onSubmitted={(newRunId) => {
+            setRestartOpen(false);
+            if (team && job) {
+              navigate(
+                `/pipelines/${encodeURIComponent(team)}/${encodeURIComponent(job)}/${encodeURIComponent(newRunId)}`,
+                { state: { requested: true } },
+              );
+            }
+          }}
+        />
+      )}
       {replayOpen && replayable && scriptQuery.data && (
         <ReplayDrawer
           runId={run.runId}

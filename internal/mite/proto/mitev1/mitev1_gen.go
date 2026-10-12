@@ -108,6 +108,10 @@ type BuildEvent struct {
 	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
 	ReplayOf                string              `json:"replay_of,omitempty"`
 	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
+	RestartOf               string              `json:"restart_of,omitempty"`
+	RestartStage            string              `json:"restart_stage,omitempty"`
+	RestartStages           []string            `json:"restart_stages,omitempty"`
+	RestartRefusal          string              `json:"restart_refusal,omitempty"`
 	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
 	RejectedSignature       string              `json:"rejected_signature,omitempty"`
 }
@@ -422,6 +426,7 @@ type ImperativeCommand struct {
 	ProceedInput    *ProceedInputPayload  `json:"proceed_input,omitempty"`
 	AbortInput      *AbortInputPayload    `json:"abort_input,omitempty"`
 	ReplayBuild     *ReplayBuildPayload   `json:"replay_build,omitempty"`
+	RestartBuild    *RestartBuildPayload  `json:"restart_build,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -1224,6 +1229,16 @@ type ReplayWebhookPayload struct {
 	DeliveryId string            `json:"delivery_id,omitempty"`
 }
 
+type RestartBuildPayload struct {
+	RunId             string      `json:"run_id"`
+	IntentKey         string      `json:"intent_key"`
+	JobPath           string      `json:"job_path"`
+	SourceRunId       string      `json:"source_run_id"`
+	SourceBuildNumber int64       `json:"source_build_number"`
+	Stage             string      `json:"stage"`
+	ActingUser        *ActingUser `json:"acting_user,omitempty"`
+}
+
 type ResumeBuildPayload struct {
 	RunId        string             `json:"run_id"`
 	JobPath      string             `json:"job_path"`
@@ -1355,6 +1370,7 @@ const (
 	CommandTypeProceedInput           CommandType = 8
 	CommandTypeAbortInput             CommandType = 9
 	CommandTypeReplayBuild            CommandType = 10
+	CommandTypeRestartBuild           CommandType = 11
 )
 
 // MiteServer is the server-side interface for the Mite service.

@@ -156,6 +156,36 @@ func TestInputRoutesReportTheUpstreamStatus(t *testing.T) {
 	}
 }
 
+// TestRestartBuildPostsTheRequestedBody asserts the restart method posts the
+// source run, the source build number, the stage, and the acting user to the
+// plugin's restart route, and reports the upstream status beside the error.
+func TestRestartBuildPostsTheRequestedBody(t *testing.T) {
+	srv, rec := newInputRouteServer(t, http.StatusAccepted)
+	c := NewClient(srv.URL, "user", "token")
+	status, err := c.RestartBuild(context.Background(), RestartBuildRequest{
+		RunID:             "0199d0b7-0000-7000-8000-000000000005",
+		IntentKey:         "restart:0199d0b7-0000-7000-8000-000000000001:0199d0b7-0000-7000-8000-000000000005",
+		JobPath:           "team/job",
+		SourceRunID:       "0199d0b7-0000-7000-8000-000000000001",
+		SourceBuildNumber: 7,
+		Stage:             "deploy",
+		ActingUser:        &ActingUser{Name: "ana"},
+	})
+	if err != nil {
+		t.Fatalf("RestartBuild: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", status, http.StatusAccepted)
+	}
+	if rec.path != "/varroa-run/restart" {
+		t.Fatalf("path = %q, want /varroa-run/restart", rec.path)
+	}
+	if rec.body["stage"] != "deploy" || rec.body["sourceRunId"] != "0199d0b7-0000-7000-8000-000000000001" ||
+		rec.body["sourceBuildNumber"] != float64(7) {
+		t.Fatalf("body = %+v", rec.body)
+	}
+}
+
 // TestReplayBuildPostsTheRequestedBody asserts the replay method posts the
 // script, the source run, the parameters, and the acting user to the
 // plugin's own route, and reports the upstream status beside the error.

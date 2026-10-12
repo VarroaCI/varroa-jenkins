@@ -249,12 +249,14 @@ reading each package's entry point):
   `oneOf` requires exactly one match and the shapes overlap. Output schemas are
   **not** server-validated — `handler.go` enables input validation only — so
   they are asserted in tests.
-  `tools_pipelines.go` registers eight pipeline tools: `run_pipeline`,
-  `proceed_run_input`, `abort_run_input`, and `replay_run` (action), and
-  `list_runs`, `get_run`, `get_run_log`, `list_job_branches`, and `list_fleet_locks` (read). Each
+  `tools_pipelines.go` registers eleven pipeline tools: `run_pipeline`,
+  `proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, and
+  `release_fleet_lock` (action), and `list_runs`, `get_run`, `get_run_log`,
+  `list_job_branches`, and `list_fleet_locks` (read). Each
   calls the same `internal/api` service method (`pipelines_service.go`'s
-  `RunPipeline`, `ProceedRunInput`, `AbortRunInput`, `ReplayRun`, `ListRuns`,
-  `GetRun`, `GetRunLog`, `ListFleetLocks`) the matching HTTP handler calls
+  `RunPipeline`, `ProceedRunInput`, `AbortRunInput`, `ReplayRun`, `RestartRun`,
+  `ListRuns`, `GetRun`, `GetRunLog`, `ListJobBranches`, `ListFleetLocks`,
+  `ReleaseFleetLock`) the matching HTTP handler calls
   (`replay_run` reaches `POST /runs/{run}/replay`; the script read
   `GET /runs/{run}/script` has no tool, because a script can reach 256 KiB),
   so the

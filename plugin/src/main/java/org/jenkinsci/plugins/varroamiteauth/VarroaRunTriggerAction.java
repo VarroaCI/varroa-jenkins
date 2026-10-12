@@ -89,6 +89,12 @@ import org.springframework.security.core.GrantedAuthority;
  * caller-supplied script, as the acting user. It refuses a template-defined job,
  * because a template owns its own script. The route name holds one word, so it
  * carries no {@link WebMethod}.
+ *
+ * <p>{@code POST /varroa-run/restart} reruns a completed declarative build from one
+ * stage, as the acting user. It refuses the restart when the source build is no
+ * longer on this cell, when the job's home moved off this cell, and when the stage
+ * is not restartable. The route name holds one word, so it carries no {@link
+ * WebMethod}.
  */
 @Extension
 public class VarroaRunTriggerAction implements RootAction {
@@ -336,6 +342,166 @@ public class VarroaRunTriggerAction implements RootAction {
     }
 
     /**
+     * Handles {@code POST /varroa-run/restart}. Reruns a completed declarative
+     * build from one stage, as the acting user, and keeps the parameter values
+     * of the source build.
+     *
+     * <p>The source build must still sit on this cell. The route refuses when
+     * the job's home moved to another slot, when the source number no longer
+     * names a build with the source run identifier, when the source build has
+     * not ended, when the run does not restart, and when the stage is not in the
+     * restartable list. A repeated run identifier schedules nothing and answers
+     * {@code 202}.
+     *
+     * <p>The route builds the restart objects itself. Jenkins' own restart
+     * method schedules the build without a {@link VarroaIntentAction}, so the
+     * claim gate could not see the run identity.
+     */
+    public void doRestart(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String runId = body.optString("runId", "");
+            String intentKey = body.optString("intentKey", "");
+            String jobPath = body.optString("jobPath", "");
+            String sourceRunId = body.optString("sourceRunId", "");
+            String stage = body.optString("stage", "");
+            long sourceBuildNumber = body.optLong("sourceBuildNumber", 0L);
+            VarroaActingUser actingUser = VarroaActingUser.fromJson(body);
+            if (runId.isEmpty() || jobPath.isEmpty() || sourceRunId.isEmpty() || stage.isEmpty()
+                    || sourceBuildNumber <= 0 || sourceBuildNumber > Integer.MAX_VALUE || actingUser == null) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no run, no job, no source run,"
+                        + " no source build number, no stage, or no acting user");
+                return;
+            }
+
+            Item rawItem = Jenkins.get().getItemByFullName(jobPath);
+            if (rawItem == null) {
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no item named " + jobPath);
+                return;
+            }
+            if (!(rawItem instanceof WorkflowJob)) {
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is not a pipeline job");
+                return;
+            }
+            Job<?, ?> job = (Job<?, ?>) rawItem;
+            if (VarroaTemplateDefinitions.isTemplateDefined(job)) {
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is template defined");
+                return;
+            }
+
+            String actor = VarroaUserCause.normalizeActor(actingUser.getName());
+
+            // A redelivered restart can name a build that already left the
+            // queue. The check runs before the home check, because a repeat
+            // schedules nothing.
+            Run<?, ?> existing = findBuildForRunId(job, runId);
+            if (existing != null) {
+                logRepeat("restart", runId, existing);
+                writeAccepted(rsp, runId, List.of());
+                return;
+            }
+
+            // A redelivered restart can also name a queued item that no build
+            // carries yet. The restart flow factory action does not suppress
+            // a second item, so the queue is checked here.
+            Queue.Item queued = queuedItemForRunId(runId);
+            if (queued != null) {
+                LOGGER.log(Level.INFO, "VarroaRunTriggerAction: restart for run {0} repeats a queued item; scheduled nothing",
+                        new Object[] {runId});
+                writeAccepted(rsp, runId, List.of());
+                return;
+            }
+
+            if (VarroaHomeCache.get().forwardSlotFor(jobPath).isPresent()) {
+                PlainTextRefusal.refuse(rsp, 409, "Conflict: the home of " + jobPath + " moved off this cell");
+                return;
+            }
+
+            // The acting user's own rights decide every check below. The
+            // declarative restart check reads Item.BUILD of the current
+            // identity, so the inspection must run as the acting user too.
+            try (ACLContext ignored = ACL.as2(actingUser.authentication())) {
+                if (!job.hasPermission(Item.BUILD)) {
+                    PlainTextRefusal.refuse(rsp, 403, "Forbidden: the acting user may not build this job");
+                    return;
+                }
+
+                int number = (int) sourceBuildNumber;
+                Run<?, ?> origin = job.getBuildByNumber(number);
+                VarroaIntentAction originIntent = origin == null ? null : origin.getAction(VarroaIntentAction.class);
+                if (origin == null || originIntent == null || !sourceRunId.equals(originIntent.getRunId())) {
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: build " + number + " of " + jobPath
+                            + " is no longer on this cell");
+                    return;
+                }
+                if (origin.isBuilding()) {
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the source build has not ended");
+                    return;
+                }
+
+                VarroaDeclarativeRestart.Outcome outcome = VarroaDeclarativeRestart.inspect(origin);
+                if (outcome.getRefusal() != null) {
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: " + outcome.getRefusal());
+                    return;
+                }
+                if (!outcome.getStages().contains(stage)) {
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: stage " + stage + " is not restartable");
+                    return;
+                }
+
+                List<ParameterValue> sourceValues = new ArrayList<>();
+                ParametersAction sourceParameters = origin.getAction(ParametersAction.class);
+                if (sourceParameters != null) {
+                    sourceValues.addAll(sourceParameters.getParameters());
+                }
+
+                List<Action> actions = new ArrayList<>();
+                actions.add(new ParametersAction(sourceValues));
+                actions.add(stampedIntentAction(runId, intentKey, actor));
+                List<Cause> causes = new ArrayList<>();
+                if (!actor.isEmpty()) {
+                    causes.add(new VarroaUserCause(actor));
+                }
+                causes.add(VarroaDeclarativeRestart.newRestartCause(origin, stage));
+                causes.add(new VarroaRestartCause(sourceRunId, stage));
+                actions.add(new CauseAction(causes.toArray(new Cause[0])));
+                actions.add(VarroaDeclarativeRestart.newRestartFlowFactoryAction(origin));
+
+                Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0, actions.toArray(new Action[0]));
+                if (item == null) {
+                    PlainTextRefusal.refuse(rsp, 409, "Conflict: the queue refused to schedule " + jobPath);
+                    return;
+                }
+            }
+
+            writeAccepted(rsp, runId, List.of());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doRestart caught exception", e);
+            try {
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /**
      * Handles {@code POST /varroa-run/cancel}. Reads {@code runId}, {@code
      * jobPath}, and {@code buildNumber}, then resolves the target by run
      * identifier: a numbered build is stopped only when its {@link
@@ -427,6 +593,21 @@ public class VarroaRunTriggerAction implements RootAction {
             VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
             if (action != null && runId.equals(action.getRunId())) {
                 return run;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Answers the queued item whose {@link VarroaIntentAction} carries {@code
+     * runId}, or {@code null} when no queued item carries it.
+     */
+    static Queue.Item queuedItemForRunId(String runId) {
+        for (Queue.Item item : Queue.getInstance().getItems()) {
+            for (VarroaIntentAction action : item.getActions(VarroaIntentAction.class)) {
+                if (runId.equals(action.getRunId())) {
+                    return item;
+                }
             }
         }
         return null;

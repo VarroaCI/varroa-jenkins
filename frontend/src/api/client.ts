@@ -54,6 +54,7 @@ import type {
   RunDetail,
   RunArtifactListResponse,
   RunTestListResponse,
+  RunRestart,
   RunScript,
   TestCaseHistoryResponse,
   RunChangeListResponse,
@@ -1351,6 +1352,23 @@ export function replayRun(runId: string, script: string): Promise<RunActionRespo
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ script }),
+  });
+}
+
+/** Reads whether a finished run restarts from a stage, and the stages it can restart from. */
+export function getRunRestart(runId: string): Promise<RunRestart> {
+  return bffFetch<RunRestart>(`${runBase(runId)}/restart`);
+}
+
+/**
+ * Requests a fresh build of the run's job from one stage. Each call mints a
+ * new run identifier, so each call starts its own build.
+ */
+export function restartRun(runId: string, stage: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/restart`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage }),
   });
 }
 

@@ -2933,6 +2933,7 @@ SearchResult:
     type:
       type: string
       enum: [controller, namespace, group, catalogitem, job, run, activity]
+      x-enum-varnames: [ComponentsSchemasSearchResultTypeController, ComponentsSchemasSearchResultTypeNamespace, ComponentsSchemasSearchResultTypeGroup, ComponentsSchemasSearchResultTypeCatalogitem, ComponentsSchemasSearchResultTypeJob, ComponentsSchemasSearchResultTypeRun, ComponentsSchemasSearchResultTypeActivity]
       description: >-
         controller, namespace, group, and catalogitem come from a live
         Kubernetes read; job, run, and activity come from the record store
@@ -4605,8 +4606,10 @@ RunSummary:
       description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
     triggerSource:
       type: string
-      enum: [user, webhook, cron, upstream, replay, scm, other]
-      description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
+      enum: [user, webhook, cron, upstream, replay, restart, scm, other]
+      x-enum-varnames: [User, Webhook, Cron, Upstream, Replay, Restart, Scm, Other]
+      description: >
+        Kind of cause that started the run. Absent when Jenkins reports no cause list.
     changeRequest:
       $ref: '#/ChangeRequest'
     queuedAt:
@@ -5528,8 +5531,10 @@ RunDetail:
       description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
     triggerSource:
       type: string
-      enum: [user, webhook, cron, upstream, replay, scm, other]
-      description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
+      enum: [user, webhook, cron, upstream, replay, restart, scm, other]
+      x-enum-varnames: [User, Webhook, Cron, Upstream, Replay, Restart, Scm, Other]
+      description: >
+        Kind of cause that started the run. Absent when Jenkins reports no cause list.
     changeRequest:
       $ref: '#/ChangeRequest'
     params:
@@ -5610,6 +5615,18 @@ RunDetail:
       description: >
         The identifier of the run whose script this build replayed. The
         field is absent for a build that is not a replay.
+    restartOf:
+      type: string
+      description: >
+        The identifier of the run this build restarted from. The field is
+        absent for a build that is not a restart.
+    restartStage:
+      type: string
+      description: >
+        The stage this restarted build began at. The field is absent for a
+        build that is not a restart.
+    restart:
+      $ref: '#/RunRestart'
     rejectedSignature:
       type: string
       description: >
@@ -6007,6 +6024,40 @@ RunTestListResponse:
     report:
       $ref: '#/RunTestReport'
   additionalProperties: false
+
+RunRestart:
+  type: object
+  description: >
+    GET /runs/{run}/restart. Whether a completed declarative run restarts
+    from a stage. The stages list is always present, and it is empty when
+    the run does not restart.
+  required: [restartable, stages]
+  properties:
+    restartable:
+      type: boolean
+    reason:
+      type: string
+      description: >
+        Why the run does not restart. The field is absent when restartable
+        is true. The value is one of not-terminal, template-defined,
+        not-recorded, not-declarative, disabled, unavailable,
+        no-restartable-stage, or home-moved.
+    stages:
+      type: array
+      description: The stages the restart can begin at, in run order.
+      items:
+        type: string
+  additionalProperties: false
+
+RestartRunRequest:
+  type: object
+  description: POST /runs/{run}/restart. The stage the restart begins at.
+  required: [stage]
+  additionalProperties: false
+  properties:
+    stage:
+      type: string
+      description: A stage name from the restart object of the run detail.
 
 RunScript:
   type: object

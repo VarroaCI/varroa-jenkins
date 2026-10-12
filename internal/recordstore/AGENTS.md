@@ -222,6 +222,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00018_runs_replay_of.sql` adds the nullable `runs.replay_of` uuid, the
   run a replayed build copied its script from. Only `run.started` writes
   it, through `COALESCE`, and it carries no default and no index.
+  `00031_runs_restart_of.sql` adds the nullable `runs.restart_of` uuid and `runs.restart_stage`
+  text. Only `run.started` writes them, through `COALESCE`. The intent-key scheme `restart`
+  (`restart:<source>:<new>`) keys a restarted build, and the scheme list now holds eight schemes.
   `00019_fleet_locks_owner_tenant.sql` adds `fleet_locks.owner_tenant`,
   the tenant that owns the lock, backfills it from each name's first
   segment, and indexes `(cluster, owner_tenant)`.

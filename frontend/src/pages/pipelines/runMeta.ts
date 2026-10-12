@@ -15,6 +15,7 @@ export const TRIGGER_LABEL: Record<TriggerSource, string> = {
   cron: "a schedule",
   upstream: "an upstream build",
   replay: "a replay",
+  restart: "a restart from a stage",
   scm: "an SCM poll or branch scan",
   other: "another cause",
 };

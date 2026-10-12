@@ -40,6 +40,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00027_webhook_deliveries.sql":                     false,
 		"00028_runs_upstream.sql":                          false,
 		"00029_runs_upstream_edge_idx.sql":                 false,
+		"00031_runs_restart_of.sql":                        false,
 		"00030_run_waits.sql":                              false,
 		"00032_job_branch_projects.sql":                    false,
 	}

@@ -70,6 +70,7 @@ func TestImperativeSuccessEventForPersonSentRunCommand(t *testing.T) {
 	for _, kind := range []mitev1.CommandType{
 		mitev1.CommandTypeCancelBuild, mitev1.CommandTypeProceedInput,
 		mitev1.CommandTypeAbortInput, mitev1.CommandTypeReplayBuild,
+		mitev1.CommandTypeRestartBuild,
 	} {
 		res := &mitev1.CommandResult{Success: true, HttpStatus: 200, CommandType: kind, JobPath: "acme/app", RunId: "run-1", Actor: "alice"}
 		event, ok := imperativeOutcomeEvent(outcomeTestController(), res, time.Now())

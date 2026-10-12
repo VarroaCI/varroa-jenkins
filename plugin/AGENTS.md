@@ -581,6 +581,19 @@ the root AGENTS.md greenfield rule.
   permission check, because a repeat schedules nothing. The recorder writes
   `VarroaReplayCause`'s source run into `replay_of` on the `STARTED` event
   alone. `replay` holds one word, so the route needs no `@WebMethod`.
+  `POST /varroa-run/restart` (`VarroaRunTriggerAction.doRestart`) reruns a completed declarative
+  build from one stage as the acting user. It keeps the source build's parameter values. It refuses
+  `409` when the job's home moved off this cell (`VarroaHomeCache.forwardSlotFor`), when the source
+  build number no longer names the source run, when the source build has not ended, when the
+  declarative inspection refuses, and when the stage is not listed. Every check after the item
+  lookup runs inside the acting user's `ACL.as2`, because `RestartDeclarativePipelineAction`
+  reads `Item.BUILD` of the current identity. `VarroaDeclarativeRestart` reaches the declarative
+  plugin through the uber class loader only (test scope in this module). It answers the restartable
+  stages from `getRestartableStages()`, and the refusal reasons `not-declarative`, `disabled`,
+  `unavailable`, and `no-restartable-stage`. It builds the restart objects itself, because Jenkins'
+  `run(String)` schedules without a `VarroaIntentAction`. `VarroaRestartCause` names the source run and
+  the stage. `BuildEvent` fields 52 to 55 carry the restart keys. The recorder fills `restart_stages` or
+  `restart_refusal` on `COMPLETED` only for a `WorkflowRun`.
   **A route of more than one word needs `@WebMethod(name = "...")`.** Stapler
   derives the URL token from the method name and never writes a dash, so
   `doLoadBuild` serves `loadBuild` and the dashed name every caller uses answers

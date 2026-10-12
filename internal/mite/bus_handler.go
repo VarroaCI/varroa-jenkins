@@ -648,6 +648,20 @@ func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg,
 			}, result)
 		}
 		return true
+	case mitev1.CommandTypeRestartBuild:
+		// A refused restart leaves no build, as a refused replay leaves none.
+		h.logRefusedRunCommand("restart build command refused", ns, name, result)
+		if p := imp.RestartBuild; p != nil && h.shouldRecordRefusal(result) {
+			// The refusal record decides the acknowledgement: a failed
+			// publish keeps the command pending for a redelivery.
+			return h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+				RunId:     p.RunId,
+				IntentKey: p.IntentKey,
+				JobPath:   p.JobPath,
+				Actor:     actingUserName(p.ActingUser),
+			}, result)
+		}
+		return true
 	}
 	if !h.recordStoreEnabled {
 		return true

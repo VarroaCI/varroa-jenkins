@@ -202,7 +202,10 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   carries them. `startedPayload` alone writes `replay_of` and
   `granted_build_number`, and `change_request` (only when the request has an id),
   each only for a non-empty or non-zero value, so no other phase and no ordinary
-  build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
+  build sends the key. `startedPayload` also writes `restart_of` and
+  `restart_stage` for a restarted build (fields 52 and 53). `completedPayload` writes
+  `restart_stages` (field 54) and `restart_refusal` (field 55) only when the plugin sent them.
+  A `COMPLETED` event publishes `run.tests` when it carries a
   test counter, a test case, or a test report, so a report whose case count
   is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
   the `error` truncation and drops the **last** case, because the plugin
@@ -227,6 +230,10 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   the refusal. A refused replay publishes `run.trigger_failed` for the
   **new** run id the replay named, through `publishTriggerFailed`, so the
   new run's page shows **Build not started**. A success publishes nothing.
+  `RESTART_BUILD` (`ImperativeCommand.restart_build`, type 11) follows the same path: `cmd/mite`
+  calls `jenkins.Client.RestartBuild`, which posts to `/varroa-run/restart`. A refused restart
+  publishes `run.trigger_failed` for the new run id, and the command stays pending when that publish
+  fails, so a redelivery retries it. This is the opposite of the always-ack rule below.
   All four **always ack**, whatever the publish answers: a redelivery runs
   the refused call again, and the record is a notice only. The operator
   still writes the cell-keyed `command.failed`/`command.succeeded` activity

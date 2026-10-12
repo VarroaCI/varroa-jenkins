@@ -218,3 +218,32 @@ func TestRecordCommandOutcome_RefusedCancelPublishFailureStillAcks(t *testing.T)
 	}
 	waitAckAll(t, conn, stream, consumer)
 }
+
+// TestFailedRestartRefusalPublishLeavesMessageUnacknowledged asserts a refused
+// restart whose run.trigger_failed publish fails keeps the command pending, so
+// the stream redelivers it and the refusal record is not lost.
+func TestFailedRestartRefusalPublishLeavesMessageUnacknowledged(t *testing.T) {
+	pub := &fakePublisher{syncFailLeft: 1, syncErr: errors.New("stream not found")}
+	h, conn := newTriggerFailedHandler(t, pub, triggerFailedResolver())
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: "cmd-1",
+		Type:      mitev1.CommandTypeRestartBuild,
+		RestartBuild: &mitev1.RestartBuildPayload{
+			RunId:             commandRefusedRun,
+			IntentKey:         "restart:source:" + commandRefusedRun,
+			JobPath:           triggerFailedJob,
+			SourceRunId:       "0199d0b7-0000-7000-8000-000000000001",
+			SourceBuildNumber: 7,
+			Stage:             "deploy",
+			ActingUser:        &mitev1.ActingUser{Name: "carol"},
+		},
+	}
+	stream, consumer, _ := seedPendingImperative(t, h, conn, cmd)
+
+	h.OnCommandResult(triggerFailedCell, triggerFailedNS, refusedRunCommandResult(mitev1.CommandTypeRestartBuild))
+
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("published %d envelopes, want 0 after a failed publish", got)
+	}
+	requireStaysUnacknowledged(t, conn, stream, consumer)
+}

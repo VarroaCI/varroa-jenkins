@@ -1794,6 +1794,32 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			} else {
 				success = true
 			}
+		case mitev1.CommandTypeRestartBuild:
+			payload := cmd.RestartBuild
+			if payload == nil {
+				errStr = "restart_build payload is nil"
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			restartStatus, restartErr := a.getJenkinsClient().RestartBuild(cctx, jenkins.RestartBuildRequest{
+				RunID:             payload.RunId,
+				IntentKey:         payload.IntentKey,
+				JobPath:           payload.JobPath,
+				SourceRunID:       payload.SourceRunId,
+				SourceBuildNumber: payload.SourceBuildNumber,
+				Stage:             payload.Stage,
+				ActingUser:        acting,
+			})
+			httpStatus = restartStatus
+			if restartErr != nil {
+				errStr = restartErr.Error()
+			} else {
+				success = true
+			}
 		case mitev1.CommandTypeResumeBuild:
 			if resumeErr := a.applyResumeBuild(cctx, cmd.ResumeBuild); resumeErr != nil {
 				errStr = resumeErr.Error()
@@ -2071,6 +2097,8 @@ func imperativeCommandSubject(cmd *mitev1.ImperativeCommand) (jobPath, runID str
 		return cmd.AbortInput.JobPath, cmd.AbortInput.RunId
 	case cmd.ReplayBuild != nil:
 		return cmd.ReplayBuild.JobPath, cmd.ReplayBuild.RunId
+	case cmd.RestartBuild != nil:
+		return cmd.RestartBuild.JobPath, cmd.RestartBuild.RunId
 	case cmd.Target != "":
 		return cmd.Target, ""
 	}
@@ -2092,6 +2120,8 @@ func imperativeCommandActor(cmd *mitev1.ImperativeCommand) string {
 		return actingUserName(cmd.AbortInput.ActingUser)
 	case cmd.ReplayBuild != nil:
 		return actingUserName(cmd.ReplayBuild.ActingUser)
+	case cmd.RestartBuild != nil:
+		return actingUserName(cmd.RestartBuild.ActingUser)
 	}
 	return ""
 }

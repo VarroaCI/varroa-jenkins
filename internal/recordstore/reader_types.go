@@ -46,6 +46,11 @@ type Run struct {
 	// ReplayOf names the run a replayed build copied its script from. It
 	// is nil for a build that is not a replay.
 	ReplayOf *uuid.UUID
+	// RestartOf names the run a restarted build reran from, and
+	// RestartStage names the stage the restart began at. Both are nil for a
+	// build that is not a restart.
+	RestartOf    *uuid.UUID
+	RestartStage *string
 	// UpstreamRunID, UpstreamTenant, UpstreamJob, and UpstreamNumber name
 	// the run that started this run, when another run did. UpstreamJob is
 	// the tenant-qualified job path. UpstreamRunID is nil when no upstream

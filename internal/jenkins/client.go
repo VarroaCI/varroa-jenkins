@@ -1243,6 +1243,41 @@ func (c *Client) ReplayBuild(ctx context.Context, req ReplayBuildRequest) (int, 
 	return resp.StatusCode, nil
 }
 
+// RestartBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/restart route.
+type RestartBuildRequest struct {
+	RunID             string      `json:"runId"`
+	IntentKey         string      `json:"intentKey"`
+	JobPath           string      `json:"jobPath"`
+	SourceRunID       string      `json:"sourceRunId"`
+	SourceBuildNumber int64       `json:"sourceBuildNumber"`
+	Stage             string      `json:"stage"`
+	ActingUser        *ActingUser `json:"actingUser,omitempty"`
+}
+
+// RestartBuild reruns a completed declarative build from one stage, through
+// the Varroa plugin's /varroa-run/restart route. The plugin checks that the
+// source build is still on this cell before it schedules the restart.
+//
+// It returns the Jenkins HTTP status beside the error. The status is 0 when
+// the call reached no Jenkins.
+func (c *Client) RestartBuild(ctx context.Context, req RestartBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("restart build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/restart", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("restart build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("restart build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
 // AssignItemRoles assigns RBAC roles on an item path via the role-strategy
 // plugin. Item-level roles are deferred — the role-strategy REST API requires
 // XML payloads that vary by plugin version. Groups are parsed from items.yaml

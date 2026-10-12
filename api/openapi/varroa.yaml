@@ -2670,6 +2670,16 @@ components:
           description: |
             The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
           type: string
+        restart:
+          $ref: '#/components/schemas/components_schemas_RunRestart'
+        restartOf:
+          description: |
+            The identifier of the run this build restarted from. The field is absent for a build that is not a restart.
+          type: string
+        restartStage:
+          description: |
+            The stage this restarted build began at. The field is absent for a build that is not a restart.
+          type: string
         result:
           type: string
         retryRunId:
@@ -2761,17 +2771,27 @@ components:
             store refused. Set only when result is TRIGGER_FAILED.
           type: string
         triggerSource:
-          description: Kind of cause that started the run. Absent when Jenkins reports
-            no cause list.
+          description: |
+            Kind of cause that started the run. Absent when Jenkins reports no cause list.
           enum:
           - user
           - webhook
           - cron
           - upstream
           - replay
+          - restart
           - scm
           - other
           type: string
+          x-enum-varnames:
+          - User
+          - Webhook
+          - Cron
+          - Upstream
+          - Replay
+          - Restart
+          - Scm
+          - Other
         upstream:
           $ref: '#/components/schemas/components_schemas_RunLink'
         waiting:
@@ -2987,17 +3007,27 @@ components:
         status:
           type: string
         triggerSource:
-          description: Kind of cause that started the run. Absent when Jenkins reports
-            no cause list.
+          description: |
+            Kind of cause that started the run. Absent when Jenkins reports no cause list.
           enum:
           - user
           - webhook
           - cron
           - upstream
           - replay
+          - restart
           - scm
           - other
           type: string
+          x-enum-varnames:
+          - User
+          - Webhook
+          - Cron
+          - Upstream
+          - Replay
+          - Restart
+          - Scm
+          - Other
       required:
       - runId
       - status
@@ -3171,6 +3201,14 @@ components:
           - run
           - activity
           type: string
+          x-enum-varnames:
+          - ComponentsSchemasSearchResultTypeController
+          - ComponentsSchemasSearchResultTypeNamespace
+          - ComponentsSchemasSearchResultTypeGroup
+          - ComponentsSchemasSearchResultTypeCatalogitem
+          - ComponentsSchemasSearchResultTypeJob
+          - ComponentsSchemasSearchResultTypeRun
+          - ComponentsSchemasSearchResultTypeActivity
       required:
       - type
       - name
@@ -8526,6 +8564,16 @@ components:
           description: Strategic-merge-patch YAML applied to the Jenkins StatefulSet.
           type: string
       type: object
+    components_schemas_RestartRunRequest:
+      additionalProperties: false
+      description: POST /runs/{run}/restart. The stage the restart begins at.
+      properties:
+        stage:
+          description: A stage name from the restart object of the run detail.
+          type: string
+      required:
+      - stage
+      type: object
     components_schemas_Rollout:
       additionalProperties: false
       description: Rollout gate status for a controller.
@@ -8771,6 +8819,16 @@ components:
           description: |
             The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
           type: string
+        restart:
+          $ref: '#/components/schemas/components_schemas_RunRestart'
+        restartOf:
+          description: |
+            The identifier of the run this build restarted from. The field is absent for a build that is not a restart.
+          type: string
+        restartStage:
+          description: |
+            The stage this restarted build began at. The field is absent for a build that is not a restart.
+          type: string
         result:
           type: string
         retryRunId:
@@ -8862,17 +8920,27 @@ components:
             store refused. Set only when result is TRIGGER_FAILED.
           type: string
         triggerSource:
-          description: Kind of cause that started the run. Absent when Jenkins reports
-            no cause list.
+          description: |
+            Kind of cause that started the run. Absent when Jenkins reports no cause list.
           enum:
           - user
           - webhook
           - cron
           - upstream
           - replay
+          - restart
           - scm
           - other
           type: string
+          x-enum-varnames:
+          - User
+          - Webhook
+          - Cron
+          - Upstream
+          - Replay
+          - Restart
+          - Scm
+          - Other
         upstream:
           $ref: '#/components/schemas/components_schemas_RunLink'
         waiting:
@@ -9024,6 +9092,26 @@ components:
       required:
       - items
       type: object
+    components_schemas_RunRestart:
+      additionalProperties: false
+      description: |
+        GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
+      properties:
+        reason:
+          description: |
+            Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved.
+          type: string
+        restartable:
+          type: boolean
+        stages:
+          description: The stages the restart can begin at, in run order.
+          items:
+            type: string
+          type: array
+      required:
+      - restartable
+      - stages
+      type: object
     components_schemas_RunScript:
       additionalProperties: false
       description: |
@@ -9131,17 +9219,27 @@ components:
         status:
           type: string
         triggerSource:
-          description: Kind of cause that started the run. Absent when Jenkins reports
-            no cause list.
+          description: |
+            Kind of cause that started the run. Absent when Jenkins reports no cause list.
           enum:
           - user
           - webhook
           - cron
           - upstream
           - replay
+          - restart
           - scm
           - other
           type: string
+          x-enum-varnames:
+          - User
+          - Webhook
+          - Cron
+          - Upstream
+          - Replay
+          - Restart
+          - Scm
+          - Other
       required:
       - runId
       - status
@@ -9535,6 +9633,14 @@ components:
           - run
           - activity
           type: string
+          x-enum-varnames:
+          - ComponentsSchemasSearchResultTypeController
+          - ComponentsSchemasSearchResultTypeNamespace
+          - ComponentsSchemasSearchResultTypeGroup
+          - ComponentsSchemasSearchResultTypeCatalogitem
+          - ComponentsSchemasSearchResultTypeJob
+          - ComponentsSchemasSearchResultTypeRun
+          - ComponentsSchemasSearchResultTypeActivity
       required:
       - type
       - name
@@ -12429,6 +12535,13 @@ paths:
                   - force-restart
                   - plugin-roll
                   type: string
+                  x-enum-varnames:
+                  - ApproveControllerJSONBodyActionReload
+                  - ApproveControllerJSONBodyActionRestart
+                  - ApproveControllerJSONBodyActionApprove
+                  - ApproveControllerJSONBodyActionForce
+                  - ApproveControllerJSONBodyActionForceRestart
+                  - ApproveControllerJSONBodyActionPluginRoll
                 expectedContentHash:
                   description: The contentHash of the pending change that the caller
                     reviewed. When present, the approval refuses unless the pending
@@ -15344,6 +15457,87 @@ paths:
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
       summary: Requests a retry of a finished run. One retry per source run, fleet-wide.
+      tags:
+      - Pipelines
+  /api/v1/runs/{run}/restart:
+    get:
+      description: |
+        The BFF reads the restart answer the plugin recorded when the run completed. It never calls Jenkins. A run that does not restart answers restartable false and the reason, and an empty stages list.
+      operationId: getRunRestart
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunRestart'
+          description: The run's restart answer.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Reads whether one run restarts from a stage, and the stages it can
+        restart from.
+      tags:
+      - Pipelines
+    post:
+      description: |
+        The BFF applies the eligibility rules of the restart read, mints a new run identifier, and publishes one RESTART_BUILD command to the job's home member. The plugin checks that the source build still sits on that cell before it schedules the restart. The new run copies the parameter values of the source build. It does not wait for Jenkins.
+      operationId: restartRun
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_RestartRunRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunActionResponse'
+          description: The restart was requested.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The request body does not decode, or the stage is empty.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The run does not exist, or the caller may not read it.
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: |
+            The run does not restart, or the stage is not restartable. The message names the reason: not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. An unlisted stage answers "stage <name> is not restartable".
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_Error'
+          description: The request body is larger than 4 KiB.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Starts a new build of the run's job from one stage. Fire and forget.
       tags:
       - Pipelines
   /api/v1/runs/{run}/script:

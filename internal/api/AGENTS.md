@@ -410,7 +410,14 @@ federation, activity persistence, and SSE fanout.
   page alike. A refused run answers an empty `script` and an empty `loadedScripts`. The replay
   answers `409` with `run does not replay: <reason>`, `413` over 256 KiB, mints a UUIDv7,
   keys it `replay:<source>:<new>`, reads no intent, and publishes one `REPLAY_BUILD` to the
-  job's `homeRef`. `GET /runs/{run}` answers `replayOf` from `runs.replay_of`. The live log tail
+  job's `homeRef`. `GET /runs/{run}` answers `replayOf` from `runs.replay_of`.
+  `run_restart.go` owns the restart route pair: `GET /runs/{run}/restart` reads the stage list the
+  plugin recorded in `run.completed.payload.restart_stages` (or its `restart_refusal`) and answers
+  `restartable`, `reason`, and `stages` without a Jenkins call. `POST /runs/{run}/restart` takes
+  `{stage}`, runs the same rules, mints a UUIDv7, keys it `restart:<source>:<new>`, and publishes one
+  `RESTART_BUILD` to the job's `homeRef`. Both answer `home-moved` when the job's home is no longer the
+  cell that ran the build. `GET /runs/{run}` carries `restart` on a terminal run, plus `restartOf` and
+  `restartStage`. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
   `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`
   (`runlog_tail.go`) is this BFF replica's shared lease table: at most one lease and one

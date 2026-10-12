@@ -557,6 +557,14 @@ message BuildEvent {
   string replay_of = 50;
   // The grant the run applied, on STARTED alone. Zero names no grant.
   int64 granted_build_number = 51;
+  // The source run of a restart. Set on STARTED alone.
+  string restart_of = 52;
+  // The stage a restart reruns from. Set on STARTED alone.
+  string restart_stage = 53;
+  // The stages a completed declarative run can restart from. Set on COMPLETED alone.
+  repeated string restart_stages = 54;
+  // Why a completed run cannot restart. Set on COMPLETED alone.
+  string restart_refusal = 55;
   // The change request the run builds, on STARTED alone. Empty for a branch run.
   ChangeRequestInfo change_request = 56;
   // rejected_signature is the script signature the sandbox refused in a
@@ -819,6 +827,7 @@ enum CommandType {
   PROCEED_INPUT = 8;
   ABORT_INPUT = 9;
   REPLAY_BUILD = 10;
+  RESTART_BUILD = 11;
 }
 
 message ImperativeCommand {
@@ -836,6 +845,7 @@ message ImperativeCommand {
   ProceedInputPayload proceed_input = 10;
   AbortInputPayload abort_input = 11;
   ReplayBuildPayload replay_build = 12;
+  RestartBuildPayload restart_build = 13;
 }
 
 message ReplayWebhookPayload {
@@ -900,6 +910,22 @@ message ReplayBuildPayload {
   string script = 5;
   ActingUser acting_user = 6;
   map<string, string> parameters = 7;
+}
+
+message RestartBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  // @required
+  string source_run_id = 4;
+  // @required
+  int64 source_build_number = 5;
+  // @required
+  string stage = 6;
+  ActingUser acting_user = 7;
 }
 
 message CancelBuildPayload {

@@ -32,7 +32,7 @@ describe("sortedParams", () => {
 describe("constants", () => {
   it("names every trigger source", () => {
     expect(Object.keys(TRIGGER_LABEL).sort()).toEqual(
-      ["cron", "other", "replay", "scm", "upstream", "user", "webhook"],
+      ["cron", "other", "replay", "restart", "scm", "upstream", "user", "webhook"],
     );
   });
 

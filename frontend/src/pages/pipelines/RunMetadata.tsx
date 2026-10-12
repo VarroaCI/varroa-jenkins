@@ -53,6 +53,9 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
       </div>
       {run.changeRequest && <ChangeRequestRow changeRequest={run.changeRequest} />}
       {run.replayOf && <ReplayOrigin replayOf={run.replayOf} team={team} job={job} />}
+      {run.restartOf && run.restartStage && (
+        <RestartOrigin restartOf={run.restartOf} stage={run.restartStage} team={team} job={job} />
+      )}
       {params.length > 0 && (
         <div className={styles.row}>
           <span className={styles.rowLabel}>Parameters</span>
@@ -80,6 +83,43 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
           </div>
         )}
     </>
+  );
+}
+
+/** RestartOrigin links the build a restart reran from, and names the stage. It
+ * reads that build to learn its number. Until the read answers, or when it
+ * fails, the row names an earlier build without a number. */
+function RestartOrigin({
+  restartOf,
+  stage,
+  team,
+  job,
+}: {
+  restartOf: string;
+  stage: string;
+  team?: string;
+  job?: string;
+}) {
+  const origin = useQuery({
+    queryKey: ["run-restart-origin", restartOf],
+    queryFn: () => getRun(restartOf),
+    enabled: !!restartOf,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const number = origin.data?.buildNumber;
+  const from = number ? `#${number}` : "an earlier build";
+  const text = `Restarted from ${from} at stage ${stage}`;
+  const linked = !!team && !!job;
+
+  return (
+    <div className={styles.row}>
+      {linked ? (
+        <Link to={`/pipelines/${enc(team!)}/${enc(job!)}/${enc(restartOf)}`}>{text}</Link>
+      ) : (
+        <span>{text}</span>
+      )}
+    </div>
   );
 }
 

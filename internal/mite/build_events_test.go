@@ -426,6 +426,46 @@ func TestStartedPayload_ReplayOf(t *testing.T) {
 	}
 }
 
+// TestStartedPayload_RestartKeys proves run.started writes restart_of and
+// restart_stage for a restarted build, and writes no key for an ordinary one.
+func TestStartedPayload_RestartKeys(t *testing.T) {
+	const source = "0199aa11-2222-7333-8444-555566667777"
+	restarted := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1", RestartOf: source, RestartStage: "deploy"})
+	if got := restarted["restart_of"]; got != source {
+		t.Fatalf("restart_of = %v, want %q", got, source)
+	}
+	if got := restarted["restart_stage"]; got != "deploy" {
+		t.Fatalf("restart_stage = %v, want deploy", got)
+	}
+	ordinary := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1"})
+	if _, ok := ordinary["restart_of"]; ok {
+		t.Fatalf("run.started payload carries restart_of for an ordinary build: %+v", ordinary)
+	}
+	if _, ok := ordinary["restart_stage"]; ok {
+		t.Fatalf("run.started payload carries restart_stage for an ordinary build: %+v", ordinary)
+	}
+}
+
+// TestCompletedPayload_RestartKeys proves run.completed writes the restart
+// stage list or the refusal, and writes neither for an empty value.
+func TestCompletedPayload_RestartKeys(t *testing.T) {
+	listed := completedPayload(&mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1", RestartStages: []string{"build", "deploy"}})
+	if got, ok := listed["restart_stages"].([]string); !ok || len(got) != 2 {
+		t.Fatalf("restart_stages = %v (present %v), want two stages", listed["restart_stages"], ok)
+	}
+	refused := completedPayload(&mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1", RestartRefusal: "not-declarative"})
+	if got := refused["restart_refusal"]; got != "not-declarative" {
+		t.Fatalf("restart_refusal = %v, want not-declarative", got)
+	}
+	plain := completedPayload(&mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1"})
+	if _, ok := plain["restart_stages"]; ok {
+		t.Fatalf("run.completed payload carries restart_stages for an empty list: %+v", plain)
+	}
+	if _, ok := plain["restart_refusal"]; ok {
+		t.Fatalf("run.completed payload carries restart_refusal for an empty value: %+v", plain)
+	}
+}
+
 // TestStartedPayload_GrantedBuildNumber proves run.started writes
 // granted_build_number for a non-zero grant, writes no key for zero, and
 // no other payload writes it.

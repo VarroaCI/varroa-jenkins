@@ -113,6 +113,9 @@ type RunDetail struct {
 	TestReport        *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
 	ReplayOf          string                   `json:"replayOf,omitempty"`
+	RestartOf         string                   `json:"restartOf,omitempty"`
+	RestartStage      string                   `json:"restartStage,omitempty"`
+	Restart           *RunRestart              `json:"restart,omitempty"`
 	RejectedSignature string                   `json:"rejectedSignature,omitempty"`
 	CommandRefusal    *runCommandRefusalJSON   `json:"commandRefusal,omitempty"`
 	Upstream          *RunLink                 `json:"upstream,omitempty"`
@@ -272,6 +275,14 @@ func (s *Server) GetRun(ctx context.Context, claims *auth.Claims, runID string) 
 		s.deps.Logger.Warn("resolve run tenant folder failed", "runId", run.RunID, "error", err)
 	}
 	detail := buildRunDetail(run, stages, retryRunID, tenantFolder)
+	if run.Status == recordstore.StatusCompleted || run.Status == recordstore.StatusDuplicate {
+		// A failed home read leaves the restart object out. The run read still answers.
+		if restart, rerr := s.runRestartSource(ctx, run); rerr == nil {
+			detail.Restart = &restart
+		} else {
+			s.deps.Logger.Warn("read run restart failed", "runId", run.RunID, "error", rerr)
+		}
+	}
 	// A failed case read degrades the two case lists alone: the run read
 	// and the rest of the digest still answer.
 	cases, casesErr := s.deps.RecordStore.ListTestCases(ctx, run.RunID)

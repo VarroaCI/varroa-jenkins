@@ -147,6 +147,47 @@ The new build takes its own build number from the ledger. The run record names t
 
 A headless tenant sees the same control, because the dashboard is the only surface of that tenant.
 
+## Restart a build from a stage
+
+The **Restart from stage** control on the build page starts a new build of the same job. The new
+build begins at the stage that you choose. Stages before that stage do not run again. The new build
+keeps the parameter values of the source build. The control needs the tenant's `pipelines` write grant.
+
+Select **Restart from stage**, choose a stage, and select **Restart**. The new build opens. A
+refused restart shows the reason on the drawer.
+
+A build shows the control only when it meets all of these conditions:
+
+| Condition | Meaning |
+|---|---|
+| It ended | The build reached a terminal state |
+| It is declarative | The build used a `pipeline { }` definition. Jenkins does not restart a scripted pipeline from a stage. |
+| It has a restartable stage | At least one stage of the build can restart. A stage skipped for a failure in an earlier stage cannot restart. |
+| It is not template defined | No pipeline template or marker file defined the job |
+| It ran on the job's current cell | The cell that ran the build is still the job's home cell |
+
+The source build must still sit on that cell. Varroa stores the build on the cell disk only while
+the cell runs. A pod roll or a move of the job to another cell removes the source build, and the
+restart is then refused.
+
+A restarted stage can use `unstash` only when the job keeps its stashes. Add this option to the
+job:
+
+```groovy
+options {
+    preserveStashes(buildCount: 5)
+}
+```
+
+A job that sets `disableRestartFromStage()` in its `options` block cannot restart from a stage.
+
+The new run names the source run in `restartOf`, and the stage in `restartStage`. The build page
+shows the link, and the run detail carries the same two fields. The restart answer is in the `restart`
+object of the run detail. It lists the stages that a restart can use.
+
+An MCP client uses the `restart_run` tool with `run` and `stage`. The `get_run` tool returns the
+`restart` object, which names the stages. The tool applies the tenant write check on the run's job path.
+
 ## Call a job on another tenant
 
 Two pipelines tenants, a producer and a caller, connect through a grant and a trigger.

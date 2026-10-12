@@ -390,6 +390,12 @@ func startedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.ReplayOf != "" {
 		p["replay_of"] = evt.ReplayOf
 	}
+	if evt.RestartOf != "" {
+		p["restart_of"] = evt.RestartOf
+	}
+	if evt.RestartStage != "" {
+		p["restart_stage"] = evt.RestartStage
+	}
 	if evt.GrantedBuildNumber != 0 {
 		p["granted_build_number"] = evt.GrantedBuildNumber
 	}
@@ -679,6 +685,12 @@ func completedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	addTemplateFields(p, evt)
 	if evt.Summary != "" {
 		p["summary"] = evt.Summary
+	}
+	if len(evt.RestartStages) > 0 {
+		p["restart_stages"] = evt.RestartStages
+	}
+	if evt.RestartRefusal != "" {
+		p["restart_refusal"] = evt.RestartRefusal
 	}
 	if evt.RejectedSignature != "" {
 		p["rejected_signature"] = evt.RejectedSignature

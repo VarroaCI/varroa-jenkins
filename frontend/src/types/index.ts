@@ -1604,7 +1604,7 @@ export interface FleetPluginDrilldown {
 export type PipelineHealth = "clear" | "cloudy" | "rain" | "unknown";
 
 /** TriggerSource names the kind of cause that started a run. */
-export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "scm" | "other";
+export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "restart" | "scm" | "other";
 
 /** ChangeRequest names the pull request a multibranch run builds. */
 export interface ChangeRequest {
@@ -2013,6 +2013,12 @@ export interface RunDetail {
   source?: RunSource;
   /** The source run this run replays. Absent for a run that is not a replay. */
   replayOf?: string;
+  /** The run this run restarted from. Absent for a run that is not a restart. */
+  restartOf?: string;
+  /** The stage this restarted run began at. Absent for a run that is not a restart. */
+  restartStage?: string;
+  /** Whether a finished run restarts from a stage, and the stages it can restart from. */
+  restart?: RunRestart;
   /** Set only when result is FAILURE and the script sandbox refused a
    * signature. An operator approves the signature on the cell pool. */
   rejectedSignature?: string;
@@ -2084,6 +2090,15 @@ export interface RunScript {
   replayable: boolean;
   /** Why the run does not replay. Empty for a run that replays. */
   reason: string;
+}
+
+/** GET /runs/{run}/restart. Whether a declarative run restarts from a stage. */
+export interface RunRestart {
+  restartable: boolean;
+  /** Why the run does not restart. Absent when restartable is true. */
+  reason?: string;
+  /** The stages the restart can begin at, in run order. */
+  stages: string[];
 }
 
 /** One entry of a digest's failed case list. */

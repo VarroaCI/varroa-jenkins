@@ -111,8 +111,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
 	mux.HandleFunc("GET /pipelines/{team}/locks", srv.handleListTeamFleetLocks)
 	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
-	// Runs: detail, log stream, artifacts, tests, changes, downstream, script, cancel,
-	// rerun, replay, and the two input routes.
+	// Runs: detail, log stream, artifacts, tests, changes, downstream, script, restart,
+	// cancel, rerun, replay, and the two input routes.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)
 	mux.HandleFunc("GET /runs/{run}/log", srv.handleStreamRunLog)
 	mux.HandleFunc("GET /runs/{run}/artifacts", srv.handleListRunArtifacts)
@@ -121,6 +121,8 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /runs/{run}/changes", srv.handleListRunChanges)
 	mux.HandleFunc("GET /runs/{run}/downstream", srv.handleListRunDownstream)
 	mux.HandleFunc("GET /runs/{run}/script", srv.handleGetRunScript)
+	mux.HandleFunc("GET /runs/{run}/restart", srv.handleGetRunRestart)
+	mux.HandleFunc("POST /runs/{run}/restart", srv.handleRestartRun)
 	mux.HandleFunc("POST /runs/{run}/cancel", srv.handleCancelRun)
 	mux.HandleFunc("POST /runs/{run}/rerun", srv.handleRerunRun)
 	mux.HandleFunc("POST /runs/{run}/replay", srv.handleReplayRun)

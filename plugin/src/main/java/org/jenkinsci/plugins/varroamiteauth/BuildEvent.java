@@ -49,6 +49,14 @@ import java.util.Map;
  * Only the {@code STARTED} event carries it. {@link #toJson()} writes no
  * key for zero.
  *
+ * <p>Field 52, {@code restart_of}, names the run a restarted build reran
+ * from, and field 53, {@code restart_stage}, names the stage the restart
+ * began at. Only the {@code STARTED} event carries them.
+ *
+ * <p>Field 54, {@code restart_stages}, lists the stages a completed
+ * declarative run can restart from. Field 55, {@code restart_refusal},
+ * names why a completed run cannot restart. Only the {@code COMPLETED}
+ * event carries them. {@link #toJson()} writes no key for an empty value.
  * <p>Field 57, {@code rejected_signature}, is the script signature the
  * sandbox refused in a failed build. Only the {@code COMPLETED} event
  * carries it. {@link #toJson()} writes no key for it when it is empty.
@@ -122,6 +130,10 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildTestCase> testCases;
     private final String replayOf;
     private final long grantedBuildNumber;
+    private final String restartOf;
+    private final String restartStage;
+    private final List<String> restartStages;
+    private final String restartRefusal;
     private final ChangeRequestInfo changeRequest;
     private final String rejectedSignature;
 
@@ -177,6 +189,10 @@ public final class BuildEvent implements PostableEvent {
         this.testCases = List.copyOf(b.testCases);
         this.replayOf = orEmpty(b.replayOf);
         this.grantedBuildNumber = b.grantedBuildNumber;
+        this.restartOf = orEmpty(b.restartOf);
+        this.restartStage = orEmpty(b.restartStage);
+        this.restartStages = List.copyOf(b.restartStages);
+        this.restartRefusal = orEmpty(b.restartRefusal);
         this.changeRequest = b.changeRequest;
         this.rejectedSignature = orEmpty(b.rejectedSignature);
     }
@@ -425,6 +441,26 @@ public final class BuildEvent implements PostableEvent {
         return grantedBuildNumber;
     }
 
+    /** Field 52: the run a restarted build reran from. Empty for a build that is not a restart. */
+    public String getRestartOf() {
+        return restartOf;
+    }
+
+    /** Field 53: the stage a restarted build began at. Empty for a build that is not a restart. */
+    public String getRestartStage() {
+        return restartStage;
+    }
+
+    /** Field 54: the stages a completed declarative run can restart from. */
+    public List<String> getRestartStages() {
+        return restartStages;
+    }
+
+    /** Field 55: why a completed run cannot restart. Empty when it can. */
+    public String getRestartRefusal() {
+        return restartRefusal;
+    }
+
     /**
      * Serializes the event to a {@link JSONObject} using proto JSON field
      * names, ready to post to {@code /v1/events}.
@@ -534,6 +570,18 @@ public final class BuildEvent implements PostableEvent {
         if (grantedBuildNumber != 0) {
             o.put("granted_build_number", grantedBuildNumber);
         }
+        if (!restartOf.isEmpty()) {
+            o.put("restart_of", restartOf);
+        }
+        if (!restartStage.isEmpty()) {
+            o.put("restart_stage", restartStage);
+        }
+        if (!restartStages.isEmpty()) {
+            o.put("restart_stages", stringArray(restartStages));
+        }
+        if (!restartRefusal.isEmpty()) {
+            o.put("restart_refusal", restartRefusal);
+        }
         if (changeRequest != null && !changeRequest.getId().isEmpty()) {
             o.put("change_request", changeRequest.toJson());
         }
@@ -609,6 +657,10 @@ public final class BuildEvent implements PostableEvent {
                 .testCases(testCases)
                 .replayOf(replayOf)
                 .grantedBuildNumber(grantedBuildNumber)
+                .restartOf(restartOf)
+                .restartStage(restartStage)
+                .restartStages(restartStages)
+                .restartRefusal(restartRefusal)
                 .changeRequest(changeRequest)
                 .rejectedSignature(rejectedSignature);
     }
@@ -724,6 +776,10 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildTestCase> testCases = new ArrayList<>();
         private String replayOf;
         private long grantedBuildNumber;
+        private String restartOf;
+        private String restartStage;
+        private List<String> restartStages = new ArrayList<>();
+        private String restartRefusal;
         private ChangeRequestInfo changeRequest;
         private String rejectedSignature;
 
@@ -1012,6 +1068,30 @@ public final class BuildEvent implements PostableEvent {
         /** Field 51: the grant the run applied. */
         public Builder grantedBuildNumber(long v) {
             this.grantedBuildNumber = v;
+            return this;
+        }
+
+        /** Field 52: the run a restarted build reran from. */
+        public Builder restartOf(String v) {
+            this.restartOf = v;
+            return this;
+        }
+
+        /** Field 53: the stage a restarted build began at. */
+        public Builder restartStage(String v) {
+            this.restartStage = v;
+            return this;
+        }
+
+        /** Field 54: the stages a completed declarative run can restart from. */
+        public Builder restartStages(List<String> v) {
+            this.restartStages = new ArrayList<>(v);
+            return this;
+        }
+
+        /** Field 55: why a completed run cannot restart. */
+        public Builder restartRefusal(String v) {
+            this.restartRefusal = v;
             return this;
         }
 

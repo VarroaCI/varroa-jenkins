@@ -92,6 +92,13 @@ describe("RunMetadata", () => {
     expect(await screen.findByText("Replay of an earlier build")).toBeInTheDocument();
   });
 
+  it("links Restarted from to the source build and names the stage", async () => {
+    vi.mocked(getRun).mockResolvedValue({ ...baseRun, runId: "orig", buildNumber: 7 });
+    renderMeta({ ...baseRun, restartOf: "orig", restartStage: "deploy" });
+    const link = await screen.findByRole("link", { name: "Restarted from #7 at stage deploy" });
+    expect(link).toHaveAttribute("href", "/pipelines/team-a/svc%2Fmain/orig");
+  });
+
   it("renders no replay row without replayOf", () => {
     renderMeta(baseRun);
     expect(screen.queryByText(/Replay of/)).toBeNull();

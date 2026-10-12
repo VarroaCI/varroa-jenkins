@@ -444,6 +444,7 @@ const (
 	ComponentsSchemasRunDetailTriggerSourceCron     ComponentsSchemasRunDetailTriggerSource = "cron"
 	ComponentsSchemasRunDetailTriggerSourceOther    ComponentsSchemasRunDetailTriggerSource = "other"
 	ComponentsSchemasRunDetailTriggerSourceReplay   ComponentsSchemasRunDetailTriggerSource = "replay"
+	ComponentsSchemasRunDetailTriggerSourceRestart  ComponentsSchemasRunDetailTriggerSource = "restart"
 	ComponentsSchemasRunDetailTriggerSourceScm      ComponentsSchemasRunDetailTriggerSource = "scm"
 	ComponentsSchemasRunDetailTriggerSourceUpstream ComponentsSchemasRunDetailTriggerSource = "upstream"
 	ComponentsSchemasRunDetailTriggerSourceUser     ComponentsSchemasRunDetailTriggerSource = "user"
@@ -461,6 +462,7 @@ const (
 	ComponentsSchemasRunSummaryTriggerSourceCron     ComponentsSchemasRunSummaryTriggerSource = "cron"
 	ComponentsSchemasRunSummaryTriggerSourceOther    ComponentsSchemasRunSummaryTriggerSource = "other"
 	ComponentsSchemasRunSummaryTriggerSourceReplay   ComponentsSchemasRunSummaryTriggerSource = "replay"
+	ComponentsSchemasRunSummaryTriggerSourceRestart  ComponentsSchemasRunSummaryTriggerSource = "restart"
 	ComponentsSchemasRunSummaryTriggerSourceScm      ComponentsSchemasRunSummaryTriggerSource = "scm"
 	ComponentsSchemasRunSummaryTriggerSourceUpstream ComponentsSchemasRunSummaryTriggerSource = "upstream"
 	ComponentsSchemasRunSummaryTriggerSourceUser     ComponentsSchemasRunSummaryTriggerSource = "user"
@@ -3290,6 +3292,12 @@ type ComponentsSchemasResourceOverlay struct {
 	StatefulSet *string `json:"statefulSet,omitempty"`
 }
 
+// ComponentsSchemasRestartRunRequest POST /runs/{run}/restart. The stage the restart begins at.
+type ComponentsSchemasRestartRunRequest struct {
+	// Stage A stage name from the restart object of the run detail.
+	Stage string `json:"stage"`
+}
+
 // ComponentsSchemasRollout Rollout gate status for a controller.
 type ComponentsSchemasRollout struct {
 	Blocked          bool      `json:"blocked"`
@@ -3431,7 +3439,16 @@ type ComponentsSchemasRunDetail struct {
 
 	// ReplayOf The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
 	ReplayOf *string `json:"replayOf,omitempty"`
-	Result   *string `json:"result,omitempty"`
+
+	// Restart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
+	Restart *ComponentsSchemasRunRestart `json:"restart,omitempty"`
+
+	// RestartOf The identifier of the run this build restarted from. The field is absent for a build that is not a restart.
+	RestartOf *string `json:"restartOf,omitempty"`
+
+	// RestartStage The stage this restarted build began at. The field is absent for a build that is not a restart.
+	RestartStage *string `json:"restartStage,omitempty"`
+	Result       *string `json:"result,omitempty"`
 
 	// RetryRunId An existing retry's run id, when one already exists.
 	RetryRunId  *string `json:"retryRunId,omitempty"`
@@ -3579,6 +3596,16 @@ type ComponentsSchemasRunLinkPage struct {
 type ComponentsSchemasRunListResponse struct {
 	Items      []ComponentsSchemasRunSummary `json:"items"`
 	NextCursor *string                       `json:"nextCursor,omitempty"`
+}
+
+// ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
+type ComponentsSchemasRunRestart struct {
+	// Reason Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved.
+	Reason      *string `json:"reason,omitempty"`
+	Restartable bool    `json:"restartable"`
+
+	// Stages The stages the restart can begin at, in run order.
+	Stages []string `json:"stages"`
 }
 
 // ComponentsSchemasRunScript GET /runs/{run}/script. The run's own Groovy script, read from the build record the run retains in the blob tier. Every field is always present. A run that does not replay answers an empty script and an empty loadedScripts object.
@@ -5142,6 +5169,9 @@ type ProceedRunInputJSONRequestBody ProceedRunInputJSONBody
 // ReplayRunJSONRequestBody defines body for ReplayRun for application/json ContentType.
 type ReplayRunJSONRequestBody ReplayRunJSONBody
 
+// RestartRunJSONRequestBody defines body for RestartRun for application/json ContentType.
+type RestartRunJSONRequestBody = ComponentsSchemasRestartRunRequest
+
 // CreateStreamTicketJSONRequestBody defines body for CreateStreamTicket for application/json ContentType.
 type CreateStreamTicketJSONRequestBody CreateStreamTicketJSONBody
 
@@ -6175,6 +6205,14 @@ type ClientInterface interface {
 
 	// RerunRun request
 	RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRunRestart request
+	GetRunRestart(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestartRunWithBody request with any body
+	RestartRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RestartRun(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetRunScript request
 	GetRunScript(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8471,6 +8509,42 @@ func (c *Client) ReplayRun(ctx context.Context, run ComponentsParametersRun, bod
 
 func (c *Client) RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRerunRunRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRunRestart(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunRestartRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestartRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartRunRequestWithBody(c.Server, run, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestartRun(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartRunRequest(c.Server, run, body)
 	if err != nil {
 		return nil, err
 	}
@@ -15666,6 +15740,87 @@ func NewRerunRunRequest(server string, run ComponentsParametersRun) (*http.Reque
 	return req, nil
 }
 
+// NewGetRunRestartRequest generates requests for GetRunRestart
+func NewGetRunRestartRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/restart", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRestartRunRequest calls the generic RestartRun builder with application/json body
+func NewRestartRunRequest(server string, run ComponentsParametersRun, body RestartRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRestartRunRequestWithBody(server, run, "application/json", bodyReader)
+}
+
+// NewRestartRunRequestWithBody generates requests for RestartRun with any type of body
+func NewRestartRunRequestWithBody(server string, run ComponentsParametersRun, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/restart", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetRunScriptRequest generates requests for GetRunScript
 func NewGetRunScriptRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
 	var err error
@@ -17099,6 +17254,14 @@ type ClientWithResponsesInterface interface {
 
 	// RerunRunWithResponse request
 	RerunRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*RerunRunResponse, error)
+
+	// GetRunRestartWithResponse request
+	GetRunRestartWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunRestartResponse, error)
+
+	// RestartRunWithBodyWithResponse request with any body
+	RestartRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartRunResponse, error)
+
+	RestartRunWithResponse(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartRunResponse, error)
 
 	// GetRunScriptWithResponse request
 	GetRunScriptWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunScriptResponse, error)
@@ -20790,6 +20953,60 @@ func (r RerunRunResponse) StatusCode() int {
 	return 0
 }
 
+type GetRunRestartResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunRestart
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunRestartResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunRestartResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RestartRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON409      *ComponentsSchemasError
+	JSON413      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r RestartRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestartRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetRunScriptResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -23032,6 +23249,32 @@ func (c *ClientWithResponses) RerunRunWithResponse(ctx context.Context, run Comp
 		return nil, err
 	}
 	return ParseRerunRunResponse(rsp)
+}
+
+// GetRunRestartWithResponse request returning *GetRunRestartResponse
+func (c *ClientWithResponses) GetRunRestartWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunRestartResponse, error) {
+	rsp, err := c.GetRunRestart(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunRestartResponse(rsp)
+}
+
+// RestartRunWithBodyWithResponse request with arbitrary body returning *RestartRunResponse
+func (c *ClientWithResponses) RestartRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartRunResponse, error) {
+	rsp, err := c.RestartRunWithBody(ctx, run, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartRunResponse(rsp)
+}
+
+func (c *ClientWithResponses) RestartRunWithResponse(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartRunResponse, error) {
+	rsp, err := c.RestartRun(ctx, run, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartRunResponse(rsp)
 }
 
 // GetRunScriptWithResponse request returning *GetRunScriptResponse
@@ -29905,6 +30148,128 @@ func ParseRerunRunResponse(rsp *http.Response) (*RerunRunResponse, error) {
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunRestartResponse parses an HTTP response from a GetRunRestartWithResponse call
+func ParseGetRunRestartResponse(rsp *http.Response) (*GetRunRestartResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunRestartResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunRestart
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestartRunResponse parses an HTTP response from a RestartRunWithResponse call
+func ParseRestartRunResponse(rsp *http.Response) (*RestartRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestartRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

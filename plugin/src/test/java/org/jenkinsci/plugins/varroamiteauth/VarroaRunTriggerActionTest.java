@@ -409,7 +409,7 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
-    public void theEndpointExposesOnlyItsSevenRoutes() {
+    public void theEndpointExposesOnlyItsEightRoutes() {
         int doMethods = 0;
         for (java.lang.reflect.Method m : VarroaRunTriggerAction.class.getDeclaredMethods()) {
             if (m.getName().startsWith("do") && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
@@ -418,10 +418,10 @@ public class VarroaRunTriggerActionTest {
                         m.getName().equals("doTrigger") || m.getName().equals("doCancel")
                                 || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild")
                                 || m.getName().equals("doProceedInput") || m.getName().equals("doAbortInput")
-                                || m.getName().equals("doReplay"));
+                                || m.getName().equals("doReplay") || m.getName().equals("doRestart"));
             }
         }
-        assertEquals(7, doMethods);
+        assertEquals(8, doMethods);
     }
 
     // ---- D13 adopt-node route ----

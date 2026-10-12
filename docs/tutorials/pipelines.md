@@ -6,14 +6,12 @@ parameters.
 ## Prerequisite
 
 The pipelines pages need the [build record store](../operations/build-records.md). Set
-`recordStore.enabled: true` in your Helm values before you start. A cluster with the store off
-still shows the **Pipelines** row, yet every page explains the store is off instead of listing
-builds.
+`recordStore.enabled: true` in your Helm values before you start. With the store off, the
+**Pipelines** row still shows, and every page says so instead of listing builds.
 
 ## Open a team
 
-Sign in and select **Pipelines** in the sidebar. Access follows the team: you see the pipelines
-of every [Team](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
+Sign in and select **Pipelines** in the sidebar. You see the pipelines of every [Team](../security/varroa-rbac.md#grant-pipelines-access) that grants you a `pipelines`
 verb. `/pipelines` lists only the teams that hold pipelines you can read, including member-cluster
 teams. A team with no pipelines and no controllers in its namespaces does not show. It opens your
 only team automatically. With more than one, pick one.
@@ -27,13 +25,13 @@ Select the pill to open the card. The card names the cell, its pool, its version
 Jenkins version. It also reports the free tenant slots on the cell, the length of the cell's build
 queue, and your own running builds.
 
-One line counts the other teams on the cell, and names none of them. It shows no other team's
-job, build, or count.
+One line counts the other teams on the cell without naming them, and shows none of their jobs,
+builds, or counts.
 
-**Cell details** opens the cell's controller page, when your access covers that page. Without it
-you still read every field.
+**Cell details** opens the cell's controller page, if your access covers it. Otherwise you still
+read every field.
 
-**Updated** states when the browser last read the record, which it reads again every 30 seconds.
+**Updated** shows when the browser last read the record. It re-reads every 30 seconds.
 
 The card reports one of five states.
 
@@ -46,7 +44,7 @@ The card reports one of five states.
 | No card | the team runs on its own controller, so no cell hosts it |
 
 **Reason** carries the operator's own text for the placement, such as `TenantPlaced` or
-`CellNotReady`. Ask an operator about a reason you do not recognize.
+`CellNotReady`. Ask an operator about an unknown reason.
 
 A cell in another cluster reports no queue length. The **Queue** figure then reads `not reported`,
 which is not an empty queue.
@@ -76,8 +74,7 @@ many of those build now. A folder reports no health value.
 A multibranch item is a folder row that counts branches instead of jobs. It offers no **Run**
 control, because it does not build. Its branches sit below it.
 
-Row order is fixed: at each level the folders come first, then the jobs, each group in
-alphabetical order.
+Row order is fixed: at each level, folders come first, then jobs, each group alphabetical.
 
 A first load unfolds the top two levels and folds every deeper level.
 
@@ -87,7 +84,7 @@ The fold state lives in the page URL, as one `open` value per unfolded folder:
 /pipelines/payments?open=release&open=release/eu
 ```
 
-Copy that URL to share the same view. A reload keeps the folds. `?open=` with no value folds
+Copy that URL to share the view. A reload keeps the folds. `?open=` with no value folds
 everything.
 
 **Runners** lists the [external runners](../operations/runners.md) bound to the team. Each row
@@ -105,7 +102,7 @@ Select a job's name to open its pipeline page.
 Breadcrumbs name the team, each folder, and the job. Select a folder crumb to open the team page
 with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
 
-A pull-request run shows a PR chip beside its branch. The build page names the request in a
+A pull-request run shows a PR chip beside its branch, and its build page names the request in a
 **Pull request** row.
 
 A queued build held by a cap shows a Waiting notice.
@@ -121,12 +118,13 @@ The commit opens on GitHub or GitLab. Other hosts get a copy button.
 The branch opens the pipeline page filtered to that branch. The **Queue** column shows each build's wait.
 
 The build page shows the parameters that the build ran with. A masked value appears as four dots.
-A replayed build names the build that it copied, with a link. A queue wait longer than five seconds
-appears on the meta line. Point at the actor to see the trigger source, such as a schedule or a webhook.
+A replayed build names the build that it copied, with a link. A restarted build names the build
+and the stage that it restarted from. A queue wait longer than five seconds appears on the meta
+line. Point at the actor to see the trigger source, such as a schedule or a webhook.
 
-Select a build number to open its build page, which shows the status, the stage graph, and four
+Select a build number to open its build page: the status, the stage graph, and four
 tabs: **Log**, **Artifacts**, **Tests**, and **Changes**. The **Older** and **Newer** buttons
-beside the build number open the adjacent builds. The buttons work inside the newest 100 builds
+beside the build number open the adjacent builds. The buttons cover the newest 100 builds
 of the job. The page keeps the active tab in the `tab` URL parameter, so a link opens the same
 tab.
 
@@ -135,7 +133,9 @@ the state stays visible in a narrow tab.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
-A wide stage graph scrolls horizontally inside its card. A stage name longer than 22 characters shows cut short in its node; point at the node to read the full name. Nested stages show under a heading with the name of their parent stage. Select the heading to show or hide them.
+A wide stage graph scrolls inside its card. A stage name over 22 characters is cut short in its
+node; point at the node to read it in full. Nested stages sit under a heading that names their
+parent. Select the heading to show or hide them.
 
 ## Read a log
 

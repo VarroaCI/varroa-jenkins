@@ -93,12 +93,13 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
 			build_number, branch, scm_revision, status, queued_at, started_at, actor, cause, params, payload,
-			replay_of, upstream_run_id, upstream_tenant, upstream_job, upstream_number
+			replay_of, upstream_run_id, upstream_tenant, upstream_job, upstream_number,
+			restart_of, restart_stage
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, 'RUNNING', $12, $13, $14, $15::jsonb, $16::jsonb,
 			jsonb_build_object('run.started', $17::jsonb),
-			$18::uuid, $19::uuid, $20, $21, $22
+			$18::uuid, $19::uuid, $20, $21, $22, $23::uuid, $24
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			build_number = COALESCE(EXCLUDED.build_number, runs.build_number),
@@ -110,6 +111,8 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
 			replay_of    = COALESCE(EXCLUDED.replay_of, runs.replay_of),
+			restart_of    = COALESCE(EXCLUDED.restart_of, runs.restart_of),
+			restart_stage = COALESCE(EXCLUDED.restart_stage, runs.restart_stage),
 			upstream_run_id = COALESCE(EXCLUDED.upstream_run_id, runs.upstream_run_id),
 			upstream_tenant = COALESCE(EXCLUDED.upstream_tenant, runs.upstream_tenant),
 			upstream_job    = COALESCE(EXCLUDED.upstream_job, runs.upstream_job),
@@ -133,6 +136,7 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		jsonArg(payload.Cause), jsonArg(payload.Params), string(envelopeJSON),
 		replayOfArg(payload.ReplayOf),
 		upstream.runID, upstream.tenant, upstream.job, upstream.number,
+		replayOfArg(payload.RestartOf), stageArg(payload.RestartStage),
 	).Scan(&status)
 	if err != nil {
 		return dispatchResult{}, fmt.Errorf("upsert started run: %w", err)
@@ -248,6 +252,15 @@ func replayOfArg(v *string) *string {
 	}
 	s := id.String()
 	return &s
+}
+
+// stageArg binds run.started's restart_stage value. An absent or empty
+// value binds NULL.
+func stageArg(v *string) *string {
+	if v == nil || *v == "" {
+		return nil
+	}
+	return v
 }
 
 // supersededStart reports whether env describes a build of a superseded

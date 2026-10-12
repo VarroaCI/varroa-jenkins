@@ -13,6 +13,7 @@ var commandTypeLabels = map[CommandType]string{
 	CommandTypeProceedInput:           "proceed_input",
 	CommandTypeAbortInput:             "abort_input",
 	CommandTypeReplayBuild:            "replay_build",
+	CommandTypeRestartBuild:           "restart_build",
 }
 
 // Label answers the command type's lower-case name. An unspecified or

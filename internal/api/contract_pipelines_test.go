@@ -141,6 +141,21 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "getRunRestart-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/restart",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
+			Name:       "restartRun-recordStoreDisabled",
+			Method:     "POST",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/restart",
+			Body:       restartRunRequest{Stage: "deploy"},
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "proceedRunInput-recordStoreDisabled",
 			Method:     "POST",
 			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/inputs/in-1/proceed",

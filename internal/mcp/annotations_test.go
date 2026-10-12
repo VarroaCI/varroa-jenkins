@@ -121,6 +121,7 @@ var expectedToolKinds = map[string]toolKind{
 	"proceed_run_input":  kindAction,
 	"abort_run_input":    kindAction,
 	"replay_run":         kindAction,
+	"restart_run":        kindAction,
 
 	// Cell pools
 	"list_cell_pools":  kindRead,

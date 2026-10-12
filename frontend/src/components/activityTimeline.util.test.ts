@@ -437,7 +437,7 @@ const BACKEND_EMITTED_TYPES = [
   "build.interrupted", "build.scheduled.backstop",
   "item.created", "item.updated", "item.deleted", "item.moved",
   "fleetlock.force_released", "fleetlock.force_release_unconfirmed",
-  "pipeline.run_requested", "pipeline.run_replay_requested",
+  "pipeline.run_requested", "pipeline.run_replay_requested", "pipeline.run_restart_requested",
   "pipeline.run_input_proceeded", "pipeline.run_input_aborted",
   "pluginConflict.detected", "pluginPinConflict.detected",
   "updatecenter.plugin.uploaded",

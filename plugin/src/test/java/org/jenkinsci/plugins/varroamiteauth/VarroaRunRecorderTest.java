@@ -331,6 +331,66 @@ public class VarroaRunRecorderTest {
         assertFalse(started.toJson().containsKey("replay_of"));
     }
 
+    // --- The restart source on STARTED, and the restart answer on COMPLETED ---
+
+    @Test
+    public void aRestartedBuildNamesItsSourceAndStageOnStartedAlone() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "restarted");
+        job.setDefinition(new CpsFlowDefinition("stage('one') { echo 'one' }\n", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction(""),
+                new CauseAction(new VarroaRestartCause("src-run", "two"))));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        List<BuildEvent> started = byPhase(result.events, BuildEvent.PHASE_STARTED);
+        assertEquals(1, started.size());
+        assertEquals("src-run", started.get(0).getRestartOf());
+        assertEquals("two", started.get(0).getRestartStage());
+        assertEquals("src-run", started.get(0).toJson().getString("restart_of"));
+        assertEquals("two", started.get(0).toJson().getString("restart_stage"));
+
+        for (BuildEvent e : result.events) {
+            if (BuildEvent.PHASE_STARTED.equals(e.getPhase())) {
+                continue;
+            }
+            assertFalse("phase " + e.getPhase() + " must write no restart_of key",
+                    e.toJson().containsKey("restart_of"));
+            assertFalse("phase " + e.getPhase() + " must write no restart_stage key",
+                    e.toJson().containsKey("restart_stage"));
+        }
+    }
+
+    @Test
+    public void aDeclarativeRunListsItsRestartableStagesOnCompleted() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "declared-restart");
+        job.setDefinition(new CpsFlowDefinition("pipeline {\n  agent any\n  stages {\n"
+                + "    stage('one') { steps { echo 'one' } }\n"
+                + "    stage('two') { steps { echo 'two' } }\n  }\n}\n", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction("")));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent completed = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0);
+        assertEquals(List.of("one", "two"), completed.getRestartStages());
+        assertEquals("", completed.getRestartRefusal());
+        assertEquals(List.of("one", "two"), completed.toJson().getJSONArray("restart_stages"));
+        assertFalse(completed.toJson().containsKey("restart_refusal"));
+    }
+
+    @Test
+    public void aScriptedRunCompletesWithANotDeclarativeRefusal() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "scripted-restart");
+        job.setDefinition(new CpsFlowDefinition("echo 'scripted'\n", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction("")));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent completed = byPhase(result.events, BuildEvent.PHASE_COMPLETED).get(0);
+        assertEquals("not-declarative", completed.getRestartRefusal());
+        assertEquals("not-declarative", completed.toJson().getString("restart_refusal"));
+        assertFalse(completed.toJson().containsKey("restart_stages"));
+    }
+
     // --- The granted number on STARTED ---
 
     @Test

@@ -18,11 +18,12 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's fifteen tables, column for
+// expectedColumns mirrors the record store's sixteen tables, column for
 // column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
-// migration 00017's "run_test_cases".
+// migration 00017's "run_test_cases", migration 00030's "run_waits", and
+// migration 00032's "job_branch_projects".
 // Migration 00007 adds three columns to "job_schedules" and creates no
 // table. Migration 00011 adds two columns to "tenant_placements" and
 // creates no table. Migration 00012 adds one column to "runs" and creates
@@ -101,6 +102,8 @@ var expectedColumns = map[string][]columnSpec{
 		{"upstream_tenant", "text", true},
 		{"upstream_job", "text", true},
 		{"upstream_number", "bigint", true},
+		{"restart_of", "uuid", true},
+		{"restart_stage", "text", true},
 	},
 	"run_stages": {
 		{"run_id", "uuid", false},
@@ -286,7 +289,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's fifteen tables, column for column.
+// schema against the record store's sixteen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
 
