@@ -58,6 +58,9 @@ const (
 	// because the run passed its byte cap.
 	KindRunState     = "run.state"
 	KindJobSchedules = "job.schedules"
+	// KindJobBranches records one cell's multibranch inventory. Like
+	// job.schedules it carries no run_id.
+	KindJobBranches = "job.branches"
 )
 
 // ingestKinds lists every kind the recorder accepts. A kind outside this
@@ -79,6 +82,7 @@ var ingestKinds = map[string]bool{
 	KindRunCommandRefused:  true,
 	KindRunState:           true,
 	KindJobSchedules:       true,
+	KindJobBranches:        true,
 }
 
 // IsKnownKind reports whether kind is one of the kinds ingestKinds

@@ -251,7 +251,7 @@ reading each package's entry point):
   they are asserted in tests.
   `tools_pipelines.go` registers eight pipeline tools: `run_pipeline`,
   `proceed_run_input`, `abort_run_input`, and `replay_run` (action), and
-  `list_runs`, `get_run`, `get_run_log`, and `list_fleet_locks` (read). Each
+  `list_runs`, `get_run`, `get_run_log`, `list_job_branches`, and `list_fleet_locks` (read). Each
   calls the same `internal/api` service method (`pipelines_service.go`'s
   `RunPipeline`, `ProceedRunInput`, `AbortRunInput`, `ReplayRun`, `ListRuns`,
   `GetRun`, `GetRunLog`, `ListFleetLocks`) the matching HTTP handler calls

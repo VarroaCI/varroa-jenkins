@@ -18,7 +18,7 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's fourteen tables, column for
+// expectedColumns mirrors the record store's fifteen tables, column for
 // column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
@@ -200,6 +200,21 @@ var expectedColumns = map[string][]columnSpec{
 		{"namespace", "text", false},
 		{"cell", "text", false},
 		{"observed_at", "timestamp with time zone", false},
+		{"branches_observed_at", "timestamp with time zone", false},
+	},
+	"job_branch_projects": {
+		{"cluster", "text", false},
+		{"namespace", "text", false},
+		{"cell", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"placement_generation", "bigint", false},
+		{"observed_at", "timestamp with time zone", false},
+		{"indexed_at", "timestamp with time zone", true},
+		{"index_result", "text", false},
+		{"heads", "jsonb", false},
+		{"heads_truncated", "boolean", false},
+		{"last_scan", "jsonb", true},
 	},
 	"tenant_placements": {
 		{"cluster", "text", false},
@@ -271,7 +286,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's fourteen tables, column for column.
+// schema against the record store's fifteen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
 
@@ -464,16 +479,17 @@ func TestIndexesExist(t *testing.T) {
 	ctx := context.Background()
 
 	want := map[string][]string{
-		"run_intents":    {"run_intents_conflict_idx", "run_intents_orphan_idx"},
-		"runs":           {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx", "runs_upstream_run_id_idx", "runs_upstream_edge_idx"},
-		"run_stages":     {"run_stages_created_at_idx"},
-		"run_tests":      {"run_tests_created_at_idx"},
-		"run_artifacts":  {"run_artifacts_created_at_idx"},
-		"log_chunks":     {"log_chunks_object_idx", "log_chunks_class_idx"},
-		"activity":       {"activity_namespace_controller_idx", "activity_cluster_idx", "activity_search_tsv_idx"},
-		"job_schedules":  {"job_schedules_tenant_trigger_idx", "job_schedules_search_tsv_idx", "job_schedules_upstream_idx"},
-		"fleet_locks":    {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
-		"run_test_cases": {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
+		"run_intents":         {"run_intents_conflict_idx", "run_intents_orphan_idx"},
+		"runs":                {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx", "runs_upstream_run_id_idx", "runs_upstream_edge_idx"},
+		"run_stages":          {"run_stages_created_at_idx"},
+		"run_tests":           {"run_tests_created_at_idx"},
+		"run_artifacts":       {"run_artifacts_created_at_idx"},
+		"log_chunks":          {"log_chunks_object_idx", "log_chunks_class_idx"},
+		"activity":            {"activity_namespace_controller_idx", "activity_cluster_idx", "activity_search_tsv_idx"},
+		"job_schedules":       {"job_schedules_tenant_trigger_idx", "job_schedules_search_tsv_idx", "job_schedules_upstream_idx"},
+		"job_branch_projects": {"job_branch_projects_cell_idx"},
+		"fleet_locks":         {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
+		"run_test_cases":      {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
 	}
 
 	for table, indexes := range want {

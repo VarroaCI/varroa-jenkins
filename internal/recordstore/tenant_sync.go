@@ -339,6 +339,14 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 		if err := deleteTenantJobSchedules(ctx, tx, req.Cluster, req.Tenant); err != nil {
 			return TenantSyncResponse{}, err
 		}
+		// The branch inventory follows the same rule. Left in place, the
+		// rehome step would adopt the previous tenant's projects.
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM varroa.job_branch_projects
+			WHERE cluster = $1 AND tenant = $2
+		`, req.Cluster, req.Tenant); err != nil {
+			return TenantSyncResponse{}, fmt.Errorf("delete the previous tenant's job branch inventory: %w", err)
+		}
 	}
 
 	// A take-over retires the stored incarnation, so a late announcement
@@ -358,6 +366,9 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	}
 	homeView := newPlacementMembers(members, jobHomes, placementScalars{cell: req.Cell, namespace: req.Namespace})
 	if err := rehomeJobSchedules(ctx, tx, req.Cluster, req.Tenant, homeView, newGeneration); err != nil {
+		return TenantSyncResponse{}, err
+	}
+	if err := rehomeJobBranches(ctx, tx, req.Cluster, req.Tenant, homeView, newGeneration); err != nil {
 		return TenantSyncResponse{}, err
 	}
 

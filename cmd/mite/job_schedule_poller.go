@@ -189,6 +189,10 @@ func (a *Agent) openScheduleExport() {
 // cached job-schedule set and answers its earliest cron occurrence. On
 // failure it changes nothing, logs once, and answers false.
 func (a *Agent) pollJobSchedulesOnce(ctx context.Context, logger *slog.Logger) (time.Time, bool) {
+	// The branch inventory has its own endpoint. Polling it first keeps a
+	// failed schedule read from freezing the branch export.
+	a.pollJobBranchesOnce(ctx, logger)
+
 	now := time.Now()
 	set, rows, err := a.pollJobSchedules(ctx)
 	if err != nil {
@@ -332,5 +336,6 @@ func (a *Agent) maybeAttachJobSchedules(snap *mitev1.StateSnapshot) {
 func (a *Agent) markStreamReconnected() {
 	a.jobScheduleMu.Lock()
 	a.jobScheduleForceSend = true
+	a.jobBranchForceSend = true
 	a.jobScheduleMu.Unlock()
 }

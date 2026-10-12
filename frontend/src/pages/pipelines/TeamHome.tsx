@@ -397,7 +397,13 @@ export default function TeamHome() {
                 </tr>
               </thead>
               <tbody>
-                <JobTree team={team!} rows={rows} openPaths={openPaths} onToggle={toggleFold} />
+                <JobTree
+                  team={team!}
+                  folder={data?.tenantFolder ?? ""}
+                  rows={rows}
+                  openPaths={openPaths}
+                  onToggle={toggleFold}
+                />
               </tbody>
             </table>
           </div>

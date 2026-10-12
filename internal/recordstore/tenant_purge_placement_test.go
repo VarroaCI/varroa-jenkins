@@ -355,6 +355,14 @@ func TestTakeOverDropsTheOldIncarnationsSchedules(t *testing.T) {
 	if got := countTenantRows(t, db, testTenant); got != 2 {
 		t.Fatalf("seeded rows of the old tenant = %d, want 2", got)
 	}
+	// One branch inventory row of the old tenant, for the same take-over.
+	if _, err := db.Exec(`
+		INSERT INTO varroa.job_branch_projects (cluster, namespace, cell, tenant, job_path,
+			placement_generation, observed_at, index_result, heads, heads_truncated)
+		VALUES ($1, $2, 'cell-a', $3, $3 || '/mb', 6, now(), '', '[]'::jsonb, false)
+	`, testCluster, testNamespace, testTenant); err != nil {
+		t.Fatalf("seed the old tenant's branch row: %v", err)
+	}
 
 	sendTenantSync(t, pool, conn, TenantSyncRequest{
 		Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
@@ -364,6 +372,13 @@ func TestTakeOverDropsTheOldIncarnationsSchedules(t *testing.T) {
 
 	if got := countTenantRows(t, db, testTenant); got != 0 {
 		t.Fatalf("rows after the take-over = %d, want 0", got)
+	}
+	var branches int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.job_branch_projects WHERE tenant = $1`, testTenant).Scan(&branches); err != nil {
+		t.Fatalf("count branch rows: %v", err)
+	}
+	if branches != 0 {
+		t.Fatalf("branch rows after the take-over = %d, want 0", branches)
 	}
 	if got := countTenantRows(t, db, "other"); got != 1 {
 		t.Fatalf("rows of the other tenant = %d, want 1", got)

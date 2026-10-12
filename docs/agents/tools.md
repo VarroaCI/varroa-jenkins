@@ -54,8 +54,8 @@ it is not wired, `search` still returns the first four.
 The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
 A cluster with `ok: false` returned incomplete results.
 
-The MCP server also exposes nine pipeline tools: `run_pipeline`, `list_runs`,
-`get_run`, `get_run_log`, `list_fleet_locks`, `release_fleet_lock`,
+The MCP server also exposes ten pipeline tools: `run_pipeline`, `list_runs`,
+`get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
 `proceed_run_input`, `abort_run_input`, and `replay_run`. They operate on the
 build record store. The `run_pipeline` tool starts a build and returns a
 `runId` and an `intentKey`.

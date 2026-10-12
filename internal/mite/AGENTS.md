@@ -252,6 +252,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `publishTriggerAccepted` carries no reason code and no error, only
   `http_status` and `actor`, because Jenkins accepted the trigger. **Neither
   publisher may consult `job_schedules.go`'s stream-missing negative
+  (`job_branches.go` mirrors it for the `job.branches` kind, sharing the TTL)
   cache.** That cache is armed by a publish failure, so it cannot tell a
   missing stream from a transient one; an armed cache would acknowledge the
   redelivery of a command whose first publish failed and lose the record.
@@ -554,7 +555,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   publishing them on `activity.*` floods the bounded audit stream and evicts
   real audit history — do not add new periodic event types to that switch.
 - `StateSnapshot.pending_signatures` (field 14) reaches the snapshot KV
-  unchanged: `OnSnapshot` strips only `job_schedules`. `completedPayload` maps
+  unchanged: `OnSnapshot` strips `job_schedules` and `job_branches` before the snapshot KV write. `completedPayload` maps
   `BuildEvent.rejected_signature` (field 57) to `rejected_signature` on
   `run.completed`.
 - Wire changes go in `proto/mitev1/mite.proto` then regenerate; never hand-edit

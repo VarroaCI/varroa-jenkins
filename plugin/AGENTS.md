@@ -64,17 +64,18 @@ the root AGENTS.md greenfield rule.
   `VARROA_ACTIVITY_SAVEABLE=1`), `HttpActivityFilter.java` (last-HTTP-activity timestamp
   for hibernation idle gauges). `ActivityEndpoint.java` — `RootAction` at
   `/varroa-activity/events` (GET, requires `ROLE:varroa:system-mite`), drains
-  `ActivitySink`, returns events + `idle` gauges. The same class's `doSchedules`
-  serves `GET /varroa-activity/script-approvals` (`doScriptApprovals`), which
-  reads script-security's pending list through `pendingRows()`. That one
-  restricted call carries `@SuppressRestrictedWarnings(ScriptApproval.class)`,
-  and the script-security version stays pinned by the plugin lock. The plugin
-  never writes an approval. `ScriptRejections` joins up to three requesters per
-  signature from a bounded in-memory map. The operator filters pool-approved
-  signatures as a second guard.
+  `ActivitySink`, returns events + `idle` gauges. `doBranches` serves
+  `GET /varroa-activity/branches` (the multibranch inventory: projects, heads, change
+  requests; bounded at 500 projects, 500 heads each, 512 KiB) with the same gates.
+  `doScriptApprovals` serves `GET /varroa-activity/script-approvals`, which reads
+  script-security's pending list through `pendingRows()`. That one restricted call
+  carries `@SuppressRestrictedWarnings(ScriptApproval.class)`, and the script-security
+  version stays pinned by the plugin lock. The plugin never writes an approval.
+  `ScriptRejections` joins up to three requesters per signature from a bounded
+  in-memory map. The operator filters pool-approved signatures as a second guard.
   `VarroaRunRecorder` stamps `rejected_signature` (BuildEvent field 57) on the
-  COMPLETED event. The same class's `doSchedules`
-  serves `GET /varroa-activity/schedules`, reusing its method gate and
+  COMPLETED event. The same class's `doSchedules` serves
+  `GET /varroa-activity/schedules`, reusing its method gate and
   `Items.getAllItems(Job.class)` walk: one row per job trigger, plus one `none`
   row for a job with no trigger, so the response is the cell's whole job
   inventory. `triggerType` maps from the trigger's simple class name

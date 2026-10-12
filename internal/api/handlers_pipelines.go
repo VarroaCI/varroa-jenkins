@@ -144,7 +144,10 @@ type pipelineParameterJSON struct {
 }
 
 type pipelineJobDetailJSON struct {
-	JobPath         string                  `json:"jobPath"`
+	JobPath string `json:"jobPath"`
+	// Kind is pipeline, multibranch, or unknown. The job page reads it to
+	// choose its card.
+	Kind            string                  `json:"kind"`
 	Health          string                  `json:"health"`
 	TenantFolder    string                  `json:"tenantFolder"`
 	Tenant          string                  `json:"tenant"`
@@ -706,7 +709,35 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 			Kind: w.Kind, Limit: w.Limit, Max: w.Max, Running: w.Running, Cell: w.Cell, Since: w.Since}})
 	}
 
+	_, hasBranches, err := s.deps.RecordStore.GetJobBranches(ctx, ref.Cluster, ref.Tenant, jobPath)
+	if s.handleReaderError(w, err, "get job branches") {
+		return
+	}
+	declaredKind := ""
+	if item != nil {
+		declaredKind = item.Kind
+	}
+	detail.Kind = pipelineJobKind(declaredKind, hasBranches, summary.LastRun != nil)
+
 	s.writeJSON(w, http.StatusOK, detail)
+}
+
+// pipelineJobKind answers the kind the job page renders. A declared
+// pipeline or multibranch item wins. Without one, a branch inventory row
+// marks a multibranch job, and a run marks a pipeline job. Any other job
+// is unknown.
+func pipelineJobKind(declaredKind string, hasBranches, hasRun bool) string {
+	switch declaredKind {
+	case "pipeline", "multibranch":
+		return declaredKind
+	}
+	if hasBranches {
+		return "multibranch"
+	}
+	if hasRun {
+		return "pipeline"
+	}
+	return "unknown"
 }
 
 // pipelineWindowDays is design D8's "Last 30 days" card window.

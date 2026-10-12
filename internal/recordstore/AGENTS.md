@@ -250,7 +250,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
   `<table>_p<YYYYMM>`; the retention round that adds later partitions
-  must use the same pattern. The schema holds exactly fourteen tables, no
+  must use the same pattern. The schema holds exactly sixteen tables, no
   more and no fewer.
 - **Migration runner** (`migrate.go`) — `RunMigrations` creates schema
   `varroa`, applies pending migrations under a Postgres advisory lock on a

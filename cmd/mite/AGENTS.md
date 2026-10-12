@@ -244,6 +244,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   `telemetry.InitTelemetry`. Never bind an instrument to a package variable
   or an `init` function. A test builds an agent with `mustNewAgent(t, cfg)`,
   and an `Agent` literal sets `metrics: noopMiteMetrics()`.
+- **`job_branch_export.go`** — `pollJobBranches` reads `GET /varroa-activity/branches` once per
+  schedule poll (`pollJobBranchesOnce`). `maybeAttachJobBranches` sends `StateSnapshot.job_branches`
+  when the hash changes, on a reconnect, or every thirty minutes. It never feeds a state hash.
 - **`script_approval_poller.go`** — `startScriptApprovalPoller` polls
   `GET /varroa-activity/script-approvals` once a minute, only while the tenant
   gate reports a cell, and keeps the last set on a failed poll. A non-cell

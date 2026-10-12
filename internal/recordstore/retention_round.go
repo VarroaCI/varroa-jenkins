@@ -198,7 +198,10 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 	}
 	cfg.FleetLockMetrics.addExpired(ctx, expiredLocks)
 
-	// No step here deletes a job_schedules or job_schedule_cells row.
+	// No step here deletes a job_schedules, job_schedule_cells, or
+	// job_branch_projects row. A branch row describes the live inventory
+	// of a multibranch job, as a schedule row does. Only a later cell
+	// export that omits it, or the tenant purge, deletes one.
 	// job_schedules describes live state: only a later whole-cell set
 	// that omits a row, or C5's tenant purge, deletes one. The
 	// job_schedule_cells watermark must outlive an empty set, so a

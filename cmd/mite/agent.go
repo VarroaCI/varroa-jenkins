@@ -235,6 +235,14 @@ type Agent struct {
 	jobScheduleExportOpen atomic.Bool
 	jobSchedulePollNow    chan struct{}
 
+	// Job-branch inventory state. It shares jobScheduleMu and the
+	// export gate. jobBranchSet is the last polled set. The last-sent hash,
+	// the last send time, and the force flag track the send gate.
+	jobBranchSet          *mitev1.JobBranchSet
+	jobBranchLastSentHash string
+	jobBranchLastSendTime time.Time
+	jobBranchForceSend    bool
+
 	// tenantHomes caches the tenant_homes field of the newest applied
 	// desired state. The loopback route GET /v1/homes serves it. The mite
 	// computes no home: the recorder is the only writer of the map and
@@ -1026,6 +1034,7 @@ func (a *Agent) sendStateSnapshot(ctx context.Context) {
 	snap.ActualStateHash = computeStateHash(configHash, pluginsHash, rbacHash, itemsHash)
 	snap.Status = snap.JenkinsHealth
 	a.maybeAttachJobSchedules(snap)
+	a.maybeAttachJobBranches(snap)
 	a.attachPendingSignatures(snap)
 
 	msg := &mitev1.MiteMessage{
@@ -1100,6 +1109,7 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 
 			// Fill the job-schedule set only when the send gate opens.
 			a.maybeAttachJobSchedules(snap)
+			a.maybeAttachJobBranches(snap)
 			a.attachPendingSignatures(snap)
 
 			// Send state snapshot (carries health, version, hashes).

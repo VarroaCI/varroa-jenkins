@@ -176,6 +176,13 @@ type BusHandler struct {
 	// suppresses the next attempt. Zero means
 	// defaultJobScheduleStreamMissingTTL; tests shrink it.
 	scheduleStreamMissingTTL time.Duration
+	// branchRetained holds, per connection ("ns/name"), the multibranch
+	// inventory set that has not yet published as a job.branches
+	// envelope. It shares scheduleMu and the job-schedule TTL.
+	branchRetained map[string]*mitev1.JobBranchSet
+	// branchStreamMissingUntil is the job.branches negative cache, with
+	// the same meaning as scheduleStreamMissingUntil.
+	branchStreamMissingUntil map[string]time.Time
 
 	// recordStoreEnabled reports whether this install configured a record
 	// store, so a builds stream exists to publish onto. cmd/gateway sets it
@@ -537,10 +544,12 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	h.touchLiveness(ns, name)
 
 	schedules := snap.JobSchedules
+	branches := snap.JobBranches
 	fanout := snap
-	if schedules != nil {
+	if schedules != nil || branches != nil {
 		clone := *snap
 		clone.JobSchedules = nil
+		clone.JobBranches = nil
 		fanout = &clone
 	}
 
@@ -564,6 +573,7 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	h.putPresence(ns, name, snap.JenkinsVersion)
 
 	h.handleJobSchedules(ns, name, schedules)
+	h.handleJobBranches(ns, name, branches)
 }
 
 // SetRecordStoreEnabled declares whether this install configured a record

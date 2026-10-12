@@ -311,6 +311,31 @@ type purgeExecer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
+// purgeTenantJobBranches deletes the varroa.job_branch_projects rows that
+// purgeTenantJobSchedules deletes for the same request. It applies the
+// same generation test and the same cell narrowing, so a slot move and a
+// teardown leave the branch inventory exactly where the schedule rows
+// are left.
+func purgeTenantJobBranches(ctx context.Context, db purgeExecer, req TenantPurgeRequest) error {
+	if req.Cell != "" {
+		if _, err := db.Exec(ctx, `
+			DELETE FROM varroa.job_branch_projects
+			WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3
+			  AND namespace = $4 AND cell = $5
+		`, req.Cluster, req.Tenant, req.PlacementGeneration, req.CellNamespace, req.Cell); err != nil {
+			return fmt.Errorf("delete the cell's job branch rows: %w", err)
+		}
+		return nil
+	}
+	if _, err := db.Exec(ctx, `
+		DELETE FROM varroa.job_branch_projects
+		WHERE cluster = $1 AND tenant = $2 AND placement_generation <= $3
+	`, req.Cluster, req.Tenant, req.PlacementGeneration); err != nil {
+		return fmt.Errorf("delete the tenant's job branch rows: %w", err)
+	}
+	return nil
+}
+
 // purgeTenantJobSchedules deletes every varroa.job_schedules row for
 // req's cluster and tenant whose stored placement_generation is at
 // most req's. The delete is idempotent: a repeat matches zero rows and
@@ -324,6 +349,9 @@ type purgeExecer interface {
 // because a row carries both and two namespaces can hold a cell of the
 // same name.
 func purgeTenantJobSchedules(ctx context.Context, db purgeExecer, req TenantPurgeRequest) error {
+	if err := purgeTenantJobBranches(ctx, db, req); err != nil {
+		return err
+	}
 	if req.Cell != "" {
 		if _, err := db.Exec(ctx, `
 			DELETE FROM varroa.job_schedules

@@ -91,6 +91,15 @@ type Reader interface {
 	// never run and carries no trigger.
 	ListJobSchedules(ctx context.Context, cluster, tenant string) ([]JobSchedule, error)
 
+	// GetJobBranches reads the stored branch and change-request inventory
+	// of one multibranch job of tenant. The bool is false when no row
+	// exists, which is the state before the cell's first export.
+	GetJobBranches(ctx context.Context, cluster, tenant, jobPath string) (JobBranchProject, bool, error)
+
+	// LatestRunsForJobs answers the newest run of each listed job path of
+	// tenant, keyed by job path. A job path with no run has no entry.
+	LatestRunsForJobs(ctx context.Context, cluster, tenant string, jobPaths []string) (map[string]Run, error)
+
 	// SearchRecords returns up to five job, run, and activity rows
 	// matching q.Query, scoped by q.Scope. It backs the "job", "run", and
 	// "activity" global-search kinds.

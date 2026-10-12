@@ -217,6 +217,10 @@ func TestMaybeAttachJobSchedulesNeverPolled(t *testing.T) {
 // leaves the cached set and hash in place and logs the failure once.
 func TestPollJobSchedulesOnceFailureKeepsLastKnownSet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == jobBranchesPath {
+			_, _ = w.Write([]byte(`{"projects":[],"total":0,"truncated":false}`))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
@@ -251,6 +255,10 @@ func TestPollJobSchedulesOnceSuccessReplacesCachedSet(t *testing.T) {
 		Total: 2,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == jobBranchesPath {
+			_, _ = w.Write([]byte(`{"projects":[],"total":0,"truncated":false}`))
+			return
+		}
 		if r.URL.Path != jobSchedulesPath {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -432,6 +440,10 @@ func TestMaybeAttachJobSchedulesPassedOccurrenceSends(t *testing.T) {
 func TestStartJobSchedulePollerRetriesFirstPoll(t *testing.T) {
 	var count int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == jobBranchesPath {
+			_, _ = w.Write([]byte(`{"projects":[],"total":0,"truncated":false}`))
+			return
+		}
 		if atomic.AddInt32(&count, 1) <= 2 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -464,6 +476,10 @@ func TestStartJobSchedulePollerRetriesFirstPoll(t *testing.T) {
 func TestStartJobSchedulePollerWaitsForApply(t *testing.T) {
 	var count int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == jobBranchesPath {
+			_, _ = w.Write([]byte(`{"projects":[],"total":0,"truncated":false}`))
+			return
+		}
 		atomic.AddInt32(&count, 1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jobScheduleResponse{})
@@ -503,6 +519,10 @@ func TestStartJobSchedulePollerWaitsForApply(t *testing.T) {
 func TestStartJobSchedulePollerCadence(t *testing.T) {
 	var count int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == jobBranchesPath {
+			_, _ = w.Write([]byte(`{"projects":[],"total":0,"truncated":false}`))
+			return
+		}
 		atomic.AddInt32(&count, 1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jobScheduleResponse{})

@@ -62,6 +62,10 @@ type ApplyResult struct {
 	// The caller acknowledges the message and counts it.
 	ScheduleStale bool
 
+	// BranchesStale is true when a job.branches envelope's time was not
+	// newer than its cell's branch watermark. The write changed no row.
+	BranchesStale bool
+
 	// TriggerFailedReason holds the reason code of a run.trigger_failed
 	// envelope the recorder stored, or skipped because a row already
 	// exists. The caller acknowledges the message and counts
@@ -253,6 +257,9 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 	// through the run_intents-anchored path below.
 	if env.Kind == KindJobSchedules {
 		return g.applyJobSchedules(ctx, env)
+	}
+	if env.Kind == KindJobBranches {
+		return g.applyJobBranches(ctx, env)
 	}
 
 	// run.trigger_failed and run.trigger_accepted each write the only

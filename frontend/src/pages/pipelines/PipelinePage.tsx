@@ -13,6 +13,7 @@ import { jobTitle } from "./pageTitles";
 import JobBreadcrumbs from "./JobBreadcrumbs";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
+import { MultibranchCard } from "./MultibranchCard";
 import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
@@ -349,7 +350,7 @@ export default function PipelinePage() {
           <div className={styles.pageTitle}>{jobDetail.jobPath}</div>
           <JobBreadcrumbs team={team!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
         </div>
-        {canRun && (
+        {canRun && jobDetail.kind !== "multibranch" && (
           <button type="button" className={styles.runBtn} onClick={() => setDrawerOpen(true)}>
             Run
           </button>
@@ -517,7 +518,9 @@ export default function PipelinePage() {
         />
       </div>
 
-      {runsQuery.isLoading ? (
+      {jobDetail.kind === "multibranch" ? (
+        <MultibranchCard team={team!} jobPath={jobDetail.jobPath} />
+      ) : runsQuery.isLoading ? (
         <div className={styles.loading}>Loading builds…</div>
       ) : runs.length === 0 ? (
         <div className={styles.empty}>No builds match this filter.</div>

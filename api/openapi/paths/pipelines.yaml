@@ -95,6 +95,35 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{team}/jobs/{job}/branches:
+  get:
+    operationId: listJobBranches
+    tags: [Pipelines]
+    summary: Lists the branches, change requests, and tags a multibranch job has discovered.
+    description: >
+      The inventory is exported by the cell that holds the job's home
+      slot, so it can be up to ten minutes stale. A cell that is down or
+      hibernated keeps its last export, and the response shows that last
+      export. A job with no export yet answers an empty list with no
+      observedAt. Each head is listed only when the caller may read its
+      job path.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+    responses:
+      "200":
+        description: The job's branch and change-request inventory.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JobBranchList'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/pipelines/{team}/jobs/{job}/runs:
   get:
     operationId: listRuns

@@ -102,8 +102,8 @@ Select a job's name to open its pipeline page.
 
 ## Open a build
 
-Each page with a breadcrumb trail names the team, each folder, and the job. Select a folder crumb to open the team page with that folder and its parents unfolded. On the build and test case pages, the job crumb links to the pipeline
-page. The last crumb names the build or the test.
+Breadcrumbs name the team, each folder, and the job. Select a folder crumb to open the team page
+with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
 
 A pull-request run shows a PR chip beside its branch. The build page names the request in a
 **Pull request** row.
@@ -217,4 +217,4 @@ cancels another branch's build.
 ## Next steps
 
 [Operate a run](run-operations.md) covers fleet locks, the failure digest, the summary line, and
-calls to a job on another tenant.
+calls to a job on another tenant. See [multibranch jobs](multibranch.md).

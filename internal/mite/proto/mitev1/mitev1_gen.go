@@ -25,6 +25,20 @@ type ActingUser struct {
 	Groups []string `json:"groups,omitempty"`
 }
 
+// BranchScanResult records one requested branch scan of a multibranch
+type BranchScanResult struct {
+	ScanId        string   `json:"scan_id,omitempty"`
+	State         string   `json:"state,omitempty"`
+	Actor         string   `json:"actor,omitempty"`
+	RequestedAt   string   `json:"requested_at,omitempty"`
+	EndedAt       string   `json:"ended_at,omitempty"`
+	Result        string   `json:"result,omitempty"`
+	NewHeads      []string `json:"new_heads,omitempty"`
+	ChangedHeads  []string `json:"changed_heads,omitempty"`
+	OrphanedHeads []string `json:"orphaned_heads,omitempty"`
+	Message       string   `json:"message,omitempty"`
+}
+
 type BuildArtifact struct {
 	Path        string `json:"path"`
 	DisplayPath string `json:"display_path,omitempty"`
@@ -428,6 +442,34 @@ type JenkinsActivityEvent struct {
 	Result      string `json:"result,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Timestamp   string `json:"timestamp,omitempty"`
+}
+
+// JobBranchHead is one discovered head of a multibranch job: a branch,
+type JobBranchHead struct {
+	Name          string             `json:"name,omitempty"`
+	JobPath       string             `json:"job_path,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	Orphaned      bool               `json:"orphaned,omitempty"`
+	Revision      string             `json:"revision,omitempty"`
+	ChangeRequest *ChangeRequestInfo `json:"change_request,omitempty"`
+}
+
+// JobBranchProject is one multibranch job of the cell with its heads.
+type JobBranchProject struct {
+	JobPath        string            `json:"job_path,omitempty"`
+	IndexedAt      string            `json:"indexed_at,omitempty"`
+	IndexResult    string            `json:"index_result,omitempty"`
+	Heads          []*JobBranchHead  `json:"heads,omitempty"`
+	HeadsTruncated bool              `json:"heads_truncated,omitempty"`
+	LastScan       *BranchScanResult `json:"last_scan,omitempty"`
+}
+
+// JobBranchSet wraps the branch inventory with presence: an unset field
+type JobBranchSet struct {
+	Hash      string              `json:"hash,omitempty"`
+	Items     []*JobBranchProject `json:"items,omitempty"`
+	Truncated bool                `json:"truncated,omitempty"`
+	Total     int                 `json:"total,omitempty"`
 }
 
 // JobSchedule is one job/trigger row of the live job-schedule inventory.
@@ -1255,6 +1297,7 @@ type StateSnapshot struct {
 	LiveConfigHash    string               `json:"live_config_hash,omitempty"`
 	LiveDrift         bool                 `json:"live_drift,omitempty"`
 	JobSchedules      *JobScheduleSet      `json:"job_schedules,omitempty"`
+	JobBranches       *JobBranchSet        `json:"job_branches,omitempty"`
 	PendingSignatures *PendingSignatureSet `json:"pending_signatures,omitempty"`
 }
 

@@ -46,6 +46,7 @@ import type {
   FleetPluginDrilldown,
   PipelineListResponse,
   PipelineJobDetail,
+  JobBranchList,
   RunListResponse,
   CreateRunRequest,
   RunActionResponse,
@@ -1143,6 +1144,12 @@ export function listPipelines(team: string): Promise<PipelineListResponse> {
 
 export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJobDetail> {
   return bffFetch<PipelineJobDetail>(jobBase(team, jobPath));
+}
+
+/** listJobBranches reads the branch and change-request inventory of one
+ * multibranch job. The inventory can be up to ten minutes stale. */
+export function listJobBranches(team: string, jobPath: string): Promise<JobBranchList> {
+  return bffFetch<JobBranchList>(`${jobBase(team, jobPath)}/branches`);
 }
 
 /**

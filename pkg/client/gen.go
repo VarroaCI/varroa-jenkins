@@ -48,6 +48,15 @@ const (
 	ComponentsSchemasBindingFederationStatusStateSkipped   ComponentsSchemasBindingFederationStatusState = "skipped"
 )
 
+// Defines values for ComponentsSchemasBranchScanState.
+const (
+	ComponentsSchemasBranchScanStateCompleted ComponentsSchemasBranchScanState = "completed"
+	ComponentsSchemasBranchScanStateFailed    ComponentsSchemasBranchScanState = "failed"
+	ComponentsSchemasBranchScanStateRefused   ComponentsSchemasBranchScanState = "refused"
+	ComponentsSchemasBranchScanStateRunning   ComponentsSchemasBranchScanState = "running"
+	ComponentsSchemasBranchScanStateTimeout   ComponentsSchemasBranchScanState = "timeout"
+)
+
 // Defines values for ComponentsSchemasBroodOperationDetailSpecActionVerb.
 const (
 	ComponentsSchemasBroodOperationDetailSpecActionVerbExecuteGroovy ComponentsSchemasBroodOperationDetailSpecActionVerb = "executeGroovy"
@@ -216,10 +225,10 @@ const (
 
 // Defines values for ComponentsSchemasComposedBundleStatusPhase.
 const (
-	ComponentsSchemasComposedBundleStatusPhaseDrifted ComponentsSchemasComposedBundleStatusPhase = "Drifted"
-	ComponentsSchemasComposedBundleStatusPhaseInvalid ComponentsSchemasComposedBundleStatusPhase = "Invalid"
-	ComponentsSchemasComposedBundleStatusPhasePending ComponentsSchemasComposedBundleStatusPhase = "Pending"
-	ComponentsSchemasComposedBundleStatusPhaseReady   ComponentsSchemasComposedBundleStatusPhase = "Ready"
+	Drifted ComponentsSchemasComposedBundleStatusPhase = "Drifted"
+	Invalid ComponentsSchemasComposedBundleStatusPhase = "Invalid"
+	Pending ComponentsSchemasComposedBundleStatusPhase = "Pending"
+	Ready   ComponentsSchemasComposedBundleStatusPhase = "Ready"
 )
 
 // Defines values for ComponentsSchemasControllerAttentionKind.
@@ -362,6 +371,13 @@ const (
 	ComponentsSchemasPipelineJobDetailHealthUnknown ComponentsSchemasPipelineJobDetailHealth = "unknown"
 )
 
+// Defines values for ComponentsSchemasPipelineJobDetailKind.
+const (
+	ComponentsSchemasPipelineJobDetailKindMultibranch ComponentsSchemasPipelineJobDetailKind = "multibranch"
+	ComponentsSchemasPipelineJobDetailKindPipeline    ComponentsSchemasPipelineJobDetailKind = "pipeline"
+	ComponentsSchemasPipelineJobDetailKindUnknown     ComponentsSchemasPipelineJobDetailKind = "unknown"
+)
+
 // Defines values for ComponentsSchemasPipelineMarkerFindingSeverity.
 const (
 	ComponentsSchemasPipelineMarkerFindingSeverityError ComponentsSchemasPipelineMarkerFindingSeverity = "error"
@@ -392,9 +408,9 @@ const (
 
 // Defines values for ComponentsSchemasPipelineSummaryKind.
 const (
-	ComponentsSchemasPipelineSummaryKindMultibranch ComponentsSchemasPipelineSummaryKind = "multibranch"
-	ComponentsSchemasPipelineSummaryKindPipeline    ComponentsSchemasPipelineSummaryKind = "pipeline"
-	ComponentsSchemasPipelineSummaryKindUnknown     ComponentsSchemasPipelineSummaryKind = "unknown"
+	Multibranch ComponentsSchemasPipelineSummaryKind = "multibranch"
+	Pipeline    ComponentsSchemasPipelineSummaryKind = "pipeline"
+	Unknown     ComponentsSchemasPipelineSummaryKind = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineTemplateInfoSource.
@@ -694,6 +710,23 @@ type ComponentsSchemasBindingFederationStatus struct {
 
 // ComponentsSchemasBindingFederationStatusState defines model for ComponentsSchemasBindingFederationStatus.State.
 type ComponentsSchemasBindingFederationStatusState string
+
+// ComponentsSchemasBranchScan The last requested scan of a multibranch job. The inventory export does not fill it yet.
+type ComponentsSchemasBranchScan struct {
+	Actor         *string                          `json:"actor,omitempty"`
+	ChangedHeads  []string                         `json:"changedHeads"`
+	EndedAt       *time.Time                       `json:"endedAt,omitempty"`
+	Message       *string                          `json:"message,omitempty"`
+	NewHeads      []string                         `json:"newHeads"`
+	OrphanedHeads []string                         `json:"orphanedHeads"`
+	RequestedAt   *time.Time                       `json:"requestedAt,omitempty"`
+	Result        *string                          `json:"result,omitempty"`
+	ScanId        string                           `json:"scanId"`
+	State         ComponentsSchemasBranchScanState `json:"state"`
+}
+
+// ComponentsSchemasBranchScanState defines model for ComponentsSchemasBranchScan.State.
+type ComponentsSchemasBranchScanState string
 
 // ComponentsSchemasBreakGlassRequest Request body for a break-glass grant.
 type ComponentsSchemasBreakGlassRequest struct {
@@ -2411,6 +2444,50 @@ type ComponentsSchemasJenkinsVersionProfile struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// ComponentsSchemasJobBranchHead One branch, change request, or tag of a multibranch job.
+type ComponentsSchemasJobBranchHead struct {
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
+	// JobPath The head's own job path, which its runs carry.
+	JobPath string `json:"jobPath"`
+
+	// LastRun One run, condensed for a list or a card.
+	LastRun *ComponentsSchemasRunSummary `json:"lastRun,omitempty"`
+	Name    string                       `json:"name"`
+
+	// Orphaned True when Jenkins no longer discovers the head as buildable.
+	Orphaned bool `json:"orphaned"`
+
+	// Revision The last seen SCM revision of the head.
+	Revision *string `json:"revision,omitempty"`
+}
+
+// ComponentsSchemasJobBranchList GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.
+type ComponentsSchemasJobBranchList struct {
+	Branches []ComponentsSchemasJobBranchHead `json:"branches"`
+
+	// ChangeRequests Sorted by numeric change request id, newest first.
+	ChangeRequests []ComponentsSchemasJobBranchHead `json:"changeRequests"`
+
+	// IndexResult The result of the last Jenkins index.
+	IndexResult *string `json:"indexResult,omitempty"`
+
+	// IndexedAt When Jenkins last indexed the multibranch job.
+	IndexedAt *time.Time `json:"indexedAt,omitempty"`
+	JobPath   string     `json:"jobPath"`
+
+	// LastScan The last requested scan of a multibranch job. The inventory export does not fill it yet.
+	LastScan *ComponentsSchemasBranchScan `json:"lastScan,omitempty"`
+
+	// ObservedAt When the cell last exported this job. Absent before the first export.
+	ObservedAt *time.Time                       `json:"observedAt,omitempty"`
+	Tags       []ComponentsSchemasJobBranchHead `json:"tags"`
+
+	// Truncated True when the cell capped the number of heads it exported.
+	Truncated bool `json:"truncated"`
+}
+
 // ComponentsSchemasJobDeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
 type ComponentsSchemasJobDeclaredBy struct {
 	Bundle      ComponentsSchemasBundleRef         `json:"bundle"`
@@ -2688,6 +2765,9 @@ type ComponentsSchemasPipelineJobDetail struct {
 	Health          ComponentsSchemasPipelineJobDetailHealth `json:"health"`
 	JobPath         string                                   `json:"jobPath"`
 
+	// Kind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+	Kind ComponentsSchemasPipelineJobDetailKind `json:"kind"`
+
 	// Last30Days Null when the record store could not answer the window query; the rest of the job page still renders.
 	Last30Days *ComponentsSchemasPipelineLast30Days `json:"last30Days"`
 
@@ -2711,6 +2791,9 @@ type ComponentsSchemasPipelineJobDetail struct {
 
 // ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
 type ComponentsSchemasPipelineJobDetailHealth string
+
+// ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+type ComponentsSchemasPipelineJobDetailKind string
 
 // ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines team.
 type ComponentsSchemasPipelineJobRetention struct {
@@ -5974,6 +6057,9 @@ type ClientInterface interface {
 	// GetPipelineJob request
 	GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListJobBranches request
+	ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListRuns request
 	ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -7869,6 +7955,18 @@ func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam,
 
 func (c *Client) GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPipelineJobRequest(c.Server, team, job)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobBranchesRequest(c.Server, team, job)
 	if err != nil {
 		return nil, err
 	}
@@ -14049,6 +14147,47 @@ func NewGetPipelineJobRequest(server string, team ComponentsParametersTeam, job 
 	return req, nil
 }
 
+// NewListJobBranchesRequest generates requests for ListJobBranches
+func NewListJobBranchesRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/branches", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListRunsRequest generates requests for ListRuns
 func NewListRunsRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams) (*http.Request, error) {
 	var err error
@@ -16841,6 +16980,9 @@ type ClientWithResponsesInterface interface {
 
 	// GetPipelineJobWithResponse request
 	GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
+
+	// ListJobBranchesWithResponse request
+	ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
 
 	// ListRunsWithResponse request
 	ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
@@ -19805,6 +19947,31 @@ func (r GetPipelineJobResponse) StatusCode() int {
 	return 0
 }
 
+type ListJobBranchesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJobBranchList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListJobBranchesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListJobBranchesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListRunsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -22488,6 +22655,15 @@ func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, te
 		return nil, err
 	}
 	return ParseGetPipelineJobResponse(rsp)
+}
+
+// ListJobBranchesWithResponse request returning *ListJobBranchesResponse
+func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error) {
+	rsp, err := c.ListJobBranches(ctx, team, job, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListJobBranchesResponse(rsp)
 }
 
 // ListRunsWithResponse request returning *ListRunsResponse
@@ -28094,6 +28270,53 @@ func ParseGetPipelineJobResponse(rsp *http.Response) (*GetPipelineJobResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ComponentsSchemasPipelineJobDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListJobBranchesResponse parses an HTTP response from a ListJobBranchesWithResponse call
+func ParseListJobBranchesResponse(rsp *http.Response) (*ListJobBranchesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListJobBranchesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJobBranchList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

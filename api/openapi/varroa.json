@@ -2678,6 +2678,15 @@
           "jobPath": {
             "type": "string"
           },
+          "kind": {
+            "description": "The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.\n",
+            "enum": [
+              "pipeline",
+              "multibranch",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "last30Days": {
             "allOf": [
               {
@@ -2726,6 +2735,7 @@
         },
         "required": [
           "jobPath",
+          "kind",
           "health",
           "last30Days",
           "tenantFolder",
@@ -5207,6 +5217,68 @@
           "cluster",
           "state",
           "lastTransitionTime"
+        ],
+        "type": "object"
+      },
+      "components_schemas_BranchScan": {
+        "additionalProperties": false,
+        "description": "The last requested scan of a multibranch job. The inventory export does not fill it yet.",
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "changedHeads": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "newHeads": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "orphanedHeads": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "scanId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "timeout",
+              "refused"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scanId",
+          "state",
+          "newHeads",
+          "changedHeads",
+          "orphanedHeads"
         ],
         "type": "object"
       },
@@ -9363,6 +9435,96 @@
         ],
         "type": "object"
       },
+      "components_schemas_JobBranchHead": {
+        "additionalProperties": false,
+        "description": "One branch, change request, or tag of a multibranch job.",
+        "properties": {
+          "changeRequest": {
+            "$ref": "#/components/schemas/components_schemas_ChangeRequest"
+          },
+          "jobPath": {
+            "description": "The head's own job path, which its runs carry.",
+            "type": "string"
+          },
+          "lastRun": {
+            "$ref": "#/components/schemas/components_schemas_RunSummary"
+          },
+          "name": {
+            "type": "string"
+          },
+          "orphaned": {
+            "description": "True when Jenkins no longer discovers the head as buildable.",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "The last seen SCM revision of the head.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "jobPath",
+          "orphaned"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JobBranchList": {
+        "additionalProperties": false,
+        "description": "GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.\n",
+        "properties": {
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JobBranchHead"
+            },
+            "type": "array"
+          },
+          "changeRequests": {
+            "description": "Sorted by numeric change request id, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JobBranchHead"
+            },
+            "type": "array"
+          },
+          "indexResult": {
+            "description": "The result of the last Jenkins index.",
+            "type": "string"
+          },
+          "indexedAt": {
+            "description": "When Jenkins last indexed the multibranch job.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "jobPath": {
+            "type": "string"
+          },
+          "lastScan": {
+            "$ref": "#/components/schemas/components_schemas_BranchScan"
+          },
+          "observedAt": {
+            "description": "When the cell last exported this job. Absent before the first export.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_JobBranchHead"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "True when the cell capped the number of heads it exported.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "jobPath",
+          "truncated",
+          "branches",
+          "changeRequests",
+          "tags"
+        ],
+        "type": "object"
+      },
       "components_schemas_JobDeclaredBy": {
         "additionalProperties": false,
         "description": "Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.\n",
@@ -10003,6 +10165,15 @@
           "jobPath": {
             "type": "string"
           },
+          "kind": {
+            "description": "The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.\n",
+            "enum": [
+              "pipeline",
+              "multibranch",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "last30Days": {
             "allOf": [
               {
@@ -10051,6 +10222,7 @@
         },
         "required": [
           "jobPath",
+          "kind",
           "health",
           "last30Days",
           "tenantFolder",
@@ -19826,6 +19998,45 @@
           }
         },
         "summary": "Returns one job's summary, definition, triggers, parameters, and dependency edges.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/pipelines/{team}/jobs/{job}/branches": {
+      "get": {
+        "description": "The inventory is exported by the cell that holds the job's home slot, so it can be up to ten minutes stale. A cell that is down or hibernated keeps its last export, and the response shows that last export. A job with no export yet answers an empty list with no observedAt. Each head is listed only when the caller may read its job path.\n",
+        "operationId": "listJobBranches",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_team"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_job"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_JobBranchList"
+                }
+              }
+            },
+            "description": "The job's branch and change-request inventory."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Lists the branches, change requests, and tags a multibranch job has discovered.",
         "tags": [
           "Pipelines"
         ]

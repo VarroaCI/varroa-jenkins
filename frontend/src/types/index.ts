@@ -1615,6 +1615,44 @@ export interface ChangeRequest {
   url?: string;
 }
 
+/** One branch, change request, or tag of a multibranch job. */
+export interface JobBranchHead {
+  name: string;
+  jobPath: string;
+  orphaned: boolean;
+  revision?: string;
+  changeRequest?: ChangeRequest;
+  lastRun?: RunSummary;
+}
+
+/** The last requested scan of a multibranch job. */
+export interface BranchScan {
+  scanId: string;
+  state: "running" | "completed" | "failed" | "timeout" | "refused";
+  actor?: string;
+  requestedAt?: string;
+  endedAt?: string;
+  result?: string;
+  newHeads: string[];
+  changedHeads: string[];
+  orphanedHeads: string[];
+  message?: string;
+}
+
+/** The branch and change-request inventory of a multibranch job. The
+ * inventory can be up to ten minutes stale. */
+export interface JobBranchList {
+  jobPath: string;
+  observedAt?: string;
+  indexedAt?: string;
+  indexResult?: string;
+  truncated: boolean;
+  branches: JobBranchHead[];
+  changeRequests: JobBranchHead[];
+  tags: JobBranchHead[];
+  lastScan?: BranchScan;
+}
+
 /** One run, condensed for a list or a card. */
 export interface RunSummary {
   runId: string;
@@ -1856,6 +1894,8 @@ export interface PipelineJobDetail {
   /** Queued runs of this job that a concurrency cap holds. */
   waiting?: RunWaitEntry[];
   jobPath: string;
+  /** pipeline, multibranch, or unknown. The job page picks its card from it. */
+  kind: "pipeline" | "multibranch" | "unknown";
   /** The tenant's Jenkins folder prefix (for example "payments"). Empty for
    * a root-hosted tenant. jobPath carries this prefix; strip it before
    * matching a grant's folder-relative job glob. */

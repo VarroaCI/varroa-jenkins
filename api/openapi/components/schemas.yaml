@@ -4478,6 +4478,104 @@ ChangeRequest:
       description: Web link to the change request on the forge.
   additionalProperties: false
 
+JobBranchList:
+  type: object
+  description: >
+    GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to
+    ten minutes stale. A hibernated cell keeps its last export.
+  required: [jobPath, truncated, branches, changeRequests, tags]
+  properties:
+    jobPath:
+      type: string
+    observedAt:
+      type: string
+      format: date-time
+      description: When the cell last exported this job. Absent before the first export.
+    indexedAt:
+      type: string
+      format: date-time
+      description: When Jenkins last indexed the multibranch job.
+    indexResult:
+      type: string
+      description: The result of the last Jenkins index.
+    truncated:
+      type: boolean
+      description: True when the cell capped the number of heads it exported.
+    branches:
+      type: array
+      items:
+        $ref: '#/JobBranchHead'
+    changeRequests:
+      type: array
+      description: Sorted by numeric change request id, newest first.
+      items:
+        $ref: '#/JobBranchHead'
+    tags:
+      type: array
+      items:
+        $ref: '#/JobBranchHead'
+    lastScan:
+      $ref: '#/BranchScan'
+  additionalProperties: false
+
+JobBranchHead:
+  type: object
+  description: One branch, change request, or tag of a multibranch job.
+  required: [name, jobPath, orphaned]
+  properties:
+    name:
+      type: string
+    jobPath:
+      type: string
+      description: The head's own job path, which its runs carry.
+    orphaned:
+      type: boolean
+      description: True when Jenkins no longer discovers the head as buildable.
+    revision:
+      type: string
+      description: The last seen SCM revision of the head.
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    lastRun:
+      $ref: '#/RunSummary'
+  additionalProperties: false
+
+BranchScan:
+  type: object
+  description: The last requested scan of a multibranch job. The inventory export does not fill it yet.
+  required: [scanId, state, newHeads, changedHeads, orphanedHeads]
+  properties:
+    scanId:
+      type: string
+    state:
+      type: string
+      enum: [running, completed, failed, timeout, refused]
+    actor:
+      type: string
+    requestedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    result:
+      type: string
+    newHeads:
+      type: array
+      items:
+        type: string
+    changedHeads:
+      type: array
+      items:
+        type: string
+    orphanedHeads:
+      type: array
+      items:
+        type: string
+    message:
+      type: string
+  additionalProperties: false
+
 RunSummary:
   type: object
   description: One run, condensed for a list or a card.
@@ -4837,10 +4935,17 @@ PipelineParameter:
 PipelineJobDetail:
   type: object
   description: GET /pipelines/{team}/jobs/{job}.
-  required: [jobPath, health, last30Days, tenantFolder, tenant, dependencies]
+  required: [jobPath, kind, health, last30Days, tenantFolder, tenant, dependencies]
   properties:
     jobPath:
       type: string
+    kind:
+      type: string
+      enum: [pipeline, multibranch, unknown]
+      description: >
+        The job's kind. A declared pipeline or multibranch item sets it.
+        Otherwise a branch inventory row marks a multibranch job, and a
+        run marks a pipeline job.
     health:
       type: string
       enum: [clear, cloudy, rain, unknown]

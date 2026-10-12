@@ -151,7 +151,7 @@ A page treats a notification as a hint and refetches the record.
 The recorder coalesces per run: a change waits at most 500 milliseconds, and a terminal state
 publishes at once.
 
-Each page also refetches when its stream opens. While the stream is closed and the run is not terminal, the build page reads the record every 3 seconds.
+With a closed stream, the build page reads a live run's record every 3 seconds.
 
 ## Activity history
 
@@ -239,6 +239,10 @@ hibernated controller, and the whole set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
 came first. The recorder deletes no row, because a partial set would erase schedules the plugin never reached.
+
+## Multibranch inventory
+
+`job_branch_projects` holds each multibranch job's branch inventory, up to ten minutes old.
 
 ## Search
 

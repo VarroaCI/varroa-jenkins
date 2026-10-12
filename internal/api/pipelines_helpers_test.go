@@ -29,6 +29,8 @@ type fakeRecordReader struct {
 
 	schemaTooOld bool
 
+	// jobBranches is keyed by branchTestKey, "<cluster>/<tenant>/<job path>".
+	jobBranches map[string]recordstore.JobBranchProject
 	// runWaits is keyed by run id; jobWaits is keyed by the tenant-qualified job path.
 	runWaits map[string]recordstore.RunWait
 	jobWaits map[string][]recordstore.RunWait

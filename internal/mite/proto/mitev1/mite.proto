@@ -76,6 +76,7 @@ message StateSnapshot {
   string live_config_hash = 11;
   bool live_drift = 12;
   JobScheduleSet job_schedules = 13;
+  JobBranchSet job_branches = 15;
   // pending_signatures carries the script signatures the sandbox refused
   // in this cell. Unset means the plugin was not asked this tick.
   PendingSignatureSet pending_signatures = 14;
@@ -127,6 +128,52 @@ message JobSchedule {
 message JobScheduleSet {
   string hash = 1;
   repeated JobSchedule items = 2;
+  bool truncated = 3;
+  int32 total = 4;
+}
+
+// JobBranchHead is one discovered head of a multibranch job: a branch,
+// a change request, or a tag. The mite exports the set on StateSnapshot;
+// it never contributes to any state hash.
+message JobBranchHead {
+  string name = 1;
+  string job_path = 2;
+  string kind = 3;          // branch | changeRequest | tag
+  bool orphaned = 4;
+  string revision = 5;
+  ChangeRequestInfo change_request = 6;
+}
+
+// BranchScanResult records one requested branch scan of a multibranch
+// job. The scan path fills it; the inventory export only carries it.
+message BranchScanResult {
+  string scan_id = 1;
+  string state = 2;         // running | completed | failed | timeout | refused
+  string actor = 3;
+  string requested_at = 4;  // RFC3339, UTC
+  string ended_at = 5;      // RFC3339, UTC
+  string result = 6;
+  repeated string new_heads = 7;
+  repeated string changed_heads = 8;
+  repeated string orphaned_heads = 9;
+  string message = 10;
+}
+
+// JobBranchProject is one multibranch job of the cell with its heads.
+message JobBranchProject {
+  string job_path = 1;
+  string indexed_at = 2;    // RFC3339, UTC; empty when never indexed
+  string index_result = 3;
+  repeated JobBranchHead heads = 4;
+  bool heads_truncated = 5;
+  BranchScanResult last_scan = 6;
+}
+
+// JobBranchSet wraps the branch inventory with presence: an unset field
+// on StateSnapshot means "not carried this tick".
+message JobBranchSet {
+  string hash = 1;
+  repeated JobBranchProject items = 2;
   bool truncated = 3;
   int32 total = 4;
 }

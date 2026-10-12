@@ -99,10 +99,14 @@ function countLabel(node: JobTreeNode): string {
  * and a multibranch item does not build.
  */
 function FolderRow({
+  team,
+  folder,
   node,
   open,
   onToggle,
 }: {
+  team: string;
+  folder: string;
   node: JobTreeNode;
   open: boolean;
   onToggle: (path: string, next: boolean) => void;
@@ -137,7 +141,13 @@ function FolderRow({
               className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
             />
           </button>
-          <span className={styles.nodeName}>{node.name}</span>
+          {node.kind === "multibranch" ? (
+            <Link className={styles.nodeName} to={jobHref(team, folder ? `${folder}/${node.path}` : node.path)}>
+              {node.name}
+            </Link>
+          ) : (
+            <span className={styles.nodeName}>{node.name}</span>
+          )}
           <span className={styles.counts}>{countLabel(node)}</span>
           {node.runningCount > 0 && (
             <span className={styles.running}>{node.runningCount} running</span>
@@ -205,11 +215,14 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
  */
 export default function JobTree({
   team,
+  folder,
   rows,
   openPaths,
   onToggle,
 }: {
   team: string;
+  /** The tenant folder prefix. Node paths are folder-relative. */
+  folder: string;
   rows: JobTreeNode[];
   openPaths: ReadonlySet<string>;
   onToggle: (path: string, next: boolean) => void;
@@ -218,7 +231,14 @@ export default function JobTree({
     <>
       {rows.map((node) =>
         isFoldable(node) ? (
-          <FolderRow key={node.path} node={node} open={openPaths.has(node.path)} onToggle={onToggle} />
+          <FolderRow
+            key={node.path}
+            team={team}
+            folder={folder}
+            node={node}
+            open={openPaths.has(node.path)}
+            onToggle={onToggle}
+          />
         ) : (
           <JobRow key={node.path} team={team} node={node} item={node.summary!} />
         ),

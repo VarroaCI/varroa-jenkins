@@ -182,6 +182,9 @@ func refreshOneTenantJobHomes(ctx context.Context, pool *pgxpool.Pool, metrics *
 	if err := rehomeJobSchedules(ctx, tx, cluster, tenant, view, old.generation); err != nil {
 		return false, err
 	}
+	if err := rehomeJobBranches(ctx, tx, cluster, tenant, view, old.generation); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit job home transaction: %w", err)
 	}
@@ -242,6 +245,54 @@ func rehomeJobSchedules(ctx context.Context, tx pgx.Tx, cluster, tenant string,
 		  AND (js.namespace <> m.namespace OR js.cell <> m.cell)
 	`, cluster, tenant, generation, paths, namespaces, cells); err != nil {
 		return fmt.Errorf("move job schedule rows to their home: %w", err)
+	}
+	return nil
+}
+
+// rehomeJobBranches moves each job_branch_projects row of tenant to its
+// job's home cell in view, as rehomeJobSchedules does for schedule rows.
+// Without the move, the old cell's next export would delete the row at
+// its stale-delete step, and the new home would not resend an unchanged
+// set until its send gate opened again.
+func rehomeJobBranches(ctx context.Context, tx pgx.Tx, cluster, tenant string,
+	view placementMembers, generation int64) error {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT job_path, namespace, cell FROM varroa.job_branch_projects
+		WHERE cluster = $1 AND tenant = $2
+	`, cluster, tenant)
+	if err != nil {
+		return fmt.Errorf("list tenant job branch addresses: %w", err)
+	}
+	var paths, namespaces, cells []string
+	for rows.Next() {
+		var path, namespace, cell string
+		if err := rows.Scan(&path, &namespace, &cell); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan tenant job branch address: %w", err)
+		}
+		home := memberForJob(view, path)
+		if home.Cell == "" || (home.Cell == cell && home.Namespace == namespace) {
+			continue
+		}
+		paths = append(paths, path)
+		namespaces = append(namespaces, home.Namespace)
+		cells = append(cells, home.Cell)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("list tenant job branch addresses: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.job_branch_projects AS jb
+		SET namespace = m.namespace, cell = m.cell, placement_generation = $3
+		FROM unnest($4::text[], $5::text[], $6::text[]) AS m(job_path, namespace, cell)
+		WHERE jb.cluster = $1 AND jb.tenant = $2 AND jb.job_path = m.job_path
+		  AND (jb.namespace <> m.namespace OR jb.cell <> m.cell)
+	`, cluster, tenant, generation, paths, namespaces, cells); err != nil {
+		return fmt.Errorf("move job branch rows to their home: %w", err)
 	}
 	return nil
 }

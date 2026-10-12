@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -43,6 +44,7 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerListRunsTool(mcpServer, deps)
 	registerGetRunTool(mcpServer, deps)
 	registerGetRunLogTool(mcpServer, deps)
+	registerListJobBranchesTool(mcpServer, deps)
 	registerListFleetLocksTool(mcpServer, deps)
 	registerReleaseFleetLockTool(mcpServer, deps)
 	registerProceedRunInputTool(mcpServer, deps)
@@ -296,6 +298,32 @@ func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 }
 
+func registerListJobBranchesTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	listJobBranchesTool := mcp.NewTool("list_job_branches",
+		mcp.WithDescription("List the branches, change requests, and tags a multibranch job has discovered, with each head's latest run. The inventory is exported by the cell that holds the job's home slot, so it can be up to ten minutes stale; a hibernated cell keeps its last inventory. A job with no export yet answers empty lists with no observedAt. Heads you may not read are omitted."),
+		mcp.WithString("team", mcp.Required(), mcp.Description("Team name")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("Multibranch job path, as the job page names it")),
+		withListOutput(jobBranchesOutputSchema),
+	)
+	addTool(mcpServer, kindRead, listJobBranchesTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, toolErr := requirePipelineCaller(ctx, deps)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		args := getArgs(req)
+		team := strArg(args, "team")
+		job := strArg(args, "job")
+		if team == "" || job == "" {
+			return mcp.NewToolResultError("team and job are required"), nil
+		}
+		list, serr := api.NewServer(deps).ListJobBranches(ctx, claims, team, job)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(list)
+	})
+}
+
 func registerGetRunLogTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunLogTool := mcp.NewTool("get_run_log",
 		mcp.WithDescription("Get the tail of a run's console log, with Jenkins console notes "+
@@ -331,6 +359,24 @@ func registerGetRunLogTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		return resultJSON(map[string]any{"text": text, "totalLines": totalLines})
 	})
 }
+
+// jobBranchesOutputSchema describes list_job_branches' result: the branch
+// inventory of one job. Each head array holds api head objects.
+var jobBranchesOutputSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["jobPath", "truncated", "branches", "changeRequests", "tags"],
+  "properties": {
+    "jobPath": {"type": "string", "description": "Multibranch job path."},
+    "observedAt": {"type": "string", "description": "When the cell last exported this job, RFC3339. Absent before the first export."},
+    "indexedAt": {"type": "string", "description": "When Jenkins last indexed the job, RFC3339."},
+    "indexResult": {"type": "string", "description": "Result of the last Jenkins index."},
+    "truncated": {"type": "boolean", "description": "True when the cell capped the heads it exported."},
+    "branches": {"type": "array", "items": {"type": "object", "description": "Branch head: name, jobPath, orphaned, revision, changeRequest, lastRun."}},
+    "changeRequests": {"type": "array", "items": {"type": "object", "description": "Change request head, newest id first."}},
+    "tags": {"type": "array", "items": {"type": "object", "description": "Tag head."}},
+    "lastScan": {"type": "object", "description": "Last requested scan. Absent until a scan has run."}
+  }
+}`)
 
 // runListOutputSchema describes list_runs' items: api.RunSummary
 // serializes directly.

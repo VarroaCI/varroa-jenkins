@@ -1,6 +1,15 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import hudson.Extension;
+import com.cloudbees.hudson.plugins.folder.computed.FolderComputation;
+import jenkins.branch.Branch;
+import jenkins.branch.BranchProjectFactory;
+import jenkins.branch.MultiBranchProject;
+import jenkins.scm.api.SCMHead;
+import jenkins.scm.api.SCMRevision;
+import jenkins.scm.api.mixin.ChangeRequestSCMHead;
+import jenkins.scm.api.mixin.TagSCMHead;
+import net.sf.json.JSONNull;
 import hudson.model.Computer;
 import hudson.model.Executor;
 import hudson.model.Item;
@@ -82,6 +91,15 @@ public class ActivityEndpoint implements RootAction {
 
     /** The number of scheduled occurrences the endpoint reports per row. */
     private static final int OCCURRENCES_PER_ROW = 3;
+
+    /** Multibranch projects per branch-inventory response. */
+    static final int MAX_BRANCH_PROJECTS = 500;
+
+    /** Heads per multibranch project in the branch-inventory response. */
+    static final int MAX_BRANCH_HEADS = 500;
+
+    /** Bytes per branch-inventory response. */
+    static final int MAX_BRANCH_BYTES = 512 * 1024;
 
     // ---- Timer-triggered jobs cache (≤5 min lazy recompute) ----
 
@@ -336,6 +354,168 @@ public class ActivityEndpoint implements RootAction {
         int slash = jobPath.indexOf('/');
         String tenant = slash < 0 ? jobPath : jobPath.substring(0, slash);
         return VarroaTenantResolver.hostsTenant(tenant) ? tenant : "";
+    }
+
+    /**
+     * Handles {@code GET /varroa-activity/branches}. Walks every multibranch project and
+     * reports one entry per project with its discovered heads, and returns
+     * {@code { "projects": [...], "total": N, "truncated": B }} as JSON.
+     */
+    public void doBranches(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"GET".equalsIgnoreCase(req.getMethod())) {
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only GET is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+            JSONObject envelope;
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+                envelope = buildBranchEnvelope(Jenkins.getInstanceOrNull());
+            }
+            rsp.setContentType("application/json");
+            rsp.setStatus(200);
+            StringWriter writer = new StringWriter();
+            envelope.write(writer);
+            rsp.getWriter().write(writer.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "ActivityEndpoint.doBranches caught exception", e);
+            try {
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    // ---- Multibranch inventory export ----
+
+    /**
+     * Builds the branch-inventory envelope. A project that fails to read is skipped, and
+     * the response stays valid. Package-private for testing.
+     */
+    @SuppressWarnings({"rawtypes"})
+    static JSONObject buildBranchEnvelope(Jenkins jenkins) {
+        JSONArray projects = new JSONArray();
+        int total = 0;
+        boolean truncated = false;
+        int bytes = 0;
+        if (jenkins != null) {
+            for (MultiBranchProject project : jenkins.getAllItems(MultiBranchProject.class)) {
+                total++;
+                if (projects.size() >= MAX_BRANCH_PROJECTS) {
+                    truncated = true;
+                    continue;
+                }
+                JSONObject row;
+                try {
+                    row = buildBranchProjectRow(project);
+                } catch (RuntimeException | LinkageError e) {
+                    LOGGER.log(Level.FINE, "ActivityEndpoint: the branch inventory read failed", e);
+                    // A project that could not be read is not evidence it left the
+                    // cell, so the envelope must not delete its stored rows.
+                    truncated = true;
+                    continue;
+                }
+                int size = row.toString().getBytes(StandardCharsets.UTF_8).length;
+                if (bytes + size > MAX_BRANCH_BYTES) {
+                    truncated = true;
+                    continue;
+                }
+                bytes += size;
+                projects.add(row);
+            }
+        }
+        JSONObject envelope = new JSONObject();
+        envelope.put("projects", projects);
+        envelope.put("total", total);
+        envelope.put("truncated", truncated);
+        return envelope;
+    }
+
+    /**
+     * Builds one project entry with its heads. The project path is the multibranch
+     * project's full name. Each head carries the full name of its own child job.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    static JSONObject buildBranchProjectRow(MultiBranchProject project) {
+        BranchProjectFactory factory = project.getProjectFactory();
+        JSONArray heads = new JSONArray();
+        boolean headsTruncated = false;
+        for (Object child : project.getItems()) {
+            Job job = factory.asProject((Item) child);
+            if (job == null) {
+                continue;
+            }
+            Branch branch = factory.getBranch(job);
+            if (branch == null) {
+                continue;
+            }
+            if (heads.size() >= MAX_BRANCH_HEADS) {
+                headsTruncated = true;
+                break;
+            }
+            heads.add(buildBranchHeadRow(job.getFullName(), revisionOf(factory, job), branch));
+        }
+        FolderComputation computation = project.getComputation();
+        String indexedAt = "";
+        String indexResult = "";
+        if (computation != null) {
+            if (computation.getTimestamp() != null) {
+                indexedAt = Instant.ofEpochMilli(computation.getTimestamp().getTimeInMillis()).toString();
+            }
+            if (computation.getResult() != null) {
+                indexResult = computation.getResult().toString();
+            }
+        }
+        JSONObject row = new JSONObject();
+        row.put("jobPath", project.getFullName());
+        row.put("indexedAt", indexedAt);
+        row.put("indexResult", indexResult);
+        row.put("heads", heads);
+        row.put("headsTruncated", headsTruncated);
+        row.put("lastScan", JSONNull.getInstance());
+        return row;
+    }
+
+    /**
+     * Builds one head entry: a branch, a change request, or a tag. The job path
+     * and the revision come in as values, so the row is built from a branch alone.
+     * Package-private for testing.
+     */
+    static JSONObject buildBranchHeadRow(String jobPath, String revision, Branch branch) {
+        SCMHead head = branch.getHead();
+        String kind = head instanceof ChangeRequestSCMHead ? "changeRequest"
+                : head instanceof TagSCMHead ? "tag" : "branch";
+        JSONObject row = new JSONObject();
+        row.put("name", branch.getName() != null ? branch.getName() : "");
+        row.put("jobPath", jobPath);
+        row.put("kind", kind);
+        row.put("orphaned", !branch.isBuildable());
+        row.put("revision", revision);
+        BuildEvent.ChangeRequestInfo request = VarroaRunRecorder.changeRequestOf(branch);
+        if (request != null) {
+            JSONObject change = new JSONObject();
+            change.put("id", request.getId());
+            change.put("title", request.getTitle());
+            change.put("sourceBranch", request.getSourceBranch());
+            change.put("targetBranch", request.getTargetBranch());
+            change.put("url", request.getUrl());
+            row.put("changeRequest", change);
+        }
+        return row;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String revisionOf(BranchProjectFactory factory, Job job) {
+        SCMRevision revision = factory.getLastSeenRevision(job);
+        if (revision == null) {
+            return "";
+        }
+        Object hash = VarroaRunRecorder.invokeNoArg(revision, "getHash");
+        return hash != null ? hash.toString() : "";
     }
 
     // ---- Job-schedule export (D8) ----
