@@ -276,7 +276,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, and the newest refused cancel or input answer."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A run you may not read appears as its tenant alone."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 	)
 	addTool(mcpServer, kindRead, getRunTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

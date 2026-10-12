@@ -179,13 +179,24 @@ The API carries the same data:
 
 ```json
 "dependencies": {
-  "upstream":   [{"tenant": "platform", "job": "release", "jobPath": "platform/release", "result": "SUCCESS", "granted": true}],
+  "upstream":   [{"tenant": "platform", "job": "release", "jobPath": "platform/release", "result": "SUCCESS", "granted": true, "lastRun": {"tenant": "platform", "jobPath": "platform/release", "runId": "0196f6b2-0000-7000-8000-000000000001", "buildNumber": 12}}],
   "downstream": [{"tenant": "search", "job": "rebuild", "jobPath": "search/rebuild", "result": "SUCCESS", "granted": false}]
 }
 ```
 
 `job` is the name in the other tenant's folder. `jobPath` is the full job path, and each row
-links to it.
+links to it. `lastRun` is the newest run on the edge within 30 days. It is absent when no such
+run exists.
+
+## Run links
+
+A run that another run started names that run as its **Triggered by** link. The build page
+shows the link in the **Run links** card. A build that the run started appears under
+**Downstream**, newest first. The first 20 downstream runs come with the run. Read the rest
+with `GET /runs/{run}/downstream`, which takes `limit` and `cursor`.
+
+A link to a run that the reader may not read keeps the tenant name alone. It has no job path,
+run id, or status. `get_run` carries the same `upstream` and `downstream` fields.
 
 ## The fleet lock
 

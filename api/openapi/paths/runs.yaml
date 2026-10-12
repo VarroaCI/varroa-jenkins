@@ -196,6 +196,42 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/runs/{run}/downstream:
+  get:
+    operationId: listRunDownstream
+    tags: [Pipelines]
+    summary: Lists one page of the runs that one run started, newest first.
+    description: >
+      Each item passes the run read check on its own. An item the caller may
+      not read carries its tenant alone.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      - {name: cursor, in: query, schema: {type: string}}
+    responses:
+      "200":
+        description: A page of the runs the run started.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunLinkPage'
+      "400":
+        description: The limit is out of range, or the cursor is malformed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
 /api/v1/runs/{run}/cancel:
   post:
     operationId: cancelRun

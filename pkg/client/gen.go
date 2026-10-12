@@ -2607,6 +2607,9 @@ type ComponentsSchemasPipelineDependencyEdge struct {
 	// JobPath The job's path with its tenant folder. The job page route takes this path.
 	JobPath string `json:"jobPath"`
 
+	// LastRun The edge's most recent run within the last 30 days. Absent when no such run exists. A run the caller may not read carries its tenant alone.
+	LastRun *ComponentsSchemasRunLink `json:"lastRun,omitempty"`
+
 	// Result The result threshold the edge fires on.
 	Result ComponentsSchemasPipelineDependencyEdgeResult `json:"result"`
 
@@ -3256,8 +3259,11 @@ type ComponentsSchemasRunDetail struct {
 		// Stage The name of the innermost stage whose status is FAILURE, in stage-start order. A stage or a parallel branch that holds a failed stage is never the answer. A parallel branch shows its branch name. Absent when no stage failed.
 		Stage *string `json:"stage,omitempty"`
 	} `json:"digest,omitempty"`
-	DurationMs *int64     `json:"durationMs,omitempty"`
-	EndedAt    *time.Time `json:"endedAt,omitempty"`
+
+	// Downstream One page of the runs a run started, newest first.
+	Downstream *ComponentsSchemasRunLinkPage `json:"downstream,omitempty"`
+	DurationMs *int64                        `json:"durationMs,omitempty"`
+	EndedAt    *time.Time                    `json:"endedAt,omitempty"`
 
 	// Inputs The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
 	Inputs *[]ComponentsSchemasRunInput `json:"inputs,omitempty"`
@@ -3328,6 +3334,9 @@ type ComponentsSchemasRunDetail struct {
 
 	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
 	TriggerSource *ComponentsSchemasRunDetailTriggerSource `json:"triggerSource,omitempty"`
+
+	// Upstream One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.
+	Upstream *ComponentsSchemasRunLink `json:"upstream,omitempty"`
 }
 
 // ComponentsSchemasRunDetailTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
@@ -3382,6 +3391,36 @@ type ComponentsSchemasRunInputParameter struct {
 
 	// Type The Java simple name of the parameter definition, such as StringParameterDefinition or ChoiceParameterDefinition.
 	Type *string `json:"type,omitempty"`
+}
+
+// ComponentsSchemasRunLink One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.
+type ComponentsSchemasRunLink struct {
+	// BuildNumber The build number of the run.
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+
+	// JobPath The run's job path, qualified with its tenant folder.
+	JobPath *string `json:"jobPath,omitempty"`
+
+	// Result The run's result, when it has one. Absent on an upstream link.
+	Result *string `json:"result,omitempty"`
+
+	// RunId The run's identifier. Absent when no run matched.
+	RunId *openapi_types.UUID `json:"runId,omitempty"`
+
+	// Status The run's status. Absent on an upstream link.
+	Status *string `json:"status,omitempty"`
+
+	// Tenant The tenant that holds the run.
+	Tenant string `json:"tenant"`
+}
+
+// ComponentsSchemasRunLinkPage One page of the runs a run started, newest first.
+type ComponentsSchemasRunLinkPage struct {
+	// Items The runs on this page. Never null.
+	Items []ComponentsSchemasRunLink `json:"items"`
+
+	// NextCursor The cursor of the next page. Absent on the last page.
+	NextCursor *string `json:"nextCursor,omitempty"`
 }
 
 // ComponentsSchemasRunListResponse GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
@@ -4697,6 +4736,12 @@ type DownloadRunArtifactParams struct {
 	Range *string `json:"Range,omitempty"`
 }
 
+// ListRunDownstreamParams defines parameters for ListRunDownstream.
+type ListRunDownstreamParams struct {
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // ProceedRunInputJSONBody defines parameters for ProceedRunInput.
 type ProceedRunInputJSONBody struct {
 	// Parameters Input parameter values, as a map of name to string value. A name the step does not declare is dropped.
@@ -5899,6 +5944,9 @@ type ClientInterface interface {
 
 	// ListRunChanges request
 	ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunDownstream request
+	ListRunDownstream(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// AbortRunInput request
 	AbortRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8106,6 +8154,18 @@ func (c *Client) CancelRun(ctx context.Context, run ComponentsParametersRun, req
 
 func (c *Client) ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListRunChangesRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunDownstream(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunDownstreamRequest(c.Server, run, params)
 	if err != nil {
 		return nil, err
 	}
@@ -15008,6 +15068,78 @@ func NewListRunChangesRequest(server string, run ComponentsParametersRun) (*http
 	return req, nil
 }
 
+// NewListRunDownstreamRequest generates requests for ListRunDownstream
+func NewListRunDownstreamRequest(server string, run ComponentsParametersRun, params *ListRunDownstreamParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/downstream", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewAbortRunInputRequest generates requests for AbortRunInput
 func NewAbortRunInputRequest(server string, run ComponentsParametersRun, input ComponentsParametersInput) (*http.Request, error) {
 	var err error
@@ -16680,6 +16812,9 @@ type ClientWithResponsesInterface interface {
 
 	// ListRunChangesWithResponse request
 	ListRunChangesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunChangesResponse, error)
+
+	// ListRunDownstreamWithResponse request
+	ListRunDownstreamWithResponse(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*ListRunDownstreamResponse, error)
 
 	// AbortRunInputWithResponse request
 	AbortRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*AbortRunInputResponse, error)
@@ -20200,6 +20335,32 @@ func (r ListRunChangesResponse) StatusCode() int {
 	return 0
 }
 
+type ListRunDownstreamResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunLinkPage
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunDownstreamResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunDownstreamResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type AbortRunInputResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -22496,6 +22657,15 @@ func (c *ClientWithResponses) ListRunChangesWithResponse(ctx context.Context, ru
 		return nil, err
 	}
 	return ParseListRunChangesResponse(rsp)
+}
+
+// ListRunDownstreamWithResponse request returning *ListRunDownstreamResponse
+func (c *ClientWithResponses) ListRunDownstreamWithResponse(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*ListRunDownstreamResponse, error) {
+	rsp, err := c.ListRunDownstream(ctx, run, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunDownstreamResponse(rsp)
 }
 
 // AbortRunInputWithResponse request returning *AbortRunInputResponse
@@ -28982,6 +29152,60 @@ func ParseListRunChangesResponse(rsp *http.Response) (*ListRunChangesResponse, e
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunDownstreamResponse parses an HTTP response from a ListRunDownstreamWithResponse call
+func ParseListRunDownstreamResponse(rsp *http.Response) (*ListRunDownstreamResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunDownstreamResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunLinkPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest ComponentsResponsesUnauthorized

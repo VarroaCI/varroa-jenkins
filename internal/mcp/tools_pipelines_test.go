@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -35,6 +36,8 @@ type fakePipelineReader struct {
 	runs    map[string]recordstore.Run
 	stages  map[string][]recordstore.Stage
 	intents map[string]recordstore.Intent
+	// downstream is keyed by upstream run id, for ListDownstreamRuns.
+	downstream map[string][]recordstore.Run
 
 	// locksByTenant is keyed by tenant, for ListFleetLocks. Every test
 	// in this file scopes to one tenant, so the cluster is not part of
@@ -70,7 +73,14 @@ func newFakePipelineReader() *fakePipelineReader {
 		intents:       map[string]recordstore.Intent{},
 		locksByTenant: map[string][]recordstore.FleetLock{},
 		testCases:     map[string][]recordstore.TestCase{},
+		downstream:    map[string][]recordstore.Run{},
 	}
+}
+
+// ListDownstreamRuns answers every seeded run of one upstream run in one
+// page. The MCP tests seed few runs, so no cursor is needed.
+func (f *fakePipelineReader) ListDownstreamRuns(_ context.Context, q recordstore.DownstreamRunQuery) (recordstore.RunPage, error) {
+	return recordstore.RunPage{Runs: append([]recordstore.Run{}, f.downstream[q.UpstreamRunID]...)}, nil
 }
 
 func (f *fakePipelineReader) GetRun(_ context.Context, runID string) (recordstore.Run, []recordstore.Stage, error) {
@@ -342,6 +352,53 @@ func TestGetRunNotFoundForUnreadableTenant(t *testing.T) {
 	}
 	if got := toolText(tr); got != "run not found" {
 		t.Errorf("error text = %q, want %q", got, "run not found")
+	}
+}
+
+// TestGetRunToolCarriesUpstream asserts get_run carries the same upstream
+// and downstream links as GET /runs/{run}.
+func TestGetRunToolCarriesUpstream(t *testing.T) {
+	reader := newFakePipelineReader()
+	upstreamID := "0194f6b2-0000-7000-8000-000000000001"
+	upTenant, upJob := "team-a", "team-a/build"
+	upNumber := int64(4)
+	upRun := uuid.MustParse(upstreamID)
+	reader.runs["run-a"] = recordstore.Run{
+		RunID: "run-a", Tenant: "team-a", JobPath: "team-a/build", Status: "COMPLETED",
+		UpstreamRunID: &upRun, UpstreamTenant: &upTenant, UpstreamJob: &upJob, UpstreamNumber: &upNumber,
+	}
+	reader.downstream["run-a"] = []recordstore.Run{{
+		RunID: "run-c", Tenant: "team-a", JobPath: "team-a/deploy", Status: "COMPLETED",
+	}}
+	deps := &api.Dependencies{
+		Authorizer:  pipelinesTestAuthorizer("read"),
+		RecordStore: reader,
+	}
+
+	tr := callPipelineTool(t, deps, "get_run", map[string]interface{}{"run": "run-a"})
+	if tr.IsError {
+		t.Fatalf("get_run returned error: %v", tr.Content)
+	}
+	var detail struct {
+		Upstream *struct {
+			JobPath     string `json:"jobPath"`
+			RunID       string `json:"runId"`
+			BuildNumber int64  `json:"buildNumber"`
+		} `json:"upstream"`
+		Downstream *struct {
+			Items []struct {
+				RunID string `json:"runId"`
+			} `json:"items"`
+		} `json:"downstream"`
+	}
+	if err := json.Unmarshal(tr.StructuredContent, &detail); err != nil {
+		t.Fatalf("unmarshal structuredContent: %v", err)
+	}
+	if detail.Upstream == nil || detail.Upstream.RunID != upstreamID || detail.Upstream.JobPath != upJob || detail.Upstream.BuildNumber != 4 {
+		t.Fatalf("upstream = %+v, want run %s on %s #4", detail.Upstream, upstreamID, upJob)
+	}
+	if detail.Downstream == nil || len(detail.Downstream.Items) != 1 || detail.Downstream.Items[0].RunID != "run-c" {
+		t.Fatalf("downstream = %+v, want run-c", detail.Downstream)
 	}
 }
 

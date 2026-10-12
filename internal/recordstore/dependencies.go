@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -28,6 +29,12 @@ type DependencyEdge struct {
 	JobPath string
 	Result  string
 	Granted bool
+	// LastRun is the most recent run on this edge within lastRunWindow,
+	// or nil when no such run exists. On an upstream edge it is the
+	// upstream run that last started this job. On a downstream edge it
+	// is the subscriber's run that the producer started. The API layer
+	// redacts the link when the reader may not read that run.
+	LastRun *RunLinkRow
 }
 
 // JobDependencies is a job's upstream and downstream cross-tenant
@@ -116,7 +123,11 @@ func (r *pgReader) jobDependenciesUpstream(ctx context.Context, evaluator *Grant
 	if err != nil {
 		return nil, fmt.Errorf("check upstream grant for %s/%s: %w", tenant, jobPath, err)
 	}
-	return append(edges, DependencyEdge{Tenant: upstreamTenant, Job: upstreamJob, JobPath: producerPath, Result: upstreamResult, Granted: result.Allow}), nil
+	lastRun, err := lastUpstreamRun(ctx, r.pool, cluster, tenant, jobPath, upstreamTenant, producerPath, time.Now().Add(-lastRunWindow))
+	if err != nil {
+		return nil, err
+	}
+	return append(edges, DependencyEdge{Tenant: upstreamTenant, Job: upstreamJob, JobPath: producerPath, Result: upstreamResult, Granted: result.Allow, LastRun: lastRun}), nil
 }
 
 // jobDependenciesDownstream reads every varroa-upstream row naming
@@ -174,7 +185,11 @@ func (r *pgReader) jobDependenciesDownstream(ctx context.Context, evaluator *Gra
 		if !ok {
 			subJob = sub.jobPath
 		}
-		edges = append(edges, DependencyEdge{Tenant: sub.tenant, Job: subJob, JobPath: sub.jobPath, Result: sub.result, Granted: result.Allow})
+		lastRun, err := lastDownstreamRun(ctx, r.pool, sub.cluster, sub.tenant, sub.jobPath, tenant, jobPath, time.Now().Add(-lastRunWindow))
+		if err != nil {
+			return nil, err
+		}
+		edges = append(edges, DependencyEdge{Tenant: sub.tenant, Job: subJob, JobPath: sub.jobPath, Result: sub.result, Granted: result.Allow, LastRun: lastRun})
 	}
 	return edges, nil
 }

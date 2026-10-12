@@ -348,6 +348,8 @@ paths:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1tests'
   /api/v1/runs/{run}/changes:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1changes'
+  /api/v1/runs/{run}/downstream:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1downstream'
   /api/v1/runs/{run}/cancel:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1cancel'
   /api/v1/runs/{run}/rerun:

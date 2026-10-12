@@ -82,18 +82,23 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		return dispatchResult{}, fmt.Errorf("marshal envelope: %w", err)
 	}
 
+	upstream, err := deriveUpstream(ctx, tx, intent, payload)
+	if err != nil {
+		return dispatchResult{}, err
+	}
+
 	startedSupersede := "(" + supersedeSQL("TRUE") + " OR " + startLostRunSQL + ")"
 	var status string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO varroa.runs (
 			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path,
 			build_number, branch, scm_revision, status, queued_at, started_at, actor, cause, params, payload,
-			replay_of
+			replay_of, upstream_run_id, upstream_tenant, upstream_job, upstream_number
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, 'RUNNING', $12, $13, $14, $15::jsonb, $16::jsonb,
 			jsonb_build_object('run.started', $17::jsonb),
-			$18::uuid
+			$18::uuid, $19::uuid, $20, $21, $22
 		)
 		ON CONFLICT (created_at, run_id) DO UPDATE SET
 			build_number = COALESCE(EXCLUDED.build_number, runs.build_number),
@@ -105,6 +110,10 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 			cause        = COALESCE(EXCLUDED.cause, runs.cause),
 			params       = COALESCE(EXCLUDED.params, runs.params),
 			replay_of    = COALESCE(EXCLUDED.replay_of, runs.replay_of),
+			upstream_run_id = COALESCE(EXCLUDED.upstream_run_id, runs.upstream_run_id),
+			upstream_tenant = COALESCE(EXCLUDED.upstream_tenant, runs.upstream_tenant),
+			upstream_job    = COALESCE(EXCLUDED.upstream_job, runs.upstream_job),
+			upstream_number = COALESCE(EXCLUDED.upstream_number, runs.upstream_number),
 			status       = CASE WHEN `+startLostRunSQL+` THEN EXCLUDED.status ELSE `+runsStatusMergeSQL("TRUE")+` END,
 			cell         = CASE WHEN `+startedSupersede+` THEN EXCLUDED.cell ELSE runs.cell END,
 			namespace    = CASE WHEN `+startedSupersede+` THEN EXCLUDED.namespace ELSE runs.namespace END,
@@ -123,9 +132,13 @@ func applyRunStarted(ctx context.Context, tx pgx.Tx, intent *intentRow, env Inge
 		payload.QueuedAt, payload.StartedAt, payload.Actor,
 		jsonArg(payload.Cause), jsonArg(payload.Params), string(envelopeJSON),
 		replayOfArg(payload.ReplayOf),
+		upstream.runID, upstream.tenant, upstream.job, upstream.number,
 	).Scan(&status)
 	if err != nil {
 		return dispatchResult{}, fmt.Errorf("upsert started run: %w", err)
+	}
+	if err := fillDownstreamUpstream(ctx, tx, intent, buildNumber); err != nil {
+		return dispatchResult{}, err
 	}
 
 	consumedAt := env.OccurredAt

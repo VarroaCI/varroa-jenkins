@@ -137,6 +137,11 @@ type RunStartedPayload struct {
 	// GrantedBuildNumber is the grant the run applied in Jenkins. The
 	// recorder only compares it with BuildNumber; no column stores it.
 	GrantedBuildNumber *int64 `json:"granted_build_number,omitempty"`
+	// UpstreamJobPath and UpstreamBuildNumber name the run that started this
+	// run through a Jenkins upstream cause. deriveUpstream reads them when
+	// the intent key names no upstream run.
+	UpstreamJobPath     *string `json:"upstream_job_path,omitempty"`
+	UpstreamBuildNumber *int64  `json:"upstream_build_number,omitempty"`
 }
 
 // RunCompletedPayload is the payload of a run.completed envelope.

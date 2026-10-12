@@ -138,6 +138,20 @@ of the fleet's audit activity, once a controller becomes disposable.
   adds `log_chunks.writer`, the writer a part was last written with
   (`blob.Store.PartStamp`); `varroa_gateway` holds `UPDATE` on it, and
   `Overwrite`'s `WHERE digest = … AND writer = …` needs only its `SELECT`.
+  `00028_runs_upstream.sql` adds four nullable `runs` columns: `upstream_run_id`,
+  `upstream_tenant`, `upstream_job` (tenant-qualified), and `upstream_number`. Only
+  `run.started` writes them, through `COALESCE`. The partial index `runs_upstream_run_id_idx`
+  serves `ListDownstreamRuns`.
+  `00029_runs_upstream_edge_idx.sql` adds `runs_upstream_edge_idx` on `(cluster, tenant,
+  job_path, upstream_tenant, upstream_job, created_at DESC)` for the dependency edge's
+  last-run lookups.
+  Derivation (`ingest_upstream.go`, `deriveUpstream`): an `upstream:<runId>:<seq>` intent key
+  names the upstream run, and the recorder reads its tenant, job, and number by primary key.
+  A `retry:<runId>` key copies the source run's four columns. Otherwise the cell's native
+  cause (`upstream_job_path`, `upstream_build_number`) links only to a run of the same cluster
+  and tenant. A child stored before its producer keeps a NULL tenant until the producer's
+  `run.started` fills it (`fillDownstreamUpstream`, NULL columns only). The trust boundary: the recorder trusts an upstream key's run id as the ledger
+  wrote it, and it does not yet verify that the ledger originated it (#1260).
   `00005_tenant_placements.sql` adds
   `tenant_placements`, the placement-fencing authority: one row per
   `(cluster, tenant)`, holding the placement identity, the rehydration

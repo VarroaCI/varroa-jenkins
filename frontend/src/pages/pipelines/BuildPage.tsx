@@ -50,6 +50,7 @@ import { StageGraph } from "./StageGraph";
 import { RunLogViewer, type RunLogViewerHandle } from "./RunLogViewer";
 import { PendingInputCard } from "./PendingInputCard";
 import { ReplayDrawer } from "./ReplayDrawer";
+import { RunLinksCard } from "./RunLinksCard";
 import styles from "./BuildPage.module.css";
 
 /** The frames the run log stream carries. */
@@ -776,6 +777,8 @@ export default function BuildPage() {
           {describeCommandRefusal(run.commandRefusal)}
         </div>
       )}
+
+      <RunLinksCard runId={run.runId} upstream={run.upstream} downstream={run.downstream} />
 
       {/* The digest card sits above the Pipeline card and under the
           interrupted banner. Each part renders on its own, so a digest that

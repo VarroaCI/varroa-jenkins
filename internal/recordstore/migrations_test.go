@@ -38,6 +38,8 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00025_run_intents_start_marked_at.sql":            false,
 		"00026_log_chunks_writer.sql":                      false,
 		"00027_webhook_deliveries.sql":                     false,
+		"00028_runs_upstream.sql":                          false,
+		"00029_runs_upstream_edge_idx.sql":                 false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

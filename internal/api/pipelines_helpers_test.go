@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +82,11 @@ type fakeRecordReader struct {
 	// historyQueries records every ListTestCaseHistory query in call
 	// order.
 	historyQueries []recordstore.TestCaseHistoryQuery
+
+	// downstream is keyed by the upstream run id, for ListDownstreamRuns.
+	// Each slice is seeded newest first, the reader's own order. The cursor
+	// is the index of the next item.
+	downstream map[string][]recordstore.Run
 }
 
 // caseHistoryKey is caseHistory's key for one tenant, job, and case.
@@ -163,7 +170,36 @@ func newFakeRecordReader() *fakeRecordReader {
 		testCases:       map[string][]recordstore.TestCase{},
 		retention:       map[string]recordstore.TenantRetentionPolicy{},
 		caseHistory:     map[string][]recordstore.TestCaseOutcome{},
+		downstream:      map[string][]recordstore.Run{},
 	}
+}
+
+// ListDownstreamRuns pages the seeded runs of one upstream run. The cursor
+// is the decimal index of the first item of the next page.
+func (f *fakeRecordReader) ListDownstreamRuns(_ context.Context, q recordstore.DownstreamRunQuery) (recordstore.RunPage, error) {
+	if f.schemaTooOld {
+		return recordstore.RunPage{}, recordstore.ErrSchemaTooOld
+	}
+	start := 0
+	if q.Cursor != "" {
+		n, err := strconv.Atoi(q.Cursor)
+		if err != nil {
+			return recordstore.RunPage{}, fmt.Errorf("%w: %v", recordstore.ErrInvalidRunCursor, err)
+		}
+		start = n
+	}
+	all := f.downstream[q.UpstreamRunID]
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	start = min(start, len(all))
+	end := min(start+limit, len(all))
+	page := recordstore.RunPage{Runs: append([]recordstore.Run{}, all[start:end]...)}
+	if end < len(all) {
+		page.NextCursor = strconv.Itoa(end)
+	}
+	return page, nil
 }
 
 func (f *fakeRecordReader) tenantKey(cluster, tenant string) string { return cluster + "/" + tenant }
@@ -384,11 +420,11 @@ func (f *fakeRecordReader) JobWindowStats(_ context.Context, cluster, tenant, jo
 	return f.windowStats[f.tenantKey(cluster, tenant)+"/"+jobPath], nil
 }
 
-// setJobDependencies seeds the JobDependencies result for one cluster,
-// tenant, and job path, for a test to assert the Triggers card's
+// setPaymentsReleaseDependencies seeds the JobDependencies result of the core cluster's payments/release job,
+// for a test to assert the Triggers card's
 // dependency edges.
-func (f *fakeRecordReader) setJobDependencies(cluster, tenant, jobPath string, deps recordstore.JobDependencies) {
-	f.jobDependencies[f.tenantKey(cluster, tenant)+"/"+jobPath] = deps
+func (f *fakeRecordReader) setPaymentsReleaseDependencies(deps recordstore.JobDependencies) {
+	f.jobDependencies[f.tenantKey("core", "payments")+"/payments/release"] = deps
 }
 
 func (f *fakeRecordReader) JobDependencies(_ context.Context, cluster, tenant, jobPath string) (recordstore.JobDependencies, error) {

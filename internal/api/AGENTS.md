@@ -457,6 +457,13 @@ federation, activity persistence, and SSE fanout.
   template. Every read here is best-effort: an unreadable or malformed
   bundle, item, or run answers nil/empty rather than an error, because the
   bundle-validation gate is the place that already rejects bad content.
+- Run links. `GET /runs/{run}` carries `upstream` (the run that started this run, from the
+  `upstream_*` columns) and `downstream` (the first 20 runs it started, `runDetailDownstreamLimit`).
+  `GET /runs/{run}/downstream` pages the rest by keyset, through `run_links.go`. Every link
+  passes `canReadRun` on its own tenant and job path (`redactRunLink`). A link the reader may
+  not read keeps its tenant alone. A run the reader may not read answers `404` on the
+  downstream route too. `get_run` (MCP) and `GET /runs/{run}` share `Server.GetRun`, so they
+  return the same links. A dependency edge's `lastRun` uses the same redaction.
 - The job detail (`GET /pipelines/{team}/jobs/{job}`) carries a `dependencies` object
   (`upstream`/`downstream` edge lists, `buildPipelineDependencies` in
   `handlers_pipelines.go`), read from `RecordStore.JobDependencies` and always present

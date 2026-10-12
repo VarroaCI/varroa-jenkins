@@ -37,6 +37,9 @@ type Reader interface {
 	ListJobSummaries(ctx context.Context, cluster, tenant string, since time.Time) ([]JobSummary, error)
 	GetJobSummary(ctx context.Context, cluster, tenant, jobPath string) (JobSummary, error)
 	ListRuns(ctx context.Context, q RunQuery) (RunPage, error)
+	// ListDownstreamRuns pages the runs whose upstream run id is
+	// q.UpstreamRunID, newest first.
+	ListDownstreamRuns(ctx context.Context, q DownstreamRunQuery) (RunPage, error)
 	GetRun(ctx context.Context, runID string) (Run, []Stage, error)
 
 	// TenantRetention answers the tenant's record-store windows. A tenant
@@ -211,7 +214,8 @@ func (r *pgReader) checkSchema(ctx context.Context) error {
 const runColumns = `run_id, created_at, cluster, namespace, cell, tenant, job_path, build_number, branch,
 	scm_revision, status, result, queued_at, started_at, ended_at, last_heartbeat_at,
 	interrupted_superseded_at, duration_ms, actor, cause, params, changes, source, inputs, summary,
-	test_report_key, tests_total, tests_failed, tests_skipped, payload, replay_of`
+	test_report_key, tests_total, tests_failed, tests_skipped, payload, replay_of,
+	upstream_run_id, upstream_tenant, upstream_job, upstream_number`
 
 // qualifiedRunColumns is the same columns as runColumns, each qualified
 // with the "runs" alias, so ListRuns' query stays unambiguous once it
@@ -221,7 +225,8 @@ const qualifiedRunColumns = `runs.run_id, runs.created_at, runs.cluster, runs.na
 	runs.queued_at, runs.started_at, runs.ended_at, runs.last_heartbeat_at,
 	runs.interrupted_superseded_at, runs.duration_ms, runs.actor, runs.cause, runs.params,
 	runs.changes, runs.source, runs.inputs, runs.summary, runs.test_report_key, runs.tests_total,
-	runs.tests_failed, runs.tests_skipped, runs.payload, runs.replay_of`
+	runs.tests_failed, runs.tests_skipped, runs.payload, runs.replay_of,
+	runs.upstream_run_id, runs.upstream_tenant, runs.upstream_job, runs.upstream_number`
 
 // scanRun scans one row shaped by runColumns into a Run.
 func scanRun(row pgx.Row) (Run, error) {
@@ -233,7 +238,7 @@ func scanRun(row pgx.Row) (Run, error) {
 		&run.StartedAt, &run.EndedAt, &run.LastHeartbeatAt, &run.InterruptedSupersededAt, &run.DurationMs,
 		&run.Actor, &run.Cause, &run.Params, &run.Changes, &run.Source, &run.Inputs, &run.Summary,
 		&run.TestReportKey, &run.TestsTotal, &run.TestsFailed, &run.TestsSkipped, &run.Payload,
-		&run.ReplayOf,
+		&run.ReplayOf, &run.UpstreamRunID, &run.UpstreamTenant, &run.UpstreamJob, &run.UpstreamNumber,
 	)
 	if err != nil {
 		return Run{}, err

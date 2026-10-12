@@ -130,6 +130,11 @@ type runDetailJSON struct {
 	// refused for this run. It is absent when no such refusal exists. A
 	// later successful command does not clear it.
 	CommandRefusal *runCommandRefusalJSON `json:"commandRefusal,omitempty"`
+	// Upstream names the run that started this run. Downstream holds the
+	// first page of the runs this run started, and GET /runs/{run}/downstream
+	// pages the rest. Both are absent when no link exists.
+	Upstream   *RunLink     `json:"upstream,omitempty"`
+	Downstream *RunLinkPage `json:"downstream,omitempty"`
 }
 
 // runCommandRefusalJSON is the response shape of a stored refusal notice.

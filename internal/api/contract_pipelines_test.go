@@ -88,6 +88,13 @@ func init() {
 			WantStatus: http.StatusServiceUnavailable,
 		},
 		contractCase{
+			Name:       "listRunDownstream-recordStoreDisabled",
+			Method:     "GET",
+			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/downstream",
+			Claims:     adminClaims,
+			WantStatus: http.StatusServiceUnavailable,
+		},
+		contractCase{
 			Name:       "getRunScript-recordStoreDisabled",
 			Method:     "GET",
 			Path:       "/api/v1/runs/0194f6b2-0000-7000-8000-000000000000/script",

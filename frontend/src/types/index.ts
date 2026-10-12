@@ -1800,6 +1800,8 @@ export interface PipelineDependencyEdge {
   jobPath: string;
   result: string;
   granted: boolean;
+  /** The edge's most recent run within 30 days. Absent when none exists. */
+  lastRun?: RunLink;
 }
 
 /**
@@ -1944,6 +1946,28 @@ export interface RunDetail {
   /** The run's failed and skipped test cases, in the reader's order.
    * Absent when the run holds no case row. */
   cases?: RunTestCase[];
+  /** The run that started this run. Absent when no run started it. */
+  upstream?: RunLink;
+  /** The first page of the runs this run started, newest first. Absent
+   * when it started none. Page on with listRunDownstream. */
+  downstream?: RunLinkPage;
+}
+
+/** One run on the far side of a run link. A run the reader may not read
+ * carries its tenant alone. */
+export interface RunLink {
+  tenant: string;
+  jobPath?: string;
+  runId?: string;
+  buildNumber?: number;
+  status?: string;
+  result?: string;
+}
+
+/** One page of the runs a run started. */
+export interface RunLinkPage {
+  items: RunLink[];
+  nextCursor?: string;
 }
 
 /** A refused cancel or input answer, as GET /runs/{run} reports it. */

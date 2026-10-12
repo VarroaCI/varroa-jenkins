@@ -56,6 +56,7 @@ import type {
   RunScript,
   TestCaseHistoryResponse,
   RunChangeListResponse,
+  RunLinkPage,
   TeamPipelines,
   TeamPlacement,
   TeamRehydration,
@@ -1307,6 +1308,13 @@ export function getTestCaseHistory(
 
 export function listRunChanges(runId: string): Promise<RunChangeListResponse> {
   return bffFetch<RunChangeListResponse>(`${runBase(runId)}/changes`);
+}
+
+/** One page of the runs a run started. Pass the previous page's nextCursor
+ * to read the next page. */
+export function listRunDownstream(runId: string, cursor?: string): Promise<RunLinkPage> {
+  const qs = cursor ? `?cursor=${enc(cursor)}` : "";
+  return bffFetch<RunLinkPage>(`${runBase(runId)}/downstream${qs}`);
 }
 
 /** Requests that a queued or running build stop. Fire and forget. */

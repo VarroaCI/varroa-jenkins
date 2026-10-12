@@ -61,7 +61,7 @@ build record store. The `run_pipeline` tool starts a build and returns a
 `runId` and an `intentKey`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
-detail. The `get_run_log` tool returns a bounded tail of the run's console
+detail, with the run's `upstream` link and the first page of its `downstream` links. The `get_run_log` tool returns a bounded tail of the run's console
 log, never a stream; `tailLines` defaults to 100 and clamps between 1 and
 500. An agent that needs live output calls `get_run_log` again. The
 `list_fleet_locks` tool takes `team` and answers the locks that team's

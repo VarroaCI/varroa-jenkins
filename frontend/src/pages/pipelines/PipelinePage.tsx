@@ -127,6 +127,18 @@ function renderDependencyRow(label: string, edges: PipelineDependencyEdge[]) {
             </Link>{" "}
             ({edge.result}
             {!edge.granted && <span className={styles.grantMissing}> · grant missing</span>})
+            {edge.lastRun && (
+              <>
+                {" "}· last run{" "}
+                {edge.lastRun.runId && edge.lastRun.jobPath ? (
+                  <Link to={runHref(edge.lastRun.tenant, edge.lastRun.jobPath, edge.lastRun.runId)}>
+                    {edge.lastRun.buildNumber != null ? `#${edge.lastRun.buildNumber}` : "view"}
+                  </Link>
+                ) : (
+                  <>{edge.lastRun.buildNumber != null ? `#${edge.lastRun.buildNumber}` : edge.lastRun.tenant}</>
+                )}
+              </>
+            )}
           </div>
         ))}
       </dd>

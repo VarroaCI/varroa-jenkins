@@ -483,6 +483,32 @@ describe("PipelinePage — dependency edges", () => {
     expect(link.getAttribute("href")).toBe("/pipelines/smoke-b/smoke-b%2Fxt-downstream");
   });
 
+  it("links an edge's last run to its build page", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        dependencies: {
+          upstream: [
+            {
+              tenant: "alpha",
+              job: "release",
+              jobPath: "alpha/release",
+              result: "SUCCESS",
+              granted: true,
+              lastRun: { tenant: "alpha", jobPath: "alpha/release", runId: "run-up-1", buildNumber: 9 },
+            },
+          ],
+          downstream: [],
+        },
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Upstream")).toBeInTheDocument());
+    const row = triggersRow("Upstream");
+    expect(row?.textContent).toContain("last run #9");
+    const link = within(row!).getByRole("link", { name: "#9" });
+    expect(link.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frelease/run-up-1");
+  });
+
   it("marks an ungranted downstream edge with grant missing, without hiding it", async () => {
     mockGetPipelineJob.mockResolvedValue(
       jobDetail({

@@ -46,6 +46,33 @@ type Run struct {
 	// ReplayOf names the run a replayed build copied its script from. It
 	// is nil for a build that is not a replay.
 	ReplayOf *uuid.UUID
+	// UpstreamRunID, UpstreamTenant, UpstreamJob, and UpstreamNumber name
+	// the run that started this run, when another run did. UpstreamJob is
+	// the tenant-qualified job path. UpstreamRunID is nil when no upstream
+	// run matched, and the tenant and job keep their values.
+	UpstreamRunID  *uuid.UUID
+	UpstreamTenant *string
+	UpstreamJob    *string
+	UpstreamNumber *int64
+}
+
+// DownstreamRunQuery pages the runs that one upstream run started. Limit
+// is capped by the reader. Cursor is the keyset cursor of an earlier page.
+type DownstreamRunQuery struct {
+	UpstreamRunID string
+	Limit         int
+	Cursor        string
+}
+
+// RunLinkRow is one run as a dependency edge's last-run link shows it.
+// Status and Result are empty when the caller needs only the identity.
+type RunLinkRow struct {
+	RunID       string
+	Tenant      string
+	JobPath     string
+	BuildNumber *int64
+	Status      string
+	Result      string
 }
 
 // Stage is one row of varroa.run_stages.

@@ -168,6 +168,9 @@ type pipelineDependencyEdgeJSON struct {
 	JobPath string `json:"jobPath"`
 	Result  string `json:"result"`
 	Granted bool   `json:"granted"`
+	// LastRun is the edge's most recent run within 30 days, redacted for the
+	// reader. It is absent when no such run exists.
+	LastRun *RunLink `json:"lastRun,omitempty"`
 }
 
 // pipelineDependenciesJSON is the job detail's dependency edge object.
@@ -178,23 +181,48 @@ type pipelineDependenciesJSON struct {
 }
 
 // buildPipelineDependencies converts the record store's dependency edges
-// into the API shape.
-func buildPipelineDependencies(deps recordstore.JobDependencies) pipelineDependenciesJSON {
+// into the API shape. Each edge's last run passes the same run read check
+// as GET /runs/{run}, so the reader sees a tenant alone for a run it may
+// not read.
+func (s *Server) buildPipelineDependencies(claims *auth.Claims, deps recordstore.JobDependencies) pipelineDependenciesJSON {
 	out := pipelineDependenciesJSON{
 		Upstream:   make([]pipelineDependencyEdgeJSON, 0, len(deps.Upstream)),
 		Downstream: make([]pipelineDependencyEdgeJSON, 0, len(deps.Downstream)),
 	}
 	for _, edge := range deps.Upstream {
-		out.Upstream = append(out.Upstream, pipelineDependencyEdgeJSON{
-			Tenant: edge.Tenant, Job: edge.Job, JobPath: edge.JobPath, Result: edge.Result, Granted: edge.Granted,
-		})
+		out.Upstream = append(out.Upstream, s.dependencyEdgeJSON(claims, edge))
 	}
 	for _, edge := range deps.Downstream {
-		out.Downstream = append(out.Downstream, pipelineDependencyEdgeJSON{
-			Tenant: edge.Tenant, Job: edge.Job, JobPath: edge.JobPath, Result: edge.Result, Granted: edge.Granted,
-		})
+		out.Downstream = append(out.Downstream, s.dependencyEdgeJSON(claims, edge))
 	}
 	return out
+}
+
+// dependencyEdgeJSON maps one edge to its API shape, redacting its last run.
+func (s *Server) dependencyEdgeJSON(claims *auth.Claims, edge recordstore.DependencyEdge) pipelineDependencyEdgeJSON {
+	out := pipelineDependencyEdgeJSON{
+		Tenant: edge.Tenant, Job: edge.Job, JobPath: edge.JobPath, Result: edge.Result, Granted: edge.Granted,
+	}
+	if edge.LastRun != nil {
+		last := s.redactRunLink(claims, RunLink{
+			Tenant:      edge.LastRun.Tenant,
+			JobPath:     edge.LastRun.JobPath,
+			RunID:       edge.LastRun.RunID,
+			BuildNumber: derefInt64(edge.LastRun.BuildNumber),
+			Status:      edge.LastRun.Status,
+			Result:      edge.LastRun.Result,
+		})
+		out.LastRun = &last
+	}
+	return out
+}
+
+// derefInt64 returns *v, or 0 when v is nil.
+func derefInt64(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // pipelineLast30DaysJSON is design D8's "Last 30 days" card. PassRate,
@@ -660,7 +688,7 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 	if s.handleReaderError(w, err, "get job dependencies") {
 		return
 	}
-	detail.Dependencies = buildPipelineDependencies(deps)
+	detail.Dependencies = s.buildPipelineDependencies(claims, deps)
 
 	s.writeJSON(w, http.StatusOK, detail)
 }

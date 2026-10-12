@@ -4869,6 +4869,12 @@ PipelineDependencyEdge:
       description: >
         The grant evaluator's fanout-path verdict, read from the
         producer's exports.
+    lastRun:
+      description: >
+        The edge's most recent run within the last 30 days. Absent when no
+        such run exists. A run the caller may not read carries its tenant alone.
+      allOf:
+        - $ref: '#/RunLink'
   additionalProperties: false
 
 PipelineLast30Days:
@@ -5525,6 +5531,55 @@ RunDetail:
       type: array
       items:
         $ref: '#/RunStage'
+    upstream:
+      $ref: '#/RunLink'
+    downstream:
+      $ref: '#/RunLinkPage'
+  additionalProperties: false
+
+RunLink:
+  type: object
+  description: >
+    One run on the far side of a run link: the run that started this
+    run, a run this run started, or a dependency edge's last run. A run
+    the caller may not read carries its tenant alone.
+  required: [tenant]
+  properties:
+    tenant:
+      type: string
+      description: The tenant that holds the run.
+    jobPath:
+      type: string
+      description: The run's job path, qualified with its tenant folder.
+    runId:
+      type: string
+      format: uuid
+      description: The run's identifier. Absent when no run matched.
+    buildNumber:
+      type: integer
+      format: int64
+      description: The build number of the run.
+    status:
+      type: string
+      description: The run's status. Absent on an upstream link.
+    result:
+      type: string
+      description: The run's result, when it has one. Absent on an upstream link.
+  additionalProperties: false
+
+RunLinkPage:
+  type: object
+  description: One page of the runs a run started, newest first.
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: The runs on this page. Never null.
+      items:
+        $ref: '#/RunLink'
+    nextCursor:
+      type: string
+      description: The cursor of the next page. Absent on the last page.
   additionalProperties: false
 
 RunCommandRefusal:

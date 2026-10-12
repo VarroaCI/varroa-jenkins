@@ -425,7 +425,7 @@ func TestHandleGetPipelineJob_DependenciesBothDirections(t *testing.T) {
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
-	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+	reader.setPaymentsReleaseDependencies(recordstore.JobDependencies{
 		Upstream:   []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", JobPath: "alpha/build", Result: "SUCCESS", Granted: true}},
 		Downstream: []recordstore.DependencyEdge{{Tenant: "search", Job: "rebuild", JobPath: "search/rebuild", Result: "SUCCESS", Granted: true}},
 	})
@@ -478,7 +478,7 @@ func TestHandleGetPipelineJob_DependenciesUngrantedEdgeVisible(t *testing.T) {
 
 	authz := resolverAuthorizer("payments")
 	reader := newFakeRecordReader()
-	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+	reader.setPaymentsReleaseDependencies(recordstore.JobDependencies{
 		Upstream: []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: false}},
 	})
 	srv := pipelinesTestServer(client, authz, reader, nil)
@@ -543,7 +543,7 @@ func TestHandleGetPipelineJob_NoReadRightReturnsNoDependencyData(t *testing.T) {
 
 	authz := resolverAuthorizer() // no tenant granted at all
 	reader := newFakeRecordReader()
-	reader.setJobDependencies("core", "payments", "payments/release", recordstore.JobDependencies{
+	reader.setPaymentsReleaseDependencies(recordstore.JobDependencies{
 		Upstream: []recordstore.DependencyEdge{{Tenant: "alpha", Job: "build", Result: "SUCCESS", Granted: true}},
 	})
 	srv := pipelinesTestServer(client, authz, reader, nil)

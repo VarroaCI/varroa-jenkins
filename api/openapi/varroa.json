@@ -3550,6 +3550,9 @@
             },
             "type": "object"
           },
+          "downstream": {
+            "$ref": "#/components/schemas/components_schemas_RunLinkPage"
+          },
           "durationMs": {
             "format": "int64",
             "type": "integer"
@@ -3715,6 +3718,9 @@
               "other"
             ],
             "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/components_schemas_RunLink"
           }
         },
         "required": [
@@ -9810,6 +9816,14 @@
             "description": "The job's path with its tenant folder. The job page route takes this path.\n",
             "type": "string"
           },
+          "lastRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/components_schemas_RunLink"
+              }
+            ],
+            "description": "The edge's most recent run within the last 30 days. Absent when no such run exists. A run the caller may not read carries its tenant alone.\n"
+          },
           "result": {
             "description": "The result threshold the edge fires on.",
             "enum": [
@@ -11352,6 +11366,9 @@
             },
             "type": "object"
           },
+          "downstream": {
+            "$ref": "#/components/schemas/components_schemas_RunLinkPage"
+          },
           "durationMs": {
             "format": "int64",
             "type": "integer"
@@ -11517,6 +11534,9 @@
               "other"
             ],
             "type": "string"
+          },
+          "upstream": {
+            "$ref": "#/components/schemas/components_schemas_RunLink"
           }
         },
         "required": [
@@ -11621,6 +11641,63 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RunLink": {
+        "additionalProperties": false,
+        "description": "One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.\n",
+        "properties": {
+          "buildNumber": {
+            "description": "The build number of the run.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "jobPath": {
+            "description": "The run's job path, qualified with its tenant folder.",
+            "type": "string"
+          },
+          "result": {
+            "description": "The run's result, when it has one. Absent on an upstream link.",
+            "type": "string"
+          },
+          "runId": {
+            "description": "The run's identifier. Absent when no run matched.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "description": "The run's status. Absent on an upstream link.",
+            "type": "string"
+          },
+          "tenant": {
+            "description": "The tenant that holds the run.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant"
+        ],
+        "type": "object"
+      },
+      "components_schemas_RunLinkPage": {
+        "additionalProperties": false,
+        "description": "One page of the runs a run started, newest first.",
+        "properties": {
+          "items": {
+            "description": "The runs on this page. Never null.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_RunLink"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "The cursor of the next page. Absent on the last page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -20604,6 +20681,76 @@
           }
         },
         "summary": "Lists one run's SCM changes.",
+        "tags": [
+          "Pipelines"
+        ]
+      }
+    },
+    "/api/v1/runs/{run}/downstream": {
+      "get": {
+        "description": "Each item passes the run read check on its own. An item the caller may not read carries its tenant alone.\n",
+        "operationId": "listRunDownstream",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_run"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_RunLinkPage"
+                }
+              }
+            },
+            "description": "A page of the runs the run started."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The limit is out of range, or the cursor is malformed."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The run does not exist, or the caller may not read it."
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Lists one page of the runs that one run started, newest first.",
         "tags": [
           "Pipelines"
         ]

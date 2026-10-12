@@ -112,6 +112,8 @@ type RunDetail struct {
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
 	ReplayOf          string                   `json:"replayOf,omitempty"`
 	CommandRefusal    *runCommandRefusalJSON   `json:"commandRefusal,omitempty"`
+	Upstream          *RunLink                 `json:"upstream,omitempty"`
+	Downstream        *RunLinkPage             `json:"downstream,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
@@ -275,6 +277,15 @@ func (s *Server) GetRun(ctx context.Context, claims *auth.Claims, runID string) 
 		detail.Cases = buildRunTestCases(cases)
 	}
 	detail.Digest = computeRunDigest(ctx, s.deps.BlobStore, run, stages, runTestCaseRead{cases: cases, err: casesErr})
+	detail.Upstream = s.upstreamRunLink(claims, run)
+	// A failed downstream read leaves the list out. The run read still answers.
+	downstream, dErr := s.downstreamRunPage(ctx, claims, run.RunID, runDetailDownstreamLimit, "")
+	switch {
+	case dErr != nil:
+		s.deps.Logger.Warn("read downstream runs failed", "runId", run.RunID, "error", dErr)
+	case len(downstream.Items) > 0:
+		detail.Downstream = &downstream
+	}
 	out, cerr := convertJSON[RunDetail](detail)
 	if cerr != nil {
 		return RunDetail{}, &ServiceError{Status: http.StatusInternalServerError, Message: "encode run detail failed"}

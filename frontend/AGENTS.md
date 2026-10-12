@@ -237,6 +237,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   `useEventStream` calls, the team run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a
   `Digest` card above the `Pipeline` card and below the interrupted banner, and
+  renders the **Run links** card (`RunLinksCard.tsx`, `RunLinksCard.module.css`) between the
+  interrupted banner and the `Digest` card. It shows the upstream run and the downstream runs,
+  and its **Show more** button pages `listRunDownstream`. It renders nothing when no link exists;
   renders a pending input step in `PendingInputCard.tsx`, which has its own
   `PendingInputCard.module.css`, in a `Pending input` card between the
   `Digest` card and the `Pipeline` card; its `Tests` tab shows the report

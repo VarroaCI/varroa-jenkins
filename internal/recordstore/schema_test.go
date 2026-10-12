@@ -97,6 +97,10 @@ var expectedColumns = map[string][]columnSpec{
 		{"inputs", "jsonb", true},
 		{"test_report_key", "text", true},
 		{"replay_of", "uuid", true},
+		{"upstream_run_id", "uuid", true},
+		{"upstream_tenant", "text", true},
+		{"upstream_job", "text", true},
+		{"upstream_number", "bigint", true},
 	},
 	"run_stages": {
 		{"run_id", "uuid", false},
@@ -447,7 +451,7 @@ func TestIndexesExist(t *testing.T) {
 
 	want := map[string][]string{
 		"run_intents":    {"run_intents_conflict_idx", "run_intents_orphan_idx"},
-		"runs":           {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx"},
+		"runs":           {"runs_run_id_idx", "runs_job_idx", "runs_tenant_idx", "runs_scm_revision_idx", "runs_search_tsv_idx", "runs_upstream_run_id_idx", "runs_upstream_edge_idx"},
 		"run_stages":     {"run_stages_created_at_idx"},
 		"run_tests":      {"run_tests_created_at_idx"},
 		"run_artifacts":  {"run_artifacts_created_at_idx"},
