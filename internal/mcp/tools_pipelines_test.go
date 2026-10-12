@@ -263,12 +263,16 @@ func TestRunPipelineReturnsRunIDAndIntentKey(t *testing.T) {
 	var payload struct {
 		RunID     string `json:"runId"`
 		IntentKey string `json:"intentKey"`
+		State     string `json:"state"`
 	}
 	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
 		t.Fatalf("unmarshal structuredContent: %v", err)
 	}
 	if payload.RunID == "" {
 		t.Error("runId is empty")
+	}
+	if payload.State != "requested" {
+		t.Errorf("state = %q, want %q", payload.State, "requested")
 	}
 	if payload.IntentKey != "manual:"+payload.RunID {
 		t.Errorf("intentKey = %q, want %q", payload.IntentKey, "manual:"+payload.RunID)

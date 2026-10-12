@@ -219,6 +219,8 @@ func TestTriggerBuildItemsWaitExpires(t *testing.T) {
 func TestTriggerBuildMissingJobAfterApply(t *testing.T) {
 	f := newItemsGateJenkins(t)
 	agent, results := itemsGateAgent(t, f)
+	agent.triggerNotFoundWait = 200 * time.Millisecond
+	agent.triggerNotFoundRecheck = 40 * time.Millisecond
 	agent.markItemsApplied()
 
 	agent.runCommand(context.Background(), commandWork{
@@ -226,12 +228,109 @@ func TestTriggerBuildMissingJobAfterApply(t *testing.T) {
 		ctx:           context.Background(),
 	})
 
-	if got := f.triggerCalls.Load(); got != 1 {
-		t.Fatalf("trigger calls = %d, want 1", got)
+	if got := f.triggerCalls.Load(); got < 2 {
+		t.Fatalf("trigger calls = %d, want at least 2 retries", got)
 	}
 	got := results()
 	if len(got) != 1 || got[0].Success || got[0].HttpStatus != http.StatusNotFound {
 		t.Fatalf("results = %+v, want one failure with the status 404", got)
+	}
+}
+
+// TestTriggerRetriesUntilQueuedDesiredStateCreatesJob verifies a trigger
+// that Jenkins answers with 404 retries after the cell applies the queued
+// desired state that creates the job, and then succeeds.
+func TestTriggerRetriesUntilQueuedDesiredStateCreatesJob(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	agent, results := itemsGateAgent(t, f)
+	agent.markItemsApplied()
+	mb := newCommandMailbox()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		agent.runCommand(context.Background(), commandWork{
+			imperativeCmd: triggerCommand(),
+			ctx:           context.Background(),
+			mailbox:       mb,
+		})
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	mb.putDesired(commandWork{
+		desiredStateCmd: &mitev1.DesiredStateCommand{CommandId: "d1"},
+		ctx:             context.Background(),
+	})
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the trigger did not finish after the desired state arrived")
+	}
+	if got := f.triggerCalls.Load(); got < 2 {
+		t.Fatalf("trigger calls = %d, want at least 2", got)
+	}
+	got := results()
+	if len(got) != 2 || got[0].GetDesiredState() == nil {
+		t.Fatalf("results = %+v, want the desired-state result and then the trigger result", got)
+	}
+	if !got[1].Success || got[1].HttpStatus != http.StatusAccepted {
+		t.Fatalf("trigger result = %+v, want success with the status 202", got[1])
+	}
+}
+
+// TestTriggerRetriesOnRecheckWithoutMailbox verifies a trigger without a
+// mailbox retries on its recheck interval until Jenkins creates the job.
+func TestTriggerRetriesOnRecheckWithoutMailbox(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerNotFoundWait = 2 * time.Second
+	agent.triggerNotFoundRecheck = 20 * time.Millisecond
+	agent.markItemsApplied()
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		f.itemsReady.Store(true)
+	}()
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: triggerCommand(),
+		ctx:           context.Background(),
+	})
+
+	got := results()
+	if len(got) != 1 || !got[0].Success {
+		t.Fatalf("results = %+v, want one success", got)
+	}
+}
+
+// TestTriggerNotFoundWaitHonorsIdleDeferral verifies that a waiting trigger
+// that gets 404 does not apply an apply_when idle desired state inline while
+// builds run. The desired state stays in the mailbox, and the trigger ends
+// 404 after the bound.
+func TestTriggerNotFoundWaitHonorsIdleDeferral(t *testing.T) {
+	f := newItemsGateJenkins(t)
+	agent, results := itemsGateAgent(t, f)
+	agent.triggerNotFoundWait = 300 * time.Millisecond
+	agent.triggerNotFoundRecheck = 40 * time.Millisecond
+	agent.markItemsApplied()
+	mb := newCommandMailbox()
+	idle := &mitev1.DesiredStateCommand{CommandId: "desired-idle", ApplyWhen: "idle"}
+	mb.putDesired(commandWork{desiredStateCmd: idle, ctx: context.Background()})
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: triggerCommand(),
+		ctx:           context.Background(),
+		mailbox:       mb,
+	})
+
+	got := results()
+	if len(got) != 1 || got[0].GetDesiredState() != nil || got[0].Success ||
+		got[0].HttpStatus != http.StatusNotFound {
+		t.Fatalf("results = %+v, want one trigger failure with the status 404 and no apply result", got)
+	}
+	left, ok := mb.takeDesired()
+	if !ok || left.desiredStateCmd.CommandId != "desired-idle" {
+		t.Fatalf("mailbox desired = %+v, %v, want the deferred desired state", left, ok)
 	}
 }
 

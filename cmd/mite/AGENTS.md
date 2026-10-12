@@ -103,7 +103,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     `tenant <t> items not applied`, which the gateway maps onto the
     retryable `TRIGGER_UNREACHABLE`. A moved-away tenant waits the full
     budget and answers the same. A job still missing after
-    the apply answers the plugin's `404` (`JOB_NOT_FOUND`). Every imperative `CommandResult` carries
+    the apply answers the plugin's `404`. A `404` starts `triggerUntilJobExists`. It retries every
+    `triggerNotFoundRecheck` (5 s) and right after each inline desired-state apply. The idle
+    deferral works as in the readiness wait. The `triggerNotFoundWait` budget is 90 s. The last
+    `404` stays and maps to `JOB_NOT_FOUND`. The reason: the listing shows a job once the bundle
+    declares it, one operator tick before the cell holds it. Every imperative `CommandResult` carries
     `command_type`, `job_path`, and `run_id` (`imperativeCommandSubject`),
     and `actor` (`imperativeCommandActor`: the trigger's or cancel's
     `actor`, or the `acting_user.name` of an input answer, a replay, or a scan).

@@ -301,6 +301,17 @@ type Agent struct {
 	// call. NewAgent sets triggerReadyWaitDefault.
 	triggerReadyWait time.Duration
 
+	// triggerNotFoundWait bounds the retry of a TRIGGER_BUILD call that
+	// Jenkins answers with 404. The retry lasts while the cell applies the
+	// desired state that creates the job. NewAgent sets
+	// triggerNotFoundWaitDefault.
+	triggerNotFoundWait time.Duration
+
+	// triggerNotFoundRecheck is the interval between two trigger calls
+	// that answer 404 while no desired state is pending. NewAgent sets
+	// triggerNotFoundRecheckDefault.
+	triggerNotFoundRecheck time.Duration
+
 	// itemsAppliedC is the items gate. It closes once, which opens the
 	// gate, when an items apply completed in this Jenkins boot. A trigger
 	// waits for it, because a cell's emptyDir home holds no jobs until
@@ -386,6 +397,8 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
 		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
 		triggerReadyWait:       triggerReadyWaitDefault,
+		triggerNotFoundWait:    triggerNotFoundWaitDefault,
+		triggerNotFoundRecheck: triggerNotFoundRecheckDefault,
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
 		runStateAcks:           newRunStateAckStore(),
 		runStateWaiters:        newRunStateWaiterMap(),
@@ -1200,6 +1213,15 @@ const defaultCommandDeadline = 20 * time.Minute
 // still has time after a full wait.
 const triggerReadyWaitDefault = 5 * time.Minute
 
+// triggerNotFoundWaitDefault bounds the retry of a trigger that the plugin
+// refuses with 404. The cell can hold a stale items set for one operator
+// tick plus one apply after the bundle declares the job.
+const triggerNotFoundWaitDefault = 90 * time.Second
+
+// triggerNotFoundRecheckDefault is the interval between two trigger calls
+// while no desired state is pending.
+const triggerNotFoundRecheckDefault = 5 * time.Second
+
 // commandMailbox is a mutex-guarded queue with a single-slot replace-on-arrival
 // desired-state entry (newest-wins) and a bounded FIFO imperative queue.
 // Desired-state commands coalesce instead of queueing; imperatives preserve
@@ -1697,8 +1719,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				errStr = fmt.Sprintf("trigger build %s: %v", payload.JobPath, readyErr)
 				break
 			}
-			jenkinsClient := a.getJenkinsClient()
-			triggerStatus, triggerErr := jenkinsClient.TriggerBuild(cctx, jenkins.TriggerBuildRequest{
+			triggerStatus, triggerErr := a.triggerUntilJobExists(cctx, w.mailbox, jenkins.TriggerBuildRequest{
 				RunID:      payload.RunId,
 				IntentKey:  payload.IntentKey,
 				JobPath:    payload.JobPath,
@@ -1973,12 +1994,7 @@ func (a *Agent) awaitRunReady(ctx context.Context, mb *commandMailbox, jobPath s
 					if dw.ctx == nil {
 						dw.ctx = ctx
 					}
-					deadline, _ := wctx.Deadline()
-					var applyCancel context.CancelFunc
-					dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
-					a.runCommand(ctx, dw)
-					applyCancel()
-					mb.finish(dw)
+					a.runInlineDesired(ctx, wctx, mb, dw)
 					if wctx.Err() != nil {
 						return waitErr()
 					}
@@ -2000,6 +2016,83 @@ func (a *Agent) awaitRunReady(ctx context.Context, mb *commandMailbox, jobPath s
 				return nil
 			}
 			return waitErr()
+		}
+	}
+}
+
+// runInlineDesired runs the pending desired state dw on the worker's
+// behalf. The deadline of wctx also bounds the apply.
+func (a *Agent) runInlineDesired(ctx, wctx context.Context, mb *commandMailbox, dw commandWork) {
+	if dw.ctx == nil {
+		dw.ctx = ctx
+	}
+	deadline, _ := wctx.Deadline()
+	var applyCancel context.CancelFunc
+	dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
+	a.runCommand(ctx, dw)
+	applyCancel()
+	mb.finish(dw)
+}
+
+// triggerUntilJobExists makes a TRIGGER_BUILD call. A 404 means that the
+// job does not exist yet. The listing shows a job once the bundle declares
+// it, one operator tick before the cell holds it. The command worker is
+// serial, so this wait runs the pending desired state inline, the same way
+// awaitRunReady does. The call retries every triggerNotFoundRecheck and
+// after each inline apply, until the job exists or triggerNotFoundWait
+// ends. The last 404 stays, and the caller maps it to JOB_NOT_FOUND.
+// An apply_when idle desired state keeps its idle deferral here too.
+func (a *Agent) triggerUntilJobExists(ctx context.Context, mb *commandMailbox, req jenkins.TriggerBuildRequest) (int, error) {
+	status, err := a.getJenkinsClient().TriggerBuild(ctx, req)
+	if status != http.StatusNotFound {
+		return status, err
+	}
+	wait := a.triggerNotFoundWait
+	if wait <= 0 {
+		wait = triggerNotFoundWaitDefault
+	}
+	recheck := a.triggerNotFoundRecheck
+	if recheck <= 0 {
+		recheck = triggerNotFoundRecheckDefault
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	a.Logger.Info("trigger waits for the job to appear", "job_path", req.JobPath, "budget", wait)
+	var signal <-chan struct{}
+	if mb != nil {
+		signal = mb.signal
+	}
+	timer := time.NewTimer(recheck)
+	defer timer.Stop()
+	for {
+		applied := false
+		if mb != nil {
+			if dw, ok := mb.takeDesired(); ok {
+				if a.deferInlineApply(dw) {
+					mb.restoreDesired(dw)
+				} else {
+					a.runInlineDesired(ctx, wctx, mb, dw)
+					applied = true
+				}
+			}
+		}
+		if !applied {
+			select {
+			case <-signal:
+				continue // re-check the mailbox before the next call
+			case <-timer.C:
+				timer.Reset(recheck)
+			case <-wctx.Done():
+				return status, err // the last 404 stays
+			}
+		}
+		if wctx.Err() != nil {
+			return status, err
+		}
+		// ctx, not wctx: the last call is never cut by the wait budget.
+		status, err = a.getJenkinsClient().TriggerBuild(ctx, req)
+		if status != http.StatusNotFound {
+			return status, err
 		}
 	}
 }

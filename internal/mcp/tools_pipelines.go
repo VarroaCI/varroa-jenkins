@@ -185,7 +185,9 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 	runPipelineTool := mcp.NewTool("run_pipeline",
 		mcp.WithDescription("Start a build of a pipeline job. The BFF mints a fresh run "+
 			"identifier for every call and publishes a TRIGGER_BUILD command; it does not "+
-			"wait for the build to start. Use get_run or get_run_log to follow it."),
+			"wait for the build to start. Use get_run or get_run_log to follow it. "+
+			"A refused trigger ends the run with status COMPLETED, result TRIGGER_FAILED, and a triggerReasonCode in get_run. "+
+			"A trigger for a job the cell does not hold yet waits up to 90 seconds."),
 		mcp.WithString("team", mcp.Required(), mcp.Description("Team, or the controller name for a single-controller tenant")),
 		mcp.WithString("job", mcp.Required(), mcp.Description("Full job path, e.g. checkout-api/main")),
 		mcp.WithObject("parameters", mcp.Description("Build parameters, as name to string value")),
@@ -216,7 +218,7 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 			Type:    "pipeline.run_requested",
 			Message: fmt.Sprintf("Pipeline run requested for %s (run %s)", job, runID),
 		})
-		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey})
+		return resultJSON(map[string]any{"runId": runID, "intentKey": intentKey, "state": "requested"})
 	})
 }
 
@@ -356,7 +358,7 @@ func registerListRunsTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 
 func registerGetRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	getRunTool := mcp.NewTool("get_run",
-		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A run you may not read appears as its tenant alone."),
+		mcp.WithDescription("Get one run's detail: status, timing, params, the repository URL, the trigger source, test counts, stages, the newest refused cancel or input answer, the upstream run that started it (upstream), and the first page of runs it started (downstream). A refused trigger reads result TRIGGER_FAILED with triggerReasonCode and triggerError. A run you may not read appears as its tenant alone."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run id (UUIDv7)")),
 	)
 	addTool(mcpServer, kindRead, getRunTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

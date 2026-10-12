@@ -59,7 +59,8 @@ The MCP server also exposes twelve pipeline tools: `run_pipeline`, `list_runs`,
 `proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, and `scan_multibranch`. They operate on the
 build record store. The `scan_multibranch` tool starts a scan of a multibranch job and returns
 a `scanId` and the state `requested`. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
-`runId` and an `intentKey`.
+`runId`, an `intentKey`, and the state `requested`. A refused trigger ends the run with status `COMPLETED`
+and result `TRIGGER_FAILED`; `get_run` shows the `triggerReasonCode` and `triggerError`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same
 maximum of 200 as `list_activity`. The `get_run` tool returns one run's
 detail, with the run's `upstream` link and the first page of its `downstream` links. The `get_run_log` tool returns a bounded tail of the run's console

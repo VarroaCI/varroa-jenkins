@@ -20,7 +20,7 @@ Six limitations apply:
 - Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
 - A rehydrated run shows no stage view, culprit list, or test detail.
 - The role-strategy screen shows a tenant's service identity as unknown until its first build.
-- An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
+- An ad-hoc job does not survive a pod roll. Only a job in
   the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
@@ -103,8 +103,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Folder.** The tenant's `items.yaml` goes under one top-level folder named for the `Team`.
   The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md). A job the bundle no longer declares leaves the
-  folder, and its next trigger fails with `JOB_NOT_FOUND`. See
-  [Build records](build-records.md).
+  folder. A trigger for a missing job waits 90 seconds, then fails with `JOB_NOT_FOUND`. See [Build records](build-records.md).
 - **Held folder.** Tenant items resolve only their own bundle's variables. The operator
   keeps the folder and its jobs as they are on one of these faults:
   - an item still holds `${`, a `${varroa_*}` name too;

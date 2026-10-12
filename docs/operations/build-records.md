@@ -106,12 +106,12 @@ Set a shorter window per tenant or job. See [Tenant and job retention windows](m
 
 ## A trigger that fails
 
-Jenkins or the recorder can refuse a build trigger. The store then holds one run whose result is
-`TRIGGER_FAILED`, and the run page names the reason.
+Jenkins or the recorder can refuse a trigger. The store then holds one run with result
+`TRIGGER_FAILED` and its reason.
 
 | Reason code | What it means |
 |---|---|
-| `JOB_NOT_FOUND` | The job does not exist on the controller. |
+| `JOB_NOT_FOUND` | The job is still missing 90 seconds after the trigger reached the controller. |
 | `JOB_NOT_BUILDABLE` | The job exists, but it cannot start a build. |
 | `TRIGGER_REJECTED` | The controller refused the trigger for another reason. |
 | `TRIGGER_UNREACHABLE` | After five minutes, the trigger found no ready Jenkins with its tenant's items. |
