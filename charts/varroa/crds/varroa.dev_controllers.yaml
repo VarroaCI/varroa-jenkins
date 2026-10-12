@@ -4080,6 +4080,68 @@ spec:
                       Instance is the running Jenkins pod's metadata.uid. Empty when no
                       pod runs. Written by the controller reconciler on every tick.
                     type: string
+                  pendingSignatures:
+                    description: |-
+                      PendingSignatures lists the script signatures the sandbox refused in
+                      this cell and that no operator has approved yet. The mite reports the
+                      list from the plugin on each snapshot. Empty when the cell has no
+                      refused signature.
+                    items:
+                      description: |-
+                        CellPendingSignature is one script signature the sandbox refused in a
+                        cell, with the tenant jobs that requested it.
+                      properties:
+                        dangerous:
+                          description: |-
+                            Dangerous is true when the script-security plugin marks the signature
+                            as dangerous.
+                          type: boolean
+                        requesters:
+                          description: |-
+                            Requesters lists up to three tenant jobs that hit this signature,
+                            newest first.
+                          items:
+                            description: |-
+                              CellSignatureRequester names one tenant job that requested a refused
+                              script signature.
+                            properties:
+                              buildNumber:
+                                description: BuildNumber is the build that hit the
+                                  refused signature.
+                                format: int64
+                                type: integer
+                              jobPath:
+                                description: JobPath is the full name of the job.
+                                type: string
+                              runId:
+                                description: RunID is the run identifier of that build.
+                                type: string
+                              tenant:
+                                description: |-
+                                  Tenant is the Team name that owns the job. Empty when the plugin
+                                  cannot resolve a tenant.
+                                type: string
+                            required:
+                            - jobPath
+                            type: object
+                          maxItems: 3
+                          type: array
+                        signature:
+                          description: Signature is the method signature the sandbox
+                            refused.
+                          maxLength: 1024
+                          type: string
+                      required:
+                      - signature
+                      type: object
+                    maxItems: 25
+                    type: array
+                  pendingSignaturesTotal:
+                    description: |-
+                      PendingSignaturesTotal is the number of pending signatures the plugin
+                      reports. It can exceed the length of PendingSignatures.
+                    format: int32
+                    type: integer
                   pendingTenants:
                     description: |-
                       PendingTenants holds one placement claim per tenant the placement

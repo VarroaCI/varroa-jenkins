@@ -119,6 +119,9 @@ type runDetailJSON struct {
 	Summary           string             `json:"summary,omitempty"`
 	Digest            *runDigestJSON     `json:"digest,omitempty"`
 	Inputs            []runInputJSON     `json:"inputs,omitempty"`
+	// RejectedSignature is set only when the run failed and the script
+	// sandbox refused a signature. An operator approves it on the cell pool.
+	RejectedSignature string `json:"rejectedSignature,omitempty"`
 	// TestReport is absent when the run holds no stored report. Cases is
 	// absent when the run holds no case row, unlike the tests read's own
 	// cases array, which is always present.
@@ -452,6 +455,9 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	d.Cause = causeSummary(run.Cause)
 	d.SCMURL, d.TriggerSource = runOriginOf(run.Payload)
 	d.ChangeRequest = changeRequestOf(run.Payload)
+	if d.Result == "FAILURE" {
+		d.RejectedSignature = runRejectedSignatureOf(run.Payload)
+	}
 	// The column holds snake_case keys, so decode it into the store shape.
 	// buildRunSource then maps the three fields one by one. A NULL column
 	// and a malformed column both leave the pointer nil.

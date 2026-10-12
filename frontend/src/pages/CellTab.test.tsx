@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { CellTab } from "./CellTab";
@@ -349,5 +349,61 @@ describe("The agent namespace and placement generation columns", () => {
     renderTab();
     expect(screen.getByText("Agent namespace")).toBeInTheDocument();
     expect(screen.getByText("acme-agents")).toBeInTheDocument();
+  });
+});
+
+describe("Script approvals panel", () => {
+  function pendingCtrl(extra: Record<string, unknown> = {}): ControllerDetail {
+    return makeCtrl({
+      cell: {
+        tenants: ["acme"],
+        pendingSignatures: [
+          {
+            signature: "method hudson.Util getHost",
+            dangerous: true,
+            requesters: [{ tenant: "acme", jobPath: "acme/build", buildNumber: 4, runId: "run-4" }],
+          },
+        ],
+        pendingSignaturesTotal: 1,
+        ...extra,
+      } as ControllerDetail["cell"],
+    });
+  }
+
+  it("renders each pending signature with a copy control and a requester link", () => {
+    renderTab(pendingCtrl());
+    expect(screen.getByText("method hudson.Util getHost")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy signature method hudson.Util getHost" })).toBeInTheDocument();
+    expect(screen.getByText("dangerous")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "acme / acme/build #4" });
+    expect(link).toHaveAttribute("href", "/pipelines/acme/build/run-4");
+  });
+
+  it("copies the signature text and confirms the copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderTab(pendingCtrl());
+    fireEvent.click(screen.getByRole("button", { name: "Copy signature method hudson.Util getHost" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("method hudson.Util getHost"));
+    expect(await screen.findByRole("button", { name: "Copy signature method hudson.Util getHost" })).toHaveTextContent(
+      "Copied",
+    );
+  });
+
+  it("states the empty state when no signature is pending", () => {
+    renderTab(makeCtrl({ cell: { tenants: ["acme"] } as ControllerDetail["cell"] }));
+    expect(screen.getByText("No pending signatures.")).toBeInTheDocument();
+  });
+
+  it("names how many more signatures the list leaves out", () => {
+    renderTab(pendingCtrl({ pendingSignaturesTotal: 27 }));
+    expect(screen.getByText("+26 more")).toBeInTheDocument();
+  });
+
+  it("names the requester without a link when the caller may not open the tenant", () => {
+    mockCanAccessTenantPipeline.mockReturnValue(false);
+    renderTab(pendingCtrl());
+    expect(screen.queryByRole("link", { name: "acme / acme/build #4" })).not.toBeInTheDocument();
+    expect(screen.getByText("acme / acme/build #4")).toBeInTheDocument();
   });
 });

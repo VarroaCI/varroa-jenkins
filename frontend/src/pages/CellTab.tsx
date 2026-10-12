@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { KVGrid } from "../components/KVGrid";
 import { age } from "../components/activityTimeline.util";
@@ -6,7 +8,10 @@ import { useCellGrants, useCellPool, useCellUsage } from "../hooks/useCells";
 import { useAuth } from "../context/AuthContext";
 import { canAccessTenantPipeline, canDoGlobal } from "../hooks/usePermissions";
 import { ApiError } from "../hooks/useApi";
-import type { ControllerDetail } from "../hooks/useControllers";
+import type {
+  CellSignatureRequester,
+  ControllerDetail,
+} from "../hooks/useControllers";
 import type { CellPool, CellTenantGrants, CellUsage } from "../types";
 import styles from "./CellTab.module.css";
 
@@ -47,6 +52,7 @@ export function CellTab({ ctrl, cluster, namespace, name, active }: CellTabProps
         permissions={permissions}
       />
       <CapacityPanel usage={usage.data} pool={pool.data} canReadPools={canReadPools} />
+      <ScriptApprovalsPanel cell={cell} permissions={permissions} />
       <PermissionsPanel
         tenants={tenants}
         entries={grants.data?.tenants}
@@ -166,6 +172,103 @@ function TopologyPanel({
       )}
     </Card>
   );
+}
+
+/**
+ * ScriptApprovalsPanel lists the script signatures the sandbox refused in
+ * this cell. It is read-only: an operator approves a signature in the pool
+ * declaration, never here. The pool approved count sits in the Topology panel.
+ */
+function ScriptApprovalsPanel({
+  cell,
+  permissions,
+}: {
+  cell: CellProjection;
+  permissions: Permissions;
+}) {
+  const pending = cell?.pendingSignatures ?? [];
+  const total = cell?.pendingSignaturesTotal ?? pending.length;
+  const more = total - pending.length;
+
+  return (
+    <Card>
+      <h3 className={styles.panelTitle}>Script approvals</h3>
+      {pending.length === 0 ? (
+        <p className={styles.empty}>No pending signatures.</p>
+      ) : (
+        <ul className={styles.sigList}>
+          {pending.map((p) => (
+            <li key={p.signature} className={styles.sigItem}>
+              <SignatureCode signature={p.signature} />
+              {p.dangerous && <span className={styles.badge}>dangerous</span>}
+              {p.requesters && p.requesters.length > 0 && (
+                <ul className={styles.requesters}>
+                  {p.requesters.map((r, i) => (
+                    <li key={`${r.jobPath}-${r.runId ?? ""}-${i}`}>
+                      <RequesterLabel requester={r} permissions={permissions} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 && <p className={styles.note}>+{more} more</p>}
+    </Card>
+  );
+}
+
+function SignatureCode({ signature }: { signature: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(signature);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <span className={styles.sigRow}>
+      <code className={styles.sigCode}>{signature}</code>
+      <Button variant="ghost" size="sm" aria-label={`Copy signature ${signature}`} onClick={copy}>
+        {copied ? "Copied" : "Copy"}
+      </Button>
+    </span>
+  );
+}
+
+/**
+ * RequesterLabel names one tenant job as tenant / job #build. It links to the
+ * build page only when the viewer may read the tenant pipeline and the run id
+ * is known.
+ */
+function RequesterLabel({
+  requester,
+  permissions,
+}: {
+  requester: CellSignatureRequester;
+  permissions: Permissions;
+}) {
+  const tenant = requester.tenant ?? "";
+  const prefix = tenant ? `${tenant} / ` : "";
+  const build = requester.buildNumber ? ` #${requester.buildNumber}` : "";
+  const label = `${prefix}${requester.jobPath}${build}`;
+  const job = requester.jobPath.startsWith(`${tenant}/`)
+    ? requester.jobPath.slice(tenant.length + 1)
+    : requester.jobPath;
+  const canOpen =
+    tenant !== "" &&
+    !!requester.runId &&
+    canAccessTenantPipeline(permissions, tenant, "read", job);
+  if (!canOpen) {
+    return <span>{label}</span>;
+  }
+  const to = `/pipelines/${encodeURIComponent(tenant)}/${encodeURIComponent(job)}/${encodeURIComponent(requester.runId ?? "")}`;
+  return <Link to={to}>{label}</Link>;
 }
 
 function poolReadyLine(pool?: CellPool): string {

@@ -64,6 +64,21 @@ export type ControllerKind = "cell" | "stateful";
  * rehydration key: the operator keeps that list internal, and no surface
  * reads it.
  */
+/** One tenant job that requested a script signature the sandbox refused. */
+export interface CellSignatureRequester {
+  tenant?: string;
+  jobPath: string;
+  buildNumber?: number;
+  runId?: string;
+}
+
+/** One script signature the sandbox refused in a cell and no operator approved. */
+export interface CellPendingSignature {
+  signature: string;
+  dangerous?: boolean;
+  requesters?: CellSignatureRequester[];
+}
+
 export interface CellStatusProjection {
   tenants?: string[];
   warm?: boolean;
@@ -80,6 +95,10 @@ export interface CellStatusProjection {
   instance?: string;
   previousInstance?: string;
   previousInstanceLastSeen?: string;
+  /** Script signatures the sandbox refused and no operator approved. */
+  pendingSignatures?: CellPendingSignature[];
+  /** The number of pending signatures. It can exceed the list length. */
+  pendingSignaturesTotal?: number;
 }
 
 /** One cluster's answer to the controllers fan-out. ok:false means its rows are absent. */

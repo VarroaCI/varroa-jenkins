@@ -3056,3 +3056,19 @@ func TestPatchUpdateCenterStatus_ClearsStaleUnknownDependencies(t *testing.T) {
 		}
 	}
 }
+
+// TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten proves the
+// pending-signature keys are in the cell patch even when empty, so a merge
+// patch clears a list that the mite no longer reports.
+func TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten(t *testing.T) {
+	patch := controllerStatusPatch(&v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{}})
+	cell, ok := patch["cell"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("cell missing from the status patch: %+v", patch)
+	}
+	for _, key := range []string{"pendingSignatures", "pendingSignaturesTotal"} {
+		if _, ok := cell[key]; !ok {
+			t.Fatalf("%s absent from the cell patch for an empty status", key)
+		}
+	}
+}

@@ -100,4 +100,14 @@ public class BuildEventJsonTest {
         assertEquals(1, copy.getPodTemplates().size());
         assertEquals("maven", copy.getPodTemplates().get(0).getName());
     }
+
+    @Test
+    public void rejectedSignatureWritesItsProtoKeyOnlyWhenSet() {
+        JSONObject with = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED)
+                .rejectedSignature("method a b").build().toJson();
+        assertEquals("method a b", with.getString("rejected_signature"));
+
+        JSONObject without = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).build().toJson();
+        assertFalse(without.has("rejected_signature"));
+    }
 }

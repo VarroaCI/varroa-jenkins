@@ -461,20 +461,39 @@ type controllerDetailResponse struct {
 
 // CellStatusJSON projects Controller.status.cell for the detail DTO.
 //
-// It declares ten keys, and neither a rehydration nor a pendingTenants key.
+// It declares twelve keys, and neither a rehydration nor a pendingTenants key.
 // The rehydration list and the placement claim list stay inside the
 // operator, so no projection and no user-interface surface may carry them.
 type CellStatusJSON struct {
-	Tenants                  []string                `json:"tenants,omitempty"`
-	Warm                     bool                    `json:"warm,omitempty"`
-	Evacuate                 bool                    `json:"evacuate,omitempty"`
-	UnreadySince             string                  `json:"unreadySince,omitempty"`
-	RolledAt                 string                  `json:"rolledAt,omitempty"`
-	AppliedTenants           []string                `json:"appliedTenants,omitempty"`
-	TenantWarnings           []CellTenantWarningJSON `json:"tenantWarnings,omitempty"`
-	Instance                 string                  `json:"instance,omitempty"`
-	PreviousInstance         string                  `json:"previousInstance,omitempty"`
-	PreviousInstanceLastSeen string                  `json:"previousInstanceLastSeen,omitempty"`
+	Tenants                  []string                   `json:"tenants,omitempty"`
+	Warm                     bool                       `json:"warm,omitempty"`
+	Evacuate                 bool                       `json:"evacuate,omitempty"`
+	UnreadySince             string                     `json:"unreadySince,omitempty"`
+	RolledAt                 string                     `json:"rolledAt,omitempty"`
+	AppliedTenants           []string                   `json:"appliedTenants,omitempty"`
+	TenantWarnings           []CellTenantWarningJSON    `json:"tenantWarnings,omitempty"`
+	Instance                 string                     `json:"instance,omitempty"`
+	PreviousInstance         string                     `json:"previousInstance,omitempty"`
+	PreviousInstanceLastSeen string                     `json:"previousInstanceLastSeen,omitempty"`
+	PendingSignatures        []CellPendingSignatureJSON `json:"pendingSignatures,omitempty"`
+	PendingSignaturesTotal   int32                      `json:"pendingSignaturesTotal,omitempty"`
+}
+
+// CellPendingSignatureJSON is one script signature the sandbox refused in a
+// cell and no operator approved yet.
+type CellPendingSignatureJSON struct {
+	Signature  string                       `json:"signature"`
+	Dangerous  bool                         `json:"dangerous,omitempty"`
+	Requesters []CellSignatureRequesterJSON `json:"requesters,omitempty"`
+}
+
+// CellSignatureRequesterJSON names one tenant job that requested a refused
+// script signature.
+type CellSignatureRequesterJSON struct {
+	Tenant      string `json:"tenant,omitempty"`
+	JobPath     string `json:"jobPath"`
+	BuildNumber int64  `json:"buildNumber,omitempty"`
+	RunID       string `json:"runId,omitempty"`
 }
 
 // CellTenantWarningJSON is one non-blocking finding about a tenant on a cell.
@@ -515,6 +534,19 @@ func buildCellStatusJSON(cr *v1alpha1.Controller) *CellStatusJSON {
 			Message: w.Message,
 		})
 	}
+	for _, p := range sc.PendingSignatures {
+		sig := CellPendingSignatureJSON{Signature: p.Signature, Dangerous: p.Dangerous}
+		for _, r := range p.Requesters {
+			sig.Requesters = append(sig.Requesters, CellSignatureRequesterJSON{
+				Tenant:      r.Tenant,
+				JobPath:     r.JobPath,
+				BuildNumber: r.BuildNumber,
+				RunID:       r.RunID,
+			})
+		}
+		out.PendingSignatures = append(out.PendingSignatures, sig)
+	}
+	out.PendingSignaturesTotal = sc.PendingSignaturesTotal
 	return out
 }
 

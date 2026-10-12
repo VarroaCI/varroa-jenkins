@@ -3604,6 +3604,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "rejectedSignature": {
+            "description": "Set only when result is FAILURE and the script sandbox refused a signature.\n",
+            "type": "string"
+          },
           "replayOf": {
             "description": "The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.\n",
             "type": "string"
@@ -6505,6 +6509,29 @@
         ],
         "type": "object"
       },
+      "components_schemas_CellPendingSignature": {
+        "additionalProperties": false,
+        "description": "One script signature the sandbox refused in a cell.",
+        "properties": {
+          "dangerous": {
+            "type": "boolean"
+          },
+          "requesters": {
+            "description": "Up to three tenant jobs that hit this signature, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_CellSignatureRequester"
+            },
+            "type": "array"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "signature"
+        ],
+        "type": "object"
+      },
       "components_schemas_CellPool": {
         "additionalProperties": false,
         "description": "Full cell-pool object returned from get and list operations.",
@@ -6756,6 +6783,28 @@
         ],
         "type": "object"
       },
+      "components_schemas_CellSignatureRequester": {
+        "additionalProperties": false,
+        "description": "One tenant job that requested a refused script signature.",
+        "properties": {
+          "buildNumber": {
+            "type": "integer"
+          },
+          "jobPath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobPath"
+        ],
+        "type": "object"
+      },
       "components_schemas_CellSpec": {
         "additionalProperties": false,
         "description": "Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.",
@@ -6775,7 +6824,7 @@
       },
       "components_schemas_CellStatusProjection": {
         "additionalProperties": false,
-        "description": "The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.",
+        "description": "The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.",
         "properties": {
           "appliedTenants": {
             "description": "The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.",
@@ -6790,6 +6839,17 @@
           },
           "instance": {
             "type": "string"
+          },
+          "pendingSignatures": {
+            "description": "The script signatures the sandbox refused in this cell and no operator approved. Carries at most 25 entries.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_CellPendingSignature"
+            },
+            "type": "array"
+          },
+          "pendingSignaturesTotal": {
+            "description": "The number of pending signatures. It can exceed the list length.",
+            "type": "integer"
           },
           "previousInstance": {
             "type": "string"
@@ -11485,6 +11545,10 @@
           },
           "queuedAt": {
             "format": "date-time",
+            "type": "string"
+          },
+          "rejectedSignature": {
+            "description": "Set only when result is FAILURE and the script sandbox refused a signature.\n",
             "type": "string"
           },
           "replayOf": {

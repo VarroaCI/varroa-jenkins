@@ -1563,6 +1563,26 @@ describe("BuildPage — refused command notice", () => {
   });
 });
 
+describe("BuildPage — a refused script signature", () => {
+  it("names the refused signature in the banner", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE", rejectedSignature: "method hudson.Util getHost" }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    const text = screen.getByText(/The script sandbox refused/);
+    expect(text).toHaveTextContent(
+      "The script sandbox refused method hudson.Util getHost. An operator approves a signature on the cell pool.",
+    );
+    expect(screen.getByText("method hudson.Util getHost").tagName).toBe("CODE");
+  });
+
+  it("shows no refused-signature banner when the run carries none", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    expect(screen.queryByText(/The script sandbox refused/)).not.toBeInTheDocument();
+  });
+});
+
 describe("BuildPage — concurrency wait", () => {
   it("shows the waiting notice for a capped run", async () => {
     mockGetRun.mockResolvedValue(

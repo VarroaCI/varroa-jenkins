@@ -1973,6 +1973,9 @@ export interface RunDetail {
   source?: RunSource;
   /** The source run this run replays. Absent for a run that is not a replay. */
   replayOf?: string;
+  /** Set only when result is FAILURE and the script sandbox refused a
+   * signature. An operator approves the signature on the cell pool. */
+  rejectedSignature?: string;
   /** The newest cancel or input answer Jenkins refused for this run.
    * Absent when no refusal exists. A later successful command does not
    * remove it. */

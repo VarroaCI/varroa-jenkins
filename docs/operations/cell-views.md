@@ -18,7 +18,7 @@ The active tab lives in the `tab` query parameter, so a link opens it directly:
 https://<varroa-host>/controllers/<cluster>/<namespace>/<cell>?tab=cell
 ```
 
-An unknown value falls back to the Overview tab, and so does `cell` on a controller that is not a cell. The tab has three panels, and its only action is Restart.
+An unknown value falls back to the Overview tab, and so does `cell` on a controller that is not a cell. The tab has four panels, and its only action is Restart.
 
 ### Topology
 
@@ -39,6 +39,10 @@ The panel renders the cell usage read: the tenant cap, the free slots, the queue
 ### Permissions
 
 The panel lists one block for each tenant, with the subjects, the pipelines verbs, and the job globs of each grant, plus the tenant's generated Jenkins item role and its folder pattern. It edits no binding, and a link opens the Access page. A tenant that no binding and no Team membership reaches says so.
+
+### Script approvals
+
+The panel lists the script signatures that the sandbox refused in this cell and that no operator approved. Each entry names up to three tenant jobs that requested it, and links to the build when the caller may read that tenant. The panel is read-only. An operator approves a signature in the pool declaration. See [Script approvals in a cell](script-approvals.md).
 
 ## The Cells page
 

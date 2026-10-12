@@ -113,6 +113,7 @@ type RunDetail struct {
 	TestReport        *runTestReportDetailJSON `json:"testReport,omitempty"`
 	Cases             []runTestCaseJSON        `json:"cases,omitempty"`
 	ReplayOf          string                   `json:"replayOf,omitempty"`
+	RejectedSignature string                   `json:"rejectedSignature,omitempty"`
 	CommandRefusal    *runCommandRefusalJSON   `json:"commandRefusal,omitempty"`
 	Upstream          *RunLink                 `json:"upstream,omitempty"`
 	Downstream        *RunLinkPage             `json:"downstream,omitempty"`

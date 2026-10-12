@@ -57,6 +57,26 @@ func runOriginOf(payload json.RawMessage) (scmURL, triggerSource string) {
 	return scmURL, classifyTriggerSource(doc.Started.Payload.CauseTypes)
 }
 
+// runRejectedSignatureOf reads the script signature the sandbox refused in a
+// failed build. It answers the empty string when the payload carries none or
+// does not decode.
+func runRejectedSignatureOf(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var doc struct {
+		Completed struct {
+			Payload struct {
+				RejectedSignature string `json:"rejected_signature"`
+			} `json:"payload"`
+		} `json:"run.completed"`
+	}
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return ""
+	}
+	return doc.Completed.Payload.RejectedSignature
+}
+
 // classifyTriggerSource maps cause class names to one trigger source.
 // It answers the empty string for an empty list.
 func classifyTriggerSource(causes []string) string {

@@ -95,6 +95,7 @@ type BuildEvent struct {
 	ReplayOf                string              `json:"replay_of,omitempty"`
 	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
 	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
+	RejectedSignature       string              `json:"rejected_signature,omitempty"`
 }
 
 type BuildInput struct {
@@ -1080,6 +1081,28 @@ func (m *OperatorMessage) GetRunStateAck() *RunStateAck {
 	return nil
 }
 
+// PendingSignature is one script signature the sandbox refused and no
+type PendingSignature struct {
+	Signature  string                       `json:"signature,omitempty"`
+	Dangerous  bool                         `json:"dangerous,omitempty"`
+	Requesters []*PendingSignatureRequester `json:"requesters,omitempty"`
+}
+
+// PendingSignatureRequester names one tenant job that hit a refused script
+type PendingSignatureRequester struct {
+	Tenant      string `json:"tenant,omitempty"`
+	JobPath     string `json:"job_path,omitempty"`
+	BuildNumber int64  `json:"build_number,omitempty"`
+	RunId       string `json:"run_id,omitempty"`
+}
+
+// PendingSignatureSet wraps the pending signatures with presence, as
+type PendingSignatureSet struct {
+	Items     []*PendingSignature `json:"items,omitempty"`
+	Total     int                 `json:"total,omitempty"`
+	Truncated bool                `json:"truncated,omitempty"`
+}
+
 type PluginDep struct {
 	Name     string `json:"name"`
 	Min      string `json:"min,omitempty"`
@@ -1219,19 +1242,20 @@ type RunStateResponse struct {
 }
 
 type StateSnapshot struct {
-	ActualStateHash string          `json:"actual_state_hash,omitempty"`
-	ConfigHash      string          `json:"config_hash,omitempty"`
-	PluginsHash     string          `json:"plugins_hash,omitempty"`
-	RbacHash        string          `json:"rbac_hash,omitempty"`
-	JenkinsVersion  string          `json:"jenkins_version,omitempty"`
-	Status          string          `json:"status,omitempty"`
-	JenkinsHealth   string          `json:"jenkins_health,omitempty"`
-	ItemsHash       string          `json:"items_hash,omitempty"`
-	ApplyDeferred   bool            `json:"apply_deferred,omitempty"`
-	DeferReason     string          `json:"defer_reason,omitempty"`
-	LiveConfigHash  string          `json:"live_config_hash,omitempty"`
-	LiveDrift       bool            `json:"live_drift,omitempty"`
-	JobSchedules    *JobScheduleSet `json:"job_schedules,omitempty"`
+	ActualStateHash   string               `json:"actual_state_hash,omitempty"`
+	ConfigHash        string               `json:"config_hash,omitempty"`
+	PluginsHash       string               `json:"plugins_hash,omitempty"`
+	RbacHash          string               `json:"rbac_hash,omitempty"`
+	JenkinsVersion    string               `json:"jenkins_version,omitempty"`
+	Status            string               `json:"status,omitempty"`
+	JenkinsHealth     string               `json:"jenkins_health,omitempty"`
+	ItemsHash         string               `json:"items_hash,omitempty"`
+	ApplyDeferred     bool                 `json:"apply_deferred,omitempty"`
+	DeferReason       string               `json:"defer_reason,omitempty"`
+	LiveConfigHash    string               `json:"live_config_hash,omitempty"`
+	LiveDrift         bool                 `json:"live_drift,omitempty"`
+	JobSchedules      *JobScheduleSet      `json:"job_schedules,omitempty"`
+	PendingSignatures *PendingSignatureSet `json:"pending_signatures,omitempty"`
 }
 
 type TailAck struct {

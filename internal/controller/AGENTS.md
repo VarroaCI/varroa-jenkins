@@ -957,7 +957,12 @@ sections describe.
     this package, one file per concern: `cell_script_approval.go`
     (`applyPoolSignatures` renders `CellPool.spec.approvedSignatures` into
     `security.scriptApproval.approvedSignatures` as a sorted, deduplicated
-    union with the bundle's entries. The key is always set, even when empty),
+    union with the bundle's entries. The key is always set, even when empty;
+    `poolSignatures` is the shared pool read),
+    `cell_script_approval_status.go` (`recordPendingSignatures` copies the
+    snapshot's refused signatures into `status.cell.pendingSignatures`, capped
+    at 25 signatures and 3 requesters each, minus the pool-approved ones; the
+    status patch writes both pending keys unconditionally),
     `cell_pool_libraries.go`
     (`applyPoolLibraries` runs in `resolveBundleForController` after the
     tenant template loop and `ResolveVars`. It renders `CellPool.spec.libraries`

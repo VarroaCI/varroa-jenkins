@@ -3,6 +3,7 @@ package org.jenkinsci.plugins.varroamiteauth;
 import hudson.Extension;
 import hudson.model.Computer;
 import hudson.model.Executor;
+import hudson.model.Item;
 import hudson.model.Items;
 import hudson.model.Job;
 import hudson.model.Queue;
@@ -25,8 +26,11 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -34,11 +38,14 @@ import java.util.logging.Logger;
 
 import jenkins.model.Jenkins;
 import jenkins.triggers.ReverseBuildTrigger;
+import org.jenkinsci.plugins.scriptsecurity.scripts.ScriptApproval;
+import org.kohsuke.accmod.restrictions.suppressions.SuppressRestrictedWarnings;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.WebMethod;
 
 import org.springframework.security.core.GrantedAuthority;
 
@@ -185,6 +192,150 @@ public class ActivityEndpoint implements RootAction {
                 // Best-effort error response.
             }
         }
+    }
+
+    /**
+     * Handles {@code GET /varroa-activity/script-approvals}. Lists the script signatures the
+     * sandbox refused in completed builds, with the tenant jobs that requested each. The
+     * operator drops the signatures that a pool approves. Answers
+     * {@code { "pending": [...], "total": N, "truncated": B }} as JSON.
+     */
+    @WebMethod(name = "script-approvals")
+    public void doScriptApprovals(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"GET".equalsIgnoreCase(req.getMethod())) {
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only GET is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            List<PendingRow> rows;
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+                rows = pendingRows();
+            }
+            JSONObject envelope = scriptApprovalEnvelope(rows);
+
+            rsp.setContentType("application/json");
+            rsp.setStatus(200);
+            StringWriter writer = new StringWriter();
+            envelope.write(writer);
+            rsp.getWriter().write(writer.toString());
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "ActivityEndpoint.doScriptApprovals caught exception", e);
+            try {
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
+            } catch (Exception ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
+    /** The most pending signatures the script-approvals response lists. */
+    static final int MAX_PENDING_LISTED = 25;
+
+    /** One refused signature with the requesters the endpoint reports for it. */
+    static final class PendingRow {
+        final String signature;
+        final boolean dangerous;
+        final List<ScriptRejections.Requester> requesters;
+
+        PendingRow(String signature, boolean dangerous, List<ScriptRejections.Requester> requesters) {
+            this.signature = signature;
+            this.dangerous = dangerous;
+            this.requesters = requesters;
+        }
+    }
+
+    /**
+     * Builds the pending rows. The refusals observed in completed builds come first, each
+     * with its requesters from {@link ScriptRejections}. Then the signatures that
+     * script-security lists as pending and no build observed are added. A signature with no
+     * requester falls back to the item of its pending approval context. The approved
+     * signatures are dropped from both sources.
+     *
+     * <p>Two calls on this path are restricted APIs. The access check is suppressed here
+     * for those calls only. The plugin pins the script-security version through the plugin
+     * lock. The plugin never writes an approval: the operator renders approvals through the
+     * pool, so this read only lists what the pool does not yet approve.
+     */
+    @SuppressRestrictedWarnings({ScriptApproval.class, ScriptApproval.PendingSignature.class})
+    static List<PendingRow> pendingRows() {
+        ScriptApproval approval = ScriptApproval.get();
+        Set<String> approved = new HashSet<>();
+        String[] approvedNow = approval.getApprovedSignatures();
+        if (approvedNow != null) {
+            approved.addAll(Arrays.asList(approvedNow));
+        }
+        Map<String, PendingRow> bySignature = new LinkedHashMap<>();
+        for (ScriptRejections.Entry e : ScriptRejections.entries()) {
+            if (!approved.contains(e.getSignature())) {
+                bySignature.put(e.getSignature(),
+                        new PendingRow(e.getSignature(), e.isDangerous(), e.getRequesters()));
+            }
+        }
+        for (ScriptApproval.PendingSignature p : approval.getPendingSignatures()) {
+            if (approved.contains(p.signature) || bySignature.containsKey(p.signature)) {
+                continue;
+            }
+            List<ScriptRejections.Requester> requesters = new ArrayList<>();
+            if (p.getContext() != null) {
+                Item item = p.getContext().getItem();
+                if (item != null) {
+                    requesters.add(new ScriptRejections.Requester(item.getFullName(), 0, ""));
+                }
+            }
+            bySignature.put(p.signature, new PendingRow(p.signature, p.dangerous, requesters));
+        }
+        return new ArrayList<>(bySignature.values());
+    }
+
+    /**
+     * Builds the script-approvals envelope. The list keeps the first
+     * {@link #MAX_PENDING_LISTED} rows, and {@code total} counts every row. Package-private
+     * for testing.
+     */
+    static JSONObject scriptApprovalEnvelope(List<PendingRow> rows) {
+        JSONArray pending = new JSONArray();
+        for (PendingRow row : rows) {
+            if (pending.size() >= MAX_PENDING_LISTED) {
+                break;
+            }
+            JSONArray requesters = new JSONArray();
+            for (ScriptRejections.Requester r : row.requesters) {
+                JSONObject requester = new JSONObject();
+                requester.put("tenant", tenantOfJobPath(r.getJobPath()));
+                requester.put("jobPath", r.getJobPath());
+                requester.put("buildNumber", r.getBuildNumber());
+                requester.put("runId", r.getRunId());
+                requesters.add(requester);
+            }
+            JSONObject item = new JSONObject();
+            item.put("signature", row.signature);
+            item.put("dangerous", row.dangerous);
+            item.put("requesters", requesters);
+            pending.add(item);
+        }
+        JSONObject envelope = new JSONObject();
+        envelope.put("pending", pending);
+        envelope.put("total", rows.size());
+        envelope.put("truncated", rows.size() > pending.size());
+        return envelope;
+    }
+
+    /**
+     * The tenant of a job path: its first segment when the cell hosts that tenant, else
+     * the empty string.
+     */
+    static String tenantOfJobPath(String jobPath) {
+        if (jobPath == null || jobPath.isEmpty()) {
+            return "";
+        }
+        int slash = jobPath.indexOf('/');
+        String tenant = slash < 0 ? jobPath : jobPath.substring(0, slash);
+        return VarroaTenantResolver.hostsTenant(tenant) ? tenant : "";
     }
 
     // ---- Job-schedule export (D8) ----

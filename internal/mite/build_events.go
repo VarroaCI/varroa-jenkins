@@ -680,6 +680,9 @@ func completedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.Summary != "" {
 		p["summary"] = evt.Summary
 	}
+	if evt.RejectedSignature != "" {
+		p["rejected_signature"] = evt.RejectedSignature
+	}
 	return p
 }
 

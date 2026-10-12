@@ -145,6 +145,22 @@
   overflow-wrap: anywhere;
 }
 
+.rejectedBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
+.rejectedBanner code {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
 .waitNotice {
   display: flex;
   flex-wrap: wrap;

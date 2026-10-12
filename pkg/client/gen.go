@@ -1198,6 +1198,15 @@ type ComponentsSchemasCellGrants struct {
 	Tenants   []ComponentsSchemasCellTenantGrants `json:"tenants"`
 }
 
+// ComponentsSchemasCellPendingSignature One script signature the sandbox refused in a cell.
+type ComponentsSchemasCellPendingSignature struct {
+	Dangerous *bool `json:"dangerous,omitempty"`
+
+	// Requesters Up to three tenant jobs that hit this signature, newest first.
+	Requesters *[]ComponentsSchemasCellSignatureRequester `json:"requesters,omitempty"`
+	Signature  string                                     `json:"signature"`
+}
+
 // ComponentsSchemasCellPool Full cell-pool object returned from get and list operations.
 type ComponentsSchemasCellPool struct {
 	// Cluster The cluster that holds the pool. A pool name is unique inside one cluster only.
@@ -1304,20 +1313,34 @@ type ComponentsSchemasCellPoolStatus struct {
 	WarmCells int32 `json:"warmCells"`
 }
 
+// ComponentsSchemasCellSignatureRequester One tenant job that requested a refused script signature.
+type ComponentsSchemasCellSignatureRequester struct {
+	BuildNumber *int    `json:"buildNumber,omitempty"`
+	JobPath     string  `json:"jobPath"`
+	RunId       *string `json:"runId,omitempty"`
+	Tenant      *string `json:"tenant,omitempty"`
+}
+
 // ComponentsSchemasCellSpec Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.
 type ComponentsSchemasCellSpec struct {
 	Enabled    bool   `json:"enabled"`
 	MaxTenants *int32 `json:"maxTenants,omitempty"`
 }
 
-// ComponentsSchemasCellStatusProjection The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+// ComponentsSchemasCellStatusProjection The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
 type ComponentsSchemasCellStatusProjection struct {
 	// AppliedTenants The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.
 	AppliedTenants *[]string `json:"appliedTenants,omitempty"`
 
 	// Evacuate Operator-written state. No API accepts a write to it, so no surface offers an evacuate action.
-	Evacuate                 *bool                                 `json:"evacuate,omitempty"`
-	Instance                 *string                               `json:"instance,omitempty"`
+	Evacuate *bool   `json:"evacuate,omitempty"`
+	Instance *string `json:"instance,omitempty"`
+
+	// PendingSignatures The script signatures the sandbox refused in this cell and no operator approved. Carries at most 25 entries.
+	PendingSignatures *[]ComponentsSchemasCellPendingSignature `json:"pendingSignatures,omitempty"`
+
+	// PendingSignaturesTotal The number of pending signatures. It can exceed the list length.
+	PendingSignaturesTotal   *int                                  `json:"pendingSignaturesTotal,omitempty"`
 	PreviousInstance         *string                               `json:"previousInstance,omitempty"`
 	PreviousInstanceLastSeen *time.Time                            `json:"previousInstanceLastSeen,omitempty"`
 	RolledAt                 *time.Time                            `json:"rolledAt,omitempty"`
@@ -1714,7 +1737,7 @@ type ComponentsSchemasControllerDetail struct {
 	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
 
-	// Cell The controller detail's projection of status.cell. It declares ten properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+	// Cell The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
 	Cell       *ComponentsSchemasCellStatusProjection `json:"cell,omitempty"`
 	CertExpiry *string                                `json:"certExpiry,omitempty"`
 	Cluster    string                                 `json:"cluster"`
@@ -3319,6 +3342,9 @@ type ComponentsSchemasRunDetail struct {
 	LogFinalized *bool              `json:"logFinalized,omitempty"`
 	Params       *map[string]string `json:"params,omitempty"`
 	QueuedAt     *time.Time         `json:"queuedAt,omitempty"`
+
+	// RejectedSignature Set only when result is FAILURE and the script sandbox refused a signature.
+	RejectedSignature *string `json:"rejectedSignature,omitempty"`
 
 	// ReplayOf The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
 	ReplayOf *string `json:"replayOf,omitempty"`

@@ -3460,6 +3460,10 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 			"previousInstance":         status.Cell.PreviousInstance,
 			"previousInstanceLastSeen": status.Cell.PreviousInstanceLastSeen,
 			"rehydration":              status.Cell.Rehydration,
+			// pendingSignatures is written unconditionally so an empty
+			// set clears the list instead of being retained.
+			"pendingSignatures":      status.Cell.PendingSignatures,
+			"pendingSignaturesTotal": status.Cell.PendingSignaturesTotal,
 		}
 	}
 	return statusPatch

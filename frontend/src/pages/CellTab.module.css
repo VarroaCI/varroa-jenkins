@@ -116,3 +116,48 @@
     transition: background .15s ease;
   }
 }
+
+.sigList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.sigItem {
+  display: grid;
+  gap: 4px;
+}
+
+.sigRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sigCode {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.badge {
+  justify-self: start;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bad-text);
+  background: var(--bad-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+
+.requesters {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+  font-size: 12px;
+  display: grid;
+  gap: 2px;
+}

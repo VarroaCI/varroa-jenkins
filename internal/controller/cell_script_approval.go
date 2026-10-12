@@ -84,6 +84,26 @@ func injectPoolSignatures(jenkinsYAML string, pool []string) (string, error) {
 	return string(out), nil
 }
 
+// poolSignatures reads the approved signature list of the cell's pool. It
+// answers nil for a controller with no pool label or no store. A read failure
+// is an error. It must not read as a pool that no longer approves signatures,
+// because that would revoke them in Jenkins.
+func (r *Reconciler) poolSignatures(ctx context.Context, cr *v1alpha1.Controller) ([]string, error) {
+	name := cr.Labels[cells.LabelCellPool]
+	if name == "" || r.store == nil {
+		return nil, nil
+	}
+	pool, err := crdstore.Get[v1alpha1.CellPool](ctx, r.store, name, "")
+	switch {
+	case err == nil:
+		return pool.Spec.ApprovedSignatures, nil
+	case apierrors.IsNotFound(err):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("read cell pool %q: %w", name, err)
+	}
+}
+
 // applyPoolSignatures renders the pool's approved script signatures onto a
 // cell's resolved bundle. It runs after ResolveVars, like the pool
 // libraries. It is a no-op for a controller that is not a cell.
@@ -92,17 +112,9 @@ func (r *Reconciler) applyPoolSignatures(ctx context.Context, cr *v1alpha1.Contr
 		return nil
 	}
 
-	// A read failure fails the resolve. It must not read as a pool that no
-	// longer approves signatures, because that would revoke them in Jenkins.
-	var sigs []string
-	if name := cr.Labels[cells.LabelCellPool]; name != "" && r.store != nil {
-		pool, err := crdstore.Get[v1alpha1.CellPool](ctx, r.store, name, "")
-		switch {
-		case err == nil:
-			sigs = pool.Spec.ApprovedSignatures
-		case !apierrors.IsNotFound(err):
-			return fmt.Errorf("read cell pool %q: %w", name, err)
-		}
+	sigs, err := r.poolSignatures(ctx, cr)
+	if err != nil {
+		return err
 	}
 
 	withSigs, err := injectPoolSignatures(mat.JenkinsYAML, sigs)

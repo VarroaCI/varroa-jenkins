@@ -312,3 +312,35 @@ func TestControllerDetail_StatefulCarriesNoCell(t *testing.T) {
 		t.Error("a controller with no cell role carries a cell projection")
 	}
 }
+
+// TestBuildCellStatusJSON_PendingSignatures proves the detail projection
+// carries the pending signatures and their requesters.
+func TestBuildCellStatusJSON_PendingSignatures(t *testing.T) {
+	cr := &v1alpha1.Controller{
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{
+			PendingSignatures: []v1alpha1.CellPendingSignature{{
+				Signature: "method a b",
+				Dangerous: true,
+				Requesters: []v1alpha1.CellSignatureRequester{
+					{Tenant: "team-a", JobPath: "team-a/build", BuildNumber: 3, RunID: "r9"},
+				},
+			}},
+			PendingSignaturesTotal: 4,
+		}},
+	}
+	out := buildCellStatusJSON(cr)
+	if out == nil || len(out.PendingSignatures) != 1 {
+		t.Fatalf("pending signatures not projected: %+v", out)
+	}
+	sig := out.PendingSignatures[0]
+	if sig.Signature != "method a b" || !sig.Dangerous {
+		t.Fatalf("signature = %+v", sig)
+	}
+	if len(sig.Requesters) != 1 || sig.Requesters[0].JobPath != "team-a/build" || sig.Requesters[0].RunID != "r9" {
+		t.Fatalf("requesters = %+v", sig.Requesters)
+	}
+	if out.PendingSignaturesTotal != 4 {
+		t.Fatalf("total = %d, want 4", out.PendingSignaturesTotal)
+	}
+}

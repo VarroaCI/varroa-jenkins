@@ -695,6 +695,58 @@ type CellStatus struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	PendingTenants []CellPendingTenant `json:"pendingTenants,omitempty"`
+
+	// PendingSignatures lists the script signatures the sandbox refused in
+	// this cell and that no operator has approved yet. The mite reports the
+	// list from the plugin on each snapshot. Empty when the cell has no
+	// refused signature.
+	// +kubebuilder:validation:MaxItems=25
+	// +optional
+	PendingSignatures []CellPendingSignature `json:"pendingSignatures,omitempty"`
+
+	// PendingSignaturesTotal is the number of pending signatures the plugin
+	// reports. It can exceed the length of PendingSignatures.
+	// +optional
+	PendingSignaturesTotal int32 `json:"pendingSignaturesTotal,omitempty"`
+}
+
+// CellPendingSignature is one script signature the sandbox refused in a
+// cell, with the tenant jobs that requested it.
+type CellPendingSignature struct {
+	// Signature is the method signature the sandbox refused.
+	// +kubebuilder:validation:MaxLength=1024
+	Signature string `json:"signature"`
+
+	// Dangerous is true when the script-security plugin marks the signature
+	// as dangerous.
+	// +optional
+	Dangerous bool `json:"dangerous,omitempty"`
+
+	// Requesters lists up to three tenant jobs that hit this signature,
+	// newest first.
+	// +kubebuilder:validation:MaxItems=3
+	// +optional
+	Requesters []CellSignatureRequester `json:"requesters,omitempty"`
+}
+
+// CellSignatureRequester names one tenant job that requested a refused
+// script signature.
+type CellSignatureRequester struct {
+	// Tenant is the Team name that owns the job. Empty when the plugin
+	// cannot resolve a tenant.
+	// +optional
+	Tenant string `json:"tenant,omitempty"`
+
+	// JobPath is the full name of the job.
+	JobPath string `json:"jobPath"`
+
+	// BuildNumber is the build that hit the refused signature.
+	// +optional
+	BuildNumber int64 `json:"buildNumber,omitempty"`
+
+	// RunID is the run identifier of that build.
+	// +optional
+	RunID string `json:"runId,omitempty"`
 }
 
 // CellPendingTenant is one placement claim on a cell. The placement pass

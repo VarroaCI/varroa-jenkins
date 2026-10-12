@@ -16,6 +16,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 
 ### CRD types (`api/v1alpha1/`)
 
+- `types.go` `CellStatus.PendingSignatures` and `PendingSignaturesTotal` carry the refused script signatures of a cell (`CellPendingSignature`, `CellSignatureRequester`). The operator writes them from the mite snapshot; their DeepCopy is hand-written in `zz_generated.deepcopy.go`.
 - `register.go` — `addKnownTypes` is the single registration list. Kinds:
   `Controller`, `VarroaRole`/`VarroaRoleBinding`, `JenkinsRole`/`JenkinsRoleBinding`,
   `User`, `Group`, `PodTemplate`, `CatalogSource`, `CatalogItem`,

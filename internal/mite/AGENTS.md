@@ -553,6 +553,10 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   presence telemetry carried by the raw brood event on `events.brood.>`;
   publishing them on `activity.*` floods the bounded audit stream and evicts
   real audit history — do not add new periodic event types to that switch.
+- `StateSnapshot.pending_signatures` (field 14) reaches the snapshot KV
+  unchanged: `OnSnapshot` strips only `job_schedules`. `completedPayload` maps
+  `BuildEvent.rejected_signature` (field 57) to `rejected_signature` on
+  `run.completed`.
 - Wire changes go in `proto/mitev1/mite.proto` then regenerate; never hand-edit
   `mitev1_gen.go`.
 - `NewBusHandler` takes a `metric.MeterProvider` as its first parameter and

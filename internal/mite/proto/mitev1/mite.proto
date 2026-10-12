@@ -76,6 +76,34 @@ message StateSnapshot {
   string live_config_hash = 11;
   bool live_drift = 12;
   JobScheduleSet job_schedules = 13;
+  // pending_signatures carries the script signatures the sandbox refused
+  // in this cell. Unset means the plugin was not asked this tick.
+  PendingSignatureSet pending_signatures = 14;
+}
+
+// PendingSignatureRequester names one tenant job that hit a refused script
+// signature.
+message PendingSignatureRequester {
+  string tenant = 1;
+  string job_path = 2;
+  int64 build_number = 3;
+  string run_id = 4;
+}
+
+// PendingSignature is one script signature the sandbox refused and no
+// operator has approved.
+message PendingSignature {
+  string signature = 1;
+  bool dangerous = 2;
+  repeated PendingSignatureRequester requesters = 3;
+}
+
+// PendingSignatureSet wraps the pending signatures with presence, as
+// JobScheduleSet does.
+message PendingSignatureSet {
+  repeated PendingSignature items = 1;
+  int32 total = 2;
+  bool truncated = 3;
 }
 
 // JobSchedule is one job/trigger row of the live job-schedule inventory.
@@ -484,6 +512,9 @@ message BuildEvent {
   int64 granted_build_number = 51;
   // The change request the run builds, on STARTED alone. Empty for a branch run.
   ChangeRequestInfo change_request = 56;
+  // rejected_signature is the script signature the sandbox refused in a
+  // failed build. Empty when the build did not fail on a signature.
+  string rejected_signature = 57;
 }
 
 message ClaimRequest {

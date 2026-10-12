@@ -437,6 +437,48 @@ func (in *CellStatus) DeepCopyInto(out *CellStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.PendingSignatures != nil {
+		in, out := &in.PendingSignatures, &out.PendingSignatures
+		*out = make([]CellPendingSignature, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellPendingSignature) DeepCopyInto(out *CellPendingSignature) {
+	*out = *in
+	if in.Requesters != nil {
+		in, out := &in.Requesters, &out.Requesters
+		*out = make([]CellSignatureRequester, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of CellPendingSignature.
+func (in *CellPendingSignature) DeepCopy() *CellPendingSignature {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPendingSignature)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellSignatureRequester) DeepCopyInto(out *CellSignatureRequester) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellSignatureRequester.
+func (in *CellSignatureRequester) DeepCopy() *CellSignatureRequester {
+	if in == nil {
+		return nil
+	}
+	out := new(CellSignatureRequester)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto copies the receiver into out.

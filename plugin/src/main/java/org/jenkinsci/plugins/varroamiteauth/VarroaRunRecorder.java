@@ -831,6 +831,13 @@ public final class VarroaRunRecorder {
                 if (summaryAction != null && !summaryAction.getSummary().isEmpty()) {
                     b.summary(summaryAction.getSummary());
                 }
+                // A failed build that the sandbox stopped names the refused
+                // signature. The pending view reads the requester from here.
+                ScriptRejections.Rejection rejected = ScriptRejections.rejectionOf(run);
+                if (rejected != null) {
+                    b.rejectedSignature(rejected.getSignature());
+                    ScriptRejections.record(rejected, jobPath, buildNumber, runId);
+                }
                 emitCapped(b.build());
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "VarroaRunRecorder.Runs: failed to emit COMPLETED", e);

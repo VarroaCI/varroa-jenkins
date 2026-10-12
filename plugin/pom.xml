@@ -121,6 +121,22 @@
             <groupId>org.jenkins-ci.plugins.workflow</groupId>
             <artifactId>workflow-step-api</artifactId>
         </dependency>
+        <!-- access-modifier-suppressions supplies @SuppressRestrictedWarnings.
+             The pending-signature read in ActivityEndpoint calls one
+             restricted script-security method, and the annotation scopes
+             that suppression to the one helper. -->
+        <dependency>
+            <groupId>org.kohsuke</groupId>
+            <artifactId>access-modifier-suppressions</artifactId>
+            <version>1.35</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- script-security supplies RejectedAccessException and the
+             ScriptApproval list the pending-signature view reads. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>script-security</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.jenkins-ci.plugins</groupId>
             <artifactId>branch-api</artifactId>

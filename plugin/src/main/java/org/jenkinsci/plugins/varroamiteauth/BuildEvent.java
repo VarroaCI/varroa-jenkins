@@ -49,6 +49,10 @@ import java.util.Map;
  * Only the {@code STARTED} event carries it. {@link #toJson()} writes no
  * key for zero.
  *
+ * <p>Field 57, {@code rejected_signature}, is the script signature the
+ * sandbox refused in a failed build. Only the {@code COMPLETED} event
+ * carries it. {@link #toJson()} writes no key for it when it is empty.
+ *
  * <p>Field 56, {@code change_request}, names the change request a
  * multibranch pull-request run builds. Only the {@code STARTED} event
  * carries it. {@link #toJson()} writes no key for a null value or an
@@ -119,6 +123,7 @@ public final class BuildEvent implements PostableEvent {
     private final String replayOf;
     private final long grantedBuildNumber;
     private final ChangeRequestInfo changeRequest;
+    private final String rejectedSignature;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -173,6 +178,7 @@ public final class BuildEvent implements PostableEvent {
         this.replayOf = orEmpty(b.replayOf);
         this.grantedBuildNumber = b.grantedBuildNumber;
         this.changeRequest = b.changeRequest;
+        this.rejectedSignature = orEmpty(b.rejectedSignature);
     }
 
     private static String orEmpty(String s) {
@@ -409,6 +415,11 @@ public final class BuildEvent implements PostableEvent {
         return replayOf;
     }
 
+    /** Field 57: the script signature the sandbox refused. Empty when none. */
+    public String getRejectedSignature() {
+        return rejectedSignature;
+    }
+
     /** Field 51: the grant the run applied. Zero for a run with no grant. */
     public long getGrantedBuildNumber() {
         return grantedBuildNumber;
@@ -526,6 +537,9 @@ public final class BuildEvent implements PostableEvent {
         if (changeRequest != null && !changeRequest.getId().isEmpty()) {
             o.put("change_request", changeRequest.toJson());
         }
+        if (!rejectedSignature.isEmpty()) {
+            o.put("rejected_signature", rejectedSignature);
+        }
         return o;
     }
 
@@ -595,7 +609,8 @@ public final class BuildEvent implements PostableEvent {
                 .testCases(testCases)
                 .replayOf(replayOf)
                 .grantedBuildNumber(grantedBuildNumber)
-                .changeRequest(changeRequest);
+                .changeRequest(changeRequest)
+                .rejectedSignature(rejectedSignature);
     }
 
     /**
@@ -710,6 +725,7 @@ public final class BuildEvent implements PostableEvent {
         private String replayOf;
         private long grantedBuildNumber;
         private ChangeRequestInfo changeRequest;
+        private String rejectedSignature;
 
         private Builder() {
         }
@@ -984,6 +1000,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 50: the run a replayed build copied its script from. */
         public Builder replayOf(String v) {
             this.replayOf = v;
+            return this;
+        }
+
+        /** Field 57: the script signature the sandbox refused. */
+        public Builder rejectedSignature(String v) {
+            this.rejectedSignature = v;
             return this;
         }
 

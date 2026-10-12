@@ -781,6 +781,15 @@ export default function BuildPage() {
         </div>
       )}
 
+      {run.rejectedSignature && (
+        <div className={styles.rejectedBanner} role="alert">
+          <span>
+            The script sandbox refused <code>{run.rejectedSignature}</code>. An operator approves a
+            signature on the cell pool.
+          </span>
+        </div>
+      )}
+
       {run.waiting && (
         <div className={styles.waitNotice} role="status">
           {run.waiting.kind === "cell"

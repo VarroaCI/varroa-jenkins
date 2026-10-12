@@ -1362,6 +1362,19 @@ func TestShrinkToBudget_RemovesTheCasesKeyWhenEveryCaseDrops(t *testing.T) {
 	}
 }
 
+// TestCompletedPayload_RejectedSignature proves run.completed carries the
+// refused signature only when the event names one.
+func TestCompletedPayload_RejectedSignature(t *testing.T) {
+	with := completedPayload(&mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1", RejectedSignature: "method x y"})
+	if with["rejected_signature"] != "method x y" {
+		t.Fatalf("rejected_signature = %v, want the signature", with["rejected_signature"])
+	}
+	without := completedPayload(&mitev1.BuildEvent{Phase: phaseCompleted, RunId: "run-1"})
+	if _, ok := without["rejected_signature"]; ok {
+		t.Fatalf("rejected_signature present with no signature: %+v", without)
+	}
+}
+
 // TestStartedPayloadCarriesChangeRequest proves run.started writes the
 // change_request object with every non-empty key of the change request.
 func TestStartedPayloadCarriesChangeRequest(t *testing.T) {

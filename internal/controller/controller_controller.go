@@ -3804,6 +3804,9 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// desiredstate_test.go.
 	version, lastHeartbeat, certExpiry, transportConnected := r.miteTransport.Info(cr.Namespace, cr.Name)
 	snapshot := r.miteTransport.Snapshot(cr.Namespace, cr.Name)
+	if err := r.recordPendingSignatures(ctx, cr, snapshot); err != nil {
+		logger.Warn("read pool approvals for pending signatures", "error", err)
+	}
 	health := deriveMiteHealth(miteObservation{
 		TransportConnected: transportConnected,
 		Version:            version,

@@ -220,6 +220,14 @@ type Agent struct {
 	jobScheduleRetryBase        time.Duration
 	jobScheduleResendAfter      time.Duration
 
+	// scriptApprovalSet is the newest pending script-signature set the
+	// plugin answered, carried on every snapshot of a cell. It is nil
+	// before the first successful poll. scriptApprovalInterval is the poll
+	// cadence, overridable in tests. Guarded by scriptApprovalMu.
+	scriptApprovalMu       sync.Mutex
+	scriptApprovalSet      *mitev1.PendingSignatureSet
+	scriptApprovalInterval time.Duration
+
 	// jobScheduleExportOpen is the export gate. It opens after an apply
 	// in this process succeeds for the items section. A convergence
 	// marker on disk also opens it. It never closes again.
@@ -350,6 +358,7 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 		version:                version,
 		heartbeatInterval:      15 * time.Second,
 		jobScheduleInterval:    jobSchedulePollInterval,
+		scriptApprovalInterval: scriptApprovalPollInterval,
 		jobScheduleMinInterval: jobScheduleMinPollInterval,
 		jobScheduleRetryBase:   jobScheduleRetryBackoff,
 		jobScheduleResendAfter: jobScheduleResendInterval,
@@ -543,6 +552,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.startFingerprintTicker(streamCtx)
 		go a.startActivityPoller(streamCtx)
 		go a.startJobSchedulePoller(streamCtx)
+		go a.startScriptApprovalPoller(streamCtx)
 		go a.startPluginInventoryCollector(streamCtx)
 		// The run loop is the only writer of a.sess, so it reads it here
 		// without sendMu.
@@ -1016,6 +1026,7 @@ func (a *Agent) sendStateSnapshot(ctx context.Context) {
 	snap.ActualStateHash = computeStateHash(configHash, pluginsHash, rbacHash, itemsHash)
 	snap.Status = snap.JenkinsHealth
 	a.maybeAttachJobSchedules(snap)
+	a.attachPendingSignatures(snap)
 
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
@@ -1089,6 +1100,7 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 
 			// Fill the job-schedule set only when the send gate opens.
 			a.maybeAttachJobSchedules(snap)
+			a.attachPendingSignatures(snap)
 
 			// Send state snapshot (carries health, version, hashes).
 			snapMsg := &mitev1.MiteMessage{
