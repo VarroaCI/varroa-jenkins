@@ -1694,6 +1694,11 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
 												"name": "VARROA_HEADLESS", "value": "true",
 											})
+											if spec.InClusterEndpoint != "" {
+												jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+													"name": "KUBERNETES_JENKINS_URL", "value": spec.InClusterEndpoint + "/",
+												})
+											}
 										}
 										jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
 											"name": "VARROA_CLAIM_GATE", "value": claimGate,

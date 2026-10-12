@@ -5172,7 +5172,7 @@
             "type": "string"
           },
           "locationUrl": {
-            "description": "The in-cluster Service URL, with a trailing slash.",
+            "description": "The location URL of a headless controller, with a trailing slash. This is the dashboard door URL when the operator has a dashboard origin, and the in-cluster Service URL otherwise.",
             "type": "string"
           },
           "target": {
@@ -8973,6 +8973,20 @@
         "required": [
           "kind",
           "type"
+        ],
+        "type": "object"
+      },
+      "components_schemas_JenkinsLink": {
+        "additionalProperties": false,
+        "description": "The Varroa page that a Jenkins item path resolves to.",
+        "properties": {
+          "link": {
+            "description": "A dashboard path, such as /pipelines/team/job/runId.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link"
         ],
         "type": "object"
       },
@@ -16563,6 +16577,66 @@
           }
         },
         "summary": "Hibernates a controller, scaling it down and parking it.",
+        "tags": [
+          "controllers"
+        ]
+      }
+    },
+    "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link": {
+      "get": {
+        "description": "The dashboard door route redirects through this endpoint. The path names\na Jenkins item, such as job/team/job/app/12/display/redirect. The answer\nis the build page for that build, or the job page when the path names no\nbuild number. The caller needs read access to the matched run.\n",
+        "operationId": "getControllerJenkinsLink",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_cluster"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_ns"
+          },
+          {
+            "$ref": "#/components/parameters/components_parameters_name"
+          },
+          {
+            "description": "The Jenkins item path after the door prefix, without the leading slash.",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_JenkinsLink"
+                }
+              }
+            },
+            "description": "The Varroa page for the Jenkins item."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/components_responses_Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/components_responses_ServiceUnavailable"
+          }
+        },
+        "summary": "Resolves a Jenkins item path under a headless controller to its Varroa page.",
         "tags": [
           "controllers"
         ]

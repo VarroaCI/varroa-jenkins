@@ -5730,7 +5730,17 @@ BreakGlassResponse:
       $ref: '#/BreakGlassTarget'
     locationUrl:
       type: string
-      description: The in-cluster Service URL, with a trailing slash.
+      description: The location URL of a headless controller, with a trailing slash. This is the dashboard door URL when the operator has a dashboard origin, and the in-cluster Service URL otherwise.
+  additionalProperties: false
+
+JenkinsLink:
+  type: object
+  description: The Varroa page that a Jenkins item path resolves to.
+  required: [link]
+  properties:
+    link:
+      type: string
+      description: A dashboard path, such as /pipelines/team/job/runId.
   additionalProperties: false
 
 CellPoolSpec:

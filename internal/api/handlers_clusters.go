@@ -120,6 +120,7 @@ var controllerRoutes = map[string]controllerRoute{
 	"events":           {http.MethodGet, (*Server).handleControllerEvents},
 	"mite/stream":      {"", (*Server).handleMiteStreamSSE},
 	"plugins":          {http.MethodGet, (*Server).handleControllerPlugins},
+	"jenkins-link":     {http.MethodGet, (*Server).handleControllerJenkinsLink},
 }
 
 // configDispatchRoutes maps the second segment of a cluster-scoped config path

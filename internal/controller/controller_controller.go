@@ -558,7 +558,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	// connection refused).
 	vars["varroa_controller_name"] = cr.Name
 	vars["varroa_controller_namespace"] = cr.Namespace
-	baseEndpoint := fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", controllerPrefix(cr), cr.Namespace)
+	baseEndpoint := inClusterEndpoint(cr)
 	vars["varroa_controller_endpoint"] = baseEndpoint
 	vars["varroa_frontend_url"] = varroaBaseURL(r.varroaRedirectURL)
 
@@ -738,13 +738,18 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	}
 
 	// Inject location URL under the three-way rule: a headless controller
-	// always gets the in-cluster endpoint (it has no external URL to inject),
-	// a non-headless controller with a resolvable external URL keeps that
-	// value, and a non-headless controller with neither gets no injection.
+	// gets the dashboard door URL when the operator has a dashboard origin,
+	// and the in-cluster endpoint otherwise. A non-headless controller with a
+	// resolvable external URL keeps that value, and a non-headless controller
+	// with neither gets no injection.
 	locationURL := ""
 	switch {
 	case v1alpha1.IsHeadless(cr):
-		locationURL = vars["varroa_controller_endpoint"] + "/"
+		if u := v1alpha1.HeadlessLocationURL(varroaBaseURL(r.varroaRedirectURL), r.clusterName, cr.Namespace, cr.Name); u != "" {
+			locationURL = u
+		} else {
+			locationURL = vars["varroa_controller_endpoint"] + "/"
+		}
 	case vars["varroa_controller_external_url"] != "":
 		locationURL = vars["varroa_controller_external_url"] + "/"
 	}
@@ -941,6 +946,11 @@ type StatefulSetSpec struct {
 	// VARROA_HEADLESS=true on the jenkins container when true, and stamps
 	// nothing when false.
 	Headless bool
+
+	// InClusterEndpoint is the Service address of the controller
+	// (inClusterEndpoint). A headless pod gets it as KUBERNETES_JENKINS_URL,
+	// so clouds without an explicit jenkinsUrl keep their agents in-cluster.
+	InClusterEndpoint string
 }
 
 // StatefulSetRollout is the part of a StatefulSet that decides whether the
@@ -6610,6 +6620,12 @@ func (r *Reconciler) effectiveDesiredJenkinsImage(cr *v1alpha1.Controller) strin
 		}
 	}
 	return desired
+}
+
+// inClusterEndpoint returns the Service address of a controller's Jenkins
+// HTTP port. It names the UID-based Service that handleProvisioning creates.
+func inClusterEndpoint(cr *v1alpha1.Controller) string {
+	return fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", controllerPrefix(cr), cr.Namespace)
 }
 
 // varroaBaseURL returns scheme+host from an OIDC redirect URL (e.g. "https://varroa.example.com/callback" → "https://varroa.example.com").

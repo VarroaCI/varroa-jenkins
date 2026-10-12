@@ -539,8 +539,11 @@ sections describe.
   deletes the controller's Ingress and sets `ConditionNoExternalURL`/`Headless` instead
   of building one. The bundle-variable host branch and the location-URL injection both
   gate on `!IsHeadless(cr)`: a headless controller keeps `varroa_controller_endpoint`
-  but gets no external URL or path prefix, and its injected `location.url` is the
-  in-cluster endpoint rather than the external URL. `reconcileSharedHostMismatch`
+  but gets no external URL or path prefix. Its injected `location.url` is built only by
+  `v1alpha1.HeadlessLocationURL` from the dashboard origin (`varroaBaseURL`) when that origin
+  is set, and is the in-cluster endpoint otherwise. A headless pod also gets
+  `KUBERNETES_JENKINS_URL` set to `inClusterEndpoint(cr)` so clouds without `jenkinsUrl`
+  keep agents in-cluster. `reconcileSharedHostMismatch`
   clears its condition for a headless controller, since it renders no Ingress to
   mismatch. `internal/api`'s `handleControllerDiff` mirrors all of this so a headless
   controller's diff matches what provisioning applies.

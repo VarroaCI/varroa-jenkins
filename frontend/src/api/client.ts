@@ -809,6 +809,20 @@ export function getBuiltinRoles(): Promise<BuiltinRole[]> {
 
 // ---- Configuration Pipeline ----
 
+/** The Varroa page that a Jenkins item path under a headless controller names. */
+export interface JenkinsLink {
+  link: string;
+}
+
+/**
+ * Resolves a Jenkins item path (the part after the headless door prefix) to
+ * its Varroa page. The path is encoded once here, so a %252F stays %252F on
+ * the wire.
+ */
+export function getControllerJenkinsLink(cluster: string, ns: string, name: string, path: string): Promise<JenkinsLink> {
+  return bffFetch<JenkinsLink>(`${ctrlBase(cluster, ns, name)}/jenkins-link?path=${encodeURIComponent(path)}`);
+}
+
 export function getControllerDiff(cluster: string, ns: string, name: string): Promise<ControllerDiff> {
   return bffFetch<ControllerDiff>(
     `${ctrlBase(cluster, ns, name)}/diff`

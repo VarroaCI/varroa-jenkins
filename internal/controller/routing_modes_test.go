@@ -186,7 +186,7 @@ func TestHeadlessRoutingVarsIgnoreResolvableHost(t *testing.T) {
 // behavior, and a non-headless controller with no external URL gets no
 // injection at all.
 func TestLocationURLThreeWayRule(t *testing.T) {
-	t.Run("headless controller gets the in-cluster endpoint", func(t *testing.T) {
+	t.Run("headless controller with no dashboard origin gets the in-cluster endpoint", func(t *testing.T) {
 		client := newTestClientWithBundle()
 		rec := newTestReconciler(client)
 
@@ -213,6 +213,36 @@ func TestLocationURLThreeWayRule(t *testing.T) {
 		want := "http://" + testPrefixFor("test") + "-svc.ns1.svc.cluster.local:8080/"
 		if location["url"] != want {
 			t.Errorf("location.url = %v, want the in-cluster endpoint %q", location["url"], want)
+		}
+	})
+
+	t.Run("headless controller gets the dashboard door URL", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		rec.SetVarroaRedirectURL("https://varroa.example.com/callback")
+		rec.SetClusterName("core")
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		cr.Spec.Headless = true
+
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		if err != nil {
+			t.Fatalf("resolveBundleForController: %v", err)
+		}
+		got := map[string]interface{}{}
+		if err := yaml.Unmarshal([]byte(mat.JenkinsYAML), &got); err != nil {
+			t.Fatalf("parse resolved jenkins.yaml: %v", err)
+		}
+		unclassified, _ := got["unclassified"].(map[string]interface{})
+		if unclassified == nil {
+			t.Fatal("unclassified block not injected")
+		}
+		location, _ := unclassified["location"].(map[string]interface{})
+		if location == nil {
+			t.Fatal("unclassified.location not injected")
+		}
+		if want := "https://varroa.example.com/headless/core/ns1/test/"; location["url"] != want {
+			t.Errorf("location.url = %v, want the door URL %q", location["url"], want)
 		}
 	})
 

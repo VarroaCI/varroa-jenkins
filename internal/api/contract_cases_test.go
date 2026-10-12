@@ -98,6 +98,7 @@ func init() {
 		contractCase{Name: "getControllerLogs-200", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/logs", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "getControllerDiff-404", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/diff", Claims: adminClaims, WantStatus: http.StatusNotFound},
 		contractCase{Name: "getControllerPlugins-404", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/plugins", Claims: adminClaims, WantStatus: http.StatusNotFound},
+		contractCase{Name: "getControllerJenkinsLink-503", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/jenkins-link?path=job/missing/1", Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		// Drain operations
 		contractCase{Name: "drainCluster-400-core", Method: "POST", Path: "/api/v1/clusters/core/drain", Claims: adminClaims, Body: map[string]string{"confirm": "core"}, WantStatus: http.StatusBadRequest},
 		contractCase{Name: "drainCluster-403-nonadmin", Method: "POST", Path: "/api/v1/clusters/dev-cluster/drain", Claims: operatorClaims, Body: map[string]string{"confirm": "dev-cluster"}, WantStatus: http.StatusForbidden},

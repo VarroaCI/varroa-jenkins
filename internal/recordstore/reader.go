@@ -601,6 +601,16 @@ func (r *pgReader) ListRuns(ctx context.Context, q RunQuery) (RunPage, error) {
 	if q.Status != "" {
 		addFilter("runs.status", q.Status)
 	}
+	if q.BuildNumber > 0 {
+		args = append(args, q.BuildNumber)
+		clauses = append(clauses, fmt.Sprintf("runs.build_number = $%d", len(args)))
+	}
+	if q.Namespace != "" {
+		addFilter("runs.namespace", q.Namespace)
+	}
+	if q.Cell != "" {
+		addFilter("runs.cell", q.Cell)
+	}
 
 	join := ""
 	if q.Cause != "" {

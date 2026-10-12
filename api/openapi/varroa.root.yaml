@@ -212,6 +212,8 @@ paths:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1diff'
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/plugins:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1plugins'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1jenkins-link'
   /api/v1/roles:
     $ref: './paths/rbac.yaml#/~1api~1v1~1roles'
   /api/v1/roles/{name}:

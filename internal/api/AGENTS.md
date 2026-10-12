@@ -592,6 +592,10 @@ federation, activity persistence, and SSE fanout.
   sorted deep copies. Gets and write paths read the apiserver. Do not call
   the generic list helper for Controllers directly in `internal/api` or
   `internal/mcp`.
+- `handlers_jenkins_link.go` serves `GET /clusters/{cluster}/controllers/{ns}/{name}/jenkins-link?path=`.
+  `parseJenkinsItemPath` reads the job path and build number from a Jenkins item path. The route
+  finds the run through `RecordStore.ListRuns` and answers `{link}`, the build page or the job
+  page. It authorizes the run with the run read check and answers 404 on every miss.
 
 ## Work Guidance
 

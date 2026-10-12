@@ -2,48 +2,24 @@ package v1alpha1
 
 import "testing"
 
-func TestIsHeadless(t *testing.T) {
-	cases := []struct {
-		name string
-		cr   *Controller
-		want bool
+func TestHeadlessLocationURL(t *testing.T) {
+	tests := []struct {
+		name                      string
+		origin, cluster, ns, ctrl string
+		want                      string
 	}{
-		{
-			name: "no cell, headless false",
-			cr:   &Controller{Spec: ControllerSpec{Headless: false}},
-			want: false,
-		},
-		{
-			name: "no cell, headless true",
-			cr:   &Controller{Spec: ControllerSpec{Headless: true}},
-			want: true,
-		},
-		{
-			name: "cell enabled, headless false",
-			cr:   &Controller{Spec: ControllerSpec{Cell: &CellSpec{Enabled: true}, Headless: false}},
-			want: true,
-		},
-		{
-			name: "cell enabled, headless true",
-			cr:   &Controller{Spec: ControllerSpec{Cell: &CellSpec{Enabled: true}, Headless: true}},
-			want: true,
-		},
-		{
-			name: "cell present but disabled, headless false",
-			cr:   &Controller{Spec: ControllerSpec{Cell: &CellSpec{Enabled: false}, Headless: false}},
-			want: false,
-		},
+		{"empty origin", "", "core", "team-a", "ci", ""},
+		{"empty cluster", "https://varroa.example.com", "", "team-a", "ci", ""},
+		{"empty namespace", "https://varroa.example.com", "core", "", "ci", ""},
+		{"empty name", "https://varroa.example.com", "core", "team-a", "", ""},
+		{"trailing slash trimmed", "https://varroa.example.com/", "core", "team-a", "ci", "https://varroa.example.com/headless/core/team-a/ci/"},
+		{"plain origin", "https://varroa.example.com", "core", "team-a", "ci", "https://varroa.example.com/headless/core/team-a/ci/"},
 	}
-
-	for _, tc := range cases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsHeadless(tc.cr); got != tc.want {
-				t.Errorf("IsHeadless() = %v, want %v", got, tc.want)
+			if got := HeadlessLocationURL(tc.origin, tc.cluster, tc.ns, tc.ctrl); got != tc.want {
+				t.Errorf("HeadlessLocationURL = %q, want %q", got, tc.want)
 			}
 		})
-	}
-
-	if got := IsHeadless(nil); got != false {
-		t.Errorf("IsHeadless(nil) = %v, want false", got)
 	}
 }

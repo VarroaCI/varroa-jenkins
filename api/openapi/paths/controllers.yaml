@@ -748,3 +748,43 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link:
+  get:
+    operationId: getControllerJenkinsLink
+    tags: [controllers]
+    summary: Resolves a Jenkins item path under a headless controller to its Varroa page.
+    description: |
+      The dashboard door route redirects through this endpoint. The path names
+      a Jenkins item, such as job/team/job/app/12/display/redirect. The answer
+      is the build page for that build, or the job page when the path names no
+      build number. The caller needs read access to the matched run.
+    parameters:
+      - $ref: '../components/parameters.yaml#/cluster'
+      - $ref: '../components/parameters.yaml#/ns'
+      - $ref: '../components/parameters.yaml#/name'
+      - name: path
+        in: query
+        required: true
+        description: The Jenkins item path after the door prefix, without the leading slash.
+        schema:
+          type: string
+    responses:
+      "200":
+        description: The Varroa page for the Jenkins item.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/JenkinsLink'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'
+      "500":
+        $ref: '../components/responses.yaml#/Internal'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

@@ -242,6 +242,15 @@ func (f *fakeRecordReader) ListRuns(_ context.Context, q recordstore.RunQuery) (
 		if q.Status != "" && r.Status != q.Status {
 			continue
 		}
+		if q.BuildNumber > 0 && (r.BuildNumber == nil || *r.BuildNumber != q.BuildNumber) {
+			continue
+		}
+		if q.Namespace != "" && r.Namespace != q.Namespace {
+			continue
+		}
+		if q.Cell != "" && r.Cell != q.Cell {
+			continue
+		}
 		filtered = append(filtered, r)
 	}
 	sort.Slice(filtered, func(i, j int) bool { return runAfter(filtered[i], filtered[j]) })

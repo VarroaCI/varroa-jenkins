@@ -238,8 +238,13 @@ type RunQuery struct {
 	Actor   string
 	Cause   string
 	Status  string
-	Limit   int
-	Cursor  string
+	// BuildNumber, when above zero, keeps only the run with that build number.
+	BuildNumber int64
+	// Namespace and Cell, when set, keep only the runs of one controller.
+	Namespace string
+	Cell      string
+	Limit     int
+	Cursor    string
 }
 
 // RunPage is one page of ListRuns. NextCursor is empty on the last page.

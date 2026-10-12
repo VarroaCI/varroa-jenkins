@@ -218,6 +218,9 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   grammar change that updates one side and not the other fails a test.
   `usePermissions.ts`, `TenantScopeEditor.tsx`, and any future caller import
   it; a second browser implementation is not permitted.
+- `src/pages/JenkinsLinkRedirect.tsx` — `/headless/:cluster/:namespace/:controller/*`, the door a
+  Jenkins link under a headless controller opens. It calls `getControllerJenkinsLink` and replaces
+  the URL with the returned Varroa page, reading the raw pathname so `%252F` survives.
 - `src/pages/pipelines/` — the pipelines route tree: `PipelinesIndex.tsx`
   (`/pipelines`, lists the names of `GET /pipelines` rows only, which include
   member-cluster Teams and controller-namespace Teams; it does not merge the

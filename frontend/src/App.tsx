@@ -11,6 +11,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import Controllers from "./pages/Controllers";
 import ControllerDetail from "./pages/ControllerDetail";
+import { JenkinsLinkRedirect } from "./pages/JenkinsLinkRedirect";
 import ControllerWizard from "./pages/ControllerWizard";
 import Clusters from "./pages/Clusters";
 import Roles from "./pages/Roles";
@@ -117,6 +118,7 @@ function AppRoutes() {
                   <Route path="controllers/create" element={<ControllerWizard />} />
                   <Route path="controllers/:cluster/:namespace/:name" element={<ControllerDetail />} />
                   <Route path="controllers/:cluster/:namespace/:name/jenkins" element={<ManagedJenkins />} />
+                  <Route path="headless/:cluster/:namespace/:controller/*" element={<JenkinsLinkRedirect />} />
                   <Route
                     path="cells"
                     element={

@@ -161,3 +161,29 @@ through the break-glass proxy. The proxy rewrites redirect headers, not page bod
 
 A controller whose bundle never installs the Varroa security realm denies every request. Set
 `spec.headless: false` to recover it, then fix the bundle.
+
+## Location URL and Jenkins links
+
+The location URL of a headless controller is the dashboard door, not the in-cluster Service
+address:
+
+```text
+https://<dashboard>/headless/<cluster>/<namespace>/<controller>/
+```
+
+Every Jenkins link that the controller emits uses this origin. `BUILD_URL` and `JENKINS_URL`
+in a build point to the door too. A link to a Jenkins item opens the matching Varroa page.
+For example, `…/headless/core/team-a/ci/job/team-a/job/app/12/display/redirect` opens
+`/pipelines/team-a/team-a%2Fapp/<runId>`.
+
+The door resolves a link only when a recorded run matches the item path. The record store must be
+enabled for the link to resolve. Without a match, the door answers "Build page not found".
+
+Pods of a headless controller also receive `KUBERNETES_JENKINS_URL` with the in-cluster Service
+address. A cloud without an explicit `jenkinsUrl` keeps its agents inside the cluster.
+
+The operator reads the dashboard origin from the OIDC redirect URL. The BFF reads it from
+`auth.dashboardUrl`. Set both to the same host. A member cluster with no dashboard URL keeps
+the in-cluster location URL.
+
+Changing the location URL rolls each headless controller once.

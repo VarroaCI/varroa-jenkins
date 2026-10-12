@@ -123,6 +123,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/logs"},
 	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/diff"},
 	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/plugins"},
+	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link"},
 	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/events"},
 	{Method: "GET", Path: "/api/v1/clusters/{cluster}/controllers/{ns}/{name}/mite/stream"},
 	// RBAC sub-routes

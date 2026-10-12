@@ -42,3 +42,16 @@ The cell must reach the forge API on port 443. Allow the egress in
 ## Not supported
 
 Varroa does not report commit status to GitLab or Bitbucket.
+
+## Status links
+
+The status link of a build points to the Varroa build page. A plain job without a `targetUrl`
+gets this link. The link has this form:
+
+```text
+https://<dashboard>/headless/<cluster>/<namespace>/<cell>/job/<job path>/<n>/display/redirect
+```
+
+The door opens `/pipelines/<team>/<job>/<runId>`. A multibranch build link has the same form,
+for example `…/job/<team>/job/<repo>/job/PR-<n>/<b>/display/redirect`. See
+[Headless controllers](../security/headless-controllers.md) for the door.

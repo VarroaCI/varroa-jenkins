@@ -674,7 +674,7 @@ type ComponentsSchemasBreakGlassRequest struct {
 type ComponentsSchemasBreakGlassResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 
-	// LocationUrl The in-cluster Service URL, with a trailing slash.
+	// LocationUrl The location URL of a headless controller, with a trailing slash. This is the dashboard door URL when the operator has a dashboard origin, and the in-cluster Service URL otherwise.
 	LocationUrl string `json:"locationUrl"`
 
 	// Target The in-cluster Service a break-glass token reaches.
@@ -2231,6 +2231,12 @@ type ComponentsSchemasInputSummaryEntry struct {
 	Kind      string  `json:"kind"`
 	Namespace *string `json:"namespace,omitempty"`
 	Type      string  `json:"type"`
+}
+
+// ComponentsSchemasJenkinsLink The Varroa page that a Jenkins item path resolves to.
+type ComponentsSchemasJenkinsLink struct {
+	// Link A dashboard path, such as /pipelines/team/job/runId.
+	Link string `json:"link"`
 }
 
 // ComponentsSchemasJenkinsRole A JenkinsRole CRD (cluster-scoped, data-plane permissions).
@@ -4457,6 +4463,12 @@ type ApproveControllerDeletionJSONBody struct {
 	Path string `json:"path"`
 }
 
+// GetControllerJenkinsLinkParams defines parameters for GetControllerJenkinsLink.
+type GetControllerJenkinsLinkParams struct {
+	// Path The Jenkins item path after the door prefix, without the leading slash.
+	Path string `form:"path" json:"path"`
+}
+
 // GetControllerLogsParams defines parameters for GetControllerLogs.
 type GetControllerLogsParams struct {
 	// Follow When true, returns an SSE stream instead of JSON.
@@ -5460,6 +5472,9 @@ type ClientInterface interface {
 
 	// HibernateController request
 	HibernateController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetControllerJenkinsLink request
+	GetControllerJenkinsLink(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetControllerLogs request
 	GetControllerLogs(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6713,6 +6728,18 @@ func (c *Client) GetControllerDiff(ctx context.Context, cluster ComponentsParame
 
 func (c *Client) HibernateController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHibernateControllerRequest(c.Server, cluster, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetControllerJenkinsLink(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetControllerJenkinsLinkRequest(c.Server, cluster, ns, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -11380,6 +11407,72 @@ func NewHibernateControllerRequest(server string, cluster ComponentsParametersCl
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetControllerJenkinsLinkRequest generates requests for GetControllerJenkinsLink
+func NewGetControllerJenkinsLinkRequest(server string, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "cluster", runtime.ParamLocationPath, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ns", runtime.ParamLocationPath, ns)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/clusters/%s/controllers/%s/%s/jenkins-link", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "path", runtime.ParamLocationQuery, params.Path); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -16161,6 +16254,9 @@ type ClientWithResponsesInterface interface {
 	// HibernateControllerWithResponse request
 	HibernateControllerWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*HibernateControllerResponse, error)
 
+	// GetControllerJenkinsLinkWithResponse request
+	GetControllerJenkinsLinkWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*GetControllerJenkinsLinkResponse, error)
+
 	// GetControllerLogsWithResponse request
 	GetControllerLogsWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerLogsParams, reqEditors ...RequestEditorFn) (*GetControllerLogsResponse, error)
 
@@ -17939,6 +18035,34 @@ func (r HibernateControllerResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r HibernateControllerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetControllerJenkinsLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJenkinsLink
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON405      *ComponentsResponsesMethodNotAllowed
+	JSON500      *ComponentsResponsesInternal
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetControllerJenkinsLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetControllerJenkinsLinkResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -21327,6 +21451,15 @@ func (c *ClientWithResponses) HibernateControllerWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseHibernateControllerResponse(rsp)
+}
+
+// GetControllerJenkinsLinkWithResponse request returning *GetControllerJenkinsLinkResponse
+func (c *ClientWithResponses) GetControllerJenkinsLinkWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*GetControllerJenkinsLinkResponse, error) {
+	rsp, err := c.GetControllerJenkinsLink(ctx, cluster, ns, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetControllerJenkinsLinkResponse(rsp)
 }
 
 // GetControllerLogsWithResponse request returning *GetControllerLogsResponse
@@ -25000,6 +25133,74 @@ func ParseHibernateControllerResponse(rsp *http.Response) (*HibernateControllerR
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetControllerJenkinsLinkResponse parses an HTTP response from a GetControllerJenkinsLinkWithResponse call
+func ParseGetControllerJenkinsLinkResponse(rsp *http.Response) (*GetControllerJenkinsLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetControllerJenkinsLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJenkinsLink
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

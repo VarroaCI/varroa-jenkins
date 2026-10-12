@@ -174,7 +174,7 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   `httputil.NewSingleHostReverseProxy`, because reading its `Director`
   field is deprecated. `newBreakGlassProxy` rewrites `Location`,
   `Content-Location`, and `Refresh` response headers that carry the
-  grant's in-cluster location URL, replacing that prefix with the proxy's
+  grant's location URL, replacing that prefix with the proxy's
   own base URL. The command prints the matching `kubectl port-forward`
   command, the bound URL, and the expiry, then exits 0 when the token
   expires or the command is interrupted.

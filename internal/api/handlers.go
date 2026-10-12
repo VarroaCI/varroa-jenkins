@@ -1909,6 +1909,12 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 	}
 
 	svcName := strings.TrimSuffix(controller.PodName(cr, 0), "-0") + "-svc"
+	// The location URL is the dashboard door when the operator has a
+	// dashboard origin. The in-cluster Service URL is the fallback.
+	locationURL := v1alpha1.HeadlessLocationURL(s.deps.DashboardURL, cluster, ns, name)
+	if locationURL == "" {
+		locationURL = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/", svcName, ns, jenkinsContainerPort)
+	}
 	s.writeJSON(w, http.StatusOK, breakGlassResponse{
 		Token:     token,
 		ExpiresAt: time.Now().Add(ttl).Format(time.RFC3339),
@@ -1917,7 +1923,7 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 			Namespace: ns,
 			Port:      jenkinsContainerPort,
 		},
-		LocationURL: fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/", svcName, ns, jenkinsContainerPort),
+		LocationURL: locationURL,
 	})
 }
 
@@ -3698,7 +3704,11 @@ func (s *Server) handleControllerDiff(w http.ResponseWriter, r *http.Request, cl
 					// diff site carries independently of the headless rule.
 					switch {
 					case headless:
-						injected, _, _ := bundle.InjectLocationURL(jcasc, endpoint+"/")
+						locationURL := v1alpha1.HeadlessLocationURL(s.deps.DashboardURL, cluster, namespace, name)
+						if locationURL == "" {
+							locationURL = endpoint + "/"
+						}
+						injected, _, _ := bundle.InjectLocationURL(jcasc, locationURL)
 						if injected != "" {
 							jcasc = injected
 						}
