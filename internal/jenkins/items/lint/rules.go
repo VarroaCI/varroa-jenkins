@@ -91,6 +91,8 @@ func credentialScope(c items.FolderCredential) string {
 		return c.File.Scope
 	case c.Certificate != nil:
 		return c.Certificate.Scope
+	case c.GitHubApp != nil:
+		return c.GitHubApp.Scope
 	default:
 		return ""
 	}

@@ -1912,3 +1912,87 @@ func TestValidate_GiteaSourceRejects(t *testing.T) {
 		t.Fatalf("valid gitea source rejected: %v", err)
 	}
 }
+
+func TestGitHubAppCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{GitHubApp: &GitHubAppCredential{
+		ID:         "github-app",
+		Scope:      "GLOBAL",
+		AppID:      "123456",
+		PrivateKey: "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+		Owner:      "example-org",
+		APIURI:     "https://api.github.example.com",
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	app, _ := doc["gitHubApp"].(map[string]any)
+	if app == nil {
+		t.Fatalf("marshalled YAML has no gitHubApp key:\n%s", out)
+	}
+	if app["appID"] != "123456" || app["owner"] != "example-org" || app["apiUri"] != "https://api.github.example.com" {
+		t.Errorf("unexpected gitHubApp fields:\n%s", out)
+	}
+	if _, ok := app["description"]; ok {
+		t.Errorf("an empty description must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.GitHubApp == nil || back.GitHubApp.AppID != "123456" || back.GitHubApp.PrivateKey != cred.GitHubApp.PrivateKey {
+		t.Errorf("round trip lost the app credential: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_GitHubAppCredential(t *testing.T) {
+	item := Item{
+		Kind: "folder",
+		Name: "github-app-folder",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{
+					Credentials: []FolderCredential{{GitHubApp: &GitHubAppCredential{
+						ID:          "github-app",
+						Scope:       "GLOBAL",
+						Description: "checks <&> app",
+						AppID:       "123456",
+						PrivateKey:  "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+						Owner:       "example-org",
+						APIURI:      "https://api.github.example.com",
+					}}},
+				}},
+			}},
+		},
+	}
+	got, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(got, "<org.jenkinsci.plugins.github__branch__source.GitHubAppCredentials>") {
+		t.Fatalf("config.xml lacks the GitHubAppCredentials element:\n%s", got)
+	}
+	if !strings.Contains(got, "checks &lt;&amp;&gt; app") {
+		t.Errorf("description is not XML-escaped:\n%s", got)
+	}
+	last := -1
+	for _, el := range []string{
+		"<scope>GLOBAL</scope>",
+		"<id>github-app</id>",
+		"<appID>123456</appID>",
+		"<privateKey>-----BEGIN PRIVATE KEY-----",
+		"<apiUri>https://api.github.example.com</apiUri>",
+		"<owner>example-org</owner>",
+	} {
+		idx := strings.Index(got, el)
+		if idx <= last {
+			t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+		}
+		last = idx
+	}
+}

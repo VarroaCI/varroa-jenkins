@@ -81,6 +81,9 @@ cases:
   - name: credential-type-certificate
     tier: breadth
     status: supported
+  - name: credential-type-githubapp
+    tier: breadth
+    status: supported
   - name: folder-libraries-git-source
     tier: breadth
     status: supported

@@ -107,6 +107,7 @@ Set the annotation `varroa.dev/credential-kind` to one of these values:
 | `usernamePassword` | `username`, `password` |
 | `secretText` | `secret` |
 | `sshPrivateKey` | `privateKey`, `username`, and optional `passphrase` |
+| `githubApp` | `appID`, `privateKey` (PKCS#8 PEM), and optional `owner`, `apiUri` |
 
 Do not put a secret value in a bundle variable or in `items.yaml`. See [Projected credentials](../operations/cells.md#what-composes-a-tenant) for the full rules.
 

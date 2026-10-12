@@ -293,3 +293,33 @@ func TestNoJobDSLRule_IgnoresItemWithoutDefinition(t *testing.T) {
 		t.Errorf("expected no findings for an item without a definition, got %+v", findings)
 	}
 }
+
+func gitHubAppFolderWithScope(scope string) items.Item {
+	return items.Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []items.Property{
+			{FolderCredentialsProperty: &items.FolderCredentialsProperty{
+				FolderCredentials: []items.FolderCredentialEntry{{
+					Credentials: []items.FolderCredential{{GitHubApp: &items.GitHubAppCredential{
+						ID: "github-app", Scope: scope, AppID: "42", PrivateKey: "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+					}}},
+				}},
+			}},
+		},
+	}
+}
+
+func TestNoGlobalCredentialsRule_RejectsGitHubAppSystemScope(t *testing.T) {
+	findings := NoGlobalCredentialsRule{}.Check(gitHubAppFolderWithScope("SYSTEM"), "tenant")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestNoGlobalCredentialsRule_AllowsGitHubAppGlobalScope(t *testing.T) {
+	findings := NoGlobalCredentialsRule{}.Check(gitHubAppFolderWithScope("GLOBAL"), "tenant")
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings, got %+v", findings)
+	}
+}

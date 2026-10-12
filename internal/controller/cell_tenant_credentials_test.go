@@ -793,3 +793,123 @@ func TestProjectTenantCredentials_CertificateSkipped(t *testing.T) {
 		})
 	}
 }
+
+// githubAppPrivateKey is a clearly fake PKCS#8 PEM body for tests. It is
+// not a real key.
+const githubAppPrivateKey = "-----BEGIN PRIVATE KEY-----\nFAKETESTKEYNOTREAL\n-----END PRIVATE KEY-----\n"
+
+func githubAppAnnotations(id string) map[string]string {
+	return map[string]string{
+		"varroa.dev/credential-id":          id,
+		"varroa.dev/credential-kind":        "githubApp",
+		"varroa.dev/credential-description": "github app for checks",
+	}
+}
+
+func TestProjectTenantCredentials_GitHubApp(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "gh-app", githubAppAnnotations("github-app"),
+		map[string][]byte{
+			"appID":      []byte("123456\n"),
+			"privateKey": []byte(githubAppPrivateKey),
+			"owner":      []byte("example-org"),
+			"apiUri":     []byte("https://api.github.example.com"),
+		},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].GitHubApp == nil {
+		t.Fatalf("expected one githubApp credential, got %+v", creds)
+	}
+	got := creds[0].GitHubApp
+	want := items.GitHubAppCredential{
+		ID:          "github-app",
+		Scope:       "GLOBAL",
+		Description: "github app for checks",
+		AppID:       "123456",
+		PrivateKey:  githubAppPrivateKey,
+		Owner:       "example-org",
+		APIURI:      "https://api.github.example.com",
+	}
+	if *got != want {
+		t.Errorf("unexpected credential:\n got %+v\nwant %+v", *got, want)
+	}
+}
+
+func TestProjectTenantCredentials_GitHubAppMinimal(t *testing.T) {
+	client := newTestClient()
+	seedTenantCredentialSecret(t, client, "gh-app", githubAppAnnotations("github-app"),
+		map[string][]byte{"appID": []byte("42"), "privateKey": []byte(githubAppPrivateKey)},
+	)
+	rec := newTestReconciler(client)
+	folder := newFolderItem(t)
+
+	warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings, got %+v", warnings)
+	}
+	creds := projectedCredentials(t, folder)
+	if len(creds) != 1 || creds[0].GitHubApp == nil {
+		t.Fatalf("expected one githubApp credential, got %+v", creds)
+	}
+	if got := creds[0].GitHubApp; got.AppID != "42" || got.Owner != "" || got.APIURI != "" {
+		t.Errorf("unexpected minimal credential: %+v", got)
+	}
+}
+
+func TestProjectTenantCredentials_GitHubAppSkipped(t *testing.T) {
+	cases := map[string]struct {
+		data   map[string][]byte
+		reason string
+	}{
+		"missing appID": {
+			data:   map[string][]byte{"privateKey": []byte(githubAppPrivateKey)},
+			reason: "githubApp secret missing a numeric appID data key",
+		},
+		"appID not numeric": {
+			data:   map[string][]byte{"appID": []byte("app-12"), "privateKey": []byte(githubAppPrivateKey)},
+			reason: "githubApp secret missing a numeric appID data key",
+		},
+		"missing privateKey": {
+			data:   map[string][]byte{"appID": []byte("42")},
+			reason: "githubApp secret missing the privateKey data key",
+		},
+		"PKCS#1 key": {
+			data: map[string][]byte{
+				"appID":      []byte("42"),
+				"privateKey": []byte("-----BEGIN " + "RSA PRIVATE KEY-----\nFAKETESTKEYNOTREAL\n-----END " + "RSA PRIVATE KEY-----\n"),
+			},
+			reason: "githubApp secret privateKey is not a PKCS#8 PEM key",
+		},
+		"over 64 KiB": {
+			data: map[string][]byte{
+				"appID":      []byte("42"),
+				"privateKey": append([]byte("-----BEGIN PRIVATE KEY-----"), bytes.Repeat([]byte("A"), maxBinaryCredentialBytes)...),
+			},
+			reason: "githubApp secret privateKey data key exceeds 65536 bytes",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := newTestClient()
+			seedTenantCredentialSecret(t, client, "gh-app", githubAppAnnotations("github-app"), tc.data)
+			rec := newTestReconciler(client)
+			folder := newFolderItem(t)
+
+			warnings := rec.projectTenantCredentials(context.Background(), "payments", tenantCredentialTestNamespace, folder)
+			want := `secret "gh-app": ` + tc.reason
+			if len(warnings) != 1 || warnings[0].Reason != v1alpha1.TeamReasonCredentialSkipped || warnings[0].Message != want {
+				t.Fatalf("expected one CredentialSkipped warning %q, got %+v", want, warnings)
+			}
+			if creds := projectedCredentials(t, folder); len(creds) != 0 {
+				t.Errorf("expected no projected credential, got %+v", creds)
+			}
+		})
+	}
+}

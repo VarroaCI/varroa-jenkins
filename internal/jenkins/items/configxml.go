@@ -1000,6 +1000,19 @@ type credentialListXML struct {
 	BasicSSHUserPrivateKey []*basicSSHUserPrivateKeyCredXML `xml:"com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey,omitempty"`
 	File                   []*fileCredXML                   `xml:"org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl,omitempty"`
 	Certificate            []*certificateCredXML            `xml:"com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl,omitempty"`
+	GitHubApp              []*gitHubAppCredXML              `xml:"org.jenkinsci.plugins.github__branch__source.GitHubAppCredentials,omitempty"`
+}
+
+// gitHubAppCredXML is a GitHub App credential. The element name comes from
+// the github-branch-source plugin, which uses double underscores.
+type gitHubAppCredXML struct {
+	Scope       string `xml:"scope"`
+	ID          string `xml:"id"`
+	Description string `xml:"description,omitempty"`
+	AppID       string `xml:"appID"`
+	PrivateKey  string `xml:"privateKey"`
+	APIURI      string `xml:"apiUri,omitempty"`
+	Owner       string `xml:"owner,omitempty"`
 }
 
 // uploadedKeyStoreSourceClass is the XStream class of an uploaded keystore
@@ -1188,6 +1201,17 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 								UploadedKeystoreBytes: k.KeyStoreSource.Uploaded.UploadedKeystore,
 							},
 							Password: k.Password,
+						})
+					case c.GitHubApp != nil:
+						g := c.GitHubApp
+						creds.GitHubApp = append(creds.GitHubApp, &gitHubAppCredXML{
+							Scope:       g.Scope,
+							ID:          g.ID,
+							Description: g.Description,
+							AppID:       g.AppID,
+							PrivateKey:  g.PrivateKey,
+							APIURI:      g.APIURI,
+							Owner:       g.Owner,
 						})
 					default:
 						return nil, fmt.Errorf("folder credential entry has no recognized credential type")

@@ -14,7 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
-// Tenant-credential Secret label, annotations, and the five credential kinds.
+// Tenant-credential Secret label, annotations, and the six credential kinds.
 const (
 	tenantCredentialLabelSelector = "varroa.dev/tenant-credential=true"
 
@@ -28,10 +28,12 @@ const (
 	credentialKindSSHPrivateKey    = "sshPrivateKey"
 	credentialKindSecretFile       = "secretFile"
 	credentialKindCertificate      = "certificate"
+	credentialKindGitHubApp        = "githubApp"
 
-	// maxBinaryCredentialBytes caps a secretFile or certificate value. The
-	// cell desired state travels as one NATS request with a 1 MiB limit, so
-	// one large file must not block the push for every tenant.
+	// maxBinaryCredentialBytes caps a secretFile, certificate, or githubApp
+	// privateKey value. The cell desired state travels as one NATS request
+	// with a 1 MiB limit, so one large file must not block the push for
+	// every tenant.
 	maxBinaryCredentialBytes = 64 * 1024
 )
 
@@ -197,6 +199,29 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 				},
 			},
 		}
+	case credentialKindGitHubApp:
+		appID, privateKey := strings.TrimSpace(string(data["appID"])), data["privateKey"]
+		if appID == "" || !isDecimal(appID) {
+			return nil, skip("githubApp secret missing a numeric appID data key")
+		}
+		if len(privateKey) == 0 {
+			return nil, skip("githubApp secret missing the privateKey data key")
+		}
+		if len(privateKey) > maxBinaryCredentialBytes {
+			return nil, skip(fmt.Sprintf("githubApp secret privateKey data key exceeds %d bytes", maxBinaryCredentialBytes))
+		}
+		if !strings.HasPrefix(strings.TrimSpace(string(privateKey)), "-----BEGIN PRIVATE KEY-----") {
+			return nil, skip("githubApp secret privateKey is not a PKCS#8 PEM key")
+		}
+		cred.GitHubApp = &items.GitHubAppCredential{
+			ID:          id,
+			Scope:       "GLOBAL",
+			Description: ann[annotationCredentialDescription],
+			AppID:       appID,
+			PrivateKey:  string(privateKey),
+			Owner:       strings.TrimSpace(string(data["owner"])),
+			APIURI:      strings.TrimSpace(string(data["apiUri"])),
+		}
 	default:
 		return nil, skip(fmt.Sprintf("unknown credential-kind %q", kind))
 	}
@@ -206,6 +231,16 @@ func (r *Reconciler) buildTenantCredential(ctx context.Context, tenant, agentNam
 	}
 	seenIDs[id] = true
 	return &cred, nil
+}
+
+// isDecimal reports whether s is a non-empty run of ASCII digits.
+func isDecimal(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // validCredentialFilename reports whether s is one plain file name, so the

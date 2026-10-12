@@ -709,6 +709,19 @@ type FolderCredential struct {
 	BasicSSHUserPrivateKey *BasicSSHUserPrivateKeyCredential `yaml:"basicSSHUserPrivateKey,omitempty"`
 	File                   *FileCredential                   `yaml:"file,omitempty"`
 	Certificate            *CertificateCredential            `yaml:"certificate,omitempty"`
+	GitHubApp              *GitHubAppCredential              `yaml:"gitHubApp,omitempty"`
+}
+
+// GitHubAppCredential is a GitHub App credential. A multibranch source that
+// uses it can publish GitHub Checks. PrivateKey is a PKCS#8 PEM key.
+type GitHubAppCredential struct {
+	ID          string `yaml:"id"`
+	Scope       string `yaml:"scope,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	AppID       string `yaml:"appID"`
+	PrivateKey  string `yaml:"privateKey"`
+	Owner       string `yaml:"owner,omitempty"`
+	APIURI      string `yaml:"apiUri,omitempty"`
 }
 
 // FileCredential is a secret file credential. SecretBytes is the base64 of the file content.

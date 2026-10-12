@@ -149,11 +149,12 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   | `secretText` | `secret` | |
   | `sshPrivateKey` | `privateKey`, `username`, optional `passphrase` | |
   | `secretFile` | `file` | Annotation `varroa.dev/credential-filename`, default the Secret name |
-  | `certificate` | `keystore` (binary PKCS#12), optional `password` | Put the keystore under `data` |
+  | `certificate` | `keystore` (binary PKCS#12), optional `password` | |
+  | `githubApp` | `appID`, `privateKey` (PKCS#8 PEM), optional `owner`, `apiUri` | Convert with `openssl pkcs8 -topk8 -nocrypt` |
 
   Varroa skips a `Secret` with a missing key, an unknown kind, or a duplicate id, and records
-  it in `TenantWarnings`. It also skips a `secretFile` or `certificate` value over
-  64 KiB, and a keystore that is not binary PKCS#12. A value reaches Jenkins as written, `${`
+  it in `TenantWarnings`. It also skips `secretFile`, `certificate`, or `githubApp`
+  values over 64 KiB, and a keystore that is not binary PKCS#12. A value reaches Jenkins as written, `${`
   included. The controller diff drops comments and shows each credential as
   `<redacted>`, so a rotation shows no change. A GitHub deploy key:
 

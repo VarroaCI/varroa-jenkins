@@ -8,6 +8,18 @@ A multibranch job or an organization-folder job on a cell reports a status by it
 `github-branch-source` plugin sends the status for a GitHub source. The `gitea` plugin sends
 the status for a Gitea or Forgejo source. You do not add a step.
 
+## GitHub Checks
+
+A multibranch build on a cell publishes a GitHub check when its source credential is a
+`githubApp` credential. The check is named `Jenkins`. The build also publishes a commit status.
+Varroa does not turn the status off.
+
+The check links to the Varroa build page. The link is the same as the status link.
+
+The GitHub App needs "Checks: write" on the repository. A classic or fine-grained personal
+access token cannot publish a check. Store the App credential as a `githubApp` tenant
+credential. See [Projected credentials](cells.md#what-composes-a-tenant).
+
 ## Plain jobs
 
 A plain pipeline job has no SCM source that reports a status. Call the `githubNotify` step
@@ -34,6 +46,7 @@ credential also works.
 | Classic personal access token | `repo:status`. Use `repo` for a private repository. |
 | Fine-grained personal access token | "Commit statuses: write" on the repository. |
 | GitHub App | "Commit statuses: write" on the repository. |
+| GitHub App, for GitHub Checks | "Checks: write" on the repository. |
 
 ## Forgejo and Gitea
 
