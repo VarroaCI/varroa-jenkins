@@ -480,8 +480,15 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			return reconcile.Result{}, err
 		}
 		lastSync := r.lastSync(team.Name)
+		webhook, webhookCond := r.resolveTeamWebhook(ctx, team)
+		if webhookCond == nil {
+			status.Conditions = removeTeamCondition(status.Conditions, v1alpha1.TeamConditionNotifications)
+		} else {
+			r.setCondition(status, *webhookCond)
+		}
 		placeInputs := cells.Inputs{
 			Now:                time.Now,
+			Webhook:            webhook,
 			Cells:              cellCandidates,
 			Pools:              poolSummaries,
 			ProfileExists:      r.profileExists(ctx),
@@ -1201,6 +1208,49 @@ func (r *TeamReconciler) setTenantWarningsCondition(status *v1alpha1.TeamStatus,
 		cond.Message = capBytes(strings.Join(lines, "; "), 2048)
 	}
 	r.setCondition(status, cond)
+}
+
+// resolveTeamWebhook reads the completion webhook a Team declares and
+// answers the signing key the record store needs. It answers a nil
+// webhook when the Team declares none, and a nil condition in that case,
+// which tells the caller to drop the Notifications condition. A Secret
+// that is missing, or that holds no value under the named key, answers a
+// nil webhook with a False condition. A read error counts as a missing
+// Secret, and the next tick reads it again.
+func (r *TeamReconciler) resolveTeamWebhook(ctx context.Context, team *v1alpha1.Team) (*cells.WebhookSync, *v1alpha1.TeamCondition) {
+	if team.Spec.Pipelines == nil || team.Spec.Pipelines.Notifications == nil ||
+		team.Spec.Pipelines.Notifications.Webhook == nil {
+		return nil, nil
+	}
+	hook := team.Spec.Pipelines.Notifications.Webhook
+	key := hook.SecretRef.Key
+	if key == "" {
+		key = v1alpha1.TeamWebhookDefaultKey
+	}
+	missing := func(msg string) (*cells.WebhookSync, *v1alpha1.TeamCondition) {
+		return nil, &v1alpha1.TeamCondition{
+			Type:    v1alpha1.TeamConditionNotifications,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.TeamReasonWebhookSecretMissing,
+			Message: msg,
+		}
+	}
+	data, err := r.client.GetSecret(ctx, hook.SecretRef.Name, team.Spec.Pipelines.AgentNamespace)
+	if err != nil {
+		r.logger.Warn("tenant webhook secret read failed", "team", team.Name,
+			"secret", hook.SecretRef.Name, "error", err)
+		return missing(fmt.Sprintf("secret %s is not readable", hook.SecretRef.Name))
+	}
+	value := data[key]
+	if len(value) == 0 {
+		return missing(fmt.Sprintf("secret %s has no value under key %s", hook.SecretRef.Name, key))
+	}
+	return &cells.WebhookSync{URL: hook.URL, Key: string(value)}, &v1alpha1.TeamCondition{
+		Type:    v1alpha1.TeamConditionNotifications,
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.TeamReasonWebhookReady,
+		Message: "completion webhook is configured",
+	}
 }
 
 // removeTeamCondition drops every condition of the given type.

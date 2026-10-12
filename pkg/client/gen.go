@@ -3811,6 +3811,12 @@ type ComponentsSchemasTeamNamespaceState struct {
 	State string `json:"state"`
 }
 
+// ComponentsSchemasTeamNotifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
+type ComponentsSchemasTeamNotifications struct {
+	// Webhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
+	Webhook *ComponentsSchemasTeamWebhook `json:"webhook,omitempty"`
+}
+
 // ComponentsSchemasTeamPipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
 type ComponentsSchemasTeamPipelines struct {
 	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required when pipelines is set.
@@ -3842,6 +3848,9 @@ type ComponentsSchemasTeamPipelines struct {
 
 	// Members The number of active slots this tenant runs. Each slot holds one cell, and a job runs only on its home slot's holder. Default 1. This field is not spec.members, which lists local usernames.
 	Members *int32 `json:"members,omitempty"`
+
+	// Notifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
+	Notifications *ComponentsSchemasTeamNotifications `json:"notifications,omitempty"`
 
 	// Profile JenkinsVersionProfile the placement pass resolves a cell against. Required when pipelines is set.
 	Profile string `json:"profile"`
@@ -3946,6 +3955,24 @@ type ComponentsSchemasTeamRequest struct {
 
 	// Subjects OIDC subject references.
 	Subjects *[]ComponentsSchemasSubjectRef `json:"subjects,omitempty"`
+}
+
+// ComponentsSchemasTeamWebhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
+type ComponentsSchemasTeamWebhook struct {
+	// SecretRef The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
+	SecretRef ComponentsSchemasTeamWebhookSecret `json:"secretRef"`
+
+	// Url Receiver endpoint. Starts with https:// or http://. Use https:// for a receiver outside the cluster.
+	Url string `json:"url"`
+}
+
+// ComponentsSchemasTeamWebhookSecret The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
+type ComponentsSchemasTeamWebhookSecret struct {
+	// Key Data key that holds the signing key. Default hmac-key.
+	Key *string `json:"key,omitempty"`
+
+	// Name Name of the Secret in the tenant's agent namespace.
+	Name string `json:"name"`
 }
 
 // ComponentsSchemasTemplateCatalogCondition Status condition for catalog/composedbundle resources.

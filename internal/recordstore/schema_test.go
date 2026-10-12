@@ -18,7 +18,7 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's thirteen tables, column for
+// expectedColumns mirrors the record store's fourteen tables, column for
 // column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
@@ -217,6 +217,22 @@ var expectedColumns = map[string][]columnSpec{
 		{"incarnation", "text", false},
 		{"agent_namespace", "text", false},
 		{"retired_incarnations", "jsonb", false},
+		{"notification_webhook", "jsonb", true},
+	},
+	"webhook_deliveries": {
+		{"delivery_id", "uuid", false},
+		{"run_id", "uuid", false},
+		{"cluster", "text", false},
+		{"tenant", "text", false},
+		{"incarnation", "text", false},
+		{"body", "bytea", false},
+		{"state", "text", false},
+		{"attempts", "integer", false},
+		{"next_attempt_at", "timestamp with time zone", false},
+		{"last_status", "integer", true},
+		{"last_error", "text", true},
+		{"created_at", "timestamp with time zone", false},
+		{"updated_at", "timestamp with time zone", false},
 	},
 	"fleet_locks": {
 		{"name", "text", false},
@@ -237,7 +253,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's thirteen tables, column for column.
+// schema against the record store's fourteen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
 
@@ -407,7 +423,7 @@ func TestNonPartitionedTables(t *testing.T) {
 	for _, table := range []string{
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
-		"fleet_locks", "run_test_cases",
+		"fleet_locks", "run_test_cases", "webhook_deliveries",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,

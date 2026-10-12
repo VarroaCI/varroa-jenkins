@@ -1552,6 +1552,11 @@ type TeamPipelinesSpec struct {
 	// +kubebuilder:validation:Maximum=8
 	// +optional
 	Standby *int32 `json:"standby,omitempty"`
+
+	// Notifications configures the outward notifications of this tenant.
+	// The record store posts the completion webhook for each run.
+	// +optional
+	Notifications *TeamNotificationsSpec `json:"notifications,omitempty"`
 }
 
 // TeamExport is one grant a pipelines tenant makes to other tenants: a
@@ -1584,6 +1589,44 @@ type TeamExport struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=253
 	Callers []string `json:"callers,omitempty"`
+}
+
+// TeamNotificationsSpec groups the outward notifications of a pipelines
+// tenant.
+type TeamNotificationsSpec struct {
+	// Webhook posts a signed JSON payload to a URL each time a run of this
+	// tenant completes. The record store sends it, not the cell.
+	// +optional
+	Webhook *TeamWebhookSpec `json:"webhook,omitempty"`
+}
+
+// TeamWebhookSpec names the receiver URL and the Secret that holds the
+// HMAC signing key. The Secret lives in the tenant's agent namespace.
+// +kubebuilder:validation:XValidation:rule="self.url.startsWith('https://') || self.url.startsWith('http://')",message="url must start with https:// or http://"
+type TeamWebhookSpec struct {
+	// URL is the receiver endpoint. Use https:// for a receiver outside
+	// the cluster.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=2048
+	URL string `json:"url"`
+
+	// SecretRef names the Secret that holds the signing key.
+	// +kubebuilder:validation:Required
+	SecretRef TeamWebhookSecretRef `json:"secretRef"`
+}
+
+// TeamWebhookSecretRef names one key of one Secret in the tenant's agent
+// namespace.
+type TeamWebhookSecretRef struct {
+	// Name is the Secret name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Key is the data key that holds the signing key.
+	// +kubebuilder:default=hmac-key
+	// +optional
+	Key string `json:"key,omitempty"`
 }
 
 // TeamPipelinesRetention sets how long the record store keeps a

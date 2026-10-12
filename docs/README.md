@@ -94,6 +94,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Build logs and artifacts](operations/build-logs-and-artifacts.md)
 - [Commit status](operations/commit-status.md)
 - [Artifact credentials](operations/artifact-credentials.md)
+- [Notifications](operations/notifications.md)
 - [NATS upgrades](operations/nats-upgrades.md)
 - [Observability](operations/observability.md)
 - [Troubleshooting](operations/troubleshooting.md)

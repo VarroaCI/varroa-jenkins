@@ -1094,7 +1094,11 @@ sections describe.
 - **Tenant-sync announcement** (`cell_instance.go`, `single_tenant_announce.go`,
   `team_sync.go`, `internal/controller/cells/sync.go`) — the placement-fencing
   capability's write side: it keeps `varroa.tenant_placements` current for
-  every controller, cell or not. `updateCellInstance` writes
+  every controller, cell or not. The completion webhook rides the announce:
+  `resolveTeamWebhook` (`team_controller.go`) reads the Secret that
+  `notifications.webhook.secretRef` names, in `spec.pipelines.agentNamespace`,
+  and sets the `Notifications` condition. `SyncPolicy.Webhook` travels in
+  the request's `notification_webhook` field and never in the policy JSON. `updateCellInstance` writes
   `Controller.status.cell.instance` from the running pod's `metadata.uid` on
   every controller-reconciler tick; it clears the field only on a confirmed
   absence, never on a transient pod-read error. **A pod in phase `Failed` or

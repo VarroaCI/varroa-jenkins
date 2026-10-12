@@ -401,6 +401,9 @@ export default function TeamForm() {
                           },
                     )
                   : undefined,
+              // The form has no notifications control. The saved value
+              // passes through, so an edit never drops the webhook.
+              notifications: team?.pipelines?.notifications,
               retention: form.pipelinesRetention,
             }
           : undefined,

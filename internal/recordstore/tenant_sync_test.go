@@ -1022,3 +1022,60 @@ func TestTenantSyncAnnounceReleasesLockOfRunItMarks(t *testing.T) {
 		t.Fatalf("%d lock rows left, want the marked run's lock released in the same announce", n)
 	}
 }
+
+// TestWriteTenantPlacement_StoresAndClearsNotificationWebhook asserts an
+// announce stores the completion webhook in notification_webhook, and that a
+// later announce with no webhook clears it. The policy column never holds it.
+func TestWriteTenantPlacement_StoresAndClearsNotificationWebhook(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	ctx := t.Context()
+	write := func(hook *TenantSyncWebhook) {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		req := TenantSyncRequest{
+			Kind: TenantSyncKindAnnounce, Cluster: testCluster, Tenant: testTenant,
+			Namespace: testNamespace, Cell: "cell-a", CellInstance: "pod-a",
+			NotificationWebhook: hook,
+		}
+		if err := writeTenantPlacement(ctx, tx, req, 1, "", nil, nil, nil, nil, placementIdentity{}); err != nil {
+			t.Fatalf("write tenant placement: %v", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+	read := func() (bool, string, string) {
+		t.Helper()
+		var set bool
+		var url, policy string
+		if err := pool.QueryRow(ctx, `
+			SELECT notification_webhook IS NOT NULL,
+			       COALESCE(notification_webhook->>'url', ''),
+			       policy::text
+			FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2
+		`, testCluster, testTenant).Scan(&set, &url, &policy); err != nil {
+			t.Fatalf("read tenant placement: %v", err)
+		}
+		return set, url, policy
+	}
+
+	write(&TenantSyncWebhook{URL: "https://hooks.example.test/varroa", Key: "whsec-test"})
+	set, url, policy := read()
+	if !set || url != "https://hooks.example.test/varroa" {
+		t.Fatalf("stored webhook = (set %v, url %q), want the announced URL", set, url)
+	}
+	if policy != "{}" {
+		t.Fatalf("policy = %s, want the empty policy with no webhook", policy)
+	}
+
+	write(nil)
+	if set, _, _ := read(); set {
+		t.Fatalf("an announce with no webhook left notification_webhook set")
+	}
+}

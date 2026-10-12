@@ -412,7 +412,7 @@ describe("age", () => {
 const BACKEND_EMITTED_TYPES = [
   // Mutations recorded by MCP write tools and the operator.
   "reconcile.triggered", "restart.approved", "catalogsource.synced",
-  "controller.created", "controller.updated", "controller.deleted", "pod.replaced",
+  "controller.created", "controller.updated", "controller.deleted", "tenant.webhook_failed", "pod.replaced",
   "catalogsource.created", "catalogsource.updated", "catalogsource.deleted",
   "composedbundle.created", "composedbundle.updated", "composedbundle.deleted",
   "jenkinsrole.created", "jenkinsrole.updated", "jenkinsrole.deleted",

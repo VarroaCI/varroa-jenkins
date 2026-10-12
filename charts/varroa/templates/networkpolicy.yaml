@@ -764,6 +764,7 @@ spec:
 {{- end }}
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
+{{ include "varroa.np.recorderWebhookEgress" . | nindent 4 }}
 {{- if eq .Values.recordStore.postgres.mode "cnpg" }}
 ---
 # Policy: record-store Postgres (the CloudNativePG instance pods). The

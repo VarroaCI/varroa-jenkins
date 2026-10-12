@@ -236,12 +236,26 @@ of the fleet's audit activity, once a controller becomes disposable.
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
   `<table>_p<YYYYMM>`; the retention round that adds later partitions
-  must use the same pattern. The schema holds exactly thirteen tables, no
+  must use the same pattern. The schema holds exactly fourteen tables, no
   more and no fewer.
 - **Migration runner** (`migrate.go`) — `RunMigrations` creates schema
   `varroa`, applies pending migrations under a Postgres advisory lock on a
   one-connection pool, then calls `EnsureGrants`. Two callers racing
   against one database both return nil; only one applies the migrations.
+- **Completion webhook** (`webhook_enqueue.go`, `webhook_dispatch.go`,
+  `webhook_sign.go`, `webhook_metrics.go`, `retention_webhooks.go`) — the
+  signing key lives in `tenant_placements.notification_webhook` (jsonb),
+  never in `policy`. The owner `run.completed` with a result inserts one
+  `webhook_deliveries` row in its own transaction, keyed `run_id` (a
+  redelivery inserts nothing). The body is encoded once and stored, so
+  every attempt signs and sends the same bytes. `WebhookDispatcher` leases
+  rows with `FOR UPDATE SKIP LOCKED`, sends at most four at a time, and
+  retries on the schedule in `webhookBackoff`. The sixth failure writes a
+  `tenant.webhook_failed` activity row. The dispatcher's dialer refuses
+  any address that is not global unicast. A DB test
+  swaps `d.client` for an `httptest` client, a test-only seam that
+  production never sets. Synthetic ends (`INTERRUPTED`, `start-lost`,
+  `heartbeat-lost`) never enqueue.
 - **Grants, not a migration** (`grants.go`) — `EnsureGrants` grants role
   `varroa_client` its read privileges when that role exists, and is a
   no-op otherwise. It never creates a role. CloudNativePG creates the role

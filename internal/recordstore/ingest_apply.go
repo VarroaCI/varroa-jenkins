@@ -151,6 +151,12 @@ type Ingester struct {
 	sweepMetrics  *InterruptedMetrics
 	stateDeleter  ObjectDeleter
 	notifier      *RunNotifier
+
+	// webhookDashboardURL is the dashboard base URL a webhook payload's
+	// url field prefixes. webhookNudge wakes the dispatcher after a
+	// terminal write enqueues a delivery.
+	webhookDashboardURL string
+	webhookNudge        func()
 }
 
 // NewIngester returns an Ingester over pool. conn publishes a ledger
@@ -170,6 +176,17 @@ func NewIngester(pool *pgxpool.Pool, conn *bus.Conn, logger *slog.Logger) *Inges
 func (g *Ingester) SetUpstreamFanout(evaluator *GrantEvaluator, metrics *UpstreamFanoutMetrics) {
 	g.fanoutEval = evaluator
 	g.fanoutMetrics = metrics
+}
+
+// SetWebhooks enables the completion webhook. Each owner run.completed
+// that carries a result enqueues one delivery in its own transaction when
+// the tenant declares a webhook. dashboardURL prefixes the payload's url
+// field, and an empty value omits the field. nudge runs after the commit
+// that enqueued a delivery, and it must never block. A nil nudge leaves
+// delivery to the dispatcher's own tick.
+func (g *Ingester) SetWebhooks(dashboardURL string, nudge func()) {
+	g.webhookDashboardURL = dashboardURL
+	g.webhookNudge = nudge
 }
 
 // SetSweepMetrics gives the ingest path the sweep's own counters. It
@@ -339,6 +356,13 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		}
 	}
 
+	// The dispatcher nudge runs after the commit, so the dispatcher never
+	// leases a row the transaction has not made visible. A lost nudge
+	// costs latency only: the dispatcher's own tick finds the row.
+	if dispatched.webhookEnqueued && g.webhookNudge != nil {
+		g.webhookNudge()
+	}
+
 	// The run-state cleanup runs after the commit, never inside it: a
 	// lost object delete must never roll the record back. The hourly
 	// backstop repairs a recorder that stops between the two.
@@ -378,6 +402,10 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
+
+	// webhookEnqueued is set when a terminal write enqueued a completion
+	// webhook delivery. Apply nudges the dispatcher after the commit.
+	webhookEnqueued bool
 
 	// stateCleanup names the run whose run-state objects Apply deletes
 	// after the transaction commits. It is set on a run's real terminal
@@ -501,6 +529,13 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 					Result:  *payload.Result,
 				}
 			}
+			// The webhook outbox row shares this transaction, so a
+			// rolled-back terminal write enqueues nothing.
+			enqueued, enqErr := enqueueWebhookDelivery(ctx, tx, intent, payload, g.webhookDashboardURL)
+			if enqErr != nil {
+				return dispatchResult{}, enqErr
+			}
+			res.webhookEnqueued = enqueued
 		}
 		return res, nil
 	case KindRunTests:

@@ -204,3 +204,16 @@ func TestWireGrantHoldWiresTheLedger(t *testing.T) {
 		t.Fatal("wireGrantHold did not wire the grant hold")
 	}
 }
+
+// TestDashboardURLFromEnv asserts VARROA_DASHBOARD_URL is read as given, and
+// that an unset variable yields the empty string, which omits the payload url.
+func TestDashboardURLFromEnv(t *testing.T) {
+	t.Setenv("VARROA_DASHBOARD_URL", "https://varroa.example.test")
+	if got := dashboardURLFromEnv(); got != "https://varroa.example.test" {
+		t.Fatalf("dashboardURLFromEnv() = %q", got)
+	}
+	t.Setenv("VARROA_DASHBOARD_URL", "")
+	if got := dashboardURLFromEnv(); got != "" {
+		t.Fatalf("empty variable: dashboardURLFromEnv() = %q, want empty", got)
+	}
+}

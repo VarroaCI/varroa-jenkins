@@ -140,24 +140,29 @@ func NewNATSSyncAnnouncer(conn *bus.Conn) cells.Announcer {
 		if err != nil {
 			return cells.AnnounceResult{}, fmt.Errorf("encode sync policy: %w", err)
 		}
+		var notification *recordstore.TenantSyncWebhook
+		if w := req.Policy.Webhook; w != nil {
+			notification = &recordstore.TenantSyncWebhook{URL: w.URL, Key: w.Key}
+		}
 		payload, err := json.Marshal(recordstore.TenantSyncRequest{
-			Kind:               recordstore.TenantSyncKindAnnounce,
-			Cluster:            req.Cluster,
-			Tenant:             req.Tenant,
-			Incarnation:        req.Incarnation,
-			Namespace:          req.Namespace,
-			Cell:               req.Cell,
-			Generation:         req.Generation,
-			CellInstance:       req.CellInstance,
-			Policy:             policy,
-			RehydratedInstance: req.RehydratedInstance,
-			PendingJobs:        req.PendingJobs,
-			CellAlive:          req.CellAlive,
-			CellAliveAt:        req.CellAliveAt,
-			CellLastSeenAt:     req.CellLastSeenAt,
-			DeadInstances:      deadInstancesToWire(req.DeadInstances),
-			Members:            membersToWire(req.Members),
-			AgentNamespace:     req.AgentNamespace,
+			Kind:                recordstore.TenantSyncKindAnnounce,
+			NotificationWebhook: notification,
+			Cluster:             req.Cluster,
+			Tenant:              req.Tenant,
+			Incarnation:         req.Incarnation,
+			Namespace:           req.Namespace,
+			Cell:                req.Cell,
+			Generation:          req.Generation,
+			CellInstance:        req.CellInstance,
+			Policy:              policy,
+			RehydratedInstance:  req.RehydratedInstance,
+			PendingJobs:         req.PendingJobs,
+			CellAlive:           req.CellAlive,
+			CellAliveAt:         req.CellAliveAt,
+			CellLastSeenAt:      req.CellLastSeenAt,
+			DeadInstances:       deadInstancesToWire(req.DeadInstances),
+			Members:             membersToWire(req.Members),
+			AgentNamespace:      req.AgentNamespace,
 		})
 		if err != nil {
 			return cells.AnnounceResult{}, fmt.Errorf("marshal tenant sync announce request: %w", err)

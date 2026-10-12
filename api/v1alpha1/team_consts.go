@@ -42,7 +42,18 @@ const (
 const (
 	TeamConditionPlaced         = "Placed"
 	TeamConditionTenantWarnings = "TenantWarnings"
+	TeamConditionNotifications  = "Notifications"
 )
+
+// Notifications reasons.
+const (
+	TeamReasonWebhookReady         = "WebhookReady"
+	TeamReasonWebhookSecretMissing = "WebhookSecretMissing"
+)
+
+// TeamWebhookDefaultKey is the Secret data key a webhook reads when its
+// secretRef names no key.
+const TeamWebhookDefaultKey = "hmac-key"
 
 // Placed reasons.
 const (

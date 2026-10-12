@@ -116,6 +116,19 @@ type TenantSyncRequest struct {
 	// means enumerate.
 	JobPaths []string `json:"job_paths,omitempty"`
 	PerJob   int      `json:"per_job,omitempty"`
+
+	// NotificationWebhook applies to kind "announce". It carries the
+	// tenant's completion webhook: the receiver URL and the HMAC signing
+	// key. Nil clears the stored webhook. The recorder never logs it.
+	NotificationWebhook *TenantSyncWebhook `json:"notification_webhook,omitempty"`
+}
+
+// TenantSyncWebhook is a tenant's completion webhook as the operator
+// announces it. Key is the HMAC signing key, read from the tenant's
+// Secret.
+type TenantSyncWebhook struct {
+	URL string `json:"url"`
+	Key string `json:"key"`
 }
 
 // TenantSyncRecord is one thin build record a "records" reply carries

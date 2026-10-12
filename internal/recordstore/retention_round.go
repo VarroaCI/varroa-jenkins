@@ -176,6 +176,10 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 		return fmt.Errorf("drop expired log_chunks partitions: %w", err)
 	}
 
+	if _, err := deleteFinishedWebhookDeliveries(ctx, db, now.Add(-webhookDeliveryRetention)); err != nil {
+		return fmt.Errorf("delete finished webhook deliveries: %w", err)
+	}
+
 	if _, _, err := sweepIntents(ctx, db, now); err != nil {
 		return fmt.Errorf("sweep intents: %w", err)
 	}

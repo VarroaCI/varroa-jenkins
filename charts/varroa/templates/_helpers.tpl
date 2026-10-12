@@ -203,6 +203,33 @@ Usage: {{ include "varroa.np.recordStoreBlobEgress" $ | nindent 4 }}
 {{- end -}}
 
 {{/*
+Completion webhook egress rule for the recorder. Renders nothing unless
+networkPolicy.recorderWebhookEgress.enabled is true. Empty cidrs render
+0.0.0.0/0.
+Usage: {{ include "varroa.np.recorderWebhookEgress" $ | nindent 4 }}
+*/}}
+{{- define "varroa.np.recorderWebhookEgress" -}}
+{{- $toggle := .Values.networkPolicy.recorderWebhookEgress -}}
+{{- if $toggle.enabled -}}
+- to:
+{{- if $toggle.cidrs }}
+{{- range $toggle.cidrs }}
+  - ipBlock:
+      cidr: {{ . }}
+{{- end }}
+{{- else }}
+  - ipBlock:
+      cidr: 0.0.0.0/0
+{{- end }}
+  ports:
+{{- range $toggle.ports }}
+  - protocol: TCP
+    port: {{ . }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Pod placement (nodeSelector/tolerations/affinity) for a component.
 Renders nothing when all three are unset/empty (the default), so a bare
 `{{- include "varroa.podPlacement" .Values.<component> }}` call is a

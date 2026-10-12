@@ -308,6 +308,39 @@ describe("TeamForm", () => {
     expect(mockCreateTeam).not.toHaveBeenCalled();
   });
 
+  it("preserves pipelines.notifications on save", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "payments" };
+    mockGetTeam.mockResolvedValue({
+      name: "payments",
+      members: ["alice"],
+      namespaces: ["ns1"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
+        notifications: {
+          webhook: { url: "https://hooks.example.test/varroa", secretRef: { name: "hook", key: "signing" } },
+        },
+      },
+    });
+
+    render(<TeamForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Update")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTeam).toHaveBeenCalled();
+    });
+    const body = mockUpdateTeam.mock.calls[0][1];
+    expect(body.pipelines.notifications).toEqual({
+      webhook: { url: "https://hooks.example.test/varroa", secretRef: { name: "hook", key: "signing" } },
+    });
+  });
+
   it("loads existing exports of both kinds on the edit view", async () => {
     mockParams = { name: "payments" };
     mockGetTeam.mockResolvedValue({

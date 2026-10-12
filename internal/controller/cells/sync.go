@@ -35,12 +35,25 @@ type SyncPolicy struct {
 	// Retention carries the tenant's record-store windows (the tenant
 	// window and the per-job rules). Nil for a tenant that sets none.
 	Retention *v1alpha1.TeamPipelinesRetention
+
+	// Webhook carries the tenant's completion webhook, resolved from the
+	// Secret the Team names. Nil when the tenant declares no webhook or
+	// its Secret is not usable. It never travels in the policy JSON; the
+	// announce request carries it on its own field.
+	Webhook *WebhookSync
+}
+
+// WebhookSync is the receiver URL and the HMAC signing key the record
+// store posts a tenant's completion webhook with.
+type WebhookSync struct {
+	URL string
+	Key string
 }
 
 // Equal reports whether p and other announce the same policy. SyncPolicy
 // carries slice and pointer fields, so the == operator cannot compare two
-// values; Equal compares the seven scalar settings directly and Exports
-// and Retention with reflect.DeepEqual.
+// values; Equal compares the seven scalar settings directly, Exports,
+// Retention, and Webhook by value.
 func (p SyncPolicy) Equal(other SyncPolicy) bool {
 	return p.RehydrateBuilds == other.RehydrateBuilds &&
 		p.RehydrateDeadline == other.RehydrateDeadline &&
@@ -50,7 +63,17 @@ func (p SyncPolicy) Equal(other SyncPolicy) bool {
 		p.CronCatchUp == other.CronCatchUp &&
 		p.CronGrace == other.CronGrace &&
 		reflect.DeepEqual(p.Exports, other.Exports) &&
-		reflect.DeepEqual(p.Retention, other.Retention)
+		reflect.DeepEqual(p.Retention, other.Retention) &&
+		webhookSyncEqual(p.Webhook, other.Webhook)
+}
+
+// webhookSyncEqual compares two resolved webhooks. Two nil values are
+// equal, and a nil value differs from any set value.
+func webhookSyncEqual(a, b *WebhookSync) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // SyncPolicyFromPipelines reads the seven settings and the export grants

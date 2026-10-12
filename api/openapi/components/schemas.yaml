@@ -406,8 +406,54 @@ TeamPipelines:
       description: >-
         Grants of this tenant's jobs and locks to other tenants. An absent
         list exports nothing.
+    notifications:
+      $ref: '#/TeamNotifications'
     retention:
       $ref: '#/TeamPipelinesRetention'
+  additionalProperties: false
+
+TeamNotifications:
+  type: object
+  description: >-
+    Outward notifications of a pipelines tenant. The record store posts
+    the completion webhook for each run.
+  properties:
+    webhook:
+      $ref: '#/TeamWebhook'
+  additionalProperties: false
+
+TeamWebhook:
+  type: object
+  description: >-
+    A completion webhook. The record store posts a signed JSON payload to
+    url for each run this tenant completes. The signing key lives in the
+    Secret that secretRef names, in the tenant's agent namespace.
+  required: [url, secretRef]
+  properties:
+    url:
+      type: string
+      maxLength: 2048
+      description: >-
+        Receiver endpoint. Starts with https:// or http://. Use https://
+        for a receiver outside the cluster.
+    secretRef:
+      $ref: '#/TeamWebhookSecret'
+  additionalProperties: false
+
+TeamWebhookSecret:
+  type: object
+  description: >-
+    The Secret and data key that hold the HMAC signing key. The key
+    defaults to hmac-key.
+  required: [name]
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: Name of the Secret in the tenant's agent namespace.
+    key:
+      type: string
+      description: Data key that holds the signing key. Default hmac-key.
   additionalProperties: false
 
 TeamPipelinesRetention:

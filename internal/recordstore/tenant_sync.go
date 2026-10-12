@@ -789,16 +789,27 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 	if err != nil {
 		return fmt.Errorf("encode retired incarnations: %w", err)
 	}
+	// The webhook is stored as it is announced, and a nil value clears
+	// the stored one. Its encoding never reaches a log line.
+	var webhookJSON *string
+	if req.NotificationWebhook != nil {
+		encoded, encErr := json.Marshal(req.NotificationWebhook)
+		if encErr != nil {
+			return fmt.Errorf("encode notification webhook: %w", encErr)
+		}
+		s := string(encoded)
+		webhookJSON = &s
+	}
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.tenant_placements (
 			cluster, tenant, namespace, cell, generation, cell_instance, policy,
 			rehydrated_instance, pending_jobs, cell_alive, cell_alive_at, cell_last_seen_at,
 			dead_instances, announced_at, members, job_homes, incarnation, agent_namespace,
-			retired_incarnations
+			retired_incarnations, notification_webhook
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13::jsonb, now(),
-			$14::jsonb, $15::jsonb, $16, $17, $18::jsonb
+			$14::jsonb, $15::jsonb, $16, $17, $18::jsonb, $19::jsonb
 		)
 		ON CONFLICT (cluster, tenant) DO UPDATE SET
 			namespace           = EXCLUDED.namespace,
@@ -817,12 +828,13 @@ func writeTenantPlacement(ctx context.Context, tx pgx.Tx, req TenantSyncRequest,
 			job_homes           = EXCLUDED.job_homes,
 			incarnation         = EXCLUDED.incarnation,
 			agent_namespace     = EXCLUDED.agent_namespace,
-			retired_incarnations = EXCLUDED.retired_incarnations
+			retired_incarnations = EXCLUDED.retired_incarnations,
+			notification_webhook = EXCLUDED.notification_webhook
 	`,
 		req.Cluster, req.Tenant, req.Namespace, req.Cell, generation, req.CellInstance, string(policy),
 		rehydratedInstance, string(pendingJobsJSON), req.CellAlive, req.CellAliveAt, req.CellLastSeenAt,
 		string(deadInstancesJSON), string(membersJSON), string(jobHomesJSON), identity.incarnation,
-		req.AgentNamespace, string(retiredJSON),
+		req.AgentNamespace, string(retiredJSON), webhookJSON,
 	); err != nil {
 		return fmt.Errorf("upsert tenant placement: %w", err)
 	}

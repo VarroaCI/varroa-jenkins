@@ -205,6 +205,46 @@ spec:
                     maximum: 16
                     minimum: 1
                     type: integer
+                  notifications:
+                    description: |-
+                      Notifications configures the outward notifications of this tenant.
+                      The record store posts the completion webhook for each run.
+                    properties:
+                      webhook:
+                        description: |-
+                          Webhook posts a signed JSON payload to a URL each time a run of this
+                          tenant completes. The record store sends it, not the cell.
+                        properties:
+                          secretRef:
+                            description: SecretRef names the Secret that holds the
+                              signing key.
+                            properties:
+                              key:
+                                default: hmac-key
+                                description: Key is the data key that holds the signing
+                                  key.
+                                type: string
+                              name:
+                                description: Name is the Secret name.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          url:
+                            description: |-
+                              URL is the receiver endpoint. Use https:// for a receiver outside
+                              the cluster.
+                            maxLength: 2048
+                            type: string
+                        required:
+                        - secretRef
+                        - url
+                        type: object
+                        x-kubernetes-validations:
+                        - message: url must start with https:// or http://
+                          rule: self.url.startsWith('https://') || self.url.startsWith('http://')
+                    type: object
                   profile:
                     description: |-
                       Profile names the JenkinsVersionProfile the placement pass resolves a

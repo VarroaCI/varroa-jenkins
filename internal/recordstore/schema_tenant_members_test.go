@@ -59,17 +59,17 @@ func TestTenantPlacementsMemberColumnsAreNotNull(t *testing.T) {
 	}
 }
 
-// TestSchemaHoldsThirteenTables asserts migration 00011 adds no table.
-// The record store holds exactly thirteen tables in schema varroa after
-// every migration runs.
-func TestSchemaHoldsThirteenTables(t *testing.T) {
+// TestSchemaHoldsFourteenTables asserts migration 00011 adds no table.
+// The record store holds exactly fourteen tables in schema varroa after
+// every migration runs. Migration 00027 adds webhook_deliveries.
+func TestSchemaHoldsFourteenTables(t *testing.T) {
 	t.Parallel()
 
 	db := setupTestDB(t)
 	ctx := context.Background()
 
 	got := queryTableNames(ctx, t, db)
-	if len(got) != 13 {
-		t.Fatalf("table count: want 13, got %d: %v", len(got), got)
+	if len(got) != 14 {
+		t.Fatalf("table count: want 14, got %d: %v", len(got), got)
 	}
 }

@@ -115,6 +115,7 @@ func main() {
 		FinalizeWait:       envDurationMillis("VARROA_RECORDSTORE_LOG_FINALIZE_WAIT", defaultFinalizeWaitMs),
 		SweepMaxPending:    sweepMaxPendingFromEnv(),
 		ConfirmedGoneGrace: confirmedGoneGraceFromEnv(),
+		DashboardURL:       dashboardURLFromEnv(),
 		Logger:             logger,
 	}
 	if cfg.BusPassFile == "" {
@@ -129,6 +130,12 @@ func main() {
 		logger.Error("recorder exited with an error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// dashboardURLFromEnv reads VARROA_DASHBOARD_URL, the base URL a completion
+// webhook payload uses to link a run. An empty value omits that link.
+func dashboardURLFromEnv() string {
+	return os.Getenv("VARROA_DASHBOARD_URL")
 }
 
 // envDefault returns the value of the environment variable key, or

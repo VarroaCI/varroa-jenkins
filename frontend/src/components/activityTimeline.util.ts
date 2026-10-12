@@ -246,6 +246,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "reconcile.triggered": { icon: "↻", style: "softInfo" },
   "controller.created": { icon: "➕", style: "softOk" },
   "controller.deleted": { icon: "✗", style: "softBad" },
+  "tenant.webhook_failed": { icon: "✘", style: "softBad" },
   "controller.updated": { icon: "✏", style: "softInfo" },
   "provisioning.started": { icon: "▶", style: "softInfo" },
   "provisioning.completed": { icon: "✔", style: "softOk" },

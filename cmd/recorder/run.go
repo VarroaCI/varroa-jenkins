@@ -48,7 +48,10 @@ type Config struct {
 	// wait a pod-read confirmation serves before the recorder counts the
 	// instance gone.
 	ConfirmedGoneGrace time.Duration
-	Logger             *slog.Logger
+	// DashboardURL is VARROA_DASHBOARD_URL, the base URL a completion
+	// webhook payload uses to link a run. An empty value omits the link.
+	DashboardURL string
+	Logger       *slog.Logger
 }
 
 // confirmedGoneGrace resolves the grace once for every seam that reads
@@ -211,6 +214,13 @@ func run(ctx context.Context, cfg Config) error {
 	ingester.SetStateDeleter(store)
 	ingester.SetRunNotifier(runNotifier)
 
+	webhookMetrics, err := recordstore.NewWebhookMetrics(mp)
+	if err != nil {
+		return fmt.Errorf("register webhook metrics: %w", err)
+	}
+	webhookDispatcher := recordstore.NewWebhookDispatcher(pool, activityIngester, webhookMetrics, logger)
+	ingester.SetWebhooks(cfg.DashboardURL, webhookDispatcher.Nudge)
+
 	maintCfg := recordstore.MaintenanceConfig{
 		RunRetention:      cfg.RetentionRuns,
 		LogRetention:      cfg.RetentionLogs,
@@ -293,6 +303,9 @@ func run(ctx context.Context, cfg Config) error {
 		runNotifier.Start(ctx)
 		return nil
 	}
+	webhookFn := func(ctx context.Context) error {
+		return webhookDispatcher.Run(ctx)
+	}
 
 	workerDone := make(chan error, 1)
 	go func() {
@@ -308,6 +321,7 @@ func run(ctx context.Context, cfg Config) error {
 			namedWorker{"activity ingest", activityIngestFn},
 			namedWorker{"run notifier", runNotifierFn},
 			namedWorker{"backstop scheduler", backstopFn},
+			namedWorker{"webhook dispatcher", webhookFn},
 		)
 	}()
 

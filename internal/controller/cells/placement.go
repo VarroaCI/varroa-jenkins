@@ -139,6 +139,11 @@ type Inputs struct {
 	// injects a fixed clock.
 	Now func() time.Time
 
+	// Webhook is the tenant's resolved completion webhook. The caller
+	// reads its Secret; the placement pass only carries it into the
+	// announce policy, so a URL or key change re-announces.
+	Webhook *WebhookSync
+
 	// Cells lists every candidate cell Controller in the operator's own
 	// cluster. Cross-cluster placement is out of scope, so Place never
 	// needs to test cluster membership itself.
@@ -656,7 +661,7 @@ func performMove(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1
 	// because this is the one tick that still knows its identity. A
 	// rolled pod of a cell that stays a candidate is reported through
 	// cellPreviousInstances, on this path and on the moveNone path.
-	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	policy := syncPolicyFor(in, team)
 	agentNamespace := teamAgentNamespace(team)
 	var dead []DeadInstance
 	if wasPlaced && oldCell == nil {
@@ -854,6 +859,15 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 	return in.Announce(ctx, req)
 }
 
+// syncPolicyFor builds the announce policy of one tenant: the seven
+// pipelines settings and the export grants, plus the resolved webhook the
+// caller read from the tenant's Secret.
+func syncPolicyFor(in Inputs, team *v1alpha1.Team) SyncPolicy {
+	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	policy.Webhook = in.Webhook
+	return policy
+}
+
 // maybeReannounce sends the same-generation announcement (tenant-placement
 // spec, task 4.4a) when the owning cell's instance changed, the seven
 // pipelines settings changed, the tenant's rehydration state changed, the
@@ -861,7 +875,7 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 // or the resync window elapsed. cell is the tenant's current, unchanged
 // binding (moveNone): status.Placement already names it.
 func maybeReannounce(ctx context.Context, in Inputs, team *v1alpha1.Team, status *v1alpha1.TeamStatus, cell CellCandidate, nowT time.Time, out *Outcome) {
-	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
+	policy := syncPolicyFor(in, team)
 	agentNamespace := teamAgentNamespace(team)
 	rehydratedInstance, pendingJobs := currentRehydrationState(in, cell)
 

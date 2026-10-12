@@ -864,6 +864,11 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.Notifications != nil {
+		in, out := &in.Notifications, &out.Notifications
+		*out = new(TeamNotificationsSpec)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy creates a deep copy of TeamPipelinesSpec.
@@ -872,6 +877,57 @@ func (in *TeamPipelinesSpec) DeepCopy() *TeamPipelinesSpec {
 		return nil
 	}
 	out := new(TeamPipelinesSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamNotificationsSpec.
+func (in *TeamNotificationsSpec) DeepCopyInto(out *TeamNotificationsSpec) {
+	*out = *in
+	if in.Webhook != nil {
+		in, out := &in.Webhook, &out.Webhook
+		*out = new(TeamWebhookSpec)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TeamNotificationsSpec.
+func (in *TeamNotificationsSpec) DeepCopy() *TeamNotificationsSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamNotificationsSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamWebhookSpec.
+func (in *TeamWebhookSpec) DeepCopyInto(out *TeamWebhookSpec) {
+	*out = *in
+	out.SecretRef = in.SecretRef
+}
+
+// DeepCopy creates a deep copy of TeamWebhookSpec.
+func (in *TeamWebhookSpec) DeepCopy() *TeamWebhookSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamWebhookSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamWebhookSecretRef.
+func (in *TeamWebhookSecretRef) DeepCopyInto(out *TeamWebhookSecretRef) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of TeamWebhookSecretRef.
+func (in *TeamWebhookSecretRef) DeepCopy() *TeamWebhookSecretRef {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamWebhookSecretRef)
 	in.DeepCopyInto(out)
 	return out
 }

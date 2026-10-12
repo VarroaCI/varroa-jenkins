@@ -283,6 +283,14 @@ networkPolicy:
     enabled: true
     cidrs: ["0.0.0.0/0"]
     ports: [443]
+  # Completion webhook egress: the recorder posts a tenant's signed run
+  # payload to the receiver URL. Off by default. Enable it when a tenant
+  # declares spec.pipelines.notifications.webhook. Empty cidrs open
+  # 0.0.0.0/0. Pin cidrs to the receiver's address range.
+  recorderWebhookEgress:
+    enabled: false
+    cidrs: []
+    ports: [443]
   # Per-cell NetworkPolicy, one per Controller with spec.cell.enabled.
   # Opt-in: honoured only when networkPolicy.enabled is also true.
   cellIsolation:

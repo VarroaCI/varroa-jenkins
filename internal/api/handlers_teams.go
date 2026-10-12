@@ -71,11 +71,34 @@ type teamPipelinesEntry struct {
 	// pipelines:admin capability. Neither check is controller-scoped,
 	// because a grant belongs to a tenant, not to a cell.
 	Exports []teamExportEntry `json:"exports,omitempty"`
+
 	// Retention carries spec.pipelines.retention: the record-store windows
 	// for this tenant's runs. Only an operator may write it, so the
 	// tenant-admin path rejects a change to it the same way it rejects any
 	// other change outside the exports.
 	Retention *v1alpha1.TeamPipelinesRetention `json:"retention,omitempty"`
+
+	// Notifications carries spec.pipelines.notifications. Changing it needs
+	// the operator's own write, not the tenant's pipelines:admin grant.
+	Notifications *teamNotificationsEntry `json:"notifications,omitempty"`
+}
+
+// teamNotificationsEntry is the JSON shape of spec.pipelines.notifications.
+type teamNotificationsEntry struct {
+	Webhook *teamWebhookEntry `json:"webhook,omitempty"`
+}
+
+// teamWebhookEntry is the JSON shape of a completion webhook.
+type teamWebhookEntry struct {
+	URL       string                 `json:"url"`
+	SecretRef teamWebhookSecretEntry `json:"secretRef"`
+}
+
+// teamWebhookSecretEntry names the Secret and the data key that hold the
+// webhook signing key.
+type teamWebhookSecretEntry struct {
+	Name string `json:"name"`
+	Key  string `json:"key,omitempty"`
 }
 
 // teamExportEntry is the JSON shape of one spec.pipelines.exports entry.
@@ -162,6 +185,15 @@ func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEnt
 			Callers: exp.Callers,
 		})
 	}
+	if n := p.Notifications; n != nil && n.Webhook != nil {
+		e.Notifications = &teamNotificationsEntry{Webhook: &teamWebhookEntry{
+			URL: n.Webhook.URL,
+			SecretRef: teamWebhookSecretEntry{
+				Name: n.Webhook.SecretRef.Name,
+				Key:  n.Webhook.SecretRef.Key,
+			},
+		}}
+	}
 	e.Retention = p.Retention
 	return e
 }
@@ -201,6 +233,17 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 			Callers: exp.Callers,
 		})
 	}
+	if n := e.Notifications; n != nil && n.Webhook != nil {
+		spec.Notifications = &v1alpha1.TeamNotificationsSpec{
+			Webhook: &v1alpha1.TeamWebhookSpec{
+				URL: strings.TrimSpace(n.Webhook.URL),
+				SecretRef: v1alpha1.TeamWebhookSecretRef{
+					Name: strings.TrimSpace(n.Webhook.SecretRef.Name),
+					Key:  strings.TrimSpace(n.Webhook.SecretRef.Key),
+				},
+			},
+		}
+	}
 	spec.Retention = e.Retention
 	return spec
 }
@@ -224,6 +267,14 @@ func validateTeamPipelines(p *teamPipelinesEntry, namespaces []string) string {
 	for i, exp := range p.Exports {
 		if len(exp.Callers) == 0 {
 			return fmt.Sprintf("pipelines.exports[%d].callers is required", i)
+		}
+	}
+	if n := p.Notifications; n != nil && n.Webhook != nil {
+		if strings.TrimSpace(n.Webhook.URL) == "" {
+			return "pipelines.notifications.webhook.url is required"
+		}
+		if strings.TrimSpace(n.Webhook.SecretRef.Name) == "" {
+			return "pipelines.notifications.webhook.secretRef.name is required"
 		}
 	}
 	if r := p.Retention; r != nil {

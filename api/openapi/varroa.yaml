@@ -9512,6 +9512,14 @@ components:
       - name
       - state
       type: object
+    components_schemas_TeamNotifications:
+      additionalProperties: false
+      description: Outward notifications of a pipelines tenant. The record store posts
+        the completion webhook for each run.
+      properties:
+        webhook:
+          $ref: '#/components/schemas/components_schemas_TeamWebhook'
+      type: object
     components_schemas_TeamPipelines:
       additionalProperties: false
       description: 'A Team''s pipelines tenancy declaration (spec.pipelines). A Team
@@ -9575,6 +9583,8 @@ components:
           maximum: 16
           minimum: 1
           type: integer
+        notifications:
+          $ref: '#/components/schemas/components_schemas_TeamNotifications'
         profile:
           description: JenkinsVersionProfile the placement pass resolves a cell against.
             Required when pipelines is set.
@@ -9724,6 +9734,38 @@ components:
       required:
       - name
       - namespaces
+      type: object
+    components_schemas_TeamWebhook:
+      additionalProperties: false
+      description: A completion webhook. The record store posts a signed JSON payload
+        to url for each run this tenant completes. The signing key lives in the Secret
+        that secretRef names, in the tenant's agent namespace.
+      properties:
+        secretRef:
+          $ref: '#/components/schemas/components_schemas_TeamWebhookSecret'
+        url:
+          description: Receiver endpoint. Starts with https:// or http://. Use https://
+            for a receiver outside the cluster.
+          maxLength: 2048
+          type: string
+      required:
+      - url
+      - secretRef
+      type: object
+    components_schemas_TeamWebhookSecret:
+      additionalProperties: false
+      description: The Secret and data key that hold the HMAC signing key. The key
+        defaults to hmac-key.
+      properties:
+        key:
+          description: Data key that holds the signing key. Default hmac-key.
+          type: string
+        name:
+          description: Name of the Secret in the tenant's agent namespace.
+          minLength: 1
+          type: string
+      required:
+      - name
       type: object
     components_schemas_TemplateCatalogCondition:
       description: Status condition for catalog/composedbundle resources.

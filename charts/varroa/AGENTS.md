@@ -333,7 +333,10 @@ the packaged CRDs. Does not own the Go source it packages
   `duration` that is not `<n>m`/`<n>h` from 15m to 12h
   (asserted by `tests/test-artifact-sts.sh`). STS mode adds the four
   `VARROA_ARTIFACT_STS_*` variables to the operator and the
-  `recordStoreBlobEgress` rule to the operator NetworkPolicy. The operator
+  `recordStoreBlobEgress` rule to the operator NetworkPolicy. The recorder's
+  completion-webhook egress is `networkPolicy.recorderWebhookEgress`, off by
+  default (`tests/test-recorder-webhook-egress.sh`); the recorder reads
+  `VARROA_DASHBOARD_URL` from `auth.dashboardUrl`. The operator
   Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
   non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the
   gateway gets, both gated the same way as the gateway's own recordStore env

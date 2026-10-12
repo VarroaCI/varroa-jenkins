@@ -199,3 +199,29 @@ cases:
     field: spec.pipelines.exports[0]
     new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [team-b]}]}}}
     want: accept
+
+  # Webhook URL must start with https:// or http://.
+  - name: https webhook url accepted
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "https://hooks.example.com/varroa", secretRef: {name: hook}}}}}}
+    want: accept
+  - name: http webhook url accepted
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "http://receiver.team-a.svc/hook", secretRef: {name: hook}}}}}}
+    want: accept
+  - name: webhook url without a scheme refused
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "hooks.example.com/varroa", secretRef: {name: hook}}}}}}
+    want: reject
+  - name: webhook url with an ftp scheme refused
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "ftp://files.example.com/hook", secretRef: {name: hook}}}}}}
+    want: reject

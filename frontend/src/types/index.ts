@@ -491,8 +491,23 @@ export interface TeamPipelines {
    * list exports nothing.
    */
   exports?: TeamExport[];
+  /** Outward notifications. The completion webhook is set through the API, not the form. */
+  notifications?: TeamNotifications;
   /** Record-store windows for this tenant's runs. Only an operator sets it. */
   retention?: TeamPipelinesRetention;
+}
+
+/** Outward notifications of a pipelines tenant. */
+export interface TeamNotifications {
+  /** Completion webhook. The record store posts a signed payload for each run. */
+  webhook?: TeamWebhook;
+}
+
+/** A completion webhook. The signing key lives in the Secret that secretRef names. */
+export interface TeamWebhook {
+  /** Receiver endpoint. Starts with https:// or http://. */
+  url: string;
+  secretRef: { name: string; key?: string };
 }
 
 /** The tenant window and the per-job rules of spec.pipelines.retention. */
