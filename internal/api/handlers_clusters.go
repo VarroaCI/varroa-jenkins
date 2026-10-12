@@ -457,6 +457,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "composedbundles", s.deps.OperatorNamespace))
 		s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		return
 	}
@@ -714,7 +715,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 
 		switch r.Method {
 		case http.MethodGet:
-			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadComposedBundles(claims) {
+			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, s.deps.OperatorNamespace) {
 				s.writeJSONError(w, http.StatusForbidden, "forbidden")
 				return
 			}
@@ -819,6 +820,7 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", s.deps.OperatorNamespace))
 		resp := map[string]interface{}{
 			"items":             items,
 			"operatorNamespace": operatorNs,
@@ -843,7 +845,7 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadCatalogItems(claims) {
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, s.deps.OperatorNamespace) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -885,6 +887,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 				writeConfigBroodError(w, err, cluster)
 				return
 			}
+			items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogsources", s.deps.OperatorNamespace))
 			s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		case http.MethodPost:
 			ns := r.URL.Query().Get("namespace")
@@ -1005,7 +1008,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.deps.Authorizer.CanManageCatalogSources(claims, "read") {
+		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", ns, s.deps.OperatorNamespace) {
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -1469,4 +1472,29 @@ func (s *Server) handleControllerPlugins(w http.ResponseWriter, r *http.Request,
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// filterConfigByNamespace keeps the raw items whose namespace keep allows.
+// A CR carries metadata.namespace; a catalog item summary carries namespace.
+func filterConfigByNamespace(items []json.RawMessage, keep func(string) bool) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(items))
+	for _, raw := range items {
+		var probe struct {
+			Namespace string `json:"namespace"`
+			Metadata  struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(raw, &probe) != nil {
+			continue
+		}
+		ns := probe.Metadata.Namespace
+		if ns == "" {
+			ns = probe.Namespace
+		}
+		if keep(ns) {
+			out = append(out, raw)
+		}
+	}
+	return out
 }

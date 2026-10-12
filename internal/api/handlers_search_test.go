@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
 	"testing"
 )
@@ -57,5 +59,44 @@ func TestMapSearchResultsDeduplicatesIdentity(t *testing.T) {
 	items := map[string]SearchResult{"core\x00team": {Type: "namespace", Cluster: "core", Name: "team"}, "edge\x00team": {Type: "namespace", Cluster: "edge", Name: "team"}}
 	if got := len(mapSearchResults(items)); got != 2 {
 		t.Fatalf("got %d namespaces, want 2", got)
+	}
+}
+
+// TestSearch_CatalogItemsFilteredByNamespace pins down that global search
+// returns only the catalog items the caller can read: its own namespace and
+// the operator namespace, and no other tenant's namespace.
+func TestSearch_CatalogItemsFilteredByNamespace(t *testing.T) {
+	item := func(ns, name string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"name": name, "namespace": ns, "description": "shared tool"})
+		return b
+	}
+	brood := &scopeTestConfigBrood{
+		operatorNs: "varroa-system",
+		items: []json.RawMessage{
+			item("team-a", "shared-a"),
+			item("team-b", "shared-b"),
+			item("varroa-system", "shared-platform"),
+		},
+	}
+	server := NewServer(&Dependencies{
+		Authorizer:        scopedDeveloperAuthorizer(),
+		ConfigBrood:       brood,
+		Brood:             &stubBrood{localCluster: "core"},
+		OperatorNamespace: "varroa-system",
+		Logger:            slog.Default(),
+	})
+
+	resp, err := server.Search(context.Background(), scopedDevClaims, "shared", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range resp.Items {
+		if r.Type == "catalogitem" {
+			got[r.Namespace] = true
+		}
+	}
+	if !got["team-a"] || !got["varroa-system"] || got["team-b"] {
+		t.Errorf("catalog item namespaces = %v, want team-a and varroa-system only", got)
 	}
 }

@@ -177,17 +177,104 @@ func TestDispatchCatalogSources_ScopedDeveloper_SyncOtherNamespace(t *testing.T)
 	}
 }
 
-// TestDispatchCatalogSources_ScopedDeveloper_GetReachableRegardlessOfNamespace
-// pins down that the single-item GET (read) stays namespace-blind: a scoped
-// developer bound only to team-a can still read a CatalogSource in team-b.
-func TestDispatchCatalogSources_ScopedDeveloper_GetReachableRegardlessOfNamespace(t *testing.T) {
+// TestDispatchCatalogSources_ScopedDeveloper_GetOtherNamespaceForbidden pins
+// down that a single-item GET outside the caller's readable namespaces answers
+// 403 before the store is read.
+func TestDispatchCatalogSources_ScopedDeveloper_GetOtherNamespaceForbidden(t *testing.T) {
 	srv, _ := newCatalogSourcesTestServer()
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/clusters/core/catalogsources/team-b/src", nil)
 	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-b", "src"})
 
+	if w.Code != http.StatusForbidden {
+		t.Errorf("get other-ns: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDispatchCatalogSources_ScopedDeveloper_GetOperatorNamespaceAllowed(t *testing.T) {
+	srv := NewServer(&Dependencies{
+		Authorizer:        scopedDeveloperAuthorizer(),
+		ConfigBrood:       &scopeTestConfigBrood{},
+		OperatorNamespace: "varroa-system",
+		Logger:            slog.Default(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/catalogsources/varroa-system/platform", nil)
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"varroa-system", "platform"})
+
 	if w.Code != http.StatusOK {
-		t.Errorf("get other-ns (read stays global): expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("get operator-ns: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDispatchCatalogSources_ScopedDeveloper_ListFiltersNamespaces(t *testing.T) {
+	brood := &scopeTestConfigBrood{
+		operatorNs: "varroa-system",
+		sources: []json.RawMessage{
+			scopeTestBundleRaw("team-a", "a"),
+			scopeTestBundleRaw("team-b", "b"),
+			scopeTestBundleRaw("varroa-system", "platform"),
+		},
+	}
+	srv := NewServer(&Dependencies{
+		Authorizer:        scopedDeveloperAuthorizer(),
+		ConfigBrood:       brood,
+		OperatorNamespace: "varroa-system",
+		Logger:            slog.Default(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/catalogsources", nil)
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got := scopedBundleListNamespaces(t, w.Body.Bytes())
+	if len(got) != 2 || got[0] != "team-a" || got[1] != "varroa-system" {
+		t.Errorf("list namespaces = %v, want [team-a varroa-system]", got)
+	}
+}
+
+func TestDispatchCatalogItems_ScopedDeveloper_ListFiltersNamespaces(t *testing.T) {
+	brood := &scopeTestConfigBrood{
+		operatorNs: "varroa-system",
+		items: []json.RawMessage{
+			scopeTestBundleRaw("team-a", "a"),
+			scopeTestBundleRaw("team-b", "b"),
+			scopeTestBundleRaw("varroa-system", "platform"),
+		},
+	}
+	srv := NewServer(&Dependencies{
+		Authorizer:        scopedDeveloperAuthorizer(),
+		ConfigBrood:       brood,
+		OperatorNamespace: "varroa-system",
+		Logger:            slog.Default(),
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/catalogitems", nil)
+	srv.dispatchCatalogItems(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got := scopedBundleListNamespaces(t, w.Body.Bytes())
+	if len(got) != 2 || got[0] != "team-a" || got[1] != "varroa-system" {
+		t.Errorf("list namespaces = %v, want [team-a varroa-system]", got)
+	}
+}
+
+func TestDispatchCatalogItems_ScopedDeveloper_GetOtherNamespaceForbidden(t *testing.T) {
+	srv, _ := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/core/catalogitems/team-b/item", nil)
+	srv.dispatchCatalogItems(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-b", "item"})
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("get other-ns: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }

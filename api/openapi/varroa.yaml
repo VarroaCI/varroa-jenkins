@@ -11422,6 +11422,8 @@ paths:
       - clusters
   /api/v1/clusters/{cluster}/catalogitems:
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: listCatalogItems
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11457,11 +11459,15 @@ paths:
           description: Catalog item list (N6 envelope with operatorNamespace sibling).
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
       summary: Lists catalog items with optional filters.
       tags:
       - catalog
   /api/v1/clusters/{cluster}/catalogitems/{ns}/{name}:
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: getCatalogItem
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11479,6 +11485,8 @@ paths:
             stale.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
       summary: Gets a catalog item.
@@ -11486,6 +11494,8 @@ paths:
       - catalog
   /api/v1/clusters/{cluster}/catalogsources:
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: listCatalogSources
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11507,6 +11517,8 @@ paths:
           description: Catalog source list (N6 envelope).
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
       summary: Lists catalog sources, optionally filtered by namespace.
       tags:
       - catalog
@@ -11554,6 +11566,8 @@ paths:
       tags:
       - catalog
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: getCatalogSource
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11568,6 +11582,8 @@ paths:
           description: Catalog source detail.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
       summary: Gets a catalog source.
@@ -11630,6 +11646,8 @@ paths:
       - catalog
   /api/v1/clusters/{cluster}/composedbundles:
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: listComposedBundles
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11651,6 +11669,8 @@ paths:
           description: Composed bundle list (N6 envelope).
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
       summary: Lists composed bundles, optionally filtered by namespace.
       tags:
       - composedbundles
@@ -11698,6 +11718,8 @@ paths:
       tags:
       - composedbundles
     get:
+      description: A namespace-scoped caller sees objects in its readable namespaces
+        and the operator namespace.
       operationId: getComposedBundle
       parameters:
       - $ref: '#/components/parameters/components_parameters_cluster'
@@ -11712,6 +11734,8 @@ paths:
           description: Composed bundle detail.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
       summary: Gets a composed bundle.

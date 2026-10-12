@@ -371,14 +371,6 @@ func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "catalogsources", "read")
 }
 
-// CanManageCatalogSources checks if the caller can manage CatalogSources with the given verb.
-func (a *Authorizer) CanManageCatalogSources(claims *auth.Claims, verb string) bool {
-	if claims == nil {
-		return false
-	}
-	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "catalogsources", verb)
-}
-
 // CanManageCatalogSourcesInNamespace checks the CatalogSource write capability
 // against a specific target namespace, so a namespace-scoped binding cannot act
 // on (or publish into) another tenant's namespace when the namespace comes from
@@ -415,12 +407,35 @@ func (a *Authorizer) CanReadComposedBundles(claims *auth.Claims) bool {
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "composedbundles", "read")
 }
 
-// CanWriteComposedBundles checks if the caller can write ComposedBundles with the given verb.
-func (a *Authorizer) CanWriteComposedBundles(claims *auth.Claims, verb string) bool {
-	if claims == nil {
+// CanReadConfigInNamespace reports whether the caller may read one
+// namespaced config object. resource is catalogitems, catalogsources, or
+// composedbundles. A caller reads an object in a namespace where a binding
+// grants the read verb. A caller with the read verb in any scope also reads
+// the operator namespace, because an unqualified itemRef resolves there.
+// An empty namespace denies.
+func (a *Authorizer) CanReadConfigInNamespace(claims *auth.Claims, resource, namespace, operatorNamespace string) bool {
+	if claims == nil || namespace == "" {
 		return false
 	}
-	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "composedbundles", verb)
+	if operatorNamespace != "" && namespace == operatorNamespace &&
+		hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), resource, "read") {
+		return true
+	}
+	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, ""), resource, "read")
+}
+
+// ConfigReadFilter returns a predicate that applies CanReadConfigInNamespace
+// and caches each namespace's answer for one list call.
+func (a *Authorizer) ConfigReadFilter(claims *auth.Claims, resource, operatorNamespace string) func(namespace string) bool {
+	seen := map[string]bool{}
+	return func(ns string) bool {
+		if v, ok := seen[ns]; ok {
+			return v
+		}
+		v := a.CanReadConfigInNamespace(claims, resource, ns, operatorNamespace)
+		seen[ns] = v
+		return v
+	}
 }
 
 // CanWriteComposedBundlesInNamespace checks the ComposedBundle write capability
@@ -429,6 +444,11 @@ func (a *Authorizer) CanWriteComposedBundles(claims *auth.Claims, verb string) b
 // namespace comes from the request.
 func (a *Authorizer) CanWriteComposedBundlesInNamespace(claims *auth.Claims, verb, namespace string) bool {
 	if claims == nil {
+		return false
+	}
+	// An empty namespace must deny for the same reason as
+	// CanManageCatalogSourcesInNamespace: an empty scope passes every binding.
+	if namespace == "" {
 		return false
 	}
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, ""), "composedbundles", verb)

@@ -42,7 +42,8 @@ func catalogItemDeps() *api.Dependencies {
 			},
 		},
 	)
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{
+		Authorizer: adminTestAuthorizer(), Client: &stubClient{}, Store: store}
 }
 
 // listCatalogItemsResult calls list_catalog_items and returns the decoded
@@ -177,4 +178,22 @@ func TestGetCatalogItem_DescriptionNamesPipelineTemplateShape(t *testing.T) {
 	if !strings.Contains(desc, "does not parse it") {
 		t.Errorf("description = %q, want it to say this tool does not parse the content", desc)
 	}
+}
+
+func TestMCPListCatalogItems_ScopedDeveloperFiltered(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"catalogitems"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps,
+		&v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "team-a"}, Spec: v1alpha1.CatalogItemSpec{SourceRef: "s", Type: v1alpha1.CatalogItemItem, Path: "a.yaml"}},
+		&v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "team-b"}, Spec: v1alpha1.CatalogItemSpec{SourceRef: "s", Type: v1alpha1.CatalogItemItem, Path: "b.yaml"}},
+		&v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "varroa-system"}, Spec: v1alpha1.CatalogItemSpec{SourceRef: "s", Type: v1alpha1.CatalogItemItem, Path: "p.yaml"}},
+	)
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "list_catalog_items", map[string]interface{}{})
+	requireNamespaces(t, listedNamespaces(t, tr), "team-a", "varroa-system")
+}
+
+func TestMCPGetCatalogItem_ScopedDeveloperOtherNamespaceDenied(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"catalogitems"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps, &v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "item", Namespace: "team-b"}, Spec: v1alpha1.CatalogItemSpec{SourceRef: "s", Type: v1alpha1.CatalogItemItem, Path: "b.yaml"}})
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "get_catalog_item", map[string]interface{}{"namespace": "team-b", "name": "item"})
+	requireAccessDenied(t, tr)
 }

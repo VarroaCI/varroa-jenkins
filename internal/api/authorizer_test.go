@@ -646,11 +646,126 @@ func TestNamespaceAllowedGates_ScopedDeveloperKeepsAccess(t *testing.T) {
 	if !a.CanReadComposedBundles(claims) {
 		t.Error("namespace-scoped developer must be allowed CanReadComposedBundles")
 	}
-	if !a.CanWriteComposedBundles(claims, "create") {
-		t.Error("namespace-scoped developer must be allowed CanWriteComposedBundles(create)")
+	if !a.CanWriteComposedBundlesInNamespace(claims, "create", "team-a") {
+		t.Error("namespace-scoped developer must be allowed CanWriteComposedBundlesInNamespace(create, team-a)")
 	}
-	if !a.CanWriteComposedBundles(claims, "update") {
-		t.Error("namespace-scoped developer must be allowed CanWriteComposedBundles(update)")
+	if !a.CanWriteComposedBundlesInNamespace(claims, "update", "team-a") {
+		t.Error("namespace-scoped developer must be allowed CanWriteComposedBundlesInNamespace(update, team-a)")
+	}
+	if a.CanWriteComposedBundlesInNamespace(claims, "create", "team-b") {
+		t.Error("namespace-scoped developer must be denied CanWriteComposedBundlesInNamespace(create, team-b)")
+	}
+}
+
+func TestCanWriteComposedBundlesInNamespace_EmptyNamespaceDenies(t *testing.T) {
+	devRole := &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "developer"},
+		Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+			{Resources: []string{"composedbundles"}, Verbs: []string{"create", "update", "delete"}},
+		}},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "ns-scoped-developer"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "user-a"}},
+				RoleRef:  "developer",
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+			}},
+	}
+	a := NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{devRole}, bindings), false)
+	claims := &auth.Claims{Subject: "user-a"}
+	for _, verb := range []string{"create", "update", "delete"} {
+		if a.CanWriteComposedBundlesInNamespace(claims, verb, "") {
+			t.Errorf("CanWriteComposedBundlesInNamespace(%s, \"\") must deny an empty namespace", verb)
+		}
+	}
+}
+
+func TestCanReadConfigInNamespace(t *testing.T) {
+	const operatorNs = "varroa-system"
+	resources := []string{"catalogitems", "catalogsources", "composedbundles"}
+
+	// scopedDev: read in team-a only.
+	scopedRole := &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-reader"},
+		Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+			{Resources: resources, Verbs: []string{"read"}},
+		}},
+	}
+	scopedBindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "scoped"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "scoped-user"}},
+				RoleRef:  "scoped-reader",
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+			}},
+	}
+	// global: read in every namespace (nil scope).
+	globalBindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "global"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "global-user"}},
+				RoleRef:  "scoped-reader",
+			}},
+	}
+	// selector: a controllerSelector-only binding grants read on controllers.
+	selectorBindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "selector"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "selector-user"}},
+				RoleRef:  "scoped-reader",
+				Scope: &v1alpha1.VarroaRoleBindingScope{
+					ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}},
+				},
+			}},
+	}
+	// nocat: a caller with no catalog verb.
+	noCatRole := &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "controller-reader"},
+		Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+			{Resources: []string{"controllers"}, Verbs: []string{"read"}},
+		}},
+	}
+	noCatBindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "nocat"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "nocat-user"}},
+				RoleRef:  "controller-reader",
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+			}},
+	}
+
+	scoped := NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{scopedRole}, scopedBindings), false)
+	global := NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{scopedRole}, globalBindings), false)
+	selector := NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{scopedRole}, selectorBindings), false)
+	nocat := NewAuthorizer(testResolver([]*v1alpha1.VarroaRole{noCatRole}, noCatBindings), false)
+
+	cases := []struct {
+		name string
+		a    *Authorizer
+		user string
+		ns   string
+		want bool
+	}{
+		{"scoped reads own namespace", scoped, "scoped-user", "team-a", true},
+		{"scoped reads operator namespace", scoped, "scoped-user", operatorNs, true},
+		{"scoped denied other namespace", scoped, "scoped-user", "team-b", false},
+		{"scoped denied empty namespace", scoped, "scoped-user", "", false},
+		{"global reads other namespace", global, "global-user", "team-b", true},
+		{"no catalog verb denied operator namespace", nocat, "nocat-user", operatorNs, false},
+		{"controllerSelector-only denied team-a", selector, "selector-user", "team-a", false},
+		{"controllerSelector-only reads operator namespace", selector, "selector-user", operatorNs, true},
+	}
+	for _, res := range resources {
+		for _, tc := range cases {
+			claims := &auth.Claims{Subject: tc.user}
+			if got := tc.a.CanReadConfigInNamespace(claims, res, tc.ns, operatorNs); got != tc.want {
+				t.Errorf("%s / %s: CanReadConfigInNamespace(%q) = %v, want %v", res, tc.name, tc.ns, got, tc.want)
+			}
+		}
+	}
+	if scoped.CanReadConfigInNamespace(nil, "catalogitems", "team-a", operatorNs) {
+		t.Error("nil claims must deny")
 	}
 }
 

@@ -30,14 +30,28 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		withListOutput(catalogItemListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listCI, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadCatalogItems(claims) {
+			return mcp.NewToolResultError("access denied: missing catalogitems:read permission"), nil
+		}
 		ns := namespaceOrDefault(getArgs(req))
 		source, _ := getArgs(req)["source"].(string)
 		items, err := crdstore.List[v1alpha1.CatalogItem](ctx, deps.Store, ns, "")
 		if err != nil {
 			return mcp.NewToolResultError("failed to list catalog items: " + err.Error()), nil
 		}
+		keep := deps.Authorizer.ConfigReadFilter(claims, "catalogitems", deps.OperatorNamespace)
 		summaries := make([]any, 0, len(items))
 		for _, item := range items {
+			if !keep(item.Namespace) {
+				continue
+			}
 			if source != "" && item.Spec.SourceRef != source {
 				continue
 			}
@@ -54,8 +68,18 @@ func registerCatalogItemTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		mcp.WithString("name", mcp.Required(), mcp.Description("Item name")),
 	)
 	addTool(mcpServer, kindRead, getCI, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
 		ns, _ := getArgs(req)["namespace"].(string)
 		name, _ := getArgs(req)["name"].(string)
+		if !deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, deps.OperatorNamespace) {
+			return mcp.NewToolResultError("access denied: missing catalogitems:read permission in namespace " + ns), nil
+		}
 		item, err := crdstore.Get[v1alpha1.CatalogItem](ctx, deps.Store, name, ns)
 		if err != nil {
 			return mcp.NewToolResultError("catalog item not found: " + err.Error()), nil

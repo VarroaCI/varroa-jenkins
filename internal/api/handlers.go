@@ -2200,6 +2200,7 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 			}
 		} else {
 			succeeded := 0
+			keep := s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", s.deps.OperatorNamespace)
 			for _, cluster := range clusters {
 				rawItems, _, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, namespace, CatalogItemFilter{})
 				if listErr != nil {
@@ -2210,7 +2211,7 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 				succeeded++
 				for _, raw := range rawItems {
 					var item bus.CatalogItemSummary
-					if json.Unmarshal(raw, &item) != nil || !searchMatch(q, item.Name, "", "", item.Description) {
+					if json.Unmarshal(raw, &item) != nil || !keep(item.Namespace) || !searchMatch(q, item.Name, "", "", item.Description) {
 						continue
 					}
 					results = append(results, SearchResult{Type: "catalogitem", Cluster: cluster.Name, Namespace: item.Namespace, Name: item.Name, Description: item.Description, Link: "/catalog/items/" + url.PathEscape(item.Namespace) + "/" + url.PathEscape(item.Name) + "?cluster=" + url.QueryEscape(cluster.Name)})

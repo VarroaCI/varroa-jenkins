@@ -57,6 +57,16 @@ spec:
 When both scope fields are set, a controller must match both. Namespace scope
 does not narrow cluster-scoped resources.
 
+## Read catalog and bundle objects
+
+A caller reads a `CatalogItem`, `CatalogSource`, or `ComposedBundle` in a
+namespace where its binding grants `read`. A caller with `read` in any scope
+also reads the operator namespace, because an unqualified `itemRef` resolves
+there. A cluster-wide binding reads every namespace. A list leaves out the
+objects that the caller cannot read. A single read outside that set answers
+`403`. MCP and search apply the same rule. A binding scoped only by
+`controllerSelector` reads the operator namespace only.
+
 ## Grant pipelines access
 
 The `pipelines` resource controls Jenkins job and run access through Varroa.

@@ -17556,6 +17556,7 @@ type ListCatalogItemsResponse struct {
 		OperatorNamespace *string                               `json:"operatorNamespace,omitempty"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -17579,6 +17580,7 @@ type GetCatalogItemResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasCatalogItemDetailResponse
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -17605,6 +17607,7 @@ type ListCatalogSourcesResponse struct {
 		Items []ComponentsSchemasCatalogSource `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -17675,6 +17678,7 @@ type GetCatalogSourceResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasCatalogSource
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -17752,6 +17756,7 @@ type ListComposedBundlesResponse struct {
 		Items []ComponentsSchemasComposedBundle `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -17870,6 +17875,7 @@ type GetComposedBundleResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasComposedBundle
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -24124,6 +24130,13 @@ func ParseListCatalogItemsResponse(rsp *http.Response) (*ListCatalogItemsRespons
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	}
 
 	return response, nil
@@ -24156,6 +24169,13 @@ func ParseGetCatalogItemResponse(rsp *http.Response) (*GetCatalogItemResponse, e
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound
@@ -24198,6 +24218,13 @@ func ParseListCatalogSourcesResponse(rsp *http.Response) (*ListCatalogSourcesRes
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	}
 
@@ -24304,6 +24331,13 @@ func ParseGetCatalogSourceResponse(rsp *http.Response) (*GetCatalogSourceRespons
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound
@@ -24435,6 +24469,13 @@ func ParseListComposedBundlesResponse(rsp *http.Response) (*ListComposedBundlesR
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	}
 
@@ -24621,6 +24662,13 @@ func ParseGetComposedBundleResponse(rsp *http.Response) (*GetComposedBundleRespo
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound

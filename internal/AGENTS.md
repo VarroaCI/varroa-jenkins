@@ -260,6 +260,9 @@ reading each package's entry point):
   so the
   MCP surface and the REST surface authorize and read identically; no tool
   here issues an HTTP request to the BFF or calls a controller-scoped check.
+  The catalog and bundle read tools check `CanReadConfigInNamespace` for a single
+  object or filter list items with `ConfigReadFilter`; the write tools use the
+  `...InNamespace` gates.
   `get_run_log` returns a bounded tail (`tailLines`, default 100, clamped 1
   to 500) as plain text, never a stream, and starts no live tail.
   `tools_cellpools.go` registers `list_cell_pools`, `get_cell_pool`, and

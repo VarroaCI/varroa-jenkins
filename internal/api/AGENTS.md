@@ -212,7 +212,10 @@ federation, activity persistence, and SSE fanout.
   exposes one `Can*(claims, ...) bool` method per capability (`CanReadController`,
   `CanApproveRestart`, `CanManageCatalogSourcesInNamespace`,
   `CanWriteComposedBundlesInNamespace`, ...). There is no generic authz middleware —
-  each handler calls the specific `Can*` it needs.
+  each handler calls the specific `Can*` it needs. Config reads (catalog items,
+  sources, composed bundles) use `CanReadConfigInNamespace` for a single object and
+  `ConfigReadFilter` per list item; a single read outside the readable set answers
+  `403`.
 - Multi-cluster fan-out: `Brood` interface (`brood.go`), implemented by `busBrood`
   over NATS (`bus.Conn` + `bus.ClusterDirectory`), is the cross-cluster Controller
   CRUD router; `BroodOps` (`broodops_bus.go`/`broodops_aggregate.go`/
