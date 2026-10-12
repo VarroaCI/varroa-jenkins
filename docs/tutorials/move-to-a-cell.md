@@ -200,7 +200,7 @@ varroa.lock(name: 'deploy-prod', timeout: 300) {
 }
 ```
 
-Read [Build logs and artifacts](../operations/build-logs-and-artifacts.md#agent-namespace-egress), [Test cases](../operations/build-records.md#test-cases), [The durability requirement](../operations/pipeline-mesh.md#the-durability-requirement) and [Acquire a fleet lock](../config/cross-tenant-pipelines.md#acquire-a-fleet-lock).
+Read [Build logs and artifacts](../operations/build-logs-and-artifacts.md#agent-namespace-egress), [Test cases](../operations/build-records.md#test-cases), [The durability requirement](../operations/pipeline-mesh.md#the-durability-requirement) and [Acquire a fleet lock](../config/cross-tenant-pipelines.md#acquire-a-fleet-lock). Read [Build state across slots](../operations/tenant-slots.md#build-state-across-slots) before you move a job to another slot.
 
 ## 8. Find the build
 

@@ -40,8 +40,7 @@ kubectl get team payments -o jsonpath='{.status.placement.members}'
 
 The recorder maps each job path to one slot. A job runs only on its home
 slot's holder; a claim from any other member answers `NOT_HOME`. One writer for each job keeps
-`disableConcurrentBuilds`, `previousBuild`, workspace reuse, and throttling true: all observe one
-Jenkins.
+`disableConcurrentBuilds`, `previousBuild`, and throttling true: all observe one Jenkins.
 
 The map uses a consistent hash. A growth from `N` to `N + 1` slots moves about one job in `N + 1`,
 onto the new slot. A new job takes its slot at once.
@@ -76,6 +75,64 @@ old holder's agent pods go as [Agent pod lifetime](tenant-pod-templates.md#agent
 
 Every other slot keeps building. A claim carrying the generation from before the promotion
 answers `NOT_READY`, a retry and never a cancel.
+
+## Build state across slots
+
+Each slot holder is its own Jenkins. A cell writes artifacts and stashes under its own object
+prefix, and computes every key from that prefix. A **move** below is a resume or a job home on
+another cell: a promoted standby, a slot scale, or a new cell for the slot. A new pod of the same
+cell is not a move.
+
+| State | Kept on a new pod of the same cell | Kept after a move |
+|---|---|---|
+| Workspace of a running `node` block | No | No |
+| Workspace of an earlier build | No, unless an idle pod kept it | No |
+| Stash of the running build | Yes | No |
+| Preserved stash, for a restart | No, the restart is refused | No, the restart is refused |
+| Archived artifact, read through Varroa | Yes | Yes |
+| Archived artifact, read by Jenkins | Yes | No |
+
+### Workspace
+
+A cell has no executors. By default, each build runs on a new agent pod. Each build starts with an
+empty workspace, also on one slot. `ws`, `dir`, and `customWorkspace` select a path in that pod.
+Check out the source in each build. Keep caches in an external store.
+
+A pod template with `idleMinutes` can keep a pod for a later build on the same cell. A restart of
+the cell ends that pod. A move ends it too. An idle pod keeps a workspace only on an uninterrupted
+cell.
+
+A resume does not keep a running `node` block today. The resumed build waits five minutes for its
+agent, then ends `ABORTED`. Rerun the build.
+
+### Stash
+
+A later stage can `unstash` a stash from an earlier stage, on any agent pod. After a move, an
+`unstash` of a stash from before the move fails with `No such saved stash`. Run the build again.
+
+`preserveStashes` keeps stashes only for a [restart from a stage](../tutorials/run-operations.md).
+A restart needs the source build on the job's current cell.
+
+### Artifacts
+
+The record store keeps the exact key of each archived artifact. The build page and
+`GET /runs/{run}/artifacts` read that key, so the artifacts of every run stay readable after a
+move. Jenkins itself lists only the artifacts of builds that the current cell wrote.
+
+The cell does not pin the Copy Artifact plugin. A `copyArtifacts` step fails with `No such DSL
+method`. To copy an artifact from another job of the same tenant, use a run handle. Use it inside
+a `node` block, on any slot. Give the job name relative to the tenant folder. `lastSuccessful`
+returns `null` when the job never succeeded:
+
+```groovy
+def last = varroa.lastSuccessful(job: 'build-app')
+if (last != null) {
+    last.copyArtifact(path: 'dist/app.tar.gz', target: 'app.tar.gz')
+}
+```
+
+A call inside one tenant needs no export. Each call copies one path. See
+[Cross-tenant pipelines](../config/cross-tenant-pipelines.md).
 
 ## Two surfaces reach slot 0 only
 
