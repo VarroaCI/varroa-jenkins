@@ -820,6 +820,21 @@ func TestAssembleCellContent_MultibranchWithoutStrategyPluginHoldsTenant(t *test
 	}
 }
 
+func TestAssembleCellContent_JobDSLStepHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, `items:
+  - kind: pipeline
+    name: seed
+    definition:
+      script: "jobDsl targets: 'jobs/*.groovy'"
+`)
+	if !strings.Contains(msg, "no-job-dsl") {
+		t.Errorf("expected the message to name no-job-dsl, got %q", msg)
+	}
+	if !strings.Contains(msg, "seed") {
+		t.Errorf("expected the message to name the seed path, got %q", msg)
+	}
+}
+
 func TestAssembleCellContent_TenantVariableResolvesItsItems(t *testing.T) {
 	client := newTestClient()
 	rec := newTestReconciler(client)

@@ -89,7 +89,7 @@ reading each package's entry point):
   cache, matched on whole path segments. Only the cell merge writes it, for
   a held tenant folder; `ReRoot` drops it. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
-  `no-global-credentials`, `no-controller-config-dependency`) over each
+  `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
   tenant's re-rooted manifest before a push; `items.Parse` itself is
   unchanged and still accepts every shape a non-cell controller accepts
   today. An item declares its build parameters two ways — a flat list at

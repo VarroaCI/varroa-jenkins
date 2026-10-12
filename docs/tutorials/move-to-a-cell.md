@@ -16,7 +16,7 @@ Read [Make a Team a pipelines tenant](../operations/cells.md#make-a-team-a-pipel
 | Classic controller | Cell |
 |---|---|
 | Jenkins web UI for job and build pages | No web UI. The Pipelines page shows jobs, builds, logs and artifacts. |
-| Jobs created in the UI or by a seed job | Jobs come only from your bundle's `items.yaml`. A job the bundle does not declare leaves the folder. |
+| Jobs created in the UI or by a seed job | Jobs come only from your bundle's `items.yaml`. A job from the UI or a seed job is lost when the cell restarts. |
 | Agents anywhere the controller reaches | Agent pods in your agent namespace, or your own registered runners |
 | Build history on the controller disk | History in the build record store. The cell's disk is temporary. |
 | Global credentials, tools and libraries | Folder-scoped credentials and libraries only |
@@ -220,7 +220,7 @@ Read [Read and run pipelines](pipelines.md#open-a-team), [Open a build](pipeline
 | `tools {}` with global tool installers | A container image that has the tool, in a pod template |
 | `agent { docker … }`, `docker.build`, `docker.image().inside` | A [runner](../operations/runners.md) on a host with Docker. An agent pod has no Docker daemon. |
 | Promoted builds, tag-build actions | A later stage with an `input` step. Tag with `git tag` and an `sshPrivateKey` credential in `withCredentials`. |
-| Job DSL seed job | Declare every job in `items.yaml`. Jobs from a seed job leave the folder when the cell restarts. |
+| Job DSL seed job | Declare every job in `items.yaml`. The cell lint rejects an inline `jobDsl` step. Jobs from a seed job leave the folder when the cell restarts. |
 | Pipeline Syntax snippet generator | The [Pipeline steps reference](https://www.jenkins.io/doc/pipeline/steps/). An admin can reach the cell UI with [break-glass](../security/headless-controllers.md#break-glass-runbook). |
 | Inline `kubernetes { yaml … }` agent | A pod template in the bundle (step 2) |
 | `pollSCM` | A webhook (step 5) |

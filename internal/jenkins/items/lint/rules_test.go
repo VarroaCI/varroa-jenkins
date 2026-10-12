@@ -228,3 +228,68 @@ func TestNoGlobalCredentialsRule_AllowsFileAndCertificateGlobalScope(t *testing.
 		t.Errorf("expected no findings for GLOBAL file and certificate credentials, got %+v", findings)
 	}
 }
+
+func jobDSLPipeline(script string) items.Item {
+	return items.Item{
+		Kind:       "pipeline",
+		Name:       "seed",
+		Definition: &items.PipelineDefinition{Script: script},
+	}
+}
+
+func TestNoJobDSLRule_RejectsNamedArgumentStep(t *testing.T) {
+	findings := NoJobDSLRule{}.Check(jobDSLPipeline("jobDsl targets: 'jobs/*.groovy'"), "tenant/seed")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Rule != "no-job-dsl" || findings[0].Path != "tenant/seed" {
+		t.Errorf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestNoJobDSLRule_RejectsParenthesizedStep(t *testing.T) {
+	findings := NoJobDSLRule{}.Check(jobDSLPipeline(`jobDsl(scriptText: "job('x')")`), "tenant/seed")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestNoJobDSLRule_RejectsExecuteDslScriptsStep(t *testing.T) {
+	findings := NoJobDSLRule{}.Check(jobDSLPipeline("step([$class: 'ExecuteDslScripts', targets: 'x'])"), "tenant/seed")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestNoJobDSLRule_AllowsUnrelatedIdentifier(t *testing.T) {
+	for _, script := range []string{
+		"def myjobDsl = 1",
+		"echo 'jobDslHelper'",
+		"def opts = [jobDslVersion: '1']",
+		"sh 'gradle test -Pdeps=javaposse.jobdsl:job-dsl-core'",
+	} {
+		if findings := (NoJobDSLRule{}).Check(jobDSLPipeline(script), "tenant/seed"); len(findings) != 0 {
+			t.Errorf("script %q: expected no findings, got %+v", script, findings)
+		}
+	}
+}
+
+func TestNoJobDSLRule_IgnoresSCMDefinition(t *testing.T) {
+	item := items.Item{
+		Kind: "pipeline",
+		Name: "seed",
+		Definition: &items.PipelineDefinition{
+			CpsScmFlowDefinition: &items.CpsScmFlowDefinition{ScriptPath: "Jenkinsfile"},
+		},
+	}
+	if findings := (NoJobDSLRule{}).Check(item, "tenant/seed"); len(findings) != 0 {
+		t.Errorf("expected no findings for an SCM definition, got %+v", findings)
+	}
+}
+
+func TestNoJobDSLRule_IgnoresItemWithoutDefinition(t *testing.T) {
+	item := items.Item{Kind: "folder", Name: "tenant"}
+	if findings := (NoJobDSLRule{}).Check(item, "tenant"); len(findings) != 0 {
+		t.Errorf("expected no findings for an item without a definition, got %+v", findings)
+	}
+}

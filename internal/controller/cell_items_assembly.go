@@ -25,6 +25,7 @@ var cellLintRules = []lint.Rule{
 	lint.NoPollSCMRule{},
 	lint.NoGlobalCredentialsRule{},
 	lint.NoControllerConfigDependencyRule{},
+	lint.NoJobDSLRule{},
 }
 
 // assembleCellState is what assembleCellContent computes for one cell tick:

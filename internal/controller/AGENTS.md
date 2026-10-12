@@ -1039,7 +1039,7 @@ sections describe.
     in one pass (no cell variable, so `${varroa_*}` stays unresolved), then
     runs `findUnresolvedVars`, `items.Parse`, `items.ReRoot`, `lint.Run`
     against `cellLintRules` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
-    `NoControllerConfigDependencyRule`), and
+    `NoControllerConfigDependencyRule`, `NoJobDSLRule`), and
     `checkBranchBuildStrategiesManifest`, and `checkFolderLibraryPluginsManifest`
     (every folder library's `RequiredPlugins` must be pinned); after the
     tenant's credentials project, `checkFolderLibraryCredentials`
