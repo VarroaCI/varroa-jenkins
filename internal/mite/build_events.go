@@ -393,7 +393,33 @@ func startedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.GrantedBuildNumber != 0 {
 		p["granted_build_number"] = evt.GrantedBuildNumber
 	}
+	if cr := changeRequestPayload(evt.ChangeRequest); cr != nil {
+		p["change_request"] = cr
+	}
 	addTemplateFields(p, evt)
+	return p
+}
+
+// changeRequestPayload maps a change request onto the run.started
+// change_request object. It returns nil when the request carries no id,
+// and it omits each empty key.
+func changeRequestPayload(cr *mitev1.ChangeRequestInfo) map[string]interface{} {
+	if cr == nil || cr.Id == "" {
+		return nil
+	}
+	p := map[string]interface{}{"id": cr.Id}
+	if cr.Title != "" {
+		p["title"] = cr.Title
+	}
+	if cr.SourceBranch != "" {
+		p["source_branch"] = cr.SourceBranch
+	}
+	if cr.TargetBranch != "" {
+		p["target_branch"] = cr.TargetBranch
+	}
+	if cr.URL != "" {
+		p["url"] = cr.URL
+	}
 	return p
 }
 

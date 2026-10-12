@@ -414,6 +414,16 @@ message LogSummary {
   int64 writer_heartbeat_unix_ms = 6;
 }
 
+// ChangeRequestInfo names the change request (pull request) a
+// multibranch run builds. Empty for a run with no change request.
+message ChangeRequestInfo {
+  string id = 1;
+  string title = 2;
+  string source_branch = 3;
+  string target_branch = 4;
+  string url = 5;
+}
+
 message BuildEvent {
   // @required
   string phase = 1;
@@ -472,6 +482,8 @@ message BuildEvent {
   string replay_of = 50;
   // The grant the run applied, on STARTED alone. Zero names no grant.
   int64 granted_build_number = 51;
+  // The change request the run builds, on STARTED alone. Empty for a branch run.
+  ChangeRequestInfo change_request = 56;
 }
 
 message ClaimRequest {

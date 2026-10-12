@@ -15,8 +15,9 @@ import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
-import { TRIGGER_LABEL, queueWaitMs } from "./runMeta";
+import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
 import type {
+  ChangeRequest,
   RunNotification,
   PipelineTemplateInfo,
   PipelineDependencyEdge,
@@ -52,6 +53,26 @@ const RESULT_CLASS: Record<string, string> = {
   INTERRUPTED: styles.resultBad,
   NOT_BUILT: styles.resultIdle,
 };
+
+/** PrChip marks a run that builds a pull request. Its visible text is also its
+ * accessible name, so the label stays in the name. */
+function PrChip({ changeRequest }: { changeRequest: ChangeRequest }) {
+  const title = changeRequest.title ? ` ${changeRequest.title}` : "";
+  const label = `PR #${changeRequest.id}${title}`;
+  const href = safeWebUrl(changeRequest.url);
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={styles.prChip} title={changeRequestLabel(changeRequest)}>
+        {label}
+      </a>
+    );
+  }
+  return (
+    <span className={styles.prChip} title={changeRequestLabel(changeRequest)}>
+      {label}
+    </span>
+  );
+}
 
 function ResultBadge({ result }: { result?: string }) {
   if (!result) return <span className={styles.dim}>—</span>;
@@ -515,6 +536,7 @@ export default function PipelinePage() {
                     ) : (
                       <span className={styles.dim}>—</span>
                     )}
+                    {run.changeRequest && <PrChip changeRequest={run.changeRequest} />}
                   </td>
                   <td>
                     {run.scmRevision ? (

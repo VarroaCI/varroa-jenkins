@@ -102,11 +102,13 @@ Select a job's name to open its pipeline page.
 
 ## Open a build
 
-The pipeline page, the build page, and the test case page each carry a breadcrumb trail. The
-trail names the team, then each folder, then the job. Select a folder crumb to open the team
-page with that folder, and every folder above it, already unfolded. On the build page and the
-test case page, the job crumb links to the pipeline page. The last crumb names the build or the
-test.
+The pipeline, build, and test case pages each carry a breadcrumb trail that names the team,
+each folder, and the job. Select a folder crumb to open the team page with that folder and every
+folder above it unfolded. On the build and test case pages, the job crumb links to the pipeline
+page. The last crumb names the build or the test.
+
+A pull-request run shows a PR chip beside its branch. The build page names the request in a
+**Pull request** row.
 
 The **Defined by** card states where the job's script comes from. A job that reads a Jenkinsfile
 from source control shows the repository and the last built commit. A job whose bundle item

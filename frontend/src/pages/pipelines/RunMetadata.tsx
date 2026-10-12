@@ -1,10 +1,18 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRun } from "../../api/client";
-import type { RunDetail } from "../../types";
+import type { ChangeRequest, RunDetail } from "../../types";
 import { formatDuration } from "./JobTree";
 import { RevisionLink } from "./RevisionLink";
-import { MASKED_PARAM, QUEUE_WAIT_SHOWN_MS, TRIGGER_LABEL, queueWaitMs, sortedParams } from "./runMeta";
+import {
+  MASKED_PARAM,
+  QUEUE_WAIT_SHOWN_MS,
+  TRIGGER_LABEL,
+  changeRequestLabel,
+  queueWaitMs,
+  safeWebUrl,
+  sortedParams,
+} from "./runMeta";
 import styles from "./RunMetadata.module.css";
 
 const enc = (s: string) => encodeURIComponent(s);
@@ -43,6 +51,7 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
         {typeof run.durationMs === "number" && <span>{formatDuration(run.durationMs)}</span>}
         {wait !== undefined && wait > QUEUE_WAIT_SHOWN_MS && <span>Waited {formatDuration(wait)} in queue</span>}
       </div>
+      {run.changeRequest && <ChangeRequestRow changeRequest={run.changeRequest} />}
       {run.replayOf && <ReplayOrigin replayOf={run.replayOf} team={team} job={job} />}
       {params.length > 0 && (
         <div className={styles.row}>
@@ -71,6 +80,26 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
           </div>
         )}
     </>
+  );
+}
+
+/** ChangeRequestRow names the pull request a multibranch run builds. It links
+ * the request only when the URL is a web link. */
+function ChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequest }) {
+  const label = changeRequestLabel(changeRequest);
+  const href = safeWebUrl(changeRequest.url);
+
+  return (
+    <div className={styles.row}>
+      <span className={styles.rowLabel}>Pull request</span>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer">
+          {label}
+        </a>
+      ) : (
+        <span>{label}</span>
+      )}
+    </div>
   );
 }
 

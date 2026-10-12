@@ -439,6 +439,9 @@ federation, activity persistence, and SSE fanout.
   The run detail and the run summary carry `scmUrl` and `triggerSource`, read from `runs.payload`
   by `runOriginOf` (`run_origin.go`). `scmUrl` prefers the `run.source` copy over the `run.started` copy.
   `triggerSource` classifies `cause_types` in a fixed order; an empty list yields no value.
+  The run summary, the running row, and the run detail carry `changeRequest`, read from
+  `run.started.payload.change_request` by `changeRequestOf` (`run_change_request.go`).
+  A branch run carries no `changeRequest`.
 - **Item manifest source** (`controllerItemManifest`) — a placed Team
   (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
   (`teamPipelineBundleContent`) and re-roots it under the Team folder with

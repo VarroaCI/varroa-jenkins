@@ -830,3 +830,28 @@ func TestGetRunOmitsCommandRefusalWhenAbsent(t *testing.T) {
 		t.Fatal("the response carries commandRefusal for a run that holds none")
 	}
 }
+
+// TestGetRunCarriesChangeRequest asserts GET /runs/{run} returns the change
+// request of a multibranch pull-request run.
+func TestGetRunCarriesChangeRequest(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{
+		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Payload: json.RawMessage(`{"run.started":{"payload":{"change_request":{"id":"12",` +
+			`"title":"Fix the cache","source_branch":"fix/cache","target_branch":"main"}}}}`),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r1", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.ChangeRequest == nil || detail.ChangeRequest.ID != "12" ||
+		detail.ChangeRequest.SourceBranch != "fix/cache" || detail.ChangeRequest.TargetBranch != "main" {
+		t.Fatalf("changeRequest = %+v", detail.ChangeRequest)
+	}
+}

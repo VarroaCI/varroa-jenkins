@@ -94,6 +94,7 @@ type BuildEvent struct {
 	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
 	ReplayOf                string              `json:"replay_of,omitempty"`
 	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
+	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
 }
 
 type BuildInput struct {
@@ -163,6 +164,15 @@ type CancelBuildPayload struct {
 	JobPath     string `json:"job_path"`
 	BuildNumber int64  `json:"build_number,omitempty"`
 	Actor       string `json:"actor,omitempty"`
+}
+
+// ChangeRequestInfo names the change request (pull request) a
+type ChangeRequestInfo struct {
+	Id           string `json:"id,omitempty"`
+	Title        string `json:"title,omitempty"`
+	SourceBranch string `json:"source_branch,omitempty"`
+	TargetBranch string `json:"target_branch,omitempty"`
+	URL          string `json:"url,omitempty"`
 }
 
 type ClaimRequest struct {

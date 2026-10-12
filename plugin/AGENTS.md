@@ -238,7 +238,10 @@ the root AGENTS.md greenfield rule.
   mark (`start_mark: true` on `/v1/claim`); only `granted` sets the granted flag,
   `duplicate` cancels the item, and every other outcome opens the gate and defers the
   next claim through `VarroaIntentAction.claimNotBeforeMillis`;
-  `grantedNumber` rides the `STARTED` event as `granted_build_number`),
+  `grantedNumber` rides the `STARTED` event as `granted_build_number`;
+  `VarroaRunRecorder.changeRequestOf` maps a multibranch branch head onto `BuildEvent`
+  field 56, `change_request`, on the `STARTED` event; `resolveChangeRequest` reads the
+  head through the run's `BranchJobProperty`),
   `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +
   `DeliveryRegistry.java` (records `X-Varroa-Delivery` for the claimer). Every class in

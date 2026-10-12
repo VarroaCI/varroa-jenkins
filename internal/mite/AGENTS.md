@@ -200,8 +200,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   onto the `run.started`/`run.completed` payload via `addTemplateFields`,
   omitting any field the event does not carry; a `HEARTBEAT` event never
   carries them. `startedPayload` alone writes `replay_of` and
-  `granted_build_number`, each only for a non-empty or non-zero value, so no
-  other phase and no ordinary build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
+  `granted_build_number`, and `change_request` (only when the request has an id),
+  each only for a non-empty or non-zero value, so no other phase and no ordinary
+  build sends the key. A `COMPLETED` event publishes `run.tests` when it carries a
   test counter, a test case, or a test report, so a report whose case count
   is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
   the `error` truncation and drops the **last** case, because the plugin

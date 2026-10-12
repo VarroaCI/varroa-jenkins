@@ -2555,6 +2555,8 @@ components:
           type: array
         cause:
           type: string
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         commandRefusal:
           $ref: '#/components/schemas/components_schemas_RunCommandRefusal'
         digest:
@@ -2934,6 +2936,8 @@ components:
           type: integer
         cause:
           type: string
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         durationMs:
           format: int64
           type: integer
@@ -3088,6 +3092,8 @@ components:
         buildNumber:
           format: int64
           type: integer
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         changeSummary:
           description: The last commit's short message.
           type: string
@@ -5240,6 +5246,28 @@ components:
       - runsLast24h
       - failedLast24h
       - jobs
+      type: object
+    components_schemas_ChangeRequest:
+      additionalProperties: false
+      description: |
+        The change request (pull request) a multibranch run builds. Absent for a branch run.
+      properties:
+        id:
+          description: The forge's change request number or identifier.
+          type: string
+        sourceBranch:
+          description: The branch that carries the change.
+          type: string
+        targetBranch:
+          description: The branch the change merges into.
+          type: string
+        title:
+          type: string
+        url:
+          description: Web link to the change request on the forge.
+          type: string
+      required:
+      - id
       type: object
     components_schemas_Check:
       additionalProperties: false
@@ -8444,6 +8472,8 @@ components:
           type: array
         cause:
           type: string
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         commandRefusal:
           $ref: '#/components/schemas/components_schemas_RunCommandRefusal'
         digest:
@@ -8866,6 +8896,8 @@ components:
           type: integer
         cause:
           type: string
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         durationMs:
           format: int64
           type: integer
@@ -9146,6 +9178,8 @@ components:
         buildNumber:
           format: int64
           type: integer
+        changeRequest:
+          $ref: '#/components/schemas/components_schemas_ChangeRequest'
         changeSummary:
           description: The last commit's short message.
           type: string

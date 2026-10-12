@@ -853,6 +853,21 @@ describe("PipelinePage — run table links", () => {
     expect(link).toHaveAttribute("href", "/pipelines/acme/payments%2Fcheckout-api%2Fmain?branch=main");
   });
 
+  it("marks a pull-request run with its change request beside the branch", async () => {
+    mockListRuns.mockResolvedValue({
+      items: [
+        oneRun({
+          branch: "fix/cache",
+          changeRequest: { id: "12", title: "Fix the cache", url: "https://forge.example/pr/12" },
+        }),
+      ],
+    });
+    renderPage();
+    const chip = await screen.findByRole("link", { name: "PR #12 Fix the cache" });
+    expect(chip).toHaveTextContent("PR #12");
+    expect(chip).toHaveAttribute("href", "https://forge.example/pr/12");
+  });
+
   it("shows the queue wait column", async () => {
     mockListRuns.mockResolvedValue({ items: [oneRun()] });
     renderPage();

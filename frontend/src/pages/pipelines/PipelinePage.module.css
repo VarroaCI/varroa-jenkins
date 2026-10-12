@@ -109,6 +109,19 @@
   color: var(--text-2);
 }
 
+/* The pull-request chip beside a run's branch. */
+.prChip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  text-decoration: none;
+}
+
 .resultBadge {
   display: inline-block;
   padding: 2px 8px;

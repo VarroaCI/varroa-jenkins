@@ -1388,6 +1388,22 @@ type ComponentsSchemasCellUsageCounts struct {
 	RunsLast24h   int64 `json:"runsLast24h"`
 }
 
+// ComponentsSchemasChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+type ComponentsSchemasChangeRequest struct {
+	// Id The forge's change request number or identifier.
+	Id string `json:"id"`
+
+	// SourceBranch The branch that carries the change.
+	SourceBranch *string `json:"sourceBranch,omitempty"`
+
+	// TargetBranch The branch the change merges into.
+	TargetBranch *string `json:"targetBranch,omitempty"`
+	Title        *string `json:"title,omitempty"`
+
+	// Url Web link to the change request on the forge.
+	Url *string `json:"url,omitempty"`
+}
+
 // ComponentsSchemasCheck Result of a single preflight validation check.
 type ComponentsSchemasCheck struct {
 	Id      string                       `json:"id"`
@@ -3233,6 +3249,9 @@ type ComponentsSchemasRunDetail struct {
 	Cases *[]ComponentsSchemasRunTestCase `json:"cases,omitempty"`
 	Cause *string                         `json:"cause,omitempty"`
 
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
 	// CommandRefusal The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
 	CommandRefusal *ComponentsSchemasRunCommandRefusal `json:"commandRefusal,omitempty"`
 
@@ -3468,17 +3487,20 @@ type ComponentsSchemasRunStage struct {
 
 // ComponentsSchemasRunSummary One run, condensed for a list or a card.
 type ComponentsSchemasRunSummary struct {
-	Actor       *string    `json:"actor,omitempty"`
-	Branch      *string    `json:"branch,omitempty"`
-	BuildNumber *int64     `json:"buildNumber,omitempty"`
-	Cause       *string    `json:"cause,omitempty"`
-	DurationMs  *int64     `json:"durationMs,omitempty"`
-	EndedAt     *time.Time `json:"endedAt,omitempty"`
-	JobPath     *string    `json:"jobPath,omitempty"`
-	QueuedAt    *time.Time `json:"queuedAt,omitempty"`
-	Result      *string    `json:"result,omitempty"`
-	RunId       string     `json:"runId"`
-	ScmRevision *string    `json:"scmRevision,omitempty"`
+	Actor       *string `json:"actor,omitempty"`
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+	Cause       *string `json:"cause,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+	DurationMs    *int64                          `json:"durationMs,omitempty"`
+	EndedAt       *time.Time                      `json:"endedAt,omitempty"`
+	JobPath       *string                         `json:"jobPath,omitempty"`
+	QueuedAt      *time.Time                      `json:"queuedAt,omitempty"`
+	Result        *string                         `json:"result,omitempty"`
+	RunId         string                          `json:"runId"`
+	ScmRevision   *string                         `json:"scmRevision,omitempty"`
 
 	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
 	ScmUrl    *string    `json:"scmUrl,omitempty"`
@@ -3631,6 +3653,9 @@ type ComponentsSchemasRunnerStatus struct {
 type ComponentsSchemasRunningRun struct {
 	Branch      *string `json:"branch,omitempty"`
 	BuildNumber *int64  `json:"buildNumber,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
 
 	// ChangeSummary The last commit's short message.
 	ChangeSummary *string    `json:"changeSummary,omitempty"`

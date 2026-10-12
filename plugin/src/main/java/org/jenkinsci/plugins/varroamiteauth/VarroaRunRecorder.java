@@ -39,11 +39,15 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import jenkins.branch.Branch;
 import jenkins.model.Jenkins;
 import jenkins.scm.RunWithSCM;
 import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.SCMRevisionAction;
+import jenkins.scm.api.metadata.ObjectMetadataAction;
+import jenkins.scm.api.mixin.ChangeRequestSCMHead;
+import jenkins.scm.api.mixin.ChangeRequestSCMHead2;
 
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.LabelAction;
@@ -64,6 +68,7 @@ import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker;
 import org.jenkinsci.plugins.workflow.graph.FlowNode;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
 import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.GenericStatus;
 import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.StatusAndTiming;
 import org.jenkinsci.plugins.workflow.steps.StepDescriptor;
@@ -1040,6 +1045,7 @@ public final class VarroaRunRecorder {
                 .replayOf(replaySourceOf(run))
                 .grantedBuildNumber(action.getGrantedNumber());
         applyCommonMetadata(b, run, false);
+        b.changeRequest(resolveChangeRequest(run));
         return b;
     }
 
@@ -1414,6 +1420,59 @@ public final class VarroaRunRecorder {
         SourceFacts git = resolveGitFacts(run);
         String branch = branchFrom(run, scmApi, git);
         return new SourceFacts(branch, branch, "", git.scmUrl, "", List.of(), List.of());
+    }
+
+    /**
+     * Reads the change request a multibranch run builds from the branch
+     * job property. Answers null when the job is no branch job, or when
+     * the branch head is no change request. Every read is guarded, so a
+     * failed read leaves the value null.
+     */
+    static BuildEvent.ChangeRequestInfo resolveChangeRequest(Run<?, ?> run) {
+        try {
+            BranchJobProperty property = run.getParent().getProperty(BranchJobProperty.class);
+            return property != null ? changeRequestOf(property.getBranch()) : null;
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.FINE, "VarroaRunRecorder: the change request read failed", e);
+            return null;
+        }
+    }
+
+    /**
+     * Maps the head of a branch onto a change request. Answers null for a
+     * null branch or a branch whose head is no change request.
+     */
+    static BuildEvent.ChangeRequestInfo changeRequestOf(Branch branch) {
+        if (branch == null) {
+            return null;
+        }
+        try {
+            SCMHead head = branch.getHead();
+            if (!(head instanceof ChangeRequestSCMHead)) {
+                return null;
+            }
+            ChangeRequestSCMHead request = (ChangeRequestSCMHead) head;
+            String target = request.getTarget() != null ? orEmpty(request.getTarget().getName()) : "";
+            String source = head instanceof ChangeRequestSCMHead2
+                    ? orEmpty(((ChangeRequestSCMHead2) head).getOriginName())
+                    : "";
+            String title = "";
+            String url = "";
+            ObjectMetadataAction metadata = branch.getAction(ObjectMetadataAction.class);
+            if (metadata != null) {
+                title = orEmpty(metadata.getObjectDisplayName());
+                url = orEmpty(metadata.getObjectUrl());
+            }
+            return new BuildEvent.ChangeRequestInfo(
+                    truncate(orEmpty(request.getId()), MAX_FIELD_512),
+                    truncate(title, MAX_FIELD_512),
+                    truncate(source, MAX_FIELD_512),
+                    truncate(target, MAX_FIELD_512),
+                    truncate(url, MAX_FIELD_512));
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.FINE, "VarroaRunRecorder: the change request read failed", e);
+            return null;
+        }
     }
 
     /**

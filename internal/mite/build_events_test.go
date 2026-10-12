@@ -1361,3 +1361,44 @@ func TestShrinkToBudget_RemovesTheCasesKeyWhenEveryCaseDrops(t *testing.T) {
 		t.Fatalf("cases = %+v, want the key absent once every case drops", env.Payload["cases"])
 	}
 }
+
+// TestStartedPayloadCarriesChangeRequest proves run.started writes the
+// change_request object with every non-empty key of the change request.
+func TestStartedPayloadCarriesChangeRequest(t *testing.T) {
+	evt := &mitev1.BuildEvent{Phase: phaseStarted, RunId: "run-1", ChangeRequest: &mitev1.ChangeRequestInfo{
+		Id:           "12",
+		Title:        "Fix the cache",
+		SourceBranch: "fix/cache",
+		TargetBranch: "main",
+		URL:          "https://forge.example/pr/12",
+	}}
+	cr, ok := startedPayload(evt)["change_request"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("run.started payload lacks change_request: %+v", startedPayload(evt))
+	}
+	want := map[string]interface{}{
+		"id":            "12",
+		"title":         "Fix the cache",
+		"source_branch": "fix/cache",
+		"target_branch": "main",
+		"url":           "https://forge.example/pr/12",
+	}
+	for k, v := range want {
+		if cr[k] != v {
+			t.Errorf("change_request[%s] = %v, want %v", k, cr[k], v)
+		}
+	}
+}
+
+// TestStartedPayloadOmitsEmptyChangeRequest proves run.started writes no
+// change_request key for a branch run, or for a request with no id.
+func TestStartedPayloadOmitsEmptyChangeRequest(t *testing.T) {
+	for name, evt := range map[string]*mitev1.BuildEvent{
+		"branch run":         {Phase: phaseStarted, RunId: "run-1"},
+		"request without id": {Phase: phaseStarted, RunId: "run-1", ChangeRequest: &mitev1.ChangeRequestInfo{Title: "orphan"}},
+	} {
+		if _, ok := startedPayload(evt)["change_request"]; ok {
+			t.Errorf("%s: run.started payload carries change_request, want no key", name)
+		}
+	}
+}

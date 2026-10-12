@@ -35,21 +35,22 @@ import (
 // RunSummary is one row of a run list: the same shape the pipelines
 // REST paths serialize (components/schemas.yaml#RunSummary).
 type RunSummary struct {
-	RunID         string     `json:"runId"`
-	BuildNumber   int64      `json:"buildNumber,omitempty"`
-	JobPath       string     `json:"jobPath,omitempty"`
-	Status        string     `json:"status"`
-	Result        string     `json:"result,omitempty"`
-	Branch        string     `json:"branch,omitempty"`
-	SCMRevision   string     `json:"scmRevision,omitempty"`
-	Actor         string     `json:"actor,omitempty"`
-	Cause         string     `json:"cause,omitempty"`
-	SCMURL        string     `json:"scmUrl,omitempty"`
-	TriggerSource string     `json:"triggerSource,omitempty"`
-	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
-	StartedAt     *time.Time `json:"startedAt,omitempty"`
-	EndedAt       *time.Time `json:"endedAt,omitempty"`
-	DurationMs    int64      `json:"durationMs,omitempty"`
+	RunID         string             `json:"runId"`
+	BuildNumber   int64              `json:"buildNumber,omitempty"`
+	JobPath       string             `json:"jobPath,omitempty"`
+	Status        string             `json:"status"`
+	Result        string             `json:"result,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	SCMRevision   string             `json:"scmRevision,omitempty"`
+	Actor         string             `json:"actor,omitempty"`
+	Cause         string             `json:"cause,omitempty"`
+	SCMURL        string             `json:"scmUrl,omitempty"`
+	TriggerSource string             `json:"triggerSource,omitempty"`
+	ChangeRequest *changeRequestJSON `json:"changeRequest,omitempty"`
+	QueuedAt      *time.Time         `json:"queuedAt,omitempty"`
+	StartedAt     *time.Time         `json:"startedAt,omitempty"`
+	EndedAt       *time.Time         `json:"endedAt,omitempty"`
+	DurationMs    int64              `json:"durationMs,omitempty"`
 }
 
 // RunListResult is ListRuns' result: RunSummary rows in the same order
@@ -93,6 +94,7 @@ type RunDetail struct {
 	Cause             string                   `json:"cause,omitempty"`
 	SCMURL            string                   `json:"scmUrl,omitempty"`
 	TriggerSource     string                   `json:"triggerSource,omitempty"`
+	ChangeRequest     *changeRequestJSON       `json:"changeRequest,omitempty"`
 	Params            map[string]string        `json:"params,omitempty"`
 	TestsTotal        int32                    `json:"testsTotal,omitempty"`
 	TestsFailed       int32                    `json:"testsFailed,omitempty"`

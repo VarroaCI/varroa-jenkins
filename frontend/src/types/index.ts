@@ -1580,6 +1580,15 @@ export type PipelineHealth = "clear" | "cloudy" | "rain" | "unknown";
 /** TriggerSource names the kind of cause that started a run. */
 export type TriggerSource = "user" | "webhook" | "cron" | "upstream" | "replay" | "scm" | "other";
 
+/** ChangeRequest names the pull request a multibranch run builds. */
+export interface ChangeRequest {
+  id: string;
+  title?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  url?: string;
+}
+
 /** One run, condensed for a list or a card. */
 export interface RunSummary {
   runId: string;
@@ -1593,6 +1602,7 @@ export interface RunSummary {
   cause?: string;
   scmUrl?: string;
   triggerSource?: TriggerSource;
+  changeRequest?: ChangeRequest;
   queuedAt?: string;
   startedAt?: string;
   endedAt?: string;
@@ -1613,6 +1623,7 @@ export interface RunningRun {
   currentStage?: string;
   branch?: string;
   scmRevision?: string;
+  changeRequest?: ChangeRequest;
   changeSummary?: string;
   queuedAt?: string;
   startedAt?: string;
@@ -1909,6 +1920,7 @@ export interface RunDetail {
   cause?: string;
   scmUrl?: string;
   triggerSource?: TriggerSource;
+  changeRequest?: ChangeRequest;
   params?: Record<string, string>;
   testsTotal?: number;
   testsFailed?: number;

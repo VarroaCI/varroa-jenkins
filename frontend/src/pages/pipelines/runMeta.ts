@@ -1,4 +1,4 @@
-import type { TriggerSource } from "../../types";
+import type { ChangeRequest, TriggerSource } from "../../types";
 
 /** QUEUE_WAIT_SHOWN_MS is the shortest queue wait the build page names.
  * A shorter wait is noise, so the page hides it. */
@@ -26,6 +26,25 @@ export function queueWaitMs(run: { queuedAt?: string; startedAt?: string }): num
   const wait = Date.parse(run.startedAt) - Date.parse(run.queuedAt);
   if (Number.isNaN(wait) || wait < 0) return undefined;
   return wait;
+}
+
+/** changeRequestLabel names a change request, for example "#12 Fix cache (fix/x → main)". */
+export function changeRequestLabel(cr: ChangeRequest): string {
+  let text = `#${cr.id}`;
+  if (cr.title) text += ` ${cr.title}`;
+  if (cr.sourceBranch && cr.targetBranch) text += ` (${cr.sourceBranch} → ${cr.targetBranch})`;
+  return text;
+}
+
+/** safeWebUrl answers the URL when it is an http or https link, and undefined otherwise. */
+export function safeWebUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** sortedParams lists the run parameters by name. */

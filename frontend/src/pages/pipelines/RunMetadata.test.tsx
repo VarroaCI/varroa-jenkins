@@ -98,3 +98,32 @@ describe("RunMetadata", () => {
     expect(getRun).not.toHaveBeenCalled();
   });
 });
+
+describe("RunMetadata — pull request", () => {
+  it("names the change request and links it when the URL is a web link", () => {
+    renderMeta({
+      ...baseRun,
+      changeRequest: {
+        id: "12",
+        title: "Fix the cache",
+        sourceBranch: "fix/cache",
+        targetBranch: "main",
+        url: "https://forge.example/pr/12",
+      },
+    });
+    const link = screen.getByRole("link", { name: "#12 Fix the cache (fix/cache → main)" });
+    expect(link).toHaveAttribute("href", "https://forge.example/pr/12");
+    expect(screen.getByText("Pull request")).toBeInTheDocument();
+  });
+
+  it("shows the change request without a link when the URL is not a web link", () => {
+    renderMeta({ ...baseRun, changeRequest: { id: "7", url: "javascript:alert(1)" } });
+    expect(screen.getByText("#7")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "#7" })).not.toBeInTheDocument();
+  });
+
+  it("hides the row for a branch run", () => {
+    renderMeta(baseRun);
+    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+  });
+});

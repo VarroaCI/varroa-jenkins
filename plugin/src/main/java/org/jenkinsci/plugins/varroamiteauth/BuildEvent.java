@@ -45,9 +45,14 @@ import java.util.Map;
  * build copied. Only the {@code STARTED} event carries it. {@link
  * #toJson()} writes no key for it when it is empty.
  *
- * <p>Field 51, {@code granted_build_number}, is the grant the run applied.
+ * Field 51, {@code granted_build_number}, is the grant the run applied.
  * Only the {@code STARTED} event carries it. {@link #toJson()} writes no
  * key for zero.
+ *
+ * <p>Field 56, {@code change_request}, names the change request a
+ * multibranch pull-request run builds. Only the {@code STARTED} event
+ * carries it. {@link #toJson()} writes no key for a null value or an
+ * empty id.
  */
 public final class BuildEvent implements PostableEvent {
 
@@ -113,6 +118,7 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildTestCase> testCases;
     private final String replayOf;
     private final long grantedBuildNumber;
+    private final ChangeRequestInfo changeRequest;
 
     private BuildEvent(Builder b) {
         this.phase = orEmpty(b.phase);
@@ -166,6 +172,7 @@ public final class BuildEvent implements PostableEvent {
         this.testCases = List.copyOf(b.testCases);
         this.replayOf = orEmpty(b.replayOf);
         this.grantedBuildNumber = b.grantedBuildNumber;
+        this.changeRequest = b.changeRequest;
     }
 
     private static String orEmpty(String s) {
@@ -321,6 +328,11 @@ public final class BuildEvent implements PostableEvent {
 
     public String getBranch() {
         return branch;
+    }
+
+    /** Field 56: the change request a multibranch run builds, or {@code null} for a branch run. */
+    public ChangeRequestInfo getChangeRequest() {
+        return changeRequest;
     }
 
     public String getDeliveryId() {
@@ -511,6 +523,9 @@ public final class BuildEvent implements PostableEvent {
         if (grantedBuildNumber != 0) {
             o.put("granted_build_number", grantedBuildNumber);
         }
+        if (changeRequest != null && !changeRequest.getId().isEmpty()) {
+            o.put("change_request", changeRequest.toJson());
+        }
         return o;
     }
 
@@ -579,7 +594,67 @@ public final class BuildEvent implements PostableEvent {
                 .testReport(testReport)
                 .testCases(testCases)
                 .replayOf(replayOf)
-                .grantedBuildNumber(grantedBuildNumber);
+                .grantedBuildNumber(grantedBuildNumber)
+                .changeRequest(changeRequest);
+    }
+
+    /**
+     * Field 56: the change request of a multibranch run. Every value is
+     * a plain string, and an empty value means the fact is unknown.
+     */
+    public static final class ChangeRequestInfo {
+        private final String id;
+        private final String title;
+        private final String sourceBranch;
+        private final String targetBranch;
+        private final String url;
+
+        public ChangeRequestInfo(String id, String title, String sourceBranch, String targetBranch, String url) {
+            this.id = orEmpty(id);
+            this.title = orEmpty(title);
+            this.sourceBranch = orEmpty(sourceBranch);
+            this.targetBranch = orEmpty(targetBranch);
+            this.url = orEmpty(url);
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public String getSourceBranch() {
+            return sourceBranch;
+        }
+
+        public String getTargetBranch() {
+            return targetBranch;
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        /** Serializes the value with the proto JSON names. Empty keys are omitted except {@code id}. */
+        JSONObject toJson() {
+            JSONObject o = new JSONObject();
+            o.put("id", id);
+            if (!title.isEmpty()) {
+                o.put("title", title);
+            }
+            if (!sourceBranch.isEmpty()) {
+                o.put("source_branch", sourceBranch);
+            }
+            if (!targetBranch.isEmpty()) {
+                o.put("target_branch", targetBranch);
+            }
+            if (!url.isEmpty()) {
+                o.put("url", url);
+            }
+            return o;
+        }
     }
 
     public static final class Builder {
@@ -634,6 +709,7 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildTestCase> testCases = new ArrayList<>();
         private String replayOf;
         private long grantedBuildNumber;
+        private ChangeRequestInfo changeRequest;
 
         private Builder() {
         }
@@ -805,6 +881,11 @@ public final class BuildEvent implements PostableEvent {
 
         public Builder stages(List<BuildStage> v) {
             this.stages = new ArrayList<>(v);
+            return this;
+        }
+
+        public Builder changeRequest(ChangeRequestInfo v) {
+            this.changeRequest = v;
             return this;
         }
 

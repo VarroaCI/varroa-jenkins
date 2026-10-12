@@ -4418,6 +4418,29 @@ FleetPluginDrilldown:
 
 # --- Pipelines schemas (add-pipelines-ui) ---
 
+ChangeRequest:
+  type: object
+  description: >
+    The change request (pull request) a multibranch run builds. Absent
+    for a branch run.
+  required: [id]
+  properties:
+    id:
+      type: string
+      description: The forge's change request number or identifier.
+    title:
+      type: string
+    sourceBranch:
+      type: string
+      description: The branch that carries the change.
+    targetBranch:
+      type: string
+      description: The branch the change merges into.
+    url:
+      type: string
+      description: Web link to the change request on the forge.
+  additionalProperties: false
+
 RunSummary:
   type: object
   description: One run, condensed for a list or a card.
@@ -4449,6 +4472,8 @@ RunSummary:
       type: string
       enum: [user, webhook, cron, upstream, replay, scm, other]
       description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
+    changeRequest:
+      $ref: '#/ChangeRequest'
     queuedAt:
       type: string
       format: date-time
@@ -4487,6 +4512,8 @@ RunningRun:
       type: string
     scmRevision:
       type: string
+    changeRequest:
+      $ref: '#/ChangeRequest'
     changeSummary:
       type: string
       description: The last commit's short message.
@@ -5355,6 +5382,8 @@ RunDetail:
       type: string
       enum: [user, webhook, cron, upstream, replay, scm, other]
       description: Kind of cause that started the run. Absent when Jenkins reports no cause list.
+    changeRequest:
+      $ref: '#/ChangeRequest'
     params:
       type: object
       additionalProperties:

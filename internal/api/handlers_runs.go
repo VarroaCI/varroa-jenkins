@@ -86,38 +86,39 @@ type runInputJSON struct {
 }
 
 type runDetailJSON struct {
-	RunID             string            `json:"runId"`
-	JobPath           string            `json:"jobPath"`
-	TenantFolder      string            `json:"tenantFolder"`
-	Tenant            string            `json:"tenant"`
-	BuildNumber       int64             `json:"buildNumber,omitempty"`
-	Branch            string            `json:"branch,omitempty"`
-	SCMRevision       string            `json:"scmRevision,omitempty"`
-	Status            string            `json:"status"`
-	Result            string            `json:"result,omitempty"`
-	QueuedAt          *time.Time        `json:"queuedAt,omitempty"`
-	StartedAt         *time.Time        `json:"startedAt,omitempty"`
-	EndedAt           *time.Time        `json:"endedAt,omitempty"`
-	DurationMs        int64             `json:"durationMs,omitempty"`
-	Actor             string            `json:"actor,omitempty"`
-	Cause             string            `json:"cause,omitempty"`
-	SCMURL            string            `json:"scmUrl,omitempty"`
-	TriggerSource     string            `json:"triggerSource,omitempty"`
-	Params            map[string]string `json:"params,omitempty"`
-	TestsTotal        int32             `json:"testsTotal,omitempty"`
-	TestsFailed       int32             `json:"testsFailed,omitempty"`
-	TestsSkipped      int32             `json:"testsSkipped,omitempty"`
-	LogFinalized      bool              `json:"logFinalized,omitempty"`
-	LogComplete       bool              `json:"logComplete,omitempty"`
-	InterruptedReason string            `json:"interruptedReason,omitempty"`
-	TriggerError      string            `json:"triggerError,omitempty"`
-	TriggerReasonCode string            `json:"triggerReasonCode,omitempty"`
-	RetryRunID        string            `json:"retryRunId,omitempty"`
-	Stages            []runStageJSON    `json:"stages,omitempty"`
-	Source            *runSourceJSON    `json:"source,omitempty"`
-	Summary           string            `json:"summary,omitempty"`
-	Digest            *runDigestJSON    `json:"digest,omitempty"`
-	Inputs            []runInputJSON    `json:"inputs,omitempty"`
+	RunID             string             `json:"runId"`
+	JobPath           string             `json:"jobPath"`
+	TenantFolder      string             `json:"tenantFolder"`
+	Tenant            string             `json:"tenant"`
+	BuildNumber       int64              `json:"buildNumber,omitempty"`
+	Branch            string             `json:"branch,omitempty"`
+	SCMRevision       string             `json:"scmRevision,omitempty"`
+	Status            string             `json:"status"`
+	Result            string             `json:"result,omitempty"`
+	QueuedAt          *time.Time         `json:"queuedAt,omitempty"`
+	StartedAt         *time.Time         `json:"startedAt,omitempty"`
+	EndedAt           *time.Time         `json:"endedAt,omitempty"`
+	DurationMs        int64              `json:"durationMs,omitempty"`
+	Actor             string             `json:"actor,omitempty"`
+	Cause             string             `json:"cause,omitempty"`
+	SCMURL            string             `json:"scmUrl,omitempty"`
+	TriggerSource     string             `json:"triggerSource,omitempty"`
+	ChangeRequest     *changeRequestJSON `json:"changeRequest,omitempty"`
+	Params            map[string]string  `json:"params,omitempty"`
+	TestsTotal        int32              `json:"testsTotal,omitempty"`
+	TestsFailed       int32              `json:"testsFailed,omitempty"`
+	TestsSkipped      int32              `json:"testsSkipped,omitempty"`
+	LogFinalized      bool               `json:"logFinalized,omitempty"`
+	LogComplete       bool               `json:"logComplete,omitempty"`
+	InterruptedReason string             `json:"interruptedReason,omitempty"`
+	TriggerError      string             `json:"triggerError,omitempty"`
+	TriggerReasonCode string             `json:"triggerReasonCode,omitempty"`
+	RetryRunID        string             `json:"retryRunId,omitempty"`
+	Stages            []runStageJSON     `json:"stages,omitempty"`
+	Source            *runSourceJSON     `json:"source,omitempty"`
+	Summary           string             `json:"summary,omitempty"`
+	Digest            *runDigestJSON     `json:"digest,omitempty"`
+	Inputs            []runInputJSON     `json:"inputs,omitempty"`
 	// TestReport is absent when the run holds no stored report. Cases is
 	// absent when the run holds no case row, unlike the tests read's own
 	// cases array, which is always present.
@@ -447,6 +448,7 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 	}
 	d.Cause = causeSummary(run.Cause)
 	d.SCMURL, d.TriggerSource = runOriginOf(run.Payload)
+	d.ChangeRequest = changeRequestOf(run.Payload)
 	// The column holds snake_case keys, so decode it into the store shape.
 	// buildRunSource then maps the three fields one by one. A NULL column
 	// and a malformed column both leave the pointer nil.

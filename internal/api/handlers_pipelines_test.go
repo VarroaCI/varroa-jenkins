@@ -1223,3 +1223,23 @@ func TestHandleListJobTestCaseHistory_ClampsLimit(t *testing.T) {
 		t.Fatalf("limit=0: status = %d, want 400", rec.Code)
 	}
 }
+
+// TestListRunsRowCarriesChangeRequest asserts a run-list row and a running
+// row carry the change request, and that a branch run carries none.
+func TestListRunsRowCarriesChangeRequest(t *testing.T) {
+	run := recordstore.Run{
+		RunID: "r1", JobPath: "svc/main", Status: "RUNNING",
+		Payload: json.RawMessage(`{"run.started":{"payload":{"change_request":{"id":"7","url":"https://forge.example/pr/7"}}}}`),
+	}
+	row := buildRunSummary(run)
+	if row.ChangeRequest == nil || row.ChangeRequest.ID != "7" || row.ChangeRequest.URL != "https://forge.example/pr/7" {
+		t.Fatalf("run row changeRequest = %+v", row.ChangeRequest)
+	}
+	if running := buildRunningRun(run, nil, ""); running.ChangeRequest == nil || running.ChangeRequest.ID != "7" {
+		t.Fatalf("running row changeRequest = %+v", running.ChangeRequest)
+	}
+	branch := buildRunSummary(recordstore.Run{RunID: "r2", Status: "COMPLETED"})
+	if branch.ChangeRequest != nil {
+		t.Fatalf("branch run row carries changeRequest %+v", branch.ChangeRequest)
+	}
+}

@@ -346,6 +346,7 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "cause", Type: "string", Desc: "Short cause description."},
 	{Name: "scmUrl", Type: "string", Desc: "Repository URL, if any."},
 	{Name: "triggerSource", Type: "string", Desc: "Kind of cause: user, webhook, cron, upstream, replay, scm, or other. Absent when unknown."},
+	{Name: "changeRequest", Type: "object", Desc: "Change request of the run: id, title, sourceBranch, targetBranch, url. Absent for a branch run."},
 	{Name: "queuedAt", Type: "string", Desc: "Queue time, RFC3339."},
 	{Name: "startedAt", Type: "string", Desc: "Start time, RFC3339."},
 	{Name: "endedAt", Type: "string", Desc: "End time, RFC3339."},

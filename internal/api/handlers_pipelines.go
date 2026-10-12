@@ -37,35 +37,37 @@ const crossTenantExhaustedCursor = "exhausted"
 // --- Response shapes (api/openapi/components/schemas.yaml) ---
 
 type runSummaryJSON struct {
-	RunID         string     `json:"runId"`
-	BuildNumber   int64      `json:"buildNumber,omitempty"`
-	JobPath       string     `json:"jobPath,omitempty"`
-	Status        string     `json:"status"`
-	Result        string     `json:"result,omitempty"`
-	Branch        string     `json:"branch,omitempty"`
-	SCMRevision   string     `json:"scmRevision,omitempty"`
-	Actor         string     `json:"actor,omitempty"`
-	Cause         string     `json:"cause,omitempty"`
-	SCMURL        string     `json:"scmUrl,omitempty"`
-	TriggerSource string     `json:"triggerSource,omitempty"`
-	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
-	StartedAt     *time.Time `json:"startedAt,omitempty"`
-	EndedAt       *time.Time `json:"endedAt,omitempty"`
-	DurationMs    int64      `json:"durationMs,omitempty"`
+	RunID         string             `json:"runId"`
+	BuildNumber   int64              `json:"buildNumber,omitempty"`
+	JobPath       string             `json:"jobPath,omitempty"`
+	Status        string             `json:"status"`
+	Result        string             `json:"result,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	SCMRevision   string             `json:"scmRevision,omitempty"`
+	Actor         string             `json:"actor,omitempty"`
+	Cause         string             `json:"cause,omitempty"`
+	SCMURL        string             `json:"scmUrl,omitempty"`
+	TriggerSource string             `json:"triggerSource,omitempty"`
+	ChangeRequest *changeRequestJSON `json:"changeRequest,omitempty"`
+	QueuedAt      *time.Time         `json:"queuedAt,omitempty"`
+	StartedAt     *time.Time         `json:"startedAt,omitempty"`
+	EndedAt       *time.Time         `json:"endedAt,omitempty"`
+	DurationMs    int64              `json:"durationMs,omitempty"`
 }
 
 type runningRunJSON struct {
-	RunID             string     `json:"runId"`
-	JobPath           string     `json:"jobPath"`
-	BuildNumber       int64      `json:"buildNumber,omitempty"`
-	Status            string     `json:"status"`
-	CurrentStage      string     `json:"currentStage,omitempty"`
-	Branch            string     `json:"branch,omitempty"`
-	SCMRevision       string     `json:"scmRevision,omitempty"`
-	ChangeSummary     string     `json:"changeSummary,omitempty"`
-	QueuedAt          *time.Time `json:"queuedAt,omitempty"`
-	StartedAt         *time.Time `json:"startedAt,omitempty"`
-	TypicalDurationMs int64      `json:"typicalDurationMs,omitempty"`
+	RunID             string             `json:"runId"`
+	JobPath           string             `json:"jobPath"`
+	BuildNumber       int64              `json:"buildNumber,omitempty"`
+	Status            string             `json:"status"`
+	CurrentStage      string             `json:"currentStage,omitempty"`
+	Branch            string             `json:"branch,omitempty"`
+	SCMRevision       string             `json:"scmRevision,omitempty"`
+	ChangeRequest     *changeRequestJSON `json:"changeRequest,omitempty"`
+	ChangeSummary     string             `json:"changeSummary,omitempty"`
+	QueuedAt          *time.Time         `json:"queuedAt,omitempty"`
+	StartedAt         *time.Time         `json:"startedAt,omitempty"`
+	TypicalDurationMs int64              `json:"typicalDurationMs,omitempty"`
 }
 
 type pipelineSummaryJSON struct {
@@ -322,6 +324,7 @@ func buildRunSummary(run recordstore.Run) runSummaryJSON {
 	}
 	s.Cause = causeSummary(run.Cause)
 	s.SCMURL, s.TriggerSource = runOriginOf(run.Payload)
+	s.ChangeRequest = changeRequestOf(run.Payload)
 	s.QueuedAt = run.QueuedAt
 	s.StartedAt = run.StartedAt
 	s.EndedAt = run.EndedAt
@@ -446,6 +449,7 @@ func buildRunningRun(run recordstore.Run, trendMs []int64, currentStage string) 
 		out.SCMRevision = *run.SCMRevision
 	}
 	out.CurrentStage = currentStage
+	out.ChangeRequest = changeRequestOf(run.Payload)
 	out.ChangeSummary = latestChangeMessage(run.Changes)
 	out.QueuedAt = run.QueuedAt
 	out.StartedAt = run.StartedAt
