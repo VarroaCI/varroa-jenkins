@@ -5798,6 +5798,51 @@ CellPoolSpec:
         the pod; miteResources goes to the mite sidecar. The pool exposes no
         raw strategic-merge overlay.
       additionalProperties: true
+    libraries:
+      type: array
+      maxItems: 16
+      description: >-
+        Trusted shared libraries that every cell of the pool serves as global
+        libraries. Names are unique.
+      items:
+        $ref: '#/CellPoolLibrary'
+  additionalProperties: false
+
+CellPoolLibrary:
+  type: object
+  description: >-
+    A trusted shared library of a pool. Jenkins runs its code outside the
+    script sandbox. Only the operator declares it.
+  required: [name, remote, defaultVersion]
+  properties:
+    name:
+      type: string
+      maxLength: 63
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+      description: The library name. A pipeline loads the library by this name.
+    remote:
+      type: string
+      maxLength: 2048
+      description: The repository URL of the library. It must not hold a variable token.
+    defaultVersion:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: The branch, tag, or commit a pipeline loads when it names no version.
+    credentialRef:
+      type: string
+      maxLength: 253
+      description: >-
+        The name of the Secret in the operator namespace that holds the login.
+        Required for an ssh remote.
+    implicit:
+      type: boolean
+      description: Loads the library in every job of every cell in the pool.
+    allowVersionOverride:
+      type: boolean
+      description: >-
+        Lets a pipeline load another version of the library. Any user who can
+        push to the library repository then runs trusted code on every cell.
   additionalProperties: false
 
 CellPoolStatus:

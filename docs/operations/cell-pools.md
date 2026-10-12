@@ -17,6 +17,7 @@ Read [Cells and pipelines tenants](cells.md) first.
 | `maxTenantsPerCell` | int32, minimum 1, default 10 | capacity a pool cell uses when its own `spec.cell.maxTenants` is zero |
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
 | `cellTemplate` | object, optional | `resources`, `miteResources`, and `podOverrides` for the cells the pool creates |
+| `libraries` | list, optional | trusted shared libraries that every cell of the pool serves. See [Pool shared libraries](cell-libraries.md) |
 
 `profileRef` is immutable. A pool's cells carry the profile label they were created with, and a
 change would orphan every one of them. To serve another profile, create another pool.

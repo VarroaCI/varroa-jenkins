@@ -27,12 +27,24 @@ type cellPoolEntry struct {
 
 // cellPoolSpecEntry mirrors v1alpha1.CellPoolSpec.
 type cellPoolSpecEntry struct {
-	ProfileRef         string           `json:"profileRef"`
-	Warm               int32            `json:"warm"`
-	MaxCells           int32            `json:"maxCells,omitempty"`
-	MaxTenantsPerCell  int32            `json:"maxTenantsPerCell,omitempty"`
-	UnreadyGracePeriod *metav1.Duration `json:"unreadyGracePeriod,omitempty"`
-	CellTemplate       *cellTemplate    `json:"cellTemplate,omitempty"`
+	ProfileRef         string                 `json:"profileRef"`
+	Warm               int32                  `json:"warm"`
+	MaxCells           int32                  `json:"maxCells,omitempty"`
+	MaxTenantsPerCell  int32                  `json:"maxTenantsPerCell,omitempty"`
+	UnreadyGracePeriod *metav1.Duration       `json:"unreadyGracePeriod,omitempty"`
+	CellTemplate       *cellTemplate          `json:"cellTemplate,omitempty"`
+	Libraries          []cellPoolLibraryEntry `json:"libraries,omitempty"`
+}
+
+// cellPoolLibraryEntry mirrors v1alpha1.CellPoolLibrary. It carries the
+// credential Secret name, never the Secret value.
+type cellPoolLibraryEntry struct {
+	Name                 string `json:"name"`
+	Remote               string `json:"remote"`
+	DefaultVersion       string `json:"defaultVersion"`
+	CredentialRef        string `json:"credentialRef,omitempty"`
+	Implicit             bool   `json:"implicit"`
+	AllowVersionOverride bool   `json:"allowVersionOverride"`
 }
 
 // cellTemplate mirrors v1alpha1.CellTemplate. The BFF carries it as raw JSON
@@ -94,6 +106,16 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			FreeTenantSlots:    pool.Status.FreeTenantSlots,
 			Tenants:            pool.Status.Tenants,
 		},
+	}
+	for _, lib := range pool.Spec.Libraries {
+		e.Spec.Libraries = append(e.Spec.Libraries, cellPoolLibraryEntry{
+			Name:                 lib.Name,
+			Remote:               lib.Remote,
+			DefaultVersion:       lib.DefaultVersion,
+			CredentialRef:        lib.CredentialRef,
+			Implicit:             lib.Implicit,
+			AllowVersionOverride: lib.AllowVersionOverride,
+		})
 	}
 	if tmpl := pool.Spec.CellTemplate; tmpl != nil {
 		e.Spec.CellTemplate = &cellTemplate{}

@@ -954,7 +954,16 @@ sections describe.
     owner reintroduces the drift the `effectiveBundleRef` rule already
     forbids.
   - The Controller reconciler's own cell-specific logic lives beside it in
-    this package, one file per concern: `cell_readiness.go`
+    this package, one file per concern: `cell_pool_libraries.go`
+    (`applyPoolLibraries` runs in `resolveBundleForController` after the
+    tenant template loop and `ResolveVars`. It renders `CellPool.spec.libraries`
+    into `unclassified.globalLibraries.libraries` (list-aware: bundle entries
+    with a pool name are dropped, pool entries appended, the key always set).
+    The git login Secret (label `varroa.dev/pool-library-credential`) goes only
+    to `MaterializedBundle.CellPoolLibraryCredentials`, injected into the mite
+    command's JcascYaml by `buildDesiredStateCommand`. Faults set the
+    `PoolLibraries` condition; a faulty library is held, not rendered),
+    `cell_readiness.go`
     (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
     record store, the s3 blob tier, and C3's `ArtifactStorage=External`
     condition before a cell may report `CellReady`; past the gates the base

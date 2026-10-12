@@ -104,3 +104,15 @@ func TestCellPoolDeepCopyObject(t *testing.T) {
 		t.Fatalf("DeepCopy of a nil CellPool = %v, want nil", got)
 	}
 }
+
+// TestCellPoolDeepCopyIsolatesLibraries checks that a copy of a pool's
+// library list does not share its backing array with the original.
+func TestCellPoolDeepCopyIsolatesLibraries(t *testing.T) {
+	orig := &CellPoolSpec{Libraries: []CellPoolLibrary{{Name: "platform-lib", Remote: "https://example.com/p.git", DefaultVersion: "main"}}}
+	cp := orig.DeepCopy()
+	cp.Libraries[0].DefaultVersion = "changed"
+	cp.Libraries = append(cp.Libraries, CellPoolLibrary{Name: "extra"})
+	if orig.Libraries[0].DefaultVersion != "main" || len(orig.Libraries) != 1 {
+		t.Fatalf("original mutated by copy: %+v", orig.Libraries)
+	}
+}

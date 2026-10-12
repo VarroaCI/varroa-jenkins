@@ -47,3 +47,28 @@ cases:
     field: spec
     new: {spec: {warm: 3}}
     want: accept
+
+  - name: https library without credentialRef accepted
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "https://example.com/lib.git", defaultVersion: main}]}}
+    want: accept
+  - name: ssh library without credentialRef refused
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "ssh://git@example.com/lib.git", defaultVersion: main}]}}
+    want: reject
+  - name: ssh library with credentialRef accepted
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "ssh://git@example.com/lib.git", defaultVersion: main, credentialRef: lib-key}]}}
+    want: accept
+  - name: scp-style library without credentialRef refused
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "git@example.com:org/lib.git", defaultVersion: main}]}}
+    want: reject

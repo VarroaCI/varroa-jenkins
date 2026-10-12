@@ -82,6 +82,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Tenant slots](operations/tenant-slots.md)
 - [Tenant pod templates](operations/tenant-pod-templates.md)
 - [Tenant shared libraries](operations/tenant-libraries.md)
+- [Pool shared libraries](operations/cell-libraries.md)
 - [Agent Services](operations/agents.md)
 - [External runners](operations/runners.md)
 - [Brood operations](operations/brood-operations.md)

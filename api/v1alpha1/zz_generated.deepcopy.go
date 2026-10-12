@@ -1198,6 +1198,11 @@ func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
 		*out = new(CellTemplate)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Libraries != nil {
+		in, out := &in.Libraries, &out.Libraries
+		*out = make([]CellPoolLibrary, len(*in))
+		copy(*out, *in)
+	}
 }
 
 // DeepCopy creates a deep copy of CellPoolSpec.
@@ -1206,6 +1211,21 @@ func (in *CellPoolSpec) DeepCopy() *CellPoolSpec {
 		return nil
 	}
 	out := new(CellPoolSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellPoolLibrary.
+func (in *CellPoolLibrary) DeepCopyInto(out *CellPoolLibrary) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolLibrary.
+func (in *CellPoolLibrary) DeepCopy() *CellPoolLibrary {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolLibrary)
 	in.DeepCopyInto(out)
 	return out
 }

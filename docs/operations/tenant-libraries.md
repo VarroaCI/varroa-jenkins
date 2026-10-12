@@ -2,6 +2,12 @@
 
 A tenant folder can load shared Pipeline libraries. Read [Cells and pipelines tenants](cells.md) first.
 
+## Trust
+
+A folder library runs in the Groovy sandbox. The sandbox limits the methods that the library code can call. A tenant declares a folder library. The operator never declares it.
+
+A trusted library runs outside the sandbox. The operator declares it on the cell pool. See [Pool shared libraries](cell-libraries.md).
+
 ## Worked example
 
 This example loads a private GitLab library into the tenant `payments`. The library tag is `v1.0.0`.

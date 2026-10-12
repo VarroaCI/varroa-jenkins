@@ -300,3 +300,29 @@ func TestCellPoolEntryFrom_CarriesMiteResources(t *testing.T) {
 		t.Errorf("podOverrides = %s", got)
 	}
 }
+
+// TestCellPoolEntryFrom_CarriesLibraries checks that the read projection
+// carries each pool library's declaration, and the credential Secret name
+// only.
+func TestCellPoolEntryFrom_CarriesLibraries(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			Libraries: []v1alpha1.CellPoolLibrary{{
+				Name:           "platform-lib",
+				Remote:         "ssh://git@example.com/platform.git",
+				DefaultVersion: "main",
+				CredentialRef:  "platform-lib-key",
+				Implicit:       true,
+			}},
+		},
+	}
+	libs := cellPoolEntryFrom(pool).Spec.Libraries
+	if len(libs) != 1 {
+		t.Fatalf("libraries = %d, want 1", len(libs))
+	}
+	got := libs[0]
+	if got.Name != "platform-lib" || got.CredentialRef != "platform-lib-key" || !got.Implicit || got.AllowVersionOverride {
+		t.Fatalf("library entry = %+v", got)
+	}
+}

@@ -2470,6 +2470,20 @@ export interface CellPoolSpec {
   maxTenantsPerCell?: number;
   unreadyGracePeriod?: string;
   cellTemplate?: Record<string, unknown>;
+  /** The trusted shared libraries every cell of the pool serves as global libraries. */
+  libraries?: CellPoolLibrary[];
+}
+
+/** A trusted shared library of a pool. Only the operator declares it. */
+export interface CellPoolLibrary {
+  name: string;
+  remote: string;
+  defaultVersion: string;
+  /** The Secret in the operator namespace that holds the login. Required for an ssh remote. */
+  credentialRef?: string;
+  implicit?: boolean;
+  /** Lets a pipeline load another version. Anyone who can push to the repository then runs trusted code. */
+  allowVersionOverride?: boolean;
 }
 
 /** A CellPool's reported cell and tenant counts. */

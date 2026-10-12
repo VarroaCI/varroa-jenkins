@@ -74,6 +74,13 @@ type MaterializedBundle struct {
 	// after both steps. No code path that writes a ConfigMap reads this
 	// field.
 	CellFolderCredentials []CellFolderCredentials
+
+	// CellPoolLibraryCredentials holds the SYSTEM-scope git credentials of a
+	// cell's pool libraries, in the shape the Jenkins credentials domain
+	// expects. A value comes from a pool Secret. The caller that builds the
+	// desired-state command injects them into JcascYaml itself. No code path
+	// that writes a ConfigMap from MaterializedBundle reads this field.
+	CellPoolLibraryCredentials []any
 }
 
 // CellFolderCredentials is the projected credentials of one tenant folder.

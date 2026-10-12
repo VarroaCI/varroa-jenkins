@@ -1210,6 +1210,27 @@ type ComponentsSchemasCellPoolCondition struct {
 	Type               string  `json:"type"`
 }
 
+// ComponentsSchemasCellPoolLibrary A trusted shared library of a pool. Jenkins runs its code outside the script sandbox. Only the operator declares it.
+type ComponentsSchemasCellPoolLibrary struct {
+	// AllowVersionOverride Lets a pipeline load another version of the library. Any user who can push to the library repository then runs trusted code on every cell.
+	AllowVersionOverride *bool `json:"allowVersionOverride,omitempty"`
+
+	// CredentialRef The name of the Secret in the operator namespace that holds the login. Required for an ssh remote.
+	CredentialRef *string `json:"credentialRef,omitempty"`
+
+	// DefaultVersion The branch, tag, or commit a pipeline loads when it names no version.
+	DefaultVersion string `json:"defaultVersion"`
+
+	// Implicit Loads the library in every job of every cell in the pool.
+	Implicit *bool `json:"implicit,omitempty"`
+
+	// Name The library name. A pipeline loads the library by this name.
+	Name string `json:"name"`
+
+	// Remote The repository URL of the library. It must not hold a variable token.
+	Remote string `json:"remote"`
+}
+
 // ComponentsSchemasCellPoolScaleRequest Request body for PATCH /cellpools/{name}. It declares the four scale dials and nothing else, so the contract itself states that a structural edit is not an API operation.
 type ComponentsSchemasCellPoolScaleRequest struct {
 	Spec struct {
@@ -1224,6 +1245,9 @@ type ComponentsSchemasCellPoolScaleRequest struct {
 type ComponentsSchemasCellPoolSpec struct {
 	// CellTemplate resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.
 	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
+
+	// Libraries Trusted shared libraries that every cell of the pool serves as global libraries. Names are unique.
+	Libraries *[]ComponentsSchemasCellPoolLibrary `json:"libraries,omitempty"`
 
 	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.
 	MaxCells *int32 `json:"maxCells,omitempty"`

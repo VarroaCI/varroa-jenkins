@@ -36,6 +36,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `JenkinsVersionProfile`. Two CEL `XValidation` rules guard it — `profileRef`
   is immutable (a pool's cells carry the profile label they were created with,
   and the pass never restamps it), and `maxCells` is 0 or at least `warm`. The
+  `libraries` list (`CellPoolLibrary`, max 16) holds trusted global libraries:
+  an ssh remote needs `credentialRef`, a CEL rule on the item type. Each
+  item has its own DeepCopy.
   second rule guards **both** field reads with `has()`: a stored object written
   before the defaults existed leaves a field absent, and a bare access raises
   `no such key`. `CellPoolStatus`'s four counters (`warmCells`, `placedCells`,
@@ -69,7 +72,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `ComposedInput.OCISource` (`*OCIBundleSource`), and the new
   `OCIBundleSource` type. DeepCopy was hand-added (no controller-gen).
   The five cell-pool types (`CellPool`, `CellPoolList`, `CellPoolSpec`,
-  `CellPoolStatus`, `CellTemplate`) carry hand-added DeepCopy for the same
+  `CellPoolStatus`, `CellTemplate`, `CellPoolLibrary`) carry hand-added DeepCopy for the same
   reason.
   `CatalogSource` validation is split across **two** levels: the spec-level
   rule is at-most-one of `repoURL`/`ociRef`, and an **object-level** rule binds

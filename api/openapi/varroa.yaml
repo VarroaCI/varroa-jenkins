@@ -4849,6 +4849,45 @@ components:
       - type
       - status
       type: object
+    components_schemas_CellPoolLibrary:
+      additionalProperties: false
+      description: A trusted shared library of a pool. Jenkins runs its code outside
+        the script sandbox. Only the operator declares it.
+      properties:
+        allowVersionOverride:
+          description: Lets a pipeline load another version of the library. Any user
+            who can push to the library repository then runs trusted code on every
+            cell.
+          type: boolean
+        credentialRef:
+          description: The name of the Secret in the operator namespace that holds
+            the login. Required for an ssh remote.
+          maxLength: 253
+          type: string
+        defaultVersion:
+          description: The branch, tag, or commit a pipeline loads when it names no
+            version.
+          maxLength: 255
+          minLength: 1
+          type: string
+        implicit:
+          description: Loads the library in every job of every cell in the pool.
+          type: boolean
+        name:
+          description: The library name. A pipeline loads the library by this name.
+          maxLength: 63
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          type: string
+        remote:
+          description: The repository URL of the library. It must not hold a variable
+            token.
+          maxLength: 2048
+          type: string
+      required:
+      - name
+      - remote
+      - defaultVersion
+      type: object
     components_schemas_CellPoolScaleRequest:
       additionalProperties: false
       description: Request body for PATCH /cellpools/{name}. It declares the four
@@ -4888,6 +4927,13 @@ components:
             the pod; miteResources goes to the mite sidecar. The pool exposes no raw
             strategic-merge overlay.
           type: object
+        libraries:
+          description: Trusted shared libraries that every cell of the pool serves
+            as global libraries. Names are unique.
+          items:
+            $ref: '#/components/schemas/components_schemas_CellPoolLibrary'
+          maxItems: 16
+          type: array
         maxCells:
           description: Cap on the pool's cells, placed cells included. 0 means unlimited.
           format: int32

@@ -3610,6 +3610,69 @@ spec:
                         type: object
                     type: object
                 type: object
+              libraries:
+                description: |-
+                  Libraries lists the trusted shared libraries that every cell of the
+                  pool serves as global libraries.
+                items:
+                  description: |-
+                    CellPoolLibrary is one trusted shared library. Jenkins runs its code
+                    outside the script sandbox, so only the operator declares it.
+                  properties:
+                    allowVersionOverride:
+                      description: |-
+                        AllowVersionOverride lets a pipeline load another branch or tag of
+                        the library. Any user who can push to the library repository then runs
+                        trusted code on every cell of the pool.
+                      type: boolean
+                    credentialRef:
+                      description: |-
+                        CredentialRef names a Secret in the operator namespace that carries
+                        the login for the repository. The Secret must carry the label
+                        varroa.dev/pool-library-credential: "true". Required for an ssh
+                        remote. Optional for an https remote.
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                      type: string
+                    defaultVersion:
+                      description: |-
+                        DefaultVersion is the branch, tag, or commit a pipeline loads when it
+                        names no version.
+                      maxLength: 255
+                      minLength: 1
+                      pattern: ^[^\s$]+$
+                      type: string
+                    implicit:
+                      description: |-
+                        Implicit loads the library in every job of every cell in the pool,
+                        without an @Library annotation.
+                      type: boolean
+                    name:
+                      description: Name is the library name. A pipeline loads the
+                        library by this name.
+                      maxLength: 63
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+                      type: string
+                    remote:
+                      description: |-
+                        Remote is the repository URL of the library. It must not contain a
+                        variable token.
+                      maxLength: 2048
+                      pattern: ^(https://|ssh://|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:)[^\s$]+$
+                      type: string
+                  required:
+                  - defaultVersion
+                  - name
+                  - remote
+                  type: object
+                  x-kubernetes-validations:
+                  - message: an ssh remote needs credentialRef
+                    rule: self.remote.startsWith('https://') || has(self.credentialRef)
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               maxCells:
                 default: 0
                 description: |-

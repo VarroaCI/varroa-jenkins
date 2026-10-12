@@ -1230,6 +1230,10 @@ const (
 	// ConditionWarmPool indicates whether a cell is a free member of the
 	// warm pool: it is Ready and carries no tenant.
 	ConditionWarmPool ControllerConditionType = "WarmPool"
+	// ConditionPoolLibraries reports whether the cell's pool libraries are
+	// rendered. A library that fails validation is held and the others
+	// still render.
+	ConditionPoolLibraries ControllerConditionType = "PoolLibraries"
 )
 
 // MiteConnected reasons.
@@ -1899,6 +1903,13 @@ type CellPoolSpec struct {
 	// CellTemplate holds the shape of the cells the pool creates.
 	// +optional
 	CellTemplate *CellTemplate `json:"cellTemplate,omitempty"`
+	// Libraries lists the trusted shared libraries that every cell of the
+	// pool serves as global libraries.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	Libraries []CellPoolLibrary `json:"libraries,omitempty"`
 }
 
 // CellTemplate is the shape a pool stamps on each cell it creates. It
@@ -1916,6 +1927,44 @@ type CellTemplate struct {
 	// PodOverrides sets the pod-level overrides of each cell.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// CellPoolLibrary is one trusted shared library. Jenkins runs its code
+// outside the script sandbox, so only the operator declares it.
+// +kubebuilder:validation:XValidation:rule="self.remote.startsWith('https://') || has(self.credentialRef)",message="an ssh remote needs credentialRef"
+type CellPoolLibrary struct {
+	// Name is the library name. A pipeline loads the library by this name.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*$`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+	// Remote is the repository URL of the library. It must not contain a
+	// variable token.
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^(https://|ssh://|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:)[^\s$]+$`
+	Remote string `json:"remote"`
+	// DefaultVersion is the branch, tag, or commit a pipeline loads when it
+	// names no version.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	// +kubebuilder:validation:Pattern=`^[^\s$]+$`
+	DefaultVersion string `json:"defaultVersion"`
+	// CredentialRef names a Secret in the operator namespace that carries
+	// the login for the repository. The Secret must carry the label
+	// varroa.dev/pool-library-credential: "true". Required for an ssh
+	// remote. Optional for an https remote.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	CredentialRef string `json:"credentialRef,omitempty"`
+	// Implicit loads the library in every job of every cell in the pool,
+	// without an @Library annotation.
+	// +optional
+	Implicit bool `json:"implicit,omitempty"`
+	// AllowVersionOverride lets a pipeline load another branch or tag of
+	// the library. Any user who can push to the library repository then runs
+	// trusted code on every cell of the pool.
+	// +optional
+	AllowVersionOverride bool `json:"allowVersionOverride,omitempty"`
 }
 
 // CellPoolStatus reports the pool's live cell and tenant counts. The four

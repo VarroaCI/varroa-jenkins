@@ -737,6 +737,15 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.JenkinsYAML = merged
 	}
 
+	// Render the pool's trusted global libraries. It runs
+	// after ResolveVars, so no pool value meets the catalog variable pass.
+	// A cell always gets the libraries key, even when empty, so a removed
+	// library does not stay live. A no-op for a controller that is not a
+	// cell.
+	if libErr := r.applyPoolLibraries(ctx, cr, mat, coreSet); libErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool libraries: %w", libErr)
+	}
+
 	// Inject location URL under the three-way rule: a headless controller
 	// gets the dashboard door URL when the operator has a dashboard origin,
 	// and the in-cluster endpoint otherwise. A non-headless controller with a
@@ -5868,12 +5877,24 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 			cmd.JcascYaml = withNodes
 
 			if len(contrib.Credentials) > 0 {
-				withRunnerCreds, credErr := injectRunnerCredentials(cmd.JcascYaml, contrib.Credentials)
+				withRunnerCreds, credErr := appendSystemCredentials(cmd.JcascYaml, contrib.Credentials)
 				if credErr != nil {
 					logger.Warn("runner credential injection failed; the mite gets a cell jcasc with no runner credential",
 						"error", credErr)
 				} else {
 					cmd.JcascYaml = withRunnerCreds
+				}
+			}
+
+			// A pool library's login follows the same
+			// rule: it reaches the mite command only.
+			if len(resolved.CellPoolLibraryCredentials) > 0 {
+				withLibCreds, credErr := appendSystemCredentials(cmd.JcascYaml, resolved.CellPoolLibraryCredentials)
+				if credErr != nil {
+					logger.Warn("pool library credential injection failed; the mite gets a cell jcasc with no pool library credential",
+						"error", credErr)
+				} else {
+					cmd.JcascYaml = withLibCreds
 				}
 			}
 		}
@@ -5935,17 +5956,18 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 	return cmd, nil
 }
 
-// injectRunnerCredentials appends a cell's ssh runner credentials (design
-// D5) to jenkins.yaml's global credentials domain. It mirrors
+// appendSystemCredentials appends SYSTEM-scope credentials to jenkins.yaml's
+// global credentials domain. It serves a cell's ssh runner keys (design D5)
+// and its pool library logins. It mirrors
 // injectTenantCloudCredentials's list-aware edit: MergeJenkinsYAML replaces
 // a list wholesale on conflict, so this edit runs on the already-parsed
-// document instead. Each entry in creds is already shaped
-// {"basicSSHUserPrivateKey": {...}} by internal/controller/runners.
+// document instead. Each entry in creds is already shaped as one Jenkins
+// credential block, such as {"basicSSHUserPrivateKey": {...}}.
 //
 // The caller MUST run this only on the JcascYaml sent to the mite, never on
 // content that reaches a ConfigMap (design D5: "The key value never enters
 // a ConfigMap"). buildDesiredStateCommand is the one caller.
-func injectRunnerCredentials(yamlDoc string, creds []any) (string, error) {
+func appendSystemCredentials(yamlDoc string, creds []any) (string, error) {
 	if len(creds) == 0 {
 		return yamlDoc, nil
 	}
