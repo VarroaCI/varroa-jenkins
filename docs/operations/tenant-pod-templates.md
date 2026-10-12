@@ -82,6 +82,84 @@ carries the `kubernetes.jenkins.io/controller` label, and carries a valid refres
 Teardown keeps the `Team` finalizer until the tenant's agent pods are gone, or for ten minutes at
 most. Each check runs once a minute, and no timeout is configurable.
 
+## Build a container image
+
+An agent pod has no Docker daemon. A `docker.build` step or an `agent { docker … }` block does
+not run on a cell. Build the image with kaniko in a pod template instead. Kaniko needs no
+daemon, no privileged container, and no security context. Varroa tests this recipe on a cell
+with kaniko `v1.23.2`.
+
+Kaniko runs as root. The agent namespace must allow the Pod Security `baseline` level, because
+the `restricted` level refuses the pod. BuildKit rootless needs an unconfined seccomp profile,
+and `baseline` refuses that profile. The operator renders no NetworkPolicy in the agent
+namespace, so the cluster's own egress rules decide which registries the pod reaches.
+
+1. Add a `podtemplate` item to the tenant bundle:
+
+   ```yaml
+   # clouds.kubernetes.templates[]
+   - name: kaniko
+     label: kaniko
+     idleMinutes: 0
+     podRetention: "never"
+     containers:
+       - name: kaniko
+         image: gcr.io/kaniko-project/executor:v1.23.2-debug
+         command: /busybox/cat
+         ttyEnabled: true
+         resourceRequestCpu: "1"
+         resourceRequestMemory: "2Gi"
+         resourceLimitCpu: "2"
+         resourceLimitMemory: "4Gi"
+   ```
+
+2. Write a Docker `config.json` for the push registry. The `auth` value is `user:token` in
+   base64:
+
+   ```json
+   {"auths": {"registry.example.com": {"auth": "<base64 of user:token>"}}}
+   ```
+
+3. Store the file as a projected `secretFile` credential in the agent namespace:
+
+   ```bash
+   kubectl -n team-payments create secret generic payments-registry --from-file=file=config.json
+   kubectl -n team-payments label secret payments-registry varroa.dev/tenant-credential=true
+   kubectl -n team-payments annotate secret payments-registry \
+     varroa.dev/credential-id=registry-push varroa.dev/credential-kind=secretFile \
+     varroa.dev/credential-filename=config.json
+   ```
+
+4. Run kaniko in the `kaniko` container. A step outside `container('kaniko')` runs in the
+   `jnlp` container, which has no kaniko. The debug image has no `/bin/sh`, so name the busybox
+   shell:
+
+   ```groovy
+   pipeline {
+     agent { label 'payments-kaniko' }
+     stages {
+       stage('image') {
+         steps {
+           withCredentials([file(credentialsId: 'registry-push', variable: 'DOCKER_CFG')]) {
+             container(name: 'kaniko', shell: '/busybox/sh') {
+               sh '''#!/busybox/sh
+                 mkdir -p /kaniko/.docker
+                 cp "$DOCKER_CFG" /kaniko/.docker/config.json
+                 /kaniko/executor --context "$WORKSPACE" --dockerfile Dockerfile \
+                   --destination registry.example.com/payments/app:$BUILD_NUMBER
+               '''
+             }
+           }
+         }
+       }
+     }
+   }
+   ```
+
+`withCredentials` writes the file in the workspace temporary directory. Every container of the
+pod mounts the workspace, so the kaniko container can read the file. Add one `--destination` for
+each tag. To keep layers in the registry between builds, add `--cache=true` and `--cache-repo`.
+
 ## Security
 
 Varroa does not filter pod specs. A tenant's `yaml` or `volumes` can name a `hostPath`. Pod
