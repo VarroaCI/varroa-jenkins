@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<jenkins.branch.OrganizationFolder plugin="branch-api">
+  <displayName>Gitea Org Folder</displayName>
+  <description>Organization folder with Gitea SCM navigator</description>
+  <navigators>
+    <org.jenkinsci.plugin.gitea.GiteaSCMNavigator plugin="gitea">
+      <serverUrl>https://git.fake-forge.example</serverUrl>
+      <repoOwner>fake-org</repoOwner>
+      <credentialsId>gitea-cred</credentialsId>
+      <traits>
+        <org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+          <strategyId>1</strategyId>
+        </org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+        <org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait>
+          <strategyId>1</strategyId>
+        </org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait>
+        <org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait>
+          <strategyId>1</strategyId>
+          <trust class="org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$TrustContributors"></trust>
+        </org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait>
+        <org.jenkinsci.plugin.gitea.WebhookRegistrationTrait>
+          <mode>DISABLE</mode>
+        </org.jenkinsci.plugin.gitea.WebhookRegistrationTrait>
+      </traits>
+    </org.jenkinsci.plugin.gitea.GiteaSCMNavigator>
+  </navigators>
+  <projectFactories>
+    <org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory">
+      <scriptPath>Jenkinsfile</scriptPath>
+    </org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory>
+  </projectFactories>
+  <buildStrategies>
+    <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+  </buildStrategies>
+</jenkins.branch.OrganizationFolder>

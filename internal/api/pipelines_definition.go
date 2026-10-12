@@ -588,6 +588,9 @@ func multibranchRemoteURL(sources []items.BranchSourceEntry) string {
 		if gh := src.BranchSource.Source.GitHub; gh != nil && gh.RepositoryURL != "" {
 			return gh.RepositoryURL
 		}
+		if g := src.BranchSource.Source.Gitea; g != nil && g.ServerURL != "" {
+			return strings.TrimRight(g.ServerURL, "/") + "/" + g.RepoOwner + "/" + g.Repository
+		}
 	}
 	return ""
 }
@@ -646,6 +649,17 @@ func buildPipelineTriggers(item *items.Item) *pipelineTriggersJSON {
 // GitHub branch or pull-request discovery.
 func multibranchDiscoveryTraits(sources []items.BranchSourceEntry) (push, pullRequest bool) {
 	for _, src := range sources {
+		if g := src.BranchSource.Source.Gitea; g != nil {
+			for _, trait := range items.EffectiveGiteaTraits(g.Traits) {
+				if trait.GiteaBranchDiscovery != nil {
+					push = true
+				}
+				if trait.GiteaPullRequestDiscovery != nil || trait.GiteaForkDiscovery != nil {
+					pullRequest = true
+				}
+			}
+			continue
+		}
 		gh := src.GitHub
 		if gh == nil {
 			gh = src.BranchSource.Source.GitHub

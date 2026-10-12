@@ -1,5 +1,5 @@
 cases:
-  # Breadth (25, supported)
+  # Breadth (27, supported)
   - name: freestyle-scm-extensions
     tier: breadth
     status: supported
@@ -39,7 +39,13 @@ cases:
   - name: multibranch-varroa-marker
     tier: breadth
     status: supported
+  - name: multibranch-gitea-source
+    tier: breadth
+    status: supported
   - name: orgfolder-github-navigator
+    tier: breadth
+    status: supported
+  - name: orgfolder-gitea-navigator
     tier: breadth
     status: supported
   - name: orgfolder-git-navigator

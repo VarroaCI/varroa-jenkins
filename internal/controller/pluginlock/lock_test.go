@@ -97,6 +97,9 @@ func TestParsedLock_SeedMembership(t *testing.T) {
 
 				"pipeline-graph-analysis":    false,
 				"pipeline-githubnotify-step": false,
+				"slack":                      false,
+				"email-ext":                  false,
+				"gitea":                      false,
 				"maven-plugin":               false,
 				"config-file-provider":       false,
 			}

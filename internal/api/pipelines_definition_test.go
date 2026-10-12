@@ -700,3 +700,35 @@ func TestBuildPipelineTriggersPollSCMDefaultSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestMultibranchGiteaRemoteAndDiscoveryTraits(t *testing.T) {
+	sources := []items.BranchSourceEntry{
+		{BranchSource: items.BranchSource{Source: items.BranchSourceConfig{Gitea: &items.GiteaSCMSource{
+			ServerURL:  "https://git.example.org/",
+			RepoOwner:  "acme",
+			Repository: "app",
+		}}}},
+	}
+	if got, want := multibranchRemoteURL(sources), "https://git.example.org/acme/app"; got != want {
+		t.Fatalf("gitea remote URL = %q, want %q", got, want)
+	}
+	push, pr := multibranchDiscoveryTraits(sources)
+	if !push || !pr {
+		t.Fatalf("gitea defaults: push=%v pullRequest=%v, want both true", push, pr)
+	}
+
+	onlyFork := []items.BranchSourceEntry{
+		{BranchSource: items.BranchSource{Source: items.BranchSourceConfig{Gitea: &items.GiteaSCMSource{
+			ServerURL:  "https://git.example.org",
+			RepoOwner:  "acme",
+			Repository: "app",
+			Traits: []items.GiteaTrait{
+				{GiteaForkDiscovery: &items.GiteaForkTrait{StrategyID: 1, Trust: "everyone"}},
+			},
+		}}}},
+	}
+	push, pr = multibranchDiscoveryTraits(onlyFork)
+	if push || !pr {
+		t.Fatalf("fork-only gitea traits: push=%v pullRequest=%v, want push false and pullRequest true", push, pr)
+	}
+}

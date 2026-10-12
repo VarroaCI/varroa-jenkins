@@ -33,6 +33,14 @@ var HeaderAllowlist = []string{
 	"X-Hub-Signature-256",
 	"X-Gitlab-Event",
 	"X-Gitlab-Token",
+	"X-Gitea-Event",
+	"X-Gitea-Event-Type",
+	"X-Gitea-Delivery",
+	"X-Gitea-Signature",
+	"X-Forgejo-Event",
+	"X-Forgejo-Event-Type",
+	"X-Forgejo-Delivery",
+	"X-Forgejo-Signature",
 	"X-Event-Key",
 	"X-Hook-UUID",
 	"X-Attempt-Number",
@@ -381,6 +389,10 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 // identifyForge reads the request headers to name the forge a tenant
 // delivery came from (design.md D13).
 func identifyForge(r *http.Request) string {
+	// Gitea and Forgejo also send X-GitHub-Event, so they are checked first.
+	if r.Header.Get("X-Gitea-Event") != "" || r.Header.Get("X-Forgejo-Event") != "" {
+		return "gitea"
+	}
 	if r.Header.Get("X-GitHub-Event") != "" {
 		return "github"
 	}
@@ -404,6 +416,19 @@ func verifyForgeSignature(r *http.Request, forge string, body []byte, secret str
 		mac.Write(body)
 		want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 		return hmac.Equal([]byte(sig), []byte(want))
+	case "gitea":
+		// Gitea and Forgejo sign the bare hex digest, without a prefix.
+		sig := r.Header.Get("X-Gitea-Signature")
+		if sig == "" {
+			sig = r.Header.Get("X-Forgejo-Signature")
+		}
+		if sig == "" {
+			return false
+		}
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(body)
+		want := hex.EncodeToString(mac.Sum(nil))
+		return hmac.Equal([]byte(sig), []byte(want))
 	case "gitlab":
 		got := r.Header.Get("X-Gitlab-Token")
 		if got == "" {
@@ -425,6 +450,13 @@ func deriveDeliveryID(r *http.Request, forge string) string {
 	switch forge {
 	case "github":
 		if v := r.Header.Get("X-GitHub-Delivery"); v != "" {
+			return v
+		}
+	case "gitea":
+		if v := r.Header.Get("X-Gitea-Delivery"); v != "" {
+			return v
+		}
+		if v := r.Header.Get("X-Forgejo-Delivery"); v != "" {
 			return v
 		}
 	case "gitlab":

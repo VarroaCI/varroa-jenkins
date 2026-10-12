@@ -87,7 +87,9 @@ reading each package's entry point):
   `Manifest.Retain` lists top-level paths the engine neither writes nor
   deletes: their managed items keep their previous hash in the managed
   cache, matched on whole path segments. Only the cell merge writes it, for
-  a held tenant folder; `ReRoot` drops it. The sibling
+  a held tenant folder; `ReRoot` drops it. A `gitea` source or navigator
+  always renders its discovery traits (the defaults when none are declared)
+  and a `WebhookRegistrationTrait` set to `DISABLE`. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
   `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
   tenant's re-rooted manifest before a push; `items.Parse` itself is

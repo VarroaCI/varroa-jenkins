@@ -1687,3 +1687,152 @@ func TestLibraryConfiguration_CredentialRefs(t *testing.T) {
 		t.Fatalf("CredentialRefs() with no credential = %+v, want none", refs)
 	}
 }
+
+func TestGenerateConfigXML_GiteaSourceDefaultTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{ServerURL: "https://git.example.org/", RepoOwner: "acme", Repository: "app", CredentialsID: "gitea-cred"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`class="org.jenkinsci.plugin.gitea.GiteaSCMSource"`,
+		`plugin="gitea"`,
+		"<serverUrl>https://git.example.org</serverUrl>",
+		"<repoOwner>acme</repoOwner>",
+		"<repository>app</repository>",
+		"<credentialsId>gitea-cred</credentialsId>",
+		"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait",
+		"org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait",
+		"org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$TrustContributors",
+		"org.jenkinsci.plugin.gitea.WebhookRegistrationTrait",
+		"<mode>DISABLE</mode>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("gitea source XML missing %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "TagDiscoveryTrait") {
+		t.Errorf("default traits must not include tag discovery:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GiteaSourceDeclaredTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{
+				ServerURL:  "https://git.example.org",
+				RepoOwner:  "acme",
+				Repository: "app",
+				Traits: []GiteaTrait{
+					{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 2, Trust: "nobody"}},
+					{GiteaTagDiscovery: &GiteaTagTrait{}},
+				},
+			},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "ForkPullRequestDiscoveryTrait$TrustNobody") {
+		t.Errorf("fork trust nobody not rendered:\n%s", xml)
+	}
+	if !strings.Contains(xml, "org.jenkinsci.plugin.gitea.TagDiscoveryTrait") {
+		t.Errorf("declared tag trait not rendered:\n%s", xml)
+	}
+	if strings.Contains(xml, "BranchDiscoveryTrait") {
+		t.Errorf("undeclared branch trait rendered:\n%s", xml)
+	}
+	if !strings.Contains(xml, "<mode>DISABLE</mode>") {
+		t.Errorf("webhook trait must always render DISABLE:\n%s", xml)
+	}
+	itemEveryone := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{ServerURL: "https://git.example.org", RepoOwner: "acme", Repository: "app",
+				Traits: []GiteaTrait{{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "everyone"}}}},
+		}}}},
+	}
+	xmlEveryone, err := GenerateConfigXML(itemEveryone)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xmlEveryone, "ForkPullRequestDiscoveryTrait$TrustEveryone") {
+		t.Errorf("fork trust everyone not rendered:\n%s", xmlEveryone)
+	}
+}
+
+func TestGenerateConfigXML_GiteaNavigator(t *testing.T) {
+	item := Item{
+		Kind: "organizationFolder",
+		Name: "org",
+		Navigators: []SCMNavigator{{Gitea: &GiteaNavigator{
+			ServerURL:     "https://git.example.org/",
+			RepoOwner:     "acme",
+			CredentialsID: "gitea-cred",
+		}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		"org.jenkinsci.plugin.gitea.GiteaSCMNavigator",
+		"<serverUrl>https://git.example.org</serverUrl>",
+		"<repoOwner>acme</repoOwner>",
+		"<credentialsId>gitea-cred</credentialsId>",
+		"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait",
+		"<mode>DISABLE</mode>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("gitea navigator XML missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestValidate_GiteaSourceRejects(t *testing.T) {
+	mb := func(g GiteaSCMSource) Item {
+		return Item{Kind: "multibranch", Name: "mb", SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{
+			Source: BranchSourceConfig{Gitea: &g}}}}}
+	}
+	okSource := GiteaSCMSource{ServerURL: "https://git.example.org", RepoOwner: "acme", Repository: "app"}
+	tests := []struct {
+		name string
+		item Item
+	}{
+		{"missing serverUrl", mb(GiteaSCMSource{RepoOwner: "acme", Repository: "app"})},
+		{"bad scheme", mb(GiteaSCMSource{ServerURL: "ssh://git.example.org", RepoOwner: "acme", Repository: "app"})},
+		{"strategyId 4", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{GiteaBranchDiscovery: &GiteaStrategyTrait{StrategyID: 4}}}})},
+		{"bad trust", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "anyone"}}}})},
+		{"two keys in one trait", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{
+				GiteaBranchDiscovery:      &GiteaStrategyTrait{StrategyID: 1},
+				GiteaPullRequestDiscovery: &GiteaStrategyTrait{StrategyID: 1},
+			}}})},
+		{"missing repository", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme"})},
+		{"navigator missing repoOwner", Item{Kind: "organizationFolder", Name: "org",
+			Navigators: []SCMNavigator{{Gitea: &GiteaNavigator{ServerURL: okSource.ServerURL}}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.item.Validate(); err == nil {
+				t.Fatal("expected a validation error")
+			}
+		})
+	}
+	valid := mb(okSource)
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid gitea source rejected: %v", err)
+	}
+}

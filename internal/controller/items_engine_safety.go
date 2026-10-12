@@ -83,3 +83,41 @@ func checkFolderLibraryPluginsManifest(manifest *items.Manifest, coreSet []plugi
 	}
 	return nil
 }
+
+// giteaPlugin supplies the Gitea and Forgejo branch source and navigator
+// classes that the items engine renders for a gitea source or navigator.
+const giteaPlugin = "gitea"
+
+// checkGiteaPlugin refuses a manifest whose gitea sources or navigators need
+// the gitea plugin when coreSet omits it. A parse failure returns no error,
+// as in checkBranchBuildStrategiesPlugin.
+func checkGiteaPlugin(itemsYAML string, coreSet []pluginlock.PluginEntry) error {
+	manifest, err := items.Parse(itemsYAML)
+	if err != nil {
+		return nil //nolint:nilerr // a parse failure is reported through the caller's own error path, not this check
+	}
+	return checkGiteaPluginManifest(manifest, coreSet)
+}
+
+// checkGiteaPluginManifest is checkGiteaPlugin for a manifest that is already
+// parsed.
+func checkGiteaPluginManifest(manifest *items.Manifest, coreSet []pluginlock.PluginEntry) error {
+	if pluginPinned(coreSet, giteaPlugin) {
+		return nil
+	}
+	for _, ip := range manifest.Flatten() {
+		for _, entry := range ip.Item.SourcesList {
+			if entry.BranchSource.Source.Gitea != nil {
+				return fmt.Errorf("item %q (kind=%s) has a gitea source, which needs plugin %q; the resolved plugin set omits it",
+					ip.Path, ip.Item.Kind, giteaPlugin)
+			}
+		}
+		for _, nav := range ip.Item.Navigators {
+			if nav.Gitea != nil {
+				return fmt.Errorf("item %q (kind=%s) has a gitea navigator, which needs plugin %q; the resolved plugin set omits it",
+					ip.Path, ip.Item.Kind, giteaPlugin)
+			}
+		}
+	}
+	return nil
+}

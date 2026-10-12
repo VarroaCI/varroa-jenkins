@@ -80,6 +80,7 @@ public class VarroaHeadlessFilter implements Filter {
         "/wsagents/",
         "/jnlpJars/",
         "/github-webhook/",
+        "/gitea-webhook/",
         "/varroa-activity/",
         "/varroa-run",
         "/prometheus/",

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject plugin="workflow-multibranch">
+  <displayName>Multibranch Gitea Source</displayName>
+  <description>Multibranch pipeline with a Gitea source</description>
+  <sources class="jenkins.branch.MultiBranchProject$BranchSourceList">
+    <data>
+      <jenkins.branch.BranchSource>
+        <source class="org.jenkinsci.plugin.gitea.GiteaSCMSource" plugin="gitea">
+          <serverUrl>https://git.fake-forge.example</serverUrl>
+          <repoOwner>fake-org</repoOwner>
+          <repository>fake-repo</repository>
+          <credentialsId>gitea-cred</credentialsId>
+          <traits>
+            <org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+              <strategyId>3</strategyId>
+            </org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+            <org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait>
+              <strategyId>1</strategyId>
+              <trust class="org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$TrustNobody"></trust>
+            </org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait>
+            <org.jenkinsci.plugin.gitea.WebhookRegistrationTrait>
+              <mode>DISABLE</mode>
+            </org.jenkinsci.plugin.gitea.WebhookRegistrationTrait>
+          </traits>
+        </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
+      </jenkins.branch.BranchSource>
+    </data>
+  </sources>
+  <factory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory">
+    <scriptPath>Jenkinsfile</scriptPath>
+  </factory>
+</org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject>

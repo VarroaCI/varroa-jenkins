@@ -295,6 +295,9 @@ func materializeTenantManifest(team string, data map[string]string, coreSet []pl
 	if err := checkFolderLibraryPluginsManifest(rerooted, coreSet); err != nil {
 		return nil, err
 	}
+	if err := checkGiteaPluginManifest(rerooted, coreSet); err != nil {
+		return nil, err
+	}
 	return rerooted, nil
 }
 

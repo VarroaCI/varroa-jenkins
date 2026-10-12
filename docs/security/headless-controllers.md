@@ -38,6 +38,7 @@ The Jenkins filter keeps these paths open on every headless controller, for ever
 | prefix | `/jnlpJars/` | The agent JAR download |
 | prefix `/computer/`, suffix `/slave-agent.jnlp` or `/jenkins-agent.jnlp` | Agent connection setup |
 | prefix | `/github-webhook/` | Forge webhooks and webhook replay |
+| prefix | `/gitea-webhook/` | Gitea and Forgejo webhooks and webhook replay |
 | exact | `/generic-webhook-trigger/invoke` | Forge webhooks and webhook replay |
 | prefix | `/varroa-activity/` | The activity drain |
 | prefix | `/varroa-run` | The pipeline run trigger |

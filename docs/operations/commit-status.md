@@ -5,7 +5,8 @@ A Jenkins job reports its commit status to the forge. Varroa controllers support
 ## Multibranch and organization-folder jobs
 
 A multibranch job or an organization-folder job on a cell reports a status by itself. The
-`github-branch-source` plugin sends the status for each build. You do not add a step.
+`github-branch-source` plugin sends the status for a GitHub source. The `gitea` plugin sends
+the status for a Gitea or Forgejo source. You do not add a step.
 
 ## Plain jobs
 
@@ -33,6 +34,40 @@ credential also works.
 | Classic personal access token | `repo:status`. Use `repo` for a private repository. |
 | Fine-grained personal access token | "Commit statuses: write" on the repository. |
 | GitHub App | "Commit statuses: write" on the repository. |
+
+## Forgejo and Gitea
+
+Forgejo and Gitea sources use the `gitea` plugin. Declare each forge server in the cell
+bundle. The plugin reads the server list from the `unclassified.giteaServers` section of
+the Jenkins configuration:
+
+```yaml
+unclassified:
+  giteaServers:
+    servers:
+      - displayName: forge
+        serverUrl: https://git.example.org
+        manageHooks: false
+        aliasUrl: ""
+```
+
+Set `manageHooks: false`. Varroa registers the webhook, so the plugin must not register one.
+
+Create a username and password credential in the job's folder. Put an access token in the
+password field. The token needs the `write:repository` and `read:organization` scopes. The
+notifier uses the folder credential on the source.
+
+Add a webhook to the repository. Use these values:
+
+| Field | Value |
+|---|---|
+| Target URL | `https://<host>/hibernation/<token>/teams/<team>/queue/gitea-webhook/post` |
+| Content type | `application/json` |
+| Secret | The value of `status.pipelines.webhookSecret` |
+| Events | Push and pull request |
+
+The `<token>` and the `<team>` come from the tenant. The webhook must reach the dashboard
+host on port 443.
 
 ## Network
 

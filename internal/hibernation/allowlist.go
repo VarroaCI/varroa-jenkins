@@ -7,5 +7,6 @@ package hibernation
 // one of these prefixes are forwarded to Jenkins.
 var ReplayPathAllowlist = []string{
 	"github-webhook/",
+	"gitea-webhook/",
 	"generic-webhook-trigger/invoke",
 }

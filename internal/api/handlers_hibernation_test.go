@@ -593,3 +593,128 @@ func TestTenantWebhookQueue_UnverifiedHeaderIsReadFromRequestNotAllowlist(t *tes
 		t.Fatal("no envelope published within timeout")
 	}
 }
+
+func giteaHexSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestIdentifyForge_GiteaBeforeGitHub(t *testing.T) {
+	// Gitea and Forgejo also send X-GitHub-Event, so the gitea check must win.
+	for _, hdr := range []string{"X-Gitea-Event", "X-Forgejo-Event"} {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("X-GitHub-Event", "push")
+		req.Header.Set(hdr, "push")
+		if got := identifyForge(req); got != "gitea" {
+			t.Errorf("%s with X-GitHub-Event: forge = %q, want gitea", hdr, got)
+		}
+	}
+}
+
+func TestTenantQueue_GiteaSignatureAccepted(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(bus.WebhookTenantSubject("core", "payments"), func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req.Header.Set("X-Gitea-Event", "push")
+	req.Header.Set("X-Gitea-Signature", giteaHexSignature("secret", body))
+	req.Header.Set("X-Gitea-Delivery", "gt-delivery-1")
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal published envelope: %v", err)
+		}
+		if env["forge"] != "gitea" || env["deliveryId"] != "gt-delivery-1" {
+			t.Fatalf("envelope identity = %+v, want forge=gitea deliveryId=gt-delivery-1", env)
+		}
+		headers, _ := env["headers"].(map[string]any)
+		if headers["X-Gitea-Event"] != "push" {
+			t.Errorf("envelope headers = %+v, want X-Gitea-Event carried", headers)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope published within timeout")
+	}
+}
+
+func TestTenantQueue_ForgejoSignatureHeaderAccepted(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
+
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(bus.WebhookTenantSubject("core", "payments"), func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req.Header.Set("X-Forgejo-Event", "pull_request")
+	req.Header.Set("X-Forgejo-Signature", giteaHexSignature("secret", body))
+	req.Header.Set("X-Forgejo-Delivery", "fj-delivery-1")
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal published envelope: %v", err)
+		}
+		if env["forge"] != "gitea" || env["deliveryId"] != "fj-delivery-1" {
+			t.Fatalf("envelope identity = %+v, want forge=gitea deliveryId=fj-delivery-1", env)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope published within timeout")
+	}
+}
+
+func TestTenantQueue_GiteaBadSignatureRejected(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, Logger: slog.Default()})
+
+	body := []byte(`{"ref":"refs/heads/main"}`)
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/gitea-webhook/post", bytes.NewReader(body))
+	req.Header.Set("X-Gitea-Event", "push")
+	req.Header.Set("X-Gitea-Signature", giteaHexSignature("some-other-secret", body))
+	rec := httptest.NewRecorder()
+
+	srv.HandleHibernationDispatch(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a mismatched Gitea signature", rec.Code)
+	}
+}

@@ -2,6 +2,7 @@ package items
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -885,6 +886,7 @@ type BranchSource struct {
 type BranchSourceConfig struct {
 	GitHub *GitHubSCMSource `yaml:"github,omitempty"`
 	Git    *GitSCMSource    `yaml:"git,omitempty"`
+	Gitea  *GiteaSCMSource  `yaml:"gitea,omitempty"`
 }
 
 // BranchSourceStrategy defines the branch discovery strategy.
@@ -910,6 +912,47 @@ type GitHubSCMSource struct {
 	RepositoryURL   string        `yaml:"repositoryUrl,omitempty"`
 	CredentialsID   string        `yaml:"credentialsId,omitempty"`
 	Traits          []GitHubTrait `yaml:"traits,omitempty"`
+}
+
+// GiteaSCMSource for a multibranch Gitea or Forgejo repository source.
+type GiteaSCMSource struct {
+	ServerURL     string       `yaml:"serverUrl"`
+	RepoOwner     string       `yaml:"repoOwner"`
+	Repository    string       `yaml:"repository"`
+	CredentialsID string       `yaml:"credentialsId,omitempty"`
+	Traits        []GiteaTrait `yaml:"traits,omitempty"`
+}
+
+// GiteaTrait is a union of Gitea branch source discovery traits. Exactly one
+// field is set in each entry.
+type GiteaTrait struct {
+	GiteaBranchDiscovery      *GiteaStrategyTrait `yaml:"giteaBranchDiscovery,omitempty"`
+	GiteaPullRequestDiscovery *GiteaStrategyTrait `yaml:"giteaPullRequestDiscovery,omitempty"`
+	GiteaForkDiscovery        *GiteaForkTrait     `yaml:"giteaForkDiscovery,omitempty"`
+	GiteaTagDiscovery         *GiteaTagTrait      `yaml:"giteaTagDiscovery,omitempty"`
+}
+
+// GiteaStrategyTrait carries the strategy of a branch or pull request
+// discovery trait. The values are 1 (exclude), 2 (only), or 3 (both).
+type GiteaStrategyTrait struct {
+	StrategyID int `yaml:"strategyId"`
+}
+
+// GiteaForkTrait is the fork pull request discovery trait.
+type GiteaForkTrait struct {
+	StrategyID int    `yaml:"strategyId"`
+	Trust      string `yaml:"trust"`
+}
+
+// GiteaTagTrait is the tag discovery trait. It carries no settings.
+type GiteaTagTrait struct{}
+
+// GiteaNavigator scans a Gitea or Forgejo server for repositories.
+type GiteaNavigator struct {
+	ServerURL     string       `yaml:"serverUrl"`
+	RepoOwner     string       `yaml:"repoOwner"`
+	CredentialsID string       `yaml:"credentialsId,omitempty"`
+	Traits        []GiteaTrait `yaml:"traits,omitempty"`
 }
 
 // GitHubTrait is a union of GitHub branch source discovery traits.
@@ -990,6 +1033,7 @@ type OrphanedStrategy struct {
 type SCMNavigator struct {
 	GitHub *GitHubNavigator `yaml:"githubNavigator,omitempty"`
 	Git    *GitNavigator    `yaml:"gitNavigator,omitempty"`
+	Gitea  *GiteaNavigator  `yaml:"giteaNavigator,omitempty"`
 }
 
 // GitHubNavigator scans a GitHub org for repositories.
@@ -1068,14 +1112,123 @@ func (i *Item) Validate() error {
 		if len(i.SourcesList) == 0 {
 			return fmt.Errorf("item %q: kind=multibranch requires at least one branch source in sourcesList", i.Name)
 		}
+		for _, entry := range i.SourcesList {
+			if g := entry.BranchSource.Source.Gitea; g != nil {
+				if err := validateGiteaServer(i.Name, g.ServerURL, g.RepoOwner); err != nil {
+					return err
+				}
+				if strings.TrimSpace(g.Repository) == "" {
+					return fmt.Errorf("item %q: gitea source requires repository", i.Name)
+				}
+				if err := validateGiteaTraits(i.Name, g.Traits); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	case "organizationFolder":
 		if len(i.Navigators) == 0 {
 			return fmt.Errorf("item %q: kind=organizationFolder requires at least one navigator", i.Name)
 		}
+		for _, nav := range i.Navigators {
+			if g := nav.Gitea; g != nil {
+				if err := validateGiteaServer(i.Name, g.ServerURL, g.RepoOwner); err != nil {
+					return err
+				}
+				if err := validateGiteaTraits(i.Name, g.Traits); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("item %q: unknown kind %q", i.Name, i.Kind)
+	}
+}
+
+// giteaServerURLPattern accepts an http or https URL without spaces or '$'.
+var giteaServerURLPattern = regexp.MustCompile(`^https?://[^\s$]+$`)
+
+// validateGiteaServer checks the server URL and the owner of a Gitea source
+// or navigator.
+func validateGiteaServer(itemName, serverURL, repoOwner string) error {
+	if !giteaServerURLPattern.MatchString(serverURL) {
+		return fmt.Errorf("item %q: gitea serverUrl %q must be an http or https URL", itemName, serverURL)
+	}
+	if strings.TrimSpace(repoOwner) == "" {
+		return fmt.Errorf("item %q: gitea source requires repoOwner", itemName)
+	}
+	return nil
+}
+
+// validateGiteaTraits checks each discovery trait. A trait entry sets exactly
+// one key, and each kind appears at most once.
+func validateGiteaTraits(itemName string, traits []GiteaTrait) error {
+	seen := map[string]bool{}
+	for _, t := range traits {
+		set := 0
+		kind := ""
+		if b := t.GiteaBranchDiscovery; b != nil {
+			set++
+			kind = "giteaBranchDiscovery"
+			if err := validateGiteaStrategy(itemName, kind, b.StrategyID); err != nil {
+				return err
+			}
+		}
+		if p := t.GiteaPullRequestDiscovery; p != nil {
+			set++
+			kind = "giteaPullRequestDiscovery"
+			if err := validateGiteaStrategy(itemName, kind, p.StrategyID); err != nil {
+				return err
+			}
+		}
+		if f := t.GiteaForkDiscovery; f != nil {
+			set++
+			kind = "giteaForkDiscovery"
+			if err := validateGiteaStrategy(itemName, kind, f.StrategyID); err != nil {
+				return err
+			}
+			switch f.Trust {
+			case "nobody", "contributors", "everyone":
+			default:
+				return fmt.Errorf("item %q: giteaForkDiscovery trust %q must be nobody, contributors, or everyone", itemName, f.Trust)
+			}
+		}
+		if t.GiteaTagDiscovery != nil {
+			set++
+			kind = "giteaTagDiscovery"
+		}
+		if set != 1 {
+			return fmt.Errorf("item %q: each gitea trait entry must set exactly one trait", itemName)
+		}
+		if seen[kind] {
+			return fmt.Errorf("item %q: gitea trait %s is declared more than once", itemName, kind)
+		}
+		seen[kind] = true
+	}
+	return nil
+}
+
+// validateGiteaStrategy checks the strategy id of a Gitea discovery trait.
+func validateGiteaStrategy(itemName, kind string, id int) error {
+	if id < 1 || id > 3 {
+		return fmt.Errorf("item %q: %s strategyId %d must be 1, 2, or 3", itemName, kind, id)
+	}
+	return nil
+}
+
+// EffectiveGiteaTraits returns the discovery traits a Gitea source or
+// navigator renders. An empty list selects the defaults: branch discovery
+// (1), origin pull request discovery (1), and fork pull request discovery
+// (1) that trusts contributors.
+func EffectiveGiteaTraits(t []GiteaTrait) []GiteaTrait {
+	if len(t) > 0 {
+		return t
+	}
+	return []GiteaTrait{
+		{GiteaBranchDiscovery: &GiteaStrategyTrait{StrategyID: 1}},
+		{GiteaPullRequestDiscovery: &GiteaStrategyTrait{StrategyID: 1}},
+		{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "contributors"}},
 	}
 }
 

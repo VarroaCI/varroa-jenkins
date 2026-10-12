@@ -738,8 +738,10 @@ type branchSourceData struct {
 }
 
 type branchSourceItemXML struct {
-	Source          *branchSourceSourceXML `xml:"source"`
-	BuildStrategies *buildStrategiesXML    `xml:"buildStrategies"`
+	// Source is a *branchSourceSourceXML for the git and github sources, or a
+	// *giteaSourceXML for a Gitea source.
+	Source          any                 `xml:"source"`
+	BuildStrategies *buildStrategiesXML `xml:"buildStrategies"`
 }
 
 // buildStrategiesXML renders the skip-initial-build strategy every
@@ -808,6 +810,14 @@ func multibranchConfigXML(item Item) xmlConfig {
 					ConfiguredByURL: entry.BranchSource.Source.GitHub.ConfiguredByURL,
 					CredentialsID:   entry.BranchSource.Source.GitHub.CredentialsID,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
+			})
+			continue
+		}
+		// Official spec: branchSource.source.gitea
+		if g := entry.BranchSource.Source.Gitea; g != nil {
+			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
+				Source:          giteaSourceFor(g),
 				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
@@ -1214,6 +1224,104 @@ type orgFolderXML struct {
 type navigatorsXML struct {
 	GitHub []*githubNavigatorXML `xml:"org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator"`
 	Git    []*gitNavigatorXML    `xml:"jenkins.plugins.git.GitSCMNavigator"`
+	Gitea  []*giteaNavigatorXML  `xml:"org.jenkinsci.plugin.gitea.GiteaSCMNavigator"`
+}
+
+// giteaSourceXML is a Gitea or Forgejo branch source.
+type giteaSourceXML struct {
+	Class         string          `xml:"class,attr"`
+	Plugin        string          `xml:"plugin,attr"`
+	ServerURL     string          `xml:"serverUrl"`
+	RepoOwner     string          `xml:"repoOwner"`
+	Repository    string          `xml:"repository"`
+	CredentialsID string          `xml:"credentialsId,omitempty"`
+	Traits        *giteaTraitsXML `xml:"traits"`
+}
+
+// giteaNavigatorXML is a Gitea or Forgejo organization scan.
+type giteaNavigatorXML struct {
+	Plugin        string          `xml:"plugin,attr"`
+	ServerURL     string          `xml:"serverUrl"`
+	RepoOwner     string          `xml:"repoOwner"`
+	CredentialsID string          `xml:"credentialsId,omitempty"`
+	Traits        *giteaTraitsXML `xml:"traits"`
+}
+
+// giteaTraitsXML lists the discovery traits in a fixed order. The webhook
+// trait is always present and always disabled: a cell's root URL is the
+// dashboard door, so the plugin must not register hooks of its own.
+type giteaTraitsXML struct {
+	Branch      *giteaStrategyXML    `xml:"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait"`
+	PullRequest *giteaStrategyXML    `xml:"org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait"`
+	Fork        *giteaForkXML        `xml:"org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait"`
+	Tag         *struct{}            `xml:"org.jenkinsci.plugin.gitea.TagDiscoveryTrait"`
+	Webhook     giteaWebhookTraitXML `xml:"org.jenkinsci.plugin.gitea.WebhookRegistrationTrait"`
+}
+
+type giteaStrategyXML struct {
+	StrategyID int `xml:"strategyId"`
+}
+
+type giteaForkXML struct {
+	StrategyID int           `xml:"strategyId"`
+	Trust      giteaTrustXML `xml:"trust"`
+}
+
+type giteaTrustXML struct {
+	Class string `xml:"class,attr"`
+}
+
+type giteaWebhookTraitXML struct {
+	Mode string `xml:"mode"`
+}
+
+// giteaTraitsFor renders the effective discovery traits of a Gitea source or
+// navigator.
+func giteaTraitsFor(traits []GiteaTrait) *giteaTraitsXML {
+	x := &giteaTraitsXML{Webhook: giteaWebhookTraitXML{Mode: "DISABLE"}}
+	for _, t := range EffectiveGiteaTraits(traits) {
+		switch {
+		case t.GiteaBranchDiscovery != nil:
+			x.Branch = &giteaStrategyXML{StrategyID: t.GiteaBranchDiscovery.StrategyID}
+		case t.GiteaPullRequestDiscovery != nil:
+			x.PullRequest = &giteaStrategyXML{StrategyID: t.GiteaPullRequestDiscovery.StrategyID}
+		case t.GiteaForkDiscovery != nil:
+			f := t.GiteaForkDiscovery
+			x.Fork = &giteaForkXML{
+				StrategyID: f.StrategyID,
+				Trust:      giteaTrustXML{Class: giteaTrustClass(f.Trust)},
+			}
+		case t.GiteaTagDiscovery != nil:
+			x.Tag = &struct{}{}
+		}
+	}
+	return x
+}
+
+// giteaTrustClass maps a trust keyword to the fork trait's inner class.
+func giteaTrustClass(trust string) string {
+	const prefix = "org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$"
+	switch trust {
+	case "nobody":
+		return prefix + "TrustNobody"
+	case "everyone":
+		return prefix + "TrustEveryone"
+	default:
+		return prefix + "TrustContributors"
+	}
+}
+
+// giteaSourceFor renders a Gitea branch source.
+func giteaSourceFor(g *GiteaSCMSource) *giteaSourceXML {
+	return &giteaSourceXML{
+		Class:         "org.jenkinsci.plugin.gitea.GiteaSCMSource",
+		Plugin:        "gitea",
+		ServerURL:     strings.TrimRight(g.ServerURL, "/"),
+		RepoOwner:     g.RepoOwner,
+		Repository:    g.Repository,
+		CredentialsID: g.CredentialsID,
+		Traits:        giteaTraitsFor(g.Traits),
+	}
 }
 
 type githubNavigatorXML struct {
@@ -1254,6 +1362,15 @@ func orgFolderConfigXML(item Item) xmlConfig {
 					Plugin:        "git",
 					Remote:        nav.Git.Remote,
 					CredentialsID: nav.Git.CredentialsID,
+				})
+			}
+			if g := nav.Gitea; g != nil {
+				o.Navigators.Gitea = append(o.Navigators.Gitea, &giteaNavigatorXML{
+					Plugin:        "gitea",
+					ServerURL:     strings.TrimRight(g.ServerURL, "/"),
+					RepoOwner:     g.RepoOwner,
+					CredentialsID: g.CredentialsID,
+					Traits:        giteaTraitsFor(g.Traits),
 				})
 			}
 		}

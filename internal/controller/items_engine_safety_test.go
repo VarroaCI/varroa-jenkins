@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
 const multibranchItemsYAML = `items:
@@ -111,5 +112,60 @@ func TestFolderLibraryPlugins_PassesWhenPinned(t *testing.T) {
 	}
 	if err := checkFolderLibraryPlugins(folderLibraryItemsYAML, coreSet); err != nil {
 		t.Fatalf("expected no refusal, got %v", err)
+	}
+}
+
+const giteaSourceItemsYAML = `items:
+  - kind: multibranch
+    name: mb
+    sourcesList:
+      - branchSource:
+          source:
+            gitea:
+              serverUrl: https://git.example.org
+              repoOwner: acme
+              repository: app
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile
+`
+
+// TestCheckGiteaPluginManifest_RefusesWhenUnpinned covers a gitea source
+// whose resolved plugin set omits the gitea plugin.
+func TestCheckGiteaPluginManifest_RefusesWhenUnpinned(t *testing.T) {
+	coreSet := []pluginlock.PluginEntry{{ArtifactID: "git", Version: "1"}}
+	err := checkGiteaPlugin(giteaSourceItemsYAML, coreSet)
+	if err == nil {
+		t.Fatal("expected a refusal for a gitea source without the gitea plugin")
+	}
+	if !strings.Contains(err.Error(), "gitea") {
+		t.Fatalf("refusal should name the plugin, got %v", err)
+	}
+}
+
+// TestCheckGiteaPluginManifest_PassesWhenPinned covers a gitea navigator and
+// a gitea source when the gitea plugin is pinned.
+func TestCheckGiteaPluginManifest_PassesWhenPinned(t *testing.T) {
+	coreSet := []pluginlock.PluginEntry{{ArtifactID: "gitea", Version: "1"}}
+	if err := checkGiteaPlugin(giteaSourceItemsYAML, coreSet); err != nil {
+		t.Fatalf("expected no refusal, got %v", err)
+	}
+	manifest, err := items.Parse(`items:
+  - kind: organizationFolder
+    name: org
+    navigators:
+      - giteaNavigator:
+          serverUrl: https://git.example.org
+          repoOwner: acme
+`)
+	if err != nil {
+		t.Fatalf("parse navigator manifest: %v", err)
+	}
+	if err := checkGiteaPluginManifest(manifest, coreSet); err != nil {
+		t.Fatalf("expected no refusal for a pinned navigator, got %v", err)
+	}
+	unpinned := []pluginlock.PluginEntry{{ArtifactID: "git", Version: "1"}}
+	if err := checkGiteaPluginManifest(manifest, unpinned); err == nil {
+		t.Fatal("expected a refusal for a gitea navigator without the gitea plugin")
 	}
 }

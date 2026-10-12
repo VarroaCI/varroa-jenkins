@@ -260,6 +260,7 @@ public class VarroaHeadlessFilterTest {
         assertAllowlisted("computer slave-agent.jnlp", "/computer/agent-1/slave-agent.jnlp");
         assertAllowlisted("computer jenkins-agent.jnlp", "/computer/agent-1/jenkins-agent.jnlp");
         assertAllowlisted("github-webhook", "/github-webhook/");
+        assertAllowlisted("gitea-webhook", "/gitea-webhook/post");
         assertAllowlisted("generic-webhook-trigger", "/generic-webhook-trigger/invoke");
         assertAllowlisted("varroa-activity", "/varroa-activity/events");
         assertAllowlisted("varroa-run", "/varroa-run/trigger");

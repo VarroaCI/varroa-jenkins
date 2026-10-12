@@ -22,11 +22,16 @@ sets:
       - ssh-slaves
       - pipeline-graph-analysis
       - pipeline-githubnotify-step
+      - slack
+      - email-ext
+      - gitea
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
       - artifactId: apache-httpcomponents-client-4-api
         version: "4.5.14-269.vfa_2321039a_83"
+      - artifactId: apache-httpcomponents-client-5-api
+        version: "5.6.4-207.vd5b_a_c15e4de5"
       - artifactId: artifact-manager-s3
         version: "986.v7c9a_d15576b_b_"
       - artifactId: asm-api
@@ -85,6 +90,8 @@ sets:
         version: "6.1.0-1321.v86c4c5114494"
       - artifactId: eddsa-api
         version: "0.3.0.1-29.v67e9a_1c969b_b_"
+      - artifactId: email-ext
+        version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
       - artifactId: git-client
@@ -93,6 +100,8 @@ sets:
         version: "137.ve0060b_432302"
       - artifactId: git
         version: "5.10.1"
+      - artifactId: gitea
+        version: "283.v14b_179495971"
       - artifactId: github-api
         version: "1.330-492.v3941a_032db_2a_"
       - artifactId: github-branch-source
@@ -101,6 +110,8 @@ sets:
         version: "1.47.0"
       - artifactId: gson-api
         version: "2.14.0-201.v8eefe5515533"
+      - artifactId: handy-uri-templates-2-api
+        version: "2.1.8-38.vcea_5d521d5f3"
       - artifactId: instance-identity
         version: "203.v15e81a_1b_7a_38"
       - artifactId: ionicons-api
@@ -201,6 +212,8 @@ sets:
         version: "728.vc30dcf7a_0df5"
       - artifactId: script-security
         version: "1415.v9a_f9b_3a_c253d"
+      - artifactId: slack
+        version: "795.v4b_9705b_e6d47"
       - artifactId: snakeyaml-api
         version: "2.5-149.v72471e9c6371"
       - artifactId: snakeyaml-engine-api
@@ -410,11 +423,16 @@ sets:
       - ssh-slaves
       - pipeline-graph-analysis
       - pipeline-githubnotify-step
+      - slack
+      - email-ext
+      - gitea
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
       - artifactId: apache-httpcomponents-client-4-api
         version: "4.5.14-269.vfa_2321039a_83"
+      - artifactId: apache-httpcomponents-client-5-api
+        version: "5.6.4-207.vd5b_a_c15e4de5"
       - artifactId: artifact-manager-s3
         version: "986.v7c9a_d15576b_b_"
       - artifactId: asm-api
@@ -473,6 +491,8 @@ sets:
         version: "6.1.0-1321.v86c4c5114494"
       - artifactId: eddsa-api
         version: "0.3.0.1-29.v67e9a_1c969b_b_"
+      - artifactId: email-ext
+        version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
       - artifactId: git-client
@@ -481,6 +501,8 @@ sets:
         version: "137.ve0060b_432302"
       - artifactId: git
         version: "5.10.1"
+      - artifactId: gitea
+        version: "283.v14b_179495971"
       - artifactId: github-api
         version: "1.330-492.v3941a_032db_2a_"
       - artifactId: github-branch-source
@@ -489,6 +511,8 @@ sets:
         version: "1.47.0"
       - artifactId: gson-api
         version: "2.14.0-201.v8eefe5515533"
+      - artifactId: handy-uri-templates-2-api
+        version: "2.1.8-38.vcea_5d521d5f3"
       - artifactId: instance-identity
         version: "203.v15e81a_1b_7a_38"
       - artifactId: ionicons-api
@@ -589,6 +613,8 @@ sets:
         version: "728.vc30dcf7a_0df5"
       - artifactId: script-security
         version: "1415.v9a_f9b_3a_c253d"
+      - artifactId: slack
+        version: "795.v4b_9705b_e6d47"
       - artifactId: snakeyaml-api
         version: "2.5-149.v72471e9c6371"
       - artifactId: snakeyaml-engine-api

@@ -409,6 +409,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 		{name: "github-webhook slash", path: "github-webhook/", wantOK: true},
 		{name: "generic-webhook-trigger invoke", path: "generic-webhook-trigger/invoke", wantOK: true},
 		{name: "github-webhook with suffix", path: "github-webhook/something", wantOK: true},
+		{name: "gitea-webhook post", path: "gitea-webhook/post", wantOK: true},
 		{name: "arbitrary path", path: "anything-else", wantOK: false, wantErr: "not allowlisted"},
 		{name: "path traversal", path: "../etc/passwd", wantOK: false, wantErr: "not allowlisted"},
 		{name: "empty path", path: "", wantOK: false, wantErr: "not allowlisted"},

@@ -201,6 +201,51 @@ follows `removeStrategy.items`. Deletion also removes build history.
 Unsafe removals appear in `status.pendingItemDeletions` and need the `approve-deletion`
 capability. A running job or unreadable build state defers deletion.
 
+## Gitea and Forgejo sources
+
+A `multibranch` item or an `organizationFolder` item can scan a Gitea or Forgejo server. Use
+the `gitea` and `giteaNavigator` keys:
+
+```yaml
+items:
+  - kind: multibranch
+    name: payments-api
+    sourcesList:
+      - branchSource:
+          source:
+            gitea:
+              serverUrl: https://git.example.org
+              repoOwner: acme
+              repository: api
+              credentialsId: forge-token
+              traits:
+                - giteaBranchDiscovery:
+                    strategyId: 3
+                - giteaForkDiscovery:
+                    strategyId: 1
+                    trust: contributors
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile
+  - kind: organizationFolder
+    name: acme
+    navigators:
+      - giteaNavigator:
+          serverUrl: https://git.example.org
+          repoOwner: acme
+          credentialsId: forge-token
+```
+
+The discovery traits are `giteaBranchDiscovery`, `giteaPullRequestDiscovery`,
+`giteaForkDiscovery`, and `giteaTagDiscovery`. Each `strategyId` is `1`, `2`, or `3`. The
+fork trust is `nobody`, `contributors`, or `everyone`. When `traits` is empty, the defaults
+apply: branch discovery (`1`), origin pull request discovery (`1`), and fork pull request
+discovery (`1`) that trusts `contributors`.
+
+The engine never registers a webhook on the forge. Add the webhook by hand, as described in
+[Commit status](../operations/commit-status.md) for the webhook and the server entry that
+the cell bundle needs.
+
 ## Cell restrictions
 
 A [cell](../operations/cells.md) merges every tenant's `items.yaml` into one manifest and

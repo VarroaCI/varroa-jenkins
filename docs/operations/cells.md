@@ -215,9 +215,9 @@ A tenant's webhook URL has the shape:
 ```
 
 served from the BFF's public host, outside `/api/v1` and login. `<path>` must match
-`github-webhook/` or `generic-webhook-trigger/invoke`; any other path answers `404`.
+`github-webhook/`, `gitea-webhook/`, or `generic-webhook-trigger/invoke`; any other path answers `404`.
 
-Two credentials guard the door. Varroa mints each once, and never regenerates them:
+Varroa mints two credentials once and never regenerates them:
 
 - `status.pipelines.webhookToken` addresses the tenant and goes in the URL. Only the `Team`
   object holds it:
@@ -230,7 +230,8 @@ Two credentials guard the door. Varroa mints each once, and never regenerates th
   signing secret in the forge.
 
 The door verifies the delivery by forge: GitHub with an HMAC-SHA256 `X-Hub-Signature-256`,
-GitLab with `X-Gitlab-Token`, anything else with `X-Varroa-Token`. An unsigned or mismatched
+Gitea and Forgejo with `X-Gitea-Signature`, GitLab with `X-Gitlab-Token`,
+anything else with `X-Varroa-Token`. An unsigned or mismatched
 delivery answers `400`.
 
 A delivery buffers for up to one hour, so a tenant that moves cells in that hour still
