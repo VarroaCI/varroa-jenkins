@@ -21,6 +21,9 @@ type CellPoolSummary struct {
 	// MaxTenantsPerCell is the capacity a pool cell uses when its own
 	// spec.cell.maxTenants is zero.
 	MaxTenantsPerCell int32
+	// MaxRunsPerTenant is the pool's per-tenant build cap on one cell. Zero
+	// means no cap.
+	MaxRunsPerTenant int32
 	// CapReached mirrors PoolReady=False with reason CellCapReached.
 	CapReached bool
 }
@@ -31,6 +34,7 @@ func SummarizeCellPool(pool *v1alpha1.CellPool) CellPoolSummary {
 		Name:              pool.Name,
 		ProfileRef:        pool.Spec.ProfileRef,
 		MaxTenantsPerCell: pool.Spec.MaxTenantsPerCell,
+		MaxRunsPerTenant:  pool.Spec.MaxRunsPerTenant,
 	}
 	for _, c := range pool.Status.Conditions {
 		if c.Type != v1alpha1.CellPoolConditionPoolReady {

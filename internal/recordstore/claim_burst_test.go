@@ -240,6 +240,7 @@ func TestExpireUnclaimedRunsEndsAnAbandonedGrant(t *testing.T) {
 		req := newTestClaimRequest("manual:"+runID.String(), 0)
 		req.RunID = runID.String()
 		mustGrant(t, ledger, req)
+		backdateGrant(t, db, runID, claimExpiryNow.Add(-age))
 		return runID
 	}
 	aged := seed(ClaimExpiryAge + time.Minute)
@@ -299,6 +300,7 @@ func TestExpireUnclaimedRunsSharesOneBatch(t *testing.T) {
 	req := newTestClaimRequest("manual:"+abandoned.String(), 0)
 	req.RunID = abandoned.String()
 	mustGrant(t, NewLedger(pool, nil), req)
+	backdateGrant(t, db, abandoned, accepted)
 
 	first, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
 	if err != nil {

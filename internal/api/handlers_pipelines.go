@@ -144,18 +144,21 @@ type pipelineParameterJSON struct {
 }
 
 type pipelineJobDetailJSON struct {
-	JobPath         string                    `json:"jobPath"`
-	Health          string                    `json:"health"`
-	TenantFolder    string                    `json:"tenantFolder"`
-	Tenant          string                    `json:"tenant"`
-	LastBuild       *runSummaryJSON           `json:"lastBuild,omitempty"`
-	DurationTrendMs []int64                   `json:"durationTrendMs,omitempty"`
-	Definition      *pipelineDefinitionJSON   `json:"definition,omitempty"`
-	Triggers        *pipelineTriggersJSON     `json:"triggers,omitempty"`
-	Parameters      []pipelineParameterJSON   `json:"parameters,omitempty"`
-	Template        *pipelineTemplateInfoJSON `json:"template,omitempty"`
-	Last30Days      *pipelineLast30DaysJSON   `json:"last30Days"`
-	Dependencies    pipelineDependenciesJSON  `json:"dependencies"`
+	JobPath         string                  `json:"jobPath"`
+	Health          string                  `json:"health"`
+	TenantFolder    string                  `json:"tenantFolder"`
+	Tenant          string                  `json:"tenant"`
+	LastBuild       *runSummaryJSON         `json:"lastBuild,omitempty"`
+	DurationTrendMs []int64                 `json:"durationTrendMs,omitempty"`
+	Definition      *pipelineDefinitionJSON `json:"definition,omitempty"`
+	Triggers        *pipelineTriggersJSON   `json:"triggers,omitempty"`
+	// Waiting lists the queued runs of this job that a concurrency cap
+	// holds. It is absent when none waits, or when the read failed.
+	Waiting      []runWaitEntry            `json:"waiting,omitempty"`
+	Parameters   []pipelineParameterJSON   `json:"parameters,omitempty"`
+	Template     *pipelineTemplateInfoJSON `json:"template,omitempty"`
+	Last30Days   *pipelineLast30DaysJSON   `json:"last30Days"`
+	Dependencies pipelineDependenciesJSON  `json:"dependencies"`
 }
 
 // pipelineDependencyEdgeJSON is one cross-tenant dependency edge (design
@@ -693,6 +696,15 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail.Dependencies = s.buildPipelineDependencies(claims, deps)
+
+	waits, werr := s.deps.RecordStore.ListJobRunWaits(ctx, ref.Cluster, ref.Tenant, jobPath)
+	if werr != nil {
+		s.deps.Logger.Warn("list job run waits failed", "jobPath", jobPath, "error", werr)
+	}
+	for _, w := range waits {
+		detail.Waiting = append(detail.Waiting, runWaitEntry{RunID: w.RunID, RunWaitJSON: RunWaitJSON{
+			Kind: w.Kind, Limit: w.Limit, Max: w.Max, Running: w.Running, Cell: w.Cell, Since: w.Since}})
+	}
 
 	s.writeJSON(w, http.StatusOK, detail)
 }

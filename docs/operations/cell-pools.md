@@ -15,6 +15,7 @@ Read [Cells and pipelines tenants](cells.md) first.
 | `warm` | int32, default 0 | target count of free cells the pool keeps ready |
 | `maxCells` | int32, default 0 | cap on the pool's cells, placed cells included. 0 means unlimited |
 | `maxTenantsPerCell` | int32, minimum 1, default 10 | capacity a pool cell uses when its own `spec.cell.maxTenants` is zero |
+| `maxRunsPerTenant` | int32, 0 to 10000, default 0 | builds one tenant runs at once on one cell; zero means no cap. A build over the cap waits. Set it on the object; the scale API does not change it |
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
 | `cellTemplate` | object, optional | `resources`, `miteResources`, and `podOverrides` for the cells the pool creates |
 | `libraries` | list, optional | trusted shared libraries that every cell of the pool serves. See [Pool shared libraries](cell-libraries.md) |

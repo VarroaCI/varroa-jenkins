@@ -216,6 +216,10 @@ func purgeTornDownTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool
 	if err := purgeTenantJobSchedules(ctx, tx, req); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM varroa.run_waits WHERE cluster = $1 AND tenant = $2`,
+		req.Cluster, req.Tenant); err != nil {
+		return fmt.Errorf("delete the tenant's run waits: %w", err)
+	}
 	if err := resetTenantPlacementGeneration(ctx, tx, req); err != nil {
 		return err
 	}

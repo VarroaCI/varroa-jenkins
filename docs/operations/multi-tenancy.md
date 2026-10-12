@@ -120,6 +120,33 @@ operator can change `retention`. A pipelines administrator of the tenant cannot.
 On a cell, `buildDiscarder` on a job does not change the record store. Use `retention` instead.
 
 
+## Cap concurrent builds across jobs
+
+A pipelines tenant can limit how many builds of a set of jobs run at one time. A pipelines
+administrator of the tenant sets the limits in `concurrencyLimits`:
+
+```yaml
+spec:
+  pipelines:
+    concurrencyLimits:
+      - name: deploys
+        jobs: ["deploy/*", "release/**"]
+        max: 1
+      - name: tests
+        jobs: ["test/*"]
+        max: 4
+```
+
+Each limit names a set of jobs and a maximum. A build over the maximum waits in the queue. The
+job globs use the same grammar as the retention rules. The name must be a DNS label, unique in
+the list.
+
+A build that waits holds no build number. When a running build ends, the oldest waiting build
+of that limit starts first. A build from source control or from a cron schedule waits in the
+queue with no run record. It shows only in the **Waiting** list of its job page.
+
+The cell pool can cap the builds of one tenant on one cell. See [Cell pools](cell-pools.md).
+
 ## Narrow a tenant grant to some of its jobs
 
 A `VarroaRoleBinding` scoped to a tenant accepts an optional `jobs` list of

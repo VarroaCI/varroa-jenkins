@@ -155,6 +155,16 @@ func TestExpireUnclaimedRunsLeavesAYoungRun(t *testing.T) {
 // TestExpireUnclaimedRunsLeavesARunWithAnIntent asserts the claim-expiry
 // class never marks a run the ledger holds an intent for. A GRANTED
 // intent with no build ends through the claim-abandoned class instead.
+// backdateGrant sets a granted intent's grant time. The grant hold reads the
+// database clock, so a test that sweeps at claimExpiryNow backdates the grant
+// the way it backdates the accepted_at of the run.
+func backdateGrant(t *testing.T, db *sql.DB, runID uuid.UUID, at time.Time) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE varroa.run_intents SET granted_at = $2 WHERE run_id = $1`, runID, at); err != nil {
+		t.Fatalf("backdate grant: %v", err)
+	}
+}
+
 func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 	t.Parallel()
 
@@ -165,6 +175,7 @@ func TestExpireUnclaimedRunsLeavesARunWithAnIntent(t *testing.T) {
 	req := newTestClaimRequest("manual:"+runID.String(), 0)
 	req.RunID = runID.String()
 	mustGrant(t, NewLedger(pool, nil), req)
+	backdateGrant(t, db, runID, accepted)
 
 	if _, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil); err != nil {
 		t.Fatalf("expire unclaimed runs: %v", err)
@@ -300,5 +311,64 @@ func TestRunStartedSupersedesAnExpiredRun(t *testing.T) {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload still holds %q after run.started", key)
 		}
+	}
+}
+
+// TestClaimExpiry_LiveWaitKeepsRun asserts that a queued run holding a live
+// wait row is not ended as never-claimed, even though it is older than the
+// claim-expiry age.
+func TestClaimExpiry_LiveWaitKeepsRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", claimExpiryNow.Add(-2*ClaimExpiryAge))
+	if _, err := db.Exec(`
+		INSERT INTO varroa.run_waits
+			(run_id, cluster, namespace, tenant, job_path, cell, cap_kind, cap_name, cap_max, running)
+		VALUES ($1, $2, $3, $4, $5, 'cell-a', 'tenant', 'builds', 1, 1)`,
+		runID, testCluster, testNamespace, testTenant, testJobPath); err != nil {
+		t.Fatalf("insert live wait: %v", err)
+	}
+
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, nil, claimExpiryNow, nil)
+	if err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("marked = %d, want 0 for a run with a live wait", n)
+	}
+	if status, _ := readStatusResult(t, db, runID); status != "QUEUED" {
+		t.Fatalf("status = %s, want QUEUED", status)
+	}
+}
+
+// TestClaimAbandoned_LateGrantAfterWaitNotMarked asserts that a grant made
+// recently, on a run accepted long ago, is not marked as abandoned. The grant
+// age is the time that counts, so a run that waited and then got a fresh grant
+// keeps its slot.
+func TestClaimAbandoned_LateGrantAfterWaitNotMarked(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	mp, _ := newTestMeterProvider(t)
+	metrics, err := NewClaimExpiryMetrics(mp)
+	if err != nil {
+		t.Fatalf("register metrics: %v", err)
+	}
+	runID := seedAcceptedOnlyRunRowInstance(t, db, "pod-a", claimExpiryNow.Add(-3*ClaimExpiryAge))
+	req := newTestClaimRequest("manual:"+runID.String(), 0)
+	req.RunID = runID.String()
+	mustGrant(t, NewLedger(pool, nil), req)
+	backdateGrant(t, db, runID, claimExpiryNow.Add(-time.Minute))
+
+	n, err := ExpireUnclaimedRuns(context.Background(), pool, nil, metrics, claimExpiryNow, nil)
+	if err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("marked = %d, want 0 for a fresh grant", n)
+	}
+	if status, _ := readStatusResult(t, db, runID); status != "QUEUED" {
+		t.Fatalf("status = %s, want QUEUED", status)
 	}
 }

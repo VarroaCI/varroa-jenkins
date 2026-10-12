@@ -31,6 +31,7 @@ type cellPoolSpecEntry struct {
 	Warm               int32                  `json:"warm"`
 	MaxCells           int32                  `json:"maxCells,omitempty"`
 	MaxTenantsPerCell  int32                  `json:"maxTenantsPerCell,omitempty"`
+	MaxRunsPerTenant   int32                  `json:"maxRunsPerTenant,omitempty"`
 	UnreadyGracePeriod *metav1.Duration       `json:"unreadyGracePeriod,omitempty"`
 	CellTemplate       *cellTemplate          `json:"cellTemplate,omitempty"`
 	Libraries          []cellPoolLibraryEntry `json:"libraries,omitempty"`
@@ -97,6 +98,7 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			Warm:               pool.Spec.Warm,
 			MaxCells:           pool.Spec.MaxCells,
 			MaxTenantsPerCell:  pool.Spec.MaxTenantsPerCell,
+			MaxRunsPerTenant:   pool.Spec.MaxRunsPerTenant,
 			UnreadyGracePeriod: pool.Spec.UnreadyGracePeriod,
 		},
 		Status: cellPoolStatusEntry{
@@ -283,7 +285,7 @@ func decodeCellPoolScaleRequest(r *http.Request) (cells.CellPoolDials, string) {
 	for k := range keys {
 		switch k {
 		case "warm", "maxCells", "maxTenantsPerCell", "unreadyGracePeriod":
-		case "profileRef", "cellTemplate", "approvedSignatures":
+		case "profileRef", "cellTemplate", "maxRunsPerTenant", "approvedSignatures":
 			return cells.CellPoolDials{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
 		default:
 			return cells.CellPoolDials{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)

@@ -136,6 +136,9 @@ type runDetailJSON struct {
 	// pages the rest. Both are absent when no link exists.
 	Upstream   *RunLink     `json:"upstream,omitempty"`
 	Downstream *RunLinkPage `json:"downstream,omitempty"`
+	// Waiting names the concurrency cap that holds a queued run. It is
+	// absent when no live wait row exists.
+	Waiting *RunWaitJSON `json:"waiting,omitempty"`
 }
 
 // runCommandRefusalJSON is the response shape of a stored refusal notice.

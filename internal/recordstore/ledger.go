@@ -165,6 +165,20 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 			HomeSlot: result.HomeSlot}, false
 	}
 
+	verdict, err := checkCaps(ctx, tx, req, runID)
+	if err != nil {
+		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
+	}
+	if verdict.Blocked {
+		// A capped veto commits the wait row and no intent. The row is
+		// the only record the wait leaves, so the run stays claimable.
+		if err := tx.Commit(ctx); err != nil {
+			return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
+		}
+		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonCapped, Message: verdict.Message,
+			RunID: runID.String()}, false
+	}
+
 	resp, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt)
 	if errors.Is(err, errConsumerReadNeeded) {
 		return ClaimResponse{}, true

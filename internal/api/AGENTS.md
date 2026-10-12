@@ -619,6 +619,8 @@ federation, activity persistence, and SSE fanout.
   finds the run through `RecordStore.ListRuns` and answers `{link}`, the build page or the job
   page. It authorizes the run with the run read check and answers 404 on every miss.
 
+- Run detail carries `waiting` (`RunWaitJSON`) for a queued run that a cap holds. The job detail lists `waiting` for each job. Both read `run_waits` through the record store. A read error leaves the field out.
+
 ## Work Guidance
 
 - A new or changed HTTP path/payload shape must land in

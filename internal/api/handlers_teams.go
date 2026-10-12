@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -77,6 +78,10 @@ type teamPipelinesEntry struct {
 	// tenant-admin path rejects a change to it the same way it rejects any
 	// other change outside the exports.
 	Retention *v1alpha1.TeamPipelinesRetention `json:"retention,omitempty"`
+
+	// ConcurrencyLimits carries spec.pipelines.concurrencyLimits. A tenant
+	// pipelines admin may write it, the same as exports.
+	ConcurrencyLimits []v1alpha1.TeamConcurrencyLimit `json:"concurrencyLimits,omitempty"`
 
 	// Notifications carries spec.pipelines.notifications. Changing it needs
 	// the operator's own write, not the tenant's pipelines:admin grant.
@@ -195,6 +200,7 @@ func teamPipelinesEntryFromSpec(p *v1alpha1.TeamPipelinesSpec) *teamPipelinesEnt
 		}}
 	}
 	e.Retention = p.Retention
+	e.ConcurrencyLimits = p.ConcurrencyLimits
 	return e
 }
 
@@ -245,6 +251,7 @@ func teamPipelinesSpecFromEntry(e *teamPipelinesEntry) *v1alpha1.TeamPipelinesSp
 		}
 	}
 	spec.Retention = e.Retention
+	spec.ConcurrencyLimits = e.ConcurrencyLimits
 	return spec
 }
 
@@ -276,6 +283,9 @@ func validateTeamPipelines(p *teamPipelinesEntry, namespaces []string) string {
 		if strings.TrimSpace(n.Webhook.SecretRef.Name) == "" {
 			return "pipelines.notifications.webhook.secretRef.name is required"
 		}
+	}
+	if msg := validateConcurrencyLimits(p.ConcurrencyLimits); msg != "" {
+		return msg
 	}
 	if r := p.Retention; r != nil {
 		if _, err := recordstore.ParseRetention(r.Runs); r.Runs != "" && err != nil {
@@ -602,8 +612,8 @@ func (s *Server) handleUpdateTeam(w http.ResponseWriter, r *http.Request, name s
 			s.writeJSONError(w, http.StatusNotFound, "team not found")
 			return
 		}
-		if !teamSpecEqualExceptExports(stored.Spec, team.Spec) {
-			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports")
+		if !teamSpecEqualExceptTenantOwned(stored.Spec, team.Spec) {
+			s.writeJSONError(w, http.StatusForbidden, "a tenant pipelines admin may change only exports and concurrency limits")
 			return
 		}
 	}
@@ -635,17 +645,48 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, name s
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// teamSpecEqualExceptExports reports whether a and b differ only in
-// spec.pipelines.exports. Both specs are copied before the exports are
-// cleared, so neither argument changes.
-func teamSpecEqualExceptExports(a, b v1alpha1.TeamSpec) bool {
+// teamSpecEqualExceptTenantOwned reports whether a and b differ only in
+// spec.pipelines.exports or spec.pipelines.concurrencyLimits. Both specs are
+// copied before those fields are cleared, so neither argument changes.
+func teamSpecEqualExceptTenantOwned(a, b v1alpha1.TeamSpec) bool {
 	strip := func(in v1alpha1.TeamSpec) v1alpha1.TeamSpec {
 		var out v1alpha1.TeamSpec
 		in.DeepCopyInto(&out)
 		if out.Pipelines != nil {
 			out.Pipelines.Exports = nil
+			out.Pipelines.ConcurrencyLimits = nil
 		}
 		return out
 	}
 	return reflect.DeepEqual(strip(a), strip(b))
+}
+
+// concurrencyLimitNamePattern is the DNS label a limit name must match.
+var concurrencyLimitNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// validateConcurrencyLimits checks each limit of spec.pipelines.concurrencyLimits.
+// It returns "" for a valid or absent list.
+func validateConcurrencyLimits(limits []v1alpha1.TeamConcurrencyLimit) string {
+	seen := map[string]bool{}
+	for i, l := range limits {
+		if len(l.Name) > 63 || !concurrencyLimitNamePattern.MatchString(l.Name) {
+			return fmt.Sprintf("pipelines.concurrencyLimits[%d].name is invalid", i)
+		}
+		if seen[l.Name] {
+			return fmt.Sprintf("pipelines.concurrencyLimits[%d].name is a duplicate", i)
+		}
+		seen[l.Name] = true
+		if len(l.Jobs) == 0 {
+			return fmt.Sprintf("pipelines.concurrencyLimits[%d].jobs is required", i)
+		}
+		for _, g := range l.Jobs {
+			if strings.TrimSpace(g) == "" || strings.HasPrefix(g, "/") {
+				return fmt.Sprintf("pipelines.concurrencyLimits[%d].jobs holds an invalid glob", i)
+			}
+		}
+		if l.Max < 1 {
+			return fmt.Sprintf("pipelines.concurrencyLimits[%d].max must be at least 1", i)
+		}
+	}
+	return ""
 }

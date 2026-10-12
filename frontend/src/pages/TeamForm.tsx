@@ -55,6 +55,8 @@ interface FormData {
   pipelinesExports: ExportFormEntry[];
   /** Kept only so a UI save does not erase a retention set with kubectl. */
   pipelinesRetention?: TeamPipelines["retention"];
+  /** Kept so a UI save does not erase the limits a tenant admin set. */
+  pipelinesConcurrencyLimits?: TeamPipelines["concurrencyLimits"];
 }
 
 function emptyForm(): FormData {
@@ -113,6 +115,7 @@ function formFromTeam(team: TeamEntry): FormData {
       callers: exp.callers && exp.callers.length > 0 ? exp.callers : [""],
     })),
     pipelinesRetention: team.pipelines?.retention,
+    pipelinesConcurrencyLimits: team.pipelines?.concurrencyLimits,
   };
 }
 
@@ -405,6 +408,7 @@ export default function TeamForm() {
               // passes through, so an edit never drops the webhook.
               notifications: team?.pipelines?.notifications,
               retention: form.pipelinesRetention,
+              concurrencyLimits: form.pipelinesConcurrencyLimits,
             }
           : undefined,
       };

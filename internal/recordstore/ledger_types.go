@@ -76,6 +76,10 @@ const (
 	// class as FENCED: it is permanent, because a non-home cell never
 	// becomes the home by waiting.
 	ReasonNotHome = "NOT_HOME"
+	// ReasonCapped holds a claim that a tenant or cell concurrency cap
+	// blocks. It is retryable: the plugin retries at a fixed interval and
+	// never gives up on it. The record store writes a wait row for the run.
+	ReasonCapped = "CAPPED"
 )
 
 // ReasonCodes lists every reason code a Fence or the ledger may answer
@@ -87,6 +91,7 @@ var ReasonCodes = []string{
 	ReasonCrossTenant,
 	ReasonThrottled,
 	ReasonNotHome,
+	ReasonCapped,
 }
 
 // markableVeto reports whether a veto with this reason code is permanent

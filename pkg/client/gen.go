@@ -451,6 +451,18 @@ const (
 	ComponentsSchemasRunSummaryTriggerSourceWebhook  ComponentsSchemasRunSummaryTriggerSource = "webhook"
 )
 
+// Defines values for ComponentsSchemasRunWaitKind.
+const (
+	ComponentsSchemasRunWaitKindCell   ComponentsSchemasRunWaitKind = "cell"
+	ComponentsSchemasRunWaitKindTenant ComponentsSchemasRunWaitKind = "tenant"
+)
+
+// Defines values for ComponentsSchemasRunWaitEntryKind.
+const (
+	ComponentsSchemasRunWaitEntryKindCell   ComponentsSchemasRunWaitEntryKind = "cell"
+	ComponentsSchemasRunWaitEntryKindTenant ComponentsSchemasRunWaitEntryKind = "tenant"
+)
+
 // Defines values for ComponentsSchemasRunnerSpecLauncher.
 const (
 	Inbound ComponentsSchemasRunnerSpecLauncher = "inbound"
@@ -1254,6 +1266,9 @@ type ComponentsSchemasCellPoolSpec struct {
 
 	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.
 	MaxCells *int32 `json:"maxCells,omitempty"`
+
+	// MaxRunsPerTenant Cap on the builds one tenant runs at once on one cell of the pool. Zero means no cap. Set it on the CellPool object, not through the scale API.
+	MaxRunsPerTenant *int32 `json:"maxRunsPerTenant,omitempty"`
 
 	// MaxTenantsPerCell Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
 	MaxTenantsPerCell *int32 `json:"maxTenantsPerCell,omitempty"`
@@ -2666,6 +2681,9 @@ type ComponentsSchemasPipelineJobDetail struct {
 	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
 	TenantFolder string                             `json:"tenantFolder"`
 	Triggers     *ComponentsSchemasPipelineTriggers `json:"triggers,omitempty"`
+
+	// Waiting Queued runs of this job that a concurrency cap holds. Absent when none waits.
+	Waiting *[]ComponentsSchemasRunWaitEntry `json:"waiting,omitempty"`
 }
 
 // ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
@@ -3359,6 +3377,9 @@ type ComponentsSchemasRunDetail struct {
 
 	// Upstream One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.
 	Upstream *ComponentsSchemasRunLink `json:"upstream,omitempty"`
+
+	// Waiting The concurrency cap that holds a queued run. Absent from a run that no cap holds.
+	Waiting *ComponentsSchemasRunWait `json:"waiting,omitempty"`
 }
 
 // ComponentsSchemasRunDetailTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
@@ -3564,6 +3585,39 @@ type ComponentsSchemasRunTestSuite struct {
 	Suite      string `json:"suite"`
 	Total      int    `json:"total"`
 }
+
+// ComponentsSchemasRunWait The concurrency cap that holds a queued run. Absent from a run that no cap holds.
+type ComponentsSchemasRunWait struct {
+	Cell *string `json:"cell,omitempty"`
+
+	// Kind tenant when a tenant limit holds the run; cell when the tenant cap of its cell does.
+	Kind ComponentsSchemasRunWaitKind `json:"kind"`
+
+	// Limit The tenant limit's name. Absent for a cell cap.
+	Limit *string `json:"limit,omitempty"`
+	Max   int32   `json:"max"`
+
+	// Running The builds the cap counted when it last held the run.
+	Running int32     `json:"running"`
+	Since   time.Time `json:"since"`
+}
+
+// ComponentsSchemasRunWaitKind tenant when a tenant limit holds the run; cell when the tenant cap of its cell does.
+type ComponentsSchemasRunWaitKind string
+
+// ComponentsSchemasRunWaitEntry A waiting run of a job, with its reason.
+type ComponentsSchemasRunWaitEntry struct {
+	Cell    *string                           `json:"cell,omitempty"`
+	Kind    ComponentsSchemasRunWaitEntryKind `json:"kind"`
+	Limit   *string                           `json:"limit,omitempty"`
+	Max     int32                             `json:"max"`
+	RunId   string                            `json:"runId"`
+	Running int32                             `json:"running"`
+	Since   time.Time                         `json:"since"`
+}
+
+// ComponentsSchemasRunWaitEntryKind defines model for ComponentsSchemasRunWaitEntry.Kind.
+type ComponentsSchemasRunWaitEntryKind string
 
 // ComponentsSchemasRunnerCondition Status condition for a Runner. Type Ready.
 type ComponentsSchemasRunnerCondition struct {
@@ -3792,6 +3846,18 @@ type ComponentsSchemasTeamCellMember struct {
 	RunsLast24h int64  `json:"runsLast24h"`
 }
 
+// ComponentsSchemasTeamConcurrencyLimit A cap on the builds of a named set of jobs that run at once.
+type ComponentsSchemasTeamConcurrencyLimit struct {
+	// Jobs Folder-relative job globs (*, **, ?).
+	Jobs []string `json:"jobs"`
+
+	// Max Number of builds the set runs at one time.
+	Max int32 `json:"max"`
+
+	// Name Name of the limit, a DNS label. The queue and the run views show it.
+	Name string `json:"name"`
+}
+
 // ComponentsSchemasTeamCondition Status condition for a Team.
 type ComponentsSchemasTeamCondition struct {
 	// LastTransitionTime ISO 8601 last transition time.
@@ -3897,6 +3963,9 @@ type ComponentsSchemasTeamPipelines struct {
 
 	// Concurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
 	Concurrency *ComponentsSchemasTeamPipelinesConcurrency `json:"concurrency,omitempty"`
+
+	// ConcurrencyLimits Named caps on how many builds of a set of this tenant's jobs run at one time. A build over a limit waits in the queue. A tenant pipelines admin may write this field.
+	ConcurrencyLimits *[]ComponentsSchemasTeamConcurrencyLimit `json:"concurrencyLimits,omitempty"`
 
 	// CronBackstop Turns the backstop cron scheduler on for this tenant. Default true.
 	CronBackstop *bool `json:"cronBackstop,omitempty"`

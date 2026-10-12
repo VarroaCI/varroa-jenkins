@@ -1440,6 +1440,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   to `varroa_recorder`, the role that creates every partition and table. A partition created
   by another role gives `varroa_client` and `varroa_gateway` no `SELECT` on it.
 
+## Concurrency caps
+
+- `ledger_caps.go` and `run_caps_policy.go` hold the cap check that `claimAttempt` runs. `decideCaps` is pure. `checkCaps` writes or deletes the `run_waits` row in the claim transaction.
+- A capped veto commits the wait row and no intent. `sweepRunWaits` deletes rows idle for an hour.
+- `claim_expiry.go` skips a run with a live wait row.
+
 ## Verification
 
 ```bash

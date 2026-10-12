@@ -112,6 +112,21 @@ describe("PipelinePage", () => {
     vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
   });
 
+  it("lists waiting runs", async () => {
+    mockGetPipelineJob.mockResolvedValue(
+      jobDetail({
+        waiting: [
+          { runId: "run-9", kind: "tenant", limit: "deploys", max: 1, running: 1, since: "2026-10-12T01:00:00Z" },
+        ],
+      }),
+    );
+    renderPage();
+    await screen.findByText("Waiting");
+    expect(screen.getByText("deploys")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 builds run/)).toBeInTheDocument();
+    expect(screen.getByText("Run run-9")).toBeInTheDocument();
+  });
+
   it("sets the document title from the job", async () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();

@@ -22,7 +22,7 @@ An unknown value falls back to the Overview tab, and so does `cell` on a control
 
 ### Topology
 
-The panel names the pool, the profile, the running pod instance, the previous one, the unready-since time, and the tenant warnings. A caller holding cluster-wide `cellpools:read` also sees the pool's `maxTenantsPerCell` and its `PoolReady` verdict. Every other caller sees neither, and the panel states the reason.
+The panel names the pool, the profile, the running pod instance, the previous one, the unready-since time, and the tenant warnings. A caller holding cluster-wide `cellpools:read` also sees the pool's `maxTenantsPerCell`, its `maxRunsPerTenant` run cap, and its `PoolReady` verdict. Every other caller sees neither, and the panel states the reason.
 
 A tenant table lists one row for each tenant, naming the tenant, its folder, and its placement state. A tenant is `placed` when the applied tenant set names it, and `rehydrating` otherwise.
 

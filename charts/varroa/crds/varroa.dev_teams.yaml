@@ -110,6 +110,47 @@ spec:
                     - allow
                     - cancelInProgress
                     type: string
+                  concurrencyLimits:
+                    description: |-
+                      ConcurrencyLimits caps how many builds of a named set of this tenant's
+                      jobs run at one time. A build over a limit waits in the queue.
+                    items:
+                      description: TeamConcurrencyLimit caps the builds of a set of
+                        jobs that run at once.
+                      properties:
+                        jobs:
+                          description: Jobs holds folder-relative globs (*, **, ?).
+                          items:
+                            maxLength: 512
+                            minLength: 1
+                            pattern: ^[^/]
+                            type: string
+                          maxItems: 64
+                          minItems: 1
+                          type: array
+                        max:
+                          description: Max is the number of builds the set runs at
+                            one time.
+                          format: int32
+                          maximum: 1000
+                          minimum: 1
+                          type: integer
+                        name:
+                          description: Name identifies the limit in the queue and
+                            in the run views.
+                          maxLength: 63
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - jobs
+                      - max
+                      - name
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   cronBackstop:
                     default: true
                     description: |-

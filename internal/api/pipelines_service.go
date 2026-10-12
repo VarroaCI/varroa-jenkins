@@ -116,6 +116,7 @@ type RunDetail struct {
 	CommandRefusal    *runCommandRefusalJSON   `json:"commandRefusal,omitempty"`
 	Upstream          *RunLink                 `json:"upstream,omitempty"`
 	Downstream        *RunLinkPage             `json:"downstream,omitempty"`
+	Waiting           *RunWaitJSON             `json:"waiting,omitempty"`
 }
 
 // convertJSON re-shapes in into a T by round-tripping through JSON. Every
@@ -288,11 +289,47 @@ func (s *Server) GetRun(ctx context.Context, claims *auth.Claims, runID string) 
 	case len(downstream.Items) > 0:
 		detail.Downstream = &downstream
 	}
+	detail.Waiting = s.runWaitJSON(ctx, run)
 	out, cerr := convertJSON[RunDetail](detail)
 	if cerr != nil {
 		return RunDetail{}, &ServiceError{Status: http.StatusInternalServerError, Message: "encode run detail failed"}
 	}
 	return out, nil
+}
+
+// RunWaitJSON is the waiting reason of a queued run that a concurrency cap
+// holds. Kind is "tenant" or "cell". Limit names the tenant limit and is
+// empty for a cell cap.
+type RunWaitJSON struct {
+	Kind    string    `json:"kind"`
+	Limit   string    `json:"limit,omitempty"`
+	Max     int32     `json:"max"`
+	Running int32     `json:"running"`
+	Cell    string    `json:"cell,omitempty"`
+	Since   time.Time `json:"since"`
+}
+
+// runWaitEntry is one waiting run of a job: its run id and its reason.
+type runWaitEntry struct {
+	RunID string `json:"runId"`
+	RunWaitJSON
+}
+
+// runWaitJSON reads the live wait of a queued run. A read error is logged
+// and leaves the reason out, so the run read still answers.
+func (s *Server) runWaitJSON(ctx context.Context, run recordstore.Run) *RunWaitJSON {
+	if run.Status != "QUEUED" {
+		return nil
+	}
+	w, ok, err := s.deps.RecordStore.GetRunWait(ctx, run.RunID)
+	if err != nil {
+		s.deps.Logger.Warn("read run wait failed", "runId", run.RunID, "error", err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	return &RunWaitJSON{Kind: w.Kind, Limit: w.Limit, Max: w.Max, Running: w.Running, Cell: w.Cell, Since: w.Since}
 }
 
 // GetRunLog is the get_run_log MCP tool's entry into design D5's log

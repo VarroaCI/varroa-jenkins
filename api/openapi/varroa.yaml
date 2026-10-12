@@ -1994,6 +1994,13 @@ components:
           type: string
         triggers:
           $ref: '#/components/schemas/components_schemas_PipelineTriggers'
+        waiting:
+          description: Queued runs of this job that a concurrency cap holds. Absent
+            when none waits.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunWaitEntry'
+          maxItems: 50
+          type: array
       required:
       - jobPath
       - health
@@ -2754,6 +2761,8 @@ components:
           type: string
         upstream:
           $ref: '#/components/schemas/components_schemas_RunLink'
+        waiting:
+          $ref: '#/components/schemas/components_schemas_RunWait'
       required:
       - runId
       - jobPath
@@ -4961,6 +4970,14 @@ components:
         maxCells:
           description: Cap on the pool's cells, placed cells included. 0 means unlimited.
           format: int32
+          minimum: 0
+          type: integer
+        maxRunsPerTenant:
+          description: Cap on the builds one tenant runs at once on one cell of the
+            pool. Zero means no cap. Set it on the CellPool object, not through the
+            scale API.
+          format: int32
+          maximum: 10000
           minimum: 0
           type: integer
         maxTenantsPerCell:
@@ -7444,6 +7461,13 @@ components:
           type: string
         triggers:
           $ref: '#/components/schemas/components_schemas_PipelineTriggers'
+        waiting:
+          description: Queued runs of this job that a concurrency cap holds. Absent
+            when none waits.
+          items:
+            $ref: '#/components/schemas/components_schemas_RunWaitEntry'
+          maxItems: 50
+          type: array
       required:
       - jobPath
       - health
@@ -8671,6 +8695,8 @@ components:
           type: string
         upstream:
           $ref: '#/components/schemas/components_schemas_RunLink'
+        waiting:
+          $ref: '#/components/schemas/components_schemas_RunWait'
       required:
       - runId
       - jobPath
@@ -9041,6 +9067,70 @@ components:
       - total
       - failed
       - skipped
+      type: object
+    components_schemas_RunWait:
+      additionalProperties: false
+      description: The concurrency cap that holds a queued run. Absent from a run
+        that no cap holds.
+      properties:
+        cell:
+          type: string
+        kind:
+          description: tenant when a tenant limit holds the run; cell when the tenant
+            cap of its cell does.
+          enum:
+          - tenant
+          - cell
+          type: string
+        limit:
+          description: The tenant limit's name. Absent for a cell cap.
+          type: string
+        max:
+          format: int32
+          type: integer
+        running:
+          description: The builds the cap counted when it last held the run.
+          format: int32
+          type: integer
+        since:
+          format: date-time
+          type: string
+      required:
+      - kind
+      - max
+      - running
+      - since
+      type: object
+    components_schemas_RunWaitEntry:
+      additionalProperties: false
+      description: A waiting run of a job, with its reason.
+      properties:
+        cell:
+          type: string
+        kind:
+          enum:
+          - tenant
+          - cell
+          type: string
+        limit:
+          type: string
+        max:
+          format: int32
+          type: integer
+        runId:
+          type: string
+        running:
+          format: int32
+          type: integer
+        since:
+          format: date-time
+          type: string
+      required:
+      - runId
+      - kind
+      - max
+      - running
+      - since
       type: object
     components_schemas_RunnerCondition:
       additionalProperties: false
@@ -9462,6 +9552,37 @@ components:
       - failedLast24h
       - jobs
       type: object
+    components_schemas_TeamConcurrencyLimit:
+      additionalProperties: false
+      description: A cap on the builds of a named set of jobs that run at once.
+      properties:
+        jobs:
+          description: Folder-relative job globs (*, **, ?).
+          items:
+            maxLength: 512
+            minLength: 1
+            pattern: ^[^/]
+            type: string
+          maxItems: 64
+          minItems: 1
+          type: array
+        max:
+          description: Number of builds the set runs at one time.
+          format: int32
+          maximum: 1000
+          minimum: 1
+          type: integer
+        name:
+          description: Name of the limit, a DNS label. The queue and the run views
+            show it.
+          maxLength: 63
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+          type: string
+      required:
+      - name
+      - jobs
+      - max
+      type: object
     components_schemas_TeamCondition:
       additionalProperties: false
       description: Status condition for a Team.
@@ -9648,6 +9769,14 @@ components:
           - allow
           - cancelInProgress
           type: string
+        concurrencyLimits:
+          description: Named caps on how many builds of a set of this tenant's jobs
+            run at one time. A build over a limit waits in the queue. A tenant pipelines
+            admin may write this field.
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamConcurrencyLimit'
+          maxItems: 32
+          type: array
         cronBackstop:
           description: Turns the backstop cron scheduler on for this tenant. Default
             true.

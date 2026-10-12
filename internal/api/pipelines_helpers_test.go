@@ -29,6 +29,10 @@ type fakeRecordReader struct {
 
 	schemaTooOld bool
 
+	// runWaits is keyed by run id; jobWaits is keyed by the tenant-qualified job path.
+	runWaits map[string]recordstore.RunWait
+	jobWaits map[string][]recordstore.RunWait
+
 	// jobSummaries is keyed by "<cluster>/<tenant>".
 	jobSummaries map[string][]recordstore.JobSummary
 	// runsByTenant is keyed by "<cluster>/<tenant>"; ListRuns filters and
@@ -585,4 +589,13 @@ func pipelinesTestServer(client *fakeResourceClient, authorizer *Authorizer, rea
 		OperatorNamespace: "test-ns",
 	}
 	return NewServer(deps)
+}
+
+func (f *fakeRecordReader) GetRunWait(_ context.Context, runID string) (recordstore.RunWait, bool, error) {
+	w, ok := f.runWaits[runID]
+	return w, ok, nil
+}
+
+func (f *fakeRecordReader) ListJobRunWaits(_ context.Context, _, _, jobPath string) ([]recordstore.RunWait, error) {
+	return f.jobWaits[jobPath], nil
 }

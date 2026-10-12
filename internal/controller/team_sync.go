@@ -36,6 +36,8 @@ type syncPolicyWire struct {
 	CronGrace         string                           `json:"cronGrace"`
 	Exports           []v1alpha1.TeamExport            `json:"exports,omitempty"`
 	Retention         *v1alpha1.TeamPipelinesRetention `json:"retention,omitempty"`
+	ConcurrencyLimits []v1alpha1.TeamConcurrencyLimit  `json:"concurrencyLimits,omitempty"`
+	CellMaxRuns       int32                            `json:"cellMaxRuns,omitempty"`
 }
 
 // marshalSyncPolicy encodes a cells.SyncPolicy for the wire. The zero
@@ -54,6 +56,8 @@ func marshalSyncPolicy(p cells.SyncPolicy) (json.RawMessage, error) {
 		CronGrace:         p.CronGrace.String(),
 		Exports:           p.Exports,
 		Retention:         p.Retention,
+		ConcurrencyLimits: p.ConcurrencyLimits,
+		CellMaxRuns:       p.CellMaxRuns,
 	}
 	return json.Marshal(wire)
 }

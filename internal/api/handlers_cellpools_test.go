@@ -328,6 +328,41 @@ func TestCellPoolEntryFrom_CarriesLibraries(t *testing.T) {
 	}
 }
 
+// TestCellPoolEntry_CarriesMaxRunsPerTenant asserts that the pool read carries
+// the per-tenant run cap of the pool spec.
+func TestCellPoolEntry_CarriesMaxRunsPerTenant(t *testing.T) {
+	pool := &v1alpha1.CellPool{ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"}}
+	pool.Spec.ProfileRef = "lts-2-555"
+	pool.Spec.MaxRunsPerTenant = 4
+
+	entry := cellPoolEntryFrom(pool)
+	if entry.Spec.MaxRunsPerTenant != 4 {
+		t.Fatalf("MaxRunsPerTenant = %d, want 4", entry.Spec.MaxRunsPerTenant)
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"maxRunsPerTenant":4`)) {
+		t.Fatalf("wire entry = %s, want maxRunsPerTenant 4", raw)
+	}
+}
+
+// TestScaleCellPool_RejectsMaxRunsPerTenant asserts that the scale API refuses
+// maxRunsPerTenant. The field is set on the CellPool object, not through a scale.
+func TestScaleCellPool_RejectsMaxRunsPerTenant(t *testing.T) {
+	srv, store, ctx := cellPoolTestServer(t, nil)
+	seedCellPool(store, "lts-2-555", 1)
+
+	req := httptest.NewRequest(http.MethodPatch, "/cellpools/lts-2-555",
+		bytes.NewReader([]byte(`{"spec": {"maxRunsPerTenant": 2}}`))).WithContext(ctx)
+	w := httptest.NewRecorder()
+	srv.HandleCellPoolDispatch(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
+	}
+}
+
 // TestCellPoolEntryFrom_CarriesApprovedSignatures checks that the read
 // projection carries the pool's approved script signatures.
 func TestCellPoolEntryFrom_CarriesApprovedSignatures(t *testing.T) {

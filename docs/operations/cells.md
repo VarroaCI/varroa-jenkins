@@ -7,10 +7,10 @@ A cell is a shared Jenkins controller that runs many teams' pipelines as tenants
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
 pod roll loses local state and mite identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation; a patch fails with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell.
+`spec.cell.enabled` cannot change after creation; patches fail with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell.
 `spec.cell.maxTenants` can; it caps tenants.
 
-A cell accepts no ingress host. Tenant traffic uses the
+A cell has no ingress host. Tenants use the
 [tenant webhook door](#the-tenant-webhook-door).
 
 Six limitations apply:
@@ -62,8 +62,8 @@ Expect `"status":"True","reason":"Connected"`.
 
 ## Pools
 
-A `CellPool` sizes one pool of cells. An auto-created pool
-gets its cell template from `cells.cellTemplate`. See [Cell pools](cell-pools.md),
+A `CellPool` sizes its cells. `maxRunsPerTenant` caps a tenant's builds per cell. Zero means none. An auto-created pool
+takes its template from `cells.cellTemplate`. See [Cell pools](cell-pools.md),
 [Cell views](cell-views.md).
 
 ## Make a Team a pipelines tenant

@@ -397,6 +397,35 @@ describe("TeamForm", () => {
     expect(body.pipelines.retention).toEqual({ runs: "30d", jobs: [{ job: "pr-*", runs: "7d" }] });
   });
 
+  it("keeps concurrency limits on save", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "team-alpha",
+        concurrencyLimits: [{ name: "deploys", jobs: ["deploy/*"], max: 1 }],
+      },
+    });
+
+    render(<TeamForm />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("alice")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTeam).toHaveBeenCalled();
+    });
+    const body = mockUpdateTeam.mock.calls[0][1];
+    expect(body.pipelines.concurrencyLimits).toEqual([{ name: "deploys", jobs: ["deploy/*"], max: 1 }]);
+  });
+
   it("omits pipelines when the tenant toggle stays off", async () => {
     const user = userEvent.setup();
     render(<TeamForm />);

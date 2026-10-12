@@ -401,6 +401,22 @@ export default function PipelinePage() {
           </dl>
         </Card>
 
+        {jobDetail.waiting && jobDetail.waiting.length > 0 && (
+          <Card title="Waiting">
+            <dl className={styles.kv}>
+              {jobDetail.waiting.map((w) => (
+                <div key={w.runId}>
+                  <dt>{w.kind === "cell" ? "Cell cap" : w.limit ?? "Limit"}</dt>
+                  <dd>
+                    {w.running} of {w.max} builds run, waiting since {new Date(w.since).toLocaleTimeString()}.{" "}
+                    <span>Run {w.runId}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        )}
+
         <Card title="Triggers">
           <dl className={styles.kv}>
             <dt>Push</dt>

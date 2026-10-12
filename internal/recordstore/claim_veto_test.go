@@ -114,6 +114,7 @@ func TestMarkableVeto(t *testing.T) {
 		ReasonThrottled:   true,
 		ReasonNotReady:    false,
 		ReasonNotHome:     false,
+		ReasonCapped:      false,
 		"":                false,
 	} {
 		if got := markableVeto(code); got != want {

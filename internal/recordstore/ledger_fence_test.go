@@ -7,8 +7,8 @@ import (
 )
 
 // TestReasonCodesHoldsAllSix asserts the exported reason-code set holds
-// all six allocated names.
-func TestReasonCodesHoldsAllSix(t *testing.T) {
+// all seven allocated names.
+func TestReasonCodesHoldsAllSeven(t *testing.T) {
 	want := map[string]bool{
 		ReasonInvalidKey:  false,
 		ReasonFenced:      false,
@@ -16,6 +16,7 @@ func TestReasonCodesHoldsAllSix(t *testing.T) {
 		ReasonCrossTenant: false,
 		ReasonThrottled:   false,
 		ReasonNotHome:     false,
+		ReasonCapped:      false,
 	}
 	if len(ReasonCodes) != len(want) {
 		t.Fatalf("ReasonCodes has %d entries, want %d: %v", len(ReasonCodes), len(want), ReasonCodes)

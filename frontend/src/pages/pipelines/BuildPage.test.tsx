@@ -1562,3 +1562,20 @@ describe("BuildPage — refused command notice", () => {
     expect(screen.queryByText(/refused/)).not.toBeInTheDocument();
   });
 });
+
+describe("BuildPage — concurrency wait", () => {
+  it("shows the waiting notice for a capped run", async () => {
+    mockGetRun.mockResolvedValue(
+      baseRun({
+        status: "QUEUED",
+        result: undefined,
+        buildNumber: undefined,
+        waiting: { kind: "tenant", limit: "deploys", max: 1, running: 1, since: "2026-10-12T01:00:00Z" },
+      }),
+    );
+    renderPage();
+    expect(
+      await screen.findByText("Waiting on concurrency limit deploys: 1 of 1 builds run."),
+    ).toBeInTheDocument();
+  });
+});

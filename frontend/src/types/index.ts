@@ -435,6 +435,8 @@ export interface JenkinsRoleBindingList {
  * this becomes a pipelines tenant: one top-level folder on exactly one cell.
  */
 export interface TeamPipelines {
+  /** Named caps on builds of a set of jobs. A tenant pipelines admin may write this field. */
+  concurrencyLimits?: TeamConcurrencyLimit[];
   /** JenkinsVersionProfile the placement pass resolves a cell against. Required. */
   profile: string;
   /**
@@ -508,6 +510,30 @@ export interface TeamWebhook {
   /** Receiver endpoint. Starts with https:// or http://. */
   url: string;
   secretRef: { name: string; key?: string };
+}
+
+/** A cap on the builds of a named set of jobs that run at once. */
+export interface TeamConcurrencyLimit {
+  name: string;
+  /** Folder-relative job globs (*, **, ?). */
+  jobs: string[];
+  max: number;
+}
+
+/** The concurrency cap that holds a queued run. */
+export interface RunWait {
+  kind: "tenant" | "cell";
+  /** The tenant limit's name. Absent for a cell cap. */
+  limit?: string;
+  max: number;
+  running: number;
+  cell?: string;
+  since: string;
+}
+
+/** A queued run of a job that a concurrency cap holds. */
+export interface RunWaitEntry extends RunWait {
+  runId: string;
 }
 
 /** The tenant window and the per-job rules of spec.pipelines.retention. */
@@ -1827,6 +1853,8 @@ export interface PipelineDependencies {
 
 /** GET /pipelines/{team}/jobs/{job}. */
 export interface PipelineJobDetail {
+  /** Queued runs of this job that a concurrency cap holds. */
+  waiting?: RunWaitEntry[];
   jobPath: string;
   /** The tenant's Jenkins folder prefix (for example "payments"). Empty for
    * a root-hosted tenant. jobPath carries this prefix; strip it before
@@ -1896,6 +1924,8 @@ export interface RunStage {
 
 /** GET /runs/{run}. */
 export interface RunDetail {
+  /** The concurrency cap that holds this queued run. */
+  waiting?: RunWait;
   runId: string;
   jobPath: string;
   /** The tenant's Jenkins folder prefix (for example "payments"). Empty for
@@ -2550,6 +2580,8 @@ export interface CellPoolCondition {
  * cells carry the profile label they were created with.
  */
 export interface CellPoolSpec {
+  /** Cap on the builds one tenant runs at once on one cell. Zero means no cap. */
+  maxRunsPerTenant?: number;
   profileRef: string;
   warm?: number;
   /** The cap on the pool's cells, placed cells included. Zero is unlimited. */

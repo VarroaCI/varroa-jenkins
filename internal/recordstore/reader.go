@@ -41,6 +41,12 @@ type Reader interface {
 	// q.UpstreamRunID, newest first.
 	ListDownstreamRuns(ctx context.Context, q DownstreamRunQuery) (RunPage, error)
 	GetRun(ctx context.Context, runID string) (Run, []Stage, error)
+	// GetRunWait answers the live concurrency wait of one run, if a claim
+	// refreshed one within the live window.
+	GetRunWait(ctx context.Context, runID string) (RunWait, bool, error)
+	// ListJobRunWaits answers the live concurrency waits of one job, the
+	// longest waiting first.
+	ListJobRunWaits(ctx context.Context, cluster, tenant, jobPath string) ([]RunWait, error)
 
 	// TenantRetention answers the tenant's record-store windows. A tenant
 	// with no placement row, or no retention key, answers the zero policy.

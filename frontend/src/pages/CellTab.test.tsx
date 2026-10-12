@@ -145,6 +145,19 @@ beforeEach(() => {
 });
 
 describe("Topology panel", () => {
+  it("shows the pool tenant run cap", () => {
+    mockUseCellPool.mockReturnValue({
+      data: makePool({
+        spec: { profileRef: "lts-2-555", warm: 2, maxCells: 8, maxTenantsPerCell: 10, maxRunsPerTenant: 3 },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderTab();
+    expect(screen.getByText("Pool tenant run cap")).toBeInTheDocument();
+    expect(screen.getByText("Pool tenant run cap").parentElement).toHaveTextContent("3");
+  });
+
   it("names the pool, the profile, and both instances", () => {
     renderTab();
     expect(screen.getAllByText("lts-2-555").length).toBeGreaterThan(0);
@@ -190,8 +203,7 @@ describe("Topology panel", () => {
 
   it("states none when the pool approves no signature", () => {
     renderTab();
-    expect(screen.getByText("Pool approved signatures")).toBeInTheDocument();
-    expect(screen.getByText("None")).toBeInTheDocument();
+    expect(screen.getByText("Pool approved signatures").parentElement).toHaveTextContent("None");
   });
 
   it("hides the pool values and states the reason without the pool read", () => {

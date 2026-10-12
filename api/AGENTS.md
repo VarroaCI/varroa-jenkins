@@ -172,6 +172,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   {ns}/{name}/plugins` serves the full classified inventory from the read
   model, cross-checked against the status.
 
+- `Team.spec.pipelines.concurrencyLimits` and `CellPool.spec.maxRunsPerTenant` are the concurrency cap fields. A tenant pipelines admin may write `concurrencyLimits` only. The cell pool field is operator-only.
+
 ## Work Guidance
 
 - Edit `varroa.root.yaml`/`paths/`/`components/`, run `make generate-client`

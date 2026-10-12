@@ -333,3 +333,19 @@ type CellUsage struct {
 	Tenants     []CellTenantUsage
 	Totals      CellUsageCounts
 }
+
+// RunWait is the live concurrency wait of one queued run. Kind is "tenant"
+// when a tenant limit holds the run, named by Limit, and "cell" when the
+// tenant cap of its cell holds it. Running is the count the cap saw.
+type RunWait struct {
+	RunID   string
+	Cluster string
+	Tenant  string
+	JobPath string
+	Cell    string
+	Kind    string
+	Limit   string
+	Max     int32
+	Running int32
+	Since   time.Time
+}

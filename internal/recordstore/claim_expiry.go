@@ -85,7 +85,9 @@ type claimExpiryCandidate struct {
 // The age test is the only part that the veto mark does not share.
 const claimExpiryGuardSQL = `
 	(r.payload->>'accepted_at')::timestamptz <= $1
-	AND ` + unclaimedQueuedRunSQL
+	AND ` + unclaimedQueuedRunSQL + `
+	AND NOT EXISTS (SELECT 1 FROM varroa.run_waits w
+	                WHERE w.run_id = r.run_id AND w.last_seen_at > now() - interval '5 minutes')`
 
 // unclaimedQueuedRunSQL matches a run row "r" that waits for its first
 // claim: it is QUEUED, holds no build number, holds no mesh resume
@@ -116,7 +118,8 @@ const claimAbandonedGuardSQL = `
 	AND COALESCE(r.payload ? 'accepted_at', false)
 	AND jsonb_typeof(r.payload->'mesh'->'resume') IS DISTINCT FROM 'object'
 	AND EXISTS (SELECT 1 FROM varroa.run_intents ri
-	            WHERE ri.run_id = r.run_id AND ri.state = 'GRANTED' AND ri.start_marked_at IS NULL)`
+	            WHERE ri.run_id = r.run_id AND ri.state = 'GRANTED' AND ri.start_marked_at IS NULL
+	            AND COALESCE(ri.granted_at, ri.created_at) <= $1)`
 
 // claimExpiryClass is one kind of run the sweep ends: its guard, its
 // reason code, its trigger_error text, and its activity type.

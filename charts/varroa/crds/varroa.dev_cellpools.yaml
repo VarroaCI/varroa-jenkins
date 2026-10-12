@@ -3697,6 +3697,15 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              maxRunsPerTenant:
+                default: 0
+                description: |-
+                  MaxRunsPerTenant caps how many builds one tenant runs at one time on
+                  one cell of the pool. Zero means no cap.
+                format: int32
+                maximum: 10000
+                minimum: 0
+                type: integer
               maxTenantsPerCell:
                 default: 10
                 description: |-

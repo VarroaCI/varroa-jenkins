@@ -1195,4 +1195,73 @@ public class VarroaClaimQueueTest {
         int end = json.indexOf('"', start);
         return json.substring(start, end);
     }
+
+    @Test
+    public void cappedVetoRetriesAtFixedInterval() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("capped-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n <= 3
+                ? new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"CAPPED\","
+                        + "\"message\":\"waiting on concurrency limit\"}")
+                : new Reply(200, "{\"decision\":\"duplicate\"}");
+
+        long[] clockMillis = {0L};
+        List<Long> slept = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled by the duplicate answer");
+        assertEquals(4, calls.get());
+        assertTrue("every capped retry waits the fixed interval, got " + slept,
+                slept.stream().filter(d -> d > 0).allMatch(d -> d == VarroaClaimQueue.CAPPED_RETRY_MILLIS));
+    }
+
+    @Test
+    public void cappedVetoExtendsLifetimeAndNeverGivesUp() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("capped-forever-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"CAPPED\","
+                + "\"message\":\"waiting on concurrency limit\"}");
+
+        long[] clockMillis = {0L};
+        // Just past one lifetime.
+        long horizon = VarroaClaimQueue.LIFETIME_MILLIS + 20_000L;
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            if (clockMillis[0] >= horizon) {
+                return;
+            }
+            // A one-minute step keeps the retry count small. Each capped answer
+            // still moves the deadline, so the one-hour budget never ends the claim.
+            clockMillis[0] += 60_000L;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
+        queue.offer(item, project);
+
+        awaitTrue(() -> clockMillis[0] >= horizon, "the clock to pass the one-hour budget");
+        assertFalse("a capped claim must not give up at the one-hour budget", isCancelled(item));
+    }
+
+    @Test
+    public void cappedVetoDoesNotCancelItem() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("capped-keeps-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n == 1
+                ? new Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"CAPPED\","
+                        + "\"message\":\"waiting on concurrency limit\"}")
+                : new Reply(200, "{\"decision\":\"duplicate\"}");
+
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> task.run();
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> 0L, scheduler);
+        queue.offer(item, project);
+
+        awaitTrue(() -> calls.get() >= 2, "the claim to retry after the capped answer");
+        assertFalse("a capped answer must not cancel the item before the retry", calls.get() < 2 && isCancelled(item));
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled by the later duplicate");
+    }
 }

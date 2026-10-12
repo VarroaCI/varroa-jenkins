@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
 
@@ -209,5 +211,38 @@ func TestHandleTenantPurge_TeamDeletedWithACellIsRefused(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatal("want a non-empty error for a slot move that reports a deleted Team")
+	}
+}
+
+// TestPurgeTenant_DeletesOnlyTheTenantsRunWaits asserts that a purge deletes the
+// wait rows of the purged tenant and keeps the rows of another tenant.
+func TestPurgeTenant_DeletesOnlyTheTenantsRunWaits(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seed := func(runID uuid.UUID, tenant string) {
+		t.Helper()
+		if _, err := db.Exec(`
+			INSERT INTO varroa.run_waits
+				(run_id, cluster, namespace, tenant, job_path, cell, cap_kind, cap_name, cap_max, running)
+			VALUES ($1, $2, $3, $4, $4 || '/build', 'cell-a', 'tenant', 'builds', 1, 1)`,
+			runID, testCluster, testNamespace, tenant); err != nil {
+			t.Fatalf("seed wait for %s: %v", tenant, err)
+		}
+	}
+	purged := uuid.Must(uuid.NewV7())
+	kept := uuid.Must(uuid.NewV7())
+	seed(purged, "payments")
+	seed(kept, "billing")
+
+	if err := purgeTenant(context.Background(), slog.Default(), pool,
+		TenantPurgeRequest{Cluster: testCluster, Tenant: "payments", PlacementGeneration: 1}); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if n := waitRowCount(t, db, purged.String()); n != 0 {
+		t.Fatalf("purged tenant keeps %d wait rows, want 0", n)
+	}
+	if n := waitRowCount(t, db, kept.String()); n != 1 {
+		t.Fatalf("other tenant has %d wait rows, want 1", n)
 	}
 }

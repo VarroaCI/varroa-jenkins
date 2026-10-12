@@ -865,6 +865,9 @@ func sendAnnounce(ctx context.Context, in Inputs, req AnnounceRequest) (Announce
 func syncPolicyFor(in Inputs, team *v1alpha1.Team) SyncPolicy {
 	policy := SyncPolicyFromPipelines(team.Spec.Pipelines)
 	policy.Webhook = in.Webhook
+	if pool := effectiveOwner(in.Pools, ResolvedPoolName(team.Spec.Pipelines)); pool != nil {
+		policy.CellMaxRuns = pool.MaxRunsPerTenant
+	}
 	return policy
 }
 

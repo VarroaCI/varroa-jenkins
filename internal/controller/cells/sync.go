@@ -36,6 +36,14 @@ type SyncPolicy struct {
 	// window and the per-job rules). Nil for a tenant that sets none.
 	Retention *v1alpha1.TeamPipelinesRetention
 
+	// ConcurrencyLimits carries the tenant's named job-set build caps. Nil
+	// for a tenant that sets none.
+	ConcurrencyLimits []v1alpha1.TeamConcurrencyLimit
+
+	// CellMaxRuns is the per-tenant build cap of the pool that owns the
+	// tenant's cell. Zero means no cap.
+	CellMaxRuns int32
+
 	// Webhook carries the tenant's completion webhook, resolved from the
 	// Secret the Team names. Nil when the tenant declares no webhook or
 	// its Secret is not usable. It never travels in the policy JSON; the
@@ -64,6 +72,8 @@ func (p SyncPolicy) Equal(other SyncPolicy) bool {
 		p.CronGrace == other.CronGrace &&
 		reflect.DeepEqual(p.Exports, other.Exports) &&
 		reflect.DeepEqual(p.Retention, other.Retention) &&
+		reflect.DeepEqual(p.ConcurrencyLimits, other.ConcurrencyLimits) &&
+		p.CellMaxRuns == other.CellMaxRuns &&
 		webhookSyncEqual(p.Webhook, other.Webhook)
 }
 
@@ -95,6 +105,7 @@ func SyncPolicyFromPipelines(p *v1alpha1.TeamPipelinesSpec) SyncPolicy {
 		CronGrace:         p.EffectiveCronGrace(),
 		Exports:           p.Exports,
 		Retention:         p.Retention,
+		ConcurrencyLimits: p.ConcurrencyLimits,
 	}
 }
 

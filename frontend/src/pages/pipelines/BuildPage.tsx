@@ -190,7 +190,10 @@ function useRunRecord(runId: string | undefined, requested: boolean, streamOpen:
       // the stream state. A record that exists polls only while the stream
       // is not open and the run is not terminal.
       const current = runRef.current;
-      if (settledRef.current && (!current || streamOpenRef.current || isTerminal(current))) return;
+      // A queued run keeps polling while the stream is open, because a cap
+      // wait writes no run notification.
+      const streamCovers = streamOpenRef.current && current?.status !== "QUEUED";
+      if (settledRef.current && (!current || streamCovers || isTerminal(current))) return;
       void tick();
     }, POLL_MS);
     return () => {
@@ -775,6 +778,14 @@ export default function BuildPage() {
       {run.commandRefusal && (
         <div className={styles.refusalNotice} role="status">
           {describeCommandRefusal(run.commandRefusal)}
+        </div>
+      )}
+
+      {run.waiting && (
+        <div className={styles.waitNotice} role="status">
+          {run.waiting.kind === "cell"
+            ? `Waiting on the tenant cap of cell ${run.waiting.cell ?? ""}: ${run.waiting.running} of ${run.waiting.max} builds run.`
+            : `Waiting on concurrency limit ${run.waiting.limit ?? ""}: ${run.waiting.running} of ${run.waiting.max} builds run.`}
         </div>
       )}
 

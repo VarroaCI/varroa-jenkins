@@ -708,6 +708,8 @@ the root AGENTS.md greenfield rule.
   JDK must be 21.** `dependencyManagement` imports `bom-2.555.x` to align JCasC + its
   test harness with the core baseline.
 
+- `CAPPED` (claim veto): `VarroaClaimQueue` retries it every 10 seconds, never gives up, and never cancels the item. The record store sends it. Change it with `internal/recordstore/ledger_types.go`.
+
 ## Work Guidance
 
 - Changes to `JWTValidator.validateOperatorToken`/`VARROA_MITE_PUBKEY_PEM` must stay in

@@ -854,6 +854,13 @@ func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
 		*out = new(TeamPipelinesRetention)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.ConcurrencyLimits != nil {
+		in, out := &in.ConcurrencyLimits, &out.ConcurrencyLimits
+		*out = make([]TeamConcurrencyLimit, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Members != nil {
 		in, out := &in.Members, &out.Members
 		*out = new(int32)
@@ -953,6 +960,26 @@ func (in *TeamExport) DeepCopy() *TeamExport {
 		return nil
 	}
 	out := new(TeamExport)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamConcurrencyLimit.
+func (in *TeamConcurrencyLimit) DeepCopyInto(out *TeamConcurrencyLimit) {
+	*out = *in
+	if in.Jobs != nil {
+		in, out := &in.Jobs, &out.Jobs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamConcurrencyLimit.
+func (in *TeamConcurrencyLimit) DeepCopy() *TeamConcurrencyLimit {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamConcurrencyLimit)
 	in.DeepCopyInto(out)
 	return out
 }

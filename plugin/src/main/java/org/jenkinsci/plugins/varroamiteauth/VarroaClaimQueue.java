@@ -70,6 +70,9 @@ import java.util.logging.Logger;
  *
  * <p>A forward keeps the item's run id. The recorder triggers the home
  * with that run id, so the run the API answered is the run that builds.
+ * <p>A {@code CAPPED} veto means a tenant or cell concurrency cap holds
+ * the run. The claim waits at a fixed interval and has no lifetime limit:
+ * each capped answer restarts the one-hour budget. It never cancels the item.
  */
 public class VarroaClaimQueue {
 
@@ -89,6 +92,12 @@ public class VarroaClaimQueue {
     /** A pending claim gives up after one hour. */
     static final long LIFETIME_MILLIS = 60L * 60 * 1000;
 
+    /**
+     * The fixed wait between claims of a run that a concurrency cap holds.
+     * A capped claim keeps no lifetime limit, so the interval never backs off.
+     */
+    static final long CAPPED_RETRY_MILLIS = 10_000L;
+
     /** The wait before a hand-back that the full work queue refused tries again. */
     static final long HANDBACK_RETRY_MILLIS = 1000L;
 
@@ -97,6 +106,7 @@ public class VarroaClaimQueue {
     private static final String DECISION_VETOED = "vetoed";
     private static final String REASON_NOT_READY = "NOT_READY";
     private static final String REASON_NOT_HOME = "NOT_HOME";
+    private static final String REASON_CAPPED = "CAPPED";
 
     /**
      * The sequence a forward sends. The preserved intent key carries the
@@ -408,6 +418,17 @@ public class VarroaClaimQueue {
             return true;
         }
 
+        if (last.capped) {
+            // A cap holds the run, so the wait restarts on every answer. The
+            // run retries at a fixed interval and never gives up.
+            last.capped = false;
+            pc.attempt = 0;
+            pc.deadline = clock.nowMillis() + LIFETIME_MILLIS;
+            LOGGER.log(Level.FINE, "VarroaClaimQueue: job {0}, run {1} waits on a concurrency cap: {2}",
+                    new Object[] {job.getFullName(), action.getRunId(), last.text});
+            return !park(pc, CAPPED_RETRY_MILLIS);
+        }
+
         if (clock.nowMillis() >= pc.deadline) {
             giveUp(pc);
             return true;
@@ -457,6 +478,9 @@ public class VarroaClaimQueue {
                 return target.isPresent() && forwardOnce(item, job, action, derived, target.getAsInt(), last);
             case VETOED_NOT_READY:
             case RETRY:
+                return false;
+            case VETOED_CAPPED:
+                last.capped = true;
                 return false;
             case VETOED_OTHER:
             case UNKNOWN:
@@ -751,7 +775,7 @@ public class VarroaClaimQueue {
     // --- Decision parsing ---
 
     private enum Kind {
-        GRANTED, DUPLICATE, VETOED_NOT_READY, VETOED_NOT_HOME, VETOED_OTHER, RETRY, UNKNOWN
+        GRANTED, DUPLICATE, VETOED_NOT_READY, VETOED_NOT_HOME, VETOED_CAPPED, VETOED_OTHER, RETRY, UNKNOWN
     }
 
     /**
@@ -763,6 +787,8 @@ public class VarroaClaimQueue {
         String text = "none";
         /** True when the newest forward got a reason code back. */
         boolean forwardRefused;
+        /** True when the newest claim answered CAPPED. */
+        boolean capped;
     }
 
     private static final class Decision {
@@ -859,6 +885,9 @@ public class VarroaClaimQueue {
                 }
                 if (REASON_NOT_HOME.equals(reason)) {
                     return Decision.of(Kind.VETOED_NOT_HOME, 0, body);
+                }
+                if (REASON_CAPPED.equals(reason)) {
+                    return Decision.of(Kind.VETOED_CAPPED, 0, body);
                 }
                 return Decision.of(Kind.VETOED_OTHER, 0, body);
             case "":

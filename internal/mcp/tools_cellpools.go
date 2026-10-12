@@ -165,6 +165,7 @@ type cellPoolSummary struct {
 	Warm               int32    `json:"warm"`
 	MaxCells           int32    `json:"maxCells"`
 	MaxTenantsPerCell  int32    `json:"maxTenantsPerCell"`
+	MaxRunsPerTenant   int32    `json:"maxRunsPerTenant"`
 	UnreadyGracePeriod string   `json:"unreadyGracePeriod,omitempty"`
 	WarmCells          int32    `json:"warmCells"`
 	PlacedCells        int32    `json:"placedCells"`
@@ -186,6 +187,7 @@ func summarizeCellPool(cluster string, pool *v1alpha1.CellPool) cellPoolSummary 
 		Warm:              pool.Spec.Warm,
 		MaxCells:          pool.Spec.MaxCells,
 		MaxTenantsPerCell: pool.Spec.MaxTenantsPerCell,
+		MaxRunsPerTenant:  pool.Spec.MaxRunsPerTenant,
 		WarmCells:         pool.Status.WarmCells,
 		PlacedCells:       pool.Status.PlacedCells,
 		UnreadyCells:      pool.Status.UnreadyCells,
@@ -211,6 +213,7 @@ var cellPoolListOutputSchema = withClustersProperty(listOutputSchema("Default su
 	{Name: "warm", Type: "integer", Desc: "Target count of free cells the pool keeps ready."},
 	{Name: "maxCells", Type: "integer", Desc: "Cap on the pool's cells, placed cells included. 0 means unlimited."},
 	{Name: "maxTenantsPerCell", Type: "integer", Desc: "Capacity a pool cell uses when its own spec.cell.maxTenants is zero."},
+	{Name: "maxRunsPerTenant", Type: "integer", Desc: "Cap on the builds one tenant runs at once on one cell of the pool. 0 means no cap. Set it on the CellPool object, not through update_cell_pool."},
 	{Name: "unreadyGracePeriod", Type: "string", Desc: "How long a pool cell may stay unready before the operator rolls its pod."},
 	{Name: "warmCells", Type: "integer", Desc: "Owned cells that hold no tenant."},
 	{Name: "placedCells", Type: "integer", Desc: "Owned cells that hold at least one tenant."},

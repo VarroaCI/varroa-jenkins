@@ -223,6 +223,20 @@ var expectedColumns = map[string][]columnSpec{
 		{"retired_incarnations", "jsonb", false},
 		{"notification_webhook", "jsonb", true},
 	},
+	"run_waits": {
+		{"run_id", "uuid", false},
+		{"cluster", "text", false},
+		{"namespace", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"cell", "text", false},
+		{"cap_kind", "text", false},
+		{"cap_name", "text", false},
+		{"cap_max", "integer", false},
+		{"running", "integer", false},
+		{"first_seen_at", "timestamp with time zone", false},
+		{"last_seen_at", "timestamp with time zone", false},
+	},
 	"webhook_deliveries": {
 		{"delivery_id", "uuid", false},
 		{"run_id", "uuid", false},
@@ -427,7 +441,7 @@ func TestNonPartitionedTables(t *testing.T) {
 	for _, table := range []string{
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
-		"fleet_locks", "run_test_cases", "webhook_deliveries",
+		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,

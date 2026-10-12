@@ -26,6 +26,7 @@ func cellPoolDeps(t *testing.T, verbs ...string) (*api.Dependencies, *crdstore.F
 				Warm:              1,
 				MaxCells:          6,
 				MaxTenantsPerCell: 10,
+				MaxRunsPerTenant:  4,
 				CellTemplate: &v1alpha1.CellTemplate{
 					PodOverrides: &v1alpha1.PodOverrides{NodeSelector: map[string]string{"pool": "cells"}},
 				},
@@ -92,6 +93,9 @@ func TestListCellPools(t *testing.T) {
 	got := payload.StructuredContent.Items[1]
 	if got.ProfileRef != "lts-2-555" || got.Warm != 1 || got.MaxCells != 6 || got.MaxTenantsPerCell != 10 {
 		t.Errorf("the summary must carry every spec dial, got %+v", got)
+	}
+	if got.MaxRunsPerTenant != 4 {
+		t.Errorf("the summary must carry maxRunsPerTenant, got %+v", got)
 	}
 	if got.WarmCells != 1 {
 		t.Errorf("the summary must carry every status count, got %+v", got)

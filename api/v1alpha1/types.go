@@ -1536,6 +1536,14 @@ type TeamPipelinesSpec struct {
 	// +optional
 	Retention *TeamPipelinesRetention `json:"retention,omitempty"`
 
+	// ConcurrencyLimits caps how many builds of a named set of this tenant's
+	// jobs run at one time. A build over a limit waits in the queue.
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	ConcurrencyLimits []TeamConcurrencyLimit `json:"concurrencyLimits,omitempty"`
+
 	// Members sets the number of active slots this tenant runs. Each slot
 	// holds one cell. A job runs only on its home slot's holder. This field
 	// is not spec.members, which lists local usernames.
@@ -1643,6 +1651,25 @@ type TeamPipelinesRetention struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	Jobs []TeamJobRetention `json:"jobs,omitempty"`
+}
+
+// TeamConcurrencyLimit caps the builds of a set of jobs that run at once.
+type TeamConcurrencyLimit struct {
+	// Name identifies the limit in the queue and in the run views.
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+	// Jobs holds folder-relative globs (*, **, ?).
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=512
+	// +kubebuilder:validation:items:Pattern=`^[^/]`
+	Jobs []string `json:"jobs"`
+	// Max is the number of builds the set runs at one time.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1000
+	Max int32 `json:"max"`
 }
 
 // TeamJobRetention sets the run window for the jobs that match a glob.
@@ -1976,6 +2003,13 @@ type CellPoolSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	MaxTenantsPerCell int32 `json:"maxTenantsPerCell,omitempty"`
+	// MaxRunsPerTenant caps how many builds one tenant runs at one time on
+	// one cell of the pool. Zero means no cap.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
+	// +optional
+	MaxRunsPerTenant int32 `json:"maxRunsPerTenant,omitempty"`
 	// UnreadyGracePeriod is how long a pool cell may stay unready before
 	// the operator rolls its pod. An unset field falls back to the chart
 	// value.

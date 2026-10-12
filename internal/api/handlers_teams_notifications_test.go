@@ -88,10 +88,10 @@ func TestUpdateTeam_TenantAdminCannotChangeNotifications(t *testing.T) {
 	changed.Pipelines = base.Pipelines.DeepCopy()
 	changed.Pipelines.Notifications.Webhook.URL = "https://attacker.example.test"
 
-	if teamSpecEqualExceptExports(base, changed) {
+	if teamSpecEqualExceptTenantOwned(base, changed) {
 		t.Fatalf("a webhook change counts as an exports-only change")
 	}
-	if !teamSpecEqualExceptExports(base, base) {
+	if !teamSpecEqualExceptTenantOwned(base, base) {
 		t.Fatalf("an unchanged spec differs from itself")
 	}
 }

@@ -924,3 +924,45 @@ func TestValidateTeamPipelinesRejectsBadRetention(t *testing.T) {
 		})
 	}
 }
+
+// A tenant pipelines admin may change spec.pipelines.concurrencyLimits, the
+// same as exports. The stored limit must match the body.
+func TestUpdateTeam_TenantAdminMayChangeConcurrencyLimits(t *testing.T) {
+	srv, store, ctx := teamPipelinesTenantTestServer(t, "tenant-admin", "pipelines-admin")
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TeamSpec{
+			Members:    []string{"alice"},
+			Namespaces: []string{"ns1"},
+			Pipelines:  &v1alpha1.TeamPipelinesSpec{Profile: "lts", AgentNamespace: "ns1"},
+		},
+	})
+
+	body := `{
+		"name": "payments",
+		"members": ["alice"],
+		"namespaces": ["ns1"],
+		"pipelines": {
+			"profile": "lts",
+			"agentNamespace": "ns1",
+			"concurrencyLimits": [{"name": "deploys", "jobs": ["deploy/*"], "max": 1}]
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/teams/payments", bytes.NewReader([]byte(body)))
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	srv.HandleTeamDispatch(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200; body=%s", w.Result().StatusCode, w.Body.String())
+	}
+
+	stored, err := crdstore.Get[v1alpha1.Team](context.Background(), store, "payments", "")
+	if err != nil {
+		t.Fatalf("get stored team: %v", err)
+	}
+	if stored.Spec.Pipelines == nil || len(stored.Spec.Pipelines.ConcurrencyLimits) != 1 ||
+		stored.Spec.Pipelines.ConcurrencyLimits[0].Name != "deploys" ||
+		stored.Spec.Pipelines.ConcurrencyLimits[0].Max != 1 {
+		t.Fatalf("stored concurrencyLimits = %+v, want the deploys limit", stored.Spec.Pipelines)
+	}
+}

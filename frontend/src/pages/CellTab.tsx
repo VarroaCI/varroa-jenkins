@@ -94,6 +94,7 @@ function TopologyPanel({
   ];
   if (canReadPools) {
     items.push({ key: "Pool tenant cap", value: String(pool?.spec.maxTenantsPerCell ?? DASH) });
+    items.push({ key: "Pool tenant run cap", value: pool?.spec.maxRunsPerTenant ? String(pool.spec.maxRunsPerTenant) : "None" });
     items.push({ key: "Pool ready", value: poolReadyLine(pool) });
     items.push({ key: "Pool approved signatures", value: poolSignaturesLine(pool) });
   }
