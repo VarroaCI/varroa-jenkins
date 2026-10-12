@@ -397,6 +397,139 @@ describe("TeamForm", () => {
     expect(body.pipelines.retention).toEqual({ runs: "30d", jobs: [{ job: "pr-*", runs: "7d" }] });
   });
 
+  it("keeps pipelines.members and standby on save", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "team-alpha",
+        members: 3,
+        standby: 2,
+      },
+    });
+
+    render(<TeamForm />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("alice")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTeam).toHaveBeenCalled();
+    });
+    const body = mockUpdateTeam.mock.calls[0][1];
+    expect(body.pipelines.members).toBe(3);
+    expect(body.pipelines.standby).toBe(2);
+  });
+
+  it("keeps the stored slot counts when the fields are cleared", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "team-alpha",
+        members: 3,
+        standby: 2,
+      },
+    });
+
+    render(<TeamForm />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("alice")).toBeInTheDocument();
+    });
+
+    const activeSlots = screen.getByText("Active slots").nextElementSibling as HTMLInputElement;
+    const standbyMembers = screen.getByText("Standby members").nextElementSibling as HTMLInputElement;
+    await user.clear(activeSlots);
+    await user.clear(standbyMembers);
+
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTeam).toHaveBeenCalled();
+    });
+    const body = mockUpdateTeam.mock.calls[0][1];
+    expect(body.pipelines.members).toBe(3);
+    expect(body.pipelines.standby).toBe(2);
+  });
+
+  it("sends edited slot counts", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "team-alpha",
+        members: 3,
+        standby: 2,
+      },
+    });
+
+    render(<TeamForm />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("alice")).toBeInTheDocument();
+    });
+
+    const activeSlots = screen.getByText("Active slots").nextElementSibling as HTMLInputElement;
+    await user.clear(activeSlots);
+    await user.type(activeSlots, "5");
+
+    await user.click(screen.getByText("Update"));
+
+    await waitFor(() => {
+      expect(mockUpdateTeam).toHaveBeenCalled();
+    });
+    const body = mockUpdateTeam.mock.calls[0][1];
+    expect(body.pipelines.members).toBe(5);
+  });
+
+  it("rejects an out-of-range slot count", async () => {
+    const user = userEvent.setup();
+    mockParams = { name: "alpha-team" };
+    mockGetTeam.mockResolvedValue({
+      name: "alpha-team",
+      members: ["alice"],
+      namespaces: ["team-alpha"],
+      roleRef: "developer",
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "team-alpha",
+        members: 3,
+      },
+    });
+
+    render(<TeamForm />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("alice")).toBeInTheDocument();
+    });
+
+    const activeSlots = screen.getByText("Active slots").nextElementSibling as HTMLInputElement;
+    await user.clear(activeSlots);
+    await user.type(activeSlots, "0");
+
+    await user.click(screen.getByText("Update"));
+
+    expect(
+      await screen.findByText("Active slots must be a whole number between 1 and 16"),
+    ).toBeInTheDocument();
+    expect(mockUpdateTeam).not.toHaveBeenCalled();
+  });
+
   it("keeps concurrency limits on save", async () => {
     const user = userEvent.setup();
     mockParams = { name: "alpha-team" };

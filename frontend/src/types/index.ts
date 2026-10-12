@@ -489,6 +489,12 @@ export interface TeamPipelines {
    */
   cronGrace?: string;
   /**
+   * Active slot count. Default 1, range 1 to 16. This field is not the team's member list.
+   */
+  members?: number;
+  /** Warm standby members. Default 0, range 0 to 8. */
+  standby?: number;
+  /**
    * Grants of this tenant's jobs and locks to other tenants. An absent
    * list exports nothing.
    */

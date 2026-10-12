@@ -45,6 +45,8 @@ interface FormData {
   pipelinesAgentNamespace: string;
   pipelinesBundleName: string;
   pipelinesBundleNamespace: string;
+  pipelinesMembers: string;
+  pipelinesStandby: string;
   pipelinesRehydrateBuilds: string;
   pipelinesRehydrateDeadline: string;
   pipelinesInterruptedRetry: "manual" | "automatic";
@@ -74,6 +76,8 @@ function emptyForm(): FormData {
     pipelinesAgentNamespace: "",
     pipelinesBundleName: "",
     pipelinesBundleNamespace: "",
+    pipelinesMembers: "",
+    pipelinesStandby: "",
     pipelinesRehydrateBuilds: "",
     pipelinesRehydrateDeadline: "",
     pipelinesInterruptedRetry: "manual",
@@ -100,6 +104,8 @@ function formFromTeam(team: TeamEntry): FormData {
     pipelinesAgentNamespace: team.pipelines?.agentNamespace || "",
     pipelinesBundleName: team.pipelines?.composedBundleRef?.name || "",
     pipelinesBundleNamespace: team.pipelines?.composedBundleRef?.namespace || "",
+    pipelinesMembers: team.pipelines?.members !== undefined ? String(team.pipelines.members) : "",
+    pipelinesStandby: team.pipelines?.standby !== undefined ? String(team.pipelines.standby) : "",
     pipelinesRehydrateBuilds:
       team.pipelines?.rehydrateBuilds !== undefined ? String(team.pipelines.rehydrateBuilds) : "",
     pipelinesRehydrateDeadline: team.pipelines?.rehydrateDeadline || "",
@@ -339,6 +345,18 @@ export default function TeamForm() {
         errs.push("Agent namespace must be one of this team's namespaces");
       }
     }
+    if (form.pipelinesEnabled && form.pipelinesMembers.trim()) {
+      const n = Number(form.pipelinesMembers);
+      if (!Number.isInteger(n) || n < 1 || n > 16) {
+        errs.push("Active slots must be a whole number between 1 and 16");
+      }
+    }
+    if (form.pipelinesEnabled && form.pipelinesStandby.trim()) {
+      const n = Number(form.pipelinesStandby);
+      if (!Number.isInteger(n) || n < 0 || n > 8) {
+        errs.push("Standby members must be a whole number between 0 and 8");
+      }
+    }
     if (form.pipelinesEnabled && form.pipelinesRehydrateBuilds.trim()) {
       const n = Number(form.pipelinesRehydrateBuilds);
       if (!Number.isInteger(n) || n < 0 || n > 100) {
@@ -393,6 +411,12 @@ export default function TeamForm() {
               cronBackstop: form.pipelinesCronBackstop,
               cronCatchUp: form.pipelinesCronCatchUp,
               cronGrace: form.pipelinesCronGrace.trim() || undefined,
+              members: form.pipelinesMembers.trim()
+                ? Number(form.pipelinesMembers)
+                : team?.pipelines?.members,
+              standby: form.pipelinesStandby.trim()
+                ? Number(form.pipelinesStandby)
+                : team?.pipelines?.standby,
               exports:
                 form.pipelinesExports.length > 0
                   ? form.pipelinesExports.map((exp) =>
@@ -673,6 +697,36 @@ export default function TeamForm() {
               />
               <div className={styles.hint}>
                 Newest completed builds to seed when this tenant's cell changes. Default 10, range 0-100.
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <label>Active slots</label>
+              <input
+                type="number"
+                min={1}
+                max={16}
+                value={form.pipelinesMembers}
+                onChange={(e) => updateField("pipelinesMembers", e.target.value)}
+                placeholder="1"
+              />
+              <div className={styles.hint}>
+                Cells that run this tenant's builds. Default 1, range 1-16. A change moves job homes.
+              </div>
+            </div>
+
+            <div className={styles.field}>
+              <label>Standby members</label>
+              <input
+                type="number"
+                min={0}
+                max={8}
+                value={form.pipelinesStandby}
+                onChange={(e) => updateField("pipelinesStandby", e.target.value)}
+                placeholder="0"
+              />
+              <div className={styles.hint}>
+                Warm cells that take a slot whose holder dies. Default 0, range 0-8.
               </div>
             </div>
 

@@ -17,6 +17,8 @@ spec:
     standby: 1      # warm members, 0 to 8, default 0
 ```
 
+The Team form edits both counts: **Active slots** sets `members` and **Standby members** sets `standby`.
+
 An **active** member holds one slot index, dense from `0` to `members - 1`. A **standby** holds
 the tenant folder, no slot, and runs no build.
 

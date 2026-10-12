@@ -966,3 +966,157 @@ func TestUpdateTeam_TenantAdminMayChangeConcurrencyLimits(t *testing.T) {
 		t.Fatalf("stored concurrencyLimits = %+v, want the deploys limit", stored.Spec.Pipelines)
 	}
 }
+
+func i32(v int32) *int32 { return &v }
+
+// TestTeamHandlers_PipelinesSlotCountsRoundTrip asserts that the slot counts
+// survive a GET, a PUT that changes them, and a PUT that sets standby to 0.
+func TestTeamHandlers_PipelinesSlotCountsRoundTrip(t *testing.T) {
+	srv, store, ctx := adminTeamTestServer(t)
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TeamSpec{
+			Members:    []string{"alice"},
+			Namespaces: []string{"ns1"},
+			Pipelines: &v1alpha1.TeamPipelinesSpec{
+				Profile:        "lts",
+				AgentNamespace: "ns1",
+				Members:        i32(3),
+				Standby:        i32(2),
+			},
+		},
+	})
+
+	getReq := httptest.NewRequest(http.MethodGet, "/teams/payments", nil)
+	getReq = getReq.WithContext(ctx)
+	getW := httptest.NewRecorder()
+	srv.HandleTeamDispatch(getW, getReq)
+	if getW.Result().StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body=%s", getW.Result().StatusCode, getW.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(getW.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	pipelines, ok := got["pipelines"].(map[string]any)
+	if !ok {
+		t.Fatalf("response pipelines = %v, want an object", got["pipelines"])
+	}
+	if pipelines["members"] != float64(3) || pipelines["standby"] != float64(2) {
+		t.Fatalf("response members/standby = %v/%v, want 3/2", pipelines["members"], pipelines["standby"])
+	}
+
+	put := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/teams/payments", bytes.NewReader([]byte(body)))
+		req = req.WithContext(ctx)
+		w := httptest.NewRecorder()
+		srv.HandleTeamDispatch(w, req)
+		if w.Result().StatusCode != http.StatusOK {
+			t.Fatalf("PUT status = %d, want 200; body=%s", w.Result().StatusCode, w.Body.String())
+		}
+	}
+	stored := func() *v1alpha1.TeamPipelinesSpec {
+		t.Helper()
+		team, err := crdstore.Get[v1alpha1.Team](context.Background(), store, "payments", "")
+		if err != nil {
+			t.Fatalf("get stored team: %v", err)
+		}
+		return team.Spec.Pipelines
+	}
+
+	put(`{
+		"name": "payments",
+		"members": ["alice"],
+		"namespaces": ["ns1"],
+		"pipelines": {"profile": "lts", "agentNamespace": "ns1", "members": 4, "standby": 1}
+	}`)
+	if p := stored(); p.Members == nil || *p.Members != 4 || p.Standby == nil || *p.Standby != 1 {
+		t.Fatalf("stored members/standby = %v/%v, want 4/1", p.Members, p.Standby)
+	}
+
+	put(`{
+		"name": "payments",
+		"members": ["alice"],
+		"namespaces": ["ns1"],
+		"pipelines": {"profile": "lts", "agentNamespace": "ns1", "members": 4, "standby": 0}
+	}`)
+	if p := stored(); p.Standby == nil || *p.Standby != 0 {
+		t.Fatalf("stored standby = %v, want a non-nil 0", p.Standby)
+	}
+}
+
+// TestTeamHandlers_UpdateExports_TenantAdminKeepsSlotCounts asserts that a
+// tenant pipelines admin who saves exports keeps the stored slot counts.
+func TestTeamHandlers_UpdateExports_TenantAdminKeepsSlotCounts(t *testing.T) {
+	srv, store, ctx := teamPipelinesTenantTestServer(t, "tenant-admin", "pipelines-admin")
+	crdstore.MustSeed(store, &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: v1alpha1.TeamSpec{
+			Members:    []string{"alice"},
+			Namespaces: []string{"ns1"},
+			Pipelines: &v1alpha1.TeamPipelinesSpec{
+				Profile:        "lts",
+				AgentNamespace: "ns1",
+				Members:        i32(2),
+				Standby:        i32(1),
+			},
+		},
+	})
+
+	body := `{
+		"name": "payments",
+		"members": ["alice"],
+		"namespaces": ["ns1"],
+		"pipelines": {
+			"profile": "lts",
+			"agentNamespace": "ns1",
+			"members": 2,
+			"standby": 1,
+			"exports": [{"job": "release/*", "callers": ["search"]}]
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/teams/payments", bytes.NewReader([]byte(body)))
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	srv.HandleTeamDispatch(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200; body=%s", w.Result().StatusCode, w.Body.String())
+	}
+
+	stored, err := crdstore.Get[v1alpha1.Team](context.Background(), store, "payments", "")
+	if err != nil {
+		t.Fatalf("get stored team: %v", err)
+	}
+	p := stored.Spec.Pipelines
+	if p == nil || p.Members == nil || *p.Members != 2 || p.Standby == nil || *p.Standby != 1 {
+		t.Fatalf("stored members/standby = %+v, want 2/1 unchanged", p)
+	}
+	if len(p.Exports) != 1 {
+		t.Fatalf("stored exports = %+v, want the grant carried", p.Exports)
+	}
+}
+
+func TestValidateTeamPipelinesRejectsBadSlotCounts(t *testing.T) {
+	namespaces := []string{"ns"}
+	tests := []struct {
+		name    string
+		members *int32
+		standby *int32
+		want    string
+	}{
+		{name: "members zero", members: i32(0), want: "pipelines.members must be between 1 and 16"},
+		{name: "members seventeen", members: i32(17), want: "pipelines.members must be between 1 and 16"},
+		{name: "standby negative", standby: i32(-1), want: "pipelines.standby must be between 0 and 8"},
+		{name: "standby nine", standby: i32(9), want: "pipelines.standby must be between 0 and 8"},
+		{name: "bounds pass", members: i32(16), standby: i32(8), want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &teamPipelinesEntry{Profile: "p", AgentNamespace: "ns", Members: tt.members, Standby: tt.standby}
+			if got := validateTeamPipelines(p, namespaces); got != tt.want {
+				t.Fatalf("validateTeamPipelines() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -271,6 +271,12 @@ func validateTeamPipelines(p *teamPipelinesEntry, namespaces []string) string {
 	if !slices.Contains(namespaces, strings.TrimSpace(p.AgentNamespace)) {
 		return "pipelines.agentNamespace must be one of namespaces"
 	}
+	if p.Members != nil && (*p.Members < 1 || *p.Members > 16) {
+		return "pipelines.members must be between 1 and 16"
+	}
+	if p.Standby != nil && (*p.Standby < 0 || *p.Standby > 8) {
+		return "pipelines.standby must be between 0 and 8"
+	}
 	for i, exp := range p.Exports {
 		if len(exp.Callers) == 0 {
 			return fmt.Sprintf("pipelines.exports[%d].callers is required", i)
