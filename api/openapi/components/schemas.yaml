@@ -6320,6 +6320,52 @@ CellPoolSpec:
         type: string
         maxLength: 1024
         pattern: '^(method|staticMethod|new|field|staticField) \S.*$'
+    mail:
+      $ref: '#/CellPoolMail'
+  additionalProperties: false
+
+CellPoolMail:
+  type: object
+  description: >-
+    The SMTP setting of a pool. Every cell of the pool renders it for the
+    mailer and email-ext plugins. Read-only through the API; edit the CellPool
+    with kubectl or GitOps. The read carries the login Secret name, never its
+    value.
+  required: [host, from]
+  properties:
+    host:
+      type: string
+      minLength: 1
+      maxLength: 253
+      description: The SMTP server name.
+    port:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 65535
+      description: The SMTP server port. Unset means 587.
+    security:
+      type: string
+      enum: [none, starttls, tls]
+      description: The transport mode. Unset means starttls.
+    from:
+      type: string
+      maxLength: 254
+      description: The sender address of every message.
+    replyTo:
+      type: string
+      maxLength: 254
+      description: The reply-to address of every message.
+    defaultSuffix:
+      type: string
+      maxLength: 254
+      description: The domain that a bare recipient name gets.
+    credentialRef:
+      type: string
+      maxLength: 253
+      description: >-
+        The Secret in the operator namespace that holds the SMTP username and
+        password. The name only; the value is never returned.
   additionalProperties: false
 
 CellPoolLibrary:

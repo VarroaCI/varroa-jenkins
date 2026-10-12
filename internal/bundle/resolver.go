@@ -81,6 +81,12 @@ type MaterializedBundle struct {
 	// desired-state command injects them into JcascYaml itself. No code path
 	// that writes a ConfigMap from MaterializedBundle reads this field.
 	CellPoolLibraryCredentials []any
+
+	// CellPoolMail holds the unclassified keys of a cell's pool mail
+	// setting. The mailer value carries the SMTP password. Only the
+	// desired-state command builder reads this field. No code path that
+	// writes a ConfigMap from MaterializedBundle reads it.
+	CellPoolMail map[string]any
 }
 
 // CellFolderCredentials is the projected credentials of one tenant folder.

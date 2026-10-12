@@ -3689,6 +3689,64 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              mail:
+                description: |-
+                  Mail configures the SMTP server that every cell of the pool uses for
+                  the mail and emailext steps and the mailer settings. The operator
+                  renders it into the desired-state command of each cell only.
+                properties:
+                  credentialRef:
+                    description: |-
+                      CredentialRef names a Secret in the operator namespace that carries
+                      the SMTP login. The Secret must carry the label
+                      varroa.dev/pool-mail-credential: "true" and the keys username and
+                      password. Optional: an SMTP server that needs no login omits it.
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
+                  defaultSuffix:
+                    description: DefaultSuffix is the domain that a bare recipient
+                      name gets.
+                    maxLength: 254
+                    pattern: ^@[A-Za-z0-9.-]+$
+                    type: string
+                  from:
+                    description: From is the sender address of every message.
+                    maxLength: 254
+                    pattern: ^[^\s@$]+@[A-Za-z0-9.-]+$
+                    type: string
+                  host:
+                    description: Host is the SMTP server name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$
+                    type: string
+                  port:
+                    default: 587
+                    description: Port is the SMTP server port. The default is 587.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  replyTo:
+                    description: ReplyTo is the reply-to address of every message.
+                    maxLength: 254
+                    pattern: ^[^\s@$]+@[A-Za-z0-9.-]+$
+                    type: string
+                  security:
+                    default: starttls
+                    description: |-
+                      Security is the transport mode: none, starttls, or tls. Empty means
+                      starttls.
+                    enum:
+                    - none
+                    - starttls
+                    - tls
+                    type: string
+                required:
+                - from
+                - host
+                type: object
               maxCells:
                 default: 0
                 description: |-

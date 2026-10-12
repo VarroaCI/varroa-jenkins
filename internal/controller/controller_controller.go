@@ -759,6 +759,12 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool signatures: %w", sigErr)
 	}
 
+	// Render the pool's SMTP setting. It reaches the desired-state command
+	// only, never the ConfigMap. A no-op for a controller that is not a cell.
+	if mailErr := r.applyPoolMail(ctx, cr, mat, coreSet); mailErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("render pool mail: %w", mailErr)
+	}
+
 	// Inject location URL under the three-way rule: a headless controller
 	// gets the dashboard door URL when the operator has a dashboard origin,
 	// and the in-cluster endpoint otherwise. A non-headless controller with a
@@ -5911,6 +5917,18 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 						"error", credErr)
 				} else {
 					cmd.JcascYaml = withLibCreds
+				}
+			}
+
+			// A pool's SMTP setting follows the same rule: its mailer
+			// password reaches the mite command only.
+			if len(resolved.CellPoolMail) > 0 {
+				withMail, mailErr := injectPoolMail(cmd.JcascYaml, resolved.CellPoolMail)
+				if mailErr != nil {
+					logger.Warn("pool mail injection failed; the mite gets a cell jcasc with no pool mail",
+						"error", mailErr)
+				} else {
+					cmd.JcascYaml = withMail
 				}
 			}
 		}

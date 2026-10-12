@@ -1286,6 +1286,9 @@ const (
 	// rendered. A library that fails validation is held and the others
 	// still render.
 	ConditionPoolLibraries ControllerConditionType = "PoolLibraries"
+	// ConditionPoolMail reports whether the cell's pool mail setting is
+	// rendered. A setting that fails validation renders nothing.
+	ConditionPoolMail ControllerConditionType = "PoolMail"
 )
 
 // MiteConnected reasons.
@@ -2088,6 +2091,55 @@ type CellPoolSpec struct {
 	// +kubebuilder:validation:items:Pattern=`^(method|staticMethod|new|field|staticField) \S.*$`
 	// +kubebuilder:validation:XValidation:rule="self.all(s, !s.contains('${'))",message="an approved signature must not contain a ${ token"
 	ApprovedSignatures []string `json:"approvedSignatures,omitempty"`
+	// Mail configures the SMTP server that every cell of the pool uses for
+	// the mail and emailext steps and the mailer settings. The operator
+	// renders it into the desired-state command of each cell only.
+	// +optional
+	Mail *CellPoolMail `json:"mail,omitempty"`
+}
+
+// CellPoolMail is the SMTP setting of one pool. The login, when set, lives
+// in a Secret, not in this object.
+type CellPoolMail struct {
+	// Host is the SMTP server name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`
+	Host string `json:"host"`
+	// Port is the SMTP server port. The default is 587.
+	// +kubebuilder:default=587
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+	// Security is the transport mode: none, starttls, or tls. Empty means
+	// starttls.
+	// +kubebuilder:default=starttls
+	// +kubebuilder:validation:Enum=none;starttls;tls
+	// +optional
+	Security string `json:"security,omitempty"`
+	// From is the sender address of every message.
+	// +kubebuilder:validation:MaxLength=254
+	// +kubebuilder:validation:Pattern=`^[^\s@$]+@[A-Za-z0-9.-]+$`
+	From string `json:"from"`
+	// ReplyTo is the reply-to address of every message.
+	// +optional
+	// +kubebuilder:validation:MaxLength=254
+	// +kubebuilder:validation:Pattern=`^[^\s@$]+@[A-Za-z0-9.-]+$`
+	ReplyTo string `json:"replyTo,omitempty"`
+	// DefaultSuffix is the domain that a bare recipient name gets.
+	// +optional
+	// +kubebuilder:validation:MaxLength=254
+	// +kubebuilder:validation:Pattern=`^@[A-Za-z0-9.-]+$`
+	DefaultSuffix string `json:"defaultSuffix,omitempty"`
+	// CredentialRef names a Secret in the operator namespace that carries
+	// the SMTP login. The Secret must carry the label
+	// varroa.dev/pool-mail-credential: "true" and the keys username and
+	// password. Optional: an SMTP server that needs no login omits it.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	CredentialRef string `json:"credentialRef,omitempty"`
 }
 
 // CellTemplate is the shape a pool stamps on each cell it creates. It

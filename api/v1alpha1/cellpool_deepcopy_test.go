@@ -132,3 +132,30 @@ func TestCellPoolDeepCopyIsolatesLibraries(t *testing.T) {
 		t.Fatalf("original mutated by copy: %+v", orig.Libraries)
 	}
 }
+
+// TestCellPoolDeepCopyIsolatesMail mutates a deep copy of a CellPool that
+// carries a mail setting and asserts the original stays unchanged.
+func TestCellPoolDeepCopyIsolatesMail(t *testing.T) {
+	orig := CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec: CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			Mail: &CellPoolMail{
+				Host:          "smtp.example.com",
+				Port:          587,
+				Security:      "starttls",
+				From:          "ci@example.com",
+				CredentialRef: "mail-login",
+			},
+		},
+	}
+
+	cp := orig.DeepCopy()
+	cp.Spec.Mail.Host = "mutated.example.com"
+	cp.Spec.Mail.Port = 25
+	cp.Spec.Mail.CredentialRef = "mutated"
+
+	if orig.Spec.Mail.Host != "smtp.example.com" || orig.Spec.Mail.Port != 587 || orig.Spec.Mail.CredentialRef != "mail-login" {
+		t.Fatalf("mutating the copy changed the original mail setting: %+v", orig.Spec.Mail)
+	}
+}

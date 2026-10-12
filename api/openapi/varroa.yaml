@@ -5038,6 +5038,52 @@ components:
       - remote
       - defaultVersion
       type: object
+    components_schemas_CellPoolMail:
+      additionalProperties: false
+      description: The SMTP setting of a pool. Every cell of the pool renders it for
+        the mailer and email-ext plugins. Read-only through the API; edit the CellPool
+        with kubectl or GitOps. The read carries the login Secret name, never its
+        value.
+      properties:
+        credentialRef:
+          description: The Secret in the operator namespace that holds the SMTP username
+            and password. The name only; the value is never returned.
+          maxLength: 253
+          type: string
+        defaultSuffix:
+          description: The domain that a bare recipient name gets.
+          maxLength: 254
+          type: string
+        from:
+          description: The sender address of every message.
+          maxLength: 254
+          type: string
+        host:
+          description: The SMTP server name.
+          maxLength: 253
+          minLength: 1
+          type: string
+        port:
+          description: The SMTP server port. Unset means 587.
+          format: int32
+          maximum: 65535
+          minimum: 1
+          type: integer
+        replyTo:
+          description: The reply-to address of every message.
+          maxLength: 254
+          type: string
+        security:
+          description: The transport mode. Unset means starttls.
+          enum:
+          - none
+          - starttls
+          - tls
+          type: string
+      required:
+      - host
+      - from
+      type: object
     components_schemas_CellPoolScaleRequest:
       additionalProperties: false
       description: Request body for PATCH /cellpools/{name}. It declares the four
@@ -5095,6 +5141,8 @@ components:
             $ref: '#/components/schemas/components_schemas_CellPoolLibrary'
           maxItems: 16
           type: array
+        mail:
+          $ref: '#/components/schemas/components_schemas_CellPoolMail'
         maxCells:
           description: Cap on the pool's cells, placed cells included. 0 means unlimited.
           format: int32

@@ -41,7 +41,10 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   an ssh remote needs `credentialRef`, a CEL rule on the item type. Each
   item has its own DeepCopy. The `approvedSignatures` list (`[]string`, max 256,
   each entry a script-security signature with no `${` token) is the pool's
-  script approval set. A cell renders it; the BFF projects it read-only.
+  script approval set. A cell renders it; the BFF projects it read-only. The
+  `mail` field (`CellPoolMail`, optional) holds the SMTP setting. Its login
+  is a Secret name (`credentialRef`), never a value; the BFF projects the
+  name only.
   second rule guards **both** field reads with `has()`: a stored object written
   before the defaults existed leaves a field absent, and a bare access raises
   `no such key`. `CellPoolStatus`'s four counters (`warmCells`, `placedCells`,
@@ -74,8 +77,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   New/edited fields in batch W2-B1b: `CatalogSourceSpec.OCIRef` (string),
   `ComposedInput.OCISource` (`*OCIBundleSource`), and the new
   `OCIBundleSource` type. DeepCopy was hand-added (no controller-gen).
-  The five cell-pool types (`CellPool`, `CellPoolList`, `CellPoolSpec`,
-  `CellPoolStatus`, `CellTemplate`, `CellPoolLibrary`) carry hand-added DeepCopy for the same
+  The six cell-pool types (`CellPool`, `CellPoolList`, `CellPoolSpec`,
+  `CellPoolStatus`, `CellTemplate`, `CellPoolLibrary`, `CellPoolMail`) carry hand-added DeepCopy for the same
   reason.
   `CatalogSource` validation is split across **two** levels: the spec-level
   rule is at-most-one of `repoURL`/`ociRef`, and an **object-level** rule binds

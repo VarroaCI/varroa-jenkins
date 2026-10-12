@@ -1373,6 +1373,26 @@ func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Mail != nil {
+		in, out := &in.Mail, &out.Mail
+		*out = new(CellPoolMail)
+		**out = **in
+	}
+}
+
+// DeepCopyInto for CellPoolMail.
+func (in *CellPoolMail) DeepCopyInto(out *CellPoolMail) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolMail.
+func (in *CellPoolMail) DeepCopy() *CellPoolMail {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolMail)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopy creates a deep copy of CellPoolSpec.

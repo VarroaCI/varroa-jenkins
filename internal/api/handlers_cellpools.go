@@ -36,6 +36,19 @@ type cellPoolSpecEntry struct {
 	CellTemplate       *cellTemplate          `json:"cellTemplate,omitempty"`
 	Libraries          []cellPoolLibraryEntry `json:"libraries,omitempty"`
 	ApprovedSignatures []string               `json:"approvedSignatures,omitempty"`
+	Mail               *cellPoolMailEntry     `json:"mail,omitempty"`
+}
+
+// cellPoolMailEntry mirrors v1alpha1.CellPoolMail. It carries the login
+// Secret name, never the Secret value.
+type cellPoolMailEntry struct {
+	Host          string `json:"host"`
+	Port          int32  `json:"port,omitempty"`
+	Security      string `json:"security,omitempty"`
+	From          string `json:"from"`
+	ReplyTo       string `json:"replyTo,omitempty"`
+	DefaultSuffix string `json:"defaultSuffix,omitempty"`
+	CredentialRef string `json:"credentialRef,omitempty"`
 }
 
 // cellPoolLibraryEntry mirrors v1alpha1.CellPoolLibrary. It carries the
@@ -121,6 +134,17 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 		})
 	}
 	e.Spec.ApprovedSignatures = pool.Spec.ApprovedSignatures
+	if m := pool.Spec.Mail; m != nil {
+		e.Spec.Mail = &cellPoolMailEntry{
+			Host:          m.Host,
+			Port:          m.Port,
+			Security:      m.Security,
+			From:          m.From,
+			ReplyTo:       m.ReplyTo,
+			DefaultSuffix: m.DefaultSuffix,
+			CredentialRef: m.CredentialRef,
+		}
+	}
 	if tmpl := pool.Spec.CellTemplate; tmpl != nil {
 		e.Spec.CellTemplate = &cellTemplate{}
 		if tmpl.Resources != nil {
@@ -285,7 +309,7 @@ func decodeCellPoolScaleRequest(r *http.Request) (cells.CellPoolDials, string) {
 	for k := range keys {
 		switch k {
 		case "warm", "maxCells", "maxTenantsPerCell", "unreadyGracePeriod":
-		case "profileRef", "cellTemplate", "maxRunsPerTenant", "approvedSignatures":
+		case "profileRef", "cellTemplate", "maxRunsPerTenant", "approvedSignatures", "mail":
 			return cells.CellPoolDials{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
 		default:
 			return cells.CellPoolDials{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)

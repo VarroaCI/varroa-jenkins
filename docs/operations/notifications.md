@@ -205,6 +205,93 @@ payload `url` field prefixes this value to the run page path. Set
 `auth.dashboardUrl` to the public address of the dashboard. When the value
 is empty, the payload carries no `url` field.
 
+## Slack and email
+
+A pipeline step sends a Slack message or an email. The `slack`, `email-ext`,
+and `mailer` plugins provide the steps. Varroa pins all three in every cell.
+
+### Slack
+
+Create a folder credential of type `secretText` that holds the Slack bot
+token. Call `slackSend` in the pipeline:
+
+```groovy
+slackSend(channel: '#releases', message: "Build ${env.BUILD_NUMBER} passed",
+          tokenCredentialId: 'slack-token', botUser: true)
+```
+
+The cell must reach Slack on port 443. Allow the egress in
+`networkPolicy.cellIsolation.extraEgress` in the chart values.
+
+### Email
+
+Set the SMTP server on the `CellPool`:
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: CellPool
+metadata:
+  name: lts-2-555
+spec:
+  profileRef: lts-2-555
+  mail:
+    host: smtp.example.com
+    port: 587
+    security: starttls
+    from: ci@example.com
+    replyTo: ops@example.com
+    credentialRef: pool-mail
+```
+
+| Field | Meaning |
+|---|---|
+| `host` | The SMTP server name. Required. |
+| `port` | The SMTP server port. The default is 587. |
+| `security` | `none`, `starttls`, or `tls`. The default is `starttls`. |
+| `from` | The sender address. Required. |
+| `replyTo` | The reply-to address. Optional. |
+| `defaultSuffix` | The domain that a bare recipient name gets. Optional. |
+| `credentialRef` | The Secret that holds the login. Optional. |
+
+Create the login Secret in the operator namespace. Label it, so the
+operator reads it. The Secret needs the keys `username` and `password`.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pool-mail
+  namespace: varroa-system
+  labels:
+    varroa.dev/pool-mail-credential: "true"
+stringData:
+  username: ci
+  password: <the SMTP password>
+```
+
+The operator writes the login only into the cell's desired-state command.
+The cell's configuration map never holds it. A cell that renders no mail
+setting shows the `PoolMail` condition on its controller. The condition
+names the fault, such as a missing Secret.
+
+Use the `mail` step in a pipeline to send through the pool login:
+
+```groovy
+post {
+  failure {
+    mail to: 'team@example.com', subject: "${env.JOB_NAME} failed",
+         body: "See ${env.BUILD_URL}"
+  }
+}
+```
+
+The `emailext` step does not use the pool login. The email-ext plugin
+sends without a login. Use a relay that accepts mail from the cell
+without a login, or use the `mail` step.
+
+Removing `spec.mail` renders nothing. The last mail setting stays in the
+cell's configuration until you recreate the cell.
+
 ## Related pages
 
 - [Build records](build-records.md) describes the record store.

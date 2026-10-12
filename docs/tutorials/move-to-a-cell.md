@@ -172,9 +172,9 @@ GitHub works without extra setup. Generic and GitLab deliveries use the generic 
 
 Read [Schedule a job](../config/items.md#schedule-a-job), [Tenant webhooks](../operations/webhooks.md) and [Cell restrictions](../config/items.md#cell-restrictions).
 
-## 6. Remove notification steps
+## 6. Review notification steps
 
-A cell has no notification plugin. Remove `emailext`, `mail` and `slackSend` steps.
+A cell runs `slackSend`, `emailext`, and `mail` steps only when the Slack and SMTP settings are in place. See [Slack and email](../operations/notifications.md#slack-and-email). Remove a step when the pool does not configure its channel.
 
 To post to a chat webhook, call it with `sh 'curl …'`. Store the webhook URL in a `secretText` credential. The agent namespace needs egress to the chat host.
 

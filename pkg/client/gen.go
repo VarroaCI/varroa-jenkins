@@ -208,6 +208,13 @@ const (
 	TenantScopedBinding ComponentsSchemasCellGrantSource = "tenantScopedBinding"
 )
 
+// Defines values for ComponentsSchemasCellPoolMailSecurity.
+const (
+	ComponentsSchemasCellPoolMailSecurityNone     ComponentsSchemasCellPoolMailSecurity = "none"
+	ComponentsSchemasCellPoolMailSecurityStarttls ComponentsSchemasCellPoolMailSecurity = "starttls"
+	ComponentsSchemasCellPoolMailSecurityTls      ComponentsSchemasCellPoolMailSecurity = "tls"
+)
+
 // Defines values for ComponentsSchemasCheckStatus.
 const (
 	Fail ComponentsSchemasCheckStatus = "fail"
@@ -532,8 +539,8 @@ const (
 
 // Defines values for ComponentsSchemasTeamPipelinesCronCatchUp.
 const (
-	ComponentsSchemasTeamPipelinesCronCatchUpNone ComponentsSchemasTeamPipelinesCronCatchUp = "none"
-	ComponentsSchemasTeamPipelinesCronCatchUpOne  ComponentsSchemasTeamPipelinesCronCatchUp = "one"
+	None ComponentsSchemasTeamPipelinesCronCatchUp = "none"
+	One  ComponentsSchemasTeamPipelinesCronCatchUp = "one"
 )
 
 // Defines values for ComponentsSchemasTeamPipelinesInterruptedRetry.
@@ -1301,6 +1308,33 @@ type ComponentsSchemasCellPoolLibrary struct {
 	Remote string `json:"remote"`
 }
 
+// ComponentsSchemasCellPoolMail The SMTP setting of a pool. Every cell of the pool renders it for the mailer and email-ext plugins. Read-only through the API; edit the CellPool with kubectl or GitOps. The read carries the login Secret name, never its value.
+type ComponentsSchemasCellPoolMail struct {
+	// CredentialRef The Secret in the operator namespace that holds the SMTP username and password. The name only; the value is never returned.
+	CredentialRef *string `json:"credentialRef,omitempty"`
+
+	// DefaultSuffix The domain that a bare recipient name gets.
+	DefaultSuffix *string `json:"defaultSuffix,omitempty"`
+
+	// From The sender address of every message.
+	From string `json:"from"`
+
+	// Host The SMTP server name.
+	Host string `json:"host"`
+
+	// Port The SMTP server port. Unset means 587.
+	Port *int32 `json:"port,omitempty"`
+
+	// ReplyTo The reply-to address of every message.
+	ReplyTo *string `json:"replyTo,omitempty"`
+
+	// Security The transport mode. Unset means starttls.
+	Security *ComponentsSchemasCellPoolMailSecurity `json:"security,omitempty"`
+}
+
+// ComponentsSchemasCellPoolMailSecurity The transport mode. Unset means starttls.
+type ComponentsSchemasCellPoolMailSecurity string
+
 // ComponentsSchemasCellPoolScaleRequest Request body for PATCH /cellpools/{name}. It declares the four scale dials and nothing else, so the contract itself states that a structural edit is not an API operation.
 type ComponentsSchemasCellPoolScaleRequest struct {
 	Spec struct {
@@ -1321,6 +1355,9 @@ type ComponentsSchemasCellPoolSpec struct {
 
 	// Libraries Trusted shared libraries that every cell of the pool serves as global libraries. Names are unique.
 	Libraries *[]ComponentsSchemasCellPoolLibrary `json:"libraries,omitempty"`
+
+	// Mail The SMTP setting of a pool. Every cell of the pool renders it for the mailer and email-ext plugins. Read-only through the API; edit the CellPool with kubectl or GitOps. The read carries the login Secret name, never its value.
+	Mail *ComponentsSchemasCellPoolMail `json:"mail,omitempty"`
 
 	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.
 	MaxCells *int32 `json:"maxCells,omitempty"`

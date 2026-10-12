@@ -972,6 +972,17 @@ sections describe.
     to `MaterializedBundle.CellPoolLibraryCredentials`, injected into the mite
     command's JcascYaml by `buildDesiredStateCommand`. Faults set the
     `PoolLibraries` condition; a faulty library is held, not rendered),
+    `cell_pool_mail.go`
+    (`applyPoolMail` renders `CellPool.spec.mail` into
+    `MaterializedBundle.CellPoolMail`: the `unclassified` keys of the
+    `mailer` and `email-ext` plugins and `location.adminAddress`. The
+    `mailer` login (Secret label `varroa.dev/pool-mail-credential`) sits
+    inline in the mailer value, so the field reaches only
+    `buildDesiredStateCommand`, through `injectPoolMail`, and no ConfigMap
+    writer reads it. The `email-ext` entry carries no `credentialsId`.
+    A missing `mailer` pin, a missing or malformed login, or a read failure
+    renders nothing. An unpinned `email-ext` keeps the mailer and records a
+    fault. Faults set the `PoolMail` condition),
     `cell_readiness.go`
     (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
     record store, the s3 blob tier, and C3's `ArtifactStorage=External`

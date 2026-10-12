@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -164,6 +165,7 @@ func TestCellPools_StructuralEditRefused(t *testing.T) {
 		{name: "profileRef", body: `{"spec": {"profileRef": "x"}}`},
 		{name: "cellTemplate", body: `{"spec": {"cellTemplate": {}}}`},
 		{name: "approvedSignatures", body: `{"spec": {"approvedSignatures": ["method hudson.Util getHost"]}}`},
+		{name: "mail", body: `{"spec": {"mail": {"host": "smtp.example.com", "from": "ci@example.com"}}}`},
 		{name: "unknown key", body: `{"spec": {"nope": 1}}`},
 		{name: "no recognised key", body: `{"spec": {}}`},
 		{name: "no spec", body: `{}`},
@@ -375,5 +377,49 @@ func TestCellPoolEntryFrom_CarriesApprovedSignatures(t *testing.T) {
 	got := cellPoolEntryFrom(pool).Spec.ApprovedSignatures
 	if len(got) != 2 || got[0] != "method hudson.Util getHost" || got[1] != "new java.util.Date" {
 		t.Fatalf("approvedSignatures = %v", got)
+	}
+}
+
+// TestCellPoolEntryFrom_CarriesMailWithoutSecretData checks that the read
+// projection carries the mail setting and the login Secret name, and never
+// a password value.
+func TestCellPoolEntryFrom_CarriesMailWithoutSecretData(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			Mail: &v1alpha1.CellPoolMail{
+				Host:          "smtp.example.com",
+				Port:          587,
+				Security:      "starttls",
+				From:          "ci@example.com",
+				CredentialRef: "mail-login",
+			},
+		},
+	}
+	entry := cellPoolEntryFrom(pool)
+	if entry.Spec.Mail == nil || entry.Spec.Mail.Host != "smtp.example.com" || entry.Spec.Mail.CredentialRef != "mail-login" {
+		t.Fatalf("mail = %+v", entry.Spec.Mail)
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal entry: %v", err)
+	}
+	if strings.Contains(string(raw), "password") {
+		t.Fatalf("the read projection must not carry Secret data: %s", raw)
+	}
+}
+
+// TestScaleCellPool_RejectsMail checks that a scale PATCH naming the mail
+// setting is refused. The mail setting is edited through GitOps only.
+func TestScaleCellPool_RejectsMail(t *testing.T) {
+	srv, store, ctx := cellPoolTestServer(t, nil)
+	seedCellPool(store, "lts-2-555", 1)
+
+	req := httptest.NewRequest(http.MethodPatch, "/cellpools/lts-2-555",
+		bytes.NewReader([]byte(`{"spec": {"mail": {"host": "smtp.example.com", "from": "ci@example.com"}}}`))).WithContext(ctx)
+	w := httptest.NewRecorder()
+	srv.HandleCellPoolDispatch(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Result().StatusCode, w.Body.String())
 	}
 }

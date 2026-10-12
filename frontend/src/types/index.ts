@@ -2668,6 +2668,22 @@ export interface CellPoolSpec {
   libraries?: CellPoolLibrary[];
   /** The script-security signatures every cell of the pool approves. */
   approvedSignatures?: string[];
+  /** The SMTP setting every cell of the pool renders. The read carries the login Secret name only. */
+  mail?: CellPoolMail;
+}
+
+/** The SMTP setting of a pool. Read-only through the API. */
+export interface CellPoolMail {
+  host: string;
+  /** Zero or unset means 587. */
+  port?: number;
+  /** Unset means starttls. */
+  security?: 'none' | 'starttls' | 'tls';
+  from: string;
+  replyTo?: string;
+  defaultSuffix?: string;
+  /** The Secret in the operator namespace that holds the login. The name only. */
+  credentialRef?: string;
 }
 
 /** A trusted shared library of a pool. Only the operator declares it. */
