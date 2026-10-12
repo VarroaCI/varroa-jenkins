@@ -37,6 +37,35 @@ func TestReRoot(t *testing.T) {
 	}
 }
 
+func TestReRoot_RejectsGenericTokenOutsideTenantPrefix(t *testing.T) {
+	gen := func(token string) Trigger {
+		return Trigger{GenericTrigger: &GenericTrigger{Token: token}}
+	}
+	tests := []struct {
+		name    string
+		item    Item
+		wantErr bool
+	}{
+		{"own prefix", Item{Kind: "freeStyle", Name: "a", Triggers: []Trigger{gen("billing:deploy")}}, false},
+		{"other prefix", Item{Kind: "freeStyle", Name: "a", Triggers: []Trigger{gen("payments:deploy")}}, true},
+		{"bare prefix with no name", Item{Kind: "freeStyle", Name: "a", Triggers: []Trigger{gen("billing:")}}, true},
+		{"nested other prefix", Item{Kind: "folder", Name: "f", Items: []Item{
+			{Kind: "freeStyle", Name: "a", Triggers: []Trigger{gen("payments:deploy")}},
+		}}, true},
+		{"pipelineTriggers other prefix", Item{Kind: "pipeline", Name: "a", Properties: []Property{
+			{PipelineTriggers: &PipelineTriggers{Triggers: []Trigger{gen("payments:deploy")}}},
+		}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ReRoot(&Manifest{Items: []Item{tt.item}}, "billing")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ReRoot error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestReRoot_RejectsNonEmptyRoot(t *testing.T) {
 	in := &Manifest{Root: "some/prefix", Items: []Item{{Kind: "folder", Name: "x"}}}
 

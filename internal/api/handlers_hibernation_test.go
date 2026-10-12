@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -489,6 +490,138 @@ func TestTenantWebhookQueue_EmptyStoredSecretAnswers503(t *testing.T) {
 // token path end to end: a valid delivery is accepted, published on
 // webhook.<cluster>.tenant.<team>, and the envelope carries the request's
 // forge/team/delivery identity but neither secret header.
+// tenantDoorFixture returns a tenant door server for team payments, with
+// the door token "tok" and the secret "secret", and the subject a
+// delivery publishes on.
+func tenantDoorFixture(t *testing.T) (*Server, *bus.Conn, string) {
+	t.Helper()
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
+	client := newFakeResourceClient()
+	conn := tenantQueueTestBus(t)
+	srv := NewServer(&Dependencies{Brood: newFakeBrood(client), Store: store, BusConn: conn, Logger: slog.Default()})
+	return srv, conn, bus.WebhookTenantSubject("core", "payments")
+}
+
+// postTenantDoor sends one delivery to the tenant door and returns the
+// status code.
+func postTenantDoor(t *testing.T, srv *Server, path string, headers map[string]string) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/"+path, bytes.NewReader([]byte(`{}`)))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	srv.HandleHibernationDispatch(rec, req)
+	return rec.Code
+}
+
+func TestTenantWebhookQueue_GenericWithoutTokenAnswers400(t *testing.T) {
+	srv, _, _ := tenantDoorFixture(t)
+	code := postTenantDoor(t, srv, "generic-webhook-trigger/invoke", map[string]string{"X-Varroa-Token": "secret"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+}
+
+func TestTenantWebhookQueue_GenericWithOtherTeamTokenAnswers400(t *testing.T) {
+	srv, _, _ := tenantDoorFixture(t)
+	code := postTenantDoor(t, srv, "generic-webhook-trigger/invoke?token=billing:x", map[string]string{"X-Varroa-Token": "secret"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+}
+
+func TestTenantWebhookQueue_GenericPrefixOnlyTokenAnswers400(t *testing.T) {
+	srv, _, _ := tenantDoorFixture(t)
+	code := postTenantDoor(t, srv, "generic-webhook-trigger/invoke?token=payments:", map[string]string{"X-Varroa-Token": "secret"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+}
+
+func TestTenantWebhookQueue_GitLabOnGitHubPathAnswers400(t *testing.T) {
+	srv, _, _ := tenantDoorFixture(t)
+	code := postTenantDoor(t, srv, "github-webhook/", map[string]string{
+		"X-Gitlab-Event": "Push Hook",
+		"X-Gitlab-Token": "secret",
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+}
+
+func TestTenantWebhookQueue_GenericTokenKeptInEnvelopeQuery(t *testing.T) {
+	srv, conn, subject := tenantDoorFixture(t)
+	received := make(chan []byte, 1)
+	sub, err := conn.SubscribeData(subject, func(data []byte) {
+		received <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	code := postTenantDoor(t, srv, "generic-webhook-trigger/invoke?token=payments:gl", map[string]string{"X-Varroa-Token": "secret"})
+	if code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", code)
+	}
+	select {
+	case data := <-received:
+		var env map[string]any
+		if err := json.Unmarshal(data, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		query, _ := env["query"].(string)
+		if !strings.Contains(query, "token=payments:gl") {
+			t.Fatalf("envelope query = %q, want it to hold token=payments:gl", query)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no envelope published within timeout")
+	}
+}
+
+func TestTenantPathServes(t *testing.T) {
+	q := func(raw string) url.Values {
+		v, err := url.ParseQuery(raw)
+		if err != nil {
+			t.Fatalf("parse query %q: %v", raw, err)
+		}
+		return v
+	}
+	tests := []struct {
+		name  string
+		path  string
+		forge string
+		query string
+		want  bool
+	}{
+		{"github path on github delivery", "github-webhook/", "github", "", true},
+		{"github path on gitlab delivery", "github-webhook/", "gitlab", "", false},
+		{"github path on generic delivery", "github-webhook/", "generic", "", false},
+		{"gitea path on gitea delivery", "gitea-webhook/", "gitea", "", true},
+		{"gitea path on github delivery", "gitea-webhook/", "github", "", false},
+		{"gitea path on generic delivery", "gitea-webhook/", "generic", "", false},
+		{"generic path with own team token", "generic-webhook-trigger/invoke", "generic", "token=payments:gl", true},
+		{"generic path with own team token on gitlab", "generic-webhook-trigger/invoke", "gitlab", "token=payments:x", true},
+		{"generic path without token", "generic-webhook-trigger/invoke", "generic", "", false},
+		{"generic path with other team token", "generic-webhook-trigger/invoke", "generic", "token=billing:x", false},
+		{"generic path with team name as prefix of another team", "generic-webhook-trigger/invoke", "generic", "token=payments-2:x", false},
+		{"generic path with prefix only", "generic-webhook-trigger/invoke", "generic", "token=payments:", false},
+		{"generic path with bare team name", "generic-webhook-trigger/invoke", "generic", "token=payments", false},
+		{"generic path with empty token", "generic-webhook-trigger/invoke", "generic", "token=", false},
+		{"generic path on the header token only", "generic-webhook-trigger/invoke", "generic", "x=payments:gl", false},
+		{"generic path with a trailing slash and own token", "generic-webhook-trigger/invoke/", "generic", "token=payments:gl", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tenantPathServes(tt.path, tt.forge, "payments", q(tt.query)); got != tt.want {
+				t.Fatalf("tenantPathServes(%q, %q, payments, %q) = %v, want %v", tt.path, tt.forge, tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, placedPipelinesTeam("payments", "tok", "secret"))
@@ -506,7 +639,7 @@ func TestTenantWebhookQueue_GitLabTokenPublishesTenantEnvelope(t *testing.T) {
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{"object_kind":"push"}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/github-webhook/?x=1", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke?token=payments:gl", bytes.NewReader(body))
 	req.Header.Set("X-Gitlab-Event", "Push Hook")
 	req.Header.Set("X-Gitlab-Token", "secret")
 	req.Header.Set("X-Gitlab-Event-UUID", "gl-uuid-1")
@@ -571,7 +704,7 @@ func TestTenantWebhookQueue_UnverifiedHeaderIsReadFromRequestNotAllowlist(t *tes
 	defer func() { _ = sub.Unsubscribe() }()
 
 	body := []byte(`{}`)
-	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/hibernation/tok/teams/payments/queue/generic-webhook-trigger/invoke?token=payments:x", bytes.NewReader(body))
 	req.Header.Set("X-Varroa-Token", "secret")
 	rec := httptest.NewRecorder()
 

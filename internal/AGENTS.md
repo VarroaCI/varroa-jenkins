@@ -129,7 +129,11 @@ reading each package's entry point):
   `PipelineTriggersJobProperty` holding the item-level `triggers` merged
   with every `properties[].pipelineTriggers`. `validateTriggers` rejects
   triggers on any other kind, `pipelineTriggers` off `pipeline`, a
-  repeated trigger type across both spellings, and an empty `cron.spec`.
+  repeated trigger type across both spellings, an empty `cron.spec`, and a
+  `genericTrigger` with no `token`. A `triggers.genericTrigger` block
+  (`GenericTrigger{Token, GenericVariables, ...}`) renders the
+  `generic-webhook-trigger` plugin's trigger; its `token` is the value a
+  webhook call carries in `?token=`.
   A cell rewrites each job from `items.yaml` on a restart, so only an item
   trigger survives it; a Jenkinsfile `triggers {}` block does not. Two
   item forms select a delivered pipeline

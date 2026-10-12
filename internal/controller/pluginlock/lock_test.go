@@ -102,6 +102,8 @@ func TestParsedLock_SeedMembership(t *testing.T) {
 				"gitea":                      false,
 				"maven-plugin":               false,
 				"config-file-provider":       false,
+				"generic-webhook-trigger":    false,
+				"github-checks":              false,
 			}
 			for _, id := range s.Core {
 				if _, exists := seed[id]; !exists {

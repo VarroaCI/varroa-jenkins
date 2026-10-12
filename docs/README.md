@@ -75,6 +75,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Lifecycle](operations/lifecycle.md)
 - [Multi-tenancy](operations/multi-tenancy.md)
 - [Cells](operations/cells.md)
+- [Tenant webhooks](operations/webhooks.md)
 - [Cell pools](operations/cell-pools.md)
 - [Cell usage](operations/cell-usage.md)
 - [Cell views](operations/cell-views.md)

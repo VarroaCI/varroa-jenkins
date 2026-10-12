@@ -315,10 +315,14 @@ federation, activity persistence, and SSE fanout.
   hibernated controller and buffers its webhook on `webhook.<cluster>.<ns>.<ctrl>`. The tenant
   shape (`/hibernation/{token}/teams/{team}/queue/{path...}`) is the pipelines tenant's own door:
   it verifies the token against `Team.status.pipelines.webhookToken`, verifies the forge signature
-  against `Team.status.pipelines.webhookSecret` (`identifyForge`/`verifyForgeSignature`). A
-  Gitea or Forgejo delivery (`X-Gitea-Event` or `X-Forgejo-Event`, checked before
-  `X-GitHub-Event`) verifies an HMAC-SHA256 `X-Gitea-Signature`, or `X-Forgejo-Signature`, over
-  the bare hex digest. The door accepts the `gitea-webhook/` path. It strips
+  against `Team.status.pipelines.webhookSecret` (`identifyForge`/`verifyForgeSignature`), then
+  checks the path fence (`tenantPathServes`): a `github-webhook/` path needs a GitHub delivery,
+  a `gitea-webhook/` path needs a Gitea or Forgejo delivery, and a `generic-webhook-trigger/invoke`
+  path needs a `?token=` that starts with `<team>:` and has a name after the colon, else `400`.
+  The fence keeps one tenant from firing another tenant's jobs, because the generic trigger
+  searches every job on a shared cell. A Gitea or Forgejo delivery (`X-Gitea-Event` or
+  `X-Forgejo-Event`, checked before `X-GitHub-Event`) verifies an HMAC-SHA256 `X-Gitea-Signature`,
+  or `X-Forgejo-Signature`, over the bare hex digest. It strips
   `X-Gitlab-Token` from the envelope, and buffers on `webhook.<cluster>.tenant.<team>` — a cell
   never hibernates, so it publishes no wake. Both shapes share the JetStream `varroa_webhooks`
   stream and its existing `webhook.>` capture; the door never resolves placement, only the

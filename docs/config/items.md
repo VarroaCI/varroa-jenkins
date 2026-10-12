@@ -179,9 +179,11 @@ only) stops that job's run-state replication entirely:
 ```
 
 Trigger types are `cron`, `pollSCM`, `githubPush` (a push webhook through the `github`
-plugin), and [`varroaUpstream`](cross-tenant-pipelines.md). `triggers` is valid on `pipeline`
-and `freeStyle` items. A `pipeline` item also accepts `properties[].pipelineTriggers`, merged
-with `triggers`. A job holds one trigger of each type. `cron.spec` must not be empty.
+plugin), [`varroaUpstream`](cross-tenant-pipelines.md), and `genericTrigger` (a webhook call
+that carries `?token=<team>:<name>`; see [Tenant webhooks](../operations/webhooks.md)). `triggers` is valid on
+`pipeline` and `freeStyle` items. A `pipeline` item also accepts `properties[].pipelineTriggers`,
+merged with `triggers`. A job holds one trigger of each type. `cron.spec` and `genericTrigger.token`
+must not be empty. A tenant's `genericTrigger.token` must start with `<team>:`.
 
 A cell rewrites each job from `items.yaml` after a restart. A Jenkinsfile `triggers {}` block
 then has no effect until the job builds again. Declare a schedule in `items.yaml`.

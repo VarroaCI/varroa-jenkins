@@ -25,6 +25,8 @@ sets:
       - slack
       - email-ext
       - gitea
+      - generic-webhook-trigger
+      - github-checks
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -94,6 +96,8 @@ sets:
         version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
+      - artifactId: generic-webhook-trigger
+        version: "2.4.3"
       - artifactId: git-client
         version: "6.6.1"
       - artifactId: git-server
@@ -106,6 +110,8 @@ sets:
         version: "1.330-492.v3941a_032db_2a_"
       - artifactId: github-branch-source
         version: "1983.vfa_27ed961853"
+      - artifactId: github-checks
+        version: "679.v74133da_b_435a_"
       - artifactId: github
         version: "1.47.0"
       - artifactId: gson-api
@@ -426,6 +432,8 @@ sets:
       - slack
       - email-ext
       - gitea
+      - generic-webhook-trigger
+      - github-checks
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -495,6 +503,8 @@ sets:
         version: "2038.v7b_8817a_499d9"
       - artifactId: font-awesome-api
         version: "7.3.1-1013.v0835a_879ec6d"
+      - artifactId: generic-webhook-trigger
+        version: "2.4.3"
       - artifactId: git-client
         version: "6.6.1"
       - artifactId: git-server
@@ -507,6 +517,8 @@ sets:
         version: "1.330-492.v3941a_032db_2a_"
       - artifactId: github-branch-source
         version: "1983.vfa_27ed961853"
+      - artifactId: github-checks
+        version: "679.v74133da_b_435a_"
       - artifactId: github
         version: "1.47.0"
       - artifactId: gson-api

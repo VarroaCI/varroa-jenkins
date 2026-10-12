@@ -1,0 +1,16 @@
+items:
+  - kind: freeStyle
+    name: trigger-generic
+    displayName: "FreeStyle Generic Webhook Trigger"
+    description: "FreeStyle job that a generic webhook call starts"
+    triggers:
+      - genericTrigger:
+          token: "payments:gl"
+          regexpFilterText: "$ref"
+          regexpFilterExpression: "^refs/heads/main$"
+          genericVariables:
+            - key: ref
+              value: "$.ref"
+            - key: sha
+              value: "$.after"
+              defaultValue: none

@@ -11,7 +11,7 @@ history, and the new instance [deletes the old agent pods](tenant-pod-templates.
 `spec.cell.maxTenants` can; it caps tenants.
 
 A cell has no ingress host. Tenants use the
-[tenant webhook door](#the-tenant-webhook-door).
+[tenant webhook door](webhooks.md).
 
 Six limitations apply:
 
@@ -20,7 +20,7 @@ Six limitations apply:
 - Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
 - A rehydrated run shows no stage view, culprit list, or test detail.
 - The role-strategy screen shows a tenant's service identity as unknown until its first build.
-- An ad-hoc job does not survive a pod roll. Only a job in
+- An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
   the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
@@ -103,7 +103,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Folder.** The tenant's `items.yaml` goes under one top-level folder named for the `Team`.
   The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md). A job the bundle no longer declares leaves the
-  folder. A trigger for a missing job waits 90 seconds, then fails with `JOB_NOT_FOUND`. See [Build records](build-records.md).
+  folder, and its next trigger fails with `JOB_NOT_FOUND`. See
+  [Build records](build-records.md).
 - **Held folder.** Tenant items resolve only their own bundle's variables. The operator
   keeps the folder and its jobs as they are on one of these faults:
   - an item still holds `${`, a `${varroa_*}` name too;
@@ -208,48 +209,7 @@ Five controls confine a tenant:
 
 ## The tenant webhook door
 
-A tenant's webhook URL has the shape:
-
-```
-/hibernation/<token>/teams/<team>/queue/<path>
-```
-
-served from the BFF's public host, outside `/api/v1` and login. `<path>` must match
-`github-webhook/`, `gitea-webhook/`, or `generic-webhook-trigger/invoke`; any other path answers `404`.
-
-Varroa mints two credentials once and never regenerates them:
-
-- `status.pipelines.webhookToken` addresses the tenant and goes in the URL. Only the `Team`
-  object holds it:
-
-  ```bash
-  kubectl get team payments -o jsonpath='{.status.pipelines.webhookToken}'
-  ```
-
-- `status.pipelines.webhookSecret` proves the forge sent the body. Configure it as the webhook's
-  signing secret in the forge.
-
-The door verifies the delivery by forge: GitHub with an HMAC-SHA256 `X-Hub-Signature-256`,
-Gitea and Forgejo with `X-Gitea-Signature`, GitLab with `X-Gitlab-Token`,
-anything else with `X-Varroa-Token`. An unsigned or mismatched
-delivery answers `400`.
-
-A delivery buffers for up to one hour, so a tenant that moves cells in that hour still
-receives it. After that, only the forge's retry recovers it.
-
-**Verify:**
-
-```bash
-curl -i -X POST \
-  -H "X-GitHub-Event: push" \
-  -H "X-Hub-Signature-256: sha256=$(openssl dgst -sha256 -hmac "$SECRET" -hex body.json | cut -d' ' -f2)" \
-  --data-binary @body.json \
-  "https://<host>/hibernation/<token>/teams/payments/queue/github-webhook/"
-```
-
-Expect `202 Accepted`, then a build in the `payments` folder.
-
-A push of an already built revision starts no build.
+The door paths, the forge rules, and the token fence are in [Tenant webhooks](webhooks.md).
 
 ## Placement lifecycle
 

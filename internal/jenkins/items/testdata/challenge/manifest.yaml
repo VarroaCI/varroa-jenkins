@@ -12,6 +12,9 @@ cases:
   - name: freestyle-varroa-upstream-trigger
     tier: breadth
     status: supported
+  - name: trigger-generic
+    tier: breadth
+    status: supported
   - name: pipeline-scm-flow
     tier: breadth
     status: supported

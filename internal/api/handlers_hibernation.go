@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -326,6 +327,12 @@ func (s *Server) handleTenantHibernationQueue(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Step 5a: the path must match the forge and carry the tenant fence.
+	if !tenantPathServes(path, forge, team, r.URL.Query()) {
+		http.Error(w, "400 bad request", http.StatusBadRequest)
+		return
+	}
+
 	// Step 6: derive the delivery id.
 	deliveryID := deriveDeliveryID(r, forge)
 
@@ -522,6 +529,27 @@ func (s *Server) handleHibernationStatus(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `{"varroaWake":true,"phase":"%s"}`, cr.Status.Phase)
+}
+
+// tenantPathServes reports whether a tenant door delivery may reach the
+// replay path. A GitHub path needs a GitHub delivery, and a Gitea path needs
+// a Gitea or Forgejo delivery. The generic trigger path needs a token that
+// names the tenant: "<team>:<name>". A Kubernetes name never holds ":", so
+// one tenant cannot use another tenant's prefix. Any other allowlisted path
+// passes.
+func tenantPathServes(path, forge, team string, q url.Values) bool {
+	if strings.HasPrefix(path, "github-webhook/") {
+		return forge == "github"
+	}
+	if strings.HasPrefix(path, "gitea-webhook/") {
+		return forge == "gitea"
+	}
+	if strings.HasPrefix(path, "generic-webhook-trigger/invoke") {
+		prefix := team + ":"
+		tok := q.Get("token")
+		return strings.HasPrefix(tok, prefix) && len(tok) > len(prefix)
+	}
+	return true
 }
 
 // isPathAllowlisted checks if the given path matches any allowlisted prefix.

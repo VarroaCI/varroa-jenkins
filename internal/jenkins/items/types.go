@@ -291,6 +291,35 @@ type Trigger struct {
 	Cron           *CronTrigger           `yaml:"cron,omitempty"`
 	GitHubPush     *GitHubPushTrigger     `yaml:"githubPush,omitempty"`
 	VarroaUpstream *VarroaUpstreamTrigger `yaml:"varroaUpstream,omitempty"`
+	GenericTrigger *GenericTrigger        `yaml:"genericTrigger,omitempty"`
+}
+
+// GenericTrigger starts a build when a webhook call reaches the
+// generic-webhook-trigger endpoint with this token. The token is the
+// job's own secret. A tenant door call must carry "<team>:<name>".
+type GenericTrigger struct {
+	Token                  string            `yaml:"token"`
+	CauseString            string            `yaml:"causeString,omitempty"`
+	RegexpFilterText       string            `yaml:"regexpFilterText,omitempty"`
+	RegexpFilterExpression string            `yaml:"regexpFilterExpression,omitempty"`
+	GenericVariables       []GenericVariable `yaml:"genericVariables,omitempty"`
+}
+
+// genericExpressionTypes holds the two expression types the plugin's
+// ExpressionType enum accepts. Any other value fails to load the trigger.
+var genericExpressionTypes = map[string]bool{
+	"JSONPath": true,
+	"XPath":    true,
+}
+
+// GenericVariable extracts one value from the webhook body into a build
+// variable. Header values are not extractable from items.yaml.
+type GenericVariable struct {
+	Key            string `yaml:"key"`
+	Value          string `yaml:"value"`
+	ExpressionType string `yaml:"expressionType,omitempty"` // defaults to JSONPath
+	RegexpFilter   string `yaml:"regexpFilter,omitempty"`
+	DefaultValue   string `yaml:"defaultValue,omitempty"`
 }
 
 // GitHubPushTrigger starts a build when the github plugin receives a push
@@ -379,6 +408,9 @@ func triggerType(t Trigger) string {
 	if t.VarroaUpstream != nil {
 		names = append(names, "varroaUpstream")
 	}
+	if t.GenericTrigger != nil {
+		names = append(names, "genericTrigger")
+	}
 	if len(names) != 1 {
 		return ""
 	}
@@ -423,6 +455,16 @@ func validateTriggers(item Item) error {
 			}
 			if vu.Result != "" && !varroaUpstreamResults[vu.Result] {
 				return fmt.Errorf("item %q: varroaUpstream trigger result %q must be one of SUCCESS, UNSTABLE, FAILURE", name, vu.Result)
+			}
+		}
+		if gt := t.GenericTrigger; gt != nil {
+			if strings.TrimSpace(gt.Token) == "" {
+				return fmt.Errorf("item %q: genericTrigger requires token", name)
+			}
+			for _, v := range gt.GenericVariables {
+				if v.ExpressionType != "" && !genericExpressionTypes[v.ExpressionType] {
+					return fmt.Errorf("item %q: genericTrigger variable %q expressionType %q must be JSONPath or XPath", name, v.Key, v.ExpressionType)
+				}
 			}
 		}
 	}

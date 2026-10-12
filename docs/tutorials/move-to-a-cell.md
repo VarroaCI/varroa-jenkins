@@ -167,9 +167,9 @@ https://<host>/hibernation/<token>/teams/<team>/queue/github-webhook/
 
 Set the webhook's signing secret to the `webhookSecret` value from the `Team` status. Your operator gives you both the token and the secret.
 
-GitHub works without extra setup. A generic webhook needs the operator to pin `generic-webhook-trigger` in the cell's version profile first. GitLab needs the operator to pin `gitlab-plugin` first.
+GitHub works without extra setup. Generic and GitLab deliveries use the generic path with a `<team>:` token.
 
-Read [Schedule a job](../config/items.md#schedule-a-job), [The tenant webhook door](../operations/cells.md#the-tenant-webhook-door) and [Cell restrictions](../config/items.md#cell-restrictions).
+Read [Schedule a job](../config/items.md#schedule-a-job), [Tenant webhooks](../operations/webhooks.md) and [Cell restrictions](../config/items.md#cell-restrictions).
 
 ## 6. Remove notification steps
 

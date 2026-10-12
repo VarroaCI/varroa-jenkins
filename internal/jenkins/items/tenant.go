@@ -1,6 +1,9 @@
 package items
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ReRoot returns a manifest whose only top-level item is a folder named
 // tenant, carrying every item of in as its children. A non-empty in.Root is
@@ -13,6 +16,9 @@ func ReRoot(in *Manifest, tenant string) (*Manifest, error) {
 	if in.Root != "" {
 		return nil, fmt.Errorf("tenant %q: manifest declares root %q, which a tenant manifest must not set", tenant, in.Root)
 	}
+	if err := checkGenericTokens(in.Items, tenant); err != nil {
+		return nil, err
+	}
 	return &Manifest{
 		Items: []Item{
 			{
@@ -22,6 +28,28 @@ func ReRoot(in *Manifest, tenant string) (*Manifest, error) {
 			},
 		},
 	}, nil
+}
+
+// checkGenericTokens rejects a genericTrigger token that does not start
+// with "<tenant>:". The tenant door fences a call by that prefix, so a
+// token outside the prefix would let another tenant's door fire the job.
+// It walks every nested item and every pipelineTriggers entry.
+func checkGenericTokens(items []Item, tenant string) error {
+	for _, it := range items {
+		for _, tr := range collectTriggers(it) {
+			if tr.GenericTrigger == nil {
+				continue
+			}
+			tok, prefix := tr.GenericTrigger.Token, tenant+":"
+			if !strings.HasPrefix(tok, prefix) || len(tok) == len(prefix) {
+				return fmt.Errorf("tenant %q: item %q genericTrigger token %q must start with %q", tenant, it.Name, tr.GenericTrigger.Token, tenant+":")
+			}
+		}
+		if err := checkGenericTokens(it.Items, tenant); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Merge returns one manifest holding every input's top-level items. It

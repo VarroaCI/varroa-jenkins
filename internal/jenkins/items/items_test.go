@@ -1086,6 +1086,82 @@ func TestItemValidateTriggerRules(t *testing.T) {
 	}
 }
 
+func TestBuildTriggersXML_GenericTrigger(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "hook",
+		Triggers: []Trigger{
+			{GenericTrigger: &GenericTrigger{
+				Token:                  "payments:gl",
+				RegexpFilterText:       "$ref",
+				RegexpFilterExpression: "^refs/heads/main$",
+				GenericVariables: []GenericVariable{
+					{Key: "ref", Value: "$.ref"},
+					{Key: "sha", Value: "$.after", DefaultValue: "none"},
+				},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		`<org.jenkinsci.plugins.gwt.GenericTrigger plugin="generic-webhook-trigger">`,
+		"<spec></spec>",
+		"<expressionType>JSONPath</expressionType>",
+		"<key>ref</key>",
+		"<defaultValue>none</defaultValue>",
+		"<regexpFilterText>$ref</regexpFilterText>",
+		"<regexpFilterExpression>^refs/heads/main$</regexpFilterExpression>",
+		"<genericRequestVariables></genericRequestVariables>",
+		"<genericHeaderVariables></genericHeaderVariables>",
+		"<printPostContent>false</printPostContent>",
+		"<causeString>Generic Cause</causeString>",
+		"<token>payments:gl</token>",
+		"<silentResponse>false</silentResponse>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("expected %q in config.xml, got: %s", want, xml)
+		}
+	}
+}
+
+func TestItemValidateGenericVariableExpressionType(t *testing.T) {
+	gen := func(expr string) Item {
+		return Item{Kind: "freeStyle", Name: "hook", Triggers: []Trigger{{GenericTrigger: &GenericTrigger{
+			Token:            "billing:hook",
+			GenericVariables: []GenericVariable{{Key: "k", Value: "$.k", ExpressionType: expr}},
+		}}}}
+	}
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+	}{
+		{"empty defaults to JSONPath", "", false},
+		{"JSONPath", "JSONPath", false},
+		{"XPath", "XPath", false},
+		{"HeaderExpression rejected", "HeaderExpression", true},
+		{"lowercase rejected", "jsonpath", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := gen(tt.expr)
+			if err := item.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestItemValidateGenericTriggerRequiresToken(t *testing.T) {
+	item := Item{Kind: "freeStyle", Name: "hook", Triggers: []Trigger{{GenericTrigger: &GenericTrigger{}}}}
+	if err := item.Validate(); err == nil {
+		t.Fatal("expected an error for a genericTrigger with no token")
+	}
+}
+
 func TestParseGitHubPushTrigger(t *testing.T) {
 	m, err := Parse(`items:
   - kind: pipeline

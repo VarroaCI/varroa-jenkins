@@ -229,6 +229,45 @@ type jenkinsTriggersXML struct {
 	Cron           []*jenkinsCronXML           `xml:"hudson.triggers.TimerTrigger,omitempty"`
 	GitHubPush     []*jenkinsGitHubPushXML     `xml:"com.cloudbees.jenkins.GitHubPushTrigger,omitempty"`
 	VarroaUpstream []*jenkinsVarroaUpstreamXML `xml:"org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger,omitempty"`
+	GenericTrigger []*jenkinsGenericTriggerXML `xml:"org.jenkinsci.plugins.gwt.GenericTrigger,omitempty"`
+}
+
+// genericPlugin is the plugin that owns GenericTrigger.
+const genericPlugin = "generic-webhook-trigger"
+
+// genericDefaultCauseString is the build cause a generic trigger writes
+// when the item sets no causeString.
+const genericDefaultCauseString = "Generic Cause"
+
+// jenkinsGenericTriggerXML renders a genericTrigger. Spec is always an
+// empty element, for the same reason as jenkinsVarroaUpstreamXML. The
+// request and header variable lists are always empty elements: XStream
+// skips the constructor, so a missing list loads as null.
+type jenkinsGenericTriggerXML struct {
+	Plugin                    string                     `xml:"plugin,attr"`
+	Spec                      string                     `xml:"spec"`
+	GenericVariables          jenkinsGenericVariablesXML `xml:"genericVariables"`
+	RegexpFilterText          string                     `xml:"regexpFilterText"`
+	RegexpFilterExpression    string                     `xml:"regexpFilterExpression"`
+	GenericRequestVariables   struct{}                   `xml:"genericRequestVariables"`
+	GenericHeaderVariables    struct{}                   `xml:"genericHeaderVariables"`
+	PrintPostContent          bool                       `xml:"printPostContent"`
+	PrintContributedVariables bool                       `xml:"printContributedVariables"`
+	CauseString               string                     `xml:"causeString"`
+	Token                     string                     `xml:"token"`
+	SilentResponse            bool                       `xml:"silentResponse"`
+}
+
+type jenkinsGenericVariablesXML struct {
+	Items []jenkinsGenericVariableXML `xml:"org.jenkinsci.plugins.gwt.GenericVariable"`
+}
+
+type jenkinsGenericVariableXML struct {
+	ExpressionType string `xml:"expressionType"`
+	Key            string `xml:"key"`
+	Value          string `xml:"value"`
+	RegexpFilter   string `xml:"regexpFilter"`
+	DefaultValue   string `xml:"defaultValue"`
 }
 
 type jenkinsPollSCMXML struct {
@@ -282,8 +321,42 @@ func buildTriggersXML(triggers []Trigger) *jenkinsTriggersXML {
 				Result: result,
 			})
 		}
+		if tr.GenericTrigger != nil {
+			t.GenericTrigger = append(t.GenericTrigger, genericTriggerXML(tr.GenericTrigger))
+		}
 	}
 	return t
+}
+
+// genericTriggerXML converts a genericTrigger declaration. It applies the
+// defaults the plugin would otherwise write: the JSONPath expression type
+// and the generic cause string.
+func genericTriggerXML(g *GenericTrigger) *jenkinsGenericTriggerXML {
+	cause := g.CauseString
+	if cause == "" {
+		cause = genericDefaultCauseString
+	}
+	x := &jenkinsGenericTriggerXML{
+		Plugin:                 genericPlugin,
+		RegexpFilterText:       g.RegexpFilterText,
+		RegexpFilterExpression: g.RegexpFilterExpression,
+		CauseString:            cause,
+		Token:                  g.Token,
+	}
+	for _, v := range g.GenericVariables {
+		expr := v.ExpressionType
+		if expr == "" {
+			expr = "JSONPath"
+		}
+		x.GenericVariables.Items = append(x.GenericVariables.Items, jenkinsGenericVariableXML{
+			ExpressionType: expr,
+			Key:            v.Key,
+			Value:          v.Value,
+			RegexpFilter:   v.RegexpFilter,
+			DefaultValue:   v.DefaultValue,
+		})
+	}
+	return x
 }
 
 // jenkinsVarroaUpstreamXML renders a varroaUpstream trigger. Its element
