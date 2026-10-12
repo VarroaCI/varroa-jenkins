@@ -83,6 +83,22 @@ func TestCellPoolDeepCopyIsolatesSubObjects(t *testing.T) {
 	}
 }
 
+// TestCellPoolDeepCopyIsolatesApprovedSignatures mutates a deep copy of a
+// pool's approved signatures and asserts the original stays unchanged.
+func TestCellPoolDeepCopyIsolatesApprovedSignatures(t *testing.T) {
+	orig := CellPool{Spec: CellPoolSpec{
+		ProfileRef:         "lts-2-555",
+		ApprovedSignatures: []string{"method hudson.Util getHost"},
+	}}
+
+	cp := orig.DeepCopy()
+	cp.Spec.ApprovedSignatures[0] = "mutated"
+
+	if got := orig.Spec.ApprovedSignatures[0]; got != "method hudson.Util getHost" {
+		t.Fatalf("approvedSignatures shallow-copied: got %q", got)
+	}
+}
+
 // TestCellPoolDeepCopyObject asserts both new kinds satisfy runtime.Object,
 // which addKnownTypes needs.
 func TestCellPoolDeepCopyObject(t *testing.T) {

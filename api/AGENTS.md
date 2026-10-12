@@ -38,7 +38,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   and the pass never restamps it), and `maxCells` is 0 or at least `warm`. The
   `libraries` list (`CellPoolLibrary`, max 16) holds trusted global libraries:
   an ssh remote needs `credentialRef`, a CEL rule on the item type. Each
-  item has its own DeepCopy.
+  item has its own DeepCopy. The `approvedSignatures` list (`[]string`, max 256,
+  each entry a script-security signature with no `${` token) is the pool's
+  script approval set. A cell renders it; the BFF projects it read-only.
   second rule guards **both** field reads with `has()`: a stored object written
   before the defaults existed leaves a field absent, and a bare access raises
   `no such key`. `CellPoolStatus`'s four counters (`warmCells`, `placedCells`,

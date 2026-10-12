@@ -115,7 +115,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 
 	updatePool := mcp.NewTool("update_cell_pool",
 		mcp.WithDescription("Scale a CellPool on its own cluster. Writes only the dials the call "+
-			"names and removes nothing. profileRef, cellTemplate, and libraries are not API operations: edit "+
+			"names and removes nothing. profileRef, cellTemplate, libraries, and approvedSignatures are not API operations: edit "+
 			"those with kubectl or through GitOps."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("CellPool name")),
 		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),

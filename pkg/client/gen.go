@@ -1243,6 +1243,9 @@ type ComponentsSchemasCellPoolScaleRequest struct {
 
 // ComponentsSchemasCellPoolSpec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
 type ComponentsSchemasCellPoolSpec struct {
+	// ApprovedSignatures Script-security signatures that every cell of the pool approves. A cell renders this list with its own bundle list, sorted. Read-only through the API; edit the CellPool with kubectl or GitOps.
+	ApprovedSignatures *[]string `json:"approvedSignatures,omitempty"`
+
 	// CellTemplate resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.
 	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
 

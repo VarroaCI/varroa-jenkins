@@ -1991,6 +1991,17 @@ type CellPoolSpec struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=16
 	Libraries []CellPoolLibrary `json:"libraries,omitempty"`
+	// ApprovedSignatures lists the script-security signatures that every
+	// cell of the pool approves. A cell renders the union of this list and
+	// its own bundle list, sorted, so a signature stays approved only while
+	// the pool or the cell bundle declares it.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:items:MaxLength=1024
+	// +kubebuilder:validation:items:Pattern=`^(method|staticMethod|new|field|staticField) \S.*$`
+	// +kubebuilder:validation:XValidation:rule="self.all(s, !s.contains('${'))",message="an approved signature must not contain a ${ token"
+	ApprovedSignatures []string `json:"approvedSignatures,omitempty"`
 }
 
 // CellTemplate is the shape a pool stamps on each cell it creates. It

@@ -18,6 +18,7 @@ Read [Cells and pipelines tenants](cells.md) first.
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
 | `cellTemplate` | object, optional | `resources`, `miteResources`, and `podOverrides` for the cells the pool creates |
 | `libraries` | list, optional | trusted shared libraries that every cell of the pool serves. See [Pool shared libraries](cell-libraries.md) |
+| `approvedSignatures` | list of strings, optional | script-security signatures that every cell of the pool approves. See [Script approvals](script-approvals.md) |
 
 `profileRef` is immutable. A pool's cells carry the profile label they were created with, and a
 change would orphan every one of them. To serve another profile, create another pool.

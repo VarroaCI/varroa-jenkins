@@ -11,6 +11,8 @@ Two kinds of shared library exist in a cell.
 | Pool library | The operator, on `CellPool.spec.libraries` | Outside the Groovy sandbox | An organisation library that needs full trust |
 | Folder library | The tenant, in a folder property | Inside the Groovy sandbox | A tenant library |
 
+For the approval policy that covers both kinds, see [Script approvals](script-approvals.md).
+
 A pool library is trusted. Its code can call any Jenkins API. A folder library is sandboxed. See [Tenant shared libraries](tenant-libraries.md).
 
 ## Spec fields

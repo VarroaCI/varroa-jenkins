@@ -95,6 +95,7 @@ function TopologyPanel({
   if (canReadPools) {
     items.push({ key: "Pool tenant cap", value: String(pool?.spec.maxTenantsPerCell ?? DASH) });
     items.push({ key: "Pool ready", value: poolReadyLine(pool) });
+    items.push({ key: "Pool approved signatures", value: poolSignaturesLine(pool) });
   }
 
   // The role, the agent namespace, and the placement generation come from
@@ -171,6 +172,14 @@ function poolReadyLine(pool?: CellPool): string {
   if (!condition) return DASH;
   const reason = condition.reason ? ` (${condition.reason})` : "";
   return `${condition.status}${reason}`;
+}
+
+// poolSignaturesLine counts the signatures the pool approves. It names none
+// of them: the list is long, and the pool declaration holds the detail.
+function poolSignaturesLine(pool?: CellPool): string {
+  if (!pool) return DASH;
+  const count = pool.spec.approvedSignatures?.length ?? 0;
+  return count === 0 ? "None" : String(count);
 }
 
 function CapacityPanel({

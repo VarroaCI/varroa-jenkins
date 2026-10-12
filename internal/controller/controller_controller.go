@@ -746,6 +746,13 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool libraries: %w", libErr)
 	}
 
+	// Render the pool's approved script signatures. The cell always gets
+	// the approval key, even when empty, so a removed signature is revoked.
+	// A no-op for a controller that is not a cell.
+	if sigErr := r.applyPoolSignatures(ctx, cr, mat); sigErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool signatures: %w", sigErr)
+	}
+
 	// Inject location URL under the three-way rule: a headless controller
 	// gets the dashboard door URL when the operator has a dashboard origin,
 	// and the in-cluster endpoint otherwise. A non-headless controller with a

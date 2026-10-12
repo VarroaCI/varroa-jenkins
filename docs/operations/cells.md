@@ -196,15 +196,16 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 ## Isolation controls
 
-Four controls confine a tenant to its own folder and agents:
+Five controls confine a tenant:
 
 1. **Network policy.** `networkPolicy.cellIsolation.enabled` renders one `NetworkPolicy` per cell.
    See [Isolate cells](../install/network-policies.md#isolate-cells).
-2. **Cloud restriction.** Each tenant's Kubernetes cloud serves only its own folder.
-3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant, or on a
-   node with no tenant label.
+2. **Cloud restriction.** Each tenant's Kubernetes cloud serves its own folder only.
+3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant or on an
+   unlabelled node.
 4. **Build identity.** The plugin authenticates every build, including a Pipeline `node` block, as
    `svc-<team>`. That identity reads only its own folder's credentials and items.
+5. **Script sandbox.** Tenant code is sandboxed. See [Script approvals](script-approvals.md).
 
 ## The tenant webhook door
 

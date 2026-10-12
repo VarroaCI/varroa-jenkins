@@ -163,6 +163,7 @@ func TestCellPools_StructuralEditRefused(t *testing.T) {
 	}{
 		{name: "profileRef", body: `{"spec": {"profileRef": "x"}}`},
 		{name: "cellTemplate", body: `{"spec": {"cellTemplate": {}}}`},
+		{name: "approvedSignatures", body: `{"spec": {"approvedSignatures": ["method hudson.Util getHost"]}}`},
 		{name: "unknown key", body: `{"spec": {"nope": 1}}`},
 		{name: "no recognised key", body: `{"spec": {}}`},
 		{name: "no spec", body: `{}`},
@@ -324,5 +325,20 @@ func TestCellPoolEntryFrom_CarriesLibraries(t *testing.T) {
 	got := libs[0]
 	if got.Name != "platform-lib" || got.CredentialRef != "platform-lib-key" || !got.Implicit || got.AllowVersionOverride {
 		t.Fatalf("library entry = %+v", got)
+	}
+}
+
+// TestCellPoolEntryFrom_CarriesApprovedSignatures checks that the read
+// projection carries the pool's approved script signatures.
+func TestCellPoolEntryFrom_CarriesApprovedSignatures(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef:         "lts-2-555",
+			ApprovedSignatures: []string{"method hudson.Util getHost", "new java.util.Date"},
+		},
+	}
+	got := cellPoolEntryFrom(pool).Spec.ApprovedSignatures
+	if len(got) != 2 || got[0] != "method hudson.Util getHost" || got[1] != "new java.util.Date" {
+		t.Fatalf("approvedSignatures = %v", got)
 	}
 }

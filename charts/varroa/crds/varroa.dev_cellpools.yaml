@@ -61,6 +61,22 @@ spec:
             description: CellPoolSpec holds the size, the capacity, and the template
               of one pool.
             properties:
+              approvedSignatures:
+                description: |-
+                  ApprovedSignatures lists the script-security signatures that every
+                  cell of the pool approves. A cell renders the union of this list and
+                  its own bundle list, sorted, so a signature stays approved only while
+                  the pool or the cell bundle declares it.
+                items:
+                  maxLength: 1024
+                  pattern: ^(method|staticMethod|new|field|staticField) \S.*$
+                  type: string
+                maxItems: 256
+                type: array
+                x-kubernetes-list-type: set
+                x-kubernetes-validations:
+                - message: an approved signature must not contain a ${ token
+                  rule: self.all(s, !s.contains('${'))
               cellTemplate:
                 description: CellTemplate holds the shape of the cells the pool creates.
                 properties:

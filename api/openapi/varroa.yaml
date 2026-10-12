@@ -4927,6 +4927,17 @@ components:
       description: A CellPool's configuration (spec.*). profileRef is immutable, because
         a pool's cells carry the profile label they were created with.
       properties:
+        approvedSignatures:
+          description: Script-security signatures that every cell of the pool approves.
+            A cell renders this list with its own bundle list, sorted. Read-only through
+            the API; edit the CellPool with kubectl or GitOps.
+          items:
+            maxLength: 1024
+            pattern: ^(method|staticMethod|new|field|staticField) \S.*$
+            type: string
+          maxItems: 256
+          type: array
+          uniqueItems: true
         cellTemplate:
           additionalProperties: true
           description: resources, miteResources, and podOverrides for the cells the

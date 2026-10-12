@@ -1299,6 +1299,11 @@ func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
 		*out = make([]CellPoolLibrary, len(*in))
 		copy(*out, *in)
 	}
+	if in.ApprovedSignatures != nil {
+		in, out := &in.ApprovedSignatures, &out.ApprovedSignatures
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 }
 
 // DeepCopy creates a deep copy of CellPoolSpec.

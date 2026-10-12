@@ -2552,6 +2552,8 @@ export interface CellPoolSpec {
   cellTemplate?: Record<string, unknown>;
   /** The trusted shared libraries every cell of the pool serves as global libraries. */
   libraries?: CellPoolLibrary[];
+  /** The script-security signatures every cell of the pool approves. */
+  approvedSignatures?: string[];
 }
 
 /** A trusted shared library of a pool. Only the operator declares it. */

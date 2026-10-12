@@ -954,7 +954,11 @@ sections describe.
     owner reintroduces the drift the `effectiveBundleRef` rule already
     forbids.
   - The Controller reconciler's own cell-specific logic lives beside it in
-    this package, one file per concern: `cell_pool_libraries.go`
+    this package, one file per concern: `cell_script_approval.go`
+    (`applyPoolSignatures` renders `CellPool.spec.approvedSignatures` into
+    `security.scriptApproval.approvedSignatures` as a sorted, deduplicated
+    union with the bundle's entries. The key is always set, even when empty),
+    `cell_pool_libraries.go`
     (`applyPoolLibraries` runs in `resolveBundleForController` after the
     tenant template loop and `ResolveVars`. It renders `CellPool.spec.libraries`
     into `unclassified.globalLibraries.libraries` (list-aware: bundle entries

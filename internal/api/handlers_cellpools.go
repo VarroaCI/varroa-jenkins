@@ -34,6 +34,7 @@ type cellPoolSpecEntry struct {
 	UnreadyGracePeriod *metav1.Duration       `json:"unreadyGracePeriod,omitempty"`
 	CellTemplate       *cellTemplate          `json:"cellTemplate,omitempty"`
 	Libraries          []cellPoolLibraryEntry `json:"libraries,omitempty"`
+	ApprovedSignatures []string               `json:"approvedSignatures,omitempty"`
 }
 
 // cellPoolLibraryEntry mirrors v1alpha1.CellPoolLibrary. It carries the
@@ -117,6 +118,7 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			AllowVersionOverride: lib.AllowVersionOverride,
 		})
 	}
+	e.Spec.ApprovedSignatures = pool.Spec.ApprovedSignatures
 	if tmpl := pool.Spec.CellTemplate; tmpl != nil {
 		e.Spec.CellTemplate = &cellTemplate{}
 		if tmpl.Resources != nil {
@@ -281,7 +283,7 @@ func decodeCellPoolScaleRequest(r *http.Request) (cells.CellPoolDials, string) {
 	for k := range keys {
 		switch k {
 		case "warm", "maxCells", "maxTenantsPerCell", "unreadyGracePeriod":
-		case "profileRef", "cellTemplate":
+		case "profileRef", "cellTemplate", "approvedSignatures":
 			return cells.CellPoolDials{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
 		default:
 			return cells.CellPoolDials{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)

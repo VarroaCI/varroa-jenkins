@@ -5988,6 +5988,18 @@ CellPoolSpec:
         libraries. Names are unique.
       items:
         $ref: '#/CellPoolLibrary'
+    approvedSignatures:
+      type: array
+      maxItems: 256
+      uniqueItems: true
+      description: >-
+        Script-security signatures that every cell of the pool approves. A
+        cell renders this list with its own bundle list, sorted. Read-only
+        through the API; edit the CellPool with kubectl or GitOps.
+      items:
+        type: string
+        maxLength: 1024
+        pattern: '^(method|staticMethod|new|field|staticField) \S.*$'
   additionalProperties: false
 
 CellPoolLibrary:

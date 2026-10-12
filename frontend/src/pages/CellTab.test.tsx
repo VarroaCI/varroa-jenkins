@@ -171,6 +171,29 @@ describe("Topology panel", () => {
     expect(screen.getByText("False (CellCapReached)")).toBeInTheDocument();
   });
 
+  it("counts the pool approved signatures for a pool reader", () => {
+    mockUseCellPool.mockReturnValue({
+      data: makePool({
+        spec: {
+          profileRef: "lts-2-555",
+          approvedSignatures: ["method hudson.Util getHost", "new java.util.Date"],
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderTab();
+    const row = screen.getByText("Pool approved signatures").closest("div")?.parentElement;
+    expect(row?.textContent).toContain("2");
+    expect(row?.textContent).not.toContain("None");
+  });
+
+  it("states none when the pool approves no signature", () => {
+    renderTab();
+    expect(screen.getByText("Pool approved signatures")).toBeInTheDocument();
+    expect(screen.getByText("None")).toBeInTheDocument();
+  });
+
   it("hides the pool values and states the reason without the pool read", () => {
     mockCanDoGlobal.mockImplementation((_p: unknown, resource: string) => resource !== "cellpools");
     renderTab();
