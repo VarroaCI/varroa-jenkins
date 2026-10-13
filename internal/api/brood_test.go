@@ -1127,3 +1127,197 @@ func TestBusBrood_ListRemotePageCap(t *testing.T) {
 		t.Fatalf("expected 128 list calls, got %d", calls)
 	}
 }
+
+// brokerItemRaw returns a marshalled Controller for a brood reply.
+func brokerItemRaw(t *testing.T) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "ns"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// requestCancelCase runs call with a plain request seam that blocks until the
+// test ends. It cancels the context once the first request starts, and
+// returns the error call produced. It fails when call does not return within
+// two seconds.
+func requestCancelCase(t *testing.T, call func(ctx context.Context, bf *busBrood) error) error {
+	t.Helper()
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var once atomic.Bool
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		if once.CompareAndSwap(false, true) {
+			close(started)
+		}
+		<-release
+		return nil, errors.New("late reply")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- call(ctx, bf) }()
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("read did not return after the request context was cancelled")
+		return nil
+	}
+}
+
+func TestBusBrood_GetCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.Get(ctx, "dev-cluster", "ns", "c1")
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *BroodError, got %T: %v", err, err)
+	}
+	if be.Msg != "request cancelled" || be.Code != bus.CodeInternal {
+		t.Fatalf("got code=%q msg=%q, want %q %q", be.Code, be.Msg, bus.CodeInternal, "request cancelled")
+	}
+	var unreachable *ErrClusterUnreachable
+	if errors.As(err, &unreachable) {
+		t.Fatalf("cancelled read must not report an unreachable cluster: %v", err)
+	}
+}
+
+func TestBusBrood_DiscoverNamespacesCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.DiscoverNamespaces(ctx, "dev-cluster")
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) || be.Msg != "request cancelled" {
+		t.Fatalf("expected request cancelled BroodError, got %T: %v", err, err)
+	}
+}
+
+func TestBusBrood_PreflightCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.Preflight(ctx, "dev-cluster", ControllersCreateArgs{Namespace: "ns"})
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) || be.Msg != "request cancelled" {
+		t.Fatalf("expected request cancelled BroodError, got %T: %v", err, err)
+	}
+}
+
+func TestBusBrood_PreflightSubjectIsCreate(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	var got string
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		got = subject
+		return json.Marshal(bus.ControllersCreateResponse{})
+	}
+	if _, err := bf.Preflight(context.Background(), "dev-cluster", ControllersCreateArgs{Namespace: "ns"}); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if !strings.HasSuffix(got, ".create") {
+		t.Fatalf("subject = %q, want suffix .create", got)
+	}
+}
+
+func TestBusBrood_GetUsesContextSeam(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	var sawCtx bool
+	bf.requestWithCtx = func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		sawCtx = ctx != nil
+		return json.Marshal(bus.ControllersGetResponse{Item: brokerItemRaw(t)})
+	}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		t.Fatal("Get must use the context seam, not the plain request seam")
+		return nil, nil
+	}
+	cr, err := bf.Get(context.Background(), "dev-cluster", "ns", "c1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if cr.Name != "c1" || !sawCtx {
+		t.Fatalf("name=%q sawCtx=%v", cr.Name, sawCtx)
+	}
+}
+
+func TestBusBrood_WritesStayOnPlainSeam(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	bf.requestWithCtx = func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		t.Fatalf("write %s must not use the context seam", subject)
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		seen[subject] = true
+		switch {
+		case strings.HasSuffix(subject, ".drain") || strings.HasSuffix(subject, ".draincancel"):
+			return json.Marshal(bus.ClusterDrainResponse{State: "active"})
+		case strings.HasSuffix(subject, ".create"):
+			return json.Marshal(bus.ControllersCreateResponse{Item: brokerItemRaw(t)})
+		case strings.HasSuffix(subject, ".update"):
+			return json.Marshal(bus.ControllersUpdateResponse{Item: brokerItemRaw(t)})
+		default:
+			return json.Marshal(bus.ControllersDeleteResponse{})
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := bf.Drain(ctx, "dev-cluster", "tester"); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if _, err := bf.DrainCancel(ctx, "dev-cluster", "tester"); err != nil {
+		t.Fatalf("draincancel: %v", err)
+	}
+	if _, _, err := bf.Create(ctx, "dev-cluster", ControllersCreateArgs{Namespace: "ns"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, _, err := bf.Update(ctx, "dev-cluster", "ns", "c1", json.RawMessage(`{}`), "", false); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if err := bf.Delete(ctx, "dev-cluster", "ns", "c1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := bf.DeletePod(ctx, "dev-cluster", "ns", "c1"); err != nil {
+		t.Fatalf("deletepod: %v", err)
+	}
+	for _, verb := range []string{".drain", ".draincancel", ".create", ".update", ".delete", ".deletepod"} {
+		found := false
+		for s := range seen {
+			if strings.HasSuffix(s, verb) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no request sent for %s", verb)
+		}
+	}
+}
+
+func TestBusBrood_GetDeadlineIsUnreachable(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		<-release
+		return nil, errors.New("late reply")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	_, err := bf.Get(ctx, "dev-cluster", "ns", "c1")
+	var unreachable *ErrClusterUnreachable
+	if !errors.As(err, &unreachable) {
+		t.Fatalf("expected ErrClusterUnreachable for a deadline, got %T: %v", err, err)
+	}
+	if unreachable.Cluster != "dev-cluster" {
+		t.Errorf("cluster = %q, want dev-cluster", unreachable.Cluster)
+	}
+}

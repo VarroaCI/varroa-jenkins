@@ -401,11 +401,9 @@ func (f *busBrood) Get(ctx context.Context, cluster, ns, name string) (*v1alpha1
 		}
 		return cr, nil
 	}
-	req := bus.ControllersGetRequest{Namespace: ns, Name: name}
-	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorControllersSubject(cluster, "get"), data, broodGetTimeout)
+	respData, err := f.readTo(ctx, "get", cluster, bus.ControllersGetRequest{Namespace: ns, Name: name}, broodGetTimeout)
 	if err != nil {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
+		return nil, err
 	}
 	var resp bus.ControllersGetResponse
 	if err := json.Unmarshal(respData, &resp); err != nil {
@@ -432,7 +430,7 @@ func (f *busBrood) Create(ctx context.Context, cluster string, req ControllersCr
 		DryRun:     req.DryRun,
 	}
 	if req.DryRun {
-		resp, err := f.requestTo("create", cluster, busReq, broodDryRunTimeout)
+		resp, err := f.readTo(ctx, "create", cluster, busReq, broodDryRunTimeout)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -584,9 +582,9 @@ func (f *busBrood) DiscoverNamespaces(ctx context.Context, cluster string) (*bus
 		return nil, fmt.Errorf("DiscoverNamespaces called for local cluster %q", cluster)
 	}
 	data, _ := json.Marshal(bus.NamespacesListRequest{})
-	respData, err := f.request(bus.OperatorNamespacesSubject(cluster), data, broodNamespacesTimeout)
+	respData, err := f.requestCtx(ctx, bus.OperatorNamespacesSubject(cluster), data, broodNamespacesTimeout)
 	if err != nil {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
+		return nil, f.readErr(ctx, cluster, err)
 	}
 	var resp bus.NamespacesListResponse
 	if err := json.Unmarshal(respData, &resp); err != nil {
@@ -598,7 +596,7 @@ func (f *busBrood) DiscoverNamespaces(ctx context.Context, cluster string) (*bus
 	return &resp, nil
 }
 
-// requestTo sends a request to the given cluster and returns the raw response bytes.
+// requestTo sends a write to the given cluster. It does not end when the caller's context ends.
 func (f *busBrood) requestTo(verb, cluster string, req any, timeout time.Duration) ([]byte, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -610,6 +608,29 @@ func (f *busBrood) requestTo(verb, cluster string, req any, timeout time.Duratio
 		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
 	}
 	return resp, nil
+}
+
+// readTo sends a read to the cluster's controllers subject. It ends when ctx
+// ends and returns a "request cancelled" error.
+func (f *busBrood) readTo(ctx context.Context, verb, cluster string, req any, timeout time.Duration) ([]byte, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s request: %w", verb, err)
+	}
+	resp, err := f.requestCtx(ctx, bus.OperatorControllersSubject(cluster, verb), data, timeout)
+	if err != nil {
+		return nil, f.readErr(ctx, cluster, err)
+	}
+	return resp, nil
+}
+
+// readErr names a cancelled read as a cancellation. A deadline or any other
+// failure is an unreachable cluster.
+func (f *busBrood) readErr(ctx context.Context, cluster string, err error) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return &BroodError{Code: bus.CodeInternal, Msg: "request cancelled"}
+	}
+	return &ErrClusterUnreachable{Cluster: cluster, Err: err}
 }
 
 func (f *busBrood) wrapK8sErr(err error) error {
