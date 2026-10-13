@@ -143,7 +143,7 @@ the list.
 
 A build that waits holds no build number. When a running build ends, the oldest waiting build
 of that limit starts first. A build from source control or from a cron schedule waits in the
-queue with no run record. It shows only in the **Waiting** list of its job page.
+queue with no run record. It shows only in the **Waiting** list of its job page. The **Waiting** list updates live.
 
 The cell pool can cap the builds of one tenant on one cell. See [Cell pools](cell-pools.md).
 

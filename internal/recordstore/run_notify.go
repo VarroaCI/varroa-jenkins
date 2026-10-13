@@ -44,8 +44,8 @@ type RunNotification struct {
 	// every other kind, and the body then omits it.
 	LockName string `json:"lock_name,omitempty"`
 	// State is that lock's own state after the write: waiting, held,
-	// releasing, or released. It stays empty for every other kind, and
-	// the body then omits it.
+	// releasing, or released. For kind wait it is waiting or cleared.
+	// It stays empty for every other kind, and the body then omits it.
 	State string `json:"state,omitempty"`
 	// Seq numbers the notifications of one publish, and At holds the
 	// publish time.
@@ -68,6 +68,27 @@ func lockNotification(cluster, tenant, jobPath, lockName, runID, state string) R
 		RunID:    runID,
 		LockName: lockName,
 		State:    state,
+	}
+}
+
+// Wait states of a kind wait notification. waiting means a concurrency cap
+// holds the run, or a held wait changed its count. cleared means the run
+// left its wait row, either by a grant or by a removed limit.
+const (
+	WaitStateWaiting = "waiting"
+	WaitStateCleared = "cleared"
+)
+
+// waitNotification builds the notification one run_waits change publishes.
+// Seq and At stay zero, because Notify stamps both under its own lock.
+func waitNotification(req ClaimRequest, runID, state string) RunNotification {
+	return RunNotification{
+		Kind:    "wait",
+		Cluster: req.Cluster,
+		Tenant:  req.Tenant,
+		JobPath: req.JobPath,
+		RunID:   runID,
+		State:   state,
 	}
 }
 

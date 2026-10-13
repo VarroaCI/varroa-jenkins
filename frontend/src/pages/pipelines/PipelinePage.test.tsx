@@ -600,6 +600,59 @@ describe("PipelinePage — live run events", () => {
   });
 });
 
+describe("PipelinePage — wait events", () => {
+  beforeEach(() => {
+    mockGetPipelineJob.mockReset();
+    mockListRuns.mockReset();
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    mockListRuns.mockResolvedValue({ items: [] });
+    vi.mocked(usePermissions).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof usePermissions>);
+  });
+
+  function runStream(frame: RunEvent | null, readyState = "closed") {
+    mockUseEventStream.mockImplementation((_baseUrl, scope) =>
+      (scope ?? "").startsWith("pipelines:")
+        ? { lastEvent: frame, readyState, error: null }
+        : { lastEvent: null, readyState: "closed", error: null },
+    );
+  }
+
+  it("subscribes to wait frames", async () => {
+    renderPage();
+    await waitFor(() => expect(mockUseEventStream).toHaveBeenCalled());
+    const teamCall = mockUseEventStream.mock.calls.find(([, scope]) => (scope ?? "").startsWith("pipelines:"));
+    expect(teamCall?.[2]).toContain("wait");
+  });
+
+  it("refetches the job read and the builds table for a wait event of its own job", async () => {
+    const { repaint } = renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    runStream({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
+    repaint();
+
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores a wait event of another job", async () => {
+    const { repaint } = renderPage();
+    await waitFor(() => expect(mockListRuns).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockGetPipelineJob).toHaveBeenCalledTimes(1));
+
+    runStream({
+      type: "wait",
+      data: notification({ kind: "wait", job_path: "payments/other/main", state: "waiting" }),
+    });
+    repaint();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockListRuns).toHaveBeenCalledTimes(1);
+    expect(mockGetPipelineJob).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("PipelinePage — provenance rows", () => {
   beforeEach(() => {
     mockGetPipelineJob.mockReset();

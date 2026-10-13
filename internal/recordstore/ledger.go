@@ -61,6 +61,10 @@ type Ledger struct {
 	vetoMarking  bool
 	vetoNotifier *RunNotifier
 
+	// waitNotifier publishes a wait notification after each claim that
+	// writes or deletes a wait row. A nil notifier publishes nothing.
+	waitNotifier *RunNotifier
+
 	// hold wires the grant hold. A nil hold (NewLedger's default, until
 	// SetGrantHold is called) holds no repeat claim.
 	hold *grantHold
@@ -87,6 +91,25 @@ func (l *Ledger) SetConcurrencyCancel(conn *bus.Conn, metrics *ConcurrencyMetric
 	l.concurrencyMetrics = metrics
 	l.concurrencyActionMetrics = actionMetrics
 	l.concurrencyLogger = logger
+}
+
+// SetWaitNotifier wires the wait notification: after a claim commits a
+// change to its run_waits row, the ledger publishes a kind wait
+// notification on notifier. cmd/recorder calls this once, after NewLedger.
+// A Ledger this method never touches publishes no wait notification.
+func (l *Ledger) SetWaitNotifier(notifier *RunNotifier) {
+	l.waitNotifier = notifier
+}
+
+// notifyWait publishes the wait notification of one committed claim. A
+// claim that changed no displayed value publishes nothing.
+func (l *Ledger) notifyWait(req ClaimRequest, runID uuid.UUID, change waitChange) {
+	switch change {
+	case waitWritten:
+		l.waitNotifier.Notify(waitNotification(req, runID.String(), WaitStateWaiting))
+	case waitCleared:
+		l.waitNotifier.Notify(waitNotification(req, runID.String(), WaitStateCleared))
+	}
 }
 
 // startConcurrencyCancel starts design D10's concurrency cancel in its
@@ -175,6 +198,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 		if err := tx.Commit(ctx); err != nil {
 			return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 		}
+		l.notifyWait(req, runID, verdict.Change)
 		return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonCapped, Message: verdict.Message,
 			RunID: runID.String()}, false
 	}
@@ -190,6 +214,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 	if err := tx.Commit(ctx); err != nil {
 		return ClaimResponse{Code: classifyDBError(err), Error: err.Error()}, false
 	}
+	l.notifyWait(req, runID, verdict.Change)
 	return resp, false
 }
 

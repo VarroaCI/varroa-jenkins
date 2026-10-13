@@ -2280,14 +2280,14 @@ export interface RunChangeListResponse {
 // ---- Live run notifications (the team run stream) ----
 
 /**
- * One frame of the team run stream, named "run", "stage", "lock", or
- * "input". The recorder publishes the frame, so every field keeps its
+ * One frame of the team run stream, named "run", "stage", "lock",
+ * "input", or "wait". The recorder publishes the frame, so every field keeps its
  * snake_case name. The stream sends no first frame and replays nothing, so
  * a page refetches when its stream opens. A page reads a frame to decide
  * which read to refresh, and it renders no field of the payload.
  */
 export interface RunNotification {
-  kind: "run" | "stage" | "lock" | "input";
+  kind: "run" | "stage" | "lock" | "input" | "wait";
   cluster: string;
   tenant: string;
   job_path: string;
@@ -2303,7 +2303,9 @@ export interface RunNotification {
    * hold a slash, so never split this value. Present on a "lock"
    * frame only. */
   lock_name?: string;
-  /** The lock's state after the write. Present on a "lock" frame only. */
+  /** The lock's state after the write. Present on a "lock" frame only.
+   * On a "wait" frame it is waiting or cleared: a cap holds the run, or
+   * it changed the count that holds it, or it released the run. */
   state?: string;
   seq: number;
   at: string;

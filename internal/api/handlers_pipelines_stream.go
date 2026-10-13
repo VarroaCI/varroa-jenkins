@@ -134,7 +134,7 @@ func (s *Server) runStreamFilter(claims *auth.Claims, refs []TenantRef) func(rec
 }
 
 // writeRunNotificationFrame writes one SSE frame for one record. The event
-// name is the notification's own kind, which is run, stage, lock, or input.
+// name is the notification's own kind: run, stage, lock, input, or wait.
 func writeRunNotificationFrame(w http.ResponseWriter, flusher http.Flusher, record sse.Record) {
 	payload, err := json.Marshal(record.Data)
 	if err != nil {

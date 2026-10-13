@@ -1057,6 +1057,20 @@ describe("BuildPage — live run events", () => {
     expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
   });
 
+  it("refetches the record on a wait frame for its own run", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    const { repaint } = renderPage();
+    await screen.findByText(/Build #42/);
+    const before = mockGetRun.mock.calls.length;
+
+    runStream({ type: "wait", data: notification({ kind: "wait", state: "waiting" }) });
+    await act(async () => {
+      repaint();
+    });
+
+    expect(mockGetRun.mock.calls.length).toBeGreaterThan(before);
+  });
+
   it("refetches nothing for an event of another run", async () => {
     mockGetRun.mockResolvedValue(baseRun());
     const { repaint } = renderPage();

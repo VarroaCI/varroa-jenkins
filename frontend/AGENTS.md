@@ -232,7 +232,7 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   lock under the team's own prefix that another tenant's run holds publishes
   its `lock` notification on the holder's subject, which the team stream does
   not carry), `PipelinePage.tsx` (`/pipelines/:team/:job`, one job's
-  health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form),
+  health, definition, and run list, and hosts `RunDrawer.tsx`'s parameter form; a `wait` stream frame of its own job refetches the job read, which feeds the Waiting card, and the runs table),
   `BuildPage.tsx` (`/pipelines/:team/:job/:run`, one run's detail; owns both
   `useEventStream` calls, the team run stream and the run log stream; renders
   the run's `summary` as a header row, renders its failure `digest` in a

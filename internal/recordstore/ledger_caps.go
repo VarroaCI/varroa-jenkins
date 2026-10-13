@@ -31,6 +31,18 @@ const (
 	capKindCell   = "cell"
 )
 
+// waitChange reports how a claim changed its wait row. The ledger
+// publishes one wait notification per change, after the claim commits.
+// The zero value means the row kept every value a reader displays.
+type waitChange int
+
+const (
+	// waitWritten means the row is new, or a displayed value changed.
+	waitWritten waitChange = iota + 1
+	// waitCleared means the claim deleted a row that existed.
+	waitCleared
+)
+
 // capVerdict is the answer of the cap check for one claim.
 type capVerdict struct {
 	Blocked bool
@@ -39,6 +51,27 @@ type capVerdict struct {
 	Max     int
 	Running int
 	Message string
+	Change  waitChange
+}
+
+// priorWait is the wait row a claim found before it wrote its own. A
+// missing row leaves exists false and the other fields zero.
+type priorWait struct {
+	exists    bool
+	firstSeen time.Time
+	kind      string
+	name      string
+	cell      string
+	max       int
+	running   int
+}
+
+// waitDiffers reports whether a blocked claim changes a value that a reader
+// displays. last_seen_at alone does not count, so a steady retry writes no
+// notification.
+func waitDiffers(p priorWait, v capVerdict, cell string) bool {
+	return !p.exists || p.kind != v.Kind || p.name != v.Name || p.max != v.Max ||
+		p.running != v.Running || p.cell != cell
 }
 
 // inFlightRun is one build that holds a slot of a tenant's cap.
@@ -124,7 +157,7 @@ func checkCaps(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID
 		`SELECT policy FROM varroa.tenant_placements WHERE cluster = $1 AND tenant = $2`,
 		req.Cluster, req.Tenant).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return capVerdict{}, clearWaitRow(ctx, tx, runID)
+		return clearWaitRow(ctx, tx, runID)
 	}
 	if err != nil {
 		return capVerdict{}, fmt.Errorf("read tenant cap policy: %w", err)
@@ -133,7 +166,7 @@ func checkCaps(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID
 	limits := policy.matching(req.Tenant, req.JobPath)
 	if len(limits) == 0 && policy.CellMaxRuns == 0 {
 		// A limit that was removed or narrowed must not leave a wait row.
-		return capVerdict{}, clearWaitRow(ctx, tx, runID)
+		return clearWaitRow(ctx, tx, runID)
 	}
 
 	// A repeat of a claim that holds its slot on the same cell passes. A
@@ -177,19 +210,21 @@ func checkCaps(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uuid.UUID
 	if err != nil {
 		return capVerdict{}, err
 	}
-	var mine time.Time
-	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE((SELECT first_seen_at FROM varroa.run_waits WHERE run_id = $1), now())`,
-		runID).Scan(&mine); err != nil {
-		return capVerdict{}, fmt.Errorf("read own wait row: %w", err)
+	prior, mine, err := readPriorWait(ctx, tx, runID)
+	if err != nil {
+		return capVerdict{}, err
 	}
 
 	verdict := decideCaps(req.Tenant, req, runID, mine, limits, policy.CellMaxRuns, inflight, waiters)
 	if !verdict.Blocked {
-		if _, err := tx.Exec(ctx, `DELETE FROM varroa.run_waits WHERE run_id = $1`, runID); err != nil {
-			return capVerdict{}, fmt.Errorf("clear wait row: %w", err)
+		deleted, err := clearWaitRow(ctx, tx, runID)
+		if err != nil {
+			return capVerdict{}, err
 		}
-		return verdict, nil
+		return deleted, nil
+	}
+	if waitDiffers(prior, verdict, req.Cell) {
+		verdict.Change = waitWritten
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.run_waits
@@ -268,10 +303,57 @@ func readLiveWaiters(ctx context.Context, tx pgx.Tx, req ClaimRequest, runID uui
 	return out, nil
 }
 
-// clearWaitRow deletes the wait row of a run that no cap holds.
-func clearWaitRow(ctx context.Context, tx pgx.Tx, runID uuid.UUID) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM varroa.run_waits WHERE run_id = $1`, runID); err != nil {
-		return fmt.Errorf("clear wait row: %w", err)
+// readPriorWait reads the wait row of the run before the claim writes it,
+// and the time the claim counts as first waiting. A run with no row counts
+// from the transaction's own clock, as it always has.
+func readPriorWait(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (priorWait, time.Time, error) {
+	var (
+		now       time.Time
+		firstSeen *time.Time
+		kind      *string
+		name      *string
+		cell      *string
+		maxRuns   *int
+		running   *int
+	)
+	if err := tx.QueryRow(ctx, `
+		SELECT now(), w.first_seen_at, w.cap_kind, w.cap_name, w.cap_max, w.running, w.cell
+		FROM (SELECT 1) AS one
+		LEFT JOIN varroa.run_waits w ON w.run_id = $1`,
+		runID).Scan(&now, &firstSeen, &kind, &name, &maxRuns, &running, &cell); err != nil {
+		return priorWait{}, time.Time{}, fmt.Errorf("read own wait row: %w", err)
 	}
-	return nil
+	if firstSeen == nil {
+		return priorWait{}, now, nil
+	}
+	p := priorWait{exists: true, firstSeen: *firstSeen}
+	if kind != nil {
+		p.kind = *kind
+	}
+	if name != nil {
+		p.name = *name
+	}
+	if cell != nil {
+		p.cell = *cell
+	}
+	if maxRuns != nil {
+		p.max = *maxRuns
+	}
+	if running != nil {
+		p.running = *running
+	}
+	return p, *firstSeen, nil
+}
+
+// clearWaitRow deletes the wait row of a run that no cap holds. It answers
+// a verdict whose Change is waitCleared when the row existed.
+func clearWaitRow(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (capVerdict, error) {
+	tag, err := tx.Exec(ctx, `DELETE FROM varroa.run_waits WHERE run_id = $1`, runID)
+	if err != nil {
+		return capVerdict{}, fmt.Errorf("clear wait row: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return capVerdict{Change: waitCleared}, nil
+	}
+	return capVerdict{}, nil
 }

@@ -270,11 +270,12 @@ export default function PipelinePage() {
   });
 
   // The team's stream carries every job of that team, so the page keeps the
-  // frames of its own job only.
+  // frames of its own job only. A wait frame reaches the Waiting card, which
+  // reads the job detail.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
     team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
-    ["run", "stage"],
+    ["run", "stage", "wait"],
   );
   const queryClient = useQueryClient();
 
@@ -309,6 +310,15 @@ export default function PipelinePage() {
   }, [readyState, invalidateRuns, invalidateJob]);
 
   useEffect(() => {
+    // A wait frame of this job refetches the job read, which carries the
+    // Waiting card. The runs table refetches too, because the coalescing
+    // stream can replace a held run frame with this one.
+    if (lastEvent?.type === "wait") {
+      if (lastEvent.data.job_path !== job) return;
+      invalidateJob();
+      invalidateRuns();
+      return;
+    }
     // The page drops a stage frame: the table and the job read carry no
     // stage value.
     if (lastEvent?.type !== "run") return;

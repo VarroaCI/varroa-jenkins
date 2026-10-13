@@ -20673,7 +20673,7 @@
     },
     "/api/v1/pipelines/{team}/stream": {
       "get": {
-        "description": "Streams one frame per live run notification, with the event name run or stage and the notification body as data. The stream writes no initial frame and replays nothing, so a page refetches its own reads when the stream reports itself open. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines:{team}.\n",
+        "description": "Streams one frame per live run notification, with the event name run, stage, lock, input, or wait and the notification body as data. The stream writes no initial frame and replays nothing, so a page refetches its own reads when the stream reports itself open. It uses `?ticket=` for browser EventSource auth, and the ticket carries the scope pipelines:{team}.\n",
         "operationId": "streamTeamRuns",
         "parameters": [
           {
@@ -20689,7 +20689,7 @@
                 }
               }
             },
-            "description": "The event stream (event kinds run and stage)."
+            "description": "The event stream (event kinds run, stage, lock, input, and wait)."
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"

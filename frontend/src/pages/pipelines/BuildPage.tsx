@@ -267,11 +267,12 @@ export default function BuildPage() {
 
   // The team's stream carries every run of the team.
   // The notifier coalesces per run, so a lock frame for this run can stand
-  // in for a stage frame. The page reads its own record on either frame.
+  // in for a stage frame. The page reads its own record on any of them,
+  // wait frames included.
   const { lastEvent: runEvent, readyState: runStreamReady } = useEventStream<RunNotification>(
     team ? teamRunStreamUrl(team) : null,
     team ? `pipelines:${team}` : null,
-    ["run", "stage", "lock", "input"],
+    ["run", "stage", "lock", "input", "wait"],
   );
   const streamOpen = runStreamReady === "open";
   const { run, status, refetch } = useRunRecord(runId, requested, streamOpen);
@@ -340,16 +341,17 @@ export default function BuildPage() {
     setLogEnded(false);
   }, [logRunId]);
 
-  // A stage frame, a run frame, a lock frame, and an input frame all change
-  // the record, so the page refetches the record on any of them. The page
-  // renders the record, never a payload field.
+  // A stage, run, lock, input, or wait frame changes the record, so the page
+  // refetches the record on any of them. The page renders the record, never a
+  // payload field.
   useEffect(() => {
     if (!runEvent) return;
     if (
       runEvent.type !== "run" &&
       runEvent.type !== "stage" &&
       runEvent.type !== "lock" &&
-      runEvent.type !== "input"
+      runEvent.type !== "input" &&
+      runEvent.type !== "wait"
     ) {
       return;
     }

@@ -371,8 +371,8 @@
     tags: [Pipelines]
     summary: Streams live run notifications for one team via Server-Sent Events.
     description: >
-      Streams one frame per live run notification, with the event name run
-      or stage and the notification body as data. The stream writes no
+      Streams one frame per live run notification, with the event name run,
+      stage, lock, input, or wait and the notification body as data. The stream writes no
       initial frame and replays nothing, so a page refetches its own reads
       when the stream reports itself open. It uses `?ticket=` for browser
       EventSource auth, and the ticket carries the scope pipelines:{team}.
@@ -381,7 +381,7 @@
       - $ref: '../components/parameters.yaml#/team'
     responses:
       "200":
-        description: The event stream (event kinds run and stage).
+        description: The event stream (event kinds run, stage, lock, input, and wait).
         content:
           text/event-stream:
             schema:

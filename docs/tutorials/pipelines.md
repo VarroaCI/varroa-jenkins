@@ -109,7 +109,7 @@ with that folder unfolded. On build and test pages, the job crumb links to the p
 A pull-request run shows a PR chip beside its branch, and its build page names the request in a
 **Pull request** row.
 
-A queued build held by a cap shows a Waiting notice.
+A queued build held by a cap shows a Waiting notice that updates live.
 
 The **Defined by** card states where the job's script comes from. A job that reads a Jenkinsfile
 from source control shows the repository and the last built commit. A job whose bundle item
