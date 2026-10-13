@@ -465,7 +465,7 @@ type ControllerStatus struct {
 	// Phase is the current lifecycle phase of the controller.
 	Phase ControllerPhase `json:"phase,omitempty"`
 
-	// Endpoint is the resolved endpoint for the running controller.
+	// Endpoint is the external URL of the controller. The operator of the cluster that holds the controller writes it. It is empty when no host resolves or when the controller is headless.
 	Endpoint string `json:"endpoint,omitempty"`
 
 	// Conditions represent the latest available observations of the controller's state.

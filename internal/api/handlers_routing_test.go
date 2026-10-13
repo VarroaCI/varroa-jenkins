@@ -87,7 +87,7 @@ func TestControllerEndpoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := srv.controllerEndpoint(context.Background(), tt.cr); got != tt.want {
+			if got := srv.controllerEndpoint(context.Background(), tt.cr, ""); got != tt.want {
 				t.Errorf("controllerEndpoint() = %q, want %q", got, tt.want)
 			}
 		})
@@ -106,10 +106,134 @@ func TestControllerEndpoint(t *testing.T) {
 			Logger:            slog.Default(),
 		})
 		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
-		if got, want := withDefaults.controllerEndpoint(context.Background(), cr), "https://ci.example.test"; got != want {
+		if got, want := withDefaults.controllerEndpoint(context.Background(), cr, ""), "https://ci.example.test"; got != want {
 			t.Errorf("controllerEndpoint() = %q, want %q", got, want)
 		}
 	})
+}
+
+// TestControllerEndpointRemoteRowSkipsCoreRootDomain asserts that a row of a
+// remote cluster never takes the core's root domain. The local cluster keeps
+// that fallback.
+func TestControllerEndpointRemoteRowSkipsCoreRootDomain(t *testing.T) {
+	fc := newFakeResourceClient()
+	crdstore.MustSeed(storeFromFake(fc), &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.test"},
+	})
+	srv := NewServer(&Dependencies{
+		Client:            fc,
+		Store:             storeFromFake(fc),
+		Brood:             newFakeBrood(fc),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+	})
+	bare := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
+	explicit := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "x.example.com"}},
+	}
+	withStatus := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Status:     v1alpha1.ControllerStatus{Endpoint: "https://r.member.test"},
+	}
+	tests := []struct {
+		name    string
+		cr      *v1alpha1.Controller
+		cluster string
+		want    string
+	}{
+		{"remote bare row", bare, "dev-cluster", ""},
+		{"remote explicit host", explicit, "dev-cluster", "https://x.example.com"},
+		{"remote status endpoint", withStatus, "dev-cluster", "https://r.member.test"},
+		{"local bare row keeps core root domain", bare, "", "https://ci.example.test"},
+		{"local cluster name keeps core root domain", bare, "core", "https://ci.example.test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := srv.controllerEndpoint(context.Background(), tt.cr, tt.cluster); got != tt.want {
+				t.Errorf("controllerEndpoint() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleControllersRemoteRowSkipsCoreRootDomain asserts the list path: a
+// remote row with no host and no status endpoint gets an empty endpoint, while
+// a local row keeps the core's root-domain fallback.
+func TestHandleControllersRemoteRowSkipsCoreRootDomain(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	crdstore.MustSeed(client.crdStore, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "core.test"},
+	})
+	client.controllers["local-ctrl"] = &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "local-ctrl", Namespace: "team-a"},
+	}
+	crdstore.MustSeed(client.crdStore, client.controllers["local-ctrl"])
+	srv.deps.Brood = &remoteRowBrood{
+		Brood: newFakeBrood(client),
+		remote: ClusterController{Cluster: "dev-cluster", CR: &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "remote-ctrl", Namespace: "team-b"},
+		}},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	endpoints := map[string]interface{}{}
+	for _, item := range envelope.Items {
+		endpoints[item["name"].(string)] = item["endpoint"]
+	}
+	if got := endpoints["local-ctrl"]; got != "https://local-ctrl.core.test" {
+		t.Errorf("local endpoint = %v, want https://local-ctrl.core.test", got)
+	}
+	if got, ok := endpoints["remote-ctrl"]; !ok || got != "" {
+		t.Errorf("remote endpoint = %v (present %v), want empty", got, ok)
+	}
+}
+
+// TestHandleControllerDetailRemoteSkipsCoreRootDomain asserts the detail path:
+// a remote controller with no host and no status endpoint returns an empty
+// endpoint.
+func TestHandleControllerDetailRemoteSkipsCoreRootDomain(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	crdstore.MustSeed(client.crdStore, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "core.test"},
+	})
+	srv.deps.Brood = &remoteGetBrood{
+		Brood:       newFakeBrood(client),
+		hiveCluster: "dev-cluster",
+		remoteNS:    "team-b",
+		remoteName:  "remote-ctrl",
+		remoteCR: &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "remote-ctrl", Namespace: "team-b"},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/dev-cluster/controllers/team-b/remote-ctrl", nil)
+	srv.handleControllerDetail(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "dev-cluster", "team-b", "remote-ctrl")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var detail map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail["endpoint"] != "" {
+		t.Errorf("remote detail endpoint = %v, want empty", detail["endpoint"])
+	}
 }
 
 func newRoutingTestServer() (*Server, *fakeResourceClient) {

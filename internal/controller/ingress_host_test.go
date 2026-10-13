@@ -149,3 +149,71 @@ func TestReconcileIngressHeadlessReturnsDeleteError(t *testing.T) {
 		t.Errorf("expected the error to wrap the delete failure, got: %v", err)
 	}
 }
+
+// reconcileIngress publishes the external URL in status.endpoint. The URL
+// follows the host the Ingress uses, and an empty host clears the field.
+func TestReconcileIngressWritesStatusEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		defaults *v1alpha1.ProvisioningDefaults
+		spec     v1alpha1.ControllerSpec
+		want     string
+	}{
+		{
+			name: "explicit host",
+			spec: v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "test.example.com"}},
+			want: "https://test.example.com",
+		},
+		{
+			name: "path mode",
+			spec: v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "shared.example.com", Mode: v1alpha1.RoutingModePath}},
+			want: "https://shared.example.com/jenkins/ns/test/",
+		},
+		{
+			name: "no host and no root domain",
+			want: "",
+		},
+		{
+			name:     "root domain from defaults",
+			defaults: &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.com"}},
+			want:     "https://test.example.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newTestClient()
+			tc.provisioningDefaults = tt.defaults
+			rec := newTestReconciler(tc)
+			cr := &v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+				Spec:       tt.spec,
+			}
+			if err := rec.reconcileIngress(context.Background(), cr); err != nil {
+				t.Fatalf("reconcileIngress: %v", err)
+			}
+			if cr.Status.Endpoint != tt.want {
+				t.Errorf("status.endpoint = %q, want %q", cr.Status.Endpoint, tt.want)
+			}
+		})
+	}
+}
+
+// A headless controller clears a stale status.endpoint.
+func TestReconcileIngressHeadlessClearsStatusEndpoint(t *testing.T) {
+	tc := newTestClient()
+	tc.provisioningDefaults = &v1alpha1.ProvisioningDefaults{
+		Spec: v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.com"},
+	}
+	rec := newTestReconciler(tc)
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Headless: true},
+		Status:     v1alpha1.ControllerStatus{Endpoint: "https://stale.example.com"},
+	}
+	if err := rec.reconcileIngress(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileIngress: %v", err)
+	}
+	if cr.Status.Endpoint != "" {
+		t.Errorf("status.endpoint = %q, want empty for a headless controller", cr.Status.Endpoint)
+	}
+}

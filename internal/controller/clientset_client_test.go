@@ -3072,3 +3072,16 @@ func TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten(t *testing.T) 
 		}
 	}
 }
+
+// The status patch always carries endpoint, so an empty value clears a stale
+// URL under the merge patch.
+func TestControllerStatusPatchAlwaysCarriesEndpoint(t *testing.T) {
+	empty := controllerStatusPatch(&v1alpha1.ControllerStatus{})
+	if v, ok := empty["endpoint"]; !ok || v != "" {
+		t.Fatalf("endpoint = %v (present %v) for an empty status, want an empty value", v, ok)
+	}
+	set := controllerStatusPatch(&v1alpha1.ControllerStatus{Endpoint: "https://x.example.com"})
+	if v := set["endpoint"]; v != "https://x.example.com" {
+		t.Fatalf("endpoint = %v, want https://x.example.com", v)
+	}
+}

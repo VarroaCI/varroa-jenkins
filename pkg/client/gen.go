@@ -1849,9 +1849,11 @@ type ComponentsSchemasControllerDetail struct {
 	DesiredStateHash  *string                             `json:"desiredStateHash,omitempty"`
 
 	// EffectiveBundle The ComposedBundle a controller is actually using, resolved. Read-only, and deliberately separate from composedBundleRef: that field is the raw spec value the dashboard writes back, so resolving into it would materialize an explicit reference to the starter bundle on the next save.
-	EffectiveBundle  *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
-	Endpoint         string                            `json:"endpoint"`
-	FirstConnectedAt *string                           `json:"firstConnectedAt,omitempty"`
+	EffectiveBundle *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
+
+	// Endpoint External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+	Endpoint         string  `json:"endpoint"`
+	FirstConnectedAt *string `json:"firstConnectedAt,omitempty"`
 
 	// Headless Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string, whatever the controller's Status.Endpoint carries.
 	Headless bool `json:"headless"`
@@ -2053,7 +2055,9 @@ type ComponentsSchemasControllerSummary struct {
 
 	// EffectiveBundle The ComposedBundle a controller is actually using, resolved. Read-only, and deliberately separate from composedBundleRef: that field is the raw spec value the dashboard writes back, so resolving into it would materialize an explicit reference to the starter bundle on the next save.
 	EffectiveBundle *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
-	Endpoint        string                            `json:"endpoint"`
+
+	// Endpoint External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+	Endpoint string `json:"endpoint"`
 
 	// Headless Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string, whatever the controller's Status.Endpoint carries.
 	Headless       bool    `json:"headless"`

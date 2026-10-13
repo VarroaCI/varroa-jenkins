@@ -1521,6 +1521,7 @@
             "$ref": "#/components/schemas/components_schemas_EffectiveBundle"
           },
           "endpoint": {
+            "description": "External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.",
             "type": "string"
           },
           "firstConnectedAt": {
@@ -1875,6 +1876,7 @@
             "$ref": "#/components/schemas/components_schemas_EffectiveBundle"
           },
           "endpoint": {
+            "description": "External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.",
             "type": "string"
           },
           "headless": {
@@ -8121,6 +8123,7 @@
             "$ref": "#/components/schemas/components_schemas_EffectiveBundle"
           },
           "endpoint": {
+            "description": "External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.",
             "type": "string"
           },
           "firstConnectedAt": {
@@ -8475,6 +8478,7 @@
             "$ref": "#/components/schemas/components_schemas_EffectiveBundle"
           },
           "endpoint": {
+            "description": "External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.",
             "type": "string"
           },
           "headless": {

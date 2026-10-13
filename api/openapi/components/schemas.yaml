@@ -1367,6 +1367,7 @@ ControllerSummary:
       type: string
     endpoint:
       type: string
+      description: External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
     kind:
       type: string
       enum: [cell, stateful]
@@ -1746,6 +1747,7 @@ ControllerDetail:
       type: string
     endpoint:
       type: string
+      description: External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
     headless:
       type: boolean
       description: >-

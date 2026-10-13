@@ -37,6 +37,19 @@ func ResolveHost(cr *Controller, rootDomain string) string {
 	return ""
 }
 
+// ExternalURL returns the external URL of cr for a resolved host.
+// It returns "" for an empty host or a headless controller.
+// Path mode adds the path prefix and a trailing slash.
+func ExternalURL(cr *Controller, host string) string {
+	if cr == nil || host == "" || IsHeadless(cr) {
+		return ""
+	}
+	if cr.Spec.IngressSpec != nil && cr.Spec.IngressSpec.RoutingMode() == RoutingModePath {
+		return "https://" + host + PathPrefix(cr.Namespace, cr.Name) + "/"
+	}
+	return "https://" + host
+}
+
 // MergeStringMaps merges two string maps with key-level nil-safe semantics.
 // On key conflict, override's value wins. Returns nil when both are nil.
 func MergeStringMaps(base, override map[string]string) map[string]string {

@@ -815,14 +815,14 @@ type RolloutJSON struct {
 	BlockedSince     *string  `json:"blockedSince,omitempty"`
 }
 
-// controllerEndpoint returns the mode-aware external endpoint for a controller.
-// Status.Endpoint takes precedence; when empty the endpoint is derived from
-// IngressSpec: subdomain mode -> "https://<Host>", path mode -> "https://<Host>/jenkins/<ns>/<name>/".
-// A headless controller has no reachable external URL, so this always
-// returns the empty string for one, even when Status.Endpoint is set.
+// controllerEndpoint returns the external endpoint for a controller of cluster.
+// A headless controller has no reachable external URL, so this returns the
+// empty string for one, even when Status.Endpoint is set. A row of a remote
+// cluster never reads the core's ProvisioningDefaults: it uses its own
+// Status.Endpoint, else its explicit ingress host, else the empty string.
 // The ProvisioningDefaults read uses ctx, so a cancelled request stops it.
-func (s *Server) controllerEndpoint(ctx context.Context, cr *v1alpha1.Controller) string {
-	return s.endpoints(ctx).resolve(cr)
+func (s *Server) controllerEndpoint(ctx context.Context, cr *v1alpha1.Controller, cluster string) string {
+	return s.endpoints(ctx).resolve(cr, cluster)
 }
 
 // endpointResolver derives controller endpoints for one request. It reads
@@ -858,33 +858,20 @@ func (e *endpointResolver) defaultRootDomain() string {
 	return e.rootDomain
 }
 
-// resolve returns the endpoint for cr. See controllerEndpoint for the rules.
-func (e *endpointResolver) resolve(cr *v1alpha1.Controller) string {
+// resolve returns the endpoint for cr of cluster. See controllerEndpoint for
+// the rules. Only a local row may fall back to the core's root domain.
+func (e *endpointResolver) resolve(cr *v1alpha1.Controller, cluster string) string {
 	if v1alpha1.IsHeadless(cr) {
 		return ""
 	}
 	if cr.Status.Endpoint != "" {
 		return cr.Status.Endpoint
 	}
-	host := ""
-	if cr.Spec.IngressSpec != nil {
-		host = cr.Spec.IngressSpec.Host
+	host := v1alpha1.ResolveHost(cr, "")
+	if host == "" && e.s.isLocalCluster(cluster) {
+		host = v1alpha1.ResolveHost(cr, e.defaultRootDomain())
 	}
-	if host == "" {
-		isSubdomain := cr.Spec.IngressSpec == nil || cr.Spec.IngressSpec.Mode == "" || cr.Spec.IngressSpec.Mode == "subdomain"
-		if isSubdomain {
-			if rd := e.defaultRootDomain(); rd != "" {
-				host = cr.Name + "." + rd
-			}
-		}
-	}
-	if host == "" {
-		return ""
-	}
-	if cr.Spec.IngressSpec != nil && cr.Spec.IngressSpec.RoutingMode() == v1alpha1.RoutingModePath {
-		return "https://" + host + v1alpha1.PathPrefix(cr.Namespace, cr.Name) + "/"
-	}
-	return "https://" + host
+	return v1alpha1.ExternalURL(cr, host)
 }
 
 // visibleControllers lists controllers the caller may read. It lists cluster-wide,
@@ -986,7 +973,7 @@ func (s *Server) handleControllersFiltered(w http.ResponseWriter, r *http.Reques
 			Namespace:         cr.Namespace,
 			Cluster:           cluster,
 			Phase:             string(cr.Status.Phase),
-			Endpoint:          eps.resolve(cr),
+			Endpoint:          eps.resolve(cr, cluster),
 			Headless:          v1alpha1.IsHeadless(cr),
 			Version:           cr.Spec.Version,
 			ComposedBundleRef: cr.Spec.ComposedBundleRef,
@@ -1893,7 +1880,7 @@ func (s *Server) handleBreakGlass(w http.ResponseWriter, r *http.Request, cluste
 
 	if !v1alpha1.IsHeadless(cr) {
 		s.writeJSONError(w, http.StatusConflict,
-			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(r.Context(), cr)))
+			fmt.Sprintf("controller is already reachable at %s; break-glass is only for a headless controller", s.controllerEndpoint(r.Context(), cr, s.localCluster())))
 		return
 	}
 

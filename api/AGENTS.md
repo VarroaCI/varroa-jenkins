@@ -114,7 +114,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   OIDC needs a purpose" at sign-in and on user writes.
 - `validation.go` — hand-written Go validation (`ValidateJenkinsRole`, …)
   supplementing CEL. `routing.go` — ingress routing-mode helpers shared by
-  operator+BFF. `bundleref.go` — `EffectiveBundleRef`/`StarterBundleName`, the
+  operator+BFF, including `ExternalURL`, the one builder of a controller's external URL. `bundleref.go` — `EffectiveBundleRef`/`StarterBundleName`, the
   one answer to "which ComposedBundle is this Controller using?"; it lives here
   precisely because the operator, the BFF, and brood filtering all need it.
   `labels.go`/`team_consts.go` — label/annotation/condition string constants;

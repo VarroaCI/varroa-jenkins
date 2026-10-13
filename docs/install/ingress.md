@@ -97,6 +97,8 @@ kubectl get controller build -n jenkins-platform \
   -o jsonpath='{.status.endpoint}{"\n"}'
 ```
 
+The operator writes the external URL to `status.endpoint`. The value is empty for a headless controller and when no host resolves. For a controller on a member cluster, the dashboard shows the URL that the member's operator wrote. The core's `rootDomain` does not apply to it.
+
 Ingress host, class, annotations, and TLS changes converge without restarting Jenkins.
 
 | Symptom | Check |

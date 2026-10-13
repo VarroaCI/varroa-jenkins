@@ -3423,6 +3423,9 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	}
 	statusPatch["rollout"] = status.Rollout
 	statusPatch["lastReconcileError"] = status.LastReconcileError
+	// endpoint is always sent: a merge patch keeps an omitted key, so an
+	// empty value must go out to clear a stale URL.
+	statusPatch["endpoint"] = status.Endpoint
 	statusPatch["lastReconcileErrorAt"] = status.LastReconcileErrorAt
 	if status.LastApplyResult != nil {
 		statusPatch["lastApplyResult"] = status.LastApplyResult

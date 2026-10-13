@@ -4359,7 +4359,9 @@ spec:
                   state.
                 type: string
               endpoint:
-                description: Endpoint is the resolved endpoint for the running controller.
+                description: Endpoint is the external URL of the controller. The operator
+                  of the cluster that holds the controller writes it. It is empty
+                  when no host resolves or when the controller is headless.
                 type: string
               firstConnectedAt:
                 description: |-

@@ -303,9 +303,11 @@ federation, activity persistence, and SSE fanout.
   (`v1alpha1.IsHeadless(cr)`); `controllerEndpoint` returns `""` for a headless
   controller before it reads `Status.Endpoint`, and the create/update handlers skip
   the path-mode shared-host check for one.
-  `controllerEndpoint(ctx, cr)` and `controllerDetail(ctx, cr, cluster)` take the request
-  context; the list builds one `endpointResolver` (`s.endpoints(ctx)`), so a list request
-  reads `varroa-defaults` at most once. The hibernation redirect endpoint
+  `controllerEndpoint(ctx, cr, cluster)` and `controllerDetail(ctx, cr, cluster)` take the
+  request context; the list builds one `endpointResolver` (`s.endpoints(ctx)`), so a list
+  request reads `varroa-defaults` at most once. A row of another cluster never reads the
+  core's `varroa-defaults`; it uses that row's `status.endpoint`, else the explicit host,
+  else empty. The hibernation redirect endpoint
   (`handlers_hibernation.go`) answers `404` for a headless controller, after the
   token guard and before any wake publish — a headless controller has no
   interstitial page to send a browser to.

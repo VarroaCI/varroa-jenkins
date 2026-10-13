@@ -54,6 +54,37 @@ func TestResolveHost(t *testing.T) {
 	}
 }
 
+func TestExternalURL(t *testing.T) {
+	subdomain := &Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
+	path := &Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Spec:       ControllerSpec{IngressSpec: &IngressSpec{Mode: RoutingModePath}},
+	}
+	headless := &Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Spec:       ControllerSpec{Headless: true},
+	}
+	tests := []struct {
+		name string
+		cr   *Controller
+		host string
+		want string
+	}{
+		{"nil controller", nil, "h.example.test", ""},
+		{"empty host", subdomain, "", ""},
+		{"headless", headless, "h.example.test", ""},
+		{"subdomain", subdomain, "h.example.test", "https://h.example.test"},
+		{"path", path, "h.example.test", "https://h.example.test" + PathPrefix("team-a", "ci") + "/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExternalURL(tt.cr, tt.host); got != tt.want {
+				t.Errorf("ExternalURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMergeStringMaps(t *testing.T) {
 	tests := []struct {
 		name     string

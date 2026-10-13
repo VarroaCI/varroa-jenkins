@@ -5576,6 +5576,7 @@ func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controll
 			Message:            "this controller has no external URL. Use the Pipelines surface, or run `varroactl break-glass` for a temporary admin session.",
 			LastTransitionTime: metav1Now(),
 		})
+		cr.Status.Endpoint = ""
 		return nil
 	}
 	var defaults *v1alpha1.ProvisioningDefaults
@@ -5601,6 +5602,7 @@ func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controll
 			Message:            "no ingress host resolved; reach this controller with `kubectl port-forward` or set ProvisioningDefaults.rootDomain (or spec.ingressSpec.host)",
 			LastTransitionTime: metav1Now(),
 		})
+		cr.Status.Endpoint = ""
 		return nil
 	}
 	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionNoExternalURL); c != nil &&
@@ -5613,6 +5615,9 @@ func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controll
 			LastTransitionTime: metav1Now(),
 		})
 	}
+	// The member's own operator publishes the URL, so the BFF never derives
+	// it from a root domain of another cluster.
+	cr.Status.Endpoint = v1alpha1.ExternalURL(cr, resolvedHost)
 
 	// Path-mode routing shares the dashboard host and terminates TLS upstream,
 	// so the per-controller Ingress carries a path prefix and no TLS block.

@@ -525,7 +525,9 @@ sections describe.
   stale flip cannot strand Failed/rollback controllers on the operator wake port.
   `reconcileIngress` (`controller_controller.go:3268`) runs `CreateIngress` every tick
   for `Running`/`Connected` so Ingress spec/TLS changes converge without a
-  re-provision.
+  re-provision. It also writes `status.endpoint` through `v1alpha1.ExternalURL` from
+  the host this operator resolved, and clears it for a headless controller or when no
+  host resolves. `controllerStatusPatch` always sends `endpoint`, so an empty value clears it.
 - **Headless controllers** — `v1alpha1.IsHeadless(cr)` is the only decision point; no
   other read of `Spec.Headless`/`Spec.Cell.Enabled` may drive this behavior.
   `desiredstate.go` sets `StatefulSetSpec.Headless` from it, and `buildStatefulSet`
