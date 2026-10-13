@@ -248,6 +248,8 @@ The engine never registers a webhook on the forge. Add the webhook by hand, as d
 [Commit status](../operations/commit-status.md) for the webhook. On a cell, declare the
 server entry in `CellPool.spec.giteaServers`.
 
+When the gitea plugin is missing, the operator refuses the items content. The condition reason is `ItemsRefused`.
+
 ## Folder library credentials
 
 A folder library names its credential by ID. A non-cell controller checks each ID before it loads the items. The check passes when the library's folder sees a credential with that ID. The credential must also have an accepted kind. A folder sees two sets of credentials:
@@ -265,8 +267,10 @@ A `SYSTEM`-scope credential is hidden from items. The check refuses it.
 
 The check refuses the whole items content when a library names a missing ID. It also refuses a `SYSTEM`-scope ID. It refuses a kind that its source rejects. The condition depends on the phase:
 
-- While the controller provisions, `BundleResolved` is `False` with reason `BundleNotMaterialized`.
-- After the controller connects, `BundleFailed` is `True` with reason `BundleResolutionFailed`. The controller keeps its last good desired state.
+- While the controller provisions, `BundleResolved` is `False` with reason `ItemsRefused`.
+- After the controller connects, `BundleFailed` is `True` with reason `ItemsRefused`. The controller keeps its last good desired state.
+
+The operator refuses the items content for a missing plugin in the same way. The gitea and branch-strategy checks use the same reason.
 
 The check does not count credentials that you create in the Jenkins UI. Create each library credential in `jenkins.yaml` or in a folder.
 
@@ -301,3 +305,4 @@ Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`
 | Deletion is pending | Pending path, build state, and approval |
 | Kind is unsupported | Keep it unmanaged |
 | Schedule stops after a cell restart | Move the Jenkinsfile trigger to `triggers` |
+| Condition reason is `ItemsRefused` | Read the condition message. Add the missing plugin or credential |

@@ -1,11 +1,16 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
+
+// errItemsRefused marks a refusal of resolved items content. Its text is the
+// "assemble items" prefix, so a wrapped refusal keeps its message unchanged.
+var errItemsRefused = errors.New("assemble items")
 
 // branchBuildStrategiesPlugin supplies
 // jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing,

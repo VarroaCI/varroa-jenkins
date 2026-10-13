@@ -390,7 +390,13 @@ sections describe.
   `mat.CellFolderCredentials` to its tenant folder in `mat.ItemsYAML`. A
   credential value is Secret data: `ResolveVars` would change a `${...}` text
   in it, and the check would fail every tenant of the cell on it. Returns
-  `(*bundle.MaterializedBundle, cb.Status.ResolvedHash, bundleIdentity, error)`.
+  `(*bundle.MaterializedBundle, cb.Status.ResolvedHash, bundleIdentity, ControllerCondition, error)`.
+  The four items refusals (`checkBranchBuildStrategiesPlugin`,
+  `checkFolderLibraryPlugins`, `checkGiteaPlugin`, `checkPlainFolderLibraryCredentials`)
+  wrap their error in `errItemsRefused` (`items_engine_safety.go`). Provisioning
+  reports them as `BundleResolved=False/ItemsRefused` and blocks. Connected reports
+  them as `BundleFailed=True/ItemsRefused`. Any other resolve fault keeps its own
+  reason. A successful resolve in Provisioning sets `BundleResolved=True`.
   On its one success return path it also calls `clearBundleFailed(cr)`, the
   single seam every caller shares for retiring a stale `ConditionBundleFailed`.
   A merge patch cannot clear a condition on its own, so a caller must never

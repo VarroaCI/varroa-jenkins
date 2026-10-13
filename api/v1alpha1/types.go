@@ -1105,6 +1105,9 @@ const (
 	// ReasonReconcileBlockedPluginConflict is set when a plugin lock version conflict
 	// is detected against the resolved profile core set during provisioning.
 	ReasonReconcileBlockedPluginConflict = "PluginConflict"
+	// ReasonItemsRefused is set on BundleResolved (Provisioning) and BundleFailed
+	// (Connected) when the operator refuses the resolved bundle's items content.
+	ReasonItemsRefused = "ItemsRefused"
 )
 
 // MiteStatus holds the mite sidecar connection and version information.

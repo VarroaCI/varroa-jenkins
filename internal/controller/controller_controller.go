@@ -652,20 +652,20 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	// ResolveVars so an item's kind is never templated. A cell already ran
 	// it on each tenant's items, so it cannot fail here for a cell.
 	if err := checkBranchBuildStrategiesPlugin(mat.ItemsYAML, coreSet); err != nil {
-		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
 	}
 
 	// Refuse to assemble items when a folder library needs a plugin that the
 	// resolved plugin set omits (git, github-branch-source, or
 	// pipeline-groovy-lib). A cell ran it on each tenant's items as well.
 	if err := checkFolderLibraryPlugins(mat.ItemsYAML, coreSet); err != nil {
-		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
 	}
 
 	// Refuse to assemble items when a gitea source or navigator needs the
 	// gitea plugin and the resolved plugin set omits it.
 	if err := checkGiteaPlugin(mat.ItemsYAML, coreSet); err != nil {
-		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
 	}
 
 	// Resolve variables in all content. mat.PipelineTemplatesYAML and
@@ -714,7 +714,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	// checks each tenant's libraries in applyCellContent.
 	if !isCellController(cr) {
 		if err := checkPlainFolderLibraryCredentials(mat.ItemsYAML, mat.JenkinsYAML); err != nil {
-			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
 		}
 	}
 
@@ -3356,6 +3356,18 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 	// starter — so a resolve failure is always worth blocking on. The former
 	// `&& ComposedBundleRef != nil` exemption existed only for the no-bundle
 	// case, which no longer occurs.
+	// A refused items bundle is a fault, not a wait. Report it under its own
+	// reason so the condition does not read as a bundle that still materializes.
+	if errors.Is(resolveErr, errItemsRefused) {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionBundleResolved,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReasonItemsRefused,
+			Message: resolveErr.Error(),
+		})
+		r.persistStatusDiagnostics(ctx, cr)
+		return fmt.Errorf("provisioning blocked: items refused: %w", resolveErr)
+	}
 	if resolveErr != nil {
 		// The bundle's plugins.yaml drives plugins.txt, which is baked into the
 		// plugins-init container at pod creation. handleProvisioning runs ONLY in
@@ -3375,6 +3387,13 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("provisioning blocked until bundle materializes: %w", resolveErr)
 	}
+	// The bundle resolved, so clear a stale False left by an earlier tick.
+	// setCondition keeps LastTransitionTime while the status is unchanged.
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionBundleResolved,
+		Status: metav1.ConditionTrue,
+		Reason: "BundleReferenceValid",
+	})
 	// Report the artifact-storage merge step's outcome (task 5.6): True/
 	// External when the fragment applied, False/LocalOnly or
 	// False/PluginMissing otherwise.
@@ -4154,10 +4173,14 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		return nil //nolint:nilerr // non-fatal in Connected phase
 	}
 	if bundleErr != nil {
+		reason := "BundleResolutionFailed"
+		if errors.Is(bundleErr, errItemsRefused) {
+			reason = v1alpha1.ReasonItemsRefused
+		}
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionBundleFailed,
 			Status:  metav1.ConditionTrue,
-			Reason:  "BundleResolutionFailed",
+			Reason:  reason,
 			Message: bundleErr.Error(),
 		})
 		// Non-fatal in Connected: surface the error on status but don't
