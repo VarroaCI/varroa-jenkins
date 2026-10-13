@@ -1216,6 +1216,10 @@
           "name": {
             "type": "string"
           },
+          "operatorNamespace": {
+            "description": "Namespace of the cluster's operator.",
+            "type": "string"
+          },
           "operatorVersion": {
             "type": "string"
           },
@@ -7559,6 +7563,10 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "operatorNamespace": {
+            "description": "Namespace of the cluster's operator.",
             "type": "string"
           },
           "operatorVersion": {

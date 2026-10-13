@@ -111,8 +111,8 @@ control plane's async transport — no other package talks to NATS directly.
   `EnsureKV`/`KV.Put`/`KV.Get`/`KV.Watch` wrap `nats.KeyValue` with
   `ErrKVKeyExists` normalized from `nats.ErrKeyExists`.
 - **Cluster directory** (`clusters.go`) — `ClusterInfo` JSON value in
-  `KVClustersBucket`, schema frozen per multicluster coordinator registry
-  §4.2. `ClusterHeartbeatInterval = 30s`, `ClusterEntryTTL = 90s`.
+  `KVClustersBucket`, per multicluster coordinator registry §4.2. The
+  heartbeat carries `operatorNamespace`, which the BFF uses for config read scope. `ClusterHeartbeatInterval = 30s`, `ClusterEntryTTL = 90s`.
   `ClusterStateActive|Draining|Drained`. `PutClusterHeartbeat`/`ListClusters`
   (sorted by name, unparseable entries skipped not fatal).
 - **Presence** (`presence.go`) — `Presence` struct is the gateway-written

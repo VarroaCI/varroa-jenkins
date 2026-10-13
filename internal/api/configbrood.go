@@ -49,7 +49,7 @@ type ConfigBrood interface {
 	ComposeBundle(ctx context.Context, cluster, ns string, spec json.RawMessage) (*bus.BundleComposePreview, error)
 
 	// --- CatalogItems (read-only) ---
-	ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, string, error)
+	ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, error)
 	GetCatalogItem(ctx context.Context, cluster, ns, name string) (json.RawMessage, error)
 
 	// --- CatalogSources ---
@@ -192,9 +192,8 @@ func (f *busConfigBrood) isLocal(cluster string) bool {
 // listConfigPages reads every page of a config list from one member. what
 // names the list in decode errors. A failed page fails the whole list, and
 // the pages read before it are discarded.
-func (f *busConfigBrood) listConfigPages(ctx context.Context, subject, ns, what string) ([]json.RawMessage, string, error) {
+func (f *busConfigBrood) listConfigPages(ctx context.Context, subject, ns, what string) ([]json.RawMessage, error) {
 	var items []json.RawMessage
-	var operatorNs string
 	err := readRemotePages(ctx, func(after string) (string, error) {
 		req := bus.ConfigListRequest{Namespace: ns, After: after}
 		respData, err := f.readTo(ctx, subject, req, configListTimeout)
@@ -209,15 +208,12 @@ func (f *busConfigBrood) listConfigPages(ctx context.Context, subject, ns, what 
 			return "", f.codeToErr(resp.Code, resp.Error)
 		}
 		items = append(items, resp.Items...)
-		if operatorNs == "" {
-			operatorNs = resp.OperatorNamespace
-		}
 		return resp.Next, nil
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return items, operatorNs, nil
+	return items, nil
 }
 
 func (f *busConfigBrood) ListComposedBundles(ctx context.Context, cluster, ns string) ([]json.RawMessage, error) {
@@ -236,7 +232,7 @@ func (f *busConfigBrood) ListComposedBundles(ctx context.Context, cluster, ns st
 		}
 		return raw, nil
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorBundlesSubject(cluster, "list"), ns, "bundles")
+	items, err := f.listConfigPages(ctx, bus.OperatorBundlesSubject(cluster, "list"), ns, "bundles")
 	return items, err
 }
 
@@ -263,37 +259,36 @@ func (f *busConfigBrood) GetComposedBundle(ctx context.Context, cluster, ns, nam
 	return resp.Item, nil
 }
 
-func (f *busConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, string, error) {
+func (f *busConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, error) {
 	var items []json.RawMessage
-	var operatorNs string
 	if f.isLocal(cluster) {
 		crds, err := crdstore.List[v1alpha1.CatalogItem](ctx, f.store, ns, "")
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		items = make([]json.RawMessage, len(crds))
 		for i, cr := range crds {
 			r, err := json.Marshal(controller.ProjectCatalogItemSummary(cr))
 			if err != nil {
-				return nil, "", fmt.Errorf("marshal catalogitem: %w", err)
+				return nil, fmt.Errorf("marshal catalogitem: %w", err)
 			}
 			items[i] = r
 		}
 	} else {
 		var err error
-		items, operatorNs, err = f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "itemlist"), ns, "items")
+		items, err = f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "itemlist"), ns, "items")
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
 	if filter == (CatalogItemFilter{}) {
-		return items, operatorNs, nil
+		return items, nil
 	}
 	kept := make([]json.RawMessage, 0, len(items))
 	for i, raw := range items {
 		var summary bus.CatalogItemSummary
 		if err := json.Unmarshal(raw, &summary); err != nil {
-			return nil, "", fmt.Errorf("catalog item index %d namespace %q: invalid summary: %w", i, ns, err)
+			return nil, fmt.Errorf("catalog item index %d namespace %q: invalid summary: %w", i, ns, err)
 		}
 		if (filter.Type == "" || summary.Type == filter.Type) &&
 			(filter.Source == "" || summary.SourceRef == filter.Source) &&
@@ -301,7 +296,7 @@ func (f *busConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns strin
 			kept = append(kept, raw)
 		}
 	}
-	return kept, operatorNs, nil
+	return kept, nil
 }
 
 func matchCatalogItemQ(summary bus.CatalogItemSummary, q string) bool {
@@ -356,7 +351,7 @@ func (f *busConfigBrood) ListCatalogSources(ctx context.Context, cluster, ns str
 		}
 		return raw, nil
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "sourcelist"), ns, "sources")
+	items, err := f.listConfigPages(ctx, bus.OperatorCatalogSubject(cluster, "sourcelist"), ns, "sources")
 	return items, err
 }
 
@@ -399,7 +394,7 @@ func (f *busConfigBrood) ListJenkinsRoles(ctx context.Context, cluster string) (
 		}
 		return raw, nil
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "rolelist"), "", "roles")
+	items, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "rolelist"), "", "roles")
 	return items, err
 }
 
@@ -442,7 +437,7 @@ func (f *busConfigBrood) ListJenkinsRoleBindings(ctx context.Context, cluster st
 		}
 		return raw, nil
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "bindinglist"), "", "bindings")
+	items, err := f.listConfigPages(ctx, bus.OperatorRbacSubject(cluster, "bindinglist"), "", "bindings")
 	return items, err
 }
 
@@ -508,7 +503,7 @@ func (f *busConfigBrood) ListVersionProfiles(ctx context.Context, cluster string
 		}
 		return raw, nil
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorVersionProfilesSubject(cluster, "list"), "", "versionprofiles")
+	items, err := f.listConfigPages(ctx, bus.OperatorVersionProfilesSubject(cluster, "list"), "", "versionprofiles")
 	return items, err
 }
 

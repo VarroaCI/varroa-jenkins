@@ -9,12 +9,21 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 )
 
+func TestBuildClusterInfo_OperatorNamespace(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	activeState := controller.LifecycleState{State: bus.ClusterStateActive}
+	info := buildClusterInfo("edge", "v1.0.0", "v1.30.0", "varroa-edge", nil, now, activeState)
+	if info.OperatorNamespace != "varroa-edge" {
+		t.Fatalf("OperatorNamespace = %q, want varroa-edge", info.OperatorNamespace)
+	}
+}
+
 func TestBuildClusterInfo(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	activeState := controller.LifecycleState{State: bus.ClusterStateActive}
 
 	t.Run("zero controllers", func(t *testing.T) {
-		info := buildClusterInfo("core", "v1.0.0", "v1.30.0", nil, now, activeState)
+		info := buildClusterInfo("core", "v1.0.0", "v1.30.0", "varroa-system", nil, now, activeState)
 		if info.Name != "core" {
 			t.Errorf("Name = %q, want %q", info.Name, "core")
 		}
@@ -45,7 +54,7 @@ func TestBuildClusterInfo(t *testing.T) {
 			{Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected}},
 			{Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseProvisioning}},
 		}
-		info := buildClusterInfo("dev-cluster", "abc1234", "v1.31.0", ctrls, now, activeState)
+		info := buildClusterInfo("dev-cluster", "abc1234", "v1.31.0", "varroa-system", ctrls, now, activeState)
 		if info.ControllerCount != 4 {
 			t.Errorf("ControllerCount = %d, want 4", info.ControllerCount)
 		}
@@ -61,7 +70,7 @@ func TestBuildClusterInfo(t *testing.T) {
 		ctrls := []*v1alpha1.Controller{
 			{Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected}},
 		}
-		info := buildClusterInfo("test-cluster", "deadbeef", "v1.32.0", ctrls, now, activeState)
+		info := buildClusterInfo("test-cluster", "deadbeef", "v1.32.0", "varroa-system", ctrls, now, activeState)
 		if info.Name != "test-cluster" {
 			t.Errorf("Name = %q, want %q", info.Name, "test-cluster")
 		}
@@ -81,7 +90,7 @@ func TestBuildClusterInfo(t *testing.T) {
 
 	t.Run("utc timestamp", func(t *testing.T) {
 		ctrls := []*v1alpha1.Controller{}
-		info := buildClusterInfo("core", "dev", "v1.30.0", ctrls, now, activeState)
+		info := buildClusterInfo("core", "dev", "v1.30.0", "varroa-system", ctrls, now, activeState)
 		if info.LastHeartbeat.Location().String() != "UTC" {
 			t.Errorf("LastHeartbeat location = %v, want UTC", info.LastHeartbeat.Location())
 		}
@@ -93,7 +102,7 @@ func TestBuildClusterInfo(t *testing.T) {
 			State:          bus.ClusterStateDraining,
 			DrainStartedAt: &ds,
 		}
-		info := buildClusterInfo("dev-cluster", "abc", "v1.30.0", nil, now, drainingState)
+		info := buildClusterInfo("dev-cluster", "abc", "v1.30.0", "varroa-system", nil, now, drainingState)
 		if info.State != bus.ClusterStateDraining {
 			t.Errorf("State = %q, want %q", info.State, bus.ClusterStateDraining)
 		}
@@ -106,7 +115,7 @@ func TestBuildClusterInfo(t *testing.T) {
 	})
 
 	t.Run("stamps active state with nil DrainStartedAt", func(t *testing.T) {
-		info := buildClusterInfo("dev-cluster", "abc", "v1.30.0", nil, now, activeState)
+		info := buildClusterInfo("dev-cluster", "abc", "v1.30.0", "varroa-system", nil, now, activeState)
 		if info.State != bus.ClusterStateActive {
 			t.Errorf("State = %q, want %q", info.State, bus.ClusterStateActive)
 		}
@@ -117,7 +126,7 @@ func TestBuildClusterInfo(t *testing.T) {
 
 	t.Run("defaults empty state to active", func(t *testing.T) {
 		emptyState := controller.LifecycleState{}
-		info := buildClusterInfo("core", "abc", "v1.30.0", nil, now, emptyState)
+		info := buildClusterInfo("core", "abc", "v1.30.0", "varroa-system", nil, now, emptyState)
 		if info.State != bus.ClusterStateActive {
 			t.Errorf("State = %q, want %q", info.State, bus.ClusterStateActive)
 		}

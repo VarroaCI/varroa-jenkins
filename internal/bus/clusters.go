@@ -27,14 +27,16 @@ const (
 // ClusterInfo is the JSON value stored in KVClustersBucket (schema frozen
 // by coordinator registry §4.2).
 type ClusterInfo struct {
-	Name            string     `json:"name"`
-	OperatorVersion string     `json:"operatorVersion"`
-	K8sVersion      string     `json:"k8sVersion"`
-	ControllerCount int        `json:"controllerCount"`
-	ConnectedCount  int        `json:"connectedCount"`
-	LastHeartbeat   time.Time  `json:"lastHeartbeat"`            // RFC3339 via encoding/json
-	State           string     `json:"state"`                    // "active" | "draining" | "drained"
-	DrainStartedAt  *time.Time `json:"drainStartedAt,omitempty"` // set iff State != "active"
+	Name            string `json:"name"`
+	OperatorVersion string `json:"operatorVersion"`
+	K8sVersion      string `json:"k8sVersion"`
+	// OperatorNamespace is the namespace of the operator that sends the heartbeat.
+	OperatorNamespace string     `json:"operatorNamespace,omitempty"`
+	ControllerCount   int        `json:"controllerCount"`
+	ConnectedCount    int        `json:"connectedCount"`
+	LastHeartbeat     time.Time  `json:"lastHeartbeat"`            // RFC3339 via encoding/json
+	State             string     `json:"state"`                    // "active" | "draining" | "drained"
+	DrainStartedAt    *time.Time `json:"drainStartedAt,omitempty"` // set iff State != "active"
 }
 
 // PutClusterHeartbeat marshals info and stores it under key info.Name.

@@ -71,7 +71,6 @@ func TestSearch_CatalogItemsFilteredByNamespace(t *testing.T) {
 		return b
 	}
 	brood := &scopeTestConfigBrood{
-		operatorNs: "varroa-system",
 		items: []json.RawMessage{
 			item("team-a", "shared-a"),
 			item("team-b", "shared-b"),

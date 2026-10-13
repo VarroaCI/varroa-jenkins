@@ -49,15 +49,15 @@ type searchFanoutConfigBrood struct {
 	errs map[string]error
 }
 
-func (c *searchFanoutConfigBrood) ListCatalogItems(_ context.Context, cluster, _ string, _ CatalogItemFilter) ([]json.RawMessage, string, error) {
+func (c *searchFanoutConfigBrood) ListCatalogItems(_ context.Context, cluster, _ string, _ CatalogItemFilter) ([]json.RawMessage, error) {
 	if err := c.errs[cluster]; err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	raw, err := json.Marshal(bus.CatalogItemSummary{Name: "team-" + cluster, Namespace: "ns-a", Type: "pipeline"})
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return []json.RawMessage{raw}, "", nil
+	return []json.RawMessage{raw}, nil
 }
 
 // searchFanoutAuthorizer grants controllers:read and catalogitems:read

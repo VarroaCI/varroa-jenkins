@@ -31,13 +31,16 @@ func newClusterHeartbeatCounter(mp metric.MeterProvider) (metric.Int64Counter, e
 type clusterHeartbeatRunner struct {
 	clusterName string // from VARROA_CLUSTER_NAME (C4), default "core"
 	version     string // main.version ldflag value
-	clustersKV  *bus.KV
-	client      *controller.ClientsetClient
-	store       crdstore.Backend
-	lifecycle   *controller.LifecycleStore
-	beatNow     chan struct{} // buffered size 1; non-blocking send
-	logger      *slog.Logger
-	heartbeats  metric.Int64Counter // from newClusterHeartbeatCounter
+	// operatorNamespace is the namespace this operator runs in. Its
+	// heartbeat tells the BFF which namespace the cluster's config reads use.
+	operatorNamespace string
+	clustersKV        *bus.KV
+	client            *controller.ClientsetClient
+	store             crdstore.Backend
+	lifecycle         *controller.LifecycleStore
+	beatNow           chan struct{} // buffered size 1; non-blocking send
+	logger            *slog.Logger
+	heartbeats        metric.Int64Counter // from newClusterHeartbeatCounter
 }
 
 func (r *clusterHeartbeatRunner) NeedLeaderElection() bool { return true }
@@ -100,7 +103,7 @@ func (r *clusterHeartbeatRunner) beat(ctx context.Context) {
 		lifecycleState = r.lifecycle.State()
 	}
 
-	info := buildClusterInfo(r.clusterName, r.version, k8sVersion, ctrls, time.Now().UTC(), lifecycleState)
+	info := buildClusterInfo(r.clusterName, r.version, k8sVersion, r.operatorNamespace, ctrls, time.Now().UTC(), lifecycleState)
 
 	if err := bus.PutClusterHeartbeat(r.clustersKV, info); err != nil {
 		r.logger.Warn("cluster heartbeat: put failed", "error", err)
@@ -111,7 +114,7 @@ func (r *clusterHeartbeatRunner) beat(ctx context.Context) {
 
 // buildClusterInfo assembles a ClusterInfo struct from the heartbeat components.
 // Extracted for testability; ctrls may be nil/empty.
-func buildClusterInfo(name, version, k8sVersion string, ctrls []*v1alpha1.Controller, now time.Time, st controller.LifecycleState) bus.ClusterInfo {
+func buildClusterInfo(name, version, k8sVersion, operatorNamespace string, ctrls []*v1alpha1.Controller, now time.Time, st controller.LifecycleState) bus.ClusterInfo {
 	connected := 0
 	for _, c := range ctrls {
 		if c.Status.Phase == v1alpha1.ControllerPhaseConnected {
@@ -123,13 +126,14 @@ func buildClusterInfo(name, version, k8sVersion string, ctrls []*v1alpha1.Contro
 		state = bus.ClusterStateActive
 	}
 	return bus.ClusterInfo{
-		Name:            name,
-		OperatorVersion: version,
-		K8sVersion:      k8sVersion,
-		ControllerCount: len(ctrls),
-		ConnectedCount:  connected,
-		LastHeartbeat:   now,
-		State:           state,
-		DrainStartedAt:  st.DrainStartedAt,
+		Name:              name,
+		OperatorVersion:   version,
+		K8sVersion:        k8sVersion,
+		OperatorNamespace: operatorNamespace,
+		ControllerCount:   len(ctrls),
+		ConnectedCount:    connected,
+		LastHeartbeat:     now,
+		State:             state,
+		DrainStartedAt:    st.DrainStartedAt,
 	}
 }

@@ -557,7 +557,7 @@ func (f *fakeConfigBrood) PauseComposedBundle(context.Context, string, string, s
 func (f *fakeConfigBrood) ComposeBundle(context.Context, string, string, json.RawMessage) (*bus.BundleComposePreview, error) {
 	panic("not implemented")
 }
-func (f *fakeConfigBrood) ListCatalogItems(context.Context, string, string, CatalogItemFilter) ([]json.RawMessage, string, error) {
+func (f *fakeConfigBrood) ListCatalogItems(context.Context, string, string, CatalogItemFilter) ([]json.RawMessage, error) {
 	panic("not implemented")
 }
 func (f *fakeConfigBrood) GetCatalogItem(context.Context, string, string, string) (json.RawMessage, error) {

@@ -67,6 +67,10 @@ objects that the caller cannot read. A single read outside that set answers
 `403`. MCP and search apply the same rule. A binding scoped only by
 `controllerSelector` reads the operator namespace only.
 
+Each cluster uses its own operator namespace. A member cluster reports that
+namespace in its heartbeat. The BFF applies the value of the target cluster.
+A member that reports no namespace grants no operator-namespace read.
+
 ## Grant pipelines access
 
 The `pipelines` resource controls Jenkins job and run access through Varroa.

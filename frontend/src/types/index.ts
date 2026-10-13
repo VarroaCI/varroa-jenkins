@@ -919,6 +919,7 @@ export interface ClusterEntry {
   lastHeartbeat: string;
   operatorVersion: string;
   k8sVersion: string;
+  operatorNamespace?: string;
   controllerCount: number;
   connectedCount: number;
   state: "active" | "draining" | "drained";

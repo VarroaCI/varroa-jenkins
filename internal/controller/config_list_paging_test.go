@@ -40,9 +40,6 @@ func TestHandleItemsListPagesAboveBudget(t *testing.T) {
 		if resp.Code != "" {
 			t.Fatalf("page %d failed: code=%q error=%q", pages, resp.Code, resp.Error)
 		}
-		if resp.OperatorNamespace != "op-ns" {
-			t.Fatalf("page %d operatorNamespace = %q, want op-ns", pages, resp.OperatorNamespace)
-		}
 		for _, raw := range resp.Items {
 			var summary bus.CatalogItemSummary
 			jsonUnmarshal(t, raw, &summary)

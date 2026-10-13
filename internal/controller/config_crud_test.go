@@ -616,23 +616,6 @@ func TestHandleSourcesListGetDelete(t *testing.T) {
 // Tests for Task 2.3: items, roles, bindings
 // ---------------------------------------------------------------------------
 
-func TestHandleItemsList_OperatorNamespace(t *testing.T) {
-	fc := newFakeClient()
-	fc.items["ns-a/item1"] = &v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "item1", Namespace: "ns-a"}}
-	cr, crStore := newTestConfigCRUD(fc, "op-ns", nil)
-	_ = crStore
-
-	resp := cr.HandleItemsList(jsonMarshal(t, bus.ConfigListRequest{Namespace: "ns-a"}))
-	var listResp bus.ConfigListResponse
-	jsonUnmarshal(t, resp, &listResp)
-	if listResp.OperatorNamespace != "op-ns" {
-		t.Errorf("expected operatorNamespace %q, got %q", "op-ns", listResp.OperatorNamespace)
-	}
-	if len(listResp.Items) != 1 {
-		t.Errorf("expected 1 item, got %d", len(listResp.Items))
-	}
-}
-
 func TestProjectCatalogItemSummary(t *testing.T) {
 	item := &v1alpha1.CatalogItem{
 		ObjectMeta: metav1.ObjectMeta{Name: "item1", Namespace: "ns-a"},

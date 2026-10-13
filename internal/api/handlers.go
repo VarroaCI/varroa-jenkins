@@ -2219,15 +2219,15 @@ func (s *Server) Search(ctx context.Context, claims *auth.Claims, rawQuery, name
 			}
 		} else {
 			succeeded := 0
-			keep := s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", s.deps.OperatorNamespace)
 			for _, cluster := range clusters {
-				rawItems, _, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, namespace, CatalogItemFilter{})
+				rawItems, listErr := s.deps.ConfigBrood.ListCatalogItems(ctx, cluster.Name, namespace, CatalogItemFilter{})
 				if listErr != nil {
 					s.deps.Logger.Warn("search catalog cluster failed", "cluster", cluster.Name, "error", listErr)
 					markClusterIncomplete(&fanout, cluster.Name, "catalog items: "+listErr.Error())
 					continue
 				}
 				succeeded++
+				keep := s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", clusterOperatorNamespace(clusters, cluster.Name, s.deps.Brood.LocalCluster(), s.deps.OperatorNamespace))
 				for _, raw := range rawItems {
 					var item bus.CatalogItemSummary
 					if json.Unmarshal(raw, &item) != nil || !keep(item.Namespace) || !searchMatch(q, item.Name, "", "", item.Description) {

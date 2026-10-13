@@ -825,15 +825,16 @@ func main() {
 
 	// Register cluster heartbeat runner (leader-elected, 30s tick).
 	hbRunner = &clusterHeartbeatRunner{
-		clusterName: cluster,
-		version:     version,
-		clustersKV:  clustersKV,
-		client:      clientsetClient,
-		store:       clientsetClient,
-		lifecycle:   lifecycleStore,
-		beatNow:     make(chan struct{}, 1),
-		logger:      logger,
-		heartbeats:  heartbeatCounter,
+		clusterName:       cluster,
+		version:           version,
+		operatorNamespace: operatorNamespace,
+		clustersKV:        clustersKV,
+		client:            clientsetClient,
+		store:             clientsetClient,
+		lifecycle:         lifecycleStore,
+		beatNow:           make(chan struct{}, 1),
+		logger:            logger,
+		heartbeats:        heartbeatCounter,
 	}
 	if err := mgr.Add(hbRunner); err != nil {
 		logger.Error("failed to add cluster heartbeat runner", "error", err)

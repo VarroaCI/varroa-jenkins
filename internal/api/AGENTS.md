@@ -218,7 +218,9 @@ federation, activity persistence, and SSE fanout.
   each handler calls the specific `Can*` it needs. Config reads (catalog items,
   sources, composed bundles) use `CanReadConfigInNamespace` for a single object and
   `ConfigReadFilter` per list item; a single read outside the readable set answers
-  `403`.
+  `403`. The operator-namespace exemption uses the target cluster's operator
+  namespace (`configOperatorNamespace`): the BFF value for the local cluster, the
+  `operatorNamespace` of a healthy member otherwise; an unhealthy member gets no exemption.
 - Multi-cluster fan-out: `Brood` interface (`brood.go`), implemented by `busBrood`
   over NATS (`bus.Conn` + `bus.ClusterDirectory`), is the cross-cluster Controller
   CRUD router; `BroodOps` (`broodops_bus.go`/`broodops_aggregate.go`/

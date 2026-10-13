@@ -84,24 +84,20 @@ func TestConfigBrood_ListCancelStopsPaging(t *testing.T) {
 func TestConfigBrood_ListCatalogItemsReadsEveryPage(t *testing.T) {
 	request, afters := pagedRequest(t, map[string]any{
 		"": bus.ConfigListResponse{
-			Items:             []json.RawMessage{json.RawMessage(`{"name":"a"}`)},
-			Next:              "ns-a/a",
-			OperatorNamespace: "op-ns",
+			Items: []json.RawMessage{json.RawMessage(`{"name":"a"}`)},
+			Next:  "ns-a/a",
 		},
 		"ns-a/a": bus.ConfigListResponse{
 			Items: []json.RawMessage{json.RawMessage(`{"name":"b"}`)},
 		},
 	})
 	f := pagedBrood(request)
-	items, operatorNs, err := f.ListCatalogItems(context.Background(), "member-b", "ns-a", CatalogItemFilter{})
+	items, err := f.ListCatalogItems(context.Background(), "member-b", "ns-a", CatalogItemFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))
-	}
-	if operatorNs != "op-ns" {
-		t.Fatalf("operatorNamespace = %q, want op-ns", operatorNs)
 	}
 	if len(*afters) != 2 || (*afters)[0] != "" || (*afters)[1] != "ns-a/a" {
 		t.Fatalf("after values = %v, want [\"\" \"ns-a/a\"]", *afters)

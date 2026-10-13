@@ -3764,6 +3764,9 @@ ClusterInfo:
       type: string
     k8sVersion:
       type: string
+    operatorNamespace:
+      type: string
+      description: Namespace of the cluster's operator.
     controllerCount:
       type: integer
       format: int32

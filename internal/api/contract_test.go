@@ -437,7 +437,7 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 		Brood:             newFakeBrood(client),
 		BroodOps:          &stubBroodOps{},
 		BroodSchedules:    &stubBroodSchedules{listResp: []bus.BroodScheduleResponse{{Namespace: "test-ns", Name: "test-sched"}}},
-		ConfigBrood:       &stubConfigBrood{client: client, operatorNs: "test-ns"},
+		ConfigBrood:       &stubConfigBrood{client: client},
 		IdentityConfig: IdentityConfig{
 			Mode:         "local",
 			CookieDomain: "example.com",
@@ -494,8 +494,7 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 
 // stubConfigBrood implements ConfigBrood over the test client for contract tests.
 type stubConfigBrood struct {
-	client     *fakeResourceClient
-	operatorNs string
+	client *fakeResourceClient
 }
 
 func (f *stubConfigBrood) ListComposedBundles(ctx context.Context, cluster, ns string) ([]json.RawMessage, error) {
@@ -543,17 +542,17 @@ func (f *stubConfigBrood) ComposeBundle(ctx context.Context, cluster, ns string,
 		UnresolvedVariables: []string{},
 	}, nil
 }
-func (f *stubConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, string, error) {
+func (f *stubConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, error) {
 	items, err := f.client.ListCatalogItemCRDs(ctx, ns, "")
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	raw := make([]json.RawMessage, len(items))
 	for i, cr := range items {
 		r, _ := json.Marshal(controller.ProjectCatalogItemSummary(cr))
 		raw[i] = r
 	}
-	return raw, f.operatorNs, nil
+	return raw, nil
 }
 func (f *stubConfigBrood) GetCatalogItem(ctx context.Context, cluster, ns, name string) (json.RawMessage, error) {
 	cr, err := f.client.GetCatalogItemCRD(ctx, name, ns)

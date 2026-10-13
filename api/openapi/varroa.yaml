@@ -885,6 +885,9 @@ components:
           type: string
         name:
           type: string
+        operatorNamespace:
+          description: Namespace of the cluster's operator.
+          type: string
         operatorVersion:
           type: string
         state:
@@ -5678,6 +5681,9 @@ components:
           format: date-time
           type: string
         name:
+          type: string
+        operatorNamespace:
+          description: Namespace of the cluster's operator.
           type: string
         operatorVersion:
           type: string

@@ -22,7 +22,6 @@ type scopeTestConfigBrood struct {
 	updateCalled  bool
 	deleteCalled  bool
 	composeCalled bool
-	operatorNs    string
 
 	createCatalogSourceCalled bool
 	updateCatalogSourceCalled bool
@@ -67,8 +66,8 @@ func (f *scopeTestConfigBrood) ComposeBundle(ctx context.Context, cluster, ns st
 	f.composeCalled = true
 	return &bus.BundleComposePreview{}, nil
 }
-func (f *scopeTestConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, string, error) {
-	return f.items, f.operatorNs, nil
+func (f *scopeTestConfigBrood) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, error) {
+	return f.items, nil
 }
 func (f *scopeTestConfigBrood) GetCatalogItem(ctx context.Context, cluster, ns, name string) (json.RawMessage, error) {
 	return scopeTestObject(ns, name), nil
@@ -235,7 +234,6 @@ func scopeTestBundleRaw(ns, name string) json.RawMessage {
 
 func TestDispatchComposedBundles_ScopedDeveloper_ListFiltersNamespaces(t *testing.T) {
 	brood := &scopeTestConfigBrood{
-		operatorNs: "varroa-system",
 		bundles: []json.RawMessage{
 			scopeTestBundleRaw("team-a", "a"),
 			scopeTestBundleRaw("team-b", "b"),

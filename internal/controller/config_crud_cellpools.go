@@ -37,7 +37,7 @@ func (c *ConfigCRUD) HandleCellPoolsList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleCellPoolsGet handles operator.<cluster>.cellpools.get.

@@ -27,7 +27,7 @@ func (f *busConfigBrood) ListCellPools(ctx context.Context, cluster string) ([]v
 	if err := f.refuseLocalCellPools(cluster); err != nil {
 		return nil, err
 	}
-	items, _, err := f.listConfigPages(ctx, bus.OperatorCellPoolsSubject(cluster, "list"), "", "cellpools")
+	items, err := f.listConfigPages(ctx, bus.OperatorCellPoolsSubject(cluster, "list"), "", "cellpools")
 	if err != nil {
 		return nil, err
 	}

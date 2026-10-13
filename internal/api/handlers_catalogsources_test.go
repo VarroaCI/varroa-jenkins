@@ -310,7 +310,6 @@ func TestDispatchCatalogSources_ScopedDeveloper_GetOperatorNamespaceAllowed(t *t
 
 func TestDispatchCatalogSources_ScopedDeveloper_ListFiltersNamespaces(t *testing.T) {
 	brood := &scopeTestConfigBrood{
-		operatorNs: "varroa-system",
 		sources: []json.RawMessage{
 			scopeTestBundleRaw("team-a", "a"),
 			scopeTestBundleRaw("team-b", "b"),
@@ -339,7 +338,6 @@ func TestDispatchCatalogSources_ScopedDeveloper_ListFiltersNamespaces(t *testing
 
 func TestDispatchCatalogItems_ScopedDeveloper_ListFiltersNamespaces(t *testing.T) {
 	brood := &scopeTestConfigBrood{
-		operatorNs: "varroa-system",
 		items: []json.RawMessage{
 			scopeTestBundleRaw("team-a", "a"),
 			scopeTestBundleRaw("team-b", "b"),

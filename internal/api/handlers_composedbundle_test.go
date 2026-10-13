@@ -283,8 +283,8 @@ func (f *fakeConfigBroodForTest) ComposeBundle(ctx context.Context, cluster, ns 
 	}
 	return preview, nil
 }
-func (f *fakeConfigBroodForTest) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, string, error) {
-	return nil, "", nil
+func (f *fakeConfigBroodForTest) ListCatalogItems(ctx context.Context, cluster, ns string, filter CatalogItemFilter) ([]json.RawMessage, error) {
+	return nil, nil
 }
 func (f *fakeConfigBroodForTest) GetCatalogItem(ctx context.Context, cluster, ns, name string) (json.RawMessage, error) {
 	return nil, nil

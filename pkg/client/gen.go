@@ -1609,14 +1609,17 @@ type ComponentsSchemasClusterInfo struct {
 	ControllerCount int32 `json:"controllerCount"`
 
 	// Core true on exactly one row: the BFF's own cluster
-	Core            bool                              `json:"core"`
-	DrainStartedAt  *time.Time                        `json:"drainStartedAt,omitempty"`
-	Healthy         bool                              `json:"healthy"`
-	K8sVersion      string                            `json:"k8sVersion"`
-	LastHeartbeat   time.Time                         `json:"lastHeartbeat"`
-	Name            string                            `json:"name"`
-	OperatorVersion string                            `json:"operatorVersion"`
-	State           ComponentsSchemasClusterInfoState `json:"state"`
+	Core           bool       `json:"core"`
+	DrainStartedAt *time.Time `json:"drainStartedAt,omitempty"`
+	Healthy        bool       `json:"healthy"`
+	K8sVersion     string     `json:"k8sVersion"`
+	LastHeartbeat  time.Time  `json:"lastHeartbeat"`
+	Name           string     `json:"name"`
+
+	// OperatorNamespace Namespace of the cluster's operator.
+	OperatorNamespace *string                           `json:"operatorNamespace,omitempty"`
+	OperatorVersion   string                            `json:"operatorVersion"`
+	State             ComponentsSchemasClusterInfoState `json:"state"`
 }
 
 // ComponentsSchemasClusterInfoState defines model for ComponentsSchemasClusterInfo.State.

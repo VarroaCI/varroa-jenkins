@@ -154,8 +154,8 @@ func catalogItemPluginName(cr *v1alpha1.CatalogItem) string {
 
 // listPageReply marshals one page of a list. Next is the After key of the
 // following page. A reply over bus.ListPageBudget is a code:internal error.
-func (c *ConfigCRUD) listPageReply(rows []json.RawMessage, next, operatorNamespace string) []byte {
-	reply := bus.ConfigListResponse{Items: rows, Next: next, OperatorNamespace: operatorNamespace}
+func (c *ConfigCRUD) listPageReply(rows []json.RawMessage, next string) []byte {
+	reply := bus.ConfigListResponse{Items: rows, Next: next}
 	data, err := json.Marshal(reply)
 	if err != nil {
 		c.Logger.Error("list reply marshal failed", "error", err)
@@ -232,7 +232,7 @@ func (c *ConfigCRUD) HandleBundlesList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleBundlesGet handles operator.<cluster>.bundles.get.
@@ -313,7 +313,7 @@ func (c *ConfigCRUD) HandleSourcesList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleSourcesGet handles operator.<cluster>.catalog.sourceget.
@@ -394,7 +394,7 @@ func (c *ConfigCRUD) HandleItemsList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, c.OperatorNamespace)
+	return c.listPageReply(rows, next)
 }
 
 // HandleItemsGet handles operator.<cluster>.catalog.itemget.
@@ -455,7 +455,7 @@ func (c *ConfigCRUD) HandleRolesList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleRolesGet handles operator.<cluster>.rbac.roleget.
@@ -536,7 +536,7 @@ func (c *ConfigCRUD) HandleBindingsList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleBindingsGet handles operator.<cluster>.rbac.bindingget.
@@ -653,7 +653,7 @@ func (c *ConfigCRUD) HandleVersionProfilesList(data []byte) []byte {
 		msg := listPageErr(err)
 		return c.configReply(bus.ConfigListResponse{Error: msg, Code: bus.CodeInternal})
 	}
-	return c.listPageReply(rows, next, "")
+	return c.listPageReply(rows, next)
 }
 
 // HandleVersionProfilesGet handles operator.<cluster>.versionprofiles.get.

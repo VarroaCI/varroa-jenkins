@@ -83,16 +83,12 @@ type ConfigListRequest struct {
 }
 
 // ConfigListResponse is the reply for *list subjects.
-// OperatorNamespace is populated only for catalog.itemlist — the BFF echoes it
-// in the catalog-items HTTP response as operatorNamespace.
-// Empty for other kinds.
 // Next is the After key of the following page. Empty on the last page.
 type ConfigListResponse struct {
-	Items             []json.RawMessage `json:"items,omitempty"`
-	Next              string            `json:"next,omitempty"`
-	OperatorNamespace string            `json:"operatorNamespace,omitempty"`
-	Code              string            `json:"code,omitempty"`
-	Error             string            `json:"error,omitempty"`
+	Items []json.RawMessage `json:"items,omitempty"`
+	Next  string            `json:"next,omitempty"`
+	Code  string            `json:"code,omitempty"`
+	Error string            `json:"error,omitempty"`
 }
 
 // CatalogItemSummary is the per-item shape returned by catalog.itemlist.

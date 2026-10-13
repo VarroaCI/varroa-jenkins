@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -199,6 +200,42 @@ func (s *Server) handleClusterDispatch(w http.ResponseWriter, r *http.Request) {
 
 // dispatchControllers dispatches cluster-scoped controller paths.
 // segments does NOT include the cluster name or the "controllers" segment.
+// configOperatorNamespace returns the operator namespace of cluster for the
+// config read gate. The local cluster uses the BFF value. A healthy member
+// uses the value of its own heartbeat. An unhealthy, unknown, or silent
+// member returns "", and the gate then grants no operator-namespace exemption.
+func (s *Server) configOperatorNamespace(ctx context.Context, cluster string) string {
+	if s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+		return s.deps.OperatorNamespace
+	}
+	clusters, err := s.deps.Brood.Clusters(ctx)
+	if err != nil {
+		s.deps.Logger.Warn("config read scope: list clusters failed", "cluster", cluster, "error", err)
+		return ""
+	}
+	return clusterOperatorNamespace(clusters, cluster, s.deps.Brood.LocalCluster(), s.deps.OperatorNamespace)
+}
+
+// clusterOperatorNamespace picks the operator namespace of cluster from a
+// cluster list. The local cluster uses localNS. A healthy member uses the
+// namespace in its heartbeat. An unhealthy member, or one absent from the
+// list, returns "". Brood.Clusters keeps entries after their TTL expires,
+// so Healthy must be checked.
+func clusterOperatorNamespace(clusters []ClusterInfo, cluster, local, localNS string) string {
+	if cluster == local {
+		return localNS
+	}
+	for _, c := range clusters {
+		if c.Name == cluster {
+			if !c.Healthy {
+				return ""
+			}
+			return c.OperatorNamespace
+		}
+	}
+	return ""
+}
+
 func (s *Server) dispatchControllers(w http.ResponseWriter, r *http.Request, cluster string, segments []string) {
 	if len(segments) == 0 {
 		if r.Method != http.MethodGet {
@@ -457,7 +494,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
-		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "composedbundles", s.deps.OperatorNamespace))
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "composedbundles", s.configOperatorNamespace(r.Context(), cluster)))
 		s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		return
 	}
@@ -715,7 +752,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 
 		switch r.Method {
 		case http.MethodGet:
-			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, s.deps.OperatorNamespace) {
+			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 				s.writeJSONError(w, http.StatusForbidden, "forbidden")
 				return
 			}
@@ -814,16 +851,17 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 			Source: r.URL.Query().Get("source"),
 			Q:      r.URL.Query().Get("q"),
 		}
-		items, operatorNs, err := s.deps.ConfigBrood.ListCatalogItems(r.Context(), cluster, ns, filter)
+		items, err := s.deps.ConfigBrood.ListCatalogItems(r.Context(), cluster, ns, filter)
 		if err != nil {
 			s.deps.Logger.Error("list catalog items failed", "cluster", cluster, "namespace", ns, "error", err)
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
-		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", s.deps.OperatorNamespace))
+		opNS := s.configOperatorNamespace(r.Context(), cluster)
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", opNS))
 		resp := map[string]interface{}{
 			"items":             items,
-			"operatorNamespace": operatorNs,
+			"operatorNamespace": opNS,
 		}
 		s.writeJSON(w, http.StatusOK, resp)
 		return
@@ -845,7 +883,7 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, s.deps.OperatorNamespace) {
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -887,7 +925,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 				writeConfigBroodError(w, err, cluster)
 				return
 			}
-			items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogsources", s.deps.OperatorNamespace))
+			items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogsources", s.configOperatorNamespace(r.Context(), cluster)))
 			s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		case http.MethodPost:
 			ns := r.URL.Query().Get("namespace")
@@ -954,7 +992,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 
 	switch r.Method {
 	case http.MethodGet:
-		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", ns, s.deps.OperatorNamespace) {
+		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}

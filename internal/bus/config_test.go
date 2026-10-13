@@ -157,12 +157,11 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 		t.Errorf("ConfigListRequest round-trip: got Namespace=%q", got.Namespace)
 	}
 
-	// ConfigListResponse with operator namespace
+	// ConfigListResponse with an error code
 	resp := ConfigListResponse{
-		Items:             []json.RawMessage{json.RawMessage(`{"a":1}`)},
-		OperatorNamespace: "op-ns",
-		Code:              CodeNotFound,
-		Error:             "not found",
+		Items: []json.RawMessage{json.RawMessage(`{"a":1}`)},
+		Code:  CodeNotFound,
+		Error: "not found",
 	}
 	data, err = json.Marshal(resp)
 	if err != nil {
@@ -174,9 +173,6 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 	}
 	if len(gotResp.Items) != 1 {
 		t.Errorf("ConfigListResponse.Items: got %d, want 1", len(gotResp.Items))
-	}
-	if gotResp.OperatorNamespace != "op-ns" {
-		t.Errorf("ConfigListResponse.OperatorNamespace: got %q", gotResp.OperatorNamespace)
 	}
 	if gotResp.Code != CodeNotFound {
 		t.Errorf("ConfigListResponse.Code: got %q", gotResp.Code)
