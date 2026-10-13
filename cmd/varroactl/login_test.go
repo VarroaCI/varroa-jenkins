@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,6 +170,55 @@ func TestLogin_BrowserDenied(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out")
+	}
+}
+
+// TestLogin_BrowserContextCancel tests that cancelling the command context
+// stops a waiting browser login with an error that wraps context.Canceled.
+func TestLogin_BrowserContextCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("VARROACTL_CONFIG", tmpDir+"/config.yaml")
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	t.Setenv("VARROACTL_SERVER", srv.URL)
+
+	urlCh := make(chan string, 1)
+	oldBrowser := openBrowser
+	openBrowser = func(u string) error {
+		urlCh <- u
+		return nil
+	}
+	t.Cleanup(func() { openBrowser = oldBrowser })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"login", "--timeout", "30s"})
+	root.SetContext(ctx)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- root.Execute()
+	}()
+
+	select {
+	case <-urlCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for browser URL")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected error wrapping context.Canceled, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("login did not stop after context cancel")
 	}
 }
 
