@@ -3,11 +3,15 @@ package org.jenkinsci.plugins.varroamiteauth;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
@@ -24,8 +28,10 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import org.jenkinsci.plugins.workflow.actions.WorkspaceAction;
 import org.jenkinsci.plugins.workflow.flow.FlowDurabilityHint;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
+import org.jenkinsci.plugins.workflow.graph.BlockStartNode;
 import org.jenkinsci.plugins.workflow.graph.FlowNode;
 import org.junit.Rule;
 import org.junit.Test;
@@ -649,6 +655,158 @@ public class RunStatePusherTest {
     }
 
     /** A {@link RunStatePusher.RunStateSender} double with a scripted answer sequence. */
+    // ---- node configs (issue 1303) ----
+
+    /** Writes a node config beside the run's Jenkins home, where the pusher reads it. */
+    private static Path writeNodeConfig(Path rootDir, String name, String content) throws Exception {
+        Path nodeDir = rootDir.resolve("..").normalize().resolve("nodes").resolve(name);
+        Files.createDirectories(nodeDir);
+        Path cfg = nodeDir.resolve("config.xml");
+        Files.writeString(cfg, content);
+        return cfg;
+    }
+
+    /** A flow node with no workspace action of its own, inside a block that names the node. */
+    private static FlowNode bodyNodeInsideBlockNaming(String nodeName) {
+        FlowNode body = mock(FlowNode.class);
+        BlockStartNode start = mock(BlockStartNode.class);
+        WorkspaceAction workspace = mock(WorkspaceAction.class);
+        when(workspace.getNode()).thenReturn(nodeName);
+        when(start.getAction(WorkspaceAction.class)).thenReturn(workspace);
+        doReturn(List.of(start)).when(body).getEnclosingBlocks();
+        return body;
+    }
+
+    private static List<JSONObject> nodePosts(FakeSender sender) {
+        return sender.posts().stream()
+                .filter(p -> p.getString("relpath").startsWith("nodes/"))
+                .toList();
+    }
+
+    @Test
+    public void aNodeNamedOnlyByAnEnclosingBlockIsPushed() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-x", "run").toPath();
+        writeNodeConfig(rootDir, "agent-1", "<slave/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-enclosing"));
+
+        pusher.schedule(bodyNodeInsideBlockNaming("agent-1"));
+        pusher.runWindow();
+
+        List<JSONObject> posts = nodePosts(sender);
+        assertEquals("the enclosing block names the node, so its config must be pushed", 1, posts.size());
+        assertEquals("nodes/agent-1/config.xml", posts.get(0).getString("relpath"));
+    }
+
+    @Test
+    public void aNodeNamedByItsOwnWorkspaceActionIsPushed() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-y", "run").toPath();
+        writeNodeConfig(rootDir, "agent-1", "<slave/>");
+
+        FlowNode node = mock(FlowNode.class);
+        WorkspaceAction workspace = mock(WorkspaceAction.class);
+        when(workspace.getNode()).thenReturn("agent-1");
+        when(node.getAction(WorkspaceAction.class)).thenReturn(workspace);
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-own"));
+
+        pusher.schedule(node);
+        pusher.runWindow();
+
+        List<JSONObject> posts = nodePosts(sender);
+        assertEquals(1, posts.size());
+        assertEquals("nodes/agent-1/config.xml", posts.get(0).getString("relpath"));
+    }
+
+    @Test
+    public void anUnchangedNodeConfigIsNotReposted() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-z", "run").toPath();
+        writeNodeConfig(rootDir, "agent-1", "<slave/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-unchanged"));
+
+        pusher.schedule(bodyNodeInsideBlockNaming("agent-1"));
+        pusher.runWindow();
+        assertEquals(1, nodePosts(sender).size());
+
+        sender.clear();
+        pusher.runWindow();
+        assertEquals("an unchanged node config must not be reposted", 0, nodePosts(sender).size());
+    }
+
+    @Test
+    public void aChangedNodeConfigIsRepostedInTheNextWindow() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-w", "run").toPath();
+        Path cfg = writeNodeConfig(rootDir, "agent-1", "<slave/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-changed"));
+
+        pusher.schedule(bodyNodeInsideBlockNaming("agent-1"));
+        pusher.runWindow();
+        assertEquals(1, nodePosts(sender).size());
+
+        Files.writeString(cfg, "<slave><launched>true</launched></slave>");
+        Files.setLastModifiedTime(cfg,
+                FileTime.fromMillis(Files.getLastModifiedTime(cfg).toMillis() + 5_000L));
+
+        sender.clear();
+        pusher.runWindow();
+        List<JSONObject> posts = nodePosts(sender);
+        assertEquals("a changed node config must be reposted once", 1, posts.size());
+        assertEquals("nodes/agent-1/config.xml", posts.get(0).getString("relpath"));
+    }
+
+    @Test
+    public void aNodeConfigRewrittenDuringAPushIsRepostedNextWindow() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-u", "run").toPath();
+        Path cfg = writeNodeConfig(rootDir, "agent-1", "<slave/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-rewritten"));
+
+        // The launcher rewrites the config during the first post.
+        sender.afterPost = () -> {
+            try {
+                if (!Files.readString(cfg).contains("launched")) {
+                    Files.writeString(cfg, "<slave><launched>true</launched></slave>");
+                    Files.setLastModifiedTime(cfg,
+                            FileTime.fromMillis(Files.getLastModifiedTime(cfg).toMillis() + 5_000L));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        };
+
+        pusher.schedule(bodyNodeInsideBlockNaming("agent-1"));
+        pusher.runWindow();
+        assertEquals("the first window posts the old bytes", 1, nodePosts(sender).size());
+
+        sender.afterPost = null;
+        sender.clear();
+        pusher.runWindow();
+        List<JSONObject> posts = nodePosts(sender);
+        assertEquals("the next window must repost a config that the launcher rewrote during the first push", 1, posts.size());
+        assertEquals("nodes/agent-1/config.xml", posts.get(0).getString("relpath"));
+    }
+
+    @Test
+    public void aBuiltInNodeIsNeverPushed() throws Exception {
+        Path rootDir = tmp.newFolder("jhome-v", "run").toPath();
+        writeNodeConfig(rootDir, "built-in", "<slave/>");
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-builtin"));
+
+        pusher.schedule(bodyNodeInsideBlockNaming("built-in"));
+        pusher.runWindow();
+
+        assertEquals("the built-in node is never a resumable agent", 0, nodePosts(sender).size());
+    }
+
     private static final class FakeSender implements RunStatePusher.RunStateSender {
 
         private final List<JSONObject> posts = new CopyOnWriteArrayList<>();
@@ -656,6 +814,8 @@ public class RunStatePusherTest {
         private volatile RunStatePusher.RunStateSender.Answer defaultAnswer =
                 RunStatePusher.RunStateSender.Answer.accepted();
         private volatile RuntimeException toThrow;
+        /** The test calls this hook inside each post, after the record is captured. */
+        volatile Runnable afterPost;
 
         synchronized void answerOnce(RunStatePusher.RunStateSender.Answer answer) {
             queuedAnswers.add(answer);
@@ -692,6 +852,10 @@ public class RunStatePusherTest {
         @Override
         public synchronized RunStatePusher.RunStateSender.Answer post(String url, JSONObject record) {
             posts.add(record);
+            Runnable hook = afterPost;
+            if (hook != null) {
+                hook.run();
+            }
             if (toThrow != null) {
                 throw toThrow;
             }

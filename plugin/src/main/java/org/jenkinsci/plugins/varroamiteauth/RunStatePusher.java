@@ -172,9 +172,11 @@ public final class RunStatePusher {
     /** Size and modification time of each workflow file at its last push. */
     private final Map<String, long[]> seenWorkflowFiles = new ConcurrentHashMap<>();
 
-    /** Node names an executor step has named, and the names already pushed. */
+    /** Node names that an executor step or its enclosing block has named. */
     private final Set<String> namedNodes = ConcurrentHashMap.newKeySet();
-    private final Set<String> pushedNodes = ConcurrentHashMap.newKeySet();
+
+    /** Size and modification time of each named node's config at its last push. */
+    private final Map<String, long[]> seenNodeFiles = new ConcurrentHashMap<>();
 
     /** The build's durability, read once at the first schedule. */
     private volatile Boolean durable;
@@ -400,12 +402,16 @@ public final class RunStatePusher {
         return ok;
     }
 
-    /** Reads the node name an executor step's workspace action reports. */
+    /**
+     * Reads the node name from the workspace action of the arriving node or
+     * of its nearest enclosing block. Jenkins adds that action to the node
+     * step's start node after the listener sees that node.
+     */
     private void recordNodeName(FlowNode node) {
         if (node == null) {
             return;
         }
-        WorkspaceAction workspace = node.getAction(WorkspaceAction.class);
+        WorkspaceAction workspace = VarroaRunRecorder.workspaceOf(node);
         if (workspace == null) {
             return;
         }
@@ -413,7 +419,9 @@ public final class RunStatePusher {
         if (name == null || name.isEmpty() || "master".equals(name) || "built-in".equals(name)) {
             return;
         }
-        namedNodes.add(name);
+        if (namedNodes.add(name)) {
+            LOGGER.fine("run state names node " + name + " for run " + runId);
+        }
     }
 
     /** Runs one window: one serial push of the whole current file set. */
@@ -615,10 +623,12 @@ public final class RunStatePusher {
 
         Set<String> nodes = new LinkedHashSet<>(namedNodes);
         for (String name : nodes) {
-            if (pushedNodes.contains(name)) {
+            Path cfg = nodesDir().resolve(name).resolve("config.xml");
+            if (!Files.isRegularFile(cfg)) {
                 continue;
             }
-            if (Files.isRegularFile(nodesDir().resolve(name).resolve("config.xml"))) {
+            long[] current = sizeAndTime(cfg);
+            if (current != null && changedSince(seenNodeFiles.get(name), current)) {
                 files.add("nodes/" + name + "/config.xml");
             }
         }
@@ -642,7 +652,11 @@ public final class RunStatePusher {
         if (current == null) {
             return false;
         }
-        long[] seen = seenWorkflowFiles.get(name);
+        return changedSince(seenWorkflowFiles.get(name), current);
+    }
+
+    /** Reports whether a file differs from its stored size and time, or was never pushed. */
+    private static boolean changedSince(long[] seen, long[] current) {
         return seen == null || seen[0] != current[0] || seen[1] != current[1];
     }
 
@@ -685,6 +699,9 @@ public final class RunStatePusher {
         if (absolute == null) {
             return true;
         }
+        // The pusher reads the marker before it reads the file. A rewrite
+        // during the post then shows as a change in the next window.
+        long[] marker = sizeAndTime(absolute);
         byte[] content;
         try {
             content = Files.readAllBytes(absolute);
@@ -723,13 +740,13 @@ public final class RunStatePusher {
         // The file is replicated only now. A marker written before the
         // push would make a failed push look like a stored file, and the
         // next window would skip it.
+        if (marker == null) {
+            return true;
+        }
         if (relPath.startsWith("nodes/")) {
-            pushedNodes.add(nodeNameOf(relPath));
+            seenNodeFiles.put(nodeNameOfPath(relPath), marker);
         } else if (relPath.contains("/workflow/")) {
-            long[] pushedAt = sizeAndTime(absolute);
-            if (pushedAt != null) {
-                seenWorkflowFiles.put(workflowNameOf(relPath), pushedAt);
-            }
+            seenWorkflowFiles.put(workflowNameOf(relPath), marker);
         }
         return true;
     }
@@ -814,7 +831,7 @@ public final class RunStatePusher {
     /** Maps a path under the Jenkins home back onto a local file. */
     private Path resolveLocalPath(String relPath) {
         if (relPath.startsWith("nodes/")) {
-            String name = nodeNameOf(relPath);
+            String name = nodeNameOfPath(relPath);
             return name.isEmpty() ? null : nodesDir().resolve(name).resolve("config.xml");
         }
         String prefix = buildRelPathPrefix();
@@ -831,7 +848,7 @@ public final class RunStatePusher {
         return local;
     }
 
-    private static String nodeNameOf(String relPath) {
+    private static String nodeNameOfPath(String relPath) {
         String[] parts = relPath.split("/");
         return parts.length >= 2 ? parts[1] : "";
     }

@@ -648,7 +648,9 @@ the root AGENTS.md greenfield rule.
   `jenkins.util.Timer` task two seconds out, and the task then posts the whole
   current file set once, serially. The set holds `build.xml` and `program.dat`
   every time, each `workflow/<n>.xml` whose size or modification time changed,
-  and `nodes/<name>/config.xml` for each node an executor step named. A build
+  and `nodes/<name>/config.xml` for each node named by the workspace action of
+  the arriving flow node or of an enclosing block (`VarroaRunRecorder.workspaceOf`),
+  again whenever its size or modification time changes. A build
   whose `FlowDurabilityHint` is below `MAX_SURVIVABILITY` pushes nothing and
   logs once: a lower level writes the flow program at a checkpoint, so a copied
   set can be stale by whole stages. `VARROA_MITE_RUN_STATE_URL` gates the push,

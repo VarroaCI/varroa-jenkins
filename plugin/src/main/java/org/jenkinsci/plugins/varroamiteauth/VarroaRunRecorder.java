@@ -2104,7 +2104,7 @@ public final class VarroaRunRecorder {
      * enclosing block holds it. The read covers one node plus its nesting
      * chain, and it walks no graph.
      */
-    private static WorkspaceAction workspaceOf(FlowNode node) {
+    static WorkspaceAction workspaceOf(FlowNode node) {
         if (node == null) {
             return null;
         }
