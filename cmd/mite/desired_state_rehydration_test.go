@@ -248,11 +248,136 @@ func fakeSessionServer(t *testing.T, session *string) *httptest.Server {
 }
 
 // TestRehydrationConvergedSkipsSecondApply is the "repeated bundle" case:
-// sending the same rehydration payload twice inside one boot session
-// applies it once. The second call is proven by observing that the
-// deferred-job check — which the first apply performed and recorded — is
-// not repeated.
+// once the marker records a seeded bundle, the same payload inside one
+// boot session writes nothing again. The seeded build directory is
+// deleted between the two calls; a second write would recreate it.
 func TestRehydrationConvergedSkipsSecondApply(t *testing.T) {
+	home := t.TempDir()
+	session := "sess-1"
+	srv := fakeSessionServer(t, &session)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+	seedJob(t, home, "jobs", "present-job")
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-1",
+		Reload:              true,
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+		Rehydration: &mitev1.RehydrationBundle{
+			ContentHash: "content-1",
+			Files: []*mitev1.RehydrationFile{
+				rehydrationFile(t, "jobs/present-job/builds/1/build.xml", []byte("<flow-build/>")),
+			},
+		},
+	}
+
+	first := agent.handleDesiredState(context.Background(), cmd)
+	if !first.RehydrationSuccess || len(first.RehydrationDeferredJobs) != 0 {
+		t.Fatalf("first apply: expected success with no deferred job, got %+v", first)
+	}
+	buildDir := filepath.Join(home, "jobs", "present-job", "builds", "1")
+	if err := os.RemoveAll(buildDir); err != nil {
+		t.Fatal(err)
+	}
+
+	second := agent.handleDesiredState(context.Background(), cmd)
+	if !second.RehydrationSuccess {
+		t.Fatalf("second apply: expected success, got %+v", second)
+	}
+	if _, err := os.Stat(buildDir); !os.IsNotExist(err) {
+		t.Errorf("second apply: converged section must not rewrite the build directory (stat err %v)", err)
+	}
+}
+
+// TestRehydrationSeedsJobsTheItemsApplyCreates is the new-cell-home case:
+// the job does not exist when the rehydration step runs, the items apply
+// creates it, and a second pass seeds its build record before the reload.
+func TestRehydrationSeedsJobsTheItemsApplyCreates(t *testing.T) {
+	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
+	home := t.TempDir()
+	jobDir := filepath.Join(home, "jobs", "new-job")
+
+	var mu sync.Mutex
+	var order []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Jenkins-Session", "sess-1")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/crumbIssuer"):
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+		case r.URL.Path == "/configuration-as-code/reload":
+			http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/config.xml"):
+			w.WriteHeader(http.StatusNotFound)
+		case strings.Contains(r.URL.Path, "/createItem"):
+			// Jenkins writes the job directory on create.
+			if err := os.MkdirAll(jobDir, 0755); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if err := os.WriteFile(filepath.Join(jobDir, "config.xml"), []byte("<flow-definition/>"), 0644); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			mu.Lock()
+			order = append(order, "items")
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+		case strings.HasSuffix(r.URL.Path, "/reload"):
+			mu.Lock()
+			order = append(order, "reload")
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-1",
+		JcascYaml:           "jenkins: {}",
+		ItemsYaml:           "items:\n  - kind: pipeline\n    name: new-job\n    definition:\n      script: 'pipeline {}'\n",
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+		Rehydration: &mitev1.RehydrationBundle{
+			ContentHash: "content-1",
+			Files: []*mitev1.RehydrationFile{
+				rehydrationFile(t, "jobs/new-job/builds/1/build.xml", []byte("<flow-build/>")),
+				rehydrationFile(t, "jobs/new-job/nextBuildNumber", []byte("2")),
+			},
+			ReloadItems: []string{"new-job"},
+		},
+	}
+
+	res := agent.handleDesiredState(context.Background(), cmd)
+	if !res.ItemsSuccess || !res.RehydrationSuccess {
+		t.Fatalf("expected items and rehydration to succeed, got %+v", res)
+	}
+	if len(res.RehydrationDeferredJobs) != 0 {
+		t.Errorf("expected no deferred jobs after the items apply, got %v", res.RehydrationDeferredJobs)
+	}
+	if _, err := os.Stat(filepath.Join(jobDir, "builds", "1", "build.xml")); err != nil {
+		t.Errorf("expected the seeded build record after the items apply: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"items", "reload"}
+	if len(order) != len(want) || order[0] != want[0] || order[1] != want[1] {
+		t.Errorf("call order = %v, want %v", order, want)
+	}
+}
+
+// TestRehydrationDeferredBundleIsNotConverged is the data-loss case: a
+// deferred job must keep the rehydration section out of the marker, so
+// a resend with the same content hash applies the bundle again.
+func TestRehydrationDeferredBundleIsNotConverged(t *testing.T) {
 	home := t.TempDir()
 	session := "sess-1"
 	srv := fakeSessionServer(t, &session)
@@ -277,13 +402,62 @@ func TestRehydrationConvergedSkipsSecondApply(t *testing.T) {
 	if !first.RehydrationSuccess || len(first.RehydrationDeferredJobs) != 1 {
 		t.Fatalf("first apply: expected one deferred job and success, got %+v", first)
 	}
+	markerBytes, err := os.ReadFile(agent.lastAppliedHashPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(markerBytes), "rehydration ") {
+		t.Fatal("marker records the rehydration section while a job is deferred")
+	}
 
+	seedJob(t, home, "jobs", "missing-job")
 	second := agent.handleDesiredState(context.Background(), cmd)
 	if !second.RehydrationSuccess {
 		t.Fatalf("second apply: expected success, got %+v", second)
 	}
 	if len(second.RehydrationDeferredJobs) != 0 {
-		t.Errorf("second apply: converged section should not re-check the deferred job, got %v", second.RehydrationDeferredJobs)
+		t.Errorf("second apply: expected no deferred job, got %v", second.RehydrationDeferredJobs)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "missing-job", "builds", "1", "build.xml")); err != nil {
+		t.Errorf("second apply: expected the seeded build record: %v", err)
+	}
+}
+
+// TestRehydrationCompositeSkipNeedsTheRehydrationHash proves the composite
+// fast path does not skip a command whose rehydration bundle is not yet
+// recorded in the marker, even when the desired-state hash matches.
+func TestRehydrationCompositeSkipNeedsTheRehydrationHash(t *testing.T) {
+	home := t.TempDir()
+	session := "sess-1"
+	srv := fakeSessionServer(t, &session)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-1",
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+		Rehydration: &mitev1.RehydrationBundle{
+			ContentHash: "content-1",
+			Files: []*mitev1.RehydrationFile{
+				rehydrationFile(t, "jobs/late-job/builds/1/build.xml", []byte("<flow-build/>")),
+			},
+		},
+	}
+
+	first := agent.handleDesiredState(context.Background(), cmd)
+	if len(first.RehydrationDeferredJobs) != 1 {
+		t.Fatalf("first apply: expected one deferred job, got %+v", first)
+	}
+
+	seedJob(t, home, "jobs", "late-job")
+	second := agent.handleDesiredState(context.Background(), cmd)
+	if len(second.RehydrationDeferredJobs) != 0 {
+		t.Errorf("second apply: expected the composite skip to be bypassed, got deferred %v", second.RehydrationDeferredJobs)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "late-job", "builds", "1", "build.xml")); err != nil {
+		t.Errorf("second apply: expected the seeded build record: %v", err)
 	}
 }
 

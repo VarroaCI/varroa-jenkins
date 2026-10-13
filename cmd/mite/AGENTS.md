@@ -319,6 +319,10 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   does not exist yet, never overwrites an existing build directory, and
   never lowers a stored `nextBuildNumber`. A deferred job's path returns in
   `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
+  A second pass after the items apply re-seeds the deferred jobs before the
+  items gate opens. The marker never records the `rehydration` section while
+  a job stays deferred. The composite fast path skips a command only when the
+  marker also holds the bundle's `rehydration` hash.
   `writeRehydrationFileAt` is the one writer that takes an overwrite flag:
   only the resume path sets it, and `applyRehydrationBundle` keeps its own
   rules.

@@ -2347,7 +2347,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	// fails (Jenkins down, likely restarting) — fall through and re-apply.
 	if cmd.DesiredStateHash != "" && !cmd.Reload {
 		marker := a.readMarker()
-		if marker.composite == cmd.DesiredStateHash {
+		if marker.composite == cmd.DesiredStateHash && rehydrationConverged(marker, cmd) {
 			live, err := a.getJenkinsClient().SessionID(ctx)
 			switch {
 			case err == nil && marker.session != "" && live == marker.session:
@@ -2445,6 +2445,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	// 4. Apply the rehydration section: write every seeded build record
 	// under JENKINS_HOME. Runs after config/RBAC and before items, so a job
 	// the items section is about to touch is already seeded. See D5.
+	rehydrationApplied := false
 	if cmd.Rehydration != nil {
 		if converged("rehydration") {
 			result.RehydrationSuccess = true
@@ -2457,6 +2458,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			} else {
 				result.RehydrationSuccess = true
 				result.RehydrationDeferredJobs = applyResult.deferredJobs
+				rehydrationApplied = true
 			}
 		}
 	} else {
@@ -2498,6 +2500,22 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		// error message — surfacing as "items: rejected, no message returned".
 		result.ItemsSuccess = true
 	}
+	// 4b. The items apply creates the jobs of a new cell home. A job
+	// deferred before the items apply can take its seed now.
+	if rehydrationApplied && len(result.RehydrationDeferredJobs) > 0 {
+		deferredBefore := len(result.RehydrationDeferredJobs)
+		retry, err := applyRehydrationBundle(a.jenkinsHomeDir, cmd.Rehydration)
+		if err != nil {
+			a.Logger.Error("rehydration retry after items apply failed", "error", err)
+			result.RehydrationSuccess = false
+			result.RehydrationError = err.Error()
+		} else {
+			a.Logger.Info("rehydration seeded deferred jobs after the items apply",
+				"deferred_before", deferredBefore, "deferred_after", len(retry.deferredJobs))
+			result.RehydrationDeferredJobs = retry.deferredJobs
+		}
+	}
+
 	// A failed items apply opens the gate too: one broken item must not
 	// hold back the triggers of every other tenant on the cell. The same
 	// rule opens the tenant gate for every tenant of this desired state.
@@ -2546,6 +2564,11 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			if _, ok := desired[name]; ok {
 				newSections[name] = desired[name]
 			}
+		}
+		// A job still deferred has no seeded record. The marker must not
+		// record the section, or a resend would skip the job's seed.
+		if len(result.RehydrationDeferredJobs) > 0 {
+			delete(newSections, "rehydration")
 		}
 		a.writeMarker(appliedMarker{
 			composite: cmd.DesiredStateHash,
@@ -3182,6 +3205,12 @@ func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string
 // allComponentsSucceeded returns true if every component present in the
 // command was applied successfully. Empty (unset) components count as
 // success (they were not requested).
+// rehydrationConverged reports whether the marker already records the
+// rehydration bundle of cmd. A command with no bundle is converged.
+func rehydrationConverged(m appliedMarker, cmd *mitev1.DesiredStateCommand) bool {
+	return cmd.Rehydration == nil || (m.sections != nil && m.sections["rehydration"] == cmd.Rehydration.ContentHash)
+}
+
 func (a *Agent) allComponentsSucceeded(result *mitev1.DesiredStateResult, cmd *mitev1.DesiredStateCommand) bool {
 	if cmd.JcascYaml != "" && !result.ConfigSuccess {
 		return false

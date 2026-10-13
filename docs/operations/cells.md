@@ -278,7 +278,8 @@ keeping `currentBuild.previousBuild` and the build-number sequence correct.
 Each seed carries the job's next build number, its newest successful build, and up to
 `rehydrateBuilds` further builds, newest first, with parameters and changesets. A multibranch
 child seeds only after branch indexing creates it; the operator retries until then or until
-`rehydrateDeadline` passes.
+`rehydrateDeadline` passes. The mite seeds a job that the same push creates after the items
+apply, so a roll needs no second push.
 
 `Team.spec.pipelines` settings for rehydration and the ledger:
 
