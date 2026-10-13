@@ -7,6 +7,46 @@ import (
 	"testing"
 )
 
+func TestCatalogsourceColumns_Source(t *testing.T) {
+	tests := []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{
+			name: "git source shows the repo URL",
+			item: map[string]any{"metadata": map[string]any{"name": "src1"}, "spec": map[string]any{"repoURL": "https://git.example/repo.git"}},
+			want: "https://git.example/repo.git",
+		},
+		{
+			name: "oci source shows the bare OCI ref",
+			item: map[string]any{"metadata": map[string]any{"name": "src2"}, "spec": map[string]any{"ociRef": "ghcr.io/varroaci/catalog:v1"}},
+			want: "ghcr.io/varroaci/catalog:v1",
+		},
+		{
+			name: "update-center source shows its name",
+			item: map[string]any{"metadata": map[string]any{"name": "varroa-update-center"}, "spec": map[string]any{}},
+			want: "update-center",
+		},
+		{
+			name: "empty source shows a dash",
+			item: map[string]any{"metadata": map[string]any{"name": "foo"}},
+			want: "-",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cols := catalogsourceColumns(tt.item)
+			if len(cols) < 3 {
+				t.Fatalf("expected at least 3 columns, got %d", len(cols))
+			}
+			if cols[2] != tt.want {
+				t.Errorf("SOURCE column: want %q, got %q", tt.want, cols[2])
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Catalog tests (6.4)
 // ---------------------------------------------------------------------------

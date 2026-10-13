@@ -2350,6 +2350,7 @@ const UpdateCenterCatalogSourceName = "varroa-update-center"
 // +kubebuilder:validation:XValidation:rule="(has(self.metadata.name) && self.metadata.name == 'varroa-update-center') ? (!has(self.spec) || (!has(self.spec.repoURL) && !has(self.spec.ociRef))) : (has(self.spec) && (has(self.spec.repoURL) != has(self.spec.ociRef)))",message="the reserved source name 'varroa-update-center' requires neither repoURL nor ociRef; every other CatalogSource requires exactly one"
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="REPOSITORY",type="string",JSONPath=".spec.repoURL"
+// +kubebuilder:printcolumn:name="OCI-REF",type="string",JSONPath=".spec.ociRef"
 // +kubebuilder:printcolumn:name="ITEMS",type="integer",JSONPath=".status.itemCount"
 // +kubebuilder:printcolumn:name="SYNC",type="string",JSONPath=".status.phase"
 type CatalogSource struct {

@@ -139,6 +139,8 @@ kubectl get catalogsource platform-catalog -n varroa-system
 kubectl get catalogitems -n varroa-system
 ```
 
+The `REPOSITORY` column shows a git source. The `OCI-REF` column shows an OCI source. The `varroa-update-center` source shows neither.
+
 | Symptom | Check |
 |---|---|
 | Source is `Error` | `status.message`, URL, credentials, path, and network access |

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
 func init() {
@@ -62,7 +64,7 @@ func addCatalogNouns(v *verbCommands) {
 		ClusterScoped: true,
 		DescribeFrom:  true,
 		Columns:       catalogsourceColumns,
-		Headers:       []string{"NAMESPACE", "NAME", "URL", "PHASE", "ITEMS", "LAST-SYNC"},
+		Headers:       []string{"NAMESPACE", "NAME", "SOURCE", "PHASE", "ITEMS", "LAST-SYNC"},
 	})
 }
 
@@ -291,12 +293,7 @@ func catalogsourceColumns(item map[string]any) []string {
 
 	name := itemName(item)
 
-	url := ""
-	if spec, ok := item["spec"].(map[string]any); ok {
-		if u, ok := spec["repoURL"].(string); ok {
-			url = u
-		}
-	}
+	source := catalogSourceLabel(name, item)
 
 	phase := ""
 	if status, ok := item["status"].(map[string]any); ok {
@@ -319,7 +316,23 @@ func catalogsourceColumns(item map[string]any) []string {
 		}
 	}
 
-	return []string{ns, name, url, phase, items, lastSync}
+	return []string{ns, name, source, phase, items, lastSync}
+}
+
+// catalogSourceLabel returns the git URL or the OCI ref of a catalog source.
+// The reserved update-center source has neither, so it shows its name.
+func catalogSourceLabel(name string, item map[string]any) string {
+	spec, _ := item["spec"].(map[string]any)
+	if u, ok := spec["repoURL"].(string); ok && u != "" {
+		return u
+	}
+	if ref, ok := spec["ociRef"].(string); ok && ref != "" {
+		return ref
+	}
+	if name == v1alpha1.UpdateCenterCatalogSourceName {
+		return "update-center"
+	}
+	return "-"
 }
 
 func catalogItemColumns(item map[string]any) []string {
