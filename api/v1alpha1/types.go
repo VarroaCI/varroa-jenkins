@@ -788,8 +788,9 @@ type CellRehydrationEntry struct {
 	// UnseededJobs counts the jobs no bundle has covered yet.
 	UnseededJobs int32 `json:"unseededJobs,omitempty"`
 	// Applied is true once the mite reports this bundle applied with no
-	// error and no deferred job, on the generation and cell instance this
-	// entry names.
+	// error, on the generation and cell instance this entry names. A
+	// deferred job does not clear it. A deadline give-up keeps it true
+	// only after a real apply.
 	Applied bool `json:"applied,omitempty"`
 	// Deferred lists the job paths the mite could not seed, because the
 	// job did not exist yet.

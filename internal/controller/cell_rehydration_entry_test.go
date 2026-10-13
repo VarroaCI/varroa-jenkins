@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -29,6 +30,11 @@ func TestMemberSeedReader_AnswersAppliedInstance(t *testing.T) {
 	cell.Status.Cell.Rehydration[0] = entry
 	if inst, _ := read("ns", "cell"); inst != "uid-1" {
 		t.Fatalf("applied entry answered instance %q, want uid-1", inst)
+	}
+	entry.Deferred = []string{"team-a/x"}
+	cell.Status.Cell.Rehydration[0] = entry
+	if inst, jobs := read("ns", "cell"); inst != "uid-1" || !slices.Equal(jobs, []string{"team-a/x"}) {
+		t.Fatalf("applied entry with a deferred job answered (%q, %v), want (uid-1, [team-a/x])", inst, jobs)
 	}
 	if inst, _ := memberSeedReader(cells, "team-b")("ns", "cell"); inst != "" {
 		t.Fatalf("missing entry answered instance %q, want none", inst)
@@ -68,6 +74,16 @@ func TestCellSeedStateChanged(t *testing.T) {
 		e.At = &later
 		return e
 	}
+	appliedDeferred := func(tenant string, jobs ...string) v1alpha1.CellRehydrationEntry {
+		e := applied(tenant)
+		e.Deferred = jobs
+		return e
+	}
+	releasedGiveUp := func(tenant string, jobs ...string) v1alpha1.CellRehydrationEntry {
+		e := appliedDeferred(tenant, jobs...)
+		e.Error = "rehydration deadline exceeded"
+		return e
+	}
 	newInstance := applied("a")
 	newInstance.CellInstance = "uid-2"
 	notCell := cellWithSeeds(pending("a"))
@@ -91,6 +107,12 @@ func TestCellSeedStateChanged(t *testing.T) {
 		{"second tenant applied", cellWithSeeds(pending("a"), pending("b")),
 			cellWithSeeds(pending("a"), applied("b")), true},
 		{"tenant removed while applied", cellWithSeeds(applied("a")), cellWithSeeds(), true},
+		{"pending to applied with deferred job", cellWithSeeds(pending("a")),
+			cellWithSeeds(appliedDeferred("a", "a/x")), true},
+		{"applied deferred to released give-up", cellWithSeeds(appliedDeferred("a", "a/x")),
+			cellWithSeeds(releasedGiveUp("a", "a/x")), true},
+		{"applied deferred to carried resend", cellWithSeeds(appliedDeferred("a", "a/x")),
+			cellWithSeeds(withLaterAt(appliedDeferred("a", "a/x"))), false},
 	}
 	for _, tc := range cases {
 		if got := CellSeedStateChanged(tc.old, tc.new); got != tc.want {
@@ -198,11 +220,96 @@ func TestApplyRehydrationResult_PerTenantDeferred(t *testing.T) {
 	}
 	deferred := map[string][]string{"team-a": {"team-a/job-x"}}
 	out := applyRehydrationResult(entries, "cmd-1", true, "", deferred, rehydrationTestNow)
-	if len(out[0].Deferred) != 1 || out[0].Applied {
-		t.Fatalf("expected team-a deferred and not applied, got %+v", out[0])
+	if len(out[0].Deferred) != 1 || !out[0].Applied {
+		t.Fatalf("expected team-a applied with its deferred job, got %+v", out[0])
 	}
 	if len(out[1].Deferred) != 0 || !out[1].Applied {
 		t.Fatalf("expected team-b applied with no deferred job, got %+v", out[1])
+	}
+}
+
+// TestSeedAnswerOf pins what the Team reconciler reads from one entry.
+func TestSeedAnswerOf(t *testing.T) {
+	cases := []struct {
+		name         string
+		entry        v1alpha1.CellRehydrationEntry
+		wantInstance string
+		wantDeferred []string
+	}{
+		{"pre-send holds the whole tenant", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1"}, "", nil},
+		{"applied with deferred job", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}}, "uid-1", []string{"t/x"}},
+		{"applied without deferred job", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true}, "uid-1", nil},
+		{"released give-up", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}, Error: "rehydration deadline exceeded"}, "uid-1", nil},
+		{"never-applied give-up", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Deferred: []string{"t/x"}, Error: "rehydration deadline exceeded"}, "", []string{"t/x"}},
+	}
+	for _, tc := range cases {
+		got := seedAnswerOf(&tc.entry)
+		if got.instance != tc.wantInstance || !slices.Equal(got.deferred, tc.wantDeferred) {
+			t.Errorf("%s: seedAnswerOf = (%q, %v), want (%q, %v)", tc.name, got.instance, got.deferred, tc.wantInstance, tc.wantDeferred)
+		}
+	}
+}
+
+// TestCarryAppliedSeed pins which earlier entries keep their applied seed
+// across a resend.
+func TestCarryAppliedSeed(t *testing.T) {
+	applied := v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}, Error: "old"}
+	next := v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1"}
+
+	kept := carryAppliedSeed(next, &applied)
+	if !kept.Applied || !slices.Equal(kept.Deferred, []string{"t/x"}) || kept.Error != "" {
+		t.Fatalf("same generation and instance: want applied with deferred and no error, got %+v", kept)
+	}
+	otherInstance := applied
+	otherInstance.CellInstance = "uid-2"
+	otherGen := applied
+	otherGen.Generation = 2
+	notApplied := applied
+	notApplied.Applied = false
+	for name, existing := range map[string]*v1alpha1.CellRehydrationEntry{
+		"other instance": &otherInstance, "other generation": &otherGen, "not applied": &notApplied, "nil": nil,
+	} {
+		if got := carryAppliedSeed(next, existing); got.Applied || len(got.Deferred) != 0 {
+			t.Errorf("%s: carried a seed, got %+v", name, got)
+		}
+	}
+}
+
+// TestExpiredEntry_ReleasesOnlyAfterAnApply pins the give-up: the deferred
+// jobs are released only when the bundle applied earlier on this
+// generation and instance.
+func TestExpiredEntry_ReleasesOnlyAfterAnApply(t *testing.T) {
+	st := rehydrationTenantState{
+		team:      &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "t"}},
+		placement: rehydrationPlacement{Generation: 1, CellInstance: "uid-1"},
+	}
+	st.existing = &v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}}
+	released := expiredEntry(st, "uid-1", rehydrationTestNow)
+	if !released.Applied || !slices.Equal(released.Deferred, []string{"t/x"}) || released.Error == "" {
+		t.Fatalf("released give-up: want applied, deferred kept in the message, error set; got %+v", released)
+	}
+	if got := seedAnswerOf(&released); got.instance != "uid-1" || len(got.deferred) != 0 {
+		t.Fatalf("released give-up answers (%q, %v), want (uid-1, none)", got.instance, got.deferred)
+	}
+
+	st.existing = &v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Deferred: []string{"t/x"}}
+	held := expiredEntry(st, "uid-1", rehydrationTestNow)
+	if held.Applied {
+		t.Fatalf("never-applied give-up must keep the tenant held, got %+v", held)
+	}
+	if got := seedAnswerOf(&held); got.instance != "" {
+		t.Fatalf("never-applied give-up answers instance %q, want none", got.instance)
+	}
+}
+
+// TestCellRehydrationEntryDeferred_GiveUpAnswersNone pins the announced
+// deferred list of a released give-up: none.
+func TestCellRehydrationEntryDeferred_GiveUpAnswersNone(t *testing.T) {
+	cell := cellWithSeeds(v1alpha1.CellRehydrationEntry{Tenant: "team-a", CellInstance: "uid-1", Applied: true, Deferred: []string{"team-a/x"}, Error: "rehydration deadline exceeded"})
+	cells := map[string]*v1alpha1.Controller{teamCellKey("ns", "cell"): cell}
+	status := &v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell", CellNamespace: "ns"}}
+	if got := cellRehydrationEntryDeferred(status, cells, "team-a"); len(got) != 0 {
+		t.Fatalf("released give-up announced deferred %v, want none", got)
 	}
 }
 

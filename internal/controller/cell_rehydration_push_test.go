@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -108,8 +109,15 @@ func TestReconcileConnected_AutomaticCellSendsNothingForAPendingTenantWithNoBund
 				t.Fatalf("sends = %d, want 1: a tick with no bundle sends nothing", tr.sends)
 			}
 			if tc.name == "past the deadline" {
-				if e := entryFor(t, cr, "team-a"); !strings.Contains(e.Error, "deadline") {
+				e := entryFor(t, cr, "team-a")
+				if !strings.Contains(e.Error, "deadline") {
 					t.Fatalf("entry = %+v, want the deadline error", e)
+				}
+				if !e.Applied || !slices.Equal(e.Deferred, []string{"team-a/build"}) {
+					t.Fatalf("entry = %+v, want the released give-up applied with its deferred job", e)
+				}
+				if got := seedAnswerOf(&e); got.instance != cr.Status.Cell.Instance || len(got.deferred) != 0 {
+					t.Fatalf("seed answer = (%q, %v), want (%q, none)", got.instance, got.deferred, cr.Status.Cell.Instance)
 				}
 			}
 		})
@@ -133,6 +141,23 @@ func TestReconcileConnected_AutomaticCellPushesAnAttachedBundleOnAnUnchangedHash
 	}
 	if got := entryFor(t, cr, "team-a").CommandID; got != tr.last.CommandId {
 		t.Fatalf("entry command = %q, want the sent command %q", got, tr.last.CommandId)
+	}
+}
+
+// TestReconcileConnected_ResendKeepsTheAppliedSeed pins that a deferred job
+// does not drop the seed of an applied bundle: the resend that follows the
+// result carries the applied seed and its deferred job until its own result.
+func TestReconcileConnected_ResendKeepsTheAppliedSeed(t *testing.T) {
+	rec, tr, cr := newRehydrationCell(t, "cell-resend", oneJobRecords, nil)
+	tr.results = []*mitev1.CommandResult{rehydrationResult(cr, tr.last.CommandId, true, "", "team-a/build")}
+
+	tick(t, rec, cr)
+	if tr.sends != 2 || tr.last.Rehydration == nil {
+		t.Fatalf("sends = %d, bundle = %v, want a resend with a bundle", tr.sends, tr.last.Rehydration != nil)
+	}
+	e := entryFor(t, cr, "team-a")
+	if !e.Applied || !slices.Equal(e.Deferred, []string{"team-a/build"}) || e.CommandID != tr.last.CommandId {
+		t.Fatalf("entry = %+v, want the applied seed with its deferred job on the resend %q", e, tr.last.CommandId)
 	}
 }
 

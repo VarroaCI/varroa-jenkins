@@ -305,11 +305,13 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		sentTenants[tenant] = st.placement
 		// Task 6.1: written before the send, Applied false, Deferred
 		// empty, and no command ID until a delivered push stamps it.
+		// An earlier applied seed on the same generation and instance
+		// carries over, so the cell keeps answering it during the resend.
 		// Truncated and UnseededJobs are filled below, once the whole
 		// cell's cross-tenant selection is known — the failed paths
 		// already count toward it here, in case a later error return
 		// leaves this initial value standing.
-		entries = append(entries, preSendEntry(tenant, "", st.placement.Generation, cellInstance, int32(count), false, int32(len(o.failedPaths)), now))
+		entries = append(entries, carryAppliedSeed(preSendEntry(tenant, "", st.placement.Generation, cellInstance, int32(count), false, int32(len(o.failedPaths)), now), st.existing))
 	}
 
 	if len(allSeeds) == 0 {
@@ -480,13 +482,19 @@ func (r *Reconciler) appendUnseededEntry(entries []v1alpha1.CellRehydrationEntry
 }
 
 // expiredEntry answers the give-up entry of a tenant past its deadline,
-// carrying the job paths its previous entry still deferred.
+// carrying the job paths its previous entry still deferred. The give-up
+// releases those jobs only when the tenant's bundle applied earlier on
+// the same generation and cell instance.
 func expiredEntry(st rehydrationTenantState, cellInstance string, now time.Time) v1alpha1.CellRehydrationEntry {
 	var deferred []string
+	released := false
 	if st.existing != nil {
 		deferred = st.existing.Deferred
+		released = st.existing.Applied &&
+			st.existing.Generation == st.placement.Generation &&
+			st.existing.CellInstance == cellInstance
 	}
-	return deadlineEntry(st.team.Name, st.placement.Generation, cellInstance, deferred, now)
+	return deadlineEntry(st.team.Name, st.placement.Generation, cellInstance, deferred, released, now)
 }
 
 // keepTenants answers the tenants of a kept in-flight push, or nil.

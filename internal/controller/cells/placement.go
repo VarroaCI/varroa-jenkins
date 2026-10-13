@@ -1268,9 +1268,10 @@ func appendReleasedMemberPatches(ctx context.Context, in Inputs, team *v1alpha1.
 // currentRehydrationState answers the rehydrated_instance and pending_jobs
 // an announcement carries for slot 0 (design D13). The rehydrated
 // instance is the seed the bound cell itself reports through the
-// MemberSeed seam, and empty while that cell applies none; pending_jobs
-// is the caller's own PendingJobs seam (task 5.7a fills it) while not
-// applied, and empty once applied.
+// MemberSeed seam, and empty while that cell applies none. pending_jobs
+// is the caller's own PendingJobs seam (task 5.7a fills it) and does not
+// depend on the instance: a job deferred on an applied seed stays listed
+// while every other job builds.
 //
 // The seed comes from the cell and never from the Rehydrated condition.
 // The rehydration pass writes that condition after this pass runs, so a
@@ -1282,10 +1283,7 @@ func currentRehydrationState(in Inputs, cell CellCandidate) (rehydratedInstance 
 	if in.MemberSeed != nil {
 		rehydratedInstance, _ = in.MemberSeed(cell.Namespace, cell.Name)
 	}
-	if rehydratedInstance == "" {
-		return "", in.PendingJobs
-	}
-	return rehydratedInstance, nil
+	return rehydratedInstance, in.PendingJobs
 }
 
 // deadInstanceDelta answers the one dead instance to report for a rolled

@@ -1277,6 +1277,14 @@ sections describe.
   `rehydration_success` with no error, minus any path the mite deferred. A
   failed or unmatched block is never committed, so the next tick's selection
   recomputes and resends it.
+  **A deferred job does not drop the applied seed.** `applyRehydrationResult`
+  sets `Applied` from the success and the error only. `carryAppliedSeed`
+  keeps `Applied` and `Deferred` on the pre-send entry of a resend, for the
+  same generation and cell instance. `seedAnswerOf` answers an applied entry's
+  instance and its deferred jobs, so only those jobs wait. A give-up
+  (`deadlineEntry`, `released`) keeps `Applied` true only when an earlier
+  apply exists on the same generation and instance. That release answers no
+  deferred jobs. A bundle that never applied stays held as a whole.
   `cells.RehydrationPass`, called from `TeamReconciler.Reconcile` inside the
   same status patch, derives `Team.status.rehydration` and the `Rehydrated`
   condition from the tenant's own entry on the bound cell by comparing

@@ -112,3 +112,41 @@ func TestPlace_Reannounce_ReportsNoSeedWhileTheCellReportsNone(t *testing.T) {
 		t.Errorf("PendingJobs = %v, want the deferred job while not applied", got.PendingJobs)
 	}
 }
+
+// TestPlace_Reannounce_CarriesTheSeedAndTheDeferredJobs asserts an applied
+// seed with a deferred job is announced with both: the instance the cell
+// applied, and the one job that still waits.
+func TestPlace_Reannounce_CarriesTheSeedAndTheDeferredJobs(t *testing.T) {
+	in := testInputs()
+	cell := readyCell("cell-a")
+	cell.Instance = "uid-1"
+	in.Cells = []CellCandidate{cell}
+	team := testTeam()
+	status := &v1alpha1.TeamStatus{}
+
+	out1, err := Place(context.Background(), in, team, status)
+	if err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	in.MemberSeed = func(string, string) (string, []string) { return "uid-1", []string{"acme/app"} }
+	in.PendingJobs = []string{"acme/app"}
+	in.LastSync = out1.SyncCacheUpdate
+	in.Now = fixedClock(fixedNow.Add(time.Minute))
+
+	var got AnnounceRequest
+	in.Announce = func(_ context.Context, req AnnounceRequest) (AnnounceResult, error) {
+		got = req
+		return AnnounceResult{OK: true}, nil
+	}
+
+	if _, err := Place(context.Background(), in, team, status); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got.RehydratedInstance != "uid-1" {
+		t.Errorf("RehydratedInstance = %q, want uid-1", got.RehydratedInstance)
+	}
+	if len(got.PendingJobs) != 1 || got.PendingJobs[0] != "acme/app" {
+		t.Errorf("PendingJobs = %v, want [acme/app]", got.PendingJobs)
+	}
+}

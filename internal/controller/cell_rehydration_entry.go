@@ -59,12 +59,33 @@ func deadlineExceededMessage(deferred []string) string {
 // field a mite-reported failure uses — so cells.RehydrationPass (task
 // 6.5) surfaces both the same way, under Rehydrated=False/
 // RehydrationFailed.
-func deadlineEntry(tenant string, generation int64, cellInstance string, deferred []string, now time.Time) v1alpha1.CellRehydrationEntry {
+//
+// released reports whether the tenant's bundle applied earlier on this
+// generation and cell instance. A released give-up keeps Applied true,
+// so the deferred jobs build with no seeded history. A give-up of a
+// bundle that never applied keeps Applied false, so the whole tenant
+// stays held.
+func deadlineEntry(tenant string, generation int64, cellInstance string, deferred []string, released bool, now time.Time) v1alpha1.CellRehydrationEntry {
 	at := metav1.NewTime(now)
 	return v1alpha1.CellRehydrationEntry{
 		Tenant: tenant, Generation: generation, CellInstance: cellInstance,
-		Deferred: deferred, Error: deadlineExceededMessage(deferred), At: &at,
+		Deferred: deferred, Error: deadlineExceededMessage(deferred),
+		Applied: released, At: &at,
 	}
+}
+
+// carryAppliedSeed keeps the applied flag and the deferred list of an
+// existing entry for the same generation and cell instance. The seed of
+// an earlier apply stays on the cell while a resend is outstanding. The
+// Error of the existing entry is not carried.
+func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
+	if existing == nil || !existing.Applied ||
+		existing.Generation != next.Generation || existing.CellInstance != next.CellInstance {
+		return next
+	}
+	next.Applied = true
+	next.Deferred = append([]string(nil), existing.Deferred...)
+	return next
 }
 
 // seedAnswer is the seed state of one tenant on one member cell: the cell
@@ -76,12 +97,19 @@ type seedAnswer struct {
 
 // seedAnswerOf returns the seed answer that the Team reconciler reads from
 // one rehydration entry. An entry that is not applied answers no instance,
-// which holds every build on the member until its seed lands.
+// which holds every build on the member until its seed lands. An applied
+// entry answers its instance and its deferred jobs, so only those jobs
+// wait. A released give-up is applied with an error and answers no
+// deferred jobs, so they build with no seeded history.
 func seedAnswerOf(e *v1alpha1.CellRehydrationEntry) seedAnswer {
-	if !e.Applied {
+	switch {
+	case !e.Applied:
 		return seedAnswer{deferred: e.Deferred}
+	case e.Error != "":
+		return seedAnswer{instance: e.CellInstance}
+	default:
+		return seedAnswer{instance: e.CellInstance, deferred: e.Deferred}
 	}
-	return seedAnswer{instance: e.CellInstance, deferred: e.Deferred}
 }
 
 // seedAnswersOf maps each tenant of a cell to its seed answer. A cell with
@@ -131,8 +159,8 @@ func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
 // rehydrationError applies to every one of them, because the mite
 // applies the rehydration section as one unit; each tenant otherwise
 // gets its own deferred job paths (already partitioned by
-// partitionDeferredJobs) and an Applied flag derived from success, the
-// error, and its own deferred list.
+// partitionDeferredJobs). A deferred job does not clear Applied: the
+// flag is derived from success and the error only.
 func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID string, success bool, rehydrationError string, deferredByTenant map[string][]string, now time.Time) []v1alpha1.CellRehydrationEntry {
 	out := make([]v1alpha1.CellRehydrationEntry, len(entries))
 	at := metav1.NewTime(now)
@@ -144,7 +172,7 @@ func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID s
 		tenantDeferred := deferredByTenant[e.Tenant]
 		e.Deferred = tenantDeferred
 		e.Error = rehydrationError
-		e.Applied = success && rehydrationError == "" && len(tenantDeferred) == 0
+		e.Applied = success && rehydrationError == ""
 		e.At = &at
 		out[i] = e
 	}
