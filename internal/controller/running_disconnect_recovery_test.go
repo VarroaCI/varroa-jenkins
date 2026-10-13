@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -208,5 +209,110 @@ func TestHandleRunning_KeepsValidBootstrapToken(t *testing.T) {
 
 	if _, rotated := client.createdSecrets[pre+"-bootstrap"]; rotated {
 		t.Fatal("expected no rotation of a still-valid bootstrap token")
+	}
+}
+
+// reconnectingCtrl builds a Running controller whose mite stream was lost a
+// minute ago and that connected before, so the next connect is a reconnect.
+func reconnectingCtrl(t *testing.T, name string) *v1alpha1.Controller {
+	t.Helper()
+	cr := newGateCtrl(name, 0, "", nil)
+	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
+	first := metav1.NewTime(time.Now().Add(-time.Hour))
+	cr.Status.FirstConnectedAt = &first
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{streamLostCond(time.Now().Add(-time.Minute))}
+	return cr
+}
+
+// TestReconcileRunning_ReconnectPushesInSamePass asserts that the reconcile
+// which sees a reconnected mite both moves the controller to Connected and
+// sends the desired state, so the push does not wait for the next tick.
+func TestReconcileRunning_ReconnectPushesInSamePass(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
+	rec.miteTransport = tr
+
+	cr := reconnectingCtrl(t, "reconnect-push")
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileController: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Fatalf("phase = %s, want Connected", cr.Status.Phase)
+	}
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d after the connect pass, want 1", tr.sends)
+	}
+	if cr.Status.DesiredStateHash == "" || cr.Status.LastDesiredPushAt == nil {
+		t.Fatal("the connect pass sent no desired state (hash or push time unset)")
+	}
+
+	// The same connection epoch on the next pass sends nothing more.
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("second reconcileController: %v", err)
+	}
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d after a same-epoch pass, want 1", tr.sends)
+	}
+
+	// A new connection epoch forces a fresh push.
+	tr.epoch = 2
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("third reconcileController: %v", err)
+	}
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d after a new epoch, want 2", tr.sends)
+	}
+}
+
+// TestReconcileRunning_ForceReprovisionWaitsForConnectedPass asserts that an
+// armed force-reprovision annotation keeps the connect pass from chaining the
+// push, because only a pass that starts in Connected consumes it.
+func TestReconcileRunning_ForceReprovisionWaitsForConnectedPass(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
+	rec.miteTransport = tr
+
+	cr := reconnectingCtrl(t, "reconnect-force")
+	cr.Annotations = map[string]string{annotationForceReprovision: time.Now().Format(time.RFC3339Nano)}
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcileController: %v", err)
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Fatalf("phase = %s, want Connected", cr.Status.Phase)
+	}
+	if tr.sends != 0 {
+		t.Fatalf("sends = %d with force-reprovision armed, want 0 on the connect pass", tr.sends)
+	}
+}
+
+// TestReconcileRunning_ChainedPushFailureKeepsConnected asserts that a failed
+// chained push returns its error and still persists the Connected phase, so
+// the Running timeout guard cannot fail a connected controller.
+func TestReconcileRunning_ChainedPushFailureKeepsConnected(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, sendErr: errors.New("marshal failed"), epoch: 1}
+	rec.miteTransport = tr
+
+	cr := reconnectingCtrl(t, "reconnect-fail")
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.reconcileController(context.Background(), cr); err == nil {
+		t.Fatal("reconcileController returned nil; want the chained push error")
+	}
+	if cr.Status.Phase != v1alpha1.ControllerPhaseConnected {
+		t.Fatalf("in-memory phase = %s after a chained failure, want Connected", cr.Status.Phase)
+	}
+	if got := client.statuses[cr.Name]; got != string(v1alpha1.ControllerPhaseConnected) {
+		t.Fatalf("persisted phase = %q after a chained failure, want Connected", got)
 	}
 }

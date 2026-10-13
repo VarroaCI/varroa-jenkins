@@ -42,7 +42,7 @@ The effective reconciliation policy controls termination draining. The default d
 
 ## Credential Delivery
 
-The desired-state command carries tenant credentials, runner SSH keys, and the mite's Jenkins token. NATS stores no copy. The operator sends each command to the gateway that holds the mite stream. A reconnecting mite gets the command on the operator's next push. While the operator is down, it gets no desired state, and a restarted cell starts without tenant credentials. A token grant can stay queued in JetStream for up to 24 hours.
+The desired-state command carries tenant credentials, runner SSH keys, and the mite's Jenkins token. NATS stores no copy. The operator sends each command to the gateway that holds the mite stream. The operator usually pushes the command to a reconnecting mite in the reconcile that sees the new connection. A failed runner read, an armed force-reprovision annotation, or a pod roll moves the push to a later reconcile. While the operator is down, it gets no desired state, and a restarted cell starts without tenant credentials. A token grant can stay queued in JetStream for up to 24 hours.
 
 ## Build Claims and Build Events
 

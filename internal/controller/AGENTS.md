@@ -200,7 +200,13 @@ sections describe.
     `MiteConnected=True/StreamRestored` only when the condition already
     exists. `nextRequeueDuration` requeues a `Running` + `StreamLost`
     controller at `streamLostRequeue` (15 s); nothing else wakes it on a
-    reconnect.
+    reconnect. When `handleRunning` moves the phase to `Connected`, the same
+    pass runs `reconcileHeadlessRoll`, `reconcileArtifactSecretRoll`, and
+    `handleConnected` (`runConnectedAfterRunning`), so the first desired-state
+    push follows the connect. The chain runs only after a good runner
+    contribution read and with no armed force-reprovision annotation. A chained
+    error writes the status before it returns. The brood `connected` event wakes
+    the owning replica.
   - Before dispatching to `handleRunning`/`handleConnected`, `reconcileController`
     runs `reconcileVersionRoll` then (if it didn't already transition)
     `reconcileContainerSpecRoll`, then `reconcileMiteTransportEnvRoll`

@@ -2874,6 +2874,9 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		r.deleteWakeSlice(ctx, cr, logger)
 	}
 
+	// eventFrom is the phase the end-of-pass phase event starts from. A pass
+	// that runs the Connected handler after handleRunning moves it forward.
+	eventFrom := oldPhase
 	if !rolled {
 		switch oldPhase {
 		case "":
@@ -2890,6 +2893,11 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			err = r.handleProvisioning(ctx, cr)
 		case v1alpha1.ControllerPhaseRunning:
 			err = r.handleRunning(ctx, cr)
+			if err == nil && r.connectsInSamePass(cr, contribErr) {
+				r.emitPhaseEvent(cr, oldPhase)
+				eventFrom = v1alpha1.ControllerPhaseConnected
+				err = r.runConnectedAfterRunning(ctx, cr, contrib)
+			}
 		case v1alpha1.ControllerPhaseConnected:
 			if contribErr != nil {
 				return fmt.Errorf("build runner contribution: %w", contribErr)
@@ -2928,8 +2936,8 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	r.evaluateCellReadiness(ctx, cr, time.Now())
 
 	// Emit phase transition events if the phase changed.
-	if cr.Status.Phase != oldPhase {
-		r.emitPhaseEvent(cr, oldPhase)
+	if cr.Status.Phase != eventFrom {
+		r.emitPhaseEvent(cr, eventFrom)
 	}
 
 	return nil
@@ -5018,6 +5026,33 @@ func isPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// connectsInSamePass reports whether a pass that moved the phase from
+// Running to Connected runs the Connected handler too. A failed runner
+// contribution read waits for the next pass, which returns that error
+// before any publish. An armed force-reprovision annotation also waits,
+// because only a pass that starts in Connected consumes it.
+func (r *Reconciler) connectsInSamePass(cr *v1alpha1.Controller, contribErr error) bool {
+	return cr.Status.Phase == v1alpha1.ControllerPhaseConnected &&
+		contribErr == nil &&
+		cr.Annotations[annotationForceReprovision] == ""
+}
+
+// runConnectedAfterRunning runs the Connected-only roll checks and then
+// handleConnected, so the first desired-state push follows a mite connect
+// in the same pass. A failed reconcile writes no status, so on an error
+// this writes the status first. Otherwise the Connected phase is lost and
+// the Running timeout guard can fail a connected controller.
+func (r *Reconciler) runConnectedAfterRunning(ctx context.Context, cr *v1alpha1.Controller, contrib runners.RunnerContribution) error {
+	if r.reconcileHeadlessRoll(ctx, cr) || r.reconcileArtifactSecretRoll(ctx, cr) {
+		return nil
+	}
+	err := r.handleConnected(ctx, cr, contrib)
+	if err != nil && ctx.Err() == nil {
+		r.persistStatusDiagnostics(ctx, cr)
+	}
+	return err
 }
 
 func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller) error {
