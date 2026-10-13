@@ -3,5 +3,5 @@ jenkins:
     varroaMiteAuth:
       oidcIssuer: "https://dex.example/dex"
       userClaimNames: "login,sub"
-      groupClaimName: "memberOf"
+      groupClaimNames: "memberOf,roles"
       localIssuer: "https://varroa.example"

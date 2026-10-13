@@ -557,10 +557,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	userClaims := strings.Split(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), ",")
-	groupClaims := strings.Split(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), ",")
+	userClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"))
+	groupClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"))
 	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer, *defaultRead,
-		userClaims, groupClaims)
+		userClaims)
 	authorizer := api.NewAuthorizer(rbacResolver, *defaultRead)
 	configBrood := api.NewBusConfigBrood(cluster, busConn, client, clientsetClient, logger)
 	rbacFederation := api.NewRBACFederationReconciler(
@@ -632,7 +632,6 @@ func main() {
 		OperatorNamespace: operatorNamespace,
 		ManagedNamespaces: managedNamespaces,
 		Logger:            logger,
-		OIDCGroupClaims:   groupClaims,
 		Reconciler:        reconcilerProxy,
 		DashboardHost:     dashboardHost,
 		DashboardURL:      *dashboardURL,
@@ -930,6 +929,7 @@ func main() {
 				os.Exit(1)
 			}
 			validator.SetCookieDomain(*oidcCookieDomain)
+			validator.SetClaimNames(userClaims, groupClaims)
 			provider = validator
 
 			logger.Info("OIDC auth enabled", "issuer", *oidcIssuer, "endSessionSupported", validator.EndSessionEndpoint() != "")

@@ -108,14 +108,14 @@ type Resolver struct {
 	teamLister              cache.GenericLister
 	defaultRead             bool
 	userClaimNames          []string // e.g. ["sub", "preferred_username"]
-	groupClaimNames         []string // e.g. ["groups"]
 }
 
 // NewResolver creates a new Resolver backed by the given informers.
 // roleBindingInformer must be configured with BySubjectIndex.
 // jenkinsRoleBindingInformer must be configured with JenkinsBySubjectIndex.
-// userClaimNames and groupClaimNames map JWT claims to VarroaRoleBinding
-// subject kinds (e.g. --oidc-user-claim=sub,preferred_username).
+// userClaimNames map JWT claims to VarroaRoleBinding User subjects (e.g.
+// sub,preferred_username). Group subjects read Claims.Groups, which the OIDC
+// validator resolves from the configured group claims.
 // teamInformer feeds tenant capability resolution's Team-membership path. A
 // nil teamInformer leaves that path contributing nothing; the operator
 // passes nil because it resolves Jenkins assignments, never HTTP
@@ -128,7 +128,7 @@ func NewResolver(
 	controllerInformer cache.SharedIndexInformer,
 	teamInformer cache.SharedIndexInformer,
 	defaultRead bool,
-	userClaimNames, groupClaimNames []string,
+	userClaimNames []string,
 ) *Resolver {
 	r := &Resolver{
 		roleLister: cache.NewGenericLister(
@@ -145,9 +145,8 @@ func NewResolver(
 			controllerInformer.GetIndexer(),
 			schema.GroupResource{Group: "varroa.dev", Resource: "controllers"},
 		),
-		defaultRead:     defaultRead,
-		userClaimNames:  userClaimNames,
-		groupClaimNames: groupClaimNames,
+		defaultRead:    defaultRead,
+		userClaimNames: userClaimNames,
 	}
 	if teamInformer != nil {
 		r.teamLister = cache.NewGenericLister(
@@ -178,11 +177,11 @@ func (r *Resolver) EffectiveAPICapabilities(claims *auth.Claims, namespace, cont
 		return caps
 	}
 
-	// Build subject keys from the configured JWT claims.
-	// Which claims are used is controlled by --oidc-user-claim and
-	// --oidc-group-claim flags (e.g. "sub,preferred_username" and "groups").
+	// Build subject keys from the claims. Users come from the configured
+	// user claims (--oidc-user-claim, e.g. "sub,preferred_username"); groups
+	// come from Claims.Groups.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -273,7 +272,7 @@ func (r *Resolver) EffectiveClusterAPICapabilities(claims *auth.Claims) APICapab
 	}
 
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -355,7 +354,7 @@ func (r *Resolver) EffectivePermissionScopes(claims *auth.Claims) PermissionScop
 
 	// Build subject keys from the configured JWT claims.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -533,7 +532,7 @@ func (r *Resolver) CreateScopeNamespaces(claims *auth.Claims) (namespaces []stri
 
 	// Build subject keys exactly as EffectiveAPICapabilities does.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -647,7 +646,7 @@ func (r *Resolver) EffectiveTenantCapabilities(claims *auth.Claims, ref ParsedTe
 	// Build subject keys from the configured JWT claims, exactly as
 	// EffectiveAPICapabilities does.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -1485,4 +1484,17 @@ func scopeSuffix(js *v1alpha1.JenkinsScope) string {
 	default:
 		return ""
 	}
+}
+
+// groupValues returns the non-empty, de-duplicated group names of a credential.
+func groupValues(c *auth.Claims) []string {
+	var vals []string
+	seen := map[string]bool{}
+	for _, v := range c.Groups {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			vals = append(vals, v)
+		}
+	}
+	return vals
 }

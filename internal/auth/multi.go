@@ -23,17 +23,30 @@ func IsLocalSession(claims *Claims) bool {
 	return claims != nil && strings.HasPrefix(claims.Subject, LocalSubjectPrefix)
 }
 
-// RefuseLocalPrefix returns ErrLocalPrefixFromIdP when IdP claims use the
-// prefix that only a local account beside OIDC may carry.
+// RefuseLocalPrefix returns ErrLocalPrefixFromIdP when any user identity
+// value of an IdP token uses the prefix that only a local account beside OIDC
+// may carry. It checks the four standard user claims and every configured
+// custom user claim. The check ignores surrounding space and letter case.
 func RefuseLocalPrefix(claims *Claims) error {
 	if claims == nil {
 		return nil
 	}
-	if strings.HasPrefix(claims.Subject, LocalSubjectPrefix) ||
-		strings.HasPrefix(claims.PreferredUsername, LocalSubjectPrefix) {
+	if hasLocalPrefix(claims.Subject) || hasLocalPrefix(claims.PreferredUsername) ||
+		hasLocalPrefix(claims.Email) || hasLocalPrefix(claims.Name) {
 		return ErrLocalPrefixFromIdP
 	}
+	for _, v := range claims.Extra {
+		if hasLocalPrefix(v) {
+			return ErrLocalPrefixFromIdP
+		}
+	}
 	return nil
+}
+
+// hasLocalPrefix reports whether v starts with LocalSubjectPrefix after
+// surrounding space is removed and letter case is ignored.
+func hasLocalPrefix(v string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(v)), LocalSubjectPrefix)
 }
 
 // MultiProvider accepts sessions from the OIDC issuer and from the local

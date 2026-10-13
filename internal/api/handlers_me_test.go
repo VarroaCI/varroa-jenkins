@@ -864,7 +864,7 @@ func TestHandleMePermissions_AuthenticatedScopedCaller(t *testing.T) {
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		nil,
-		false, []string{"sub"}, []string{"groups"},
+		false, []string{"sub"},
 	)
 
 	client := newFakeResourceClient()
@@ -973,7 +973,7 @@ func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: teamIdx},
-		false, []string{"sub"}, []string{"groups"},
+		false, []string{"sub"},
 	)
 
 	client := newFakeResourceClient()

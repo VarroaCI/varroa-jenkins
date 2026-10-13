@@ -7055,7 +7055,7 @@ func generateRealmDocument() string {
       oidcIssuer: "${VARROA_OIDC_ISSUER}"
       localIssuer: "${VARROA_LOCAL_ISSUER:-}"
       userClaimNames: "${VARROA_OIDC_USER_CLAIM}"
-      groupClaimName: "${VARROA_OIDC_GROUP_CLAIM}"
+      groupClaimNames: "${VARROA_OIDC_GROUP_CLAIM}"
 `
 }
 

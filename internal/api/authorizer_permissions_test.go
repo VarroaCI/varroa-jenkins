@@ -47,7 +47,7 @@ func testResolverWithTeams(
 	teamInf := &fakeInformer{indexer: teamIdx}
 
 	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, teamInf, false,
-		[]string{"sub", "preferred_username"}, []string{"groups"})
+		[]string{"sub", "preferred_username"})
 }
 
 // TestEffectivePermissions_TenantsNeverNil proves /me/permissions carries a

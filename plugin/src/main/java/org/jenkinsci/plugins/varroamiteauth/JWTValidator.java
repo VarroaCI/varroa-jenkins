@@ -265,22 +265,29 @@ public class JWTValidator {
     }
 
     /**
-     * Extracts the groups claim from a validated JWT claims map using a
-     * configurable claim name. The OIDC provider returns groups as a JSON array
-     * of strings.
+     * Extracts the group values of the named claims from a validated JWT claims
+     * map. Each claim holds a JSON array of strings or one string. A string is
+     * never split. Other shapes are ignored. Claim names match literally. The
+     * result keeps first-seen order without duplicates. A null or empty name
+     * list reads the {@code groups} claim.
      */
-    public static List<String> getGroups(Map<String, Object> claims, String claimName) {
-        Object groupsObj = claims.get(claimName != null ? claimName : "groups");
-        if (!(groupsObj instanceof List)) {
-            return List.of();
-        }
-        List<String> groups = new java.util.ArrayList<>();
-        for (Object g : (List<?>) groupsObj) {
-            if (g instanceof String && !((String) g).isEmpty()) {
-                groups.add((String) g);
+    public static List<String> getGroups(Map<String, Object> claims, List<String> claimNames) {
+        List<String> names = claimNames == null || claimNames.isEmpty()
+                ? List.of("groups") : claimNames;
+        java.util.Set<String> groups = new java.util.LinkedHashSet<>();
+        for (String name : names) {
+            Object value = claims.get(name);
+            if (value instanceof String && !((String) value).isEmpty()) {
+                groups.add((String) value);
+            } else if (value instanceof List) {
+                for (Object g : (List<?>) value) {
+                    if (g instanceof String && !((String) g).isEmpty()) {
+                        groups.add((String) g);
+                    }
+                }
             }
         }
-        return groups;
+        return new java.util.ArrayList<>(groups);
     }
 
     /**

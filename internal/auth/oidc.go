@@ -10,13 +10,21 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Claims holds the OIDC token claims we care about.
+// Claims holds the identity of a verified credential.
+//
+// Groups is the resolved group set for every credential type. An IdP
+// session fills it from the configured group claims at verify time. A local,
+// LDAP, API-key, or operator user credential fills it from its own groups.
 type Claims struct {
 	Subject           string   `json:"sub"`
 	Email             string   `json:"email"`
 	Name              string   `json:"name"`
 	PreferredUsername string   `json:"preferred_username"`
-	Groups            []string `json:"groups"`
+	Groups            []string `json:"-"`
+
+	// Extra holds the configured user claims outside the four fixed fields.
+	// Only an IdP session and a ticket minted from one carry it.
+	Extra map[string]string `json:"-"`
 
 	// IssuedAt is the session token issue time. It is zero when the credential has no session token.
 	IssuedAt time.Time `json:"-"`
@@ -37,22 +45,6 @@ func (c *Claims) UserValues(claimNames []string) []string {
 	return vals
 }
 
-// GroupValues returns the values of the configured group claims.
-// Used by the resolver to build subject keys for kind:Group bindings.
-func (c *Claims) GroupValues(claimNames []string) []string {
-	var vals []string
-	seen := map[string]bool{}
-	for _, name := range claimNames {
-		for _, v := range c.groupClaim(name) {
-			if v != "" && !seen[v] {
-				seen[v] = true
-				vals = append(vals, v)
-			}
-		}
-	}
-	return vals
-}
-
 func (c *Claims) userClaim(name string) string {
 	switch name {
 	case "sub":
@@ -64,17 +56,51 @@ func (c *Claims) userClaim(name string) string {
 	case "preferred_username":
 		return c.PreferredUsername
 	default:
-		return ""
+		return c.Extra[name]
 	}
 }
 
-func (c *Claims) groupClaim(name string) []string {
-	switch name {
-	case "groups":
-		return c.Groups
-	default:
-		return nil
+// ParseClaimNames splits a comma-separated claim name list. It trims each
+// name, drops empty names, and removes duplicates. It keeps the order.
+func ParseClaimNames(csv string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(csv, ",") {
+		name := strings.TrimSpace(raw)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
 	}
+	return names
+}
+
+// claimStrings returns the string values of the named claims in raw. A claim
+// holds a JSON array of strings or one string. Every other shape is ignored.
+// A string is never split. The result keeps first-seen order without duplicates.
+func claimStrings(raw map[string]any, names []string) []string {
+	var vals []string
+	seen := map[string]bool{}
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			vals = append(vals, v)
+		}
+	}
+	for _, name := range names {
+		switch v := raw[name].(type) {
+		case string:
+			add(v)
+		case []any:
+			for _, elem := range v {
+				if s, ok := elem.(string); ok {
+					add(s)
+				}
+			}
+		}
+	}
+	return vals
 }
 
 // OIDCProvider is the subset of Validator used by the OIDC auth handlers.
@@ -97,6 +123,8 @@ type Validator struct {
 	oauth2Cfg          oauth2.Config
 	cookieDomain       string // optional domain for varroa_token cookie
 	endSessionEndpoint string // cached from OIDC discovery; empty when absent
+	userClaims         []string
+	groupClaims        []string
 }
 
 // NewValidator creates a new OIDC validator by fetching the OIDC discovery
@@ -120,9 +148,11 @@ func NewValidator(ctx context.Context, issuer, clientID, clientSecret, redirectU
 	}
 
 	v := &Validator{
-		provider:  provider,
-		verifier:  verifier,
-		oauth2Cfg: oauth2Cfg,
+		provider:    provider,
+		verifier:    verifier,
+		oauth2Cfg:   oauth2Cfg,
+		userClaims:  []string{"preferred_username", "sub"},
+		groupClaims: []string{"groups"},
 	}
 
 	// Fetch optional end_session_endpoint from provider discovery metadata.
@@ -135,6 +165,18 @@ func NewValidator(ctx context.Context, issuer, clientID, clientSecret, redirectU
 	}
 
 	return v, nil
+}
+
+// SetClaimNames sets the configured user and group claim names. An empty
+// list keeps the default for that kind: preferred_username, sub for users and
+// groups for groups.
+func (v *Validator) SetClaimNames(userClaims, groupClaims []string) {
+	if len(userClaims) > 0 {
+		v.userClaims = userClaims
+	}
+	if len(groupClaims) > 0 {
+		v.groupClaims = groupClaims
+	}
 }
 
 // AuthCodeURL returns the URL to redirect the user to for authentication.
@@ -187,13 +229,10 @@ func (v *Validator) VerifyToken(ctx context.Context, rawToken string) (*Claims, 
 	if err != nil {
 		return nil, fmt.Errorf("verify token: %w", err)
 	}
-
-	claims := &Claims{}
-	if err := idToken.Claims(claims); err != nil {
+	claims, err := v.claimsFrom(idToken)
+	if err != nil {
 		return nil, fmt.Errorf("parse claims: %w", err)
 	}
-	claims.IssuedAt = idToken.IssuedAt
-
 	return claims, nil
 }
 
@@ -203,9 +242,33 @@ func (v *Validator) VerifyTokenQuiet(ctx context.Context, rawToken string) (*Cla
 	if err != nil {
 		return nil, err
 	}
+	return v.claimsFrom(idToken)
+}
+
+// claimsFrom reads the fixed identity fields and the configured claims of a
+// verified ID token. Groups always comes from the configured group claims, so
+// a groups claim that is not configured never leaks in.
+func (v *Validator) claimsFrom(idToken *oidc.IDToken) (*Claims, error) {
 	claims := &Claims{}
 	if err := idToken.Claims(claims); err != nil {
 		return nil, err
+	}
+	raw := map[string]any{}
+	if err := idToken.Claims(&raw); err != nil {
+		return nil, err
+	}
+	claims.Groups = claimStrings(raw, v.groupClaims)
+	for _, name := range v.userClaims {
+		switch name {
+		case "sub", "email", "name", "preferred_username":
+			continue
+		}
+		if s, ok := raw[name].(string); ok && s != "" {
+			if claims.Extra == nil {
+				claims.Extra = map[string]string{}
+			}
+			claims.Extra[name] = s
+		}
 	}
 	claims.IssuedAt = idToken.IssuedAt
 	return claims, nil

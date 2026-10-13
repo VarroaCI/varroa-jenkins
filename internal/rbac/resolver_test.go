@@ -1130,7 +1130,7 @@ func testResolverWithJenkins(
 	}
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	return NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, defaultRead, []string{"sub", "preferred_username"}, []string{"groups"})
+	return NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, defaultRead, []string{"sub", "preferred_username"})
 }
 
 // TestJenkinsRoleAssignments_MiteUsesGroupAuthority verifies the synthesized

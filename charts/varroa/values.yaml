@@ -466,9 +466,12 @@ auth:
     redirectUrl: ""
     # -- Comma-separated OIDC scopes. Default: openid,profile,email,groups.
     scopes: ""
-    # -- Comma-separated JWT claims for kind:User bindings. Default: preferred_username,sub.
+    # -- Comma-separated top-level JWT claims for kind:User bindings. Each claim is a string.
+    # Keep preferred_username or sub in the list. Default: preferred_username,sub.
     userClaim: ""
-    # -- Comma-separated JWT claims for kind:Group bindings. Default: groups.
+    # -- Comma-separated top-level JWT claims for kind:Group bindings. Each claim is an
+    # array of strings or one string; a string is not split. Nested claims are not read.
+    # Default: groups.
     groupClaim: ""
     # -- OIDC shared state signing secret (32+ bytes, base64). Auto-generated on
     # first install; preserved across upgrades via Helm lookup. Must be identical

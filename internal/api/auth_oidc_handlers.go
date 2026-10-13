@@ -318,11 +318,11 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !hasGroups(claims, s.deps.OIDCGroupClaims) {
+	if !hasGroups(claims) {
 		s.deps.Logger.Warn("user has zero groups in ID token, RBAC group-based permissions will not apply",
 			"email", claims.Email,
 			"subject", claims.Subject,
-			"hint", "Request the groups scope (auth.oidc.scopes). With Dex, set loadAllGroups on github or gitea connectors and insecureEnableGroups on oidc connectors. With direct OIDC, configure the provider to send a groups claim.")
+			"hint", "Request the groups scope (auth.oidc.scopes) and set auth.oidc.groupClaim to the claim that carries groups. With Dex, set loadAllGroups on github or gitea connectors and insecureEnableGroups on oidc connectors. With direct OIDC, configure the provider to send a groups claim.")
 	} else {
 		s.deps.Logger.Info("user authenticated",
 			"email", claims.Email,
@@ -411,8 +411,7 @@ func (s *Server) deleteCookie(w http.ResponseWriter, name, path string) {
 	})
 }
 
-// hasGroups reports whether the token carries a group value under one of
-// the configured group claim names.
-func hasGroups(claims *auth.Claims, groupClaimNames []string) bool {
-	return len(claims.GroupValues(groupClaimNames)) > 0
+// hasGroups reports whether the resolved group set of the token is not empty.
+func hasGroups(claims *auth.Claims) bool {
+	return len(claims.Groups) > 0
 }

@@ -42,6 +42,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
@@ -76,7 +77,7 @@ func main() {
 	oidcClientSecret := flag.String("oidc-client-secret", envDefault("VARROA_OIDC_CLIENT_SECRET", ""), "OIDC client secret")
 	oidcRedirectURL := flag.String("oidc-redirect-url", envDefault("VARROA_OIDC_REDIRECT_URL", ""), "OIDC redirect URL (for Varroa login link)")
 	oidcUserClaim := flag.String("oidc-user-claim", envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), "comma-separated JWT claims for kind:User bindings")
-	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings")
+	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings inside Jenkins")
 	defaultRead := flag.Bool("default-read", false, "Allow any authenticated user to read controllers without explicit binding")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
@@ -518,13 +519,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	userClaims := strings.Split(*oidcUserClaim, ",")
-	groupClaims := strings.Split(*oidcGroupClaim, ",")
+	userClaims := auth.ParseClaimNames(*oidcUserClaim)
 	// The operator resolves Jenkins assignments, never HTTP capabilities,
 	// and has no Team informer today; a nil teamInformer leaves the
 	// Team-membership tenant path contributing nothing.
 	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, nil,
-		*defaultRead, userClaims, groupClaims)
+		*defaultRead, userClaims)
 	rbacGen := rbac.NewGenerator(rbacResolver)
 	rbacGen.Logger = logger
 

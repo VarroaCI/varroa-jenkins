@@ -41,7 +41,7 @@ func testResolverWithControllers(roles []*v1alpha1.VarroaRole, bindings []*v1alp
 	}
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"}, []string{"groups"})
+	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"})
 }
 
 // activityScopeShape names the four real VarroaRoleBindingScope shapes.

@@ -28,7 +28,6 @@ func NewTestResolver() *Resolver {
 		controllerLister:        cache.NewGenericLister(controllerIndexer, schema.GroupResource{Group: "varroa.dev", Resource: "controllers"}),
 		defaultRead:             true,
 		userClaimNames:          []string{"sub", "preferred_username"},
-		groupClaimNames:         []string{"groups"},
 	}
 }
 

@@ -49,7 +49,6 @@ func testTenantResolver(
 		&fakeInformer{indexer: teamIdx},
 		false,
 		[]string{"sub", "preferred_username"},
-		[]string{"groups"},
 	)
 }
 

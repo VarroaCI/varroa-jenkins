@@ -32,6 +32,54 @@ dex:
 Register the exact redirect URL with the provider. `dashboardUrl` must be an
 absolute HTTPS origin. Check the username and groups in `/api/v1/me`.
 
+## Map token claims to users and groups
+
+`oidc.userClaim` and `oidc.groupClaim` name the ID token claims that Varroa reads.
+Each setting takes a comma-separated list of claim names.
+
+- Varroa reads each named claim from the ID token. Names match literally.
+- A group claim holds a JSON array of strings or one string. Each value is one group name.
+- Varroa does not split a string. A value with a comma or a space stays one group name.
+- Other claim shapes are ignored.
+- Nested claims are not read. `realm_access.roles` does not work. In Keycloak, add a
+  protocol mapper that writes the roles to a top-level claim, and name that claim.
+- A user claim can be any top-level string claim.
+- Keep `preferred_username` or `sub` in `userClaim`. Other credentials do not carry
+  custom claims. Each credential type sets these fields:
+  - Local and LDAP session tokens set `sub`, `preferred_username`, `email`, `name`,
+    and `groups`.
+  - An API key sets the stored `subject`, `preferred_username`, `email`, `name`, and
+    the owner's groups.
+  - A schedule credential sets all four identity fields to the schedule subject. It
+    carries no groups.
+- A token whose subject, standard user claim, or configured user claim starts with
+  `local:` is refused. The check ignores surrounding space and letter case. The
+  prefix is reserved for local accounts.
+- Group values from an IdP token are not checked for the prefix. Group subjects use
+  a separate key kind, so a group value cannot match a user binding.
+- The same claim names apply to the dashboard and to every Jenkins controller.
+
+For AWS Cognito groups, set the group claim to the Cognito claim name:
+
+```yaml
+auth:
+  oidc:
+    userClaim: preferred_username,sub
+    groupClaim: cognito:groups
+```
+
+For a provider that writes groups to a `roles` claim:
+
+```yaml
+auth:
+  oidc:
+    userClaim: preferred_username,sub
+    groupClaim: roles
+```
+
+When a user signs in with no groups, the BFF logs
+`user has zero groups in ID token`. Check the group claim name when you see this message.
+
 ## Use Dex as an OIDC broker
 
 Use Dex when a provider needs a Dex connector.

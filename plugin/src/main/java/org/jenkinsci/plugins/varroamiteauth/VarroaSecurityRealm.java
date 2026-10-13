@@ -42,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -88,7 +89,8 @@ public class VarroaSecurityRealm extends SecurityRealm {
     // Test seam for VARROA_LOGIN_URL, which is otherwise read from the environment.
     String loginUrlForTest;
     private final List<String> userClaimNames;
-    private final String groupClaimName;
+    // Non-final: an older config.xml leaves it null, and readResolve sets the default.
+    private List<String> groupClaimNames;
 
     // Stapler.getCurrentRequest() returns null inside authenticate() because
     // SecurityFilter calls authenticate BEFORE Stapler dispatches the request.
@@ -110,11 +112,11 @@ public class VarroaSecurityRealm extends SecurityRealm {
      * Data-bound constructor for JCasC.
      *
      * @param oidcIssuer      OIDC issuer URL; defaults to {@code VARROA_OIDC_ISSUER} when empty
-     * @param userClaimNames  comma-separated claim names for user identity; defaults to {@code VARROA_OIDC_USER_CLAIM}
-     * @param groupClaimName  claim name for group memberships; defaults to {@code VARROA_OIDC_GROUP_CLAIM}
+     * @param userClaimNames   comma-separated claim names for user identity; defaults to {@code VARROA_OIDC_USER_CLAIM}
+     * @param groupClaimNames  comma-separated claim names for group memberships; defaults to {@code VARROA_OIDC_GROUP_CLAIM}
      */
     @DataBoundConstructor
-    public VarroaSecurityRealm(String oidcIssuer, String userClaimNames, String groupClaimName) {
+    public VarroaSecurityRealm(String oidcIssuer, String userClaimNames, String groupClaimNames) {
         if (oidcIssuer == null || oidcIssuer.isEmpty()) {
             oidcIssuer = System.getenv("VARROA_OIDC_ISSUER");
         }
@@ -124,19 +126,34 @@ public class VarroaSecurityRealm extends SecurityRealm {
         if (userClaimNames == null || userClaimNames.isEmpty()) {
             userClaimNames = System.getenv("VARROA_OIDC_USER_CLAIM");
         }
-        if (userClaimNames != null && !userClaimNames.isEmpty()) {
-            this.userClaimNames = Arrays.asList(userClaimNames.split(","));
-        } else {
-            this.userClaimNames = Arrays.asList("preferred_username", "sub");
-        }
+        List<String> users = parseClaimNames(userClaimNames);
+        this.userClaimNames = users.isEmpty() ? Arrays.asList("preferred_username", "sub") : users;
 
-        if (groupClaimName == null || groupClaimName.isEmpty()) {
-            groupClaimName = System.getenv("VARROA_OIDC_GROUP_CLAIM");
+        if (groupClaimNames == null || groupClaimNames.isEmpty()) {
+            groupClaimNames = System.getenv("VARROA_OIDC_GROUP_CLAIM");
         }
-        this.groupClaimName = (groupClaimName != null && !groupClaimName.isEmpty())
-                ? groupClaimName : "groups";
+        List<String> groups = parseClaimNames(groupClaimNames);
+        this.groupClaimNames = groups.isEmpty() ? List.of("groups") : groups;
 
         setLocalIssuer(null);
+    }
+
+    /**
+     * Splits a comma-separated claim name list. Each name is trimmed and
+     * empty names are dropped. Returns an empty list for {@code null}.
+     */
+    static List<String> parseClaimNames(String csv) {
+        List<String> names = new java.util.ArrayList<>();
+        if (csv == null) {
+            return names;
+        }
+        for (String raw : csv.split(",")) {
+            String name = raw.trim();
+            if (!name.isEmpty() && !names.contains(name)) {
+                names.add(name);
+            }
+        }
+        return names;
     }
 
     /**
@@ -181,15 +198,38 @@ public class VarroaSecurityRealm extends SecurityRealm {
             return local.validate(token);
         }
         Map<String, Object> claims = jwtValidator.validate(token);
-        if (claims != null && (hasLocalPrefix(claims.get("sub")) || hasLocalPrefix(claims.get("preferred_username")))) {
+        if (claims != null && usesLocalPrefix(claims)) {
             LOGGER.warning("varroa-mite-auth: OIDC token uses the reserved local: subject prefix");
             return null;
         }
         return claims;
     }
 
+    /**
+     * Reports whether an OIDC token carries the local account prefix in the
+     * subject, the standard user claims, or any configured user claim.
+     */
+    private boolean usesLocalPrefix(Map<String, Object> claims) {
+        for (String name : List.of("sub", "preferred_username", "email", "name")) {
+            if (hasLocalPrefix(claims.get(name))) {
+                return true;
+            }
+        }
+        for (String name : userClaimNames) {
+            if (hasLocalPrefix(claims.get(name))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Reports whether a claim value starts with the local account prefix after
+     * surrounding space is removed and letter case is ignored.
+     */
     private static boolean hasLocalPrefix(Object v) {
-        return v instanceof String && ((String) v).startsWith(LOCAL_SUBJECT_PREFIX);
+        return v instanceof String
+                && ((String) v).strip().toLowerCase(Locale.ROOT).startsWith(LOCAL_SUBJECT_PREFIX);
     }
 
     // ---- Data-bound property accessors (JCasC export) ----
@@ -218,12 +258,13 @@ public class VarroaSecurityRealm extends SecurityRealm {
     }
 
     /**
-     * The configured group-claim name.
+     * The configured group-claim names, comma-joined to round-trip with the
+     * data-bound constructor.
      *
-     * @return the group-claim name; never {@code null}.
+     * @return the comma-separated claim names; never {@code null}.
      */
-    public String getGroupClaimName() {
-        return groupClaimName;
+    public String getGroupClaimNames() {
+        return String.join(",", groupClaimNames);
     }
 
     /** @return the resolved user-claim names as an immutable list (internal use/tests). */
@@ -471,7 +512,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
      * Returns [authenticated] + one GrantedAuthorityImpl per group value.
      */
     private GrantedAuthority[] authoritiesFor(Map<String, Object> claims) {
-        List<String> groups = JWTValidator.getGroups(claims, groupClaimName);
+        List<String> groups = sessionGroups(claims);
         GrantedAuthority[] authorities = new GrantedAuthority[1 + groups.size()];
         authorities[0] = new GrantedAuthorityImpl("authenticated");
         for (int i = 0; i < groups.size(); i++) {
@@ -480,8 +521,22 @@ public class VarroaSecurityRealm extends SecurityRealm {
         return authorities;
     }
 
+    /**
+     * Returns the group values of a session token. A local account session
+     * beside OIDC always carries its groups under {@code groups}. An OIDC
+     * session reads the configured group claims.
+     */
+    List<String> sessionGroups(Map<String, Object> claims) {
+        JWTValidator local = localJwtValidator;
+        if (local != null && local.getOidcIssuer() != null
+                && local.getOidcIssuer().equals(claims.get("iss"))) {
+            return JWTValidator.getGroups(claims, List.of("groups"));
+        }
+        return JWTValidator.getGroups(claims, groupClaimNames);
+    }
+
     private GrantedAuthority[] authoritiesForOperatorUser(Map<String, Object> claims) {
-        List<String> groups = JWTValidator.getGroups(claims, "groups");
+        List<String> groups = JWTValidator.getGroups(claims, List.of("groups"));
         java.util.ArrayList<GrantedAuthority> authorities = new java.util.ArrayList<>();
         authorities.add(new GrantedAuthorityImpl("authenticated"));
         for (String group : groups) {
@@ -549,7 +604,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
         }
         String email = (String) claims.get("email");
         String name = (String) claims.getOrDefault("name", userId);
-        List<String> groups = JWTValidator.getGroups(claims, groupClaimName);
+        List<String> groups = sessionGroups(claims);
 
         LOGGER.info("varroa-mite-auth: proactive sign-in for " + userId +
             " groups=" + groups + " claims=" + claims);
@@ -964,6 +1019,9 @@ public class VarroaSecurityRealm extends SecurityRealm {
     private Object readResolve() {
         if (apiKeyValidator == null) {
             apiKeyValidator = new ApiKeyValidator();
+        }
+        if (groupClaimNames == null) {
+            groupClaimNames = List.of("groups");
         }
         return this;
     }

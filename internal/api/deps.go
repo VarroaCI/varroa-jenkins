@@ -69,11 +69,6 @@ type Dependencies struct {
 	// Must be at least 32 bytes in OIDC mode. Empty in non-OIDC modes.
 	OIDCStateSecret []byte
 
-	// OIDCGroupClaims names the token claims that carry group values. It is
-	// the list the RBAC resolver reads, so the zero-groups warning matches
-	// the groups RBAC applies. Empty in non-OIDC modes.
-	OIDCGroupClaims []string
-
 	// SecureCookies controls whether cookies set Secure flag. False only for
 	// explicitly validated HTTP local-development dashboard URLs.
 	SecureCookies bool

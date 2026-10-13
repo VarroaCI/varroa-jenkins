@@ -815,23 +815,19 @@ func testLoggerOIDC(t *testing.T) *slog.Logger {
 
 // --- zero-groups check tests ---
 
-func TestHasGroups_ConfiguredClaimNames(t *testing.T) {
+func TestHasGroups(t *testing.T) {
 	tests := []struct {
-		name       string
-		claims     *auth.Claims
-		claimNames []string
-		want       bool
+		name   string
+		claims *auth.Claims
+		want   bool
 	}{
-		{"groups present under default name", &auth.Claims{Groups: []string{"a"}}, []string{"groups"}, true},
-		{"no groups under default name", &auth.Claims{}, []string{"groups"}, false},
-		{"no configured names", &auth.Claims{Groups: []string{"a"}}, nil, false},
-		// auth.Claims reads only the groups claim, so another configured
-		// name yields no values, as it does for RBAC.
-		{"custom name yields no values", &auth.Claims{Groups: []string{"a"}}, []string{"roles"}, false},
+		{"resolved groups present", &auth.Claims{Groups: []string{"a"}}, true},
+		{"no resolved groups", &auth.Claims{}, false},
+		{"nil groups", &auth.Claims{Groups: nil}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasGroups(tt.claims, tt.claimNames); got != tt.want {
+			if got := hasGroups(tt.claims); got != tt.want {
 				t.Errorf("hasGroups() = %v, want %v", got, tt.want)
 			}
 		})

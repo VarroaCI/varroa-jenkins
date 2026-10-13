@@ -85,7 +85,7 @@ func testResolver(roles []*v1alpha1.VarroaRole, bindings []*v1alpha1.VarroaRoleB
 	ctrlIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"}, []string{"groups"})
+	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"})
 }
 
 // --------------------------------------------------------------------------
@@ -434,7 +434,7 @@ func TestEffectivePermissions_NilClaimsDefaultRead(t *testing.T) {
 	ctrlIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	r := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, true, []string{"sub"}, []string{"groups"})
+	r := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, true, []string{"sub"})
 	a := NewAuthorizer(r, true)
 	ps := a.EffectivePermissions(nil)
 	if !ps.Global["controllers"]["read"] {
@@ -444,7 +444,7 @@ func TestEffectivePermissions_NilClaimsDefaultRead(t *testing.T) {
 		t.Errorf("expected empty Scopes, got %d entries", len(ps.Scopes))
 	}
 
-	r2 := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub"}, []string{"groups"})
+	r2 := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub"})
 	a2 := NewAuthorizer(r2, false)
 	ps2 := a2.EffectivePermissions(nil)
 	if len(ps2.Global) != 0 {

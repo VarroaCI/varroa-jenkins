@@ -23,7 +23,9 @@ the root AGENTS.md greenfield rule.
      validates it **online** against the issuer's JWKS. Beside OIDC, a second
      validator serves the `localIssuer` field. Its fallback is `VARROA_LOCAL_ISSUER`.
      An empty value turns it off. `validateSession` picks the validator by the
-     unverified `iss`. It refuses an OIDC token whose subject starts with `local:`.
+     unverified `iss`. It refuses an OIDC token whose subject, preferred username, email,
+     name, or any configured user claim starts with `local:` (trimmed, case-insensitive). A local session always reads its groups
+     from the literal `groups` claim. An OIDC session reads the configured group claims.
   2. `Authorization: Bearer` header: `vk_*` API keys go to `ApiKeyValidator.java`, which
      calls the gateway verify endpoint (`VARROA_APIKEY_VERIFY_URL`/`VARROA_CA_PEM`,
      60s/10s pos/neg cache TTL, errors never cached). Non-`vk_` Bearer is the mite
@@ -35,7 +37,7 @@ the root AGENTS.md greenfield rule.
   The direct BOM-managed `mailer` plugin dependency supplies the reflective
   `Mailer.UserProperty` used when persisting non-empty user email claims.
   `VarroaCrumbExclusion.java` exempts both Bearer types from CSRF crumb checks.
-  JCasC symbol `varroaMiteAuth` (fields `oidcIssuer`/`userClaimNames`/`groupClaimName`,
+  JCasC symbol `varroaMiteAuth` (fields `oidcIssuer`/`userClaimNames`/`groupClaimNames`,
   falling back to `VARROA_OIDC_ISSUER`/`_USER_CLAIM`/`_GROUP_CLAIM`); round-trip fixtures
   `src/test/resources/.../realm-{minimal,explicit}.yml`.
 - **`VarroaHeadlessFilter.java`** blocks the Jenkins web UI on a headless controller

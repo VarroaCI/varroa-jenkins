@@ -61,9 +61,13 @@ reading each package's entry point):
   `auth/userdirectory`, `auth/schedule` hold provider-specific logic.
   `multi.go`'s `MultiProvider` serves local accounts beside OIDC
   (`--local-accounts`). It selects the verifier by the unverified `iss`. It
-  refuses an IdP token whose `sub` or `preferred_username` starts with
-  `LocalSubjectPrefix` (`local:`). Only a local session beside OIDC carries that
-  prefix. `auth.IsLocalSession` is the one test for it. Every claim-to-`User`
+  refuses an IdP token whose `sub`, `preferred_username`, `email`, `name`, or any
+  configured user claim starts with `LocalSubjectPrefix` (`local:`). The check trims
+  space and ignores letter case. Only a local session beside OIDC
+  carries that prefix. The OIDC `Validator` resolves `Claims.Groups` from the
+  configured group claims at verify time (`SetClaimNames`). Every consumer reads
+  `Claims.Groups`, and no code reads a claim name. `Claims.Extra` carries the
+  configured custom user claims and travels in stream tickets. `auth.IsLocalSession` is the one test for it. Every claim-to-`User`
   mapping (`identity.UserResourceName`, the API-key group ladder) strips it. The
   API-key owner label is `local.<name>`, because a label value cannot hold `:`.
 - **`apikey/`** — `vk_`-prefixed API key generation/parsing (`token.go`:

@@ -445,5 +445,5 @@ func testResolverWithController(
 	_ = ctrlIdx.Add(ctrl)
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"}, []string{"groups"})
+	return rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"})
 }
