@@ -53,16 +53,22 @@ type ChangeRequestBranchInput struct {
 // BranchScanInput is the last scan of a project. The scan path fills it;
 // the inventory export carries null until then.
 type BranchScanInput struct {
-	ScanID        string   `json:"scan_id"`
-	State         string   `json:"state"`
-	Actor         string   `json:"actor"`
-	RequestedAt   string   `json:"requested_at"`
-	EndedAt       string   `json:"ended_at"`
-	Result        string   `json:"result"`
-	NewHeads      []string `json:"new_heads"`
-	ChangedHeads  []string `json:"changed_heads"`
-	OrphanedHeads []string `json:"orphaned_heads"`
-	Message       string   `json:"message"`
+	ScanID           string                `json:"scan_id"`
+	State            string                `json:"state"`
+	Actor            string                `json:"actor"`
+	RequestedAt      string                `json:"requested_at"`
+	EndedAt          string                `json:"ended_at"`
+	Result           string                `json:"result"`
+	NewHeadRefs      []BranchScanHeadInput `json:"new_head_refs"`
+	ChangedHeadRefs  []BranchScanHeadInput `json:"changed_head_refs"`
+	OrphanedHeadRefs []BranchScanHeadInput `json:"orphaned_head_refs"`
+	Message          string                `json:"message"`
+}
+
+// BranchScanHeadInput names one head of a scan and the job that holds it.
+type BranchScanHeadInput struct {
+	Name    string `json:"name"`
+	JobPath string `json:"job_path"`
 }
 
 // applyJobBranches applies one job.branches envelope in its own

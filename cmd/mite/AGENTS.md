@@ -115,7 +115,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     (`awaitScanReady`), never the tenant gate; the job's home member answers it. An accepted scan
     opens a 15-minute fast-poll window (`openBranchScanWindow`): the schedule poller uses its
     minimum interval, so the branch export sends the scan result sooner. The inventory row
-    carries `lastScan` to the gateway through `lastScanProto`.
+    carries `lastScan` to the gateway through `lastScanProto`. Each scan head keeps its job path
+    (`BranchScanHead`).
     A cancel carries the plugin's HTTP status like every other run
     command. `logImperativeResult` logs each result at info on success and
     at warn on failure.

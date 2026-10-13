@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,9 @@ import net.sf.json.JSONObject;
  * Tracks the branch scans the mite requests on a multibranch job. A scan
  * records the heads of the job before it starts. A timer compares the heads
  * after the folder computation ends with that record. The result answers
- * the {@code lastScan} key of the branch inventory row.
+ * the {@code lastScan} key of the branch inventory row. Each head in the
+ * result carries its job path, so a head that the scan deleted stays
+ * attributable to its job.
  *
  * <p>The tracker holds its state in memory. A restart of the controller
  * drops every record.
@@ -64,22 +67,35 @@ public final class VarroaBranchScans {
 
     /** One head of a multibranch job at one moment. */
     static final class Head {
+        final String name;
         final String hash;
         final boolean buildable;
 
-        Head(String hash, boolean buildable) {
+        Head(String name, String hash, boolean buildable) {
+            this.name = name;
             this.hash = hash;
             this.buildable = buildable;
         }
     }
 
+    /** One head that a scan names: the branch name and the job path of its job. */
+    static final class Ref {
+        final String name;
+        final String jobPath;
+
+        Ref(String name, String jobPath) {
+            this.name = name;
+            this.jobPath = jobPath;
+        }
+    }
+
     /** The heads a scan adds, orphans, or changes. Each list is capped. */
     static final class Diff {
-        final List<String> newHeads;
-        final List<String> changedHeads;
-        final List<String> orphanedHeads;
+        final List<Ref> newHeads;
+        final List<Ref> changedHeads;
+        final List<Ref> orphanedHeads;
 
-        Diff(List<String> newHeads, List<String> changedHeads, List<String> orphanedHeads) {
+        Diff(List<Ref> newHeads, List<Ref> changedHeads, List<Ref> orphanedHeads) {
             this.newHeads = newHeads;
             this.changedHeads = changedHeads;
             this.orphanedHeads = orphanedHeads;
@@ -97,9 +113,9 @@ public final class VarroaBranchScans {
         volatile String result = "";
         volatile String message = "";
         volatile long endedAt;
-        volatile List<String> newHeads = Collections.emptyList();
-        volatile List<String> changedHeads = Collections.emptyList();
-        volatile List<String> orphanedHeads = Collections.emptyList();
+        volatile List<Ref> newHeads = Collections.emptyList();
+        volatile List<Ref> changedHeads = Collections.emptyList();
+        volatile List<Ref> orphanedHeads = Collections.emptyList();
 
         Scan(String scanId, String actor, long requestedAt, MultiBranchProject project,
                 Map<String, Head> before) {
@@ -134,6 +150,17 @@ public final class VarroaBranchScans {
         forgetAccepted(fullName, scanId);
     }
 
+    /** Records a completed scan with the given diff. Tests use it to fill the result. */
+    static void recordCompletedForTest(String fullName, String scanId, Diff diff) {
+        Scan scan = new Scan(scanId, "ada", System.currentTimeMillis(), null, Collections.emptyMap());
+        scan.state = "completed";
+        scan.endedAt = scan.requestedAt;
+        scan.newHeads = diff.newHeads;
+        scan.changedHeads = diff.changedHeads;
+        scan.orphanedHeads = diff.orphanedHeads;
+        RECORDS.put(fullName, scan);
+    }
+
     /** Answers the {@code lastScan} value of a job's inventory row, or JSON null. */
     static Object lastScanJson(String fullName) {
         Scan scan = RECORDS.get(fullName);
@@ -147,50 +174,60 @@ public final class VarroaBranchScans {
         out.put("requestedAt", iso(scan.requestedAt));
         out.put("endedAt", scan.endedAt == 0 ? "" : iso(scan.endedAt));
         out.put("result", scan.result);
-        out.put("newHeads", array(scan.newHeads));
-        out.put("changedHeads", array(scan.changedHeads));
-        out.put("orphanedHeads", array(scan.orphanedHeads));
+        out.put("newHeadRefs", refs(scan.newHeads));
+        out.put("changedHeadRefs", refs(scan.changedHeads));
+        out.put("orphanedHeadRefs", refs(scan.orphanedHeads));
         out.put("message", scan.message);
         return out;
     }
 
     /**
-     * Answers the difference between two head snapshots. A new head is in
-     * {@code after} only. An orphaned head is missing from {@code after}, or
-     * was buildable before and is not buildable now. A changed head is still
-     * buildable and holds a different revision hash.
+     * Answers the difference between two head snapshots. Heads are keyed by
+     * job path, so two heads that share a branch name stay separate. A new
+     * head is in {@code after} only. An orphaned head is missing from
+     * {@code after}, or was buildable before and is not buildable now. A
+     * changed head is still buildable and holds a different revision hash.
      */
     static Diff diff(Map<String, Head> before, Map<String, Head> after) {
-        TreeSet<String> added = new TreeSet<>();
-        TreeSet<String> changed = new TreeSet<>();
-        TreeSet<String> orphaned = new TreeSet<>();
-        for (String name : after.keySet()) {
-            if (!before.containsKey(name)) {
-                added.add(name);
+        TreeSet<Ref> added = new TreeSet<>(REF_ORDER);
+        TreeSet<Ref> changed = new TreeSet<>(REF_ORDER);
+        TreeSet<Ref> orphaned = new TreeSet<>(REF_ORDER);
+        for (Map.Entry<String, Head> entry : after.entrySet()) {
+            if (!before.containsKey(entry.getKey())) {
+                added.add(refOf(entry.getKey(), entry.getValue()));
             }
         }
         for (Map.Entry<String, Head> entry : before.entrySet()) {
-            String name = entry.getKey();
+            String path = entry.getKey();
             Head was = entry.getValue();
-            Head now = after.get(name);
+            Head now = after.get(path);
             if (now == null) {
-                orphaned.add(name);
+                orphaned.add(refOf(path, was));
             } else if (was.buildable && !now.buildable) {
-                orphaned.add(name);
+                orphaned.add(refOf(path, now));
             } else if (now.buildable && !Objects.equals(was.hash, now.hash)) {
-                changed.add(name);
+                changed.add(refOf(path, now));
             }
         }
         return new Diff(cap(added), cap(changed), cap(orphaned));
     }
 
-    private static List<String> cap(TreeSet<String> names) {
-        List<String> out = new ArrayList<>();
-        for (String name : names) {
+    /** Orders refs by branch name, then by job path. */
+    private static final Comparator<Ref> REF_ORDER = Comparator
+            .comparing((Ref ref) -> ref.name)
+            .thenComparing(ref -> ref.jobPath);
+
+    private static Ref refOf(String jobPath, Head head) {
+        return new Ref(head.name, jobPath);
+    }
+
+    private static List<Ref> cap(TreeSet<Ref> refs) {
+        List<Ref> out = new ArrayList<>();
+        for (Ref ref : refs) {
             if (out.size() >= LIST_CAP) {
                 break;
             }
-            out.add(name);
+            out.add(ref);
         }
         return out;
     }
@@ -309,9 +346,9 @@ public final class VarroaBranchScans {
     }
 
     /**
-     * Answers the heads of a job now, keyed by branch name. The snapshot runs as
-     * the system identity, so the before and after records hold the same heads
-     * whichever identity requested the scan.
+     * Answers the heads of a job now, keyed by the full name of each head's job.
+     * The snapshot runs as the system identity, so the before and after records
+     * hold the same heads whichever identity requested the scan.
      */
     static Map<String, Head> snapshot(MultiBranchProject project) {
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
@@ -332,7 +369,8 @@ public final class VarroaBranchScans {
                 continue;
             }
             String name = branch.getName() != null ? branch.getName() : "";
-            out.put(name, new Head(ActivityEndpoint.revisionOf(factory, job), branch.isBuildable()));
+            out.put(job.getFullName(), new Head(name, ActivityEndpoint.revisionOf(factory, job),
+                    branch.isBuildable()));
         }
         return out;
     }
@@ -357,9 +395,14 @@ public final class VarroaBranchScans {
         return Instant.ofEpochMilli(millis).toString();
     }
 
-    private static JSONArray array(List<String> names) {
+    private static JSONArray refs(List<Ref> refs) {
         JSONArray out = new JSONArray();
-        out.addAll(names);
+        for (Ref ref : refs) {
+            JSONObject item = new JSONObject();
+            item.put("name", ref.name);
+            item.put("jobPath", ref.jobPath);
+            out.add(item);
+        }
         return out;
     }
 }

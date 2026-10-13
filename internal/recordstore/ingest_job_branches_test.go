@@ -211,6 +211,40 @@ func TestApplyJobBranchesKeepsLastScanWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestApplyJobBranchesStoresScanHeadPaths asserts each head of a scan keeps
+// its job path through the stored row, so a read can test the head on its
+// own job.
+func TestApplyJobBranchesStoresScanHeadPaths(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	scanned := oneBranchProject("acme/app")
+	scanned.LastScan = &BranchScanInput{
+		ScanID: "scan-1", State: "completed", Result: "SUCCESS",
+		OrphanedHeadRefs: []BranchScanHeadInput{{Name: "gone", JobPath: "acme/app/gone"}},
+	}
+	if _, err := g.Apply(ctx, newJobBranchesEnvelope(t, jsTestCell, time.Now().UTC(), JobBranchesPayload{
+		Hash: "h1", Projects: []JobBranchProjectInput{scanned},
+	})); err != nil {
+		t.Fatalf("apply scanned job.branches: %v", err)
+	}
+
+	project, found, err := reader.GetJobBranches(ctx, jsTestCluster, "acme", "acme/app")
+	if err != nil {
+		t.Fatalf("get job branches: %v", err)
+	}
+	if !found || project.LastScan == nil || len(project.LastScan.OrphanedHeadRefs) != 1 {
+		t.Fatalf("found = %v, last scan = %+v, want one orphaned ref", found, project.LastScan)
+	}
+	if ref := project.LastScan.OrphanedHeadRefs[0]; ref.Name != "gone" || ref.JobPath != "acme/app/gone" {
+		t.Fatalf("orphaned ref = %+v, want gone at acme/app/gone", ref)
+	}
+}
+
 // TestRehomeJobBranchesMovesRowToHome asserts a home move carries the
 // stored row to the new home cell, so the old cell's next export cannot
 // delete it.

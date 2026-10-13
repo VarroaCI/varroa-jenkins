@@ -116,6 +116,54 @@ func TestListJobBranchesFiltersByJobGlobs(t *testing.T) {
 	}
 }
 
+// TestListJobBranchesShowsADeletedOrphanedHead asserts a head that the last
+// scan deleted is named when the caller reads its job, and hidden when the
+// caller does not read it. The head is no longer in the inventory.
+func TestListJobBranchesShowsADeletedOrphanedHead(t *testing.T) {
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{
+		"ctrl-a": {ObjectMeta: metav1.ObjectMeta{Name: "ctrl-a", Namespace: "test-ns"}},
+	}
+	seedTeam(t, client.crdStore, placedTeamObject("payments", "core", "test-ns", "ctrl-a"))
+
+	authz := NewAuthorizer(testResolver(pipelinesRoles(), []*v1alpha1.VarroaRoleBinding{
+		branchTestBinding("mb", "mb/*"),
+	}), false)
+	reader := newFakeRecordReader()
+	seedBranchInventory(reader, time.Now().UTC())
+	project := reader.jobBranches[branchTestKey("core", "payments", "payments/mb")]
+	project.LastScan = &recordstore.BranchScan{
+		ScanID: "scan-1",
+		State:  "completed",
+		OrphanedHeadRefs: []recordstore.BranchScanHead{
+			{Name: "gone", JobPath: "payments/mb/gone"},
+			{Name: "secret", JobPath: "payments/other/secret"},
+		},
+	}
+	reader.jobBranches[branchTestKey("core", "payments", "payments/mb")] = project
+	srv := pipelinesTestServer(client, authz, reader, nil)
+
+	rec := doPipelinesRequest(t, srv.handleListJobBranches, "/pipelines/payments/jobs/payments%2Fmb/branches",
+		map[string]string{"team": "payments", "job": "payments/mb"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		LastScan *struct {
+			OrphanedHeads []string `json:"orphanedHeads"`
+		} `json:"lastScan"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode branch list: %v", err)
+	}
+	if body.LastScan == nil {
+		t.Fatalf("lastScan missing from %s", rec.Body.String())
+	}
+	if len(body.LastScan.OrphanedHeads) != 1 || body.LastScan.OrphanedHeads[0] != "gone" {
+		t.Fatalf("orphanedHeads = %v, want [gone]", body.LastScan.OrphanedHeads)
+	}
+}
+
 // TestListJobBranchesNoInventoryAnswers200Empty asserts a job with no
 // inventory row answers an empty list with no observedAt, not a 404.
 func TestListJobBranchesNoInventoryAnswers200Empty(t *testing.T) {

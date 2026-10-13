@@ -60,6 +60,39 @@ func TestGetJobBranches(t *testing.T) {
 	}
 }
 
+// TestGetJobBranchesDecodesALegacyScan asserts a stored scan written before
+// the head refs existed reads without error and carries no head refs.
+func TestGetJobBranchesDecodesALegacyScan(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	g := NewIngester(pool, nil, nil)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	if _, err := g.Apply(ctx, newJobBranchesEnvelope(t, jsTestCell, time.Now().UTC(), JobBranchesPayload{
+		Hash: "h1", Projects: []JobBranchProjectInput{oneBranchProject("acme/app")},
+	})); err != nil {
+		t.Fatalf("apply job.branches: %v", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE varroa.job_branch_projects SET last_scan = '{"scan_id":"s","orphaned_heads":["x"]}'
+	`); err != nil {
+		t.Fatalf("write legacy scan: %v", err)
+	}
+
+	project, found, err := reader.GetJobBranches(ctx, jsTestCluster, "acme", "acme/app")
+	if err != nil {
+		t.Fatalf("get job branches: %v", err)
+	}
+	if !found || project.LastScan == nil {
+		t.Fatalf("found = %v, last scan = %v, want the legacy scan", found, project.LastScan)
+	}
+	if project.LastScan.ScanID != "s" || len(project.LastScan.OrphanedHeadRefs) != 0 {
+		t.Fatalf("legacy scan = %+v, want scan s with no head refs", project.LastScan)
+	}
+}
+
 func TestLatestRunsForJobs(t *testing.T) {
 	t.Parallel()
 

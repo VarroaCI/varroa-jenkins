@@ -44,16 +44,23 @@ type ChangeRequestBranch struct {
 
 // BranchScan is the last scan of a multibranch job.
 type BranchScan struct {
-	ScanID        string   `json:"scan_id"`
-	State         string   `json:"state"`
-	Actor         string   `json:"actor"`
-	RequestedAt   string   `json:"requested_at"`
-	EndedAt       string   `json:"ended_at"`
-	Result        string   `json:"result"`
-	NewHeads      []string `json:"new_heads"`
-	ChangedHeads  []string `json:"changed_heads"`
-	OrphanedHeads []string `json:"orphaned_heads"`
-	Message       string   `json:"message"`
+	ScanID           string           `json:"scan_id"`
+	State            string           `json:"state"`
+	Actor            string           `json:"actor"`
+	RequestedAt      string           `json:"requested_at"`
+	EndedAt          string           `json:"ended_at"`
+	Result           string           `json:"result"`
+	NewHeadRefs      []BranchScanHead `json:"new_head_refs"`
+	ChangedHeadRefs  []BranchScanHead `json:"changed_head_refs"`
+	OrphanedHeadRefs []BranchScanHead `json:"orphaned_head_refs"`
+	Message          string           `json:"message"`
+}
+
+// BranchScanHead names one head of a scan and the job that holds it. The
+// job path is the key the read gate checks.
+type BranchScanHead struct {
+	Name    string `json:"name"`
+	JobPath string `json:"job_path"`
 }
 
 // GetJobBranches reads the stored branch inventory of one multibranch job

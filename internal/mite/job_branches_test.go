@@ -30,6 +30,28 @@ func oneBranchSet() *mitev1.JobBranchSet {
 	}
 }
 
+// TestBranchScanInputOfCarriesHeadPaths asserts each scan head keeps its
+// job path on the way to the recorder payload, and a nil scan maps to nil.
+func TestBranchScanInputOfCarriesHeadPaths(t *testing.T) {
+	if got := branchScanInputOf(nil); got != nil {
+		t.Fatalf("branchScanInputOf(nil) = %+v, want nil", got)
+	}
+	scan := &mitev1.BranchScanResult{
+		ScanId: "s1",
+		OrphanedHeadRefs: []*mitev1.BranchScanHead{
+			{Name: "old", JobPath: "payments/mb/old"},
+		},
+	}
+	got := branchScanInputOf(scan)
+	if len(got.OrphanedHeadRefs) != 1 || got.OrphanedHeadRefs[0].Name != "old" ||
+		got.OrphanedHeadRefs[0].JobPath != "payments/mb/old" {
+		t.Fatalf("orphaned refs = %+v", got.OrphanedHeadRefs)
+	}
+	if len(got.NewHeadRefs) != 0 || len(got.ChangedHeadRefs) != 0 {
+		t.Fatalf("empty lists carried heads: %+v", got)
+	}
+}
+
 // TestOnSnapshotStripsJobBranches asserts the branch set leaves the
 // snapshot KV copy, while the caller's own snapshot keeps it.
 func TestOnSnapshotStripsJobBranches(t *testing.T) {

@@ -33,8 +33,8 @@ write the job.
 - The page checks for the result every five seconds. The checks stop when the result
   arrives, or after ten minutes.
 - A completed scan shows the counts of new, changed, and orphaned heads. Select a count to
-  see the names. A head that the scan deleted is not named while the list omits it, because
-  the cell does not yet report that head's path.
+  see the names. The list shows only the heads that you may read, including a head that the
+  scan deleted.
 - A scan that does not complete shows its state and reason:
   - `failed`: Jenkins did not finish the index.
   - `timeout`: the scan ran for more than 30 minutes.

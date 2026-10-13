@@ -123,9 +123,9 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 		canRead := func(path string) bool {
 			return granted && grantsAllow(grants, ref.Folder, path, "read")
 		}
-		scan.NewHeads = scanNamesVisibleTo(scan.NewHeads, project.Heads, canRead)
-		scan.ChangedHeads = scanNamesVisibleTo(scan.ChangedHeads, project.Heads, canRead)
-		scan.OrphanedHeads = scanNamesVisibleTo(scan.OrphanedHeads, project.Heads, canRead)
+		scan.NewHeads = scanHeadNamesVisibleTo(project.LastScan.NewHeadRefs, canRead)
+		scan.ChangedHeads = scanHeadNamesVisibleTo(project.LastScan.ChangedHeadRefs, canRead)
+		scan.OrphanedHeads = scanHeadNamesVisibleTo(project.LastScan.OrphanedHeadRefs, canRead)
 		out.LastScan = scan
 	}
 
@@ -198,61 +198,33 @@ func changeRequestIDLess(a, b jobBranchHeadJSON) bool {
 	return idA < idB
 }
 
-// scanNamesVisibleTo keeps the head names of a scan result that the caller
-// may read. A name is tested on the job path of the inventory head that
-// holds it. A name with no inventory head is dropped, because its job path
-// cannot be rebuilt from the name: Jenkins encodes a slash in a head name.
-// The result therefore omits a head that the scan deleted. Showing it would
-// need the job path stored on the scan.
-func scanNamesVisibleTo(names []string, heads []recordstore.JobBranchHead, canRead func(string) bool) []string {
-	// A branch, a tag, and a pull request can share one name. The name is
-	// visible only when the caller reads every head that holds it.
-	paths := make(map[string][]string, len(heads))
-	for _, head := range heads {
-		paths[head.Name] = append(paths[head.Name], head.JobPath)
-	}
+// scanHeadNamesVisibleTo keeps the names of a scan list whose own job path
+// the caller may read. Each head carries the job path that it was stored
+// with, so a head the scan deleted is still tested on its own job. The
+// result is never nil.
+func scanHeadNamesVisibleTo(heads []recordstore.BranchScanHead, canRead func(string) bool) []string {
 	out := []string{}
-	for _, name := range names {
-		held, ok := paths[name]
-		if !ok {
-			continue
-		}
-		visible := true
-		for _, path := range held {
-			if !canRead(path) {
-				visible = false
-				break
-			}
-		}
-		if visible {
-			out = append(out, name)
+	for _, head := range heads {
+		if canRead(head.JobPath) {
+			out = append(out, head.Name)
 		}
 	}
 	return out
 }
 
-// branchScanOf converts a stored scan into its response shape.
+// branchScanOf converts a stored scan into its response shape. The head
+// lists start empty; the caller fills them through scanHeadNamesVisibleTo.
 func branchScanOf(scan recordstore.BranchScan) *branchScanJSON {
-	out := branchScanJSON{
+	return &branchScanJSON{
 		ScanID:        scan.ScanID,
 		State:         scan.State,
 		Actor:         scan.Actor,
 		RequestedAt:   scan.RequestedAt,
 		EndedAt:       scan.EndedAt,
 		Result:        scan.Result,
-		NewHeads:      scan.NewHeads,
-		ChangedHeads:  scan.ChangedHeads,
-		OrphanedHeads: scan.OrphanedHeads,
+		NewHeads:      []string{},
+		ChangedHeads:  []string{},
+		OrphanedHeads: []string{},
 		Message:       scan.Message,
 	}
-	if out.NewHeads == nil {
-		out.NewHeads = []string{}
-	}
-	if out.ChangedHeads == nil {
-		out.ChangedHeads = []string{}
-	}
-	if out.OrphanedHeads == nil {
-		out.OrphanedHeads = []string{}
-	}
-	return &out
 }

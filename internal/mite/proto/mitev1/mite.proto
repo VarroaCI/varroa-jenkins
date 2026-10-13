@@ -144,19 +144,29 @@ message JobBranchHead {
   ChangeRequestInfo change_request = 6;
 }
 
+// BranchScanHead is one head a branch scan adds, changes, or orphans.
+// The job path names the head, because a deleted head is no longer in
+// the inventory that the name would be looked up in.
+message BranchScanHead {
+  string name = 1;
+  string job_path = 2;
+}
+
 // BranchScanResult records one requested branch scan of a multibranch
 // job. The scan path fills it; the inventory export only carries it.
 message BranchScanResult {
+  reserved 7, 8, 9;
+  reserved "new_heads", "changed_heads", "orphaned_heads";
   string scan_id = 1;
   string state = 2;         // running | completed | failed | timeout | refused
   string actor = 3;
   string requested_at = 4;  // RFC3339, UTC
   string ended_at = 5;      // RFC3339, UTC
   string result = 6;
-  repeated string new_heads = 7;
-  repeated string changed_heads = 8;
-  repeated string orphaned_heads = 9;
   string message = 10;
+  repeated BranchScanHead new_head_refs = 11;
+  repeated BranchScanHead changed_head_refs = 12;
+  repeated BranchScanHead orphaned_head_refs = 13;
 }
 
 // JobBranchProject is one multibranch job of the cell with its heads.

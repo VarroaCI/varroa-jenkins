@@ -590,8 +590,10 @@ the root AGENTS.md greenfield rule.
   refusal is recorded), and `202` on success. `VarroaBranchScans` (static, in-memory, no
   `@Extension`) keeps one scan per job full name: `arm` snapshots the heads, a `Timer` task checks
   every 3 seconds whether the folder computation ended, `diff` names new, changed, and orphaned
-  heads (each list capped at 200), and a scan past 30 minutes becomes `timeout`. `lastScanJson`
-  fills the `lastScan` key of each `/varroa-activity/branches` row. The route list pin is nine.
+  heads as `{name, jobPath}` refs (each list capped at 200), and a scan past 30 minutes becomes
+  `timeout`. The snapshot keys heads by job full name, so two heads with one name stay separate.
+  `lastScanJson` fills the `lastScan` key of each `/varroa-activity/branches` row with the three
+  `newHeadRefs`, `changedHeadRefs`, and `orphanedHeadRefs` arrays. The route list pin is nine.
   `POST /varroa-run/restart` (`VarroaRunTriggerAction.doRestart`) reruns a completed declarative
   build from one stage as the acting user. It keeps the source build's parameter values. It refuses
   `409` when the job's home moved off this cell (`VarroaHomeCache.forwardSlotFor`), when the source

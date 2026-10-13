@@ -46,16 +46,31 @@ const branchScanFastWindow = 15 * time.Minute
 // plugin's branch-inventory response. The plugin sends lastScan as null
 // until a scan is requested.
 type jobBranchScanRow struct {
-	ScanID        string   `json:"scanId"`
-	State         string   `json:"state"`
-	Actor         string   `json:"actor"`
-	RequestedAt   string   `json:"requestedAt"`
-	EndedAt       string   `json:"endedAt"`
-	Result        string   `json:"result"`
-	NewHeads      []string `json:"newHeads"`
-	ChangedHeads  []string `json:"changedHeads"`
-	OrphanedHeads []string `json:"orphanedHeads"`
-	Message       string   `json:"message"`
+	ScanID           string             `json:"scanId"`
+	State            string             `json:"state"`
+	Actor            string             `json:"actor"`
+	RequestedAt      string             `json:"requestedAt"`
+	EndedAt          string             `json:"endedAt"`
+	Result           string             `json:"result"`
+	NewHeadRefs      []jobBranchHeadRef `json:"newHeadRefs"`
+	ChangedHeadRefs  []jobBranchHeadRef `json:"changedHeadRefs"`
+	OrphanedHeadRefs []jobBranchHeadRef `json:"orphanedHeadRefs"`
+	Message          string             `json:"message"`
+}
+
+// jobBranchHeadRef names one head of a scan and the job that holds it.
+type jobBranchHeadRef struct {
+	Name    string `json:"name"`
+	JobPath string `json:"jobPath"`
+}
+
+// scanHeadsProto converts the heads of one scan list.
+func scanHeadsProto(refs []jobBranchHeadRef) []*mitev1.BranchScanHead {
+	out := make([]*mitev1.BranchScanHead, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, &mitev1.BranchScanHead{Name: ref.Name, JobPath: ref.JobPath})
+	}
+	return out
 }
 
 // jobBranchProjectRow is one multibranch project of the plugin's
@@ -101,16 +116,16 @@ func lastScanProto(row *jobBranchScanRow) *mitev1.BranchScanResult {
 		return nil
 	}
 	return &mitev1.BranchScanResult{
-		ScanId:        row.ScanID,
-		State:         row.State,
-		Actor:         row.Actor,
-		RequestedAt:   row.RequestedAt,
-		EndedAt:       row.EndedAt,
-		Result:        row.Result,
-		NewHeads:      row.NewHeads,
-		ChangedHeads:  row.ChangedHeads,
-		OrphanedHeads: row.OrphanedHeads,
-		Message:       row.Message,
+		ScanId:           row.ScanID,
+		State:            row.State,
+		Actor:            row.Actor,
+		RequestedAt:      row.RequestedAt,
+		EndedAt:          row.EndedAt,
+		Result:           row.Result,
+		NewHeadRefs:      scanHeadsProto(row.NewHeadRefs),
+		ChangedHeadRefs:  scanHeadsProto(row.ChangedHeadRefs),
+		OrphanedHeadRefs: scanHeadsProto(row.OrphanedHeadRefs),
+		Message:          row.Message,
 	}
 }
 

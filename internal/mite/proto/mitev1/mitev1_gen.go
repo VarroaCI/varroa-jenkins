@@ -25,18 +25,24 @@ type ActingUser struct {
 	Groups []string `json:"groups,omitempty"`
 }
 
+// BranchScanHead is one head a branch scan adds, changes, or orphans.
+type BranchScanHead struct {
+	Name    string `json:"name,omitempty"`
+	JobPath string `json:"job_path,omitempty"`
+}
+
 // BranchScanResult records one requested branch scan of a multibranch
 type BranchScanResult struct {
-	ScanId        string   `json:"scan_id,omitempty"`
-	State         string   `json:"state,omitempty"`
-	Actor         string   `json:"actor,omitempty"`
-	RequestedAt   string   `json:"requested_at,omitempty"`
-	EndedAt       string   `json:"ended_at,omitempty"`
-	Result        string   `json:"result,omitempty"`
-	NewHeads      []string `json:"new_heads,omitempty"`
-	ChangedHeads  []string `json:"changed_heads,omitempty"`
-	OrphanedHeads []string `json:"orphaned_heads,omitempty"`
-	Message       string   `json:"message,omitempty"`
+	ScanId           string            `json:"scan_id,omitempty"`
+	State            string            `json:"state,omitempty"`
+	Actor            string            `json:"actor,omitempty"`
+	RequestedAt      string            `json:"requested_at,omitempty"`
+	EndedAt          string            `json:"ended_at,omitempty"`
+	Result           string            `json:"result,omitempty"`
+	Message          string            `json:"message,omitempty"`
+	NewHeadRefs      []*BranchScanHead `json:"new_head_refs,omitempty"`
+	ChangedHeadRefs  []*BranchScanHead `json:"changed_head_refs,omitempty"`
+	OrphanedHeadRefs []*BranchScanHead `json:"orphaned_head_refs,omitempty"`
 }
 
 type BuildArtifact struct {

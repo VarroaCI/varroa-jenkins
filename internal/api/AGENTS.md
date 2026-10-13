@@ -496,7 +496,8 @@ federation, activity persistence, and SSE fanout.
   return the same links. A dependency edge's `lastRun` uses the same redaction.
 - `GET /pipelines/{team}/jobs/{job}/branches` (`handlers_pipelines_branches.go`) lists the
   branch and change-request inventory. A job with no export answers 200 with empty lists. Each
-  head is filtered by its own job path, and it carries its newest run. The job detail carries
+  head is filtered by its own job path, and it carries its newest run. Each scan head in
+  `lastScan` is filtered by its own stored job path. The job detail carries
   `kind` (`pipeline`, `multibranch`, or `unknown`).
 - The job detail (`GET /pipelines/{team}/jobs/{job}`) carries a `dependencies` object
   (`upstream`/`downstream` edge lists, `buildPipelineDependencies` in

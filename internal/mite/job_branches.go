@@ -49,16 +49,34 @@ type changeRequestBranchInput struct {
 // branchScanInput is the last scan of a project. The payload carries it
 // as null until the scan path fills it.
 type branchScanInput struct {
-	ScanID        string   `json:"scan_id"`
-	State         string   `json:"state"`
-	Actor         string   `json:"actor"`
-	RequestedAt   string   `json:"requested_at"`
-	EndedAt       string   `json:"ended_at"`
-	Result        string   `json:"result"`
-	NewHeads      []string `json:"new_heads"`
-	ChangedHeads  []string `json:"changed_heads"`
-	OrphanedHeads []string `json:"orphaned_heads"`
-	Message       string   `json:"message"`
+	ScanID           string                `json:"scan_id"`
+	State            string                `json:"state"`
+	Actor            string                `json:"actor"`
+	RequestedAt      string                `json:"requested_at"`
+	EndedAt          string                `json:"ended_at"`
+	Result           string                `json:"result"`
+	NewHeadRefs      []branchScanHeadInput `json:"new_head_refs"`
+	ChangedHeadRefs  []branchScanHeadInput `json:"changed_head_refs"`
+	OrphanedHeadRefs []branchScanHeadInput `json:"orphaned_head_refs"`
+	Message          string                `json:"message"`
+}
+
+// branchScanHeadInput names one head of a scan and the job that holds it.
+type branchScanHeadInput struct {
+	Name    string `json:"name"`
+	JobPath string `json:"job_path"`
+}
+
+// branchScanHeadsInputOf converts the heads of one scan list.
+func branchScanHeadsInputOf(heads []*mitev1.BranchScanHead) []branchScanHeadInput {
+	out := make([]branchScanHeadInput, 0, len(heads))
+	for _, head := range heads {
+		if head == nil {
+			continue
+		}
+		out = append(out, branchScanHeadInput{Name: head.Name, JobPath: head.JobPath})
+	}
+	return out
 }
 
 // handleJobBranches is OnSnapshot's post-strip hook for the branch
@@ -227,15 +245,15 @@ func branchScanInputOf(scan *mitev1.BranchScanResult) *branchScanInput {
 		return nil
 	}
 	return &branchScanInput{
-		ScanID:        scan.ScanId,
-		State:         scan.State,
-		Actor:         scan.Actor,
-		RequestedAt:   scan.RequestedAt,
-		EndedAt:       scan.EndedAt,
-		Result:        scan.Result,
-		NewHeads:      scan.NewHeads,
-		ChangedHeads:  scan.ChangedHeads,
-		OrphanedHeads: scan.OrphanedHeads,
-		Message:       scan.Message,
+		ScanID:           scan.ScanId,
+		State:            scan.State,
+		Actor:            scan.Actor,
+		RequestedAt:      scan.RequestedAt,
+		EndedAt:          scan.EndedAt,
+		Result:           scan.Result,
+		NewHeadRefs:      branchScanHeadsInputOf(scan.NewHeadRefs),
+		ChangedHeadRefs:  branchScanHeadsInputOf(scan.ChangedHeadRefs),
+		OrphanedHeadRefs: branchScanHeadsInputOf(scan.OrphanedHeadRefs),
+		Message:          scan.Message,
 	}
 }

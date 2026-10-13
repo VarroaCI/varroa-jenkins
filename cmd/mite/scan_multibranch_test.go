@@ -137,14 +137,16 @@ func TestLastScanProtoCarriesTheScan(t *testing.T) {
 	row := &jobBranchScanRow{
 		ScanID: "s1", State: "completed", Actor: "ana",
 		RequestedAt: "2026-10-12T10:00:00Z", EndedAt: "2026-10-12T10:02:00Z", Result: "SUCCESS",
-		NewHeads: []string{"feature"}, ChangedHeads: []string{"main"}, OrphanedHeads: []string{"old"},
+		NewHeadRefs:      []jobBranchHeadRef{{Name: "feature", JobPath: "mb/feature"}},
+		ChangedHeadRefs:  []jobBranchHeadRef{{Name: "main", JobPath: "mb/main"}},
+		OrphanedHeadRefs: []jobBranchHeadRef{{Name: "old", JobPath: "mb/old"}},
 	}
 	got := lastScanProto(row)
 	if got.ScanId != "s1" || got.State != "completed" || got.Actor != "ana" ||
 		got.RequestedAt != "2026-10-12T10:00:00Z" || got.EndedAt != "2026-10-12T10:02:00Z" || got.Result != "SUCCESS" ||
-		len(got.NewHeads) != 1 || got.NewHeads[0] != "feature" ||
-		len(got.ChangedHeads) != 1 || got.ChangedHeads[0] != "main" ||
-		len(got.OrphanedHeads) != 1 || got.OrphanedHeads[0] != "old" {
+		len(got.NewHeadRefs) != 1 || got.NewHeadRefs[0].Name != "feature" || got.NewHeadRefs[0].JobPath != "mb/feature" ||
+		len(got.ChangedHeadRefs) != 1 || got.ChangedHeadRefs[0].Name != "main" ||
+		len(got.OrphanedHeadRefs) != 1 || got.OrphanedHeadRefs[0].Name != "old" || got.OrphanedHeadRefs[0].JobPath != "mb/old" {
 		t.Fatalf("lastScanProto = %+v", got)
 	}
 }
