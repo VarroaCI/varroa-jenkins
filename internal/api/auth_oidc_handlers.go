@@ -318,11 +318,11 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(claims.Groups) == 0 {
+	if !hasGroups(claims, s.deps.OIDCGroupClaims) {
 		s.deps.Logger.Warn("user has zero groups in ID token, RBAC group-based permissions will not apply",
 			"email", claims.Email,
 			"subject", claims.Subject,
-			"hint", "Add a 'claims' mapping to your Dex connector config. See: https://dexidp.io/docs/connectors/#claims")
+			"hint", "Request the groups scope (auth.oidc.scopes). With Dex, set loadAllGroups on github or gitea connectors and insecureEnableGroups on oidc connectors. With direct OIDC, configure the provider to send a groups claim.")
 	} else {
 		s.deps.Logger.Info("user authenticated",
 			"email", claims.Email,
@@ -409,4 +409,10 @@ func (s *Server) deleteCookie(w http.ResponseWriter, name, path string) {
 		Path:   path,
 		MaxAge: -1,
 	})
+}
+
+// hasGroups reports whether the token carries a group value under one of
+// the configured group claim names.
+func hasGroups(claims *auth.Claims, groupClaimNames []string) bool {
+	return len(claims.GroupValues(groupClaimNames)) > 0
 }

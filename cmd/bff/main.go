@@ -632,6 +632,7 @@ func main() {
 		OperatorNamespace: operatorNamespace,
 		ManagedNamespaces: managedNamespaces,
 		Logger:            logger,
+		OIDCGroupClaims:   groupClaims,
 		Reconciler:        reconcilerProxy,
 		DashboardHost:     dashboardHost,
 		DashboardURL:      *dashboardURL,
