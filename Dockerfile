@@ -9,9 +9,6 @@ RUN mvn package -DskipTests -B
 # Stage 2: Build Go binaries
 FROM golang:1.26-alpine AS builder
 
-ARG GIT_SHA=unknown
-ARG GIT_BRANCH=unknown
-
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /build
@@ -20,6 +17,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# Build arguments change on every commit. Declare them after the dependency layers, so those layers stay cached.
+ARG GIT_SHA=unknown
+ARG GIT_BRANCH=unknown
 
 RUN CGO_ENABLED=0 go build \
     -ldflags="-s -w -X main.version=${GIT_SHA}" \
