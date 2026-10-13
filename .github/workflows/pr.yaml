@@ -242,8 +242,8 @@ jobs:
             GIT_SHA=${{ github.sha }}
             GIT_BRANCH=${{ github.ref_name }}
           tags: varroa-jenkins:pr-${{ github.event.number || github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A pull request uses no build cache. The release writes its cache on a tag ref,
+          # and a pull request cannot read it.
 
   build-frontend:
     name: Build frontend
@@ -268,8 +268,8 @@ jobs:
           context: frontend
           push: false
           tags: varroa-frontend:pr-${{ github.event.number || github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A pull request uses no build cache. The release writes its cache on a tag ref,
+          # and a pull request cannot read it.
 
   frontend-test:
     name: Frontend test
