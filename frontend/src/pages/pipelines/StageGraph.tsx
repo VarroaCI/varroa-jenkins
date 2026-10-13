@@ -68,18 +68,66 @@ const NESTED_STEP = 20;
 const NODE_R = 15;
 const PAD_X = COLUMN_W / 2;
 const PAD_Y = 40;
-const MAX_LABEL_CHARS = 22;
+// LABEL_FONT_PX must equal the .label font-size in StageGraph.module.css.
+const LABEL_FONT_PX = 11;
+// The label stays 12 px inside its column on each side.
+const LABEL_MAX_W = COLUMN_W - 12;
+// Used only when no canvas context exists, such as in a headless test host.
+const FALLBACK_CHAR_W = 7;
 
 /**
- * Shortens a stage name to fit one column. The full name stays in the
- * node's title and accessible name.
+ * Shortens a stage name so its drawn width fits maxWidth. The measure function
+ * returns a width in pixels. A cut name ends with an ellipsis and never splits
+ * a surrogate pair. The result keeps at least one character.
  */
-export function truncateLabel(name: string): string {
-  // Array.from splits by code point, so a surrogate pair is never cut in two.
-  const characters = Array.from(name);
-  return characters.length > MAX_LABEL_CHARS
-    ? `${characters.slice(0, MAX_LABEL_CHARS - 1).join("")}…`
-    : name;
+export function fitLabel(name: string, maxWidth: number, measure: (s: string) => number): string {
+  if (measure(name) <= maxWidth) return name;
+  const chars = Array.from(name);
+  // A prefix of only spaces trims to nothing, so it keeps the first code point.
+  const cut = (count: number) => {
+    const kept = chars.slice(0, count).join("").trimEnd();
+    return (kept === "" ? chars[0] : kept) + "…";
+  };
+  let lo = 1;
+  let hi = chars.length - 1;
+  let best = 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (measure(cut(mid)) <= maxWidth) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return cut(best);
+}
+
+/**
+ * Returns a width measure for the label font. It uses a canvas context and
+ * caches each width. Without a context it estimates FALLBACK_CHAR_W per character.
+ */
+export function createLabelMeasurer(): (s: string) => number {
+  let ctx: CanvasRenderingContext2D | null = null;
+  try {
+    ctx = document.createElement("canvas").getContext("2d");
+  } catch {
+    ctx = null;
+  }
+  if (ctx) {
+    const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim() || "sans-serif";
+    ctx.font = `${LABEL_FONT_PX}px ${sans}`;
+  }
+  const cache = new Map<string, number>();
+  return (s: string) => {
+    if (!ctx) return Array.from(s).length * FALLBACK_CHAR_W;
+    let w = cache.get(s);
+    if (w === undefined) {
+      w = ctx.measureText(s).width;
+      cache.set(s, w);
+    }
+    return w;
+  };
 }
 
 /** One stage rendered in the indented nested list, at its indentation depth. */
@@ -248,6 +296,11 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
     [merged, byParent, largeMode, expandedTrunkId],
   );
   const topNodes = useMemo(() => columns.flat(), [columns]);
+  const measure = useMemo(() => createLabelMeasurer(), []);
+  const labels = useMemo(
+    () => new Map(topNodes.map((n) => [n.stage.stageId, fitLabel(n.stage.name, LABEL_MAX_W, measure)])),
+    [topNodes, measure],
+  );
 
   const width = PAD_X * 2 + Math.max(0, columns.length - 1) * COLUMN_W;
   const maxRows = Math.max(1, ...topNodes.map((n) => n.rowsInColumn));
@@ -334,7 +387,7 @@ export function StageGraph({ stages, lastEvent, terminal, onSelectStage }: Stage
                   {desc.running && <circle r={NODE_R + 4} className={styles.ring} />}
                   <circle r={NODE_R} className={styles[`tone_${desc.tone}`]} />
                   <text className={styles.label} y={NODE_R + 14} textAnchor="middle">
-                    {truncateLabel(n.stage.name)}
+                    {labels.get(n.stage.stageId) ?? n.stage.name}
                   </text>
                 </a>
                 {hasHiddenChildren(n.stage.stageId) && (

@@ -137,7 +137,7 @@ the state stays visible in a narrow tab.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
-A wide stage graph scrolls inside its card. A stage name over 22 characters is cut short in its
+A wide stage graph scrolls inside its card. A stage name too wide for its node is cut short in its
 node; point at the node to read it in full. Nested stages sit under a heading that names their
 parent. Select the heading to show or hide them.
 

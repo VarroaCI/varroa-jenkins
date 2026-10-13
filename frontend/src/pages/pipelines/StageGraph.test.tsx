@@ -1,14 +1,25 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { StageGraph } from "./StageGraph";
+import { StageGraph, fitLabel } from "./StageGraph";
 import type { RunStage } from "../../types";
 
 function stage(overrides: Partial<RunStage> & Pick<RunStage, "stageId" | "name" | "status">): RunStage {
   return { ...overrides };
 }
 
+// A fake context: capitals are 10 px wide, other glyphs 6 px.
+const fakeMeasure = (s: string) => [...s].reduce((w, c) => w + (/[A-Z]/.test(c) ? 10 : 6), 0);
+
 beforeEach(() => {
   window.location.hash = "";
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    font: "",
+    measureText: (s: string) => ({ width: fakeMeasure(s) }),
+  } as unknown as CanvasRenderingContext2D);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function nodeY(id: string): number {
@@ -227,8 +238,8 @@ describe("StageGraph", () => {
     expect(svg.getAttribute("width")).toBe(String(2 * 80 + 23 * 160));
   });
 
-  it("truncates a long label and keeps the full name in the title and the accessible name", () => {
-    const long = "Image-Frontend-Build-Pipeline-Stage-Name";
+  it("cuts a long all-caps label with an ellipsis and keeps the full name in the title and the accessible name", () => {
+    const long = "IMAGE-FRONTEND-BUILD-PIPELINE-STAGE-NAME";
     const stages: RunStage[] = [
       stage({ stageId: "1", name: long, status: "SUCCESS" }),
       stage({ stageId: "2", name: "Branch: Image-Frontend", status: "SUCCESS", startedAt: "2026-01-01T00:00:01Z" }),
@@ -237,12 +248,59 @@ describe("StageGraph", () => {
     const link = document.getElementById("node-stage-1")!;
     const label = link.querySelector("text")!;
     expect(label.textContent!.endsWith("…")).toBe(true);
-    expect(label.textContent!.length).toBe(22);
+    expect(label.textContent!.length).toBeLessThan(long.length);
+    expect(fakeMeasure(label.textContent!)).toBeLessThanOrEqual(148);
     expect(link.querySelector("title")?.textContent).toBe(`${long} — Passed`);
     expect(link.getAttribute("aria-label")).toContain(long);
 
     const short = document.getElementById("node-stage-2")!.querySelector("text")!;
     expect(short.textContent).toBe("Branch: Image-Frontend");
+  });
+
+  it("falls back to a character estimate without a canvas context", () => {
+    vi.restoreAllMocks();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const long = "Image-Frontend-Build-Pipeline-Stage-Name";
+    render(<StageGraph stages={[stage({ stageId: "1", name: long, status: "SUCCESS" })]} terminal={false} />);
+    const label = document.getElementById("node-stage-1")!.querySelector("text")!;
+    expect(label.textContent!.endsWith("…")).toBe(true);
+    expect(label.textContent!.length).toBeLessThan(long.length);
+  });
+
+  it("keeps a label that fits", () => {
+    const name = "Build and Test stage";
+    expect(fitLabel(name, 148, fakeMeasure)).toBe(name);
+  });
+
+  it("cuts an all-caps label to the column width", () => {
+    const name = "IMAGE-FRONTEND-BUILD-PIPELINE-STAGE-NAME";
+    const result = fitLabel(name, 148, fakeMeasure);
+    expect(result.endsWith("…")).toBe(true);
+    expect(fakeMeasure(result)).toBeLessThanOrEqual(148);
+    const kept = Array.from(result).length - 1;
+    const oneMore = Array.from(name).slice(0, kept + 1).join("") + "…";
+    expect(fakeMeasure(oneMore)).toBeGreaterThan(148);
+  });
+
+  it("never splits a surrogate pair", () => {
+    const name = "🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀";
+    const result = fitLabel(name, 30, (s) => Array.from(s).length * 10);
+    const body = result.slice(0, -1);
+    expect(Array.from(body).every((c) => c === "🚀")).toBe(true);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("keeps one character when the prefix is only spaces", () => {
+    const result = fitLabel("     Deploy", 15, fakeMeasure);
+    expect(result).not.toBe("…");
+    expect(result.endsWith("…")).toBe(true);
+    expect(Array.from(result).length).toBe(2);
+  });
+
+  it("keeps at least one character", () => {
+    const result = fitLabel("Deploy", 1, fakeMeasure);
+    expect(Array.from(result).length).toBe(2);
+    expect(result.endsWith("…")).toBe(true);
   });
 
   it("shows a visible parent heading for each nested list", () => {
