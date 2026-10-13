@@ -73,6 +73,10 @@ import java.util.logging.Logger;
  * <p>A {@code CAPPED} veto means a tenant or cell concurrency cap holds
  * the run. The claim waits at a fixed interval and has no lifetime limit:
  * each capped answer restarts the one-hour budget. It never cancels the item.
+ *
+ * <p>A {@code NOT_READY} veto waits at most {@link #NOT_READY_RETRY_CAP_MILLIS}
+ * before the next claim. Transport failures keep the full
+ * {@link #BACKOFF_MILLIS} ladder. Both kinds keep the one-hour lifetime.
  */
 public class VarroaClaimQueue {
 
@@ -97,6 +101,12 @@ public class VarroaClaimQueue {
      * A capped claim keeps no lifetime limit, so the interval never backs off.
      */
     static final long CAPPED_RETRY_MILLIS = 10_000L;
+
+    /**
+     * The longest wait after a {@code NOT_READY} veto. A NOT_READY hold can
+     * end at any time, so the claimer asks again at most every 10 seconds.
+     */
+    static final long NOT_READY_RETRY_CAP_MILLIS = 10_000L;
 
     /** The wait before a hand-back that the full work queue refused tries again. */
     static final long HANDBACK_RETRY_MILLIS = 1000L;
@@ -410,6 +420,7 @@ public class VarroaClaimQueue {
         OptionalInt home = last.forwardRefused ? OptionalInt.empty()
                 : homeCache.forwardSlotFor(job.getFullName());
         last.forwardRefused = false;
+        last.notReady = false;
         if (home.isPresent()) {
             if (forwardOnce(item, job, action, derived, home.getAsInt(), last)) {
                 return true;
@@ -433,7 +444,12 @@ public class VarroaClaimQueue {
             giveUp(pc);
             return true;
         }
-        return !park(pc, backoffFor(pc.attempt));
+        long delay = backoffFor(pc.attempt);
+        if (last.notReady) {
+            delay = Math.min(delay, NOT_READY_RETRY_CAP_MILLIS);
+            last.notReady = false;
+        }
+        return !park(pc, delay);
     }
 
     /**
@@ -477,6 +493,8 @@ public class VarroaClaimQueue {
                         : homeCache.forwardSlotFor(job.getFullName());
                 return target.isPresent() && forwardOnce(item, job, action, derived, target.getAsInt(), last);
             case VETOED_NOT_READY:
+                last.notReady = true;
+                return false;
             case RETRY:
                 return false;
             case VETOED_CAPPED:
@@ -789,6 +807,8 @@ public class VarroaClaimQueue {
         boolean forwardRefused;
         /** True when the newest claim answered CAPPED. */
         boolean capped;
+        /** True when the newest claim answered NOT_READY. Reset on every attempt. */
+        boolean notReady;
     }
 
     private static final class Decision {

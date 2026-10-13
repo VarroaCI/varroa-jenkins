@@ -436,7 +436,8 @@ public class VarroaClaimQueueTest {
 
         long[] clockMillis = {0L};
         VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
-            clockMillis[0] += d;
+            // A NOT_READY claim retries every 10 s. A one-minute step keeps the attempt count small.
+            clockMillis[0] += Math.max(d, 60_000L);
             task.run();
         };
         VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
@@ -447,6 +448,10 @@ public class VarroaClaimQueueTest {
         String line = lines.get(lines.size() - 1);
         assertTrue(line, line.contains("giving up on job give-up-job after one hour"));
         assertTrue(line, line.endsWith("last answer NOT_READY: tenant alpha has no placement row"));
+        // The give-up runs at the first attempt past the deadline. One clock step is 60 s here.
+        assertTrue("the give-up must come within one step after the one-hour budget, got " + clockMillis[0],
+                clockMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS
+                        && clockMillis[0] < VarroaClaimQueue.LIFETIME_MILLIS + 60_000L);
     }
 
     @Test
@@ -594,6 +599,52 @@ public class VarroaClaimQueueTest {
         String secondIntentKey = extractField(requestBodies.get(1), "intent_key");
         assertEquals(firstIntentKey, secondIntentKey);
         assertTrue(requestBodies.get(1).contains("\"run_id\":\"run-1\""));
+    }
+
+    @Test
+    public void notReadyVetoRetriesAtMostEveryTenSeconds() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("not-ready-cap-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n <= 6
+                ? new Reply(200, NOT_READY_BODY)
+                : new Reply(200, "{\"decision\":\"duplicate\"}");
+
+        long[] clockMillis = {0L};
+        List<Long> slept = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled by the duplicate answer");
+        assertEquals(7, calls.get());
+        assertEquals(List.of(1000L, 2000L, 5000L, 10_000L, 10_000L, 10_000L), slept);
+    }
+
+    @Test
+    public void transportRetryKeepsFullLadder() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("transport-ladder-job");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> n <= 6
+                ? new Reply(503, UNAVAILABLE_BODY)
+                : new Reply(200, "{\"decision\":\"duplicate\"}");
+
+        long[] clockMillis = {0L};
+        List<Long> slept = new CopyOnWriteArrayList<>();
+        VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
+            slept.add(d);
+            clockMillis[0] += d;
+            task.run();
+        };
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), () -> clockMillis[0], scheduler);
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the item to be cancelled by the duplicate answer");
+        assertEquals(7, calls.get());
+        assertEquals(List.of(1000L, 2000L, 5000L, 10_000L, 30_000L, 60_000L), slept);
     }
 
     @Test
@@ -947,7 +998,8 @@ public class VarroaClaimQueueTest {
         List<String> schedulingThreads = new CopyOnWriteArrayList<>();
         VarroaClaimQueue.Scheduler scheduler = (task, d) -> {
             schedulingThreads.add(Thread.currentThread().getName());
-            clockMillis[0] += d;
+            // A NOT_READY claim retries every 10 s. A one-minute step keeps the attempt count small.
+            clockMillis[0] += Math.max(d, 60_000L);
             task.run();
         };
         AtomicInteger resolved = new AtomicInteger();
@@ -956,8 +1008,10 @@ public class VarroaClaimQueueTest {
 
         awaitTrue(() -> isCancelled(item), "the item to be cancelled at the one-hour budget");
         awaitTrue(() -> resolved.get() == 1, "one resolution");
-        assertTrue("the cancel must come at the one-hour budget or later, got " + clockMillis[0],
-                clockMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS);
+        // The give-up runs at the first attempt past the deadline. One clock step is 60 s here.
+        assertTrue("the cancel must come within one step after the one-hour budget, got " + clockMillis[0],
+                clockMillis[0] >= VarroaClaimQueue.LIFETIME_MILLIS
+                        && clockMillis[0] < VarroaClaimQueue.LIFETIME_MILLIS + 60_000L);
         assertFalse(queue.isPendingForTesting("budget-job#run-1"));
         assertEquals("the claim resolves exactly once", 1, resolved.get());
         assertTrue("only a claimer thread parks a claim",

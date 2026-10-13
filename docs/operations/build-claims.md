@@ -53,8 +53,10 @@ background claimer asks for the claim.
 The item runs only after the claimer receives a `granted` decision.
 
 The claimer retries a failed or timed-out claim on this schedule: 1 s, 2 s, 5 s, 10 s, 30 s,
-then every 60 s. After one hour it cancels the queue item and logs a `WARNING`. A claim waits for
-its next attempt off the claimer threads, so a refused claim does not delay other jobs.
+then every 60 s. The claimer retries a `NOT_READY` veto at most every 10 seconds. It keeps the
+full schedule for transport failures. After one hour it cancels the queue item and logs a
+`WARNING`. A claim waits for its next attempt off the claimer threads, so a refused claim does not
+delay other jobs.
 
 ## Reading a claim decision
 
@@ -73,7 +75,7 @@ A missing `decision` key counts as empty. The mite omits the key from every fail
 | `INVALID_KEY` | the key or the request does not parse | cancel |
 | `FENCED` | the cell holds no member of the tenant | cancel |
 | `CROSS_TENANT` | the trigger names a job of another tenant | cancel |
-| `NOT_READY` | the placement is missing or behind, or another pod holds the grant | retry |
+| `NOT_READY` | the placement is missing or behind, or another pod holds the grant | retry at most every 10 s |
 | `NOT_HOME` | a standby or a slot that is not the home | forward to the veto's `home_slot` |
 
 A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>: <message>`. The recorder
