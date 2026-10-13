@@ -15,8 +15,10 @@ const mockListPipelines = vi.fn();
 const mockListRunners = vi.fn();
 const mockGetTeamCell = vi.fn();
 const mockListFleetLocks = vi.fn();
+const mockGetTeam = vi.fn();
 vi.mock("../../api/client", () => ({
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
+  getTeam: (...args: unknown[]) => mockGetTeam(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
   listFleetLocks: (...args: unknown[]) => mockListFleetLocks(...args),
@@ -54,6 +56,7 @@ function notification(overrides: Partial<RunNotification> = {}): RunNotification
 beforeEach(() => {
   mockUseEventStream.mockClear();
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
+  mockGetTeam.mockReset();
 });
 
 /** LocationSpy publishes the current search string, so a test can read the
@@ -786,7 +789,14 @@ describe("TeamHome — live run events", () => {
     await waitFor(() => expect(mockListPipelines).toHaveBeenCalledTimes(1));
 
     // The URL carries the BFF base, so the browser reaches the API and not
-    // the SPA fallback.
+    // the SPA fallback. The stream opens once the main read has succeeded.
+    await waitFor(() =>
+      expect(mockUseEventStream).toHaveBeenCalledWith(
+        "/api/v1/pipelines/payments/stream",
+        "pipelines:payments",
+        ["run", "stage", "lock"],
+      ),
+    );
     expect(mockUseEventStream).toHaveBeenCalledWith(
       "/api/v1/pipelines/payments/stream",
       "pipelines:payments",
@@ -1036,5 +1046,161 @@ describe("TeamHome — live run events", () => {
     });
 
     await waitFor(() => expect(mockListPipelines.mock.calls.length).toBeGreaterThan(settled));
+  });
+});
+
+describe("TeamHome — a team the main read does not find", () => {
+  const waitingTeam = {
+    name: "acme",
+    namespaces: [],
+    pipelines: { profile: "p", agentNamespace: "n" },
+  };
+
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListFleetLocks.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockListFleetLocks.mockResolvedValue({ items: [] });
+    mockGetTeamCell.mockResolvedValue({ state: "unplaced", reason: "ProfileNotFound", canOpenCell: false });
+    mockListPipelines.mockRejectedValue(new ApiError(404, "team not found"));
+  });
+
+  it("shows the Not placed pill and the waiting note for a pipelines Team with no cell", async () => {
+    mockGetTeam.mockResolvedValue(waitingTeam);
+    const user = userEvent.setup();
+    renderPage("/pipelines/acme");
+
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("acme");
+    const pill = await screen.findByRole("button", { name: "Not placed" });
+    expect(screen.getByText("This team has no cell yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Not found")).not.toBeInTheDocument();
+
+    await user.click(pill);
+    expect(screen.getByText("ProfileNotFound")).toBeInTheDocument();
+  });
+
+  it("sends no runners, locks, or stream request for a waiting team", async () => {
+    mockGetTeam.mockResolvedValue(waitingTeam);
+    renderPage("/pipelines/acme");
+
+    await screen.findByRole("button", { name: "Not placed" });
+    expect(mockListRunners).not.toHaveBeenCalled();
+    expect(mockListFleetLocks).not.toHaveBeenCalled();
+    const last = mockUseEventStream.mock.calls[mockUseEventStream.mock.calls.length - 1];
+    expect(last?.[0]).toBeNull();
+    expect(last?.[1]).toBeNull();
+  });
+
+  it("shows the no-pipelines page for a readable Team with no pipelines", async () => {
+    mockGetTeam.mockResolvedValue({ name: "acme", namespaces: [] });
+    renderPage("/pipelines/acme");
+
+    expect(await screen.findByText("No pipelines")).toBeInTheDocument();
+    expect(screen.queryByText("Not found")).not.toBeInTheDocument();
+  });
+
+  it("shows Not found when the Team read is refused", async () => {
+    mockGetTeam.mockRejectedValue(new ApiError(403, "forbidden"));
+    renderPage("/pipelines/acme");
+
+    expect(await screen.findByText("Not found")).toBeInTheDocument();
+  });
+
+  it("shows Not found when no Team exists", async () => {
+    mockGetTeam.mockRejectedValue(new ApiError(404, "team not found"));
+    renderPage("/pipelines/acme");
+
+    expect(await screen.findByText("Not found")).toBeInTheDocument();
+  });
+
+  it("issues no dependent request while the main read is pending", async () => {
+    mockListPipelines.mockReturnValue(new Promise(() => {}));
+    renderPage("/pipelines/acme");
+
+    await screen.findByText(/Loading pipelines/);
+    expect(mockListRunners).not.toHaveBeenCalled();
+    expect(mockListFleetLocks).not.toHaveBeenCalled();
+    expect(mockGetTeamCell).not.toHaveBeenCalled();
+    expect(mockGetTeam).not.toHaveBeenCalled();
+    expect(mockUseEventStream.mock.calls[mockUseEventStream.mock.calls.length - 1]?.[0]).toBeNull();
+  });
+
+  it("issues no dependent request and no Team read when the main read fails with a server error", async () => {
+    mockListPipelines.mockRejectedValue(new ApiError(500, "boom"));
+    renderPage("/pipelines/acme");
+
+    expect(await screen.findByText("Unable to load page")).toBeInTheDocument();
+    expect(mockListRunners).not.toHaveBeenCalled();
+    expect(mockListFleetLocks).not.toHaveBeenCalled();
+    expect(mockGetTeamCell).not.toHaveBeenCalled();
+    expect(mockGetTeam).not.toHaveBeenCalled();
+    expect(mockUseEventStream.mock.calls[mockUseEventStream.mock.calls.length - 1]?.[0]).toBeNull();
+  });
+});
+
+describe("TeamHome — a waiting team's transitions", () => {
+  const waitingTeam = {
+    name: "acme",
+    namespaces: [],
+    pipelines: { profile: "p", agentNamespace: "n" },
+  };
+
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListFleetLocks.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockListFleetLocks.mockResolvedValue({ items: [] });
+    mockGetTeamCell.mockResolvedValue({ state: "unplaced", reason: "ProfileNotFound", canOpenCell: false });
+    mockListPipelines.mockRejectedValue(new ApiError(404, "team not found"));
+  });
+
+  it("renders the team page and opens the stream after the waiting team is placed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetTeam.mockResolvedValue(waitingTeam);
+      renderPage("/pipelines/acme");
+      await screen.findByRole("button", { name: "Not placed" });
+      expect(screen.getByText("This team has no cell yet.")).toBeInTheDocument();
+
+      // The operator places the Team. The main read now succeeds on its
+      // 30 second poll.
+      mockListPipelines.mockResolvedValue(pipelineList("acme", ["acme/checkout-api"]));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      await waitFor(() => expect(screen.queryByText("This team has no cell yet.")).not.toBeInTheDocument());
+      expect(screen.getByText("Running now")).toBeInTheDocument();
+      expect(screen.getByText("Locks")).toBeInTheDocument();
+      expect(screen.getByText("Runners")).toBeInTheDocument();
+      expect(mockListRunners).toHaveBeenCalled();
+      expect(mockListFleetLocks).toHaveBeenCalled();
+      const last = mockUseEventStream.mock.calls[mockUseEventStream.mock.calls.length - 1];
+      expect(last?.[0]).toBe("/api/v1/pipelines/acme/stream");
+      expect(last?.[1]).toBe("pipelines:acme");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops polling when the Team has no pipelines", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGetTeam.mockResolvedValue({ name: "acme", namespaces: [] });
+      renderPage("/pipelines/acme");
+      await screen.findByText("No pipelines");
+
+      const before = mockListPipelines.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(mockListPipelines).toHaveBeenCalledTimes(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

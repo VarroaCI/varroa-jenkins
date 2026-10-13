@@ -30,7 +30,12 @@ export function RecoveryState({ kind, title, message, onRetry }: RecoveryStatePr
 
 export const ForbiddenPage = () => <RecoveryState kind="403" title="Access denied" message="You do not have access to this page." />;
 export const NotFoundPage = () => <RecoveryState kind="404" title="Not found" message="We could not find that page." />;
-export const GenericErrorPage = ({ onRetry }: { onRetry?: () => void }) => <RecoveryState kind="error" title="Unable to load page" message="Varroa could not load this page." onRetry={onRetry} />;
+/**
+ * Explains a Team that has no pipelines. A caller who can read the Team sees
+ * this page. Other callers see Not found.
+ */
+export const NoPipelinesPage = () => <RecoveryState kind="disabled" title="No pipelines" message="This team has no pipelines. An administrator turns them on with the Team's spec.pipelines field." />;
+export const GenericErrorPage =({ onRetry }: { onRetry?: () => void }) => <RecoveryState kind="error" title="Unable to load page" message="Varroa could not load this page." onRetry={onRetry} />;
 
 /**
  * Explains a 503 caused by an unconfigured record store, per design D12: the

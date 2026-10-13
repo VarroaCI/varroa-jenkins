@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getTeamCell, listFleetLocks, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
+import { getTeam, getTeamCell, listFleetLocks, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
+import type { TeamEntry } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { useEventStream } from "../../hooks/useEventStream";
-import { ForbiddenPage, GenericErrorPage, NotFoundPage, RecordStoreDisabledPage } from "../../components/RecoveryState";
+import {
+  ForbiddenPage,
+  GenericErrorPage,
+  NoPipelinesPage,
+  NotFoundPage,
+  RecordStoreDisabledPage,
+} from "../../components/RecoveryState";
 import { Card } from "../../components/Card";
 import { age } from "../../components/activityTimeline.util";
 import { holderOf, holdsLock } from "../../lib/fleetLocks";
@@ -159,13 +166,32 @@ export default function TeamHome() {
     queryKey: ["pipelines", team],
     queryFn: () => listPipelines(team!),
     enabled: !!team,
+    // A Team that waits for its first cell answers Not found until the
+    // operator places it. The read then polls, so the page fills in alone.
+    refetchInterval: (query) => {
+      const notFound = query.state.error instanceof ApiError && query.state.error.status === 404;
+      const probe = queryClient.getQueryData<TeamEntry>(["pipelines-team-probe", team]);
+      return notFound && probe?.pipelines ? 30_000 : false;
+    },
   });
 
+  // The main read answers Not found for a Team with no placed cell and for a
+  // Team the caller cannot read. The Team read tells the two apart.
+  const mainReady = !!team && data !== undefined;
+  const mainNotFound = !!team && data === undefined && error instanceof ApiError && error.status === 404;
+  const teamProbe = useQuery({
+    queryKey: ["pipelines-team-probe", team],
+    queryFn: () => getTeam(team!),
+    enabled: mainNotFound,
+    retry: false,
+  });
+  const waiting = mainNotFound && !!teamProbe.data?.pipelines;
+
   // The team's stream carries every run and every lock of every tenant of
-  // that team.
+  // that team. It opens only after the main read succeeds.
   const { lastEvent, readyState } = useEventStream<RunNotification>(
-    team ? teamRunStreamUrl(team) : null,
-    team ? `pipelines:${team}` : null,
+    mainReady ? teamRunStreamUrl(team!) : null,
+    mainReady ? `pipelines:${team}` : null,
     ["run", "stage", "lock"],
   );
 
@@ -237,7 +263,7 @@ export default function TeamHome() {
   const runnersQuery = useQuery({
     queryKey: ["runners", team],
     queryFn: () => listRunners(team!),
-    enabled: !!team,
+    enabled: mainReady,
   });
   // The team stream carries a lock frame for this tenant's own locks only.
   // A lock under this tenant's prefix that another tenant's run holds
@@ -246,15 +272,16 @@ export default function TeamHome() {
   const locksQuery = useQuery({
     queryKey: ["fleet-locks", team],
     queryFn: () => listFleetLocks(team!),
-    enabled: !!team,
+    enabled: mainReady,
     refetchInterval: 15_000,
   });
   // This call shares its query key with TeamCellCard's own call, so React
-  // Query dedupes the two into one request.
+  // Query dedupes the two into one request. A waiting Team reads it too,
+  // because the pill names the state the Team waits in.
   const cellQuery = useQuery({
     queryKey: ["team-cell", team],
     queryFn: () => getTeamCell(team!),
-    enabled: !!team,
+    enabled: mainReady || waiting,
     refetchInterval: 30_000,
   });
   const [cellOpen, setCellOpen] = useState(false);
@@ -310,54 +337,91 @@ export default function TeamHome() {
   }
 
   if (error instanceof ApiError && error.status === 403) return <ForbiddenPage />;
-  if (error instanceof ApiError && error.status === 404) return <NotFoundPage />;
   if (error instanceof ApiError && error.status === 503) return <RecordStoreDisabledPage />;
+
+  // The page head and the cell disclosure are the same on every branch that
+  // names a Team, so both come from one element.
+  const pageHead = (
+    <div className={styles.pageHead}>
+      <h1 className={styles.pageTitle}>{team}</h1>
+      <div className={styles.pageDesc}>Pipelines for this team</div>
+      {data?.retention && (
+        <div className={styles.retention} data-testid="team-retention">
+          Build history kept {data.retention.effectiveDays} days
+          {data.retention.tenantDays !== undefined &&
+            data.retention.tenantDays < data.retention.storeDays &&
+            ` (store limit ${data.retention.storeDays} days)`}
+          {data.retention.jobs.length > 0 && (
+            <ul className={styles.retentionJobs}>
+              {data.retention.jobs.map((rule) => (
+                <li key={rule.job}>
+                  {rule.job}: {rule.effectiveDays} days
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {/* A failed refetch keeps the last data, so the isError test hides
+          the pill then, as TeamCellCard hides its own card. */}
+      {cellQuery.data && !cellQuery.isError && cellQuery.data.state !== "notCellHosted" && (
+        <button
+          type="button"
+          className={pillClassName(cellQuery.data.state)}
+          aria-expanded={cellOpen}
+          aria-controls="team-cell-disclosure"
+          onClick={() => setCellOpen((v) => !v)}
+        >
+          {CELL_STATE_LABELS[cellQuery.data.state]}
+          {cellQuery.data.cell ? ` · ${cellQuery.data.cell}` : ""}
+        </button>
+      )}
+    </div>
+  );
+
+  // The card stays mounted while the disclosure is closed, so its own
+  // 30 second read keeps running underneath.
+  const cellDisclosure = (
+    <div id="team-cell-disclosure" className={styles.cellDisclosure} hidden={!cellOpen}>
+      <TeamCellCard team={team!} />
+    </div>
+  );
+
+  if (mainNotFound) {
+    if (teamProbe.isLoading) {
+      return (
+        <div className={styles.page}>
+          <div className={styles.loading}>Loading pipelines…</div>
+        </div>
+      );
+    }
+    if (waiting) {
+      return (
+        <div className={styles.page}>
+          {pageHead}
+          {cellDisclosure}
+          <div className={styles.empty}>
+            <div>This team has no cell yet.</div>
+            <div className={styles.emptyNote}>
+              Its pipelines show here after Varroa places it on a cell. Select the status above to read the reason.
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // The Team read answers only to a caller who can read the Team, so a
+    // Team with no pipelines shows its own page only to that caller.
+    if (teamProbe.data) return <NoPipelinesPage />;
+    return <NotFoundPage />;
+  }
+
   if (error) return <GenericErrorPage />;
   if (!data) return <NotFoundPage />;
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHead}>
-        <h1 className={styles.pageTitle}>{team}</h1>
-        <div className={styles.pageDesc}>Pipelines for this team</div>
-        {data.retention && (
-          <div className={styles.retention} data-testid="team-retention">
-            Build history kept {data.retention.effectiveDays} days
-            {data.retention.tenantDays !== undefined &&
-              data.retention.tenantDays < data.retention.storeDays &&
-              ` (store limit ${data.retention.storeDays} days)`}
-            {data.retention.jobs.length > 0 && (
-              <ul className={styles.retentionJobs}>
-                {data.retention.jobs.map((rule) => (
-                  <li key={rule.job}>
-                    {rule.job}: {rule.effectiveDays} days
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        {/* A failed refetch keeps the last data, so the isError test hides
-            the pill then, as TeamCellCard hides its own card. */}
-        {cellQuery.data && !cellQuery.isError && cellQuery.data.state !== "notCellHosted" && (
-          <button
-            type="button"
-            className={pillClassName(cellQuery.data.state)}
-            aria-expanded={cellOpen}
-            aria-controls="team-cell-disclosure"
-            onClick={() => setCellOpen((v) => !v)}
-          >
-            {CELL_STATE_LABELS[cellQuery.data.state]}
-            {cellQuery.data.cell ? ` · ${cellQuery.data.cell}` : ""}
-          </button>
-        )}
-      </div>
-
-      {/* The card stays mounted while the disclosure is closed, so its own
-          30 second read keeps running underneath. */}
-      <div id="team-cell-disclosure" className={styles.cellDisclosure} hidden={!cellOpen}>
-        <TeamCellCard team={team!} />
-      </div>
+      {pageHead}
+      {cellDisclosure}
 
       <div className={styles.sectionTitle}>Running now</div>
       {data.truncated && (

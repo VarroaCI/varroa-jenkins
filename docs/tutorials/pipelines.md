@@ -43,6 +43,10 @@ The card reports one of five states.
 | Not placed | the badge and the reason only. The team waits for its first cell |
 | No card | the team runs on its own controller, so no cell hosts it |
 
+A team waiting for its first cell shows only the pill and a note. The page reads again every 30 seconds.
+
+Callers who can read a team with no pipelines see No pipelines. Other callers see Not found.
+
 **Reason** carries the operator's own text for the placement, such as `TenantPlaced` or
 `CellNotReady`. Ask an operator about an unknown reason.
 
