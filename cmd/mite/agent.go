@@ -2510,9 +2510,22 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			result.RehydrationSuccess = false
 			result.RehydrationError = err.Error()
 		} else {
+			keep := retry.deferredJobs
+			if result.ItemsSuccess {
+				var orphans []string
+				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs)
+				if len(orphans) > 0 {
+					sample := orphans
+					if len(sample) > 5 {
+						sample = sample[:5]
+					}
+					a.Logger.Info("rehydration dropped records of jobs the items apply did not create",
+						"orphans", len(orphans), "sample", sample)
+				}
+			}
 			a.Logger.Info("rehydration seeded deferred jobs after the items apply",
-				"deferred_before", deferredBefore, "deferred_after", len(retry.deferredJobs))
-			result.RehydrationDeferredJobs = retry.deferredJobs
+				"deferred_before", deferredBefore, "deferred_after", len(keep))
+			result.RehydrationDeferredJobs = keep
 		}
 	}
 

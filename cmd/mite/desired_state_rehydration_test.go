@@ -187,7 +187,7 @@ func TestRehydrationSuccessTracksTheAppliedContentHash(t *testing.T) {
 		Rehydration: &mitev1.RehydrationBundle{
 			ContentHash: "content-1",
 			Files: []*mitev1.RehydrationFile{
-				rehydrationFile(t, "jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
+				rehydrationFile(t, "jobs/mb/jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
 			},
 		},
 	}
@@ -382,6 +382,7 @@ func TestRehydrationDeferredBundleIsNotConverged(t *testing.T) {
 	session := "sess-1"
 	srv := fakeSessionServer(t, &session)
 
+	writeJobConfig(t, home, "mb", multibranchConfig)
 	agent := newTestAgentWithJenkins(t, srv.URL)
 	agent.jenkinsHomeDir = home
 
@@ -393,7 +394,7 @@ func TestRehydrationDeferredBundleIsNotConverged(t *testing.T) {
 		Rehydration: &mitev1.RehydrationBundle{
 			ContentHash: "content-1",
 			Files: []*mitev1.RehydrationFile{
-				rehydrationFile(t, "jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
+				rehydrationFile(t, "jobs/mb/jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
 			},
 		},
 	}
@@ -410,7 +411,7 @@ func TestRehydrationDeferredBundleIsNotConverged(t *testing.T) {
 		t.Fatal("marker records the rehydration section while a job is deferred")
 	}
 
-	seedJob(t, home, "jobs", "missing-job")
+	seedJob(t, home, "jobs", "mb", "jobs", "missing-job")
 	second := agent.handleDesiredState(context.Background(), cmd)
 	if !second.RehydrationSuccess {
 		t.Fatalf("second apply: expected success, got %+v", second)
@@ -418,7 +419,7 @@ func TestRehydrationDeferredBundleIsNotConverged(t *testing.T) {
 	if len(second.RehydrationDeferredJobs) != 0 {
 		t.Errorf("second apply: expected no deferred job, got %v", second.RehydrationDeferredJobs)
 	}
-	if _, err := os.Stat(filepath.Join(home, "jobs", "missing-job", "builds", "1", "build.xml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "jobs", "missing-job", "builds", "1", "build.xml")); err != nil {
 		t.Errorf("second apply: expected the seeded build record: %v", err)
 	}
 }
@@ -431,6 +432,7 @@ func TestRehydrationCompositeSkipNeedsTheRehydrationHash(t *testing.T) {
 	session := "sess-1"
 	srv := fakeSessionServer(t, &session)
 
+	writeJobConfig(t, home, "mb", multibranchConfig)
 	agent := newTestAgentWithJenkins(t, srv.URL)
 	agent.jenkinsHomeDir = home
 
@@ -441,7 +443,7 @@ func TestRehydrationCompositeSkipNeedsTheRehydrationHash(t *testing.T) {
 		Rehydration: &mitev1.RehydrationBundle{
 			ContentHash: "content-1",
 			Files: []*mitev1.RehydrationFile{
-				rehydrationFile(t, "jobs/late-job/builds/1/build.xml", []byte("<flow-build/>")),
+				rehydrationFile(t, "jobs/mb/jobs/late-job/builds/1/build.xml", []byte("<flow-build/>")),
 			},
 		},
 	}
@@ -451,12 +453,12 @@ func TestRehydrationCompositeSkipNeedsTheRehydrationHash(t *testing.T) {
 		t.Fatalf("first apply: expected one deferred job, got %+v", first)
 	}
 
-	seedJob(t, home, "jobs", "late-job")
+	seedJob(t, home, "jobs", "mb", "jobs", "late-job")
 	second := agent.handleDesiredState(context.Background(), cmd)
 	if len(second.RehydrationDeferredJobs) != 0 {
 		t.Errorf("second apply: expected the composite skip to be bypassed, got deferred %v", second.RehydrationDeferredJobs)
 	}
-	if _, err := os.Stat(filepath.Join(home, "jobs", "late-job", "builds", "1", "build.xml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "jobs", "late-job", "builds", "1", "build.xml")); err != nil {
 		t.Errorf("second apply: expected the seeded build record: %v", err)
 	}
 }
@@ -469,6 +471,7 @@ func TestRehydrationBootSessionChangeForcesReapply(t *testing.T) {
 	session := "sess-1"
 	srv := fakeSessionServer(t, &session)
 
+	writeJobConfig(t, home, "mb", multibranchConfig)
 	agent := newTestAgentWithJenkins(t, srv.URL)
 	agent.jenkinsHomeDir = home
 
@@ -480,7 +483,7 @@ func TestRehydrationBootSessionChangeForcesReapply(t *testing.T) {
 		Rehydration: &mitev1.RehydrationBundle{
 			ContentHash: "content-1",
 			Files: []*mitev1.RehydrationFile{
-				rehydrationFile(t, "jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
+				rehydrationFile(t, "jobs/mb/jobs/missing-job/builds/1/build.xml", []byte("<flow-build/>")),
 			},
 		},
 	}

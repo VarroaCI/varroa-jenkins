@@ -321,7 +321,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   never lowers a stored `nextBuildNumber`. A deferred job's path returns in
   `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
   A second pass after the items apply re-seeds the deferred jobs before the
-  items gate opens. The marker never records the `rehydration` section while
+  items gate opens. After a successful items apply, a job that is still absent
+  is an orphan, not a deferral, unless its parent is a multibranch project or
+  an organization folder, or its parent directory exists without a `config.xml`
+  (`orphanDeferredJobs`); the mite drops its records.
+  A failed items apply keeps every deferral. The marker never records the `rehydration` section while
   a job stays deferred. The composite fast path skips a command only when the
   marker also holds the bundle's `rehydration` hash.
   `writeRehydrationFileAt` is the one writer that takes an overwrite flag:

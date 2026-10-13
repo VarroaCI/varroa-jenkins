@@ -279,7 +279,7 @@ Each seed carries the job's next build number, its newest successful build, and 
 `rehydrateBuilds` further builds, newest first, with parameters and changesets. A multibranch
 child seeds only after branch indexing creates it; the operator retries until then or until
 `rehydrateDeadline` passes. The mite seeds a job that the same push creates after the items
-apply, so a roll needs no second push.
+apply, so a roll needs no second push. The mite drops the records of a job that the catalog deleted.
 
 `Team.spec.pipelines` settings for rehydration and the ledger:
 

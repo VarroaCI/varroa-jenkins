@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -333,6 +334,77 @@ func jobConfigExists(jobDir string) bool {
 func buildDirExists(buildDir string) bool {
 	info, err := os.Stat(buildDir)
 	return err == nil && info.IsDir()
+}
+
+// orphanDeferredJobs splits deferred job paths after a successful items
+// apply. A job whose parent is a multibranch project or an organization
+// folder stays deferred, because branch indexing can still create it. A job
+// whose parent directory exists without a config.xml also stays deferred.
+// Any other job the items apply did not create no longer exists, so its
+// records have nothing to seed.
+func orphanDeferredJobs(jenkinsHome string, deferred []string) (keep, orphans []string) {
+	for _, jobPath := range deferred {
+		if parentCanCreateJob(jenkinsHome, jobPath) {
+			keep = append(keep, jobPath)
+		} else {
+			orphans = append(orphans, jobPath)
+		}
+	}
+	return keep, orphans
+}
+
+// parentCanCreateJob reports whether the parent of jobPath can still create
+// it later. A parent whose config.xml is absent keeps the job when the parent
+// directory exists, because Jenkins may not have written the config yet. A
+// parent directory that is absent, or a config.xml whose root element is not
+// a multibranch project or organization folder, cannot create it. Any other
+// read error keeps the job, so an unreadable parent never drops records by
+// mistake. A top-level job has no parent and cannot be created later.
+func parentCanCreateJob(jenkinsHome, jobPath string) bool {
+	idx := strings.LastIndex(jobPath, "/")
+	if idx < 0 {
+		return false
+	}
+	parent := jobPath[:idx]
+	// Map the parent through parseRehydrationPath, the one job-path rule.
+	parsed, err := parseRehydrationPath("jobs/" + strings.ReplaceAll(parent, "/", "/jobs/") + "/nextBuildNumber")
+	if err != nil {
+		return true
+	}
+	parentDir := filepath.Join(append([]string{jenkinsHome}, parsed.jobDirParts...)...)
+	root, err := rootElementName(filepath.Join(parentDir, "config.xml"))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+		info, statErr := os.Stat(parentDir)
+		if statErr != nil {
+			return !errors.Is(statErr, os.ErrNotExist)
+		}
+		return info.IsDir()
+	}
+	return strings.HasSuffix(root, "MultiBranchProject") || strings.HasSuffix(root, "OrganizationFolder")
+}
+
+// rootElementName returns the name of the root element of the XML file at
+// path. It reads at most 64 KiB, which holds the root start tag of a Jenkins
+// config.xml.
+func rootElementName(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	dec := xml.NewDecoder(io.LimitReader(f, 64<<10))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return "", err
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			return start.Name.Local, nil
+		}
+	}
 }
 
 // rehydrationApplyResult is the outcome of applying one RehydrationBundle.
