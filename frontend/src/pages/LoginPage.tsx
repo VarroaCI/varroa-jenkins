@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { useAuth, PROGRESS_COPY } from "../context/AuthContext";
 import styles from "./LoginPage.module.css";
 
@@ -140,8 +140,11 @@ export function LoginPage({ authError }: LoginPageProps) {
               </div>
             )}
 
+            {/* Each branch has its own key. React must not reuse a button node
+                across branches, because a reused node can change its type
+                during a click. */}
             {localForm ? (
-              <>
+              <Fragment key="local">
                 <div className={styles.field}>
                   <label htmlFor="username" className={styles.label}>
                     Username
@@ -203,9 +206,9 @@ export function LoginPage({ authError }: LoginPageProps) {
                     Back to single sign-on
                   </button>
                 )}
-              </>
+              </Fragment>
             ) : (
-              <>
+              <Fragment key="sso">
                 <p className={styles.oidcNote}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
                     <rect x="4" y="10.5" width="16" height="10" rx="2" />
@@ -231,7 +234,7 @@ export function LoginPage({ authError }: LoginPageProps) {
                     Sign in with a local account
                   </button>
                 )}
-              </>
+              </Fragment>
             )}
 
             <p className={styles.footNote}>

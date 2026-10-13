@@ -148,6 +148,25 @@ func TestHandleLogin_BesideOIDC_FailedAttempt(t *testing.T) {
 	}
 }
 
+func TestHandleLogin_EmptyFields(t *testing.T) {
+	s, store, _ := besideOIDCServer(t)
+	store.add("acct", "correct-horse", v1alpha1.UserPurposeBreakGlass)
+	for _, body := range []string{
+		`{"username":"","password":"x"}`,
+		`{"username":"a","password":""}`,
+		`{}`,
+	} {
+		w := httptest.NewRecorder()
+		s.HandleLogin(w, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("body %s: status %d, want 400", body, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "username and password required") {
+			t.Errorf("body %s: response = %s", body, w.Body.String())
+		}
+	}
+}
+
 func TestHandleLogin_LocalOnly_NoAuditEvent(t *testing.T) {
 	signer, err := signing.New()
 	if err != nil {

@@ -153,4 +153,34 @@ describe("LoginPage", () => {
     await user.click(screen.getByRole("button", { name: /^sign in$/i }));
     await waitFor(() => expect(login).toHaveBeenCalledWith("rescue", "s3cret"));
   });
+
+  it("mounts a new submit button when the local-account toggle opens the form", async () => {
+    authState.authMode = "oidc";
+    authState.localAccounts = true;
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    const toggle = screen.getByRole("button", { name: /sign in with a local account/i });
+    await user.click(toggle);
+
+    const submit = screen.getByRole("button", { name: /^sign in$/i });
+    expect(submit).not.toBe(toggle);
+    expect(toggle).not.toBeInTheDocument();
+  });
+
+  it("opens the local form with no alert and no invalid fields", async () => {
+    authState.authMode = "oidc";
+    authState.localAccounts = true;
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await user.click(screen.getByRole("button", { name: /sign in with a local account/i }));
+
+    // jsdom does not replay the browser click timing, so the previous test
+    // is the guard against the reused-button bug.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/username/i)).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText(/password/i)).not.toHaveAttribute("aria-invalid");
+    expect(login).not.toHaveBeenCalled();
+  });
 });
