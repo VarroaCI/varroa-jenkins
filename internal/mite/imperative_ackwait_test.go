@@ -54,8 +54,16 @@ func connectResultMite(t *testing.T, addr string, certAuth *ca.CA) (mitev1.Mite_
 	return stream, imps
 }
 
-// shortAckWait sets a one-second imperative ack wait on the gateway.
-func shortAckWait(h *BusHandler) { h.imperativeAckWait = time.Second }
+// heartbeatAckWait sets a two-second imperative ack wait and a 100ms
+// in-progress interval. The margin between the two must absorb a
+// scheduler stall on a loaded race-detector run.
+func heartbeatAckWait(h *BusHandler) {
+	h.imperativeAckWait = 2 * time.Second
+	h.imperativeProgressEvery = 100 * time.Millisecond
+}
+
+// heartbeatHold is three ack waits of the heartbeat test.
+const heartbeatHold = 3 * 2 * time.Second
 
 // consumerConfig waits until the gateway's imperative consumer exists and
 // reports its config.
@@ -124,7 +132,7 @@ func TestImperativeConsumerUpdatesExistingAckWait(t *testing.T) {
 // from a repeat, and the result must then acknowledge the command.
 func TestPendingImperativeHeartbeatPreventsRedelivery(t *testing.T) {
 	natsSrv := startNATS(t)
-	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL(), shortAckWait)
+	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL(), heartbeatAckWait)
 	stream, imps := connectResultMite(t, lis.Addr().String(), certAuth)
 	publishTriggerBuild(t, busConn)
 	awaitImperative(t, imps, 15*time.Second, "mite")
@@ -135,7 +143,7 @@ func TestPendingImperativeHeartbeatPreventsRedelivery(t *testing.T) {
 			t.Fatalf("imperative %s delivered again while it ran", imp.CommandId)
 		}
 		t.Fatal("stream closed while the command ran")
-	case <-time.After(3 * time.Second):
+	case <-time.After(heartbeatHold):
 	}
 
 	if err := stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{

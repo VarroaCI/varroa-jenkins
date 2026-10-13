@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
@@ -74,7 +75,7 @@ func publishTriggerBuild(t *testing.T, conn *bus.Conn) {
 	subject := bus.MiteOutSubject(bus.DefaultCluster, redeliveryNS, redeliveryCell)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		_, err := conn.PublishJetStream(subject, data)
+		_, err := conn.JetStream().Publish(subject, data, nats.MsgId(redeliveryCommandID))
 		if err == nil {
 			return
 		}

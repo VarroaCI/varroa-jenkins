@@ -17,8 +17,12 @@ func (h *BusHandler) imperativeAckWaitOrDefault() time.Duration {
 }
 
 // imperativeProgressInterval is how often the gateway marks each pending
-// imperative command in progress: a quarter of the ack wait.
+// imperative command in progress: a quarter of the ack wait, unless a test
+// sets imperativeProgressEvery.
 func (h *BusHandler) imperativeProgressInterval() time.Duration {
+	if h.imperativeProgressEvery > 0 {
+		return h.imperativeProgressEvery
+	}
 	return h.imperativeAckWaitOrDefault() / 4
 }
 

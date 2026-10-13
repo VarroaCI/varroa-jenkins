@@ -265,6 +265,10 @@ type BusHandler struct {
 	// default; tests shrink it so a redelivery test runs in seconds.
 	imperativeAckWait time.Duration
 
+	// imperativeProgressEvery overrides the in-progress interval. Zero means
+	// a quarter of the ack wait. It must stay well below the ack wait.
+	imperativeProgressEvery time.Duration
+
 	// logMu guards logRuns and the gateway-wide pending-bytes counter,
 	// kept separate from mu so a log append never contends with the
 	// heartbeat/presence path.

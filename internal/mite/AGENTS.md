@@ -118,6 +118,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   the mite's serial queue never repeats. The ack wait must exceed that
   heartbeat interval with margin; it bounds how long a command a crashed
   gateway held waits for a repeat, never a command's length.
+  `imperativeProgressEvery` lets a test set the interval apart from the ack wait.
   `EnsureConsumer` updates the live durable in place on the next mite
   connection. A message that does not decode is terminated (`Term()`),
   never naked, because a nak repeats it at once forever.
