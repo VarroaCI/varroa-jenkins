@@ -139,6 +139,10 @@ sections describe.
   generation-only predicate would never fire for an annotation-less trigger); and
   `Watches` on `JenkinsRoleBinding`/`JenkinsRole` that enqueue **every** Controller so
   an RBAC CRD edit is pushed live instead of waiting for the periodic tick.
+- `NotifyCommandResult` (`controller_controller.go`) enqueues an owned reconcile when a
+  desired-state result applies its rehydration seed. It skips a result with deferred
+  jobs, a rehydration error, or no applied seed, because the tick paces the bundle resend.
+  `CellSeedStateChanged` (`cell_rehydration_entry.go`) decides the Team ticker wake.
 - Phase dispatch is `reconcileController` (`controller_controller.go:1278`): handles
   deletion/finalization first, then `PowerState` `Stopped`/`Hibernated` short-circuits
   (scale StatefulSet to 0 through `scaleTickToZero` and `ScaleStatefulSetToZero`), then dispatches on

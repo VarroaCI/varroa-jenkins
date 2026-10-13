@@ -3592,6 +3592,54 @@ func TestTriggerOwnedReconcile_SkipsForeignShard(t *testing.T) {
 	}
 }
 
+// TestNotifyCommandResult checks which desired-state results wake an owned
+// Controller. A result that applies the seed wakes it. A deferred job, a
+// failure, a result without the desired-state field, and a foreign shard
+// wake nothing.
+func TestNotifyCommandResult(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/owned"))
+
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.SetShardOwnership(ring, held)
+	foreign := "foreign-0"
+	for i := 0; held.Held(ring.ShardFor("ns/" + foreign)); i++ {
+		foreign = fmt.Sprintf("foreign-%d", i+1)
+	}
+
+	desired := func(ds *mitev1.DesiredStateResult) *mitev1.CommandResult {
+		return &mitev1.CommandResult{Result: &mitev1.CommandResult_DesiredState{DesiredState: ds}}
+	}
+	cases := []struct {
+		name string
+		key  string
+		res  *mitev1.CommandResult
+		want int
+	}{
+		{"owned applied seed", "owned", desired(&mitev1.DesiredStateResult{RehydrationSuccess: true}), 1},
+		{"owned deferred jobs", "owned", desired(&mitev1.DesiredStateResult{
+			RehydrationSuccess: true, RehydrationDeferredJobs: []string{"team/job"}}), 0},
+		{"owned rehydration error", "owned", desired(&mitev1.DesiredStateResult{
+			RehydrationError: "boom"}), 0},
+		{"owned seed not applied", "owned", desired(&mitev1.DesiredStateResult{}), 0},
+		{"owned no desired state", "owned", &mitev1.CommandResult{}, 0},
+		{"foreign applied seed", foreign, desired(&mitev1.DesiredStateResult{RehydrationSuccess: true}), 0},
+	}
+	for _, tc := range cases {
+		before := len(rec.reconcileEvents)
+		rec.NotifyCommandResult("ns", tc.key, tc.res)
+		if got := len(rec.reconcileEvents) - before; got != tc.want {
+			t.Errorf("%s: %d enqueued, want %d", tc.name, got, tc.want)
+		}
+	}
+	ctrlGVR, _ := crdstore.GVRFor[v1alpha1.Controller]()
+	if n := len(client.store.MetaPatches(ctrlGVR)); n != 0 {
+		t.Fatalf("%d metadata patches, want 0: a result never routes a wake", n)
+	}
+}
+
 // captureTransport is a minimal mite transport that captures the last pushed
 // desired state command.
 type captureTransport struct {

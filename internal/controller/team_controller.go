@@ -728,10 +728,8 @@ func memberSeedReader(cellsByKey map[string]*v1alpha1.Controller, teamName strin
 			if entry.Tenant != teamName {
 				continue
 			}
-			if !entry.Applied {
-				return "", entry.Deferred
-			}
-			return entry.CellInstance, entry.Deferred
+			answer := seedAnswerOf(entry)
+			return answer.instance, answer.deferred
 		}
 		return "", nil
 	}

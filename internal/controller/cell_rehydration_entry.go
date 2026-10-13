@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,6 +65,65 @@ func deadlineEntry(tenant string, generation int64, cellInstance string, deferre
 		Tenant: tenant, Generation: generation, CellInstance: cellInstance,
 		Deferred: deferred, Error: deadlineExceededMessage(deferred), At: &at,
 	}
+}
+
+// seedAnswer is the seed state of one tenant on one member cell: the cell
+// instance the tenant may build on, and the job paths still deferred.
+type seedAnswer struct {
+	instance string
+	deferred []string
+}
+
+// seedAnswerOf returns the seed answer that the Team reconciler reads from
+// one rehydration entry. An entry that is not applied answers no instance,
+// which holds every build on the member until its seed lands.
+func seedAnswerOf(e *v1alpha1.CellRehydrationEntry) seedAnswer {
+	if !e.Applied {
+		return seedAnswer{deferred: e.Deferred}
+	}
+	return seedAnswer{instance: e.CellInstance, deferred: e.Deferred}
+}
+
+// seedAnswersOf maps each tenant of a cell to its seed answer. A cell with
+// no status, or a tenant with no entry, answers the zero value.
+func seedAnswersOf(cr *v1alpha1.Controller) map[string]seedAnswer {
+	out := map[string]seedAnswer{}
+	if cr == nil || cr.Status.Cell == nil {
+		return out
+	}
+	for i := range cr.Status.Cell.Rehydration {
+		e := &cr.Status.Cell.Rehydration[i]
+		out[e.Tenant] = seedAnswerOf(e)
+	}
+	return out
+}
+
+// CellSeedStateChanged reports whether a Controller update changed the seed
+// answer of any tenant on a cell. The Controller informer handler calls it
+// on every replica. A true answer wakes the Team ticker, which reads the same
+// answers through memberSeedReader. Only the instance and the deferred job
+// paths count. A change of the entry time alone is false.
+func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
+	if newCR == nil || !v1alpha1.IsCell(newCR) || newCR.Status.Cell == nil {
+		return false
+	}
+	oldAnswers := seedAnswersOf(oldCR)
+	newAnswers := seedAnswersOf(newCR)
+	for tenant, now := range newAnswers {
+		prev := oldAnswers[tenant]
+		if prev.instance != now.instance || !slices.Equal(prev.deferred, now.deferred) {
+			return true
+		}
+	}
+	for tenant, prev := range oldAnswers {
+		if _, ok := newAnswers[tenant]; ok {
+			continue
+		}
+		if prev.instance != "" || len(prev.deferred) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // applyRehydrationResult implements task 6.2: it updates only the

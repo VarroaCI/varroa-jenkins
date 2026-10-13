@@ -1353,6 +1353,22 @@ func (r *Reconciler) TriggerOwnedReconcile(cluster, name, namespace string) {
 	}
 }
 
+// NotifyCommandResult enqueues a reconcile of an owned Controller when a
+// desired-state result applies its rehydration seed. The reconcile drains
+// the buffered result at once. A result that does not apply the seed wakes
+// nothing: a deferred job or a failure makes the next reconcile resend the
+// bundle, so the periodic tick must pace that resend. It never routes a
+// wake to another shard.
+func (r *Reconciler) NotifyCommandResult(ns, name string, res *mitev1.CommandResult) {
+	ds := res.GetDesiredState()
+	if ds == nil || !ds.RehydrationSuccess || ds.RehydrationError != "" || len(ds.RehydrationDeferredJobs) > 0 {
+		return
+	}
+	if r.ownsController(ns, name) {
+		r.enqueueReconcile(ns + "/" + name)
+	}
+}
+
 // SetProvisioningDefaults caches the cluster-wide ProvisioningDefaults for
 // resolution of default reconciliation policies.
 func (r *Reconciler) SetProvisioningDefaults(defaults *v1alpha1.ProvisioningDefaults) {

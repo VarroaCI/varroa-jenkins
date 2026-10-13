@@ -435,6 +435,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A change of a cell's per-tenant seed answer wakes the Team ticker on
+	// every replica. Only the leader runs that ticker, and it reads the same
+	// answers from its own informer cache.
+	teamWakeCh := make(chan struct{}, 1)
+	if _, err := controllerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			o, _ := oldObj.(*v1alpha1.Controller)
+			n, _ := newObj.(*v1alpha1.Controller)
+			if o != nil && n != nil && controller.CellSeedStateChanged(o, n) {
+				notifyWake(teamWakeCh)
+			}
+		},
+	}); err != nil {
+		logger.Error("failed to add event handler on controller informer", "error", err)
+		os.Exit(1)
+	}
+
 	// CellPool informer. Its only job is to wake the pool ticker, so a
 	// scale edit takes effect at once rather than after the 60-second
 	// backstop. The channel holds one token and the send never blocks, so
@@ -531,6 +548,9 @@ func main() {
 	// --- Reconciler ---
 	reconciler := controller.NewReconciler(meterProvider, resolver, clientsetClient, clientsetClient, miteTransport, tokenSigner, rbacGen, composer)
 	reconciler.SetClusterName(cluster)
+	// A desired-state result that applies a rehydration seed wakes the
+	// owned Controller at once, so the drain applies it without a tick.
+	miteTransport.OnCommandResult = reconciler.NotifyCommandResult
 	reconciler.SetMiteTokenSigner(miteTokenSigner)
 	reconciler.SetCAPEM(string(certAuth.CAPEM()))
 	// Wire the bus-mode token-grant path: a mite's TokenRefreshRequest
@@ -999,11 +1019,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. Team reconciler (30s, immediate). The brood subscriber below
-	// wakes it, so a confirmed cell loss is announced without waiting for
-	// the interval. The channel holds one token and the send never
-	// blocks, so no publisher can stall on it.
-	teamWakeCh := make(chan struct{}, 1)
+	// 3. Team reconciler (30s, immediate). The brood subscriber and the
+	// Controller informer handler above wake it, so a confirmed cell loss
+	// and a new seed answer take effect without waiting for the interval.
+	// The channel holds one token and the send never blocks, so no
+	// publisher can stall on it.
 	if err := mgr.Add(&tickerRunnable{
 		name:      "team",
 		interval:  30 * time.Second,

@@ -329,6 +329,75 @@ func TestBusReadModelTransport_PublishSafeRestart(t *testing.T) {
 	}
 }
 
+// publishDesiredResult sends one desired-state CommandResult on the mite
+// inbound subject of ns/name, as a mite does.
+func publishDesiredResult(t *testing.T, tr *BusTransport, ns, name, id string) {
+	t.Helper()
+	data, err := json.Marshal(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_CommandResult{CommandResult: &mitev1.CommandResult{
+			CommandId: id,
+			Success:   true,
+			Result: &mitev1.CommandResult_DesiredState{DesiredState: &mitev1.DesiredStateResult{
+				RehydrationSuccess: true,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if err := tr.conn.Publish(bus.MiteInSubject(bus.DefaultCluster, ns, name), data); err != nil {
+		t.Fatalf("publish result: %v", err)
+	}
+}
+
+// The hook runs after the result is buffered, so a drain inside the hook
+// returns the result. A nil hook disables the call and must not panic.
+func TestBusTransport_OnCommandResultRunsAfterBuffer(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	ns, name := "ns", "ctrl"
+
+	buffered := make(chan int, 4)
+	calls := make(chan string, 4)
+	tr.OnCommandResult = func(gotNS, gotName string, res *mitev1.CommandResult) {
+		calls <- gotNS + "/" + gotName
+		buffered <- len(tr.DrainResults(ns, name))
+	}
+
+	// Create the inbound subscription before the mite publishes.
+	tr.DrainResults(ns, name)
+	publishDesiredResult(t, tr, ns, name, "cmd-1")
+
+	select {
+	case got := <-calls:
+		if got != "ns/ctrl" {
+			t.Errorf("hook called for %q, want ns/ctrl", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnCommandResult was not called for a desired-state result")
+	}
+	select {
+	case n := <-buffered:
+		if n != 1 {
+			t.Errorf("drain inside the hook returned %d results, want 1", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("hook did not finish its drain")
+	}
+
+	tr.OnCommandResult = nil
+	publishDesiredResult(t, tr, ns, name, "cmd-2")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := tr.DrainResults(ns, name); len(got) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("result with a nil hook was not buffered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestBusTransport_SendImperativeRefusesAnEndedContext pins that an ended
 // context publishes no imperative command.
 func TestBusTransport_SendImperativeRefusesAnEndedContext(t *testing.T) {

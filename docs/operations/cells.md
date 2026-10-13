@@ -302,7 +302,8 @@ child seeds only after branch indexing creates it; the operator retries until th
 | `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. | Read the message. A give-up needs a fresh generation: move the tenant or roll the cell. |
 
 A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`; the
-claimer retries.
+claimer retries. The operator applies a rehydration result and announces the seed within
+seconds, so the first build after a cell roll waits about one claim retry.
 
 ## Interrupted runs
 

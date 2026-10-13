@@ -84,6 +84,12 @@ stating what it is/is not responsible for:
   **The event decides nothing** — it only removes latency, so a foreign
   cluster, any other event value, and a missed message all cost one tick
   and no more, and the wake send never blocks.
+  A `connected` event does not wake the `team` ticker. The Controller
+  informer wakes it on every replica when `controller.CellSeedStateChanged`
+  reports a change of a cell's per-tenant seed answer. Only the leader runs
+  the ticker. `BusTransport.OnCommandResult` is set to
+  `Reconciler.NotifyCommandResult`, so an applied rehydration result wakes
+  its owned Controller at once.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`

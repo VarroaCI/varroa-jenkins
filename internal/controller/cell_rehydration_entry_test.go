@@ -12,6 +12,93 @@ import (
 
 var rehydrationTestNow = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// TestMemberSeedReader_AnswersAppliedInstance pins the Team-side read: an
+// applied entry answers its cell instance, and a pending or missing entry
+// answers none.
+func TestMemberSeedReader_AnswersAppliedInstance(t *testing.T) {
+	at := metav1.NewTime(rehydrationTestNow)
+	entry := v1alpha1.CellRehydrationEntry{Tenant: "team-a", CellInstance: "uid-1", At: &at}
+	cell := cellWithSeeds(entry)
+	cells := map[string]*v1alpha1.Controller{teamCellKey("ns", "cell"): cell}
+	read := memberSeedReader(cells, "team-a")
+
+	if inst, _ := read("ns", "cell"); inst != "" {
+		t.Fatalf("pending entry answered instance %q, want none", inst)
+	}
+	entry.Applied = true
+	cell.Status.Cell.Rehydration[0] = entry
+	if inst, _ := read("ns", "cell"); inst != "uid-1" {
+		t.Fatalf("applied entry answered instance %q, want uid-1", inst)
+	}
+	if inst, _ := memberSeedReader(cells, "team-b")("ns", "cell"); inst != "" {
+		t.Fatalf("missing entry answered instance %q, want none", inst)
+	}
+}
+
+// cellWithSeeds builds a cell Controller whose status holds the given
+// rehydration entries.
+func cellWithSeeds(entries ...v1alpha1.CellRehydrationEntry) *v1alpha1.Controller {
+	return &v1alpha1.Controller{
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{
+			Rehydration: entries,
+		}},
+	}
+}
+
+// TestCellSeedStateChanged pins the informer wake: only a change of the
+// per-tenant seed answer (instance or deferred list) is true.
+func TestCellSeedStateChanged(t *testing.T) {
+	at := metav1.NewTime(rehydrationTestNow)
+	later := metav1.NewTime(rehydrationTestNow.Add(time.Minute))
+	pending := func(tenant string) v1alpha1.CellRehydrationEntry {
+		return v1alpha1.CellRehydrationEntry{Tenant: tenant, CellInstance: "uid-1", At: &at}
+	}
+	applied := func(tenant string) v1alpha1.CellRehydrationEntry {
+		e := pending(tenant)
+		e.Applied = true
+		return e
+	}
+	deferred := func(tenant string, jobs ...string) v1alpha1.CellRehydrationEntry {
+		e := pending(tenant)
+		e.Deferred = jobs
+		return e
+	}
+	withLaterAt := func(e v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
+		e.At = &later
+		return e
+	}
+	newInstance := applied("a")
+	newInstance.CellInstance = "uid-2"
+	notCell := cellWithSeeds(pending("a"))
+	notCell.Spec.Cell = nil
+	notCellApplied := cellWithSeeds(applied("a"))
+	notCellApplied.Spec.Cell = nil
+	cases := []struct {
+		name     string
+		old, new *v1alpha1.Controller
+		want     bool
+	}{
+		{"pending to applied", cellWithSeeds(pending("a")), cellWithSeeds(applied("a")), true},
+		{"new cell instance", cellWithSeeds(applied("a")), cellWithSeeds(newInstance), true},
+		{"deferred list shrinks", cellWithSeeds(deferred("a", "a/x", "a/y")), cellWithSeeds(deferred("a", "a/x")), true},
+		{"identical", cellWithSeeds(applied("a")), cellWithSeeds(applied("a")), false},
+		{"only at changes", cellWithSeeds(applied("a")), cellWithSeeds(withLaterAt(applied("a"))), false},
+		{"not a cell", notCell, notCellApplied, false},
+		{"no old status", &v1alpha1.Controller{Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}}},
+			cellWithSeeds(applied("a")), true},
+		{"new pending, old missing", cellWithSeeds(), cellWithSeeds(pending("a")), false},
+		{"second tenant applied", cellWithSeeds(pending("a"), pending("b")),
+			cellWithSeeds(pending("a"), applied("b")), true},
+		{"tenant removed while applied", cellWithSeeds(applied("a")), cellWithSeeds(), true},
+	}
+	for _, tc := range cases {
+		if got := CellSeedStateChanged(tc.old, tc.new); got != tc.want {
+			t.Errorf("%s: CellSeedStateChanged = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // --- task 6.0a: the empty-selection entry ---
 
 func TestEmptySelectionEntry_AppliedNoRehydrationField(t *testing.T) {

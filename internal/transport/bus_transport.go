@@ -36,6 +36,10 @@ type BusTransport struct {
 	// published to the mite's outbound subject. Nil disables the grant path.
 	TokenGrantFunc func(ns, name string) (token string, exp int64, err error)
 
+	// OnCommandResult runs after a result is in the buffer. It must not
+	// block. Nil disables it.
+	OnCommandResult func(ns, name string, res *mitev1.CommandResult)
+
 	Logger *slog.Logger
 }
 
@@ -144,6 +148,9 @@ func (b *BusTransport) ensureSub(ns, name string) {
 		if cr := mm.GetCommandResult(); cr != nil {
 			select {
 			case ch <- cr:
+				if b.OnCommandResult != nil {
+					b.OnCommandResult(ns, name, cr)
+				}
 			default:
 				b.log().Error("results channel full, dropping message", "controller", key)
 			}

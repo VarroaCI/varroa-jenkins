@@ -161,7 +161,8 @@ reading each package's entry point):
   `LocalRegistry` (in-process, gateway-colocated) and a NATS JetStream-backed
   bus transport (`bus_transport.go`, `bus_read_model.go`,
   `bus_read_model_transport.go`) for the multi-cluster case where operator
-  and gateway run in different clusters. `StreamDegraded` reports whether the
+  and gateway run in different clusters. `BusTransport.OnCommandResult` runs
+  after a result enters the buffer. It must not block. `StreamDegraded` reports whether the
   gateway's bus→stream bridge is broken (read from `bus.Presence`; always false
   for `LocalRegistry`, which has no bus hop) — a mite can hold a healthy gRPC
   stream while receiving no desired state at all. `BusTransport.Send` is a
