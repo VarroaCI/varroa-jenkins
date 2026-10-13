@@ -368,7 +368,7 @@ func sweepAfterMovedWindow(t *testing.T, pool *pgxpool.Pool) {
 	defer cleanup()
 	freshenSweepConsumer(t, conn)
 	if _, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now().Add(6*time.Minute), testGrace, nil); err != nil {
+		DefaultSweepMaxPending, time.Now().Add(6*time.Minute), testGrace, "", nil); err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
 }

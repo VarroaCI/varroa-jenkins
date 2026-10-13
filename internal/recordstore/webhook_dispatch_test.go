@@ -94,7 +94,8 @@ func TestBuildWebhookPayloadOmitsEmptyFields(t *testing.T) {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	for _, key := range []string{"number", "started_at", "scm_revision", "url"} {
+	for _, key := range []string{"number", "started_at", "scm_revision", "url", "synthetic",
+		"interrupted_reason", "supersedes"} {
 		if _, ok := fields[key]; ok {
 			t.Fatalf("payload carries %q with no value: %s", key, raw)
 		}

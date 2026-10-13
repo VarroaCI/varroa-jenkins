@@ -87,7 +87,7 @@ func TestLateHeartbeatFromTheDeadOwnerLeavesTheRunMarkable(t *testing.T) {
 		t.Fatalf("resume guard = (%q, %v, %v), want (%q, true, true)",
 			reason, ok, decided, ReasonResumeTimeout)
 	}
-	changed, err := markInterrupted(context.Background(), pool, c, reason, past)
+	changed, err := markInterrupted(context.Background(), pool, c, reason, past, "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}

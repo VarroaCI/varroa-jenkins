@@ -184,6 +184,7 @@ func run(ctx context.Context, cfg Config) error {
 		BackstopMetrics:    backstopMetrics,
 		ActionMetrics:      actionMetrics,
 		ClaimExpiryMetrics: claimExpiryMetrics,
+		DashboardURL:       cfg.DashboardURL,
 		RunNotifier:        runNotifier,
 		StateDeleter:       store,
 		LogReader:          store,
@@ -267,7 +268,8 @@ func run(ctx context.Context, cfg Config) error {
 		return sub.Unsubscribe()
 	}
 	tenantSyncResponderFn := func(ctx context.Context) error {
-		sub, err := recordstore.RegisterTenantSyncResponder(mp, busConn, pool, confirmedGoneGrace, store, store, runNotifier, logger)
+		sub, err := recordstore.RegisterTenantSyncResponder(mp, busConn, pool, confirmedGoneGrace, store, store, runNotifier,
+			cfg.DashboardURL, logger)
 		if err != nil {
 			return err
 		}

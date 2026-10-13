@@ -34,6 +34,9 @@ type intentRow struct {
 	cell         *string
 	cellInstance *string
 	buildNumber  *int64
+	// incarnation is the tenant incarnation that owned the placement when
+	// the claim granted the run. A webhook delivery is stamped from it.
+	incarnation string
 }
 
 // loadIntent reads the run_intents row for runID inside tx and locks
@@ -47,12 +50,13 @@ type intentRow struct {
 func loadIntent(ctx context.Context, tx pgx.Tx, runID uuid.UUID) (*intentRow, error) {
 	row := &intentRow{runID: runID}
 	err := tx.QueryRow(ctx, `
-		SELECT created_at, intent_key, cluster, namespace, tenant, job_path, cell, cell_instance, build_number
+		SELECT created_at, intent_key, cluster, namespace, tenant, job_path, cell, cell_instance, build_number,
+		       incarnation
 		FROM varroa.run_intents
 		WHERE run_id = $1
 		FOR UPDATE
 	`, runID).Scan(&row.createdAt, &row.intentKey, &row.cluster, &row.namespace,
-		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance, &row.buildNumber)
+		&row.tenant, &row.jobPath, &row.cell, &row.cellInstance, &row.buildNumber, &row.incarnation)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil, ErrIntentMissing

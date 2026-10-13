@@ -270,16 +270,24 @@ of the fleet's audit activity, once a controller becomes disposable.
   `webhook_sign.go`, `webhook_metrics.go`, `retention_webhooks.go`) — the
   signing key lives in `tenant_placements.notification_webhook` (jsonb),
   never in `policy`. The owner `run.completed` with a result inserts one
-  `webhook_deliveries` row in its own transaction, keyed `run_id` (a
-  redelivery inserts nothing). The body is encoded once and stored, so
+  `webhook_deliveries` row in its own transaction, keyed `(run_id,
+  delivery_key)` with key `completed` (a redelivery inserts nothing). The
+  stamped incarnation comes from `run_intents.incarnation`, which the claim
+  copies from the placement row it fenced against. A real completion names
+  a pending or sent synthetic row in `supersedes` and drops every pending
+  synthetic row of the run. The body is encoded once and stored, so
   every attempt signs and sends the same bytes. `WebhookDispatcher` leases
   rows with `FOR UPDATE SKIP LOCKED`, sends at most four at a time, and
   retries on the schedule in `webhookBackoff`. The sixth failure writes a
   `tenant.webhook_failed` activity row. The dispatcher's dialer refuses
   any address that is not global unicast. A DB test
   swaps `d.client` for an `httptest` client, a test-only seam that
-  production never sets. Synthetic ends (`INTERRUPTED`, `start-lost`,
-  `heartbeat-lost`) never enqueue.
+  production never sets. Each synthetic end writes one row in
+  `markInterruptedTx`, in the same transaction, with key
+  `interrupted:<reason>` and body `synthetic: true`, through
+  `enqueueInterruptedWebhookDelivery`. It writes nothing for a run with no
+  `run_intents` row. `dashboardURL` threads from `BackstopConfig.DashboardURL`
+  and the tenant sync responder to every mark.
 - **Grants, not a migration** (`grants.go`) — `EnsureGrants` grants role
   `varroa_client` its read privileges when that role exists, and is a
   no-op otherwise. It never creates a role. CloudNativePG creates the role

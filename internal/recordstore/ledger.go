@@ -179,7 +179,7 @@ func (l *Ledger) claimAttempt(ctx context.Context, req ClaimRequest, runID uuid.
 			RunID: runID.String()}, false
 	}
 
-	resp, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt)
+	resp, err := claimTx(ctx, tx, l.hold, reading, req, runID, createdAt, result.Incarnation)
 	if errors.Is(err, errConsumerReadNeeded) {
 		return ClaimResponse{}, true
 	}
@@ -210,26 +210,27 @@ func (l *Ledger) checkFence(ctx context.Context, tx pgx.Tx, req ClaimRequest) (F
 // claim. reading is the hold's consumer reading, or nil when Claim has not
 // read it yet.
 func claimTx(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	runID uuid.UUID, createdAt time.Time) (ClaimResponse, error) {
+	runID uuid.UUID, createdAt time.Time, incarnation string) (ClaimResponse, error) {
 	var insertedRunID uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO varroa.run_intents
 			(intent_key, run_id, created_at, cluster, namespace, tenant, job_path,
-			 cell, cell_instance, placement_generation, state, actor, cause, params_digest, granted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'GRANTED', $11, $12, $13, now())
+			 cell, cell_instance, placement_generation, state, actor, cause, params_digest, granted_at,
+			 incarnation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'GRANTED', $11, $12, $13, now(), $14)
 		ON CONFLICT (intent_key) DO NOTHING
 		RETURNING run_id
 	`,
 		req.IntentKey, runID, createdAt, req.Cluster, req.Namespace, req.Tenant, req.JobPath,
 		nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration,
-		nullableString(req.Actor), nullableString(req.Cause), nullableString(req.ParamsDigest),
+		nullableString(req.Actor), nullableString(req.Cause), nullableString(req.ParamsDigest), incarnation,
 	).Scan(&insertedRunID)
 
 	switch {
 	case err == nil:
 		return grantNewIntent(ctx, tx, req, runID)
 	case errors.Is(err, pgx.ErrNoRows):
-		return existingKeyDecision(ctx, tx, hold, reading, req, runID, createdAt)
+		return existingKeyDecision(ctx, tx, hold, reading, req, runID, createdAt, incarnation)
 	default:
 		return ClaimResponse{}, fmt.Errorf("insert intent: %w", err)
 	}
@@ -272,7 +273,7 @@ type storedIntent struct {
 // existingKeyDecision applies D2's decision table, in order, to the row
 // a repeated intent_key already holds.
 func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, reading *consumerReading, req ClaimRequest,
-	reqRunID uuid.UUID, reqCreatedAt time.Time) (ClaimResponse, error) {
+	reqRunID uuid.UUID, reqCreatedAt time.Time, incarnation string) (ClaimResponse, error) {
 	var row storedIntent
 	err := tx.QueryRow(ctx, `
 		SELECT run_id, created_at, cell_instance, placement_generation, state, build_number, granted_at,
@@ -317,7 +318,7 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 			return ClaimResponse{Decision: DecisionVetoed, ReasonCode: ReasonNotReady, Message: message,
 				RunID: row.runID.String()}, nil
 		}
-		return reanswerSameRun(ctx, tx, req, row)
+		return reanswerSameRun(ctx, tx, req, row, incarnation)
 	}
 
 	// Row 3: a higher generation on an unstarted GRANTED intent transfers
@@ -329,7 +330,7 @@ func existingKeyDecision(ctx context.Context, tx pgx.Tx, hold *grantHold, readin
 			return ClaimResponse{}, err
 		}
 		if !exists {
-			return transferIntent(ctx, tx, req, reqRunID, reqCreatedAt)
+			return transferIntent(ctx, tx, req, reqRunID, reqCreatedAt, incarnation)
 		}
 	}
 
@@ -395,7 +396,7 @@ func intentStarted(ctx context.Context, tx pgx.Tx, row storedIntent) (bool, erro
 // usable number. A number_conflict that names the stored number means
 // the cell refused to apply it; the cell holds no build under it, and
 // the number is below the watermark, so the fresh number is above it.
-func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent) (ClaimResponse, error) {
+func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row storedIntent, incarnation string) (ClaimResponse, error) {
 	buildNumber := derefInt64(row.buildNumber)
 	if row.state != stateGranted {
 		return ClaimResponse{Decision: DecisionGranted, RunID: row.runID.String(), BuildNumber: buildNumber}, nil
@@ -403,11 +404,13 @@ func reanswerSameRun(ctx context.Context, tx pgx.Tx, req ClaimRequest, row store
 	sameInstance := row.cellInstance != nil && *row.cellInstance == req.CellInstance
 	refresh := false
 	if !sameInstance {
+		// The move stamps the claiming incarnation, because the claiming
+		// instance runs the build. The run then belongs to that incarnation.
 		if _, err := tx.Exec(ctx, `
 			UPDATE varroa.run_intents
-			SET cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now()
+			SET cell = $1, cell_instance = $2, placement_generation = $3, granted_at = now(), incarnation = $5
 			WHERE run_id = $4
-		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID); err != nil {
+		`, nullableString(req.Cell), nullableString(req.CellInstance), req.PlacementGeneration, row.runID, incarnation); err != nil {
 			return ClaimResponse{}, fmt.Errorf("move ownership: %w", err)
 		}
 		refresh = req.CellInstance != "" && req.JenkinsNextBuildNumber > 0 && buildNumber < req.JenkinsNextBuildNumber
@@ -453,7 +456,7 @@ func namedOrNullRefresh(ctx context.Context, tx pgx.Tx, req ClaimRequest, row st
 
 // transferIntent moves an intent to a new run_id, reserving a new build
 // number for it.
-func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID uuid.UUID, newCreatedAt time.Time) (ClaimResponse, error) {
+func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID uuid.UUID, newCreatedAt time.Time, incarnation string) (ClaimResponse, error) {
 	buildNumber, err := reserveBuildNumber(ctx, tx, req.Cluster, req.Tenant, req.JobPath, req.JenkinsNextBuildNumber)
 	if err != nil {
 		return ClaimResponse{}, err
@@ -461,10 +464,11 @@ func transferIntent(ctx context.Context, tx pgx.Tx, req ClaimRequest, newRunID u
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.run_intents
 		SET run_id = $1, created_at = $2, cell = $3, cell_instance = $4,
-		    placement_generation = $5, build_number = $6, granted_at = now(), start_marked_at = NULL
+		    placement_generation = $5, build_number = $6, granted_at = now(), start_marked_at = NULL,
+		    incarnation = $8
 		WHERE intent_key = $7
 	`, newRunID, newCreatedAt, nullableString(req.Cell), nullableString(req.CellInstance),
-		req.PlacementGeneration, buildNumber, req.IntentKey); err != nil {
+		req.PlacementGeneration, buildNumber, req.IntentKey, incarnation); err != nil {
 		return ClaimResponse{}, fmt.Errorf("transfer intent: %w", err)
 	}
 	return ClaimResponse{Decision: DecisionGranted, RunID: newRunID.String(), BuildNumber: buildNumber}, nil

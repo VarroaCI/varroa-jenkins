@@ -139,7 +139,7 @@ func TestSweepInterruptedRuns_RetryAddressesTheHomeSlot(t *testing.T) {
 	wait := collectBackstopActions(t, conn)
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}

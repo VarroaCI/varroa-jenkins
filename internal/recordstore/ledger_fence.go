@@ -31,6 +31,10 @@ type FenceResult struct {
 	// HomeSlot names the job's home slot on a NOT_HOME veto, and is nil
 	// on every other answer. The claimer forwards to that slot.
 	HomeSlot *int32
+	// Incarnation is the placement row's incarnation on an allowed claim.
+	// It is empty when no placement row is stored, or when the fence reads
+	// no placement. The claim stamps it on the run's intent.
+	Incarnation string
 }
 
 // allowAllFence is the default Fence. It allows every well-formed claim,

@@ -45,7 +45,8 @@ const maxDeadInstances = 10
 // console log for the resume action the announce hook's takeover
 // publishes, and a nil logs sends no log sequence.
 func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *pgxpool.Pool, grace time.Duration,
-	stateDeleter ObjectDeleter, logs LogIndexReader, notifier *RunNotifier, logger *slog.Logger) (*bus.Responder, error) {
+	stateDeleter ObjectDeleter, logs LogIndexReader, notifier *RunNotifier, dashboardURL string,
+	logger *slog.Logger) (*bus.Responder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -58,7 +59,8 @@ func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *
 		logger.Warn("action metrics registration failed; the tenant sync responder starts anyway", "error", err)
 	}
 	handler := func(data []byte) []byte {
-		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier, data)
+		return handleTenantSync(conn, logger, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
+			dashboardURL, data)
 	}
 	return conn.ServeRequests(bus.TenantSyncSubject, tenantSyncQueueGroup, handler)
 }
@@ -68,7 +70,7 @@ func RegisterTenantSyncResponder(mp metric.MeterProvider, conn *bus.Conn, pool *
 // values, both answer an error reply and write nothing.
 func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
-	notifier *RunNotifier, data []byte) []byte {
+	notifier *RunNotifier, dashboardURL string, data []byte) []byte {
 	var req TenantSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("tenant sync request decode failed", "error", err)
@@ -80,7 +82,8 @@ func handleTenantSync(conn *bus.Conn, logger *slog.Logger, pool *pgxpool.Pool, m
 
 	switch req.Kind {
 	case TenantSyncKindAnnounce:
-		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier, logger, req)
+		resp, err := handleTenantSyncAnnounce(ctx, conn, pool, metrics, actionMetrics, stateDeleter, logs, grace, notifier,
+			dashboardURL, logger, req)
 		if err != nil {
 			logger.Error("tenant sync announce failed", "cluster", req.Cluster, "tenant", req.Tenant, "error", err)
 			return marshalTenantSyncResponse(logger, TenantSyncResponse{Error: "tenant sync announce failed"})
@@ -215,7 +218,7 @@ type tenantPlacementRow struct {
 // and a nil notifier publishes nothing.
 func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool.Pool, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, logs LogIndexReader, grace time.Duration,
-	notifier *RunNotifier, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
+	notifier *RunNotifier, dashboardURL string, logger *slog.Logger, req TenantSyncRequest) (TenantSyncResponse, error) {
 	if req.Cluster == "" || req.Tenant == "" {
 		return TenantSyncResponse{}, errors.New("announce request needs a cluster and a tenant")
 	}
@@ -410,7 +413,7 @@ func handleTenantSyncAnnounce(ctx context.Context, conn *bus.Conn, pool *pgxpool
 	var interruptedMarked int
 	if old.cell != req.Cell || old.cellInstance != req.CellInstance || len(derived) > 0 {
 		n, markErr := MarkMovedRunsForTenant(ctx, pool, conn, metrics, actionMetrics, stateDeleter,
-			req.Cluster, req.Tenant, row, time.Now(), grace, logger)
+			req.Cluster, req.Tenant, row, time.Now(), grace, dashboardURL, logger)
 		if markErr != nil {
 			logger.Error("interrupted-run marking after announce failed",
 				"cluster", req.Cluster, "tenant", req.Tenant, "error", markErr)

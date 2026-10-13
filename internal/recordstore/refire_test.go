@@ -714,7 +714,7 @@ func TestRefireAndMarkAreIndependent(t *testing.T) {
 		cell: "cell-old", tenant: testTenant, jobPath: testJobPath, status: StatusQueued,
 		cellInstance: refireDeadInstance,
 	}
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellLost, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellLost, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}

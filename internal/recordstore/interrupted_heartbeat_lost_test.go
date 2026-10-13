@@ -167,7 +167,7 @@ func TestSweepEndsASilentRunOnALiveOwner(t *testing.T) {
 	store := &prefixRecordingStore{}
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, store,
-		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSweepLeavesASilentRunOnALiveOwnerInsideTheWindow(t *testing.T) {
 	freshenSweepConsumer(t, conn)
 
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, nil, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestMarkMovedRunsForTenantSkipsHeartbeatLost(t *testing.T) {
 	fresh := time.Now()
 	row := resolveLivenessMembers(tenantPlacementLivenessRow{cellInstance: "pod-a", cellAlive: true, cellAliveAt: &fresh})
 	marked, err := MarkMovedRunsForTenant(context.Background(), pool, nil, nil, nil, nil, testCluster, testTenant,
-		row, time.Now(), testGrace, nil)
+		row, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("MarkMovedRunsForTenant: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestMarkInterruptedHeartbeatLostRereadsTheHeartbeat(t *testing.T) {
 	if _, err := db.Exec(`UPDATE varroa.runs SET heartbeat_received_at = now() WHERE run_id = $1`, runID); err != nil {
 		t.Fatalf("raise heartbeat_received_at: %v", err)
 	}
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -294,7 +294,7 @@ func markHeartbeatLost(t *testing.T) (*Ingester, *sql.DB, uuid.UUID, string) {
 	runID := seedRunningRun(t, pool, newTestClaimRequest(intentKey, 0))
 	seedSilentRunOnLiveOwner(t, db, runID, liveOwnerSilentWindow+time.Minute, `{}`)
 	c := fetchRunningCandidate(t, pool, runID)
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now(), "")
 	if err != nil || !changed {
 		t.Fatalf("markInterrupted: changed=%v err=%v, want a mark", changed, err)
 	}
@@ -472,7 +472,7 @@ func TestHeartbeatLostMarkKeepsThePendingInputs(t *testing.T) {
 		t.Fatalf("seed pending inputs: %v", err)
 	}
 	c := fetchRunningCandidate(t, pool, runID)
-	if changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now()); err != nil || !changed {
+	if changed, err := markInterrupted(context.Background(), pool, c, ReasonHeartbeatLost, time.Now(), ""); err != nil || !changed {
 		t.Fatalf("markInterrupted: changed=%v err=%v, want a mark", changed, err)
 	}
 	var inputs sql.NullString

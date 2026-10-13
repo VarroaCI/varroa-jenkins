@@ -48,13 +48,16 @@ type tenantPlacementFenceRow struct {
 	// an empty stored list answers one synthetic slot-0 member, so a
 	// single-member tenant reads exactly as it did before slots existed.
 	members placementMembers
+	// incarnation names the tenant object the row describes. A claim
+	// stamps it on its run_intents row.
+	incarnation string
 }
 
 // tenantPlacementFenceQuery is the column list both readRow and
 // readRowTx select, in the order scanTenantPlacementFenceRow expects.
 const tenantPlacementFenceQuery = `
 	SELECT namespace, cell, generation, cell_instance, rehydrated_instance, pending_jobs,
-	       members, job_homes
+	       members, job_homes, incarnation
 	FROM varroa.tenant_placements
 	WHERE cluster = $1 AND tenant = $2
 `
@@ -113,7 +116,9 @@ func (f *PlacementFence) decide(ctx context.Context, row tenantPlacementFenceRow
 			result = decidePlacement(row, exists, own)
 		}
 	}
-	if !result.Allow {
+	if result.Allow {
+		result.Incarnation = row.incarnation
+	} else {
 		f.metrics.addVeto(ctx, result.ReasonCode)
 	}
 	return result, nil
@@ -157,7 +162,7 @@ func scanTenantPlacementFenceRow(row pgx.Row) (tenantPlacementFenceRow, bool, er
 		jobHomesRaw json.RawMessage
 	)
 	err := row.Scan(&out.namespace, &out.cell, &out.generation, &out.cellInstance,
-		&out.rehydratedInstance, &pendingRaw, &membersRaw, &jobHomesRaw)
+		&out.rehydratedInstance, &pendingRaw, &membersRaw, &jobHomesRaw, &out.incarnation)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return tenantPlacementFenceRow{}, false, nil

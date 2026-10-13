@@ -183,7 +183,8 @@ func (c markedLostIntent) candidate() runInterruptCandidate {
 // build. The mark then takes the ordinary conditional write.
 //
 // The intent stays GRANTED. The marking writes no run_intents row.
-func endMarkedLostIntent(ctx context.Context, pool *pgxpool.Pool, c markedLostIntent, reason string, markedBy, now time.Time) (bool, error) {
+func endMarkedLostIntent(ctx context.Context, pool *pgxpool.Pool, c markedLostIntent, reason string, markedBy, now time.Time,
+	dashboardURL string) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin marked lost intent end: %w", err)
@@ -230,7 +231,7 @@ func endMarkedLostIntent(ctx context.Context, pool *pgxpool.Pool, c markedLostIn
 		return false, nil
 	}
 
-	changed, err := markInterruptedTx(ctx, tx, c.candidate(), reason, now)
+	changed, err := markInterruptedTx(ctx, tx, c.candidate(), reason, now, dashboardURL)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -273,7 +274,7 @@ func endMarkedLostIntent(ctx context.Context, pool *pgxpool.Pool, c markedLostIn
 // A nil notifier and nil metrics are no-ops.
 func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, notifier *RunNotifier,
 	metrics *InterruptedMetrics, actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64,
-	now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
+	now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -301,7 +302,7 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !exists || !confirmedGoneInstance(row.deadInstances, c.cellInstance, now, grace) {
 			continue
 		}
-		changed, err := endMarkedLostIntent(ctx, pool, c, ReasonCellRolled, time.Time{}, now)
+		changed, err := endMarkedLostIntent(ctx, pool, c, ReasonCellRolled, time.Time{}, now, dashboardURL)
 		if err != nil {
 			logger.Warn("marked lost intent: end failed", "run_id", c.runID, "error", err)
 			continue
@@ -338,7 +339,7 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 			return ended, err
 		}
 		for _, c := range stale {
-			if endStaleMarkedIntent(ctx, pool, notifier, metrics, c, now, logger) {
+			if endStaleMarkedIntent(ctx, pool, notifier, metrics, c, now, dashboardURL, logger) {
 				ended++
 			}
 		}
@@ -355,8 +356,8 @@ func EndMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 // and counts the mark. It counts a skipped retry when the tenant's policy
 // asks for an automatic one.
 func endStaleMarkedIntent(ctx context.Context, pool *pgxpool.Pool, notifier *RunNotifier,
-	metrics *InterruptedMetrics, c markedLostIntent, now time.Time, logger *slog.Logger) bool {
-	changed, err := endMarkedLostIntent(ctx, pool, c, ReasonStartLost, now.Add(-ClaimExpiryAge), now)
+	metrics *InterruptedMetrics, c markedLostIntent, now time.Time, dashboardURL string, logger *slog.Logger) bool {
+	changed, err := endMarkedLostIntent(ctx, pool, c, ReasonStartLost, now.Add(-ClaimExpiryAge), now, dashboardURL)
 	if err != nil {
 		logger.Warn("stale marked intent: end failed", "run_id", c.runID, "error", err)
 		return false

@@ -175,7 +175,7 @@ func TestAnnounceSingleTenantPlacement_ClaimGranted(t *testing.T) {
 	defer pool.Close()
 
 	conn := startTestSyncBus(t)
-	sub, err := recordstore.RegisterTenantSyncResponder(noop.NewMeterProvider(), conn, pool, recordstore.DefaultConfirmedGoneGrace, nil, nil, nil, nil)
+	sub, err := recordstore.RegisterTenantSyncResponder(noop.NewMeterProvider(), conn, pool, recordstore.DefaultConfirmedGoneGrace, nil, nil, nil, "", nil)
 	if err != nil {
 		t.Fatalf("register responder: %v", err)
 	}

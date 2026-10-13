@@ -56,13 +56,13 @@ administrator sets it.
 
 ## Which runs send a webhook
 
-The record store sends one webhook for each run that completes with a
-result. The webhook is sent once per run, even when the completion arrives
-more than once.
+The record store sends one webhook for each completion of a run that has a
+result. A redelivered completion sends nothing new.
 
-Only a real completion sends a webhook. The backstop ends some runs with
-a synthetic result: `INTERRUPTED`, `start-lost`, or `heartbeat-lost`. A
-synthetic end does not send a webhook in this release.
+The backstop can also end a run with the synthetic result `INTERRUPTED`.
+That end sends one delivery with `synthetic: true`. A later real completion
+sends its own delivery, which names the synthetic one in `supersedes`. A
+real delivery always wins for a `run_id`.
 
 ## Payload
 
@@ -100,6 +100,9 @@ The body is a JSON object:
 | `duration_ms` | yes | The run duration in milliseconds. Zero when unknown. |
 | `scm_revision` | no | The source revision, when the run reported one. |
 | `url` | no | A link to the run page in the dashboard. Absent when the dashboard URL is not set. |
+| `synthetic` | no | `true` for a synthetic delivery. |
+| `interrupted_reason` | no | The mark reason, for example `start-lost`. |
+| `supersedes` | no | The `delivery_id` of the synthetic delivery that this completion replaces. |
 
 ## Headers
 
@@ -172,8 +175,8 @@ The record store refuses to send to any address that is not global unicast.
 Loopback, link-local, group, and unspecified addresses are not global unicast. A receiver must use an address that the record
 store can reach.
 
-A delivery records the Team incarnation that was current when the run
-completed. When you delete a Team and create a new one with the same name,
+A delivery records the Team incarnation that owned the run when the cell
+claimed it. When you delete a Team and create a new one with the same name,
 the record store drops any pending delivery of the old Team. The new Team's
 receiver gets no deliveries for the old Team's runs.
 

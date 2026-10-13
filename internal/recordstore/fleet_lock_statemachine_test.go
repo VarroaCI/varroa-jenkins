@@ -43,7 +43,7 @@ func TestFleetLockStateMachine_MarkingWritesNoRow(t *testing.T) {
 	insertFleetLockRow(t, db, fleetLockStateMachineTestName, runID.String(), FleetLockStateHeld,
 		time.Now().Add(-time.Minute), time.Now().Add(fleetLockDefaultLeaseSeconds*time.Second))
 
-	changed, err := markInterrupted(context.Background(), pool, candidate, ReasonNoHeartbeat, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, candidate, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}

@@ -86,7 +86,7 @@ func TestMarkInterruptedWritesTerminalRecordReasonAndActivity(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestMarkInterruptedClearsThePendingSet(t *testing.T) {
 	}
 
 	c := fetchRunningCandidate(t, pool, runID)
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestMarkInterruptedRollsBackWhenActivityInsertFails(t *testing.T) {
 	c := fetchRunningCandidate(t, pool, runID)
 
 	far := time.Now().UTC().AddDate(0, 6, 0)
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, far)
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, far, "")
 	if err == nil {
 		t.Fatal("want an error from the missing activity partition, got nil")
 	}
@@ -212,7 +212,7 @@ func TestMarkInterruptedFinalizesIncompleteWhenSummaryExists(t *testing.T) {
 	}
 	c := fetchRunningCandidate(t, pool, runID)
 
-	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now()); err != nil {
+	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), ""); err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestMarkInterruptedKeepsAStoredIncompleteReason(t *testing.T) {
 	}
 	c := fetchRunningCandidate(t, pool, runID)
 
-	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now()); err != nil {
+	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), ""); err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
 
@@ -284,7 +284,7 @@ func TestMarkInterruptedSummaryDecodesAsAPIExpects(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
-	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now()); err != nil {
+	if _, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), ""); err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestMarkInterruptedReasonReadableThroughGetRun(t *testing.T) {
 	runID := startRunForFinalize(t, pool, "manual:"+newTestUUIDv7String())
 	c := fetchRunningCandidate(t, pool, runID)
 
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellRolled, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonCellRolled, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestMarkInterruptedSkipsAlreadyTerminalRun(t *testing.T) {
 		t.Fatalf("simulate a real completion: %v", err)
 	}
 
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestMarkInterruptedNoopsWhenAnArmRacesTheMark(t *testing.T) {
 		t.Fatalf("commit an arm that races the mark: %v", err)
 	}
 
-	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now())
+	changed, err := markInterrupted(context.Background(), pool, c, ReasonNoHeartbeat, time.Now(), "")
 	if err != nil {
 		t.Fatalf("markInterrupted: %v", err)
 	}
@@ -874,7 +874,7 @@ func TestSweepInterruptedRunsMarksASilentRun(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestSweepInterruptedRunsSkipsOnPendingBacklog(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, 1, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, 1, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -973,7 +973,7 @@ func TestSweepInterruptedRunsSkipsOnStaleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1120,7 +1120,7 @@ func TestSweepMarksQueuedRunWithDeadAcceptingInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1185,7 +1185,7 @@ func TestSweepLeavesQueuedRunWithLiveAcceptingInstanceAlone(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1227,7 +1227,7 @@ func TestSweepSkipsQueuedPlaceholderWithNoOwningInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1285,7 +1285,7 @@ func TestSweepMarksClaimedQueuedRunThroughIntentInstance(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 
-	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, nil)
+	marked, err := SweepInterruptedRuns(ctx, pool, conn, metrics, nil, nil, DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1481,7 +1481,7 @@ func TestSweepMarksCellLostAndCountsIt(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}
@@ -1529,7 +1529,7 @@ func TestSweepMarksCellLostOnAnIdleConsumer(t *testing.T) {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
 	marked, err := SweepInterruptedRuns(context.Background(), pool, conn, metrics, nil, nil,
-		DefaultSweepMaxPending, time.Now(), testGrace, nil)
+		DefaultSweepMaxPending, time.Now(), testGrace, "", nil)
 	if err != nil {
 		t.Fatalf("SweepInterruptedRuns: %v", err)
 	}

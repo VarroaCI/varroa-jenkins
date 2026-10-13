@@ -63,6 +63,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"refire_attempts", "integer", false},
 		{"granted_at", "timestamp with time zone", true},
 		{"start_marked_at", "timestamp with time zone", true},
+		{"incarnation", "text", false},
 	},
 	"runs": {
 		{"run_id", "uuid", false},
@@ -276,6 +277,7 @@ var expectedColumns = map[string][]columnSpec{
 		{"last_error", "text", true},
 		{"created_at", "timestamp with time zone", false},
 		{"updated_at", "timestamp with time zone", false},
+		{"delivery_key", "text", false},
 	},
 	"fleet_locks": {
 		{"name", "text", false},

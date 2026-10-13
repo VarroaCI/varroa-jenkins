@@ -301,14 +301,15 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // A heartbeat-lost mark also keeps the run's pending input set. Its owner
 // can still wait on that input, and no later event restores a set on a
 // completed row. The owner's run.completed clears it.
-func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
+func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time,
+	dashboardURL string) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin interrupted-run marking: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	changed, err := markInterruptedTx(ctx, tx, run, reason, now)
+	changed, err := markInterruptedTx(ctx, tx, run, reason, now, dashboardURL)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -321,7 +322,8 @@ func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCa
 // markInterruptedTx is markInterrupted's body inside the caller's
 // transaction: the conditional terminal write and the build.interrupted
 // activity row. The caller commits.
-func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time) (bool, error) {
+func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time,
+	dashboardURL string) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE varroa.runs
 		SET status = 'COMPLETED',
@@ -389,6 +391,11 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
 	); err != nil {
 		return false, fmt.Errorf("insert interrupted activity row: %w", err)
+	}
+	// The synthetic delivery shares this transaction, so a rolled-back
+	// mark enqueues nothing.
+	if _, err := enqueueInterruptedWebhookDelivery(ctx, tx, run, reason, now, dashboardURL); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -591,7 +598,7 @@ func markedStatusLabel(status string) string {
 // heartbeat window.
 func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, cluster, tenant string,
-	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, logger *slog.Logger) (int, error) {
+	row tenantPlacementLivenessRow, now time.Time, grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -612,7 +619,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if !ok || reason == ReasonNoHeartbeat || reason == ReasonHeartbeatLost {
 			continue
 		}
-		changed, err := markInterrupted(ctx, pool, c, reason, now)
+		changed, err := markInterrupted(ctx, pool, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("announce-triggered interrupted marking failed", "run_id", c.runID, "error", err)
 			continue
@@ -667,7 +674,7 @@ func sweepConsumerSkip(info *nats.ConsumerInfo, maxPending uint64, now time.Time
 // each one that qualifies. It answers how many runs it marked.
 func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *InterruptedMetrics,
 	actionMetrics *ActionMetrics, stateDeleter ObjectDeleter, maxPending uint64, now time.Time,
-	grace time.Duration, logger *slog.Logger) (int, error) {
+	grace time.Duration, dashboardURL string, logger *slog.Logger) (int, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -701,7 +708,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !ok {
 			continue
 		}
-		changed, err := markInterrupted(ctx, pool, c, reason, now)
+		changed, err := markInterrupted(ctx, pool, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("interrupted sweep: mark failed", "run_id", c.runID, "error", err)
 			continue

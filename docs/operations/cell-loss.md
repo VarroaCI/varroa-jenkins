@@ -56,7 +56,7 @@ pod is about to adopt.
 ## What a user sees
 
 A marked build reads `INTERRUPTED` on the build page and writes one `build.interrupted` row in the
-activity feed. The reason names the signal that decided.
+activity feed. The reason names the signal that decided. A completion webhook also sends one `synthetic` delivery.
 
 | Reason | Meaning |
 |---|---|

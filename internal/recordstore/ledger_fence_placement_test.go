@@ -479,7 +479,7 @@ func TestClaimFenceLockSerializesAgainstConcurrentAnnounce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse run id: %v", err)
 	}
-	if _, err := claimTx(context.Background(), tx, nil, nil, req, runID, createdAt); err != nil {
+	if _, err := claimTx(context.Background(), tx, nil, nil, req, runID, createdAt, ""); err != nil {
 		t.Fatalf("claimTx: %v", err)
 	}
 	if err := tx.Commit(context.Background()); err != nil {

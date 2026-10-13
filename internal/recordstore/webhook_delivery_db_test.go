@@ -95,12 +95,20 @@ func webhookRowCount(t *testing.T, db *sql.DB, runID uuid.UUID) int {
 	return n
 }
 
+// webhookState reads the owner completion row of runID.
 func webhookState(t *testing.T, db *sql.DB, runID uuid.UUID) (string, int) {
+	t.Helper()
+	return webhookStateFor(t, db, runID, webhookKeyCompleted)
+}
+
+// webhookStateFor reads the row of runID that carries delivery key key.
+func webhookStateFor(t *testing.T, db *sql.DB, runID uuid.UUID, key string) (string, int) {
 	t.Helper()
 	var state string
 	var attempts int
-	if err := db.QueryRow(`SELECT state, attempts FROM varroa.webhook_deliveries WHERE run_id = $1`, runID).Scan(&state, &attempts); err != nil {
-		t.Fatalf("read webhook delivery: %v", err)
+	if err := db.QueryRow(`SELECT state, attempts FROM varroa.webhook_deliveries WHERE run_id = $1 AND delivery_key = $2`,
+		runID, key).Scan(&state, &attempts); err != nil {
+		t.Fatalf("read webhook delivery %q: %v", key, err)
 	}
 	return state, attempts
 }

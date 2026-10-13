@@ -24,6 +24,9 @@ const scheduleTriggerTypeCron = "cron"
 
 // BackstopConfig carries one backstop-and-sweep round's tunables.
 type BackstopConfig struct {
+	// DashboardURL is the dashboard origin a synthetic completion webhook
+	// links its run with. An empty value omits the link.
+	DashboardURL string
 	// MaxSweepPending is VARROA_SWEEP_MAX_PENDING, D9's interrupted-sweep
 	// gate.
 	MaxSweepPending uint64
@@ -119,12 +122,12 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	// records no build. This end runs before the sweep, so the sweep never
 	// marks that row as a queued run.
 	if _, err := EndMarkedLostIntents(ctx, pool, conn, cfg.RunNotifier, cfg.SweepMetrics, cfg.ActionMetrics,
-		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, logger); err != nil {
+		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("marked lost intent round failed", "error", err)
 	}
 
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
-		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, logger); err != nil {
+		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
 	}
 
