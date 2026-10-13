@@ -150,8 +150,9 @@ the root AGENTS.md greenfield rule.
   gated end to end by `VARROA_CLAIM_GATE`): compile-scope `workflow-api`, `workflow-job`,
   `pipeline-graph-analysis`, and `workflow-cps` (the last compile-scope only because
   `VarroaTemplateParams` needs its `GlobalVariable`; test-scope `workflow-basic-steps`
-  exercises the pipeline graph in tests only). `VarroaRunRecorder.java` is an outer class
-  with three static `@Extension` nested classes, because `RunListener` and
+  exercises the pipeline graph in tests only). `VarroaRunRecorder.java` sends `queued_at`
+  from the queue item's `inQueueSince`. The intent admission time is the fallback, and
+  the run creation time is the last resort. It is an outer class with three static `@Extension` nested classes, because `RunListener` and
   `FlowExecutionListener` are abstract classes: `Runs` (`RunListener`) emits `STARTED`
   and `COMPLETED`; `Flows` (`FlowExecutionListener`) attaches and detaches `Graph` on a
   running pipeline; `Graph` (`GraphListener`) emits `STAGE_STARTED` on a labelled block

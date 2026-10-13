@@ -207,6 +207,48 @@ public class VarroaRunRecorderTest {
         assertEquals("a finished build owns no state entry", 0, VarroaRunRecorder.stateSizeForTesting());
     }
 
+    // --- Queue wait: measured from the queue entry, quiet period included ---
+
+    @Test
+    public void theQueuedTimeIsWhenTheItemEnteredTheQueue() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("queued-at-entry");
+        long before = System.currentTimeMillis();
+        j.assertBuildStatusSuccess(project.scheduleBuild2(3, grantedAction("")));
+
+        BuildEventSink.DrainResult result = BuildEventSink.get().drain(100);
+        BuildEvent started = byPhase(result.events, BuildEvent.PHASE_STARTED).get(0);
+
+        assertTrue("queued_at is not before the request", started.getQueuedAtMillis() >= before);
+        assertTrue("the 3 s quiet period is queue wait, was " + started.getQueueWaitMillis(),
+                started.getQueueWaitMillis() >= 2500);
+        assertEquals(started.getStartedAtMillis() - started.getQueuedAtMillis(), started.getQueueWaitMillis());
+    }
+
+    @Test
+    public void theAdmissionTimeIsTheFallbackWhenNoQueueItemResolves() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("queued-at-fallback");
+        hudson.model.FreeStyleBuild run = new hudson.model.FreeStyleBuild(project);
+        long now = System.currentTimeMillis();
+        long admittedAt = now - 10_000;
+        run.addAction(new VarroaIntentAction(Uuid7.next(), "", null, admittedAt));
+
+        assertEquals("an unresolved queue id falls back to the admission time",
+                admittedAt, VarroaRunRecorder.queuedAtMillis(run, now));
+    }
+
+    @Test
+    public void theRunCreationTimeIsTheLastFallback() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("queued-at-last");
+        hudson.model.FreeStyleBuild run = new hudson.model.FreeStyleBuild(project);
+        long now = System.currentTimeMillis();
+
+        assertEquals("with no queue item and no intent, the creation time answers",
+                run.getTimeInMillis(), VarroaRunRecorder.queuedAtMillis(run, now));
+        assertEquals("the queued time never follows the start",
+                Math.min(run.getTimeInMillis(), now - 5_000),
+                VarroaRunRecorder.queuedAtMillis(run, now - 5_000));
+    }
+
     // --- 5.9: one STARTED and one COMPLETED for a freestyle job ---
 
     @Test

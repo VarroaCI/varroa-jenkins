@@ -68,7 +68,7 @@ names the run's top-level stage in progress. A running build with no stage in pr
 
 **Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's
-median wait between its queued and started moments, over the last 30 days. Health is a weather
+median wait from queue entry to start, quiet period included, over the last 30 days. Health is a weather
 glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
 or more failed. A job that has never run shows no glyph and an empty last build.
 

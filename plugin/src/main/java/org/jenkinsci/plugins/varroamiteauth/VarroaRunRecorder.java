@@ -8,6 +8,7 @@ import hudson.model.Job;
 import hudson.model.Node;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
+import hudson.model.Queue;
 import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
@@ -1174,6 +1175,38 @@ public final class VarroaRunRecorder {
 
     // --- D3: run metadata ---
 
+    /**
+     * Answers when the run's queue item entered the Jenkins queue.
+     *
+     * <p>Jenkins keeps a left queue item for a few minutes only. The intent
+     * admission time is the durable fallback. The run creation time is the
+     * last resort, and it is later than the queue entry.
+     */
+    static long queuedAtMillis(Run<?, ?> run, long startedAt) {
+        long queuedAt = 0L;
+        long queueId = run.getQueueId();
+        if (queueId != Run.QUEUE_ID_UNKNOWN) {
+            try {
+                Queue.Item item = Queue.getInstance().getItem(queueId);
+                if (item instanceof Queue.LeftItem && item.getInQueueSince() > 0) {
+                    queuedAt = item.getInQueueSince();
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.FINE, "VarroaRunRecorder: queue lookup failed for item " + queueId, e);
+            }
+        }
+        if (queuedAt <= 0) {
+            VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+            if (action != null && action.getAdmittedAtMillis() > 0) {
+                queuedAt = action.getAdmittedAtMillis();
+            }
+        }
+        if (queuedAt <= 0) {
+            queuedAt = run.getTimeInMillis();
+        }
+        return startedAt > 0 ? Math.min(queuedAt, startedAt) : queuedAt;
+    }
+
     private static void applyCommonMetadata(BuildEvent.Builder b, Run<?, ?> run, boolean completed) {
         Job<?, ?> job = run.getParent();
         b.jobDisplayName(truncate(job.getDisplayName(), MAX_FIELD_512));
@@ -1204,8 +1237,8 @@ public final class VarroaRunRecorder {
         b.upstreamJobPath(upstreamJobPath != null ? upstreamJobPath : "");
         b.upstreamBuildNumber(upstreamBuildNumber);
 
-        long queuedAt = run.getTimeInMillis();
         long startedAt = run.getStartTimeInMillis();
+        long queuedAt = queuedAtMillis(run, startedAt);
         b.queuedAtMillis(queuedAt);
         b.startedAtMillis(startedAt);
         b.queueWaitMillis(Math.max(0, startedAt - queuedAt));
