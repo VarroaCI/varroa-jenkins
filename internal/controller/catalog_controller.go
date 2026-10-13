@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -446,6 +447,28 @@ func (r *CatalogReconciler) teardownReservedSource(ctx context.Context, src *v1a
 	return true
 }
 
+// maxComposedContentBytes bounds the stored composed content. The desired-state
+// command carries this content in one NATS message of at most 1 MiB.
+const maxComposedContentBytes = 900 * 1024
+
+// composedContentSize returns the total byte size of the composed content, and
+// the largest key with its size. On a tie, the smaller key name wins.
+func composedContentSize(data map[string]string) (total int, largestKey string, largestLen int) {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		n := len(data[k])
+		total += n
+		if n > largestLen {
+			largestKey, largestLen = k, n
+		}
+	}
+	return total, largestKey, largestLen
+}
+
 // ReconcileComposedBundle updates the status of a ComposedBundle by composing
 // its referenced items, materializing git inputs, and storing merged unresolved
 // content in a ConfigMap.
@@ -800,14 +823,13 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 				"variables.yaml":          strings.Join(varLines, "\n"),
 				"pipeline-templates.yaml": result.Materialized.PipelineTemplatesYAML,
 			}
-			totalSize := 0
-			for _, v := range contentData {
-				totalSize += len(v)
-			}
-			if totalSize > 900*1024 { // ~900KB, leaving headroom
+			if total, key, n := composedContentSize(contentData); total > maxComposedContentBytes {
+				msg := fmt.Sprintf("content too large: composed content is %d bytes, above the limit of %d bytes; "+
+					"the largest key %s is %d bytes; one NATS message of at most 1 MiB carries the desired state to Jenkins",
+					total, maxComposedContentBytes, key, n)
 				status := r.buildStatus(cb, v1alpha1.ComposedBundleInvalid, len(cb.Spec.Inputs), "",
 					previousContentRef, observedRevisions,
-					[]string{"content too large: merged bundle exceeds ConfigMap size limit"},
+					[]string{msg},
 					nil, inputSummary)
 				r.applyStatusAndGrant(ctx, cb, status)
 				return

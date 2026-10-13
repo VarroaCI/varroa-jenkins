@@ -264,11 +264,65 @@ func TestReconcileComposedBundle_OversizeContentInvalid(t *testing.T) {
 	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleInvalid {
 		t.Fatalf("phase = %v, want Invalid", tc.lastStatus())
 	}
-	if !strings.Contains(strings.Join(tc.lastStatus().Errors, " "), "too large") {
-		t.Errorf("expected 'too large' error, got %v", tc.lastStatus().Errors)
+	errText := strings.Join(tc.lastStatus().Errors, " ")
+	for _, want := range []string{"content too large", "921600", "largest key jenkins.yaml"} {
+		if !strings.Contains(errText, want) {
+			t.Errorf("error %q does not contain %q", errText, want)
+		}
 	}
 	if _, ok := tc.configMapData["cb-big-content"]; ok {
 		t.Error("oversize content should not be written")
+	}
+}
+
+func TestReconcileComposedBundle_OversizeKeepsLastGoodContentRef(t *testing.T) {
+	tc := newCatalogTestClient()
+	huge := "jenkins:\n  systemMessage: \"" + strings.Repeat("x", 950*1024) + "\"\n"
+	tc.seedItem(jcascItem("big", huge))
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb-big", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{ItemRef: &v1alpha1.ComposedItemRef{Name: "big"}}},
+		},
+		Status: v1alpha1.ComposedBundleStatus{
+			Phase:      v1alpha1.ComposedBundleReady,
+			ContentRef: "cb-big-content",
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	st := tc.lastStatus()
+	if st == nil || st.Phase != v1alpha1.ComposedBundleInvalid {
+		t.Fatalf("phase = %v, want Invalid", st)
+	}
+	if st.ContentRef != "cb-big-content" {
+		t.Errorf("contentRef = %q, want the last-good cb-big-content", st.ContentRef)
+	}
+}
+
+func TestComposedContentSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    map[string]string
+		total   int
+		key     string
+		largest int
+	}{
+		{name: "empty", data: map[string]string{}, total: 0, key: "", largest: 0},
+		{name: "largest wins", data: map[string]string{"a": "xx", "b": "xxxxx", "c": "x"}, total: 8, key: "b", largest: 5},
+		{name: "tie picks smaller key", data: map[string]string{"z": "abc", "a": "abc"}, total: 6, key: "a", largest: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total, key, n := composedContentSize(tt.data)
+			if total != tt.total || key != tt.key || n != tt.largest {
+				t.Errorf("composedContentSize = (%d, %q, %d), want (%d, %q, %d)",
+					total, key, n, tt.total, tt.key, tt.largest)
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -280,6 +282,9 @@ func (b *BusTransport) Send(ctx context.Context, ns, name string, msg *mitev1.Op
 	if _, err := b.conn.RequestWithContext(ctx, bus.MiteDesiredSubject(b.cluster, ns, name), data, desiredRequestTimeout); err != nil {
 		if bus.IsNoReply(err) {
 			return fmt.Errorf("%w: %v", ErrMiteUnreachable, err)
+		}
+		if errors.Is(err, nats.ErrMaxPayload) {
+			return fmt.Errorf("desired-state command is %d bytes, above the NATS max payload: %w", len(data), err)
 		}
 		return fmt.Errorf("desired-state request: %w", err)
 	}

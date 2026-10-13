@@ -727,6 +727,7 @@ sections describe.
     `OCIAuthFromSecret`, resolves manifest digest via `oci.RegistryStore.Resolve`,
     populates `resolvedOCIAuth[i]`, and `hasNewOCIInputs` gates the skip path.
     `Composer.Compose` receives `resolvedOCIAuth` as its 5th argument.
+    Composed content above `maxComposedContentBytes` (900 KiB) is refused, and the last-good `contentRef` stays.
     `catalogFetchTimeout` (2m) bounds the remote fetch work (git and OCI) of
     one source sync and of one bundle's drift checks plus compose, because the
     ticker runs them in series. Status writes keep the ticker ctx, never the

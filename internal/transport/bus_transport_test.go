@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,24 @@ func TestBusTransport_SendNoResponderReturnsErrMiteUnreachable(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatalf("send took %v; a missing responder must fail at once", time.Since(start))
+	}
+}
+
+// Send refuses a command above the NATS max payload and names its size.
+func TestBusTransport_SendOversizeNamesTheSize(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+	msg := &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_DesiredState{
+		DesiredState: &mitev1.DesiredStateCommand{ItemsYaml: strings.Repeat("x", 1100*1024)},
+	}}
+	err := tr.Send(context.Background(), "ns", "c1", msg)
+	if !errors.Is(err, nats.ErrMaxPayload) {
+		t.Fatalf("send err = %v, want nats.ErrMaxPayload", err)
+	}
+	if errors.Is(err, ErrMiteUnreachable) {
+		t.Fatalf("send err = %v; an oversize command is not an unreachable mite", err)
+	}
+	if !strings.Contains(err.Error(), "above the NATS max payload") {
+		t.Errorf("send err = %q, want the size message", err)
 	}
 }
 

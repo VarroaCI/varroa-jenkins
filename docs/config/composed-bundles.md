@@ -105,6 +105,10 @@ kubectl annotate composedbundle platform-baseline -n teams-platform \
 Remove the annotation to resume. See [rollout waves](../operations/rollout-waves.md)
 for staged application.
 
+### Content size limit
+
+The operator stores merged bundle content only when it is 900 KiB or less. That is 921,600 bytes. The desired state reaches Jenkins in one NATS message of at most 1 MiB. A larger bundle cannot reach the controller. Such a bundle moves to `Invalid`. Its `errors` entry starts with `content too large`. It names the total size, the limit, and the largest key. The last valid content stays active. `contentRef` keeps pointing at that content. Reduce the bundle, or move its controllers to a separate bundle.
+
 ## Trace a job back to its bundle input
 
 The pipelines dashboard's job page shows a `Defined by` card. Its `Bundle` row links to this
