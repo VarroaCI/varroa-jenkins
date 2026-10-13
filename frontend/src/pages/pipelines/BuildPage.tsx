@@ -250,6 +250,13 @@ function isTabId(v: string | null): v is TabId {
   return v !== null && (TAB_IDS as readonly string[]).includes(v);
 }
 
+export function testsSummary(t?: { total: number; failed: number; skipped: number }): string {
+  if (!t) return "The run reported no test results.";
+  const passed = Math.max(0, t.total - t.failed - t.skipped);
+  const noun = t.total === 1 ? "test" : "tests";
+  return `${t.total} ${noun}: ${t.failed} failed, ${t.skipped} skipped, ${passed} passed`;
+}
+
 export default function BuildPage() {
   const { team, job, run: runId } = useParams<{ team: string; job: string; run: string }>();
   const location = useLocation();
@@ -564,10 +571,6 @@ export default function BuildPage() {
 
   const totalsRow = useMemo(
     () => testsQuery.data?.items.find((i) => i.suite === "_total"),
-    [testsQuery.data],
-  );
-  const suiteRows = useMemo(
-    () => testsQuery.data?.items.filter((i) => i.suite !== "_total") ?? [],
     [testsQuery.data],
   );
   // The response carries the failed cases first and the skipped cases
@@ -931,6 +934,11 @@ export default function BuildPage() {
 
       {activeTab === "tests" && (
         <div className={styles.testsTab}>
+          {testsQuery.isError ? (
+            <p className={styles.testsNotice}>The run's test results could not be loaded.</p>
+          ) : (
+            <p className={styles.testsSummary}>{testsSummary(totalsRow)}</p>
+          )}
           <p className={styles.testsNotice}>
             The case table shows the failed and skipped cases the run reported, at most 500. The
             test report holds every case, including each passed case.
@@ -997,28 +1005,6 @@ export default function BuildPage() {
               </table>
             </div>
           )}
-          <div className={styles.tableScroll}>
-            <table className={styles.table} aria-label="Test suites">
-              <thead>
-                <tr>
-                  <th>Suite</th>
-                  <th>Total</th>
-                  <th>Failed</th>
-                  <th>Skipped</th>
-                </tr>
-              </thead>
-              <tbody>
-                {suiteRows.map((s) => (
-                  <tr key={s.suite}>
-                    <td>{breakablePath(s.suite)}</td>
-                    <td>{s.total}</td>
-                    <td>{s.failed}</td>
-                    <td>{s.skipped}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
 

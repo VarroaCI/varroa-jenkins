@@ -225,6 +225,13 @@
   margin-left: 8px;
 }
 
+.testsSummary {
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
 .testsNotice {
   color: var(--text-2);
   font-size: 13px;

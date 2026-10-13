@@ -3076,7 +3076,7 @@ components:
     RunTestListResponse:
       additionalProperties: false
       description: |
-        GET /runs/{run}/tests. items holds one row for each suite, plus the "_total" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+        GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
       properties:
         cases:
           items:
@@ -9388,7 +9388,7 @@ components:
     components_schemas_RunTestListResponse:
       additionalProperties: false
       description: |
-        GET /runs/{run}/tests. items holds one row for each suite, plus the "_total" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+        GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
       properties:
         cases:
           items:
@@ -15726,7 +15726,7 @@ paths:
   /api/v1/runs/{run}/tests:
     get:
       description: |
-        items holds one row for each suite, plus the "_total" sentinel row. cases holds the run's stored failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds every case. Download that file through the run's artifact path.
+        items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds every case. Download that file through the run's artifact path.
       operationId: listRunTests
       parameters:
       - $ref: '#/components/parameters/components_parameters_run'

@@ -3759,7 +3759,7 @@ type ComponentsSchemasRunTestCase struct {
 	Suite  string `json:"suite"`
 }
 
-// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds one row for each suite, plus the "_total" sentinel row. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
 type ComponentsSchemasRunTestListResponse struct {
 	Cases []ComponentsSchemasRunTestCase  `json:"cases"`
 	Items []ComponentsSchemasRunTestSuite `json:"items"`

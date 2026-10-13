@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InitialEntry } from "react-router-dom";
-import BuildPage from "./BuildPage";
+import BuildPage, { testsSummary } from "./BuildPage";
 import { ApiError } from "../../hooks/useApi";
 import type { RunDetail, RunInput, RunScript, RunTestListResponse } from "../../types";
 
@@ -182,10 +182,7 @@ describe("BuildPage — test cases and the test report", () => {
    * page keeps the response order. */
   function testsRead(overrides: Partial<RunTestListResponse> = {}): RunTestListResponse {
     return {
-      items: [
-        { suite: "_total", total: 12, failed: 2, skipped: 1 },
-        { suite: "unit", total: 12, failed: 2, skipped: 1 },
-      ],
+      items: [{ suite: "_total", total: 12, failed: 2, skipped: 1 }],
       cases: [
         {
           suite: "unit",
@@ -220,15 +217,15 @@ describe("BuildPage — test cases and the test report", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
   }
 
-  it("renders the case rows in the response order, above the suite table", async () => {
+  it("renders the totals line above the case rows, in the response order", async () => {
     mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
     mockListRunTests.mockResolvedValue(testsRead());
     renderPage();
     await openTestsTab();
 
     const caseTable = await screen.findByRole("table", { name: "Test cases" });
-    const suiteTable = screen.getByRole("table", { name: "Test suites" });
-    expect(caseTable.compareDocumentPosition(suiteTable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const totals = screen.getByText("12 tests: 2 failed, 1 skipped, 9 passed");
+    expect(totals.compareDocumentPosition(caseTable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     // The suite header row holds a row header; the body rows do not.
     const rows = within(caseTable)
@@ -289,7 +286,6 @@ describe("BuildPage — test cases and the test report", () => {
 
     const caseTable = await screen.findByRole("table", { name: "Test cases" });
     expect(caseTable.parentElement?.className).toMatch(/tableScroll/);
-    expect(screen.getByRole("table", { name: "Test suites" }).parentElement?.className).toMatch(/tableScroll/);
   });
 
   it("links each case row to that case's history with the encoded case key", async () => {
@@ -311,7 +307,7 @@ describe("BuildPage — test cases and the test report", () => {
     renderPage();
     await openTestsTab();
 
-    expect(await screen.findByRole("table", { name: "Test suites" })).toBeInTheDocument();
+    expect(await screen.findByText("12 tests: 2 failed, 1 skipped, 9 passed")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Test cases" })).toBeNull();
   });
 
@@ -361,7 +357,7 @@ describe("BuildPage — test cases and the test report", () => {
     renderPage();
     await openTestsTab();
 
-    await screen.findByRole("table", { name: "Test suites" });
+    await screen.findByText("12 tests: 2 failed, 1 skipped, 9 passed");
     expect(screen.queryByText("Test report")).toBeNull();
     expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
   });
@@ -404,10 +400,7 @@ describe("BuildPage — record and recovery states", () => {
       ],
     });
     mockListRunTests.mockResolvedValue({
-      items: [
-        { suite: "_total", total: 10, failed: 1, skipped: 0 },
-        { suite: "unit", total: 10, failed: 1, skipped: 0 },
-      ],
+      items: [{ suite: "_total", total: 10, failed: 1, skipped: 0 }],
     });
     renderPage();
     await screen.findByText(/Build #42/);
@@ -422,9 +415,59 @@ describe("BuildPage — record and recovery states", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
     expect(await screen.findByText(/failed and skipped cases the run reported, at most 500/)).toBeInTheDocument();
     expect(screen.getByText(/test report holds every case, including each passed case/)).toBeInTheDocument();
-    expect(screen.getByText("unit")).toBeInTheDocument();
+    expect(screen.getByText("10 tests: 1 failed, 0 skipped, 9 passed")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: /^Changes/ }));
+  });
+
+  it("shows the totals line and no suite table for a total-only run", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue({
+      items: [{ suite: "_total", total: 11746, failed: 0, skipped: 756 }],
+      cases: [],
+    });
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
+
+    expect(await screen.findByText("11746 tests: 0 failed, 756 skipped, 10990 passed")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Test suites" })).toBeNull();
+  });
+
+  it("hides the totals line and shows the error notice when the tests read fails", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockRejectedValue(new ApiError(500, "boom"));
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
+
+    expect(await screen.findByText("The run's test results could not be loaded.")).toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ tests?:/)).toBeNull();
+    expect(screen.queryByText("The run reported no test results.")).toBeNull();
+  });
+
+  it("states that the run reported no test results when items is empty", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue({ items: [], cases: [] });
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
+
+    expect(await screen.findByText("The run reported no test results.")).toBeInTheDocument();
+  });
+});
+
+describe("testsSummary", () => {
+  it("names the run as having no results when totals are absent", () => {
+    expect(testsSummary(undefined)).toBe("The run reported no test results.");
+  });
+
+  it("uses the singular noun for one test", () => {
+    expect(testsSummary({ total: 1, failed: 0, skipped: 0 })).toBe("1 test: 0 failed, 0 skipped, 1 passed");
+  });
+
+  it("clamps the passed count at zero", () => {
+    expect(testsSummary({ total: 2, failed: 2, skipped: 1 })).toBe("2 tests: 2 failed, 1 skipped, 0 passed");
   });
 });
 
