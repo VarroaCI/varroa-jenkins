@@ -752,6 +752,13 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool libraries: %w", libErr)
 	}
 
+	// Render the pool's Gitea and Forgejo servers. A cell with the gitea
+	// plugin always gets the servers key, even when empty, so a removed
+	// server is unloaded. A no-op for a controller that is not a cell.
+	if gErr := r.applyPoolGiteaServers(ctx, cr, mat, coreSet); gErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool gitea servers: %w", gErr)
+	}
+
 	// Render the pool's approved script signatures. The cell always gets
 	// the approval key, even when empty, so a removed signature is revoked.
 	// A no-op for a controller that is not a cell.

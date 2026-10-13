@@ -133,6 +133,28 @@ func TestCellPoolDeepCopyIsolatesLibraries(t *testing.T) {
 	}
 }
 
+// TestCellPoolDeepCopyIsolatesGiteaServers mutates a deep copy of a CellPool
+// that carries Gitea servers and asserts the original stays unchanged.
+func TestCellPoolDeepCopyIsolatesGiteaServers(t *testing.T) {
+	orig := CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "lts-2-555"},
+		Spec: CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			GiteaServers: []CellPoolGiteaServer{
+				{ServerURL: "https://git.example.org", DisplayName: "Example"},
+			},
+		},
+	}
+
+	cp := orig.DeepCopy()
+	cp.Spec.GiteaServers[0].ServerURL = "https://mutated.example.org"
+	cp.Spec.GiteaServers = append(cp.Spec.GiteaServers, CellPoolGiteaServer{ServerURL: "https://extra.example.org"})
+
+	if len(orig.Spec.GiteaServers) != 1 || orig.Spec.GiteaServers[0].ServerURL != "https://git.example.org" {
+		t.Fatalf("mutating the copy changed the original Gitea servers: %+v", orig.Spec.GiteaServers)
+	}
+}
+
 // TestCellPoolDeepCopyIsolatesMail mutates a deep copy of a CellPool that
 // carries a mail setting and asserts the original stays unchanged.
 func TestCellPoolDeepCopyIsolatesMail(t *testing.T) {

@@ -1289,6 +1289,8 @@ const (
 	// ConditionPoolMail reports whether the cell's pool mail setting is
 	// rendered. A setting that fails validation renders nothing.
 	ConditionPoolMail ControllerConditionType = "PoolMail"
+	// ConditionPoolGiteaServers reports whether the cell's pool Gitea servers are rendered.
+	ConditionPoolGiteaServers ControllerConditionType = "PoolGiteaServers"
 )
 
 // MiteConnected reasons.
@@ -2096,6 +2098,34 @@ type CellPoolSpec struct {
 	// renders it into the desired-state command of each cell only.
 	// +optional
 	Mail *CellPoolMail `json:"mail,omitempty"`
+	// GiteaServers lists the Gitea and Forgejo servers that every cell of the
+	// pool declares. A gitea branch source or navigator on a cell finds its
+	// server here. The operator renders each entry with manageHooks false and
+	// no credential.
+	// +optional
+	// +listType=map
+	// +listMapKey=serverUrl
+	// +kubebuilder:validation:MaxItems=16
+	GiteaServers []CellPoolGiteaServer `json:"giteaServers,omitempty"`
+}
+
+// CellPoolGiteaServer is one Gitea or Forgejo server of a pool.
+type CellPoolGiteaServer struct {
+	// ServerURL is the base URL of the forge.
+	// +kubebuilder:validation:MinLength=8
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://[^\s/$?#]+(/[^\s$?#]*)?$`
+	ServerURL string `json:"serverUrl"`
+	// DisplayName is the server name in Jenkins. Empty means the plugin derives it from the URL.
+	// +optional
+	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:Pattern=`^[^$]*$`
+	DisplayName string `json:"displayName,omitempty"`
+	// AliasURL is the URL the forge reports in webhook payloads, when it differs from ServerURL.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://[^\s/$?#]+(/[^\s$?#]*)?$`
+	AliasURL string `json:"aliasUrl,omitempty"`
 }
 
 // CellPoolMail is the SMTP setting of one pool. The login, when set, lives

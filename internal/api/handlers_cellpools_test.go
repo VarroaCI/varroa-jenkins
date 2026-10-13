@@ -166,6 +166,7 @@ func TestCellPools_StructuralEditRefused(t *testing.T) {
 		{name: "cellTemplate", body: `{"spec": {"cellTemplate": {}}}`},
 		{name: "approvedSignatures", body: `{"spec": {"approvedSignatures": ["method hudson.Util getHost"]}}`},
 		{name: "mail", body: `{"spec": {"mail": {"host": "smtp.example.com", "from": "ci@example.com"}}}`},
+		{name: "giteaServers", body: `{"spec": {"giteaServers": [{"serverUrl": "https://git.example.org"}]}}`},
 		{name: "unknown key", body: `{"spec": {"nope": 1}}`},
 		{name: "no recognised key", body: `{"spec": {}}`},
 		{name: "no spec", body: `{}`},
@@ -406,6 +407,27 @@ func TestCellPoolEntryFrom_CarriesMailWithoutSecretData(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "password") {
 		t.Fatalf("the read projection must not carry Secret data: %s", raw)
+	}
+}
+
+// TestCellPoolEntryFrom_CarriesGiteaServers checks that the read projection
+// carries each pool Gitea server.
+func TestCellPoolEntryFrom_CarriesGiteaServers(t *testing.T) {
+	pool := &v1alpha1.CellPool{
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			GiteaServers: []v1alpha1.CellPoolGiteaServer{
+				{ServerURL: "https://git.example.org", DisplayName: "Example", AliasURL: "https://forge.example.org"},
+			},
+		},
+	}
+	entry := cellPoolEntryFrom(pool)
+	if len(entry.Spec.GiteaServers) != 1 {
+		t.Fatalf("giteaServers = %+v, want one entry", entry.Spec.GiteaServers)
+	}
+	got := entry.Spec.GiteaServers[0]
+	if got.ServerURL != "https://git.example.org" || got.DisplayName != "Example" || got.AliasURL != "https://forge.example.org" {
+		t.Fatalf("giteaServers[0] = %+v", got)
 	}
 }
 

@@ -50,9 +50,35 @@ credential also works.
 
 ## Forgejo and Gitea
 
-Forgejo and Gitea sources use the `gitea` plugin. Declare each forge server in the cell
-bundle. The plugin reads the server list from the `unclassified.giteaServers` section of
-the Jenkins configuration:
+Forgejo and Gitea sources use the `gitea` plugin. The plugin needs a server entry for each
+forge. Declare the entry in the way that fits the controller.
+
+### Pool cell
+
+Set `spec.giteaServers` on the `CellPool`. Each entry names one forge:
+
+```bash
+kubectl patch cellpool <pool> --type merge -p '{"spec":{"giteaServers":[{"serverUrl":"https://git.example.org"}]}}'
+```
+
+The operator renders each entry as `unclassified.giteaServers` in the cell configuration.
+The operator sets `manageHooks: false` and writes no credential. Varroa registers the
+webhook, so the plugin must not register one.
+
+The controller reports the result in the `PoolGiteaServers` condition. The condition uses
+these reasons:
+
+- `Rendered`: every server rendered.
+- `PluginMissing`: the pinned plugin set has no `gitea` plugin. No server renders.
+- `ServerInvalid`: a server carries a `${` token. The operator skips that server.
+
+The cell must reach the forge API on port 443. The operator does not add this egress. Allow
+it in `networkPolicy.cellIsolation.extraEgress`.
+
+### Classic controller
+
+Declare each forge server in the controller's own bundle. The plugin reads the server list
+from the `unclassified.giteaServers` section of the Jenkins configuration:
 
 ```yaml
 unclassified:
@@ -65,6 +91,8 @@ unclassified:
 ```
 
 Set `manageHooks: false`. Varroa registers the webhook, so the plugin must not register one.
+
+### Credentials and webhook
 
 Create a username and password credential in the job's folder. Put an access token in the
 password field. The token needs the `write:repository` and `read:organization` scopes. The

@@ -44,7 +44,9 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   script approval set. A cell renders it; the BFF projects it read-only. The
   `mail` field (`CellPoolMail`, optional) holds the SMTP setting. Its login
   is a Secret name (`credentialRef`), never a value; the BFF projects the
-  name only.
+  name only. The `giteaServers` list (`CellPoolGiteaServer`, max 16, map key
+  `serverUrl`) declares the Gitea and Forgejo servers of every cell. It holds
+  no credential, and the BFF projects it read-only.
   second rule guards **both** field reads with `has()`: a stored object written
   before the defaults existed leaves a field absent, and a bare access raises
   `no such key`. `CellPoolStatus`'s four counters (`warmCells`, `placedCells`,

@@ -6322,6 +6322,41 @@ CellPoolSpec:
         pattern: '^(method|staticMethod|new|field|staticField) \S.*$'
     mail:
       $ref: '#/CellPoolMail'
+    giteaServers:
+      type: array
+      maxItems: 16
+      description: >-
+        Gitea and Forgejo servers that every cell of the pool declares. Each
+        server has hooks off and no credential. Read-only through the API;
+        edit the CellPool with kubectl or GitOps. Server URLs are unique.
+      items:
+        $ref: '#/CellPoolGiteaServer'
+  additionalProperties: false
+
+CellPoolGiteaServer:
+  type: object
+  description: >-
+    One Gitea or Forgejo server of a pool. The operator renders it with
+    manageHooks false and no credential.
+  required: [serverUrl]
+  properties:
+    serverUrl:
+      type: string
+      minLength: 8
+      maxLength: 2048
+      description: The base URL of the forge.
+    displayName:
+      type: string
+      maxLength: 100
+      description: >-
+        The server name in Jenkins. Unset means the plugin derives it from
+        the URL.
+    aliasUrl:
+      type: string
+      maxLength: 2048
+      description: >-
+        The URL the forge reports in webhook payloads, when it differs from
+        serverUrl.
   additionalProperties: false
 
 CellPoolMail:

@@ -1378,6 +1378,26 @@ func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
 		*out = new(CellPoolMail)
 		**out = **in
 	}
+	if in.GiteaServers != nil {
+		in, out := &in.GiteaServers, &out.GiteaServers
+		*out = make([]CellPoolGiteaServer, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyInto for CellPoolGiteaServer.
+func (in *CellPoolGiteaServer) DeepCopyInto(out *CellPoolGiteaServer) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolGiteaServer.
+func (in *CellPoolGiteaServer) DeepCopy() *CellPoolGiteaServer {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolGiteaServer)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for CellPoolMail.

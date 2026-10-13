@@ -27,16 +27,25 @@ type cellPoolEntry struct {
 
 // cellPoolSpecEntry mirrors v1alpha1.CellPoolSpec.
 type cellPoolSpecEntry struct {
-	ProfileRef         string                 `json:"profileRef"`
-	Warm               int32                  `json:"warm"`
-	MaxCells           int32                  `json:"maxCells,omitempty"`
-	MaxTenantsPerCell  int32                  `json:"maxTenantsPerCell,omitempty"`
-	MaxRunsPerTenant   int32                  `json:"maxRunsPerTenant,omitempty"`
-	UnreadyGracePeriod *metav1.Duration       `json:"unreadyGracePeriod,omitempty"`
-	CellTemplate       *cellTemplate          `json:"cellTemplate,omitempty"`
-	Libraries          []cellPoolLibraryEntry `json:"libraries,omitempty"`
-	ApprovedSignatures []string               `json:"approvedSignatures,omitempty"`
-	Mail               *cellPoolMailEntry     `json:"mail,omitempty"`
+	ProfileRef         string                     `json:"profileRef"`
+	Warm               int32                      `json:"warm"`
+	MaxCells           int32                      `json:"maxCells,omitempty"`
+	MaxTenantsPerCell  int32                      `json:"maxTenantsPerCell,omitempty"`
+	MaxRunsPerTenant   int32                      `json:"maxRunsPerTenant,omitempty"`
+	UnreadyGracePeriod *metav1.Duration           `json:"unreadyGracePeriod,omitempty"`
+	CellTemplate       *cellTemplate              `json:"cellTemplate,omitempty"`
+	Libraries          []cellPoolLibraryEntry     `json:"libraries,omitempty"`
+	ApprovedSignatures []string                   `json:"approvedSignatures,omitempty"`
+	Mail               *cellPoolMailEntry         `json:"mail,omitempty"`
+	GiteaServers       []cellPoolGiteaServerEntry `json:"giteaServers,omitempty"`
+}
+
+// cellPoolGiteaServerEntry mirrors v1alpha1.CellPoolGiteaServer. It carries
+// no credential, because a pool Gitea server has none.
+type cellPoolGiteaServerEntry struct {
+	ServerURL   string `json:"serverUrl"`
+	DisplayName string `json:"displayName,omitempty"`
+	AliasURL    string `json:"aliasUrl,omitempty"`
 }
 
 // cellPoolMailEntry mirrors v1alpha1.CellPoolMail. It carries the login
@@ -122,6 +131,13 @@ func cellPoolEntryFrom(pool *v1alpha1.CellPool) cellPoolEntry {
 			FreeTenantSlots:    pool.Status.FreeTenantSlots,
 			Tenants:            pool.Status.Tenants,
 		},
+	}
+	for _, srv := range pool.Spec.GiteaServers {
+		e.Spec.GiteaServers = append(e.Spec.GiteaServers, cellPoolGiteaServerEntry{
+			ServerURL:   srv.ServerURL,
+			DisplayName: srv.DisplayName,
+			AliasURL:    srv.AliasURL,
+		})
 	}
 	for _, lib := range pool.Spec.Libraries {
 		e.Spec.Libraries = append(e.Spec.Libraries, cellPoolLibraryEntry{
@@ -309,7 +325,7 @@ func decodeCellPoolScaleRequest(r *http.Request) (cells.CellPoolDials, string) {
 	for k := range keys {
 		switch k {
 		case "warm", "maxCells", "maxTenantsPerCell", "unreadyGracePeriod":
-		case "profileRef", "cellTemplate", "maxRunsPerTenant", "approvedSignatures", "mail":
+		case "profileRef", "cellTemplate", "maxRunsPerTenant", "approvedSignatures", "mail", "giteaServers":
 			return cells.CellPoolDials{}, fmt.Sprintf("spec.%s is not an API operation; edit the CellPool with kubectl or through GitOps", k)
 		default:
 			return cells.CellPoolDials{}, fmt.Sprintf("spec may only contain the scale dials; got %q", k)

@@ -21,6 +21,7 @@ Read [Cells and pipelines tenants](cells.md) first.
 | `libraries` | list, optional | trusted shared libraries that every cell of the pool serves. See [Pool shared libraries](cell-libraries.md) |
 | `approvedSignatures` | list of strings, optional | script-security signatures that every cell of the pool approves. See [Script approvals](script-approvals.md) |
 | `mail` | object, optional | SMTP server for the `mail` and `emailext` steps of every cell of the pool. See [Slack and email](notifications.md#slack-and-email) |
+| `giteaServers` | list, optional, max 16 | Gitea and Forgejo servers every cell of the pool declares. See [Commit status](commit-status.md#forgejo-and-gitea) |
 
 `profileRef` is immutable. A pool's cells carry the profile label they were created with, and a
 change would orphan every one of them. To serve another profile, create another pool.

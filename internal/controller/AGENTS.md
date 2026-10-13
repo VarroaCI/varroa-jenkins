@@ -983,6 +983,15 @@ sections describe.
     A missing `mailer` pin, a missing or malformed login, or a read failure
     renders nothing. An unpinned `email-ext` keeps the mailer and records a
     fault. Faults set the `PoolMail` condition),
+    `cell_pool_gitea.go`
+    (`applyPoolGiteaServers` runs after `applyPoolLibraries`. It renders
+    `CellPool.spec.giteaServers` into `unclassified.giteaServers.servers`
+    with `manageHooks: false` and no credential. The key is always set when
+    the `gitea` plugin is pinned, as an empty list when no server remains,
+    and list-aware: a bundle entry with the same normalized `serverUrl` is
+    dropped. An unpinned plugin leaves the JCasC unchanged, because an
+    unknown key fails the reload. Faults set the `PoolGiteaServers`
+    condition; a server with a `${` token is held),
     `cell_readiness.go`
     (`isCellController`; `cellConfigGateReason` checks, in fixed order, the
     record store, the s3 blob tier, and C3's `ArtifactStorage=External`

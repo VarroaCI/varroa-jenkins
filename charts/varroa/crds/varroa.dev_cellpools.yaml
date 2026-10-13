@@ -3626,6 +3626,42 @@ spec:
                         type: object
                     type: object
                 type: object
+              giteaServers:
+                description: |-
+                  GiteaServers lists the Gitea and Forgejo servers that every cell of the
+                  pool declares. A gitea branch source or navigator on a cell finds its
+                  server here. The operator renders each entry with manageHooks false and
+                  no credential.
+                items:
+                  description: CellPoolGiteaServer is one Gitea or Forgejo server
+                    of a pool.
+                  properties:
+                    aliasUrl:
+                      description: AliasURL is the URL the forge reports in webhook
+                        payloads, when it differs from ServerURL.
+                      maxLength: 2048
+                      pattern: ^https?://[^\s/$?#]+(/[^\s$?#]*)?$
+                      type: string
+                    displayName:
+                      description: DisplayName is the server name in Jenkins. Empty
+                        means the plugin derives it from the URL.
+                      maxLength: 100
+                      pattern: ^[^$]*$
+                      type: string
+                    serverUrl:
+                      description: ServerURL is the base URL of the forge.
+                      maxLength: 2048
+                      minLength: 8
+                      pattern: ^https?://[^\s/$?#]+(/[^\s$?#]*)?$
+                      type: string
+                  required:
+                  - serverUrl
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - serverUrl
+                x-kubernetes-list-type: map
               libraries:
                 description: |-
                   Libraries lists the trusted shared libraries that every cell of the

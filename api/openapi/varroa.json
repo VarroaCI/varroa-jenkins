@@ -6723,6 +6723,32 @@
         ],
         "type": "object"
       },
+      "components_schemas_CellPoolGiteaServer": {
+        "additionalProperties": false,
+        "description": "One Gitea or Forgejo server of a pool. The operator renders it with manageHooks false and no credential.",
+        "properties": {
+          "aliasUrl": {
+            "description": "The URL the forge reports in webhook payloads, when it differs from serverUrl.",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "displayName": {
+            "description": "The server name in Jenkins. Unset means the plugin derives it from the URL.",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "serverUrl": {
+            "description": "The base URL of the forge.",
+            "maxLength": 2048,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverUrl"
+        ],
+        "type": "object"
+      },
       "components_schemas_CellPoolLibrary": {
         "additionalProperties": false,
         "description": "A trusted shared library of a pool. Jenkins runs its code outside the script sandbox. Only the operator declares it.",
@@ -6871,6 +6897,14 @@
             "additionalProperties": true,
             "description": "resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.",
             "type": "object"
+          },
+          "giteaServers": {
+            "description": "Gitea and Forgejo servers that every cell of the pool declares. Each server has hooks off and no credential. Read-only through the API; edit the CellPool with kubectl or GitOps. Server URLs are unique.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_CellPoolGiteaServer"
+            },
+            "maxItems": 16,
+            "type": "array"
           },
           "libraries": {
             "description": "Trusted shared libraries that every cell of the pool serves as global libraries. Names are unique.",

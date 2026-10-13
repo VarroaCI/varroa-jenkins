@@ -245,8 +245,8 @@ apply: branch discovery (`1`), origin pull request discovery (`1`), and fork pul
 discovery (`1`) that trusts `contributors`.
 
 The engine never registers a webhook on the forge. Add the webhook by hand, as described in
-[Commit status](../operations/commit-status.md) for the webhook and the server entry that
-the cell bundle needs.
+[Commit status](../operations/commit-status.md) for the webhook. On a cell, declare the
+server entry in `CellPool.spec.giteaServers`.
 
 ## Cell restrictions
 

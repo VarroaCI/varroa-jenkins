@@ -1287,6 +1287,18 @@ type ComponentsSchemasCellPoolCondition struct {
 	Type               string  `json:"type"`
 }
 
+// ComponentsSchemasCellPoolGiteaServer One Gitea or Forgejo server of a pool. The operator renders it with manageHooks false and no credential.
+type ComponentsSchemasCellPoolGiteaServer struct {
+	// AliasUrl The URL the forge reports in webhook payloads, when it differs from serverUrl.
+	AliasUrl *string `json:"aliasUrl,omitempty"`
+
+	// DisplayName The server name in Jenkins. Unset means the plugin derives it from the URL.
+	DisplayName *string `json:"displayName,omitempty"`
+
+	// ServerUrl The base URL of the forge.
+	ServerUrl string `json:"serverUrl"`
+}
+
 // ComponentsSchemasCellPoolLibrary A trusted shared library of a pool. Jenkins runs its code outside the script sandbox. Only the operator declares it.
 type ComponentsSchemasCellPoolLibrary struct {
 	// AllowVersionOverride Lets a pipeline load another version of the library. Any user who can push to the library repository then runs trusted code on every cell.
@@ -1352,6 +1364,9 @@ type ComponentsSchemasCellPoolSpec struct {
 
 	// CellTemplate resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.
 	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
+
+	// GiteaServers Gitea and Forgejo servers that every cell of the pool declares. Each server has hooks off and no credential. Read-only through the API; edit the CellPool with kubectl or GitOps. Server URLs are unique.
+	GiteaServers *[]ComponentsSchemasCellPoolGiteaServer `json:"giteaServers,omitempty"`
 
 	// Libraries Trusted shared libraries that every cell of the pool serves as global libraries. Names are unique.
 	Libraries *[]ComponentsSchemasCellPoolLibrary `json:"libraries,omitempty"`

@@ -2670,6 +2670,15 @@ export interface CellPoolSpec {
   approvedSignatures?: string[];
   /** The SMTP setting every cell of the pool renders. The read carries the login Secret name only. */
   mail?: CellPoolMail;
+  /** The Gitea and Forgejo servers every cell of the pool declares. Read-only through the API. */
+  giteaServers?: CellPoolGiteaServer[];
+}
+
+/** One Gitea or Forgejo server of a pool. It carries no credential. */
+export interface CellPoolGiteaServer {
+  serverUrl: string;
+  displayName?: string;
+  aliasUrl?: string;
 }
 
 /** The SMTP setting of a pool. Read-only through the API. */
