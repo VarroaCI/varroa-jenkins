@@ -989,21 +989,16 @@ func coreForLatest(dp declaredPlugin) string {
 	return ""
 }
 
-// requestingCore returns the exact core a controller or profile deploys, without a
-// build suffix. It returns "" when the deployed version does not name an exact core.
-// A two-segment version is an exact core only on the weekly channel. The baseline
-// (an empty version or "lts", which have no profile) is the weekly 2.570 profile in
-// the lock file. On the LTS channel a two-segment version is a line. An empty core
-// accepts any stored version, which is the check the update center applied before
-// core-aware reporting.
+// requestingCore returns the core that the deployed jenkins/jenkins image runs, without
+// a build suffix. A two-segment tag is a fixed weekly release on every channel, so it
+// names an exact core. The profile resolveVersion wins through deployedCore. It returns
+// "" when the deployed version does not parse. An empty core accepts any stored version.
 func requestingCore(version string, profile *v1alpha1.JenkinsVersionProfile) string {
 	segs, ok := jenkinsver.Core(deployedCore(version, profile))
 	if !ok {
 		return ""
 	}
-	v := strings.TrimSpace(version)
-	weekly := (profile != nil && profile.Spec.Channel == "weekly") || v == "" || v == "lts"
-	if len(segs) == 2 && weekly {
+	if len(segs) == 2 {
 		return fmt.Sprintf("%d.%d", segs[0], segs[1])
 	}
 	if len(segs) != 3 {

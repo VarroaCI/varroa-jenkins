@@ -101,6 +101,30 @@ func TestUpdateCenterLatestPerCore(t *testing.T) {
 		}
 	})
 
+	t.Run("bare-line-controller-requests-its-weekly-core", func(t *testing.T) {
+		client := coreTestClient(t)
+		seedDeclaredBundle(client, "b-bare", "ns", "plugins:\n  - artifactId: foo\n    version: latest\n")
+		seedCoreController(client, "cr-bare", "2.479", "b-bare", "ns")
+
+		var posted []ucServabilityPlugin
+		ts := gapTestUCServerInventory(t, []inventoryEntry{{Name: "foo", Version: "2.0", RequiredCore: "2.570"}}, nil, &posted)
+		rec := NewUpdateCenterReconciler(client, client.store, "default", ts.URL, testLogger())
+		if _, err := rec.Reconcile(context.Background(), reconcileRequest(updateCenterSingletonName)); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		status := lastUCStatus(t, client)
+
+		if status.GapCount != 1 || len(status.Gaps) != 1 {
+			t.Fatalf("gaps = %d %+v, want one foo gap", status.GapCount, status.Gaps)
+		}
+		if status.Gaps[0].Core != "2.479" {
+			t.Errorf("gap core = %q, want 2.479", status.Gaps[0].Core)
+		}
+		if len(posted) != 1 || posted[0] != (ucServabilityPlugin{Name: "foo", Version: "latest", Core: "2.479"}) {
+			t.Errorf("posted = %+v, want foo latest core 2.479", posted)
+		}
+	})
+
 	t.Run("bundle-without-controller-posts-no-core", func(t *testing.T) {
 		client := coreTestClient(t)
 		seedDeclaredBundle(client, "b-unused", "ns", "plugins:\n  - artifactId: foo\n    version: latest\n  - artifactId: bar\n    version: latest\n")
@@ -202,7 +226,10 @@ func TestRequestingCore(t *testing.T) {
 		profile *v1alpha1.JenkinsVersionProfile
 		want    string
 	}{
-		{"bare-lts-line-requests-no-core", "2.479", nil, ""},
+		{"bare-two-segment-is-weekly-core", "2.479", nil, "2.479"},
+		{"lts-profile-without-resolve-version-is-weekly-core", "2.479", &v1alpha1.JenkinsVersionProfile{Spec: v1alpha1.JenkinsVersionProfileSpec{Version: "2.479", Channel: "lts"}}, "2.479"},
+		{"suffixed-two-segment-is-exact", "2.570-jdk21", nil, "2.570"},
+		{"unparseable-version-requests-no-core", "latest", nil, ""},
 		{"empty-version-is-weekly-baseline", "", nil, pluginlock.Baseline()},
 		{"weekly-two-segment-is-exact", "2.570", &v1alpha1.JenkinsVersionProfile{Spec: v1alpha1.JenkinsVersionProfileSpec{Version: "2.570", Channel: "weekly"}}, "2.570"},
 		{"build-suffix-is-stripped", "2.492.3-jdk21", nil, "2.492.3"},

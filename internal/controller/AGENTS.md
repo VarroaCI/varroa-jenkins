@@ -677,7 +677,8 @@ sections describe.
     `UpdateCenterReconciler` and `ProfileCandidateReconciler` both call them.
     The candidate posts only its unstored pins to the servability route.
     `storedForCore` is the one stored check for a latest pin. Both reconcilers
-    post `core` for a latest entry.
+    post `core` for a latest entry. `requestingCore` reads `deployedCore`.
+    A two-segment core is a fixed weekly release on every channel.
   - `CatalogReconciler` (`catalog_controller.go`) — `CatalogSource` +
     `ComposedBundle`; `Reconcile` is a **three-way** dispatch: `repoURL` (git
     clone) vs `ociRef` (OCI pull via `oci.RegistryStore` + `Resolve` → digest as
