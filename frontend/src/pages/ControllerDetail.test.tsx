@@ -1448,4 +1448,41 @@ describe("The tab query parameter", () => {
     await user.click(screen.getByRole("button", { name: "go back" }));
     await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
   });
+
+  // The tab panel must name a tab that the tablist renders, and exactly one
+  // tab must report aria-selected. The early return in ControllerDetail
+  // keeps the panel and the tab row out of the DOM until the read answers.
+  function expectPanelNamesSelectedTab(expectedTabId: string) {
+    const panel = screen.getByRole("tabpanel");
+    const labelId = panel.getAttribute("aria-labelledby");
+    expect(labelId).toBe(`controller-detail-tab-${expectedTabId}`);
+    const tab = document.getElementById(labelId!);
+    expect(tab).not.toBeNull();
+    expect(tab).toHaveAttribute("role", "tab");
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    const selected = screen.getAllByRole("tab").filter((t) => t.getAttribute("aria-selected") === "true");
+    expect(selected).toHaveLength(1);
+    expect(tab).toHaveAttribute("aria-controls", panel.id);
+  }
+
+  it("renders no tab panel and no tab row while the detail read is in flight", () => {
+    mockUseController.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  });
+
+  it("names the Cell tab from the panel on a cold load of a cell", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: ["acme"] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+    expectPanelNamesSelectedTab("cell");
+  });
+
+  it("names the Overview tab from the panel on a cold load of a stateful controller at ?tab=cell", async () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+    expectPanelNamesSelectedTab("overview");
+  });
 });
