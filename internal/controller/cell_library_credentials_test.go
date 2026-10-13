@@ -143,3 +143,28 @@ func TestFolderCredentialIDKind(t *testing.T) {
 		t.Fatalf("folderCredentialIDKind(secretText) = %q, %q", id, kind)
 	}
 }
+
+func TestCheckFolderLibraryCredentials_GitHubAppTenantCredentialPasses(t *testing.T) {
+	projected := []items.FolderCredentialEntry{{Credentials: []items.FolderCredential{{
+		GitHubApp: &items.GitHubAppCredential{ID: "app-cred", AppID: "1", PrivateKey: "k"},
+	}}}}
+	lib := items.LibraryConfiguration{
+		Name: "platform-lib", DefaultVersion: "v1.0.0",
+		Retriever: items.LibraryRetriever{ModernSCM: &items.ModernSCMRetriever{
+			SCM: items.LibrarySCM{GitHub: &items.GitHubSCMSource{RepoOwner: "org", Repository: "lib", CredentialsID: "app-cred"}},
+		}},
+	}
+	m := libraryFolderManifest(nil, lib)
+	if err := checkFolderLibraryCredentials(m, projected); err != nil {
+		t.Fatalf("githubApp tenant credential on a github source: %v", err)
+	}
+}
+
+func TestCheckFolderLibraryCredentials_MessageUnchanged(t *testing.T) {
+	m := libraryFolderManifest(nil, gitLibraryFor("missing-cred"))
+	err := checkFolderLibraryCredentials(m, nil)
+	want := `folder library "platform-lib" at "payments/apps" names credential "missing-cred", which no tenant credential Secret or folder credential provides`
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}

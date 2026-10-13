@@ -20,12 +20,38 @@ import (
 func checkFolderLibraryCredentials(manifest *items.Manifest, projected []items.FolderCredentialEntry) error {
 	visible := make(map[string]string)
 	addFolderCredentials(visible, projected)
-	return checkLibraryCredentialsIn(manifest.Items, "", visible)
+	return checkLibraryCredentials(manifest, visible, libraryCredentialOrigin{
+		missing: "which no tenant credential Secret or folder credential provides",
+	})
+}
+
+// credentialKindAny marks a credential whose type the walker does not
+// recognise. Any library source accepts it.
+const credentialKindAny = "*"
+
+// libraryCredentialOrigin holds the words that one refusal uses for one
+// controller kind. missing ends the message for an ID that no visible
+// credential provides. systemOnly names the IDs that exist only at SYSTEM
+// scope, which a folder library cannot see. unresolvedIDs reports that a
+// system credential ID still holds a variable token. Then an ID that no
+// visible credential provides may be that unresolved ID, so it is not
+// refused as missing. A SYSTEM-scope or kind refusal still applies.
+type libraryCredentialOrigin struct {
+	missing       string
+	systemOnly    map[string]bool
+	unresolvedIDs bool
+}
+
+// checkLibraryCredentials checks every folder library of manifest against
+// the credentials in visible. visible holds the ID and kind of each
+// credential that the root folder can see.
+func checkLibraryCredentials(manifest *items.Manifest, visible map[string]string, origin libraryCredentialOrigin) error {
+	return checkLibraryCredentialsIn(manifest.Items, "", visible, origin)
 }
 
 // checkLibraryCredentialsIn walks one level of the item tree. visible holds
 // the credential IDs and kinds that every item of this level can see.
-func checkLibraryCredentialsIn(list []items.Item, parent string, visible map[string]string) error {
+func checkLibraryCredentialsIn(list []items.Item, parent string, visible map[string]string, origin libraryCredentialOrigin) error {
 	for _, it := range list {
 		path := it.Name
 		if parent != "" {
@@ -45,12 +71,12 @@ func checkLibraryCredentialsIn(list []items.Item, parent string, visible map[str
 				continue
 			}
 			for _, lc := range p.FolderLibraries.Libraries {
-				if err := checkLibraryCredentialRefs(lc.LibraryConfiguration, path, scope); err != nil {
+				if err := checkLibraryCredentialRefs(lc.LibraryConfiguration, path, scope, origin); err != nil {
 					return err
 				}
 			}
 		}
-		if err := checkLibraryCredentialsIn(it.Items, path, scope); err != nil {
+		if err := checkLibraryCredentialsIn(it.Items, path, scope, origin); err != nil {
 			return err
 		}
 	}
@@ -59,13 +85,19 @@ func checkLibraryCredentialsIn(list []items.Item, parent string, visible map[str
 
 // checkLibraryCredentialRefs checks each credential that one library names
 // against the credentials visible at its folder.
-func checkLibraryCredentialRefs(c items.LibraryConfiguration, path string, scope map[string]string) error {
+func checkLibraryCredentialRefs(c items.LibraryConfiguration, path string, scope map[string]string, origin libraryCredentialOrigin) error {
 	for _, ref := range c.CredentialRefs() {
 		kind, ok := scope[ref.ID]
 		if !ok {
-			return fmt.Errorf("folder library %q at %q names credential %q, which no tenant credential Secret or folder credential provides", c.Name, path, ref.ID)
+			if origin.systemOnly[ref.ID] {
+				return fmt.Errorf("folder library %q at %q names credential %q, which has SYSTEM scope; a folder library sees only GLOBAL-scope credentials", c.Name, path, ref.ID)
+			}
+			if origin.unresolvedIDs {
+				continue
+			}
+			return fmt.Errorf("folder library %q at %q names credential %q, %s", c.Name, path, ref.ID, origin.missing)
 		}
-		if !slices.Contains(ref.Kinds, kind) {
+		if kind != credentialKindAny && !slices.Contains(ref.Kinds, kind) {
 			return fmt.Errorf("folder library %q at %q: credential %q is kind %s; this source needs %s",
 				c.Name, path, ref.ID, kind, strings.Join(ref.Kinds, " or "))
 		}
@@ -95,6 +127,12 @@ func folderCredentialIDKind(c items.FolderCredential) (id, kind string) {
 		return c.SecretText.ID, credentialKindSecretText
 	case c.BasicSSHUserPrivateKey != nil:
 		return c.BasicSSHUserPrivateKey.ID, credentialKindSSHPrivateKey
+	case c.File != nil:
+		return c.File.ID, credentialKindSecretFile
+	case c.Certificate != nil:
+		return c.Certificate.ID, credentialKindCertificate
+	case c.GitHubApp != nil:
+		return c.GitHubApp.ID, credentialKindGitHubApp
 	}
 	return "", ""
 }

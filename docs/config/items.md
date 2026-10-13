@@ -248,6 +248,32 @@ The engine never registers a webhook on the forge. Add the webhook by hand, as d
 [Commit status](../operations/commit-status.md) for the webhook. On a cell, declare the
 server entry in `CellPool.spec.giteaServers`.
 
+## Folder library credentials
+
+A folder library names its credential by ID. A non-cell controller checks each ID before it loads the items. The check passes when the library's folder sees a credential with that ID. The credential must also have an accepted kind. A folder sees two sets of credentials:
+
+- The `GLOBAL`-scope credentials in the `credentials.system` store of `jenkins.yaml`. Every domain counts.
+- The folder credentials of the library's folder and of each ancestor folder.
+
+A `SYSTEM`-scope credential is hidden from items. The check refuses it.
+
+| Retriever | Accepted kinds |
+|---|---|
+| `modernSCM.scm.github` | `usernamePassword`, `gitHubApp` |
+| `modernSCM.scm.git` | `usernamePassword`, `sshPrivateKey`, `gitHubApp` |
+| `legacySCM.scm.gitSCM` | `usernamePassword`, `sshPrivateKey`, `gitHubApp` |
+
+The check refuses the whole items content when a library names a missing ID. It also refuses a `SYSTEM`-scope ID. It refuses a kind that its source rejects. The condition depends on the phase:
+
+- While the controller provisions, `BundleResolved` is `False` with reason `BundleNotMaterialized`.
+- After the controller connects, `BundleFailed` is `True` with reason `BundleResolutionFailed`. The controller keeps its last good desired state.
+
+The check does not count credentials that you create in the Jenkins UI. Create each library credential in `jenkins.yaml` or in a folder.
+
+A system credential ID that holds a `${...}` variable is not counted. While such an ID exists, a library that names an unknown ID is not refused as missing. The check still refuses a `SYSTEM`-scope ID and a kind that its source rejects.
+
+A cell checks its tenant libraries differently. See [tenant libraries](../operations/tenant-libraries.md).
+
 ## Cell restrictions
 
 A [cell](../operations/cells.md) merges every tenant's `items.yaml` into one manifest and

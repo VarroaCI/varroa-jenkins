@@ -367,7 +367,11 @@ sections describe.
   make XStream drop the rendered `buildStrategies` element or fail the item
   create, so a silent omission would produce an initial-index build storm
   with no warning; then resolves all vars and runs `findUnresolvedVars` as the
-  completeness check — any leftover `${...}` fails resolution. For a cell
+  completeness check — any leftover `${...}` fails resolution. A non-cell
+  controller then runs `checkPlainFolderLibraryCredentials`
+  (`library_credentials_plain.go`), which reads the GLOBAL-scope system store of
+  the resolved `jenkins.yaml` and the folder credentials, and refuses a folder
+  library whose credential is missing, SYSTEM-scope, or of a rejected kind. For a cell
   both steps skip `items.yaml`: it is tenant content only, which
   `assembleCellContent` already resolved and checked per tenant, so a cell
   variable never reaches a tenant item and a tenant fault never fails the
@@ -1068,7 +1072,9 @@ sections describe.
     (every folder library's `RequiredPlugins` must be pinned); after the
     tenant's credentials project, `checkFolderLibraryCredentials`
     (`cell_library_credentials.go`) holds the tenant when a library names a
-    credential its folder cannot see or one of a kind its source rejects; the tenant's
+    credential its folder cannot see or one of a kind its source rejects (the same
+    `checkLibraryCredentials` walker that a plain controller uses in
+    `library_credentials_plain.go`); the tenant's
     template fragment must also load (`bundle.InjectPipelineTemplates`) against the base
     `applyCellContent` builds: the cell's `jenkins.yaml` with the cell
     bundle's own templates in it. A failed

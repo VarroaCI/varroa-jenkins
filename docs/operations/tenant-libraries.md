@@ -67,9 +67,9 @@ Each library names one retriever. Set exactly one of `modernSCM` and `legacySCM`
 
 | Retriever | Credential kinds | Notes |
 | --- | --- | --- |
-| `modernSCM.scm.github` | `usernamePassword` | Needs `repoOwner` and `repository`, or `repositoryUrl` with `configuredByUrl`. |
-| `modernSCM.scm.git` | `usernamePassword` or `sshPrivateKey` | Needs `remote`. The library loads every branch and tag. |
-| `legacySCM.scm.gitSCM` | `usernamePassword` or `sshPrivateKey` | Set `branches` to a fixed name. A `${...}` variable reference fails the check. |
+| `modernSCM.scm.github` | `usernamePassword` or `gitHubApp` | Needs `repoOwner` and `repository`, or `repositoryUrl` with `configuredByUrl`. |
+| `modernSCM.scm.git` | `usernamePassword`, `sshPrivateKey`, or `gitHubApp` | Needs `remote`. The library loads every branch and tag. |
+| `legacySCM.scm.gitSCM` | `usernamePassword`, `sshPrivateKey`, or `gitHubApp` | Set `branches` to a fixed name. A `${...}` variable reference fails the check. |
 
 A library needs `defaultVersion`, `allowVersionOverride: true`, or both. Without one of them, no `@Library` line can load it.
 

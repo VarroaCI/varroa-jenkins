@@ -709,6 +709,15 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		}
 	}
 
+	// A folder library on a plain controller sees GLOBAL-scope system
+	// credentials and the folder credentials of its folder chain. A cell
+	// checks each tenant's libraries in applyCellContent.
+	if !isCellController(cr) {
+		if err := checkPlainFolderLibraryCredentials(mat.ItemsYAML, mat.JenkinsYAML); err != nil {
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble items: %w", err)
+		}
+	}
+
 	// Add each placed tenant's projected folder credentials, after
 	// ResolveVars and the unresolved-variable check. A credential value is
 	// Secret data and must reach Jenkins exactly as the Secret holds it. A

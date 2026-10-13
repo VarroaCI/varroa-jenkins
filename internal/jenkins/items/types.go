@@ -866,6 +866,7 @@ func (c LibraryConfiguration) RequiredPlugins() []string {
 func (c LibraryConfiguration) CredentialRefs() []LibraryCredentialRef {
 	const userPass = "usernamePassword"
 	const sshKey = "sshPrivateKey"
+	const gitHubApp = "githubApp"
 	var refs []LibraryCredentialRef
 	add := func(id string, kinds ...string) {
 		if id != "" {
@@ -874,15 +875,15 @@ func (c LibraryConfiguration) CredentialRefs() []LibraryCredentialRef {
 	}
 	if m := c.Retriever.ModernSCM; m != nil {
 		if m.SCM.GitHub != nil {
-			add(m.SCM.GitHub.CredentialsID, userPass)
+			add(m.SCM.GitHub.CredentialsID, userPass, gitHubApp)
 		}
 		if m.SCM.Git != nil {
-			add(m.SCM.Git.CredentialsID, userPass, sshKey)
+			add(m.SCM.Git.CredentialsID, userPass, sshKey, gitHubApp)
 		}
 	}
 	if l := c.Retriever.LegacySCM; l != nil && l.SCM.GitSCM != nil {
 		for _, urc := range l.SCM.GitSCM.UserRemoteConfigs {
-			add(urc.UserRemoteConfig.CredentialsID, userPass, sshKey)
+			add(urc.UserRemoteConfig.CredentialsID, userPass, sshKey, gitHubApp)
 		}
 	}
 	return refs

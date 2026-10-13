@@ -1744,16 +1744,16 @@ func TestLibraryConfiguration_CredentialRefs(t *testing.T) {
 	if len(refs) != 1 || refs[0].ID != "legacy-a" {
 		t.Fatalf("CredentialRefs() = %+v, want one ref to legacy-a", refs)
 	}
-	if strings.Join(refs[0].Kinds, ",") != "usernamePassword,sshPrivateKey" {
-		t.Fatalf("legacy kinds = %v, want usernamePassword and sshPrivateKey", refs[0].Kinds)
+	if strings.Join(refs[0].Kinds, ",") != "usernamePassword,sshPrivateKey,githubApp" {
+		t.Fatalf("legacy kinds = %v, want usernamePassword, sshPrivateKey and githubApp", refs[0].Kinds)
 	}
 
 	gh := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
 		SCM: LibrarySCM{GitHub: &GitHubSCMSource{CredentialsID: "gh-cred"}},
 	}}}
 	ghRefs := gh.CredentialRefs()
-	if len(ghRefs) != 1 || strings.Join(ghRefs[0].Kinds, ",") != "usernamePassword" {
-		t.Fatalf("GitHub CredentialRefs() = %+v, want usernamePassword only", ghRefs)
+	if len(ghRefs) != 1 || strings.Join(ghRefs[0].Kinds, ",") != "usernamePassword,githubApp" {
+		t.Fatalf("GitHub CredentialRefs() = %+v, want usernamePassword and githubApp", ghRefs)
 	}
 
 	none := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
