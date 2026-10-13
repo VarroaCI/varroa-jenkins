@@ -169,6 +169,21 @@ func TestMCPDeleteCatalogSource_ScopedDeveloper(t *testing.T) {
 	requireAccessDenied(t, parseToolResult(t, otherNs.Result))
 }
 
+func TestMCPDeleteCatalogSource_ReservedNameRejected(t *testing.T) {
+	handler := NewHandler(scopedDeveloperDeps())
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "delete_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      v1alpha1.UpdateCenterCatalogSourceName,
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "reconciled by the operator") {
+		t.Fatalf("deleting the reserved source must be rejected, got: %v", tr.Content)
+	}
+}
+
 func TestMCPSyncCatalogSource_ScopedDeveloper(t *testing.T) {
 	deps := scopedDeveloperDeps()
 	deps.ConfigBrood = &syncRecordingConfigBrood{}
@@ -819,7 +834,7 @@ func TestMCPUpdateCatalogSource_ReservedNameRejected(t *testing.T) {
 		},
 	}, mcpScopedDevClaims)
 	tr := parseToolResult(t, resp.Result)
-	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "cannot be edited") {
+	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "reconciled by the operator") {
 		t.Fatalf("editing the reserved source must be rejected, got: %v", tr.Content)
 	}
 }

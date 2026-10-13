@@ -113,7 +113,9 @@ the repository URL, the OCI reference, or the label "Update center" for the
 reserved `varroa-update-center` source. The New Source form has a source type
 select. The OCI type has no revision field. For an OCI source, the Revision
 column shows the resolved digest. The operator manages the reserved source, so
-the page has no Edit action for it.
+the page has no Edit or Delete action for it. The API, the MCP tools, and
+`varroactl` refuse a create, an edit, or a delete of `varroa-update-center`
+with HTTP 409. A sync of the reserved source is permitted.
 
 ## Consume an item
 

@@ -371,7 +371,7 @@ describe("CatalogSources", () => {
       expect(within(row as HTMLElement).queryByText("main")).not.toBeInTheDocument();
     });
 
-    it("renders an Update center marker for the reserved source and hides Edit", () => {
+    it("renders an Update center marker for the reserved source and hides Edit and Delete", () => {
       mockUseCatalogSources.mockReturnValue({
         data: {
           items: [
@@ -388,7 +388,7 @@ describe("CatalogSources", () => {
       expect(screen.getByText("Update center")).toBeInTheDocument();
       expect(screen.queryByText("Edit")).not.toBeInTheDocument();
       expect(screen.getByText("Sync")).toBeInTheDocument();
-      expect(screen.getByText("Delete")).toBeInTheDocument();
+      expect(screen.queryByText("Delete")).not.toBeInTheDocument();
     });
 
     it("edit of an OCI source opens on the OCI kind and switching to git clears ociRef", async () => {

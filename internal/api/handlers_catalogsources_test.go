@@ -180,6 +180,105 @@ func TestDispatchCatalogSources_ScopedDeveloper_SyncOtherNamespace(t *testing.T)
 // TestDispatchCatalogSources_ScopedDeveloper_GetOtherNamespaceForbidden pins
 // down that a single-item GET outside the caller's readable namespaces answers
 // 403 before the store is read.
+func reservedSourceBody(t *testing.T) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]interface{}{"metadata": map[string]string{"name": v1alpha1.UpdateCenterCatalogSourceName}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func TestDispatchCatalogSources_ReservedName_CreateRefused(t *testing.T) {
+	srv, brood := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/catalogsources?namespace=team-a", strings.NewReader(reservedSourceBody(t)))
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", nil)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("create reserved (query ns): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if brood.createCatalogSourceCalled {
+		t.Error("ConfigBrood.CreateCatalogSource must not be called for the reserved name")
+	}
+}
+
+func TestDispatchCatalogSources_ReservedName_CreatePathNamespaceRefused(t *testing.T) {
+	srv, brood := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/catalogsources/team-a", strings.NewReader(reservedSourceBody(t)))
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-a"})
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("create reserved (path ns): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if brood.createCatalogSourceCalled {
+		t.Error("ConfigBrood.CreateCatalogSource must not be called for the reserved name")
+	}
+}
+
+func TestDispatchCatalogSources_ReservedName_PutRefused(t *testing.T) {
+	srv, brood := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/clusters/core/catalogsources/team-a/"+v1alpha1.UpdateCenterCatalogSourceName, strings.NewReader(reservedSourceBody(t)))
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-a", v1alpha1.UpdateCenterCatalogSourceName})
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("put reserved: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "reconciled by the operator") {
+		t.Errorf("put reserved: body should name the operator owner, got %s", w.Body.String())
+	}
+	if brood.updateCatalogSourceCalled {
+		t.Error("ConfigBrood.UpdateCatalogSource must not be called for the reserved name")
+	}
+}
+
+func TestDispatchCatalogSources_ReservedName_DeleteRefused(t *testing.T) {
+	srv, brood := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/clusters/core/catalogsources/team-a/"+v1alpha1.UpdateCenterCatalogSourceName, nil)
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-a", v1alpha1.UpdateCenterCatalogSourceName})
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("delete reserved: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if brood.deleteCatalogSourceCalled {
+		t.Error("ConfigBrood.DeleteCatalogSource must not be called for the reserved name")
+	}
+}
+
+func TestDispatchCatalogSources_ReservedName_SyncAllowed(t *testing.T) {
+	srv, _ := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/clusters/core/catalogsources/team-a/"+v1alpha1.UpdateCenterCatalogSourceName+"/sync", nil)
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-a", v1alpha1.UpdateCenterCatalogSourceName, "sync"})
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("sync reserved: expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDispatchCatalogSources_ReservedName_UnauthorizedStill403(t *testing.T) {
+	srv, brood := newCatalogSourcesTestServer()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/clusters/core/catalogsources/team-b/"+v1alpha1.UpdateCenterCatalogSourceName, strings.NewReader(reservedSourceBody(t)))
+	srv.dispatchCatalogSources(w, req.WithContext(contextWithClaims(req.Context(), scopedDevClaims)), "core", []string{"team-b", v1alpha1.UpdateCenterCatalogSourceName})
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("put reserved in other ns: expected 403 (authz before guard), got %d: %s", w.Code, w.Body.String())
+	}
+	if brood.updateCatalogSourceCalled {
+		t.Error("ConfigBrood.UpdateCatalogSource must not be called when authz denies")
+	}
+}
+
 func TestDispatchCatalogSources_ScopedDeveloper_GetOtherNamespaceForbidden(t *testing.T) {
 	srv, _ := newCatalogSourcesTestServer()
 

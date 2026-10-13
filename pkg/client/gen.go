@@ -18224,6 +18224,7 @@ type CreateCatalogSourceResponse struct {
 	JSON201      *ComponentsSchemasCatalogSource
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -18247,6 +18248,7 @@ type DeleteCatalogSourceResponse struct {
 	HTTPResponse *http.Response
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -18297,6 +18299,7 @@ type UpdateCatalogSourceResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -25017,6 +25020,13 @@ func ParseCreateCatalogSourceResponse(rsp *http.Response) (*CreateCatalogSourceR
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -25049,6 +25059,13 @@ func ParseDeleteCatalogSourceResponse(rsp *http.Response) (*DeleteCatalogSourceR
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -25143,6 +25160,13 @@ func ParseUpdateCatalogSourceResponse(rsp *http.Response) (*UpdateCatalogSourceR
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 

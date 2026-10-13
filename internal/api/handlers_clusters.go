@@ -895,34 +895,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 				s.writeJSONError(w, http.StatusBadRequest, "namespace query parameter required")
 				return
 			}
-			if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
-				s.writeJSONError(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			var src v1alpha1.CatalogSource
-			if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
-				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
-				return
-			}
-			src.Namespace = ns
-			src.APIVersion = "varroa.dev/v1alpha1"
-			src.Kind = "CatalogSource"
-			obj, _ := json.Marshal(src)
-			item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
-			if err != nil {
-				writeConfigBroodError(w, err, cluster)
-				return
-			}
-			var created v1alpha1.CatalogSource
-			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:      "catalogsource.created",
-				Actor:     ActorFrom(claims),
-				Namespace: ns,
-				Cluster:   cluster,
-				Message:   "CatalogSource " + src.Name + " created in " + ns,
-			})
-			s.writeJSON(w, http.StatusCreated, created)
+			s.createCatalogSource(w, r, claims, cluster, ns)
 		default:
 			s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -933,34 +906,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 	if len(segments) == 1 && segments[0] != "" {
 		ns := segments[0]
 		if r.Method == http.MethodPost {
-			if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
-				s.writeJSONError(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			var src v1alpha1.CatalogSource
-			if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
-				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
-				return
-			}
-			src.Namespace = ns
-			src.APIVersion = "varroa.dev/v1alpha1"
-			src.Kind = "CatalogSource"
-			obj, _ := json.Marshal(src)
-			item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
-			if err != nil {
-				writeConfigBroodError(w, err, cluster)
-				return
-			}
-			var created v1alpha1.CatalogSource
-			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:      "catalogsource.created",
-				Actor:     ActorFrom(claims),
-				Namespace: ns,
-				Cluster:   cluster,
-				Message:   "CatalogSource " + src.Name + " created in " + ns,
-			})
-			s.writeJSON(w, http.StatusCreated, created)
+			s.createCatalogSource(w, r, claims, cluster, ns)
 			return
 		}
 		if r.Method == http.MethodGet {
@@ -1025,6 +971,10 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			s.writeJSONError(w, http.StatusConflict, err.Error())
+			return
+		}
 		var src v1alpha1.CatalogSource
 		if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
 			s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
@@ -1055,6 +1005,10 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			s.writeJSONError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if err := s.deps.ConfigBrood.DeleteCatalogSource(r.Context(), cluster, ns, name); err != nil {
 			writeConfigBroodError(w, err, cluster)
 			return
@@ -1070,6 +1024,43 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 	default:
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// createCatalogSource creates a CatalogSource in ns from the request body. The
+// reserved-name guard runs after the authorization check and before the brood call.
+func (s *Server) createCatalogSource(w http.ResponseWriter, r *http.Request, claims *auth.Claims, cluster, ns string) {
+	if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var src v1alpha1.CatalogSource
+	if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := v1alpha1.CheckCatalogSourceWritable(src.Name); err != nil {
+		s.writeJSONError(w, http.StatusConflict, err.Error())
+		return
+	}
+	src.Namespace = ns
+	src.APIVersion = "varroa.dev/v1alpha1"
+	src.Kind = "CatalogSource"
+	obj, _ := json.Marshal(src)
+	item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
+	if err != nil {
+		writeConfigBroodError(w, err, cluster)
+		return
+	}
+	var created v1alpha1.CatalogSource
+	_ = json.Unmarshal(item, &created)
+	s.notifyActivity(activity.Event{
+		Type:      "catalogsource.created",
+		Actor:     ActorFrom(claims),
+		Namespace: ns,
+		Cluster:   cluster,
+		Message:   "CatalogSource " + src.Name + " created in " + ns,
+	})
+	s.writeJSON(w, http.StatusCreated, created)
 }
 
 // dispatchJenkinsRoles handles /clusters/{cluster}/jenkinsroles[...]

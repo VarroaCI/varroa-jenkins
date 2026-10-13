@@ -16277,6 +16277,9 @@
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a catalog source.",
@@ -16308,6 +16311,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Deletes a catalog source.",
@@ -16397,6 +16403,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Updates a catalog source.",

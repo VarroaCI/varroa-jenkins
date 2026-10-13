@@ -141,12 +141,8 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			}
 			spec.SyncIntervalSeconds = v
 		}
-		if strArg(args, "name") == v1alpha1.UpdateCenterCatalogSourceName {
-			// The reserved source is operator-created and namespace-bound;
-			// a create through the tool would persist an object the
-			// operator marks Error, and the operator re-asserts its spec, so
-			// neither create nor update goes through the tool.
-			return mcp.NewToolResultError("invalid catalog source: the reserved update-center source is created and reconciled by the operator"), nil
+		if err := v1alpha1.CheckCatalogSourceWritable(strArg(args, "name")); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
 		if err := validateCatalogSourceSpec(strArg(args, "name"), &spec); err != nil {
 			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
@@ -192,10 +188,8 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "update", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:update permission"), nil
 		}
-		if name == v1alpha1.UpdateCenterCatalogSourceName {
-			// The operator re-asserts this source's spec every tick, so an
-			// edit through the tool would only appear to take effect.
-			return mcp.NewToolResultError("invalid catalog source: the reserved update-center source is reconciled by the operator and cannot be edited"), nil
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
 		existing, err := crdstore.Get[v1alpha1.CatalogSource](ctx, deps.Store, name, ns)
 		if err != nil {
@@ -276,6 +270,9 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
 		if !deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "delete", ns) {
 			return mcp.NewToolResultError("access denied: missing catalogsources:delete permission"), nil
+		}
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			return mcp.NewToolResultError("invalid catalog source: " + err.Error()), nil
 		}
 		if err := crdstore.Delete[v1alpha1.CatalogSource](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete catalog source: %v", err)), nil

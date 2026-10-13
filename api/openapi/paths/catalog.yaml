@@ -52,6 +52,8 @@
         $ref: '../components/responses.yaml#/BadRequest'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}:
   get:
@@ -103,6 +105,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteCatalogSource
     tags: [catalog]
@@ -118,6 +122,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}/sync:
   post:

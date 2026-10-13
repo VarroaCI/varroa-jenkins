@@ -30,6 +30,9 @@ federation, activity persistence, and SSE fanout.
 
 ## Local Contracts
 
+- CatalogSource writes: `v1alpha1.CheckCatalogSourceWritable` is the single
+  reserved-name guard for create, update, and delete in the BFF and MCP. It returns
+  409 in the BFF. Sync is exempt.
 - Entry point: `NewRouter` (`router.go`) builds one `http.ServeMux`, strips the
   `/api/v1` prefix, and registers each resource's routes against `*Server` methods
   (`NewServer(deps)`, `handlers.go:48`). There is **no** oapi-codegen-generated server

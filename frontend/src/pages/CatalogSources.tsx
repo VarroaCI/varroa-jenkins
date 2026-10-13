@@ -411,7 +411,8 @@ export default function CatalogSources() {
                     Edit
                   </Button>
                 )}
-                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "delete") && (
+                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "delete") &&
+                  source.metadata.name !== UPDATE_CENTER_SOURCE && (
                   <Button size="sm" variant="ghost" onClick={() => openDelete(source)}>
                     Delete
                   </Button>
