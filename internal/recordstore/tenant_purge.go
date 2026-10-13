@@ -220,6 +220,10 @@ func purgeTornDownTenant(ctx context.Context, logger *slog.Logger, pool *pgxpool
 		req.Cluster, req.Tenant); err != nil {
 		return fmt.Errorf("delete the tenant's run waits: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM varroa.upstream_origins WHERE cluster = $1 AND tenant = $2`,
+		req.Cluster, req.Tenant); err != nil {
+		return fmt.Errorf("delete the tenant's upstream origins: %w", err)
+	}
 	if err := resetTenantPlacementGeneration(ctx, tx, req); err != nil {
 		return err
 	}

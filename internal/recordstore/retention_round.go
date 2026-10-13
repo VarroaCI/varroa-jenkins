@@ -188,6 +188,10 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 		return fmt.Errorf("sweep run waits: %w", err)
 	}
 
+	if _, err := sweepUpstreamOrigins(ctx, db); err != nil {
+		return fmt.Errorf("sweep upstream origins: %w", err)
+	}
+
 	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.FinalizeWait, now); err != nil {
 		return fmt.Errorf("finalize stale logs: %w", err)
 	}

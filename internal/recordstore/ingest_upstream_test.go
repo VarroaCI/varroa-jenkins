@@ -82,6 +82,7 @@ func TestApplyRunStartedStampsUpstreamFromIntentKey(t *testing.T) {
 	upNumber := int64(7)
 	mustApply(t, g, newTestEnvelope(t, upstreamID, "manual:up-stamp-1", KindRunStarted, RunStartedPayload{BuildNumber: &upNumber}))
 
+	seedUpstreamOrigin(t, pool, "upstream:"+upstreamID.String()+":1")
 	childID := seedGrantedIntent(t, pool, "upstream:"+upstreamID.String()+":1")
 	childNumber := int64(1)
 	mustApply(t, g, newTestEnvelope(t, childID, "upstream:"+upstreamID.String()+":1", KindRunStarted, RunStartedPayload{BuildNumber: &childNumber}))
@@ -219,6 +220,7 @@ func TestRedeliveredStartKeepsUpstream(t *testing.T) {
 	mustApply(t, g, newTestEnvelope(t, upstreamID, "manual:redeliver-up", KindRunStarted, RunStartedPayload{BuildNumber: &upNumber}))
 
 	key := "upstream:" + upstreamID.String() + ":1"
+	seedUpstreamOrigin(t, pool, key)
 	childID := seedGrantedIntent(t, pool, key)
 	childNumber := int64(1)
 	mustApply(t, g, newTestEnvelope(t, childID, key, KindRunStarted, RunStartedPayload{BuildNumber: &childNumber}))
@@ -243,6 +245,7 @@ func TestApplyRunStartedRetryInheritsUpstream(t *testing.T) {
 	mustApply(t, g, newTestEnvelope(t, upstreamID, "manual:retry-up", KindRunStarted, RunStartedPayload{BuildNumber: &upNumber}))
 
 	sourceKey := "upstream:" + upstreamID.String() + ":1"
+	seedUpstreamOrigin(t, pool, sourceKey)
 	sourceID := seedGrantedIntent(t, pool, sourceKey)
 	sourceNumber := int64(1)
 	mustApply(t, g, newTestEnvelope(t, sourceID, sourceKey, KindRunStarted, RunStartedPayload{BuildNumber: &sourceNumber}))

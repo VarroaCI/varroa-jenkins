@@ -57,13 +57,14 @@ func retryRunFromIntentKey(key string) (uuid.UUID, time.Time, bool) {
 // deriveUpstream answers the upstream columns of a run.started write. The
 // rules run in this order:
 //
-//  1. An upstream intent key names the upstream run. The ledger wrote the
-//     key, so the run id is trusted. The recorder reads that run's tenant,
-//     job, and number. When the run row is absent, the link keeps the run
-//     id alone.
+//  1. An upstream intent key names the upstream run. The recorder stamps
+//     that key only when it wrote an origin row for the key, with this
+//     run's cluster, tenant, and job. A key with no such row falls through to the
+//     later rules. The recorder reads that run's tenant, job, and number.
+//     When the run row is absent, the link keeps the run id alone.
 //  2. A retry intent key copies the four upstream columns of its source
-//     run, because a retry repeats the cause of the source. A source row
-//     with no upstream columns copies nothing.
+//     run of the same tenant, because a retry repeats the cause of the
+//     source. A source row with no upstream columns copies nothing.
 //  3. Otherwise the native cause sent by the cell names the upstream job
 //     path and build number. The recorder looks for the run in the
 //     intent's own cluster and tenant only. A native cause never links
@@ -73,7 +74,15 @@ func retryRunFromIntentKey(key string) (uuid.UUID, time.Time, bool) {
 // Every lookup reads a row by its primary key, or by the (cluster,
 // tenant, job_path, build_number) prefix of runs_job_idx.
 func deriveUpstream(ctx context.Context, tx pgx.Tx, intent *intentRow, p RunStartedPayload) (upstreamLink, error) {
-	if id, created, ok := upstreamRunFromIntentKey(intent.intentKey); ok {
+	id, created, isUpstreamKey := upstreamRunFromIntentKey(intent.intentKey)
+	if isUpstreamKey {
+		matched, err := upstreamOriginMatches(ctx, tx, intent.intentKey, intent.cluster, intent.tenant, intent.jobPath)
+		if err != nil {
+			return upstreamLink{}, err
+		}
+		isUpstreamKey = matched
+	}
+	if isUpstreamKey {
 		runID := id.String()
 		link := upstreamLink{runID: &runID}
 		var tenant, job string
@@ -105,8 +114,8 @@ func deriveUpstream(ctx context.Context, tx pgx.Tx, intent *intentRow, p RunStar
 		var link upstreamLink
 		err := tx.QueryRow(ctx, `
 			SELECT upstream_run_id::text, upstream_tenant, upstream_job, upstream_number
-			FROM varroa.runs WHERE created_at = $1 AND run_id = $2
-		`, created, source).Scan(&link.runID, &link.tenant, &link.job, &link.number)
+			FROM varroa.runs WHERE created_at = $1 AND run_id = $2 AND cluster = $3 AND tenant = $4
+		`, created, source, intent.cluster, intent.tenant).Scan(&link.runID, &link.tenant, &link.job, &link.number)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:

@@ -18,6 +18,7 @@ func TestApplyRunStartedFillsDownstreamStoredBeforeProducer(t *testing.T) {
 
 	producer := uuid.Must(uuid.NewV7())
 	childKey := "upstream:" + producer.String() + ":1"
+	seedUpstreamOrigin(t, pool, childKey)
 	childID := seedGrantedIntent(t, pool, childKey)
 	childNumber := int64(1)
 	mustApply(t, g, newTestEnvelope(t, childID, childKey, KindRunStarted, RunStartedPayload{BuildNumber: &childNumber}))

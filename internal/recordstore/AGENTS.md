@@ -147,11 +147,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   last-run lookups.
   Derivation (`ingest_upstream.go`, `deriveUpstream`): an `upstream:<runId>:<seq>` intent key
   names the upstream run, and the recorder reads its tenant, job, and number by primary key.
-  A `retry:<runId>` key copies the source run's four columns. Otherwise the cell's native
+  A `retry:<runId>` key copies the source run's four columns when the source runs in the same
+  tenant. Otherwise the cell's native
   cause (`upstream_job_path`, `upstream_build_number`) links only to a run of the same cluster
   and tenant. A child stored before its producer keeps a NULL tenant until the producer's
-  `run.started` fills it (`fillDownstreamUpstream`, NULL columns only). The trust boundary: the recorder trusts an upstream key's run id as the ledger
-  wrote it, and it does not yet verify that the ledger originated it (#1260).
+  `run.started` fills it (`fillDownstreamUpstream`, NULL columns only).
+  An upstream key stamps a link only when `varroa.upstream_origins` holds a row for that key with
+  the child's cluster, tenant, and job path. The recorder writes that row before it publishes a `trigger_run`
+  action that carries the key: the cross-tenant build for a verified caller run, or the `varroaUpstream`
+  fan-out. An intra-tenant forward writes no row. A key with no matching row stamps nothing.
   `00005_tenant_placements.sql` adds
   `tenant_placements`, the placement-fencing authority: one row per
   `(cluster, tenant)`, holding the placement identity, the rehydration
@@ -225,6 +229,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `00031_runs_restart_of.sql` adds the nullable `runs.restart_of` uuid and `runs.restart_stage`
   text. Only `run.started` writes them, through `COALESCE`. The intent-key scheme `restart`
   (`restart:<source>:<new>`) keys a restarted build, and the scheme list now holds eight schemes.
+  `00033_upstream_origins.sql` adds `varroa.upstream_origins`, the origin rows that the upstream
+  stamp reads (see the upstream columns bullet). `sweepUpstreamOrigins` deletes rows older than the
+  oldest runs partition in the retention round. The tenant purge deletes a purged tenant's rows.
   `00019_fleet_locks_owner_tenant.sql` adds `fleet_locks.owner_tenant`,
   the tenant that owns the lock, backfills it from each name's first
   segment, and indexes `(cluster, owner_tenant)`.
@@ -253,7 +260,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   the recorder needs no separate deploy artifact. Monthly partition
   names on `runs`, `log_chunks`, and `activity` follow
   `<table>_p<YYYYMM>`; the retention round that adds later partitions
-  must use the same pattern. The schema holds exactly sixteen tables, no
+  must use the same pattern. The schema holds exactly seventeen tables, no
   more and no fewer.
 - **Migration runner** (`migrate.go`) — `RunMigrations` creates schema
   `varroa`, applies pending migrations under a Postgres advisory lock on a

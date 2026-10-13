@@ -172,6 +172,13 @@ func TestRunUpstreamFanout_PublishesGrantedSubscriber(t *testing.T) {
 		if action.IntentKey != wantKey {
 			t.Fatalf("intent_key = %q, want %q", action.IntentKey, wantKey)
 		}
+		var tenant, job string
+		if err := fx.db.QueryRow(`SELECT tenant, job_path FROM varroa.upstream_origins WHERE intent_key = $1`, wantKey).Scan(&tenant, &job); err != nil {
+			t.Fatalf("read fan-out origin row: %v", err)
+		}
+		if tenant != "beta" || job != "beta/rebuild" {
+			t.Fatalf("fan-out origin = %q/%q, want beta/beta/rebuild", tenant, job)
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for trigger_run action")
 	}

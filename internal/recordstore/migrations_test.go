@@ -43,6 +43,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00031_runs_restart_of.sql":                        false,
 		"00030_run_waits.sql":                              false,
 		"00032_job_branch_projects.sql":                    false,
+		"00033_upstream_origins.sql":                       false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

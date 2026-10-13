@@ -195,6 +195,8 @@ shows the link in the **Run links** card. A build that the run started appears u
 **Downstream**, newest first. The first 20 downstream runs come with the run. Read the rest
 with `GET /runs/{run}/downstream`, which takes `limit` and `cursor`.
 
+The recorder links a run only to an upstream run that the recorder itself triggered, or to a run of the same tenant. A build that names another upstream run gets no **Triggered by** link.
+
 A link to a run that the reader may not read keeps the tenant name alone. It has no job path,
 run id, or status. `get_run` carries the same `upstream` and `downstream` fields.
 

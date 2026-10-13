@@ -18,12 +18,12 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's sixteen tables, column for
+// expectedColumns mirrors the record store's seventeen tables, column for
 // column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
 // migration 00017's "run_test_cases", migration 00030's "run_waits", and
-// migration 00032's "job_branch_projects".
+// migration 00032's "job_branch_projects", and migration 00033's "upstream_origins".
 // Migration 00007 adds three columns to "job_schedules" and creates no
 // table. Migration 00011 adds two columns to "tenant_placements" and
 // creates no table. Migration 00012 adds one column to "runs" and creates
@@ -255,6 +255,13 @@ var expectedColumns = map[string][]columnSpec{
 		{"first_seen_at", "timestamp with time zone", false},
 		{"last_seen_at", "timestamp with time zone", false},
 	},
+	"upstream_origins": {
+		{"intent_key", "text", false},
+		{"cluster", "text", false},
+		{"tenant", "text", false},
+		{"job_path", "text", false},
+		{"created_at", "timestamp with time zone", false},
+	},
 	"webhook_deliveries": {
 		{"delivery_id", "uuid", false},
 		{"run_id", "uuid", false},
@@ -289,7 +296,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's sixteen tables, column for column.
+// schema against the record store's seventeen tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
 
@@ -459,7 +466,7 @@ func TestNonPartitionedTables(t *testing.T) {
 	for _, table := range []string{
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
-		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits",
+		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,

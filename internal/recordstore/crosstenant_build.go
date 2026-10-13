@@ -23,8 +23,9 @@ var crossTenantBuildSeqPattern = regexp.MustCompile(`^s[1-9][0-9]*$`)
 // request-path grant, then reserves the run identifier against the
 // ledger. It calls no identifier-deriving function; C4 withdrew it. It
 // writes no run_intents row of its own: the target cell's claim gate
-// creates the one row, so this responder only reads run_intents and
-// publishes a trigger_run action.
+// creates the one row, so this responder only reads run_intents, writes
+// an upstream_origins row for a verified caller run, and publishes a
+// trigger_run action.
 //
 // The kind also serves an intra-tenant forward, whose caller tenant
 // equals its target tenant. Such a request carries its own intent key,
@@ -130,6 +131,21 @@ func handleCrossTenantBuild(ctx context.Context, deps CrossTenantDeps, req Cross
 		// The target job's home slot holds no cell yet. The caller
 		// retries and the recorder drops nothing.
 		return CrossTenantResponse{State: CrossTenantStatePending}, nil
+	}
+
+	if !forward {
+		// The origin row names only a producer run that the ledger granted
+		// to the caller's own tenant and job. An unverified caller run still
+		// publishes the build, and only the upstream link is dropped.
+		ok, err := callerRunMatches(ctx, deps.Pool, req.CallerRunID, req.Cluster, req.CallerTenant, req.CallerJobPath)
+		if err != nil {
+			return CrossTenantResponse{}, err
+		}
+		if ok {
+			if err := recordUpstreamOrigin(ctx, deps.Pool, intentKey, target.cluster, req.TargetTenant, qualifiedJobPath); err != nil {
+				return CrossTenantResponse{}, err
+			}
+		}
 	}
 
 	action := LedgerAction{

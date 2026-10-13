@@ -428,6 +428,12 @@ func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c 
 	}
 
 	seq := upstreamFanoutSeq(c.cluster, c.tenant, c.jobPath)
+	key := fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, producer.RunID, seq)
+	if err := recordUpstreamOrigin(ctx, deps.Pool, key, c.cluster, c.tenant, c.jobPath); err != nil {
+		// The trigger still publishes. Its run then starts without an
+		// upstream link, which only loses the Triggered by link.
+		logger.Warn("record fan-out upstream origin failed", "subscriber_tenant", c.tenant, "subscriber_job", c.jobPath, "error", err)
+	}
 	action := LedgerAction{
 		Kind:       LedgerActionTriggerRun,
 		Cluster:    c.cluster,
@@ -435,7 +441,7 @@ func fanOutOne(ctx context.Context, deps FanoutDeps, producer FanoutProducer, c 
 		Controller: cell,
 		Actor:      upstreamFanoutActorPrefix + producer.Tenant,
 		RunID:      runID.String(),
-		IntentKey:  fmt.Sprintf("%s:%s:%s", IntentSchemeUpstream, producer.RunID, seq),
+		IntentKey:  key,
 		JobPath:    c.jobPath,
 	}
 	if err := PublishLedgerAction(deps.Conn, action); err != nil {
