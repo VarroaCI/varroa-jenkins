@@ -293,8 +293,14 @@ func TestApplyRunSourceZeroSeqApplies(t *testing.T) {
 	}
 
 	second := newTestEnvelope(t, runID, "manual:source-zero", KindRunSource, RunSourcePayload{
-		Seq:       0,
-		Libraries: []SourceLibrary{{Name: "shared", Version: "1.0", Revision: "abc"}},
+		Seq: 0,
+		Libraries: []SourceLibrary{{
+			Name:            "shared",
+			Version:         "1.0",
+			Revision:        "abc",
+			RepositoryURL:   "https://github.com/example/shared",
+			RepositoryForge: "github",
+		}},
 	})
 	res, err := g.Apply(context.Background(), second)
 	if err != nil {
@@ -314,6 +320,9 @@ func TestApplyRunSourceZeroSeqApplies(t *testing.T) {
 	storedSourceField(t, source, "libraries", &libraries)
 	if len(libraries) != 1 || libraries[0].Name != "shared" {
 		t.Fatalf("libraries = %+v, want one shared entry", libraries)
+	}
+	if libraries[0].RepositoryURL != "https://github.com/example/shared" || libraries[0].RepositoryForge != "github" {
+		t.Fatalf("library repository = %q/%q, want the github URL and forge", libraries[0].RepositoryURL, libraries[0].RepositoryForge)
 	}
 	if sourceSeq != "0" {
 		t.Fatalf("source_seq = %q, want 0", sourceSeq)

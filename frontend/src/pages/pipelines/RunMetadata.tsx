@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRun } from "../../api/client";
 import type { ChangeRequest, RunDetail } from "../../types";
 import { formatDuration } from "./JobTree";
+import { libraryHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import {
   MASKED_PARAM,
@@ -71,12 +72,25 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
           <div className={styles.row}>
             <span className={styles.rowLabel}>Ran with</span>
             {run.source.definitionPath && <span className={styles.mono}>{run.source.definitionPath}</span>}
-            {(run.source.libraries ?? []).map((lib, i) => (
-              <span key={`lib-${i}-${lib.name}`}>
-                {lib.version ? `${lib.name}@${lib.version}` : lib.name}
-                {lib.revision ? ` ${lib.revision.slice(0, 8)}` : ""}
-              </span>
-            ))}
+            {(run.source.libraries ?? []).map((lib, i) => {
+              const text =
+                (lib.version ? `${lib.name}@${lib.version}` : lib.name) +
+                (lib.revision ? ` ${lib.revision.slice(0, 8)}` : "");
+              const href = libraryHref(lib.repositoryUrl, lib.repositoryForge, lib.revision, lib.version);
+              return href ? (
+                <a
+                  key={`lib-${i}-${lib.name}`}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={lib.repositoryUrl}
+                >
+                  {text}
+                </a>
+              ) : (
+                <span key={`lib-${i}-${lib.name}`}>{text}</span>
+              );
+            })}
             {(run.source.podTemplates ?? []).map((pod, i) => (
               <span key={`pod-${i}-${pod.name}`}>{pod.image ? `${pod.name} (${pod.image})` : pod.name}</span>
             ))}

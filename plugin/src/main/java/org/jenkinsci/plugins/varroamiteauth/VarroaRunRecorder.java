@@ -1688,10 +1688,11 @@ public final class VarroaRunRecorder {
      * list.
      */
     private static List<BuildLibrary> resolveLibraries(Run<?, ?> run) {
-        // LibraryRecord declares getName() and getVersion(), and no
-        // getRevision(), on the pinned pipeline-groovy-lib. The revision
-        // read therefore answers empty. The proto field stays for a
-        // plugin that adds the method.
+        // LibraryRecord declares no getRevision() on the pinned
+        // pipeline-groovy-lib. The revision comes from the git checkout
+        // of the library repository instead, and answers empty when no
+        // checkout of that repository carries a commit. The revision
+        // read stays for a plugin that adds the method.
         Object librariesAction = null;
         for (Action action : run.getAllActions()) {
             if (hasSimpleNameInHierarchy(action.getClass(), "LibrariesAction")) {
@@ -1707,11 +1708,22 @@ public final class VarroaRunRecorder {
             return List.of();
         }
         List<BuildLibrary> libraries = new ArrayList<>();
+        List<Object> checkouts = VarroaLibrarySources.buildDataActions(run);
         for (Object record : (Iterable<?>) records) {
+            String name = stringOf(invokeNoArg(record, "getName"));
+            Object trustedFlag = invokeNoArg(record, "isTrusted");
+            Boolean trusted = trustedFlag instanceof Boolean ? (Boolean) trustedFlag : null;
+            VarroaLibrarySources.Source source = VarroaLibrarySources.sourceFor(run, name, trusted);
+            String rawRemote = source == null ? "" : source.rawRemote;
+            String revision = firstNonEmpty(
+                    stringOf(invokeNoArg(record, "getRevision")),
+                    VarroaLibrarySources.revisionFor(rawRemote, checkouts));
             libraries.add(BuildLibrary.builder()
-                    .name(truncate(stringOf(invokeNoArg(record, "getName")), MAX_FIELD_512))
+                    .name(truncate(name, MAX_FIELD_512))
                     .version(truncate(stringOf(invokeNoArg(record, "getVersion")), MAX_FIELD_512))
-                    .revision(truncate(stringOf(invokeNoArg(record, "getRevision")), MAX_FIELD_512))
+                    .revision(truncate(revision, MAX_FIELD_512))
+                    .repositoryUrl(source == null ? "" : source.repositoryUrl)
+                    .repositoryForge(source == null ? "" : source.forge)
                     .build());
         }
         return libraries;
@@ -2694,13 +2706,20 @@ public final class VarroaRunRecorder {
     private static List<BuildLibrary> capLibraries(List<BuildLibrary> libraries) {
         List<BuildLibrary> capped = new ArrayList<>(libraries.size());
         for (BuildLibrary library : libraries) {
-            capped.add(longerThanCap(library.getName(), library.getVersion(), library.getRevision())
-                    ? BuildLibrary.builder()
-                            .name(truncate(library.getName(), MAX_FIELD_512))
-                            .version(truncate(library.getVersion(), MAX_FIELD_512))
-                            .revision(truncate(library.getRevision(), MAX_FIELD_512))
-                            .build()
-                    : library);
+            // A repository URL over the cap is dropped, never truncated:
+            // a cut URL names no repository.
+            if (!longerThanCap(library.getName(), library.getVersion(), library.getRevision(),
+                    library.getRepositoryUrl(), library.getRepositoryForge())) {
+                capped.add(library);
+                continue;
+            }
+            capped.add(BuildLibrary.builder()
+                    .name(truncate(library.getName(), MAX_FIELD_512))
+                    .version(truncate(library.getVersion(), MAX_FIELD_512))
+                    .revision(truncate(library.getRevision(), MAX_FIELD_512))
+                    .repositoryUrl(longerThanCap(library.getRepositoryUrl()) ? "" : library.getRepositoryUrl())
+                    .repositoryForge(truncate(library.getRepositoryForge(), MAX_FIELD_512))
+                    .build());
         }
         return capped;
     }

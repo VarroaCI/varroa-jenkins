@@ -100,19 +100,18 @@ administrator writes those globs.
 
 ## Open a build
 
-Breadcrumbs name the team, each folder, and the job. Select a folder crumb to open the team page
-with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
+Breadcrumbs name the team, folders, and job. A folder crumb opens the team page with that folder unfolded. On build and test pages, the job crumb links to the pipeline page.
 
-A pull-request run shows a PR chip beside its branch, and its build page names the request in a
-**Pull request** row.
+A pull-request run shows a PR chip beside its branch and a **Pull request** row.
 
-A queued build held by a cap shows a Waiting notice that updates live.
+A queued build held by a cap shows a live Waiting notice.
 
 The **Defined by** card states where the job's script comes from. A job that reads a Jenkinsfile
-from source control shows the repository and the last built commit. A job whose bundle item
-carries the script inline shows a **Script** row that says so. The card also names the catalog template, if any, and the controller's version profile.
+from source control shows the repository and the last built commit. A job with an inline script shows a **Script** row. The card names any catalog template and the version profile.
 
-The page lists the job's builds, with filters for branch, result, actor, and cause. Each filter
+A shared library in the **Ran with** row links to its repository: the commit, or on GitHub and GitLab the version. An unknown host shows text.
+
+The page lists the job's builds, filterable by branch, result, actor, and cause. Each filter
 stays in the page URL, so a filtered view is shareable and survives a reload.
 
 The commit opens on GitHub or GitLab. Other hosts get a copy button.

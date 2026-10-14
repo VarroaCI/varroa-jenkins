@@ -39,6 +39,27 @@ public class EventCapsTest {
     // --- Hard caps (5.11) ---
 
     @Test
+    public void anOverCapLibraryUrlIsDroppedNotTruncated() {
+        String overCap = "https://github.com/" + "a".repeat(600);
+        BuildLibrary library = BuildLibrary.builder()
+                .name("shared-lib")
+                .version("1.2.0")
+                .repositoryUrl(overCap)
+                .repositoryForge("github")
+                .build();
+        BuildEvent event = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_RUN_SOURCE)
+                .libraries(List.of(library))
+                .build();
+
+        BuildLibrary capped = VarroaRunRecorder.applyCaps(event).getLibraries().get(0);
+
+        assertEquals("", capped.getRepositoryUrl());
+        assertEquals("the name and version survive the URL drop", "shared-lib", capped.getName());
+        assertEquals("github", capped.getRepositoryForge());
+    }
+
+    @Test
     public void stagesAreCappedAt1000KeepingTheNewest() {
         List<BuildStage> stages = new ArrayList<>();
         for (int i = 0; i < 1005; i++) {

@@ -306,9 +306,11 @@ type RunSourcePayload struct {
 // SourceLibrary is one shared library a run loaded, as the payload
 // carries it.
 type SourceLibrary struct {
-	Name     string `json:"name"`
-	Version  string `json:"version,omitempty"`
-	Revision string `json:"revision,omitempty"`
+	Name            string `json:"name"`
+	Version         string `json:"version,omitempty"`
+	Revision        string `json:"revision,omitempty"`
+	RepositoryURL   string `json:"repository_url,omitempty"`
+	RepositoryForge string `json:"repository_forge,omitempty"`
 }
 
 // SourcePodTemplate is one pod template a run used, as the payload

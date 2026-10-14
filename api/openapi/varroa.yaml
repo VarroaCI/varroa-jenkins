@@ -2731,9 +2731,25 @@ components:
                 properties:
                   name:
                     type: string
+                  repositoryForge:
+                    description: |
+                      The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+                    enum:
+                    - github
+                    - gitlab
+                    - gitea
+                    type: string
+                  repositoryUrl:
+                    description: |
+                      The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.
+                    type: string
                   revision:
+                    description: |
+                      The commit the run loaded. Absent when the library loaded from the cache.
                     type: string
                   version:
+                    description: The version the run loaded. Absent when the library
+                      declares none.
                     type: string
                 type: object
               type: array
@@ -8999,9 +9015,25 @@ components:
                 properties:
                   name:
                     type: string
+                  repositoryForge:
+                    description: |
+                      The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+                    enum:
+                    - github
+                    - gitlab
+                    - gitea
+                    type: string
+                  repositoryUrl:
+                    description: |
+                      The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.
+                    type: string
                   revision:
+                    description: |
+                      The commit the run loaded. Absent when the library loaded from the cache.
                     type: string
                   version:
+                    description: The version the run loaded. Absent when the library
+                      declares none.
                     type: string
                 type: object
               type: array

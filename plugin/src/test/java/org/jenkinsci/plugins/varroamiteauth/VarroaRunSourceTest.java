@@ -32,6 +32,14 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+
+import com.cloudbees.hudson.plugins.folder.AbstractFolder;
+import com.cloudbees.hudson.plugins.folder.AbstractFolderProperty;
+import com.cloudbees.hudson.plugins.folder.AbstractFolderPropertyDescriptor;
+import com.cloudbees.hudson.plugins.folder.Folder;
+
+import jenkins.model.GlobalConfiguration;
 
 /**
  * Tests for the two {@code run.source} emissions (E1 and E2), the source
@@ -39,6 +47,44 @@ import org.jvnet.hudson.test.JenkinsRule;
  * the changelog fallback.
  */
 public class VarroaRunSourceTest {
+
+    /** A folder property that answers one configured library, read back reflectively. */
+    public static final class FolderLibraries extends AbstractFolderProperty<AbstractFolder<?>> {
+
+        private final List<LibraryConfigurationStub> libraries = new ArrayList<>();
+
+        public FolderLibraries(String name, String remote) {
+            libraries.add(new LibraryConfigurationStub(name,
+                    new SCMSourceRetrieverStub(new GitSCMSource(remote))));
+        }
+
+        /** The configured libraries, read back reflectively. */
+        public List<LibraryConfigurationStub> getLibraries() {
+            return libraries;
+        }
+
+        /** Registers the descriptor the folder property needs before Folder.addProperty. */
+        @TestExtension
+        public static final class DescriptorImpl extends AbstractFolderPropertyDescriptor {
+        }
+    }
+
+    /** Answers the global libraries the resolver reads back reflectively. */
+    @TestExtension
+    public static final class GlobalLibraries extends GlobalConfiguration {
+
+        private final List<LibraryConfigurationStub> libraries = new ArrayList<>();
+
+        public GlobalLibraries() {
+            libraries.add(new LibraryConfigurationStub("shared-lib",
+                    new SCMSourceRetrieverStub(new GitSCMSource("https://github.com/example/shared-lib.git"))));
+        }
+
+        /** The configured libraries, read back reflectively. */
+        public List<LibraryConfigurationStub> getLibraries() {
+            return libraries;
+        }
+    }
 
     @Rule
     public JenkinsRule j = new JenkinsRule();
@@ -82,7 +128,7 @@ public class VarroaRunSourceTest {
     @Test
     public void e1FiresAfterTheFlowLoadsCarryingTheScriptPathAndOneLibrary() throws Exception {
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "library-run");
-        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false));
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false, "shared-lib", true));
 
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
 
@@ -94,10 +140,42 @@ public class VarroaRunSourceTest {
         assertEquals("1.2.0", sources.get(0).getLibraries().get(0).getVersion());
         assertEquals("the pinned library record declares no revision method",
                 "", sources.get(0).getLibraries().get(0).getRevision());
+        assertEquals("the global configuration names the repository",
+                "https://github.com/example/shared-lib.git",
+                sources.get(0).getLibraries().get(0).getRepositoryUrl());
+        assertEquals("the github host classifies as github",
+                "github", sources.get(0).getLibraries().get(0).getRepositoryForge());
         assertEquals("E1 writes no revision", "", sources.get(0).getScmRevision());
         assertEquals("E1 carries no SCM URL", "", sources.get(0).getScmUrl());
         assertEquals("E1 carries no SCM head", "", sources.get(0).getScmHead());
         assertTrue("E1 carries no pod templates", sources.get(0).getPodTemplates().isEmpty());
+    }
+
+    @Test
+    public void anUnconfiguredLibraryReportsNoRepository() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "unconfigured-run");
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false, "other-lib", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        BuildLibrary library = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE).get(0).getLibraries().get(0);
+        assertEquals("other-lib", library.getName());
+        assertEquals("", library.getRepositoryUrl());
+        assertEquals("", library.getRepositoryForge());
+    }
+
+    @Test
+    public void aFolderLibraryShadowsAGlobalOfTheSameNameForAnUntrustedRecord() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "team");
+        folder.addProperty(new FolderLibraries("shared-lib", "https://github.com/folder/shared-lib"));
+        WorkflowJob job = folder.createProject(WorkflowJob.class, "library-run");
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", false, "shared-lib", false));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        BuildLibrary library = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE).get(0).getLibraries().get(0);
+        assertEquals("https://github.com/folder/shared-lib", library.getRepositoryUrl());
+        assertEquals("github", library.getRepositoryForge());
     }
 
     // --- E2: the first node at which the run answers a revision ---
@@ -424,10 +502,18 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
 
     private final String script;
     private final boolean attachRevisionAction;
+    private final String libraryName;
+    private final Boolean libraryTrusted;
 
     SourceFactsFlowDefinition(String script, boolean attachRevisionAction) {
+        this(script, attachRevisionAction, "shared-lib", null);
+    }
+
+    SourceFactsFlowDefinition(String script, boolean attachRevisionAction, String libraryName, Boolean libraryTrusted) {
         this.script = script;
         this.attachRevisionAction = attachRevisionAction;
+        this.libraryName = libraryName;
+        this.libraryTrusted = libraryTrusted;
     }
 
     /** The Jenkinsfile path a consumer repository's CpsScmFlowDefinition answers. */
@@ -439,7 +525,7 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
     public FlowExecution create(FlowExecutionOwner owner, TaskListener listener, List<? extends Action> actions)
             throws Exception {
         Run<?, ?> run = (Run<?, ?>) owner.getExecutable();
-        run.addAction(new LibrariesAction());
+        run.addAction(new LibrariesAction(libraryName, libraryTrusted));
         if (attachRevisionAction) {
             run.addAction(new SCMRevisionAction(new FakeRevision(new SCMHead("main"), "abc123")));
         }
@@ -455,13 +541,64 @@ final class LibrariesAction extends InvisibleAction {
 
     private final List<LibraryRecord> libraries = new ArrayList<>();
 
-    LibrariesAction() {
-        libraries.add(new LibraryRecord("shared-lib", "1.2.0"));
+    LibrariesAction(String name, Boolean trusted) {
+        libraries.add(new LibraryRecord(name, "1.2.0", trusted));
     }
 
     /** The records the resolver reads back reflectively. */
     public Collection<LibraryRecord> getLibraries() {
         return libraries;
+    }
+}
+
+/** A stand-in for a library configuration. */
+final class LibraryConfigurationStub {
+
+    private final String name;
+    private final SCMSourceRetrieverStub retriever;
+
+    LibraryConfigurationStub(String name, SCMSourceRetrieverStub retriever) {
+        this.name = name;
+        this.retriever = retriever;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public SCMSourceRetrieverStub getRetriever() {
+        return retriever;
+    }
+}
+
+/** A stand-in for a library retriever, which answers its source. */
+final class SCMSourceRetrieverStub {
+
+    private final GitSCMSource scm;
+
+    SCMSourceRetrieverStub(GitSCMSource scm) {
+        this.scm = scm;
+    }
+
+    public GitSCMSource getScm() {
+        return scm;
+    }
+}
+
+/**
+ * A stand-in for an SCM source. Its simple name is the one the resolver
+ * matches for the source class. The tests use the Git source name.
+ */
+final class GitSCMSource {
+
+    private final String remote;
+
+    GitSCMSource(String remote) {
+        this.remote = remote;
+    }
+
+    public String getRemote() {
+        return remote;
     }
 }
 
@@ -473,10 +610,12 @@ final class LibraryRecord {
 
     private final String name;
     private final String version;
+    private final Boolean trusted;
 
-    LibraryRecord(String name, String version) {
+    LibraryRecord(String name, String version, Boolean trusted) {
         this.name = name;
         this.version = version;
+        this.trusted = trusted;
     }
 
     public String getName() {
@@ -485,6 +624,10 @@ final class LibraryRecord {
 
     public String getVersion() {
         return version;
+    }
+
+    public Boolean isTrusted() {
+        return trusted;
     }
 }
 

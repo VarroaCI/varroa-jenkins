@@ -1,5 +1,56 @@
 import { describe, it, expect } from "vitest";
-import { matchForgeShape, repositoryHref, fileHref, commitHref } from "./forgeLink";
+import { matchForgeShape, repositoryHref, fileHref, commitHref, libraryHref, repositoryBase } from "./forgeLink";
+
+describe("libraryHref", () => {
+  it("links a github library at its commit and at its version", () => {
+    expect(libraryHref("https://github.com/o/r.git", "github", "abc123", "1.0.0")).toBe(
+      "https://github.com/o/r/commit/abc123",
+    );
+    expect(libraryHref("https://github.com/o/r", "github", undefined, "1.0.0")).toBe(
+      "https://github.com/o/r/tree/1.0.0",
+    );
+  });
+
+  it("links a gitlab library through the dash segment", () => {
+    expect(libraryHref("https://gitlab.com/o/r", "gitlab", "abc123")).toBe("https://gitlab.com/o/r/-/commit/abc123");
+    expect(libraryHref("https://gitlab.com/o/r", "gitlab", undefined, "v2")).toBe("https://gitlab.com/o/r/-/tree/v2");
+  });
+
+  it("links a gitea library through the commit and src paths", () => {
+    expect(libraryHref("https://git.example.com/t/lib", "gitea", "abc123")).toBe(
+      "https://git.example.com/t/lib/commit/abc123",
+    );
+    expect(libraryHref("https://git.example.com/t/lib", "gitea", undefined, "main")).toBeNull();
+    expect(repositoryBase("https://git.example.com/t/lib.git/")).toBe("https://git.example.com/t/lib");
+  });
+
+  it("maps the ssh and scp forms to https", () => {
+    expect(libraryHref("ssh://git@github.com/o/r.git", "github", "abc")).toBe("https://github.com/o/r/commit/abc");
+    expect(libraryHref("git@github.com:o/r.git", "github", "abc")).toBe("https://github.com/o/r/commit/abc");
+  });
+
+  it("strips userinfo from an https URL", () => {
+    expect(libraryHref("https://user:tok@github.com/o/r", "github", "abc")).toBe("https://github.com/o/r/commit/abc");
+  });
+
+  it("answers null for an unknown forge, an empty URL, or a query", () => {
+    expect(libraryHref("https://example.org/o/r", undefined, "abc")).toBeNull();
+    expect(libraryHref("https://example.org/o/r", "bitbucket", "abc")).toBeNull();
+    expect(libraryHref("", "github", "abc")).toBeNull();
+    expect(libraryHref("https://github.com/o/r?x=1", "github", "abc")).toBeNull();
+    expect(libraryHref("https://github.com/o/r", "github")).toBeNull();
+  });
+
+  it("keeps a branch with a slash as path segments", () => {
+    expect(libraryHref("https://github.com/o/r", "github", undefined, "feature/x y")).toBe(
+      "https://github.com/o/r/tree/feature/x%20y",
+    );
+  });
+
+  it("answers null for a URL with fewer than two path segments", () => {
+    expect(repositoryBase("https://github.com/only")).toBeNull();
+  });
+});
 
 describe("matchForgeShape", () => {
   it("recognizes the https form for both hosts", () => {

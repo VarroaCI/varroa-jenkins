@@ -207,9 +207,11 @@ type changeEntry struct {
 // libraryEntry is one entry of a run.source envelope's payload["libraries"]
 // array.
 type libraryEntry struct {
-	Name     string `json:"name"`
-	Version  string `json:"version,omitempty"`
-	Revision string `json:"revision,omitempty"`
+	Name            string `json:"name"`
+	Version         string `json:"version,omitempty"`
+	Revision        string `json:"revision,omitempty"`
+	RepositoryURL   string `json:"repository_url,omitempty"`
+	RepositoryForge string `json:"repository_forge,omitempty"`
 }
 
 // podTemplateEntry is one entry of a run.source envelope's
@@ -555,7 +557,13 @@ func libraryEntries(in []*mitev1.BuildLibrary) []libraryEntry {
 		if l == nil {
 			continue
 		}
-		out = append(out, libraryEntry{Name: l.Name, Version: l.Version, Revision: l.Revision})
+		out = append(out, libraryEntry{
+			Name:            l.Name,
+			Version:         l.Version,
+			Revision:        l.Revision,
+			RepositoryURL:   l.RepositoryUrl,
+			RepositoryForge: l.RepositoryForge,
+		})
 	}
 	return out
 }

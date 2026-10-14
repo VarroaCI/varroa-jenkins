@@ -2153,6 +2153,10 @@ export interface RunSourceLibrary {
   name: string;
   version?: string;
   revision?: string;
+  /** The library repository URL. It carries no credentials. */
+  repositoryUrl?: string;
+  /** The forge that hosts repositoryUrl. Absent when unknown. */
+  repositoryForge?: "github" | "gitlab" | "gitea";
 }
 
 /** One pod template the run allocated. */

@@ -451,6 +451,13 @@ const (
 	ProceedInput ComponentsSchemasRunCommandRefusalCommand = "proceed_input"
 )
 
+// Defines values for ComponentsSchemasRunDetailSourceLibrariesRepositoryForge.
+const (
+	Gitea  ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitea"
+	Github ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "github"
+	Gitlab ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitlab"
+)
+
 // Defines values for ComponentsSchemasRunDetailTriggerSource.
 const (
 	ComponentsSchemasRunDetailTriggerSourceCron     ComponentsSchemasRunDetailTriggerSource = "cron"
@@ -3545,9 +3552,19 @@ type ComponentsSchemasRunDetail struct {
 		// DefinitionPath The pipeline script path in the run's own repository. A run that a template defines reports no value here.
 		DefinitionPath *string `json:"definitionPath,omitempty"`
 		Libraries      *[]struct {
-			Name     *string `json:"name,omitempty"`
+			Name *string `json:"name,omitempty"`
+
+			// RepositoryForge The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+			RepositoryForge *ComponentsSchemasRunDetailSourceLibrariesRepositoryForge `json:"repositoryForge,omitempty"`
+
+			// RepositoryUrl The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.
+			RepositoryUrl *string `json:"repositoryUrl,omitempty"`
+
+			// Revision The commit the run loaded. Absent when the library loaded from the cache.
 			Revision *string `json:"revision,omitempty"`
-			Version  *string `json:"version,omitempty"`
+
+			// Version The version the run loaded. Absent when the library declares none.
+			Version *string `json:"version,omitempty"`
 		} `json:"libraries,omitempty"`
 		PodTemplates *[]struct {
 			Image *string `json:"image,omitempty"`
@@ -3589,6 +3606,9 @@ type ComponentsSchemasRunDetail struct {
 	// Waiting The concurrency cap that holds a queued run. Absent from a run that no cap holds.
 	Waiting *ComponentsSchemasRunWait `json:"waiting,omitempty"`
 }
+
+// ComponentsSchemasRunDetailSourceLibrariesRepositoryForge The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+type ComponentsSchemasRunDetailSourceLibrariesRepositoryForge string
 
 // ComponentsSchemasRunDetailTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
 type ComponentsSchemasRunDetailTriggerSource string

@@ -5642,8 +5642,24 @@ RunDetail:
                 type: string
               version:
                 type: string
+                description: The version the run loaded. Absent when the library declares none.
               revision:
                 type: string
+                description: >
+                  The commit the run loaded. Absent when the library loaded
+                  from the cache.
+              repositoryUrl:
+                type: string
+                description: >
+                  The library repository URL. It carries no credentials. The
+                  field is absent when the current library configuration does
+                  not name a repository.
+              repositoryForge:
+                type: string
+                enum: [github, gitlab, gitea]
+                description: >
+                  The forge that hosts repositoryUrl. The field is absent when
+                  the forge is unknown.
         podTemplates:
           type: array
           items:

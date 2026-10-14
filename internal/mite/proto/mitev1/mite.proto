@@ -408,6 +408,10 @@ message BuildLibrary {
   string name = 1;
   string version = 2;
   string revision = 3;
+  // Repository URL of the library source. Carries no credentials. Empty when unknown.
+  string repository_url = 4;
+  // Forge of repository_url: github, gitlab, or gitea. Empty when unknown.
+  string repository_forge = 5;
 }
 
 message BuildPodTemplate {

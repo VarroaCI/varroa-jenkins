@@ -41,9 +41,11 @@ type runStageJSON struct {
 
 // runSourceLibraryJSON is one shared library the run was defined with.
 type runSourceLibraryJSON struct {
-	Name     string `json:"name"`
-	Version  string `json:"version,omitempty"`
-	Revision string `json:"revision,omitempty"`
+	Name            string `json:"name"`
+	Version         string `json:"version,omitempty"`
+	Revision        string `json:"revision,omitempty"`
+	RepositoryURL   string `json:"repositoryUrl,omitempty"`
+	RepositoryForge string `json:"repositoryForge,omitempty"`
 }
 
 // runSourcePodTemplateJSON is one pod template the run allocated.
@@ -393,9 +395,11 @@ func buildRunSource(stored recordstore.StoredRunSource) *runSourceJSON {
 	out := &runSourceJSON{DefinitionPath: stored.DefinitionPath}
 	for _, lib := range stored.Libraries {
 		out.Libraries = append(out.Libraries, runSourceLibraryJSON{
-			Name:     lib.Name,
-			Version:  lib.Version,
-			Revision: lib.Revision,
+			Name:            lib.Name,
+			Version:         lib.Version,
+			Revision:        lib.Revision,
+			RepositoryURL:   lib.RepositoryURL,
+			RepositoryForge: lib.RepositoryForge,
 		})
 	}
 	for _, pod := range stored.PodTemplates {

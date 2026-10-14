@@ -31,6 +31,19 @@ public class BuildEventJsonTest {
     }
 
     @Test
+    public void buildLibraryWritesTheRepositoryJsonNames() {
+        JSONObject o = BuildLibrary.builder()
+                .name("shared-lib")
+                .repositoryUrl("https://github.com/example/shared-lib")
+                .repositoryForge("github")
+                .build()
+                .toJson();
+
+        assertEquals("https://github.com/example/shared-lib", o.getString("repository_url"));
+        assertEquals("github", o.getString("repository_forge"));
+    }
+
+    @Test
     public void buildPodTemplateWritesTheProtoJsonNames() {
         JSONObject o = podTemplate("maven", "linux", "maven:3.9-eclipse-temurin-21").toJson();
 

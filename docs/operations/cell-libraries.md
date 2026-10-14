@@ -63,6 +63,8 @@ A pipeline loads a library by name. The pipeline needs no credential.
 
 With `implicit: true`, the library loads in every job of the pool. The pipeline needs no annotation.
 
+A run page links the library to its repository. A library on a Gitea or Forgejo host links only when `spec.giteaServers` lists that host.
+
 ## Warning: version override
 
 `allowVersionOverride: true` lets a pipeline load any branch or tag of the library. Anyone who can push a branch to the library repository then runs trusted code. That code runs on every cell of the pool, for every tenant. Keep this value `false` unless the repository has strict branch protection.

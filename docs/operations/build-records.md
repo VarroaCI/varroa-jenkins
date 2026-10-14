@@ -156,7 +156,7 @@ With a closed stream, the build page reads a live run's record every 3 seconds.
 
 Every activity event publishes onto the JetStream stream `varroa_activity`. That stream holds
 at most 72 hours, so the recorder can catch up after a brief outage; it is no retention tier.
-The recorder writes each event once into the `activity` table. `GET /activity` and the MCP activity readers read that table, never the stream.
+The recorder writes each event once into the `activity` table. The activity readers never read the stream.
 
 ```yaml
 recordStore:
@@ -182,9 +182,11 @@ A build reports its definition in four kinds of event.
 | Each allocation of a new pod template after that node. | Every source field again, and every pod template the run has allocated. No change list. |
 | Completion of a run with no revision. | Its pod templates, and no revision fields. |
 
-A template-defined run reports no script path. The plugin reads each pod template when its agent attaches, so an early leaver stays
-in the record. Each entry names a pod template, at most 50. A non-Kubernetes agent,
+A template-defined run reports no script path. The plugin reads each pod template at agent attach, so an early leaver stays recorded. Each entry names a pod template, at most 50. A non-Kubernetes agent,
 or an agent gone before the read, reports its node name and no image.
+
+Each `libraries` entry also carries `repositoryUrl` and `repositoryForge`. The URL reads the current library configuration.
+The forge is `github`, `gitlab`, or `gitea`, and is absent when unknown. The revision is empty for a cached library.
 
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
 `podTemplates[]`.
@@ -211,9 +213,7 @@ window.
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one
-`none` row for a job with no trigger. A cell's set is its whole job inventory: a branch job with
-no trigger and no run still holds a row. After a cell restart, a Jenkinsfile trigger has no row
-until the job builds again.
+`none` row for a job with no trigger. A cell's set is its whole job inventory. After a cell restart, a Jenkinsfile trigger has no row until the job builds again.
 
 The plugin computes each cron row's next three occurrences with Jenkins's cron engine, so the
 times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`
@@ -232,9 +232,7 @@ A row's `next_fire_times` also keeps its passed occurrences from the last
 replaces the list.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.
-An occurrence that never fired under a watermark no more than thirty minutes old is a missed
-fire. An older watermark means the cell has not reported, likely a disconnected mite or a
-hibernated controller, and the whole set is stale.
+An occurrence that never fired under a watermark at most thirty minutes old is a missed fire. An older watermark means the cell has not reported, so the whole set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
 came first. The recorder deletes no row, because a partial set would erase schedules the plugin never reached.

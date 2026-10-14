@@ -106,6 +106,65 @@ describe("RunMetadata", () => {
   });
 });
 
+describe("RunMetadata — libraries", () => {
+  beforeEach(() => {
+    vi.mocked(getRun).mockReset();
+  });
+
+  function withLibraries(libraries: NonNullable<RunDetail["source"]>["libraries"]): RunDetail {
+    return { ...baseRun, source: { libraries } } as RunDetail;
+  }
+
+  it("links a library at its revision when the forge is known", () => {
+    renderMeta(
+      withLibraries([
+        {
+          name: "shared-lib",
+          version: "1.2.0",
+          revision: "abc1234567890",
+          repositoryUrl: "https://github.com/example/shared-lib.git",
+          repositoryForge: "github",
+        },
+      ]),
+    );
+    expect(screen.getByRole("link", { name: /shared-lib@1\.2\.0 abc12345/ })).toHaveAttribute(
+      "href",
+      "https://github.com/example/shared-lib/commit/abc1234567890",
+    );
+  });
+
+  it("links a library at its version when no revision is known", () => {
+    renderMeta(
+      withLibraries([
+        {
+          name: "shared-lib",
+          version: "release/2",
+          repositoryUrl: "https://gitlab.com/example/shared-lib",
+          repositoryForge: "gitlab",
+        },
+      ]),
+    );
+    expect(screen.getByRole("link", { name: "shared-lib@release/2" })).toHaveAttribute(
+      "href",
+      "https://gitlab.com/example/shared-lib/-/tree/release/2",
+    );
+  });
+
+  it("shows text, not a link, for a library with no known forge", () => {
+    renderMeta(
+      withLibraries([
+        {
+          name: "shared-lib",
+          version: "1.2.0",
+          repositoryUrl: "https://git.example.org/team/shared-lib",
+        },
+      ]),
+    );
+    expect(screen.getByText("shared-lib@1.2.0")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "shared-lib@1.2.0" })).not.toBeInTheDocument();
+  });
+});
+
 describe("RunMetadata — pull request", () => {
   it("names the change request and links it when the URL is a web link", () => {
     renderMeta({

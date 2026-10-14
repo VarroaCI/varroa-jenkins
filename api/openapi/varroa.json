@@ -3685,10 +3685,25 @@
                     "name": {
                       "type": "string"
                     },
+                    "repositoryForge": {
+                      "description": "The forge that hosts repositoryUrl. The field is absent when the forge is unknown.\n",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "gitea"
+                      ],
+                      "type": "string"
+                    },
+                    "repositoryUrl": {
+                      "description": "The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.\n",
+                      "type": "string"
+                    },
                     "revision": {
+                      "description": "The commit the run loaded. Absent when the library loaded from the cache.\n",
                       "type": "string"
                     },
                     "version": {
+                      "description": "The version the run loaded. Absent when the library declares none.",
                       "type": "string"
                     }
                   },
@@ -11976,10 +11991,25 @@
                     "name": {
                       "type": "string"
                     },
+                    "repositoryForge": {
+                      "description": "The forge that hosts repositoryUrl. The field is absent when the forge is unknown.\n",
+                      "enum": [
+                        "github",
+                        "gitlab",
+                        "gitea"
+                      ],
+                      "type": "string"
+                    },
+                    "repositoryUrl": {
+                      "description": "The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.\n",
+                      "type": "string"
+                    },
                     "revision": {
+                      "description": "The commit the run loaded. Absent when the library loaded from the cache.\n",
                       "type": "string"
                     },
                     "version": {
+                      "description": "The version the run loaded. Absent when the library declares none.",
                       "type": "string"
                     }
                   },

@@ -50,3 +50,61 @@ export function commitHref(match: ForgeMatch, sha: string): string {
     ? `https://github.com/${match.owner}/${match.repo}/commit/${sha}`
     : `https://gitlab.com/${match.owner}/${match.repo}/-/commit/${sha}`;
 }
+
+/** ForgeKind names a forge the plugin can classify for a library repository. */
+export type ForgeKind = "github" | "gitlab" | "gitea";
+
+/** repositoryBase turns a repository URL into a browsable https base with no
+ * userinfo, no ".git" suffix, and no trailing slash. Answers null for a
+ * query, a fragment, an unknown shape, or fewer than two path segments. */
+export function repositoryBase(url: string): string | null {
+  const value = url.trim();
+  if (!value || /[?#]/.test(value)) return null;
+  let host = "";
+  let path = "";
+  let scheme = "https";
+  const webMatch = value.match(/^(https?):\/\/(?:[^@/]*@)?([A-Za-z0-9.-]+(?::\d+)?)\/(.+)$/i);
+  const sshMatch = value.match(/^ssh:\/\/(?:[^@/]+@)?([A-Za-z0-9.-]+)(?::\d+)?\/(.+)$/i);
+  const scpMatch = value.match(/^[^@/:]+@([A-Za-z0-9.-]+):(?!\/\/)(.+)$/);
+  if (webMatch) {
+    [, scheme, host, path] = webMatch;
+    scheme = scheme.toLowerCase();
+  } else if (sshMatch) {
+    [, host, path] = sshMatch;
+  } else if (scpMatch) {
+    [, host, path] = scpMatch;
+  } else {
+    return null;
+  }
+  const segments = path.replace(/\/+$/, "").replace(/\.git$/, "").split("/");
+  if (segments.length < 2) return null;
+  if (segments.some((s) => !s || s === "." || s === ".." || /\s/.test(s))) return null;
+  return `${scheme}://${host}/${segments.join("/")}`;
+}
+
+/** libraryHref links a shared library to its repository. It targets the
+ * commit when a revision is known, and the version otherwise. Answers null
+ * for an unknown forge, an unparsable URL, or a library with neither a
+ * revision nor a version. */
+export function libraryHref(
+  repositoryUrl?: string,
+  forge?: string,
+  revision?: string,
+  version?: string,
+): string | null {
+  if (!repositoryUrl) return null;
+  if (forge !== "github" && forge !== "gitlab" && forge !== "gitea") return null;
+  const base = repositoryBase(repositoryUrl);
+  if (!base) return null;
+  const dash = forge === "gitlab" ? "/-" : "";
+  if (revision) {
+    return `${base}${dash}/commit/${encodeURIComponent(revision)}`;
+  }
+  // Gitea needs the ref kind (branch or tag) in its src path, and the record
+  // does not carry it. A Gitea library with no revision therefore shows text.
+  if (version && forge !== "gitea") {
+    const ref = version.split("/").map(encodeURIComponent).join("/");
+    return `${base}${dash}/tree/${ref}`;
+  }
+  return null;
+}
