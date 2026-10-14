@@ -34,14 +34,16 @@ import org.jvnet.hudson.test.JenkinsSessionRule;
  * resumed build continues its log sequence. A fake mite loopback records
  * every accepted chunk by its sequence. Before the fix, the second JVM
  * started again at sequence 0, so one sequence carried two different
- * chunks, and the gateway kept only the first.
+ * chunks, and the gateway kept only the first. The script sleeps 10
+ * seconds, so the session stop suspends the program in the sleep, and the
+ * step after the sleep must arrive above the resume line.
  */
 public class VarroaLogStorageResumeRestartTest {
 
     private static final String RUN_ID = "run-log-resume";
 
     private static final String SCRIPT = "echo 'before-restart'\n"
-            + "sleep(time: 5, unit: 'SECONDS')\n"
+            + "sleep(time: 10, unit: 'SECONDS')\n"
             + "echo 'after-sleep'\n";
 
     @Rule
@@ -90,7 +92,7 @@ public class VarroaLogStorageResumeRestartTest {
         assertNotNull("the resume line must reach the mite; chunks: " + mite.bySeq, resumingSeq);
         assertTrue("the resume line must continue above seq " + highestBeforeRestart + ", got " + resumingSeq,
                 resumingSeq > highestBeforeRestart);
-        assertNotNull(seqOfChunkContaining("after-sleep"));
+        assertAfterSleepAbove(resumingSeq);
         long finalSeq = mite.finalSeq.get();
         for (long seq = 0; seq <= finalSeq; seq++) {
             assertTrue("the sequence must have no hole at " + seq, mite.bySeq.containsKey(seq));
@@ -131,10 +133,17 @@ public class VarroaLogStorageResumeRestartTest {
         Long resumingSeq = seqOfChunkContaining("Resuming build");
         assertNotNull("the resume line must reach the mite; chunks: " + mite.bySeq, resumingSeq);
         assertEquals("the resume line must take the hint", hint, resumingSeq.longValue());
-        assertNotNull(seqOfChunkContaining("after-sleep"));
+        assertAfterSleepAbove(resumingSeq);
         for (long seq = hint; seq <= mite.finalSeq.get(); seq++) {
             assertTrue("the moved sequence must have no hole at " + seq, mite.bySeq.containsKey(seq));
         }
+    }
+
+    private void assertAfterSleepAbove(long resumingSeq) {
+        Long afterSleepSeq = seqOfChunkContaining("after-sleep");
+        assertNotNull("the step after the sleep must reach the mite; chunks: " + mite.bySeq, afterSleepSeq);
+        assertTrue("the step after the sleep must continue above the resume line at " + resumingSeq
+                + ", got " + afterSleepSeq, afterSleepSeq > resumingSeq);
     }
 
     private static void deleteTree(Path root) throws IOException {

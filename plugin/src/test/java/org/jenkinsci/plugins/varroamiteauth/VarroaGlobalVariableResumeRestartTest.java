@@ -1,6 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
 import com.sun.net.httpserver.HttpExchange;
@@ -28,14 +29,19 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsSessionRule;
 
 /**
  * Proves that a program which holds the {@code varroa} global variable,
  * or a run handle it returned, loads again on a second Jenkins boot over
- * the same Jenkins home. Each script sleeps across the restart.
+ * the same Jenkins home. Each script sleeps 10 seconds, so the session
+ * stop suspends the program in the sleep. The second session asserts that
+ * the step after the sleep runs only after the resume line.
  */
 public class VarroaGlobalVariableResumeRestartTest {
+
+    private static final String RESUMED = "Resuming build at";
 
     @Rule
     public JenkinsSessionRule sessions = new JenkinsSessionRule();
@@ -77,7 +83,7 @@ public class VarroaGlobalVariableResumeRestartTest {
     public void aRunHandleSurvivesARestart() throws Throwable {
         startBuildAndRestart("def h = varroa.build(tenant: 'beta', job: 'beta/deploy', wait: false)\n"
                 + "echo(\"in-body state=${h.state}\")\n"
-                + "sleep(time: 2, unit: 'SECONDS')\n"
+                + "sleep(time: 10, unit: 'SECONDS')\n"
                 + "def r = h.refresh()\n"
                 + "echo(\"after-sleep state=${r.state} runId=${r.runId}\")\n");
         sessions.then(j -> {
@@ -87,6 +93,7 @@ public class VarroaGlobalVariableResumeRestartTest {
             j.assertLogNotContains("ClassNotFoundException", run);
             j.assertLogContains("after-sleep state=running runId=run-9", run);
             assertEquals(List.of("alpha/deploy"), statusCallers);
+            assertCrossedTheRestart(run);
         });
     }
 
@@ -95,7 +102,7 @@ public class VarroaGlobalVariableResumeRestartTest {
         startBuildAndRestart("varroa.lock(name: 'outer') {\n"
                 + "  varroa.lock(name: 'inner') {\n"
                 + "    echo 'in-body'\n"
-                + "    sleep(time: 2, unit: 'SECONDS')\n"
+                + "    sleep(time: 10, unit: 'SECONDS')\n"
                 + "    echo(\"after-sleep name=${varroa.lock.name} token=${varroa.lock.token}\")\n"
                 + "  }\n"
                 + "}\n");
@@ -105,6 +112,7 @@ public class VarroaGlobalVariableResumeRestartTest {
             j.assertBuildStatus(Result.SUCCESS, run);
             j.assertLogNotContains("ClassNotFoundException", run);
             j.assertLogContains("after-sleep name=inner token=5", run);
+            assertCrossedTheRestart(run);
         });
     }
 
@@ -116,12 +124,28 @@ public class VarroaGlobalVariableResumeRestartTest {
             p.setDefinition(new CpsFlowDefinition(script, true));
             WorkflowRun run = (WorkflowRun) p.scheduleBuild2(0,
                     new VarroaIntentAction("run-restart", "", null, System.currentTimeMillis())).waitForStart();
-            j.waitForMessage("in-body", run);
+            j.waitForMessage("Sleeping for", run);
+            assertTrue("the sleep holds the program at the restart", run.isBuilding());
         });
     }
 
-    private static WorkflowRun resumedRun(org.jvnet.hudson.test.JenkinsRule j) {
+    private static WorkflowRun resumedRun(JenkinsRule j) {
         return j.jenkins.getItemByFullName("alpha/deploy", WorkflowJob.class).getBuildByNumber(1);
+    }
+
+    /**
+     * Asserts that the build stopped in the sleep and continued after the
+     * restart. Only a resumed build prints the resume line between the two
+     * markers.
+     */
+    private static void assertCrossedTheRestart(WorkflowRun run) throws java.io.IOException {
+        String log = JenkinsRule.getLog(run);
+        int inBody = log.indexOf("in-body");
+        int resumed = log.indexOf(RESUMED);
+        int afterSleep = log.indexOf("after-sleep");
+        assertTrue("the build resumes after the restart; log:\n" + log, resumed >= 0);
+        assertTrue("the body starts before the restart; log:\n" + log, inBody >= 0 && inBody < resumed);
+        assertTrue("the step after the sleep runs only after the resume; log:\n" + log, afterSleep > resumed);
     }
 
     /** Grants every acquire and confirms every renew under fence token 5. */
