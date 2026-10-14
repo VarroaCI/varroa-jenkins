@@ -341,6 +341,16 @@ A tenant manifest that fails a rule holds only that tenant's folder. The cell ke
 
 A cell also refuses a key that the items schema does not define. A non-cell controller ignores such a key. The `ItemsHeld` warning names each unknown key, its item path, and its key path, for example `items[0].builders[0].jobDsl`.
 
+### Top-level keys
+
+A composed bundle keeps only the `items` key of each item manifest. Every other top-level key is dropped. The `ComposedBundle` `status.warnings` names each dropped key and its source, for example `item manifest from itemRef "x": top-level key "item" is dropped`.
+
+On a cell, the drop has these effects:
+
+- An undefined top-level key, such as a typo for `items`, holds the tenant. The `ItemsHeld` warning names the key and its source.
+- A top-level `root` key holds the tenant. A tenant may not set `root`.
+- A `removeStrategy` or `retain` key is ignored. The `BundleKeysIgnored` warning names it.
+
 ### Job DSL on a cell
 
 Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`. The cell home is temporary, so a cell restart deletes the jobs that a seed job made. A seeded job exists only on the member that ran the seed, and a build for it can go to another member. The lint reads an inline `script` and the inline `jenkinsfile` of a pipeline template, and rejects a `jobDsl` step there before the item reaches the cell. It does not read a Jenkinsfile in SCM or a step name built at run time. At run time, the Varroa plugin stops each `jobDsl` step on a cell, from any source: an inline script, a Jenkinsfile in SCM, or a pipeline template. The build fails with the message `The jobDsl step is not allowed on a cell.` The step creates no job. The `job-dsl` plugin stays installed because a non-cell controller uses it.

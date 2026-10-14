@@ -269,7 +269,40 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 			})
 		}
 	}
+	// A declared top-level item key that a cell does not apply is named
+	// here. An undefined key or root holds the tenant instead, in
+	// materializeTenantManifest. A parse fault also holds it there.
+	if _, declared, err := droppedItemKeys(data); err == nil {
+		for _, d := range declared {
+			if d.Key == "root" {
+				continue
+			}
+			warnings = append(warnings, v1alpha1.TenantWarning{
+				Tenant:  team,
+				Reason:  v1alpha1.TeamReasonBundleKeysIgnored,
+				Message: fmt.Sprintf("tenant item manifest key %q from %s is ignored on a cell", d.Key, d.Source),
+			})
+		}
+	}
 	return lift.Templates, warnings
+}
+
+// droppedItemKeys splits the top-level item keys that the composer dropped
+// for a tenant. unknown names keys that no manifest field declares. declared
+// names keys that Manifest declares, which a cell refuses or ignores.
+func droppedItemKeys(data map[string]string) (unknown, declared []bundle.DroppedItemKey, err error) {
+	keys, err := bundle.ParseDroppedItemKeys(data[bundle.DroppedItemKeysConfigMapKey])
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, k := range keys {
+		if items.IsManifestKey(k.Key) {
+			declared = append(declared, k)
+		} else {
+			unknown = append(unknown, k)
+		}
+	}
+	return unknown, declared, nil
 }
 
 // lintTenantTemplates runs cellLintRules over the inline jenkinsfile of
@@ -315,6 +348,24 @@ func lintTenantTemplates(fragment string) (string, []lint.Finding) {
 // key, must set no root, must pass cellLintRules, and must not need a plugin that coreSet
 // omits. Nil data gives an empty folder.
 func materializeTenantManifest(team string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
+	// The composer keeps only items, so a dropped key never reaches
+	// items.yaml. A tenant that sets an undefined key, or root, is held.
+	unknown, declared, err := droppedItemKeys(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", bundle.DroppedItemKeysConfigMapKey, err)
+	}
+	if len(unknown) > 0 {
+		named := make([]string, 0, len(unknown))
+		for _, k := range unknown {
+			named = append(named, fmt.Sprintf("%q (from %s)", k.Key, k.Source))
+		}
+		return nil, fmt.Errorf("item manifest drops unknown top-level keys: %s", strings.Join(named, ", "))
+	}
+	for _, d := range declared {
+		if d.Key == "root" {
+			return nil, fmt.Errorf("item manifest sets top-level key \"root\" (from %s); a tenant may not set root", d.Source)
+		}
+	}
 	resolved := tenantVarsReplacer(parseBundleVariables(data["variables.yaml"])).Replace(data["items.yaml"])
 	if unresolved := findUnresolvedVars(false, resolved); len(unresolved) > 0 {
 		return nil, fmt.Errorf("items.yaml holds unresolved variables: %s", strings.Join(unresolved, ", "))

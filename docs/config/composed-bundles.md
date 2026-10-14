@@ -95,6 +95,8 @@ pin is updated. Unpinned items track current catalog content.
 | `observedRevisions` | Resolved item hashes, Git commits, and OCI digests |
 | `missingItems`, `errors`, `warnings` | Resolution and validation findings |
 
+A `warnings` entry also names each top-level item manifest key other than `items`, which the bundle drops. See [Top-level keys](items.md#top-level-keys).
+
 Pause dependent controller rollout during review:
 
 ```bash

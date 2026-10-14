@@ -1410,3 +1410,79 @@ func TestAssembleCellContent_DuplicateKeyHoldsOnlyThatTenant(t *testing.T) {
 		t.Errorf("expected a parse fault in the message, got %q", msg)
 	}
 }
+
+// assertDroppedItemKeys seeds two tenants with clean items and a dropped-key
+// list keysYAML on bad. It returns the assembled state.
+func assertDroppedItemKeys(t *testing.T, keysYAML string) assembleCellState {
+	t.Helper()
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", cleanPipelineItemsYAML)
+	client.configMapData["bad-bundle-content"][bundle.DroppedItemKeysConfigMapKey] = keysYAML
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{good, bad}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	return state
+}
+
+func TestAssembleCellContent_DroppedUnknownTopLevelKeyHoldsOnlyThatTenant(t *testing.T) {
+	state := assertDroppedItemKeys(t, "- source: itemRef \"x\"\n  key: item\n")
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected only the good folder pushed, got %v", got)
+	}
+	msg := heldMessage(state.Warnings, "bad")
+	if !strings.Contains(msg, `"item"`) || !strings.Contains(msg, `itemRef "x"`) {
+		t.Errorf("expected the message to name key item and its source, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_DroppedRootHoldsOnlyThatTenant(t *testing.T) {
+	state := assertDroppedItemKeys(t, "- source: git input[0] (repo)\n  key: root\n")
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected only the good folder pushed, got %v", got)
+	}
+	msg := heldMessage(state.Warnings, "bad")
+	if !strings.Contains(msg, `"root"`) {
+		t.Errorf("expected the message to name root, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_DroppedRemoveStrategyWarnsWithoutHold(t *testing.T) {
+	state := assertDroppedItemKeys(t, "- source: itemRef \"x\"\n  key: removeStrategy\n")
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 2 {
+		t.Errorf("expected both folders pushed, got %v", got)
+	}
+	if heldMessage(state.Warnings, "bad") != "" {
+		t.Errorf("expected no hold for removeStrategy, got %+v", state.Warnings)
+	}
+	var found bool
+	for _, w := range state.Warnings {
+		if w.Tenant == "bad" && w.Reason == v1alpha1.TeamReasonBundleKeysIgnored && strings.Contains(w.Message, `"removeStrategy"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a BundleKeysIgnored warning for removeStrategy, got %+v", state.Warnings)
+	}
+}
+
+func TestAssembleCellContent_UnparseableDroppedItemKeysHoldsTenant(t *testing.T) {
+	state := assertDroppedItemKeys(t, "- [unclosed\n")
+	manifest := parseCellItems(t, state.ItemsYAML)
+	if got := topLevelNames(manifest); len(got) != 1 || got[0] != "good" {
+		t.Errorf("expected only the good folder pushed, got %v", got)
+	}
+	if heldMessage(state.Warnings, "bad") == "" {
+		t.Errorf("expected the bad tenant held, got %+v", state.Warnings)
+	}
+}

@@ -109,13 +109,14 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   keeps the folder and its jobs as they are on one of these faults:
   - an item still holds `${`, a `${varroa_*}` name too;
   - the items do not parse, hold an unknown key, set `root`, or fail a lint rule;
+  - the item manifest holds an undefined top-level key, such as `item`, or a top-level `root` key;
   - an item needs a plugin the cell does not pin;
   - a pipeline template does not load, or its body fails a lint rule. Only a failing template
     leaves the fragment; the tenant's other templates stay;
-  - the bundle is missing or has no content yet.
+  - the bundle is missing or not yet built.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until the fix.
+  folder until fixed.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a plugin-synthesized identity
@@ -255,9 +256,9 @@ Every `Placed` reason on a `Team`:
 | `AwaitingCell` | False | No cell of the tenant's pool is enabled, ready, not evacuating, and under its resolved capacity. | Wait for the pool to create a cell, or raise its `warm` or `maxTenantsPerCell`. |
 | `CellCapReached` | False | The tenant's pool sits at its `maxCells` and no cell is free. | Raise `maxCells`, or move the tenant to another pool. |
 | `TenantMoving` | False | A voluntary move is waiting for the old cell to finish draining the tenant's folder. | Wait. Check `status.pendingItemDeletions` for a stuck delete on the old cell. |
-| `CellNotReady` | False | The pass keeps the tenant on its current cell, but that cell reports `CellReady=False` with no `evacuate` signal yet. | Diagnose the cell's own `CellReady` reason below. |
+| `CellNotReady` | False | The tenant stays on its cell, which reports `CellReady=False` without an `evacuate` signal. | Diagnose the cell's own `CellReady` reason below. |
 | `AgentServiceFailed` | False | An agent Service write or delete failed. The placement is kept. | See [Agent Services](agents.md). |
-| `TenantTeardownPending` | False | Dropping `spec.pipelines` is tearing the tenant down, but the schedule purge or the old cell's drain has not confirmed yet. | Wait. The pass retries up to ten times, or waits ten minutes when the cell is unreachable. |
+| `TenantTeardownPending` | False | Teardown waits for the schedule purge or the old cell's drain to confirm. | Wait. The pass retries up to ten times, or waits ten minutes when the cell is unreachable. |
 
 Every `CellReady` reason on a cell `Controller`:
 

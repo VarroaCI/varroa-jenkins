@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"gopkg.in/yaml.v3"
 
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
@@ -54,6 +55,11 @@ type MaterializedBundle struct {
 	// that writes a ConfigMap from MaterializedBundle reads this field,
 	// so a secret value carried here never enters a ConfigMap.
 	CellCloudCredentials []CellCloudCredential
+
+	// DroppedItemKeys lists the top-level keys of each item manifest that
+	// the composer does not keep. It goes into the content ConfigMap under
+	// DroppedItemKeysConfigMapKey. It is never part of the resolved hash.
+	DroppedItemKeys []DroppedItemKey
 
 	// PipelineTemplatesYAML holds the templates the bundle's
 	// pipeline-template inputs carry, in input order. It is never subject
@@ -524,4 +530,38 @@ var InjectedVariableNames = []string{
 	"varroa_controller_name", "varroa_controller_namespace", "varroa_controller_endpoint",
 	"varroa_controller_external_url", "varroa_controller_path_prefix", "varroa_frontend_url",
 	"varroa_oidc_issuer", "varroa_oidc_client_id", "varroa_login_url",
+}
+
+// DroppedItemKeysConfigMapKey is the content ConfigMap key that holds the
+// DroppedItemKey list of a composed bundle.
+const DroppedItemKeysConfigMapKey = "dropped-item-keys.yaml"
+
+// DroppedItemKey names one top-level key of an item manifest that the
+// composer drops, and the source that declared it.
+type DroppedItemKey struct {
+	Source string `yaml:"source"`
+	Key    string `yaml:"key"`
+}
+
+// MarshalDroppedItemKeys renders keys as the content ConfigMap value. It
+// returns "" for an empty list.
+func MarshalDroppedItemKeys(keys []DroppedItemKey) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	out, _ := yaml.Marshal(keys)
+	return string(out)
+}
+
+// ParseDroppedItemKeys reads a value that MarshalDroppedItemKeys wrote. A
+// blank value gives nil.
+func ParseDroppedItemKeys(content string) ([]DroppedItemKey, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil
+	}
+	var keys []DroppedItemKey
+	if err := yaml.Unmarshal([]byte(content), &keys); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

@@ -4,8 +4,10 @@
 
 Implements the unified `ComposedBundle` model: composing a `ComposedBundleSpec`
 (ordered `inputs[]`, each an `itemRef`/`gitSource` union) into merged,
-still-**unresolved** content — five keys: `jenkins.yaml`, `plugins.yaml`,
-`items.yaml`, `rbac.yaml`, and `pipeline-templates.yaml` — plus bundle.yaml
+still-**unresolved** content — seven keys: `jenkins.yaml`, `plugins.yaml`,
+`items.yaml`, `rbac.yaml`, `variables.yaml`, `pipeline-templates.yaml`, and
+`dropped-item-keys.yaml` (the top-level item keys the composer drops, from
+`DroppedItemKeys`; never part of the resolved hash) — plus bundle.yaml
 manifest parsing, git materialization with an on-disk clone cache, catalog
 index parsing, and pre-apply content validation.
 
@@ -31,7 +33,9 @@ index parsing, and pre-apply content validation.
 ## Local Contracts
 
 - **`Composer.Compose`** (`composer.go`) — validates each input is exactly
-  one of `ItemRef`/`GitSource`/`OCISource`, then per input in list order:
+  one of `ItemRef`/`GitSource`/`OCISource`, then per input in list order.
+  `composeItems` keeps only `items` from each item fragment. It reports each
+  other top-level key, with its source, as a `Warnings` entry:
   - `itemRef`: resolved via `ItemLookup.GetCatalogItemCRD`, **local-first with
     operator-namespace fallback** when `ref.Namespace` is unset (explicit
     namespace = exact lookup, no fallback, no shadow warning). A local hit

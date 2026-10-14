@@ -858,12 +858,12 @@ func TestComposeItems_MalformedFragment(t *testing.T) {
 		"this is not valid yaml {{",
 		"items:\n- name: another-job\n",
 	}
-	result, err := composeItems(yamls)
+	result, _, err := composeItems(yamls, []string{"a", "b", "c"})
 	if err == nil {
 		t.Fatal("expected error for malformed fragment")
 	}
-	if !strings.Contains(err.Error(), "input 1") {
-		t.Errorf("expected error to name input 1, got: %v", err)
+	if !strings.Contains(err.Error(), "b:") {
+		t.Errorf("expected error to name source b, got: %v", err)
 	}
 	if result != "" {
 		t.Errorf("expected empty result on parse error, got: %s", result)
@@ -875,7 +875,7 @@ func TestComposeItems_AllValid(t *testing.T) {
 		"items:\n- name: job-a\n",
 		"items:\n- name: job-b\n",
 	}
-	result, err := composeItems(yamls)
+	result, _, err := composeItems(yamls, []string{"a", "b"})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -1219,4 +1219,118 @@ func TestCompose_GitInputStopsAtDeadline(t *testing.T) {
 		t.Errorf("result.Errors = %q, want one git input[0] deadline error", result.Errors)
 	}
 	remote.assertPeerClosed(t)
+}
+
+func TestComposeItems_ReportsTypoTopLevelKey(t *testing.T) {
+	yamls := []string{
+		"item:\n  - kind: folder\n    name: a\nitems:\n  - kind: folder\n    name: b\n",
+	}
+	result, dropped, err := composeItems(yamls, []string{"itemRef \"x\""})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []DroppedItemKey{{Source: "itemRef \"x\"", Key: "item"}}
+	if fmt.Sprint(dropped) != fmt.Sprint(want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
+	if strings.Contains(result, "name: a") || !strings.Contains(result, "name: b") {
+		t.Errorf("expected only item b to be kept, got:\n%s", result)
+	}
+}
+
+func TestComposeItems_ReportsDeclaredManifestKeys(t *testing.T) {
+	yamls := []string{
+		"removeStrategy:\n  items: delete\nroot: x\nretain:\n  - y\nitems:\n  - kind: folder\n    name: b\n",
+	}
+	_, dropped, err := composeItems(yamls, []string{"git input[0] (r)"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []DroppedItemKey{
+		{Source: "git input[0] (r)", Key: "removeStrategy"},
+		{Source: "git input[0] (r)", Key: "root"},
+		{Source: "git input[0] (r)", Key: "retain"},
+	}
+	if fmt.Sprint(dropped) != fmt.Sprint(want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
+}
+
+func TestComposeItems_ItemsOnlyReportsNothing(t *testing.T) {
+	yamls := []string{"items:\n- kind: folder\n  name: a\n"}
+	_, dropped, err := composeItems(yamls, []string{"s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dropped) != 0 {
+		t.Errorf("expected no dropped keys, got %v", dropped)
+	}
+}
+
+func TestComposeItems_QuotedMergeKeyIsReported(t *testing.T) {
+	yamls := []string{"\"<<\":\n  - kind: folder\n    name: a\nitems:\n  - kind: folder\n    name: b\n"}
+	_, dropped, err := composeItems(yamls, []string{"s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dropped) != 1 || dropped[0].Key != "<<" {
+		t.Errorf("a quoted << key is an ordinary key and must be reported, got %v", dropped)
+	}
+}
+
+func TestComposer_DroppedItemKeyWarningNamesItemRef(t *testing.T) {
+	clean := "items:\n- kind: folder\n  name: b\n"
+	typo := "item:\n- kind: folder\n  name: a\n" + clean
+	build := func(content string) *Composer {
+		f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+			"ns/x": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: content, ContentHash: "h", Valid: true}},
+		}}
+		return NewComposer(f, nil, "", "")
+	}
+	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("x")}}
+
+	res, err := build(typo).Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	var found bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, `itemRef "x"`) && strings.Contains(w, `"item"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a dropped-key warning naming itemRef x and item, got %v", res.Warnings)
+	}
+	if len(res.Materialized.DroppedItemKeys) != 1 {
+		t.Errorf("DroppedItemKeys = %v, want one entry", res.Materialized.DroppedItemKeys)
+	}
+
+	clresult, err := build(clean).Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if res.ResolvedHash != clresult.ResolvedHash {
+		t.Errorf("a dropped key changed ResolvedHash")
+	}
+	if res.Materialized.ItemsYAML != clresult.Materialized.ItemsYAML {
+		t.Errorf("a dropped key changed ItemsYAML:\n%s\nvs\n%s", res.Materialized.ItemsYAML, clresult.Materialized.ItemsYAML)
+	}
+}
+
+func TestDroppedItemKeys_RoundTrip(t *testing.T) {
+	keys := []DroppedItemKey{{Source: "itemRef \"a\"", Key: "item"}, {Source: "git input[1] (r)", Key: "root"}}
+	got, err := ParseDroppedItemKeys(MarshalDroppedItemKeys(keys))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(keys) {
+		t.Errorf("round trip = %v, want %v", got, keys)
+	}
+	if MarshalDroppedItemKeys(nil) != "" {
+		t.Error("expected empty marshal for no keys")
+	}
+	if got, err := ParseDroppedItemKeys("  "); got != nil || err != nil {
+		t.Errorf("blank parse = %v, %v; want nil, nil", got, err)
+	}
 }

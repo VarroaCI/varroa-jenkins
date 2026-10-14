@@ -260,3 +260,9 @@ func yamlFields(t reflect.Type) map[string]reflect.Type {
 	}
 	return out
 }
+
+// IsManifestKey reports whether Manifest declares key at its top level.
+func IsManifestKey(key string) bool {
+	_, ok := yamlFields(reflect.TypeOf(Manifest{}))[key]
+	return ok
+}

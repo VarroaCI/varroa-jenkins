@@ -816,12 +816,13 @@ func (r *CatalogReconciler) ReconcileComposedBundle(ctx context.Context, cb *v1a
 				varLines = append(varLines, k+": "+v)
 			}
 			contentData := map[string]string{
-				"jenkins.yaml":            result.Materialized.JenkinsYAML,
-				"plugins.yaml":            result.Materialized.PluginsYAML,
-				"items.yaml":              result.Materialized.ItemsYAML,
-				"rbac.yaml":               result.Materialized.RbacYAML,
-				"variables.yaml":          strings.Join(varLines, "\n"),
-				"pipeline-templates.yaml": result.Materialized.PipelineTemplatesYAML,
+				"jenkins.yaml":                     result.Materialized.JenkinsYAML,
+				"plugins.yaml":                     result.Materialized.PluginsYAML,
+				"items.yaml":                       result.Materialized.ItemsYAML,
+				"rbac.yaml":                        result.Materialized.RbacYAML,
+				"variables.yaml":                   strings.Join(varLines, "\n"),
+				"pipeline-templates.yaml":          result.Materialized.PipelineTemplatesYAML,
+				bundle.DroppedItemKeysConfigMapKey: bundle.MarshalDroppedItemKeys(result.Materialized.DroppedItemKeys),
 			}
 			if total, key, n := composedContentSize(contentData); total > maxComposedContentBytes {
 				msg := fmt.Sprintf("content too large: composed content is %d bytes, above the limit of %d bytes; "+

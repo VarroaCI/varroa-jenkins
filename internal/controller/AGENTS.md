@@ -1106,7 +1106,9 @@ sections describe.
     check **holds** the tenant: its folder is left out of
     `items.Merge`, its name goes on the merged `Manifest.Retain` so the
     mite keeps the folder, it carries no folder credential, and an
-    `ItemsHeld` tenant warning names the fault. A held tenant keeps its
+    `ItemsHeld` tenant warning names the fault. The check first reads
+    `dropped-item-keys.yaml`: an undefined top-level key, or `root`, holds the tenant, and
+    a `removeStrategy` or `retain` key adds a `BundleKeysIgnored` warning. A held tenant keeps its
     cloud and a fragment that loads; a fragment that does not load is
     dropped. A set `composedBundleRef` whose bundle is not found or has no
     `contentRef` yet (`errTenantBundleNotReady`) also holds the tenant; only

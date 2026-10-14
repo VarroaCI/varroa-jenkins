@@ -99,6 +99,10 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 		"rbac":        {},
 	}
 
+	// itemSources names the source of each entry in groups["item"], in the
+	// same order. composeItems uses it to name a dropped top-level key.
+	var itemSources []string
+
 	// Raw variables from all sources. Precedence (lowest to highest):
 	// 1. Item defaults — fill unset keys only
 	// 2. Spec-wide variables — override defaults
@@ -220,6 +224,13 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 				}
 				if strings.TrimSpace(content) != "" {
 					groups[groupKey] = append(groups[groupKey], content)
+					if groupKey == "item" {
+						refName := ref.Name
+						if ref.Namespace != "" {
+							refName = ref.Namespace + "/" + ref.Name
+						}
+						itemSources = append(itemSources, fmt.Sprintf("itemRef %q", refName))
+					}
 				}
 			}
 
@@ -279,6 +290,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 			}
 			if mat.ItemsYAML != "" {
 				groups["item"] = append(groups["item"], mat.ItemsYAML)
+				itemSources = append(itemSources, fmt.Sprintf("git input[%d] (%s)", i, gs.RepoURL))
 			}
 			if mat.RbacYAML != "" {
 				groups["rbac"] = append(groups["rbac"], mat.RbacYAML)
@@ -329,6 +341,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 			}
 			if mat.ItemsYAML != "" {
 				groups["item"] = append(groups["item"], mat.ItemsYAML)
+				itemSources = append(itemSources, fmt.Sprintf("OCI input[%d] (%s)", i, ocs.Ref))
 			}
 			if mat.RbacYAML != "" {
 				groups["rbac"] = append(groups["rbac"], mat.RbacYAML)
@@ -373,9 +386,13 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 	pluginsYAML, pluginWarnings := composePlugins(groups["plugin"])
 	result.Warnings = append(result.Warnings, pluginWarnings...)
 
-	itemsYAML, err := composeItems(groups["item"])
+	itemsYAML, droppedItemKeys, err := composeItems(groups["item"], itemSources)
 	if err != nil {
 		return nil, fmt.Errorf("compose items: %w", err)
+	}
+	for _, d := range droppedItemKeys {
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"item manifest from %s: top-level key %q is dropped; a composed bundle keeps only \"items\"", d.Source, d.Key))
 	}
 	rbacYAML, err := composeRbac(groups["rbac"])
 	if err != nil {
@@ -410,6 +427,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 		RbacYAML:              rbacYAML,
 		Variables:             rawVars,
 		PipelineTemplatesYAML: pipelineTemplatesYAML,
+		DroppedItemKeys:       droppedItemKeys,
 	}
 
 	// Step 6: Compute hash over unresolved content + raw vars.
@@ -745,27 +763,62 @@ func composePlugins(yamls []string) (string, []string) {
 	return string(out), warnings
 }
 
-// composeItems concatenates item YAML content under a single items key.
-func composeItems(yamls []string) (string, error) {
+// composeItems concatenates item YAML content under a single items key. It
+// also returns each top-level key other than items that a fragment declares
+// and the composer drops. sources[i] names the source of yamls[i].
+func composeItems(yamls []string, sources []string) (string, []DroppedItemKey, error) {
 	var items []map[string]any
+	var dropped []DroppedItemKey
 	for i, y := range yamls {
 		if strings.TrimSpace(y) == "" {
 			continue
 		}
+		source := sources[i]
+		dropped = append(dropped, droppedTopLevelKeys(y, source)...)
 		var wrapper struct {
 			Items []map[string]any `yaml:"items"`
 		}
 		if err := yaml.Unmarshal([]byte(y), &wrapper); err != nil {
-			return "", fmt.Errorf("input %d: %w", i, err)
+			return "", nil, fmt.Errorf("%s: %w", source, err)
 		}
 		items = append(items, wrapper.Items...)
 	}
 
 	if len(items) == 0 {
-		return "", nil
+		return "", dropped, nil
 	}
 	out, _ := yaml.Marshal(map[string]any{"items": items})
-	return string(out), nil
+	return string(out), dropped, nil
+}
+
+// droppedTopLevelKeys lists the top-level mapping keys of one item fragment
+// other than items and a merge key, in document order. A fragment that does
+// not parse as a mapping gives nothing; the wrapper unmarshal reports it.
+func droppedTopLevelKeys(y, source string) []DroppedItemKey {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(y), &doc); err != nil || len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	var out []DroppedItemKey
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := root.Content[i].Value
+		if key == "items" || isMergeKeyNode(root.Content[i]) {
+			continue
+		}
+		out = append(out, DroppedItemKey{Source: source, Key: key})
+	}
+	return out
+}
+
+// isMergeKeyNode reports whether k is a YAML merge key, by the same test as
+// yaml.v3. A quoted "<<" is an ordinary key.
+func isMergeKeyNode(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.Value == "<<" &&
+		(k.Tag == "" || k.Tag == "!" || k.ShortTag() == "!!merge")
 }
 
 // composeRbac merges RBAC YAML content under a single roles key.

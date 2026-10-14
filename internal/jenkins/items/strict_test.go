@@ -241,3 +241,16 @@ func TestParseStrict_QuotedMergeKeyIsAnOrdinaryKey(t *testing.T) {
 		t.Fatalf("keys = %+v, want quoted << key at item quoted", keys)
 	}
 }
+
+func TestIsManifestKey(t *testing.T) {
+	for _, key := range []string{"removeStrategy", "root", "retain", "items"} {
+		if !IsManifestKey(key) {
+			t.Errorf("IsManifestKey(%q) = false, want true", key)
+		}
+	}
+	for _, key := range []string{"item", "Items", "", "rbac"} {
+		if IsManifestKey(key) {
+			t.Errorf("IsManifestKey(%q) = true, want false", key)
+		}
+	}
+}

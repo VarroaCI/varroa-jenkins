@@ -1359,3 +1359,37 @@ func TestReconcileComposedBundle_TransientItemReadDoesNotFabricateDeletion(t *te
 		t.Errorf("a transient read error recomposed the bundle (%d new status patches); it is not a deletion", after-before)
 	}
 }
+
+func TestReconcileComposedBundle_WritesDroppedItemKeys(t *testing.T) {
+	tc := newCatalogTestClient()
+	tc.seedItem(&v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: "items-1", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem},
+		Status: v1alpha1.CatalogItemStatus{
+			Content: "item:\n- kind: folder\n  name: a\nitems:\n- kind: folder\n  name: b\n",
+			Valid:   true,
+		},
+	})
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb-drop", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{ItemRef: &v1alpha1.ComposedItemRef{Name: "items-1"}}},
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("expected Ready, got %+v", tc.lastStatus())
+	}
+	data := tc.configMapData["cb-drop-content"]
+	keys, err := bundle.ParseDroppedItemKeys(data[bundle.DroppedItemKeysConfigMapKey])
+	if err != nil {
+		t.Fatalf("parse dropped-item-keys.yaml: %v", err)
+	}
+	if len(keys) != 1 || keys[0].Key != "item" || keys[0].Source != `itemRef "items-1"` {
+		t.Errorf("dropped keys = %+v, want one item key from itemRef items-1", keys)
+	}
+}
