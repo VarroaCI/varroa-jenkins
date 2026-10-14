@@ -6,14 +6,12 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // poolLibraryCredentialLabelSelector marks a Secret as the git login of a
@@ -292,15 +290,9 @@ func (r *Reconciler) applyPoolLibraries(ctx context.Context, cr *v1alpha1.Contro
 
 	// A read failure fails the resolve. It must not read as a pool that no
 	// longer declares libraries, because that would unload them from Jenkins.
-	var libs []v1alpha1.CellPoolLibrary
-	if name := cr.Labels[cells.LabelCellPool]; name != "" && r.store != nil {
-		pool, err := crdstore.Get[v1alpha1.CellPool](ctx, r.store, name, "")
-		switch {
-		case err == nil:
-			libs = pool.Spec.Libraries
-		case !apierrors.IsNotFound(err):
-			return fmt.Errorf("read cell pool %q: %w", name, err)
-		}
+	libs, err := r.cellPoolLibraries(ctx, cr)
+	if err != nil {
+		return fmt.Errorf("read cell pool %q: %w", cr.Labels[cells.LabelCellPool], err)
 	}
 
 	var secrets []map[string][]byte

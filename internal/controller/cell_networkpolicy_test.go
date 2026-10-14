@@ -17,6 +17,7 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
@@ -709,5 +710,183 @@ func TestBuildCellNetworkPolicyAdmitsUpdateCenter(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no egress rule admits the varroa-updatecenter component")
+	}
+}
+
+// seedCellPoolWithLibrary registers pool-a with one library at remote and
+// labels cr as a member of that pool.
+func seedCellPoolWithLibrary(client *testClient, cr *v1alpha1.Controller, remote string) {
+	crdstore.MustSeed(client.store, &v1alpha1.CellPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+		Spec: v1alpha1.CellPoolSpec{
+			ProfileRef: "lts-2-555",
+			Libraries: []v1alpha1.CellPoolLibrary{{
+				Name: "platform-lib", Remote: remote, DefaultVersion: "main",
+			}},
+		},
+	})
+	cr.Labels = map[string]string{cells.LabelCellPool: "pool-a"}
+}
+
+// TestBuildCellNetworkPolicy_LibraryPeersRenderAfterRunnersBeforeExtra
+// checks the rule order: runner rules, then library rules, then extra
+// egress.
+func TestBuildCellNetworkPolicy_LibraryPeersRenderAfterRunnersBeforeExtra(t *testing.T) {
+	spec := CellPolicySpec{
+		ControllerName:   "test",
+		Namespace:        "ns1",
+		ReleaseNamespace: "varroa-system",
+		GatewayGRPCPort:  9090,
+		RunnerPeers:      []runners.RunnerEgressPeer{{IP: "10.20.0.5", Port: 22}},
+		LibraryPeers:     []runners.RunnerEgressPeer{{IP: "10.30.0.9", Port: 2222}},
+		ExtraEgress: []networkingv1.NetworkPolicyEgressRule{{
+			To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "192.0.2.0/24"}}},
+		}},
+	}
+	np := buildCellNetworkPolicy(spec)
+	order := []string{"10.20.0.5/32", "10.30.0.9/32", "192.0.2.0/24"}
+	last := -1
+	for _, cidr := range order {
+		idx := -1
+		for i, rule := range np.Spec.Egress {
+			if len(rule.To) == 1 && rule.To[0].IPBlock != nil && rule.To[0].IPBlock.CIDR == cidr {
+				idx = i
+			}
+		}
+		if idx <= last {
+			t.Fatalf("rule %s at index %d, want after index %d; egress = %+v", cidr, idx, last, np.Spec.Egress)
+		}
+		last = idx
+	}
+}
+
+// TestReconcileCellNetworkPolicy_PoolLibraryContributesPeer checks that a
+// pool library's resolved host and port reach the built policy.
+func TestReconcileCellNetworkPolicy_PoolLibraryContributesPeer(t *testing.T) {
+	withPoolLibraryLookup(t, func(context.Context, string) ([]string, error) {
+		return []string{"10.30.0.9"}, nil
+	})
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	seedCellPoolWithLibrary(client, cr, "ssh://git@git.example:2222/lib.git")
+
+	if err := rec.reconcileCellNetworkPolicy(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("reconcileCellNetworkPolicy: %v", err)
+	}
+	if len(client.createdCellNetworkPolicies) != 1 {
+		t.Fatalf("createdCellNetworkPolicies = %+v, want exactly 1", client.createdCellNetworkPolicies)
+	}
+	spec := client.createdCellNetworkPolicies[0]
+	want := runners.RunnerEgressPeer{IP: "10.30.0.9", Port: 2222}
+	if len(spec.LibraryPeers) != 1 || spec.LibraryPeers[0] != want {
+		t.Fatalf("LibraryPeers = %+v, want [%+v]", spec.LibraryPeers, want)
+	}
+
+	np := buildCellNetworkPolicy(spec)
+	found := false
+	for _, rule := range np.Spec.Egress {
+		if len(rule.To) == 1 && rule.To[0].IPBlock != nil && rule.To[0].IPBlock.CIDR == "10.30.0.9/32" {
+			found = true
+			if len(rule.Ports) != 1 || rule.Ports[0].Port.IntValue() != 2222 {
+				t.Errorf("library rule ports = %+v, want [2222]", rule.Ports)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("built policy carries no egress rule to 10.30.0.9/32; egress = %+v", np.Spec.Egress)
+	}
+}
+
+// TestReconcileCellNetworkPolicy_PoolWithoutLibrariesAddsNoPeer covers a
+// cell whose pool is missing and a pool that declares no library.
+func TestReconcileCellNetworkPolicy_PoolWithoutLibrariesAddsNoPeer(t *testing.T) {
+	t.Run("missing pool", func(t *testing.T) {
+		client := newTestClient()
+		rec := newTestReconciler(client)
+		rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
+		cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+		cr.Labels = map[string]string{cells.LabelCellPool: "pool-missing"}
+		if err := rec.reconcileCellNetworkPolicy(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+			t.Fatalf("reconcileCellNetworkPolicy: %v", err)
+		}
+		if got := client.createdCellNetworkPolicies[0].LibraryPeers; len(got) != 0 {
+			t.Fatalf("LibraryPeers = %+v, want none", got)
+		}
+	})
+	t.Run("empty library list", func(t *testing.T) {
+		client := newTestClient()
+		rec := newTestReconciler(client)
+		rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
+		cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+		crdstore.MustSeed(client.store, &v1alpha1.CellPool{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
+			Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555"},
+		})
+		cr.Labels = map[string]string{cells.LabelCellPool: "pool-a"}
+		if err := rec.reconcileCellNetworkPolicy(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+			t.Fatalf("reconcileCellNetworkPolicy: %v", err)
+		}
+		if got := client.createdCellNetworkPolicies[0].LibraryPeers; len(got) != 0 {
+			t.Fatalf("LibraryPeers = %+v, want none", got)
+		}
+	})
+}
+
+// TestReconcileCellNetworkPolicy_RemovedLibraryLosesItsPeer models two
+// ticks: the pool is deleted between them, so its library peer drops.
+func TestReconcileCellNetworkPolicy_RemovedLibraryLosesItsPeer(t *testing.T) {
+	withPoolLibraryLookup(t, func(context.Context, string) ([]string, error) {
+		return []string{"10.30.0.9"}, nil
+	})
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	seedCellPoolWithLibrary(client, cr, "https://git.example/lib.git")
+
+	ctx := context.Background()
+	if err := rec.reconcileCellNetworkPolicy(ctx, cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	if got := client.createdCellNetworkPolicies[0].LibraryPeers; len(got) != 1 {
+		t.Fatalf("tick 1 LibraryPeers = %+v, want one peer", got)
+	}
+
+	gvr := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "cellpools"}
+	if err := client.store.DeleteObject(ctx, gvr, "", "pool-a"); err != nil {
+		t.Fatalf("delete pool: %v", err)
+	}
+	if err := rec.reconcileCellNetworkPolicy(ctx, cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if got := client.createdCellNetworkPolicies[1].LibraryPeers; len(got) != 0 {
+		t.Fatalf("tick 2 LibraryPeers = %+v, want none after removal", got)
+	}
+}
+
+// TestReconcileCellNetworkPolicy_PoolReadErrorWritesNothing checks that a
+// failed pool read returns an error and writes no policy.
+func TestReconcileCellNetworkPolicy_PoolReadErrorWritesNothing(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.cellsConfig = CellsConfig{NetworkPolicyEnabled: true, CellIsolation: CellIsolation{Enabled: true}}
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseConnected)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	cr.Labels = map[string]string{cells.LabelCellPool: "pool-a"}
+	gvr := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "cellpools"}
+	client.store.FailAlways("get", gvr, errors.New("apiserver unavailable"))
+
+	if err := rec.reconcileCellNetworkPolicy(context.Background(), cr, runners.RunnerContribution{}); err == nil {
+		t.Fatal("a pool read failure must fail the reconcile")
+	}
+	if len(client.createdCellNetworkPolicies) != 0 {
+		t.Fatalf("createdCellNetworkPolicies = %+v, want none", client.createdCellNetworkPolicies)
 	}
 }

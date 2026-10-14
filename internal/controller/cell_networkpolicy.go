@@ -59,6 +59,9 @@ type CellPolicySpec struct {
 	// runners.BuildContribution read that produced the cell's node list.
 	// One egress rule renders per entry.
 	RunnerPeers []runners.RunnerEgressPeer
+	// LibraryPeers is one resolved address per pool library remote,
+	// rendered as a separate rule set from RunnerPeers.
+	LibraryPeers []runners.RunnerEgressPeer
 	// ExtraIngress and ExtraEgress render verbatim after the fixed rules,
 	// mirroring chart value networkPolicy.cellIsolation.extraIngress and
 	// networkPolicy.cellIsolation.extraEgress. The operator never writes a
@@ -148,7 +151,8 @@ func buildCellNetworkPolicy(spec CellPolicySpec) *networkingv1.NetworkPolicy {
 			},
 		})
 	}
-	egress = append(egress, runnerEgressRules(spec.RunnerPeers)...)
+	egress = append(egress, addressEgressRules(spec.RunnerPeers)...)
+	egress = append(egress, addressEgressRules(spec.LibraryPeers)...)
 	egress = append(egress, spec.ExtraEgress...)
 
 	return &networkingv1.NetworkPolicy{
@@ -223,13 +227,14 @@ func portRule(protocol *corev1.Protocol, port int32) networkingv1.NetworkPolicyP
 	return networkingv1.NetworkPolicyPort{Protocol: protocol, Port: &p}
 }
 
-// runnerEgressRules builds one egress rule per resolved ssh-runner peer
-// (design D11), sorted by address then port so the result is deterministic
-// regardless of the caller's read order. A peer absent from the list opens
-// no rule: this is how a deleted or moved runner's rule disappears on the
-// next assembly. This is a separate rule set from
-// networkPolicy.cellIsolation.extraEgress: the two never merge.
-func runnerEgressRules(peers []runners.RunnerEgressPeer) []networkingv1.NetworkPolicyEgressRule {
+// addressEgressRules builds one egress rule per resolved peer, sorted by
+// address then port so the result is deterministic regardless of the
+// caller's read order. A peer absent from the list opens no rule: this is
+// how a deleted or moved runner's rule disappears on the next assembly.
+// Runner and pool library peers pass through this function. Its rules are
+// a separate rule set from networkPolicy.cellIsolation.extraEgress: the two
+// never merge.
+func addressEgressRules(peers []runners.RunnerEgressPeer) []networkingv1.NetworkPolicyEgressRule {
 	sorted := append([]runners.RunnerEgressPeer(nil), peers...)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].IP != sorted[j].IP {
@@ -324,6 +329,10 @@ func (r *Reconciler) reconcileCellNetworkPolicy(ctx context.Context, cr *v1alpha
 	if !r.cellsConfig.NetworkPolicyEnabled || !r.cellsConfig.CellIsolation.Enabled {
 		return r.client.DeleteCellNetworkPolicy(ctx, name, cr.Namespace)
 	}
+	libs, err := r.cellPoolLibraries(ctx, cr)
+	if err != nil {
+		return fmt.Errorf("read cell pool libraries: %w", err)
+	}
 	spec := CellPolicySpec{
 		ControllerName:   controllerPrefix(cr),
 		Namespace:        cr.Namespace,
@@ -332,6 +341,7 @@ func (r *Reconciler) reconcileCellNetworkPolicy(ctx context.Context, cr *v1alpha
 		AgentNamespaces:  r.cellTenantAgentNamespaces(ctx, cr),
 		APIServerEgress:  r.cellsConfig.APIServerEgress,
 		RunnerPeers:      contrib.EgressPeers,
+		LibraryPeers:     poolLibraryEgressPeers(ctx, libs),
 		ExtraIngress:     r.cellsConfig.CellIsolation.ExtraIngress,
 		ExtraEgress:      r.cellsConfig.CellIsolation.ExtraEgress,
 	}

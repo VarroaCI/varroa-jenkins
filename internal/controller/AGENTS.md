@@ -996,6 +996,12 @@ sections describe.
     to `MaterializedBundle.CellPoolLibraryCredentials`, injected into the mite
     command's JcascYaml by `buildDesiredStateCommand`. Faults set the
     `PoolLibraries` condition; a faulty library is held, not rendered),
+    `cell_pool_library_egress.go`
+    (`poolLibraryEgressPeers` turns each library remote into resolved
+    address and port peers on every tick. An IP host needs no lookup. A
+    hostname resolves through the replaceable `poolLibraryLookupHost`. A
+    failed lookup skips only that library. `cellPoolLibraries` is the shared
+    pool-library read),
     `cell_pool_mail.go`
     (`applyPoolMail` renders `CellPool.spec.mail` into
     `MaterializedBundle.CellPoolMail`: the `unclassified` keys of the
@@ -1049,7 +1055,8 @@ sections describe.
     — so a tenant add/remove converges without a re-provision; ingress
     admits the BFF and the operator, never the gateway; egress reaches the
     gateway's gRPC and API-key-verify ports, each placed tenant's agent
-    namespace, kube-dns, and the configured API-server CIDRs), `cell_jcasc.go`
+    namespace, kube-dns, the configured API-server CIDRs, and each pool
+    library remote host and port resolved per tick (`cell_pool_library_egress.go`)), `cell_jcasc.go`
     (the fixed cell JCasC fragment — `numExecutors: 0`,
     `MAX_SURVIVABILITY` flow durability, which the pipeline mesh needs
     because a lower level writes the flow program at a checkpoint. A job's

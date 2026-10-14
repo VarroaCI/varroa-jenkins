@@ -69,7 +69,13 @@ With `implicit: true`, the library loads in every job of the pool. The pipeline 
 
 ## Egress
 
-A cell reaches the library repository from its own JVM. The operator does not add an egress rule for a library. Add a rule to `networkPolicy.cellIsolation.extraEgress` in the chart values. Allow the git host and port.
+A cell reaches the library repository from its own JVM. The operator adds one egress rule for each library remote. The rule allows the git host and port of the remote.
+
+- The operator adds one egress rule for each resolved address of each library host.
+- The port is the explicit port in the URL. Without one, it is 443 for `https` and 22 for `ssh` and `user@host:path` remotes.
+- The operator resolves a hostname on every reconcile. A lookup failure skips that library's rule only.
+- A host with rotating addresses rewrites the policy often. For such a host, add a CIDR entry to `networkPolicy.cellIsolation.extraEgress` instead.
+- The rules apply only when `networkPolicy.cellIsolation.enabled` is `true`.
 
 ## Condition
 

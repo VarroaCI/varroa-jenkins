@@ -132,6 +132,10 @@ of a tenant currently placed on it, to that runner's `spec.host` on `spec.port`.
 computes these rules itself on every reconcile; `cellIsolation.extraEgress` is a separate,
 hand-maintained list and plays no part in them.
 
+A cell's policy also admits one egress rule per resolved address of each pool library remote.
+The operator resolves the remote host on every reconcile. See
+[pool library egress](../operations/cell-libraries.md#egress).
+
 ## The public host and WebSocket upgrades
 
 The dashboard host serves both the tenant webhook door and the external-runner agent door. Any
