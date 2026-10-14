@@ -483,6 +483,10 @@ federation, activity persistence, and SSE fanout.
   jobs under a tenant. A single-controller tenant (empty `Folder`) reads its
   controller's bundle with the lenient `items.Parse`. Job paths on this surface
   are Jenkins full names, the same shape the record store stores.
+  A member-placed Team (local NotFound, non-local `ref.Cluster`) reads through
+  `ConfigBrood.GetTeamBundleContent` on `operator.<cluster>.bundles.teamcontent`.
+  That read is live, with the same strict parse. A member NotFound yields no
+  definition.
 - **Pipeline template resolution** (`pipelines_definition.go`) — the job detail's
   `template` row (`buildPipelineTemplateInfo`) picks one of three sources, never
   guessing: an items-declared job (`definition.varroaTemplate`) resolves its

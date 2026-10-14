@@ -90,6 +90,11 @@ type ConfigBrood interface {
 	ListCellPools(ctx context.Context, cluster string) ([]v1alpha1.CellPool, error)
 	GetCellPool(ctx context.Context, cluster, name string) (*v1alpha1.CellPool, error)
 	ScaleCellPool(ctx context.Context, cluster string, req bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error)
+
+	// --- Member-placed Team bundles (member clusters only) ---
+	// GetTeamBundleContent reads a Team that only a member cluster holds.
+	// It refuses the local cluster, whose Teams the caller reads on its own store.
+	GetTeamBundleContent(ctx context.Context, cluster, team string) (*v1alpha1.ComposedBundle, map[string]string, error)
 }
 
 // busConfigBrood implements ConfigBrood over the NATS bus (with direct k8s

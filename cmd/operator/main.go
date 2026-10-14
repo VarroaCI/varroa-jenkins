@@ -1850,7 +1850,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"broodschedules.list", bus.OperatorBroodSchedulesSubject(r.cluster, "list"), r.broodSchedules.HandleList, serialResponder},
 		{"broodschedules.delete", bus.OperatorBroodSchedulesSubject(r.cluster, "delete"), r.broodSchedules.HandleDelete, serialResponder},
 		{"broodschedules.suspend", bus.OperatorBroodSchedulesSubject(r.cluster, "suspend"), r.broodSchedules.HandleSuspend, serialResponder},
-		// Config CRUD handlers (bundles, catalog, rbac) — 26 subjects.
+		// Config CRUD handlers (bundles, catalog, rbac) — 27 subjects.
 		{"bundles.list", bus.OperatorBundlesSubject(r.cluster, "list"), r.configCrud.HandleBundlesList, serialResponder},
 		{"bundles.get", bus.OperatorBundlesSubject(r.cluster, "get"), r.configCrud.HandleBundlesGet, serialResponder},
 		{"bundles.create", bus.OperatorBundlesSubject(r.cluster, "create"), r.configCrud.HandleBundlesCreate, serialResponder},
@@ -1859,6 +1859,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview, composeConcurrency},
 		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause, serialResponder},
 		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause, serialResponder},
+		{"bundles.teamcontent", bus.OperatorBundlesSubject(r.cluster, "teamcontent"), r.configCrud.HandleBundlesTeamContent, serialResponder},
 		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList, serialResponder},
 		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet, serialResponder},
 		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList, serialResponder},

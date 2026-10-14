@@ -3,7 +3,7 @@ package bus
 import "encoding/json"
 
 // OperatorBundlesSubject returns operator.<cluster>.bundles.<verb>.
-// verb ∈ list|get|create|update|delete|preview|pause|resume.
+// verb ∈ list|get|create|update|delete|preview|pause|resume|teamcontent.
 // Request/response types per verb are defined below in this file.
 func OperatorBundlesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".bundles." + verb
@@ -48,6 +48,24 @@ func OperatorVersionProfilesSubject(cluster, verb string) string {
 // ConfigGetResponse with the stored pool after the write.
 func OperatorCellPoolsSubject(cluster, verb string) string {
 	return "operator." + cluster + ".cellpools." + verb
+}
+
+// TeamBundleContentRequest is the payload for bundles.teamcontent. Team
+// names a Team that the member cluster holds.
+type TeamBundleContentRequest struct {
+	Team string `json:"team"`
+}
+
+// TeamBundleContentResponse is the reply for bundles.teamcontent. An empty
+// Bundle means the Team has no pipelines bundle ref, or the ref names no
+// ComposedBundle. A nil Content means the bundle has no contentRef, or its
+// ConfigMap is absent. Code CodeNotFound means the member holds no such Team.
+// Content holds only the keys a pipeline read needs.
+type TeamBundleContentResponse struct {
+	Bundle  json.RawMessage   `json:"bundle,omitempty"`
+	Content map[string]string `json:"content,omitempty"`
+	Code    string            `json:"code,omitempty"`
+	Error   string            `json:"error,omitempty"`
 }
 
 // CellPoolScaleRequest is the payload for cellpools.scale. It carries the

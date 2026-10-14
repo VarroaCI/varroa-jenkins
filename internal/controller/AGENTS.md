@@ -479,6 +479,9 @@ sections describe.
   already reported any parse error on the bundle itself. Called from
   `config_crud.go`'s preview/validate NATS replies onto
   `bus.BundleComposePreview.PipelineTemplates`.
+- **Team bundle content reply.** `config_crud_teambundle.go` answers
+  `bundles.teamcontent` for a member-placed Team's pipeline read. It returns the
+  bundle and four content keys, never `jenkins.yaml`.
 - **plugins-init reports on its termination log.** `pluginsInitScript`
   (`clientset_client.go`) writes one marker line that `plugininit_report.go`
   parses, so the format is a contract:

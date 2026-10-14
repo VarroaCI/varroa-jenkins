@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
@@ -112,10 +114,11 @@ func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v
 
 // teamPipelineBundleContent reads a placed Team's own composed bundle and
 // its content ConfigMap, named by Team.spec.pipelines.composedBundleRef.
-// It returns a nil bundle and a nil map, with no error, when the Team, its
-// pipelines spec, its bundle ref, or the bundle's ConfigMap cannot be
-// found: a tenant with no catalog template still serves record-derived
-// data alone.
+// A Team that the local store does not hold, and that ref.Cluster names
+// as a member, is read live from that member. It returns a nil bundle and
+// a nil map, with no error, when the Team, its pipelines spec, its bundle
+// ref, or the bundle's ConfigMap cannot be found: a tenant with no catalog
+// template still serves record-derived data alone.
 func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.ComposedBundle, map[string]string, error) {
 	if ref.Team == "" {
 		return nil, nil, nil
@@ -123,6 +126,9 @@ func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, ref.Team, "")
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
+			if !s.isLocalCluster(ref.Cluster) {
+				return s.memberTeamBundleContent(ctx, ref)
+			}
 			return nil, nil, nil
 		}
 		return nil, nil, err
@@ -132,6 +138,21 @@ func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (
 	}
 	bundleRef := team.Spec.Pipelines.ComposedBundleRef
 	return s.composedBundleContent(ctx, bundleRef.Name, bundleRef.Namespace)
+}
+
+// memberTeamBundleContent reads a Team that only a member cluster holds,
+// over that member's bundles.teamcontent subject. A member that holds no
+// such Team answers a nil bundle and a nil map, with no error.
+func (s *Server) memberTeamBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.ComposedBundle, map[string]string, error) {
+	if s.deps.ConfigBrood == nil {
+		return nil, nil, nil
+	}
+	cb, content, err := s.deps.ConfigBrood.GetTeamBundleContent(ctx, ref.Cluster, ref.Team)
+	var be *BroodError
+	if errors.As(err, &be) && be.Code == bus.CodeNotFound {
+		return nil, nil, nil
+	}
+	return cb, content, err
 }
 
 // tenantController returns ref's controller, or nil when it does not

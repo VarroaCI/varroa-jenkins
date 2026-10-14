@@ -16,6 +16,8 @@ verb. `/pipelines` lists only the teams that hold pipelines you can read, includ
 teams. A team with no pipelines and no controllers in its namespaces does not show. It opens your
 only team automatically. With more than one, pick one.
 
+A team on a member cluster shows its definition, parameters, and declared jobs. Varroa reads them from the member at each request.
+
 ## Your cell card
 
 A team on a [cell](../operations/cells.md) shows a placement pill under the page title. The pill
@@ -30,8 +32,6 @@ builds, or counts.
 
 **Cell details** opens the cell's controller page, if your access covers it. Otherwise you still
 read every field.
-
-**Updated** shows when the browser last read the record. It re-reads every 30 seconds.
 
 The card reports one of five states.
 
@@ -51,8 +51,7 @@ A cell in another cluster reports no queue length. The **Queue** figure then rea
 which is not an empty queue.
 
 **Free slots** counts the free tenant slots of this cell alone. The cell's pool can hold a lower
-cap, which stops a new team from landing even while the cell reports a free slot. An operator
-reads both numbers on the cell page.
+cap, which stops a new team from landing even while the cell reports a free slot.
 
 ## Read the pipelines tree
 
