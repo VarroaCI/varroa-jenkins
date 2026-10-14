@@ -13,21 +13,10 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
-	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
 )
-
-// cellLintRules is the fixed rule set each tenant's re-rooted manifest must
-// pass before the operator pushes it (design D9). A finding holds only that
-// tenant.
-var cellLintRules = []lint.Rule{
-	lint.NoPollSCMRule{},
-	lint.NoGlobalCredentialsRule{},
-	lint.NoControllerConfigDependencyRule{},
-	lint.NoJobDSLRule{},
-}
 
 // assembleCellState is what assembleCellContent computes for one cell tick:
 // the merged items.yaml with no tenant credential, the tenant clouds to
@@ -123,7 +112,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// provision an agent. A draining tenant is never held, because a
 		// held folder would never drain.
 		if !draining {
-			fragment, templateFindings := lintTenantTemplates(data["pipeline-templates.yaml"])
+			fragment, templateFindings := bundle.LintTenantTemplates(data["pipeline-templates.yaml"])
 			// Two tenant folders never overlap, so two tenant fragments never
 			// conflict: each fragment loads against the cell's own base only.
 			_, fragErr := bundle.InjectPipelineTemplates(templateBase, fragment, team.Name)
@@ -135,7 +124,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 				err = fmt.Errorf("pipeline-templates.yaml: %w", fragErr)
 			}
 			if err == nil && len(templateFindings) > 0 {
-				err = fmt.Errorf("pipeline template lint failed: %s", findingsSummary(templateFindings))
+				err = fmt.Errorf("pipeline template lint failed: %s", lint.Summary(templateFindings))
 			}
 			if err != nil {
 				hold(team.Name, err)
@@ -272,7 +261,7 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 	// A declared top-level item key that a cell does not apply is named
 	// here. An undefined key or root holds the tenant instead, in
 	// materializeTenantManifest. A parse fault also holds it there.
-	if _, declared, err := droppedItemKeys(data); err == nil {
+	if _, declared, err := bundle.SplitDroppedItemKeys(data); err == nil {
 		for _, d := range declared {
 			if d.Key == "root" {
 				continue
@@ -287,95 +276,16 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 	return lift.Templates, warnings
 }
 
-// droppedItemKeys splits the top-level item keys that the composer dropped
-// for a tenant. unknown names keys that no manifest field declares. declared
-// names keys that Manifest declares, which a cell refuses or ignores.
-func droppedItemKeys(data map[string]string) (unknown, declared []bundle.DroppedItemKey, err error) {
-	keys, err := bundle.ParseDroppedItemKeys(data[bundle.DroppedItemKeysConfigMapKey])
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, k := range keys {
-		if items.IsManifestKey(k.Key) {
-			declared = append(declared, k)
-		} else {
-			unknown = append(unknown, k)
-		}
-	}
-	return unknown, declared, nil
-}
-
-// lintTenantTemplates runs cellLintRules over the inline jenkinsfile of
-// each template in fragment. It returns fragment without the failing
-// templates, and the findings. A template with an scmDefinition has no
-// body here and passes. A fragment that does not parse returns
-// unchanged with no finding; InjectPipelineTemplates reports that fault.
-func lintTenantTemplates(fragment string) (string, []lint.Finding) {
-	docs, err := bundle.ParsePipelineTemplates(fragment)
-	if err != nil {
-		return fragment, nil
-	}
-	var findings []lint.Finding
-	kept := make([]pipelinetemplate.Document, 0, len(docs))
-	for _, doc := range docs {
-		if doc.Spec.Jenkinsfile == "" {
-			kept = append(kept, doc)
-			continue
-		}
-		label := "pipeline template " + doc.Metadata.Name + "@" + doc.Spec.Version
-		docFindings := lint.RunScript(doc.Spec.Jenkinsfile, label, cellLintRules)
-		if len(docFindings) == 0 {
-			kept = append(kept, doc)
-			continue
-		}
-		findings = append(findings, docFindings...)
-	}
-	if len(findings) == 0 {
-		return fragment, nil
-	}
-	rendered, err := bundle.RenderPipelineTemplates(kept)
-	if err != nil {
-		return "", findings
-	}
-	return rendered, findings
-}
-
 // materializeTenantManifest returns a tenant's items.yaml re-rooted under
-// its folder, or the first check it fails. It resolves the tenant's own
-// variables.yaml in one pass and no cell variable, so a tenant item never
-// reads a cell value. Any "${" reference left after that pass fails, a
-// ${varroa_*} name included. Then the manifest must parse with no unknown
-// key, must set no root, must pass cellLintRules, and must not need a plugin that coreSet
-// omits. Nil data gives an empty folder.
+// its folder, or the first check it fails. The item checks come from
+// bundle.TenantItemsManifest: the dropped item keys, a strict parse of
+// the tenant's own variables, and the cell lint rules. The plugin-set
+// checks run here only, because they need the cell's coreSet. Nil data
+// gives an empty folder.
 func materializeTenantManifest(team string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
-	// The composer keeps only items, so a dropped key never reaches
-	// items.yaml. A tenant that sets an undefined key, or root, is held.
-	unknown, declared, err := droppedItemKeys(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", bundle.DroppedItemKeysConfigMapKey, err)
-	}
-	if len(unknown) > 0 {
-		named := make([]string, 0, len(unknown))
-		for _, k := range unknown {
-			named = append(named, fmt.Sprintf("%q (from %s)", k.Key, k.Source))
-		}
-		return nil, fmt.Errorf("item manifest drops unknown top-level keys: %s", strings.Join(named, ", "))
-	}
-	for _, d := range declared {
-		if d.Key == "root" {
-			return nil, fmt.Errorf("item manifest sets top-level key \"root\" (from %s); a tenant may not set root", d.Source)
-		}
-	}
-	manifest, err := bundle.ParseTenantItems(data)
+	rerooted, err := bundle.TenantItemsManifest(team, data)
 	if err != nil {
 		return nil, err
-	}
-	rerooted, err := items.ReRoot(manifest, team)
-	if err != nil {
-		return nil, err
-	}
-	if findings := lint.Run(rerooted, cellLintRules); len(findings) > 0 {
-		return nil, fmt.Errorf("items lint failed: %s", findingsSummary(findings))
 	}
 	if err := checkBranchBuildStrategiesManifest(rerooted, coreSet); err != nil {
 		return nil, err
@@ -399,16 +309,6 @@ func (r *Reconciler) tenantCloudCredentialFor(ctx context.Context, team, agentNa
 		return nil
 	}
 	return &tenantCloudCredential{ID: tenantCloudCredentialID(team), Secret: string(data["token"])}
-}
-
-// findingsSummary renders lint findings as one line per finding, each
-// naming its rule id, item path, and message.
-func findingsSummary(findings []lint.Finding) string {
-	lines := make([]string, 0, len(findings))
-	for _, f := range findings {
-		lines = append(lines, fmt.Sprintf("%s at %q: %s", f.Rule, f.Path, f.Message))
-	}
-	return strings.Join(lines, "; ")
 }
 
 // recordCellTenantWarnings rebuilds cr.Status.Cell.TenantWarnings' entries

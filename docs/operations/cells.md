@@ -106,17 +106,18 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   folder; its next trigger fails with `JOB_NOT_FOUND`. See
   [Build records](build-records.md).
 - **Held folder.** Tenant items resolve only their own variables. The operator
-  keeps the folder and jobs on one of these faults:
+  keeps the folder and jobs on these faults:
   - an item still holds `${`, a `${varroa_*}` name too;
   - the items do not parse, hold an unknown key, set `root`, or fail a lint rule;
-  - the item manifest holds an undefined top-level key, such as `item`, or a top-level `root` key;
   - an item needs a plugin the cell does not pin;
   - a pipeline template does not load, or its body fails a lint rule. Only a failing template
     leaves the fragment; the tenant's other templates stay;
   - the bundle is missing or not built.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until fixed. A folder held for a parse or variable fault shows no declared job.
+  folder until fixed. Pipelines pages declare no job for a folder held for a variable, parse,
+  unknown-key, `root`, or lint fault, template bodies included. Other holds show their jobs.
+  The `TenantWarnings` condition names it.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity

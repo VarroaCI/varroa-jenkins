@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
 )
 
 // ParseVariables reads the "name: value" lines of a content ConfigMap's
@@ -93,4 +95,94 @@ func ParseTenantItems(data map[string]string) (*items.Manifest, error) {
 		return nil, fmt.Errorf("parse tenant items.yaml: %w", err)
 	}
 	return manifest, nil
+}
+
+// SplitDroppedItemKeys splits the top-level item keys that the composer
+// dropped for a tenant. unknown names keys that no manifest field
+// declares. declared names keys that Manifest declares, which a cell
+// refuses or ignores.
+func SplitDroppedItemKeys(data map[string]string) (unknown, declared []DroppedItemKey, err error) {
+	keys, err := ParseDroppedItemKeys(data[DroppedItemKeysConfigMapKey])
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, k := range keys {
+		if items.IsManifestKey(k.Key) {
+			declared = append(declared, k)
+		} else {
+			unknown = append(unknown, k)
+		}
+	}
+	return unknown, declared, nil
+}
+
+// TenantItemsManifest returns a tenant's items.yaml re-rooted under
+// folder, or the first item check it fails. It checks the dropped item
+// keys, then parses with ParseTenantItems, then re-roots, then runs
+// lint.CellRules. It runs no plugin-set check; that check needs the
+// cell's resolved plugin set.
+func TenantItemsManifest(folder string, data map[string]string) (*items.Manifest, error) {
+	unknown, declared, err := SplitDroppedItemKeys(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", DroppedItemKeysConfigMapKey, err)
+	}
+	if len(unknown) > 0 {
+		named := make([]string, 0, len(unknown))
+		for _, k := range unknown {
+			named = append(named, fmt.Sprintf("%q (from %s)", k.Key, k.Source))
+		}
+		return nil, fmt.Errorf("item manifest drops unknown top-level keys: %s", strings.Join(named, ", "))
+	}
+	for _, d := range declared {
+		if d.Key == "root" {
+			return nil, fmt.Errorf("item manifest sets top-level key \"root\" (from %s); a tenant may not set root", d.Source)
+		}
+	}
+	manifest, err := ParseTenantItems(data)
+	if err != nil {
+		return nil, err
+	}
+	rerooted, err := items.ReRoot(manifest, folder)
+	if err != nil {
+		return nil, err
+	}
+	if findings := lint.Run(rerooted, lint.CellRules()); len(findings) > 0 {
+		return nil, fmt.Errorf("items lint failed: %s", lint.Summary(findings))
+	}
+	return rerooted, nil
+}
+
+// LintTenantTemplates runs the cell rule set over the inline jenkinsfile
+// of each template in fragment. It returns fragment without the failing
+// templates, and the findings. A template with an scmDefinition has no
+// body here and passes. A fragment that does not parse returns
+// unchanged with no finding; InjectPipelineTemplates reports that fault.
+func LintTenantTemplates(fragment string) (string, []lint.Finding) {
+	docs, err := ParsePipelineTemplates(fragment)
+	if err != nil {
+		return fragment, nil
+	}
+	var findings []lint.Finding
+	kept := make([]pipelinetemplate.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc.Spec.Jenkinsfile == "" {
+			kept = append(kept, doc)
+			continue
+		}
+		label := "pipeline template " + doc.Metadata.Name + "@" + doc.Spec.Version
+		docFindings := lint.RunScript(doc.Spec.Jenkinsfile, label, lint.CellRules())
+		if len(docFindings) == 0 {
+			kept = append(kept, doc)
+			continue
+		}
+		findings = append(findings, docFindings...)
+	}
+	if len(findings) == 0 {
+		return fragment, nil
+	}
+	rendered, err := RenderPipelineTemplates(kept)
+	if err != nil {
+		return "", findings
+	}
+	return rendered, findings
 }

@@ -211,3 +211,10 @@ func disallowedFieldNames(names []string) []string {
 	}
 	return out
 }
+
+// CellRules returns the fixed rule set that a cell runs on each tenant's
+// re-rooted manifest and on each inline template jenkinsfile. Each call
+// returns a new slice.
+func CellRules() []Rule {
+	return []Rule{NoPollSCMRule{}, NoGlobalCredentialsRule{}, NoControllerConfigDependencyRule{}, NoJobDSLRule{}}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -173,10 +175,11 @@ func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1
 
 // controllerItemManifest reads and parses the items.yaml that declares
 // ref's jobs. A placed Team (ref.Folder set) reads its own tenant bundle.
-// It resolves the tenant's variables, then parses strictly, as the cell
-// does. A manifest that the cell holds gives no definition. The gate is
-// ref.Folder, so a placed Team with no local controller is covered. The
-// read re-roots the manifest under the Team folder. A synthetic
+// It runs bundle.TenantItemsManifest (the dropped-key, strict-parse,
+// re-root, and cell-lint checks) and the template lint, as the cell does.
+// A manifest that the cell holds gives no definition. The plugin-set,
+// template fragment, and credential checks run only on the cell. The gate
+// is ref.Folder, so a placed Team with no local controller is covered. A synthetic
 // single-controller tenant (ref.Folder empty) reads its controller's
 // bundle and parses it leniently. It returns the bundle it read, and a
 // nil manifest, with no error, when the controller, the bundle, or an
@@ -210,23 +213,30 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 	if !ok || content == "" {
 		return cr, cb, nil, nil
 	}
-	var manifest *items.Manifest
 	if ref.Folder != "" {
-		manifest, err = bundle.ParseTenantItems(cm)
-	} else {
-		manifest, err = items.Parse(content)
+		manifest, err := bundle.TenantItemsManifest(ref.Folder, cm)
+		if err == nil {
+			_, templateFindings := bundle.LintTenantTemplates(cm["pipeline-templates.yaml"])
+			if len(templateFindings) > 0 {
+				err = fmt.Errorf("pipeline template lint failed: %s", lint.Summary(templateFindings))
+			}
+		}
+		if err != nil {
+			// The cell holds a tenant whose items or templates fail a
+			// cell check, so the read declares no job. The Team's
+			// TenantWarnings condition carries the hold. The plugin-set
+			// checks run only on the cell.
+			s.deps.Logger.Debug("tenant items fail a cell check; declaring no job", "team", ref.Team, "error", err)
+			return cr, cb, nil, nil //nolint:nilerr // the Team's TenantWarnings condition carries the hold
+		}
+		return cr, cb, manifest, nil
 	}
+	manifest, err := items.Parse(content)
 	if err != nil {
 		// An items.yaml that fails to parse leaves the pipeline surface
 		// without a definition rather than failing the read: the
 		// bundle-validation gate is the place that rejects a bad manifest.
 		return cr, cb, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
-	}
-	if ref.Folder != "" {
-		manifest, err = items.ReRoot(manifest, ref.Folder)
-		if err != nil {
-			return cr, cb, nil, nil //nolint:nilerr // a tenant manifest that names its own root is rejected upstream
-		}
 	}
 	return cr, cb, manifest, nil
 }

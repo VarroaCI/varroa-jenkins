@@ -97,9 +97,10 @@ reading each package's entry point):
   renders its declared traits (`githubSkipNotifications` renders the
   `skip-notifications-trait` plugin's `GithubSkipNotifications`), and renders no
   `traits` element when it declares none. The sibling
-  `items/lint` package runs cell-only policy rules (`no-poll-scm`,
-  `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
-  tenant's re-rooted manifest before a push. `no-job-dsl` also runs over the
+  `items/lint` package owns the cell rule set (`lint.CellRules`: `no-poll-scm`,
+  `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) and
+  `lint.Summary`. The cell runs it over each tenant's re-rooted manifest before a
+  push, and the pipelines read runs it too. `no-job-dsl` also runs over the
   inline `jenkinsfile` of each tenant pipeline template (`lint.RunScript`).
   `items.Parse` still accepts every shape a non-cell controller accepts and
   ignores an unknown key. `items.ParseStrict` refuses an unknown key, and only

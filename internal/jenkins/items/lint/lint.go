@@ -1,10 +1,15 @@
 // Package lint runs policy rules over an items manifest. It is a seam
 // separate from items.Parse: a non-cell controller must keep accepting
 // every item shape it accepts today, so no rule runs there. The cell rule
-// set runs only in the operator, only for a cell.
+// set runs in the operator's cell path and in the pipelines read.
 package lint
 
-import "github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+)
 
 // Finding is one policy violation found in a manifest.
 type Finding struct {
@@ -51,4 +56,14 @@ func RunScript(script, path string, rules []Rule) []Finding {
 		findings = append(findings, sr.CheckScript(script, path)...)
 	}
 	return findings
+}
+
+// Summary renders findings as one line per finding, each naming its rule
+// id, item path, and message, joined by "; ".
+func Summary(findings []Finding) string {
+	lines := make([]string, 0, len(findings))
+	for _, f := range findings {
+		lines = append(lines, fmt.Sprintf("%s at %q: %s", f.Rule, f.Path, f.Message))
+	}
+	return strings.Join(lines, "; ")
 }

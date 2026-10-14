@@ -1091,17 +1091,19 @@ sections describe.
     tenant only, `materializeTenantManifest` and the folder.
     `materializeTenantManifest` resolves the tenant's own `variables.yaml`
     in one pass (no cell variable, so `${varroa_*}` stays unresolved), then
-    runs `bundle.ParseTenantItems` (resolve, `bundle.RemainingVarRefs`, `items.ParseStrict`), `items.ReRoot`, `lint.Run`
-    against `cellLintRules` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
-    `NoControllerConfigDependencyRule`, `NoJobDSLRule`), and
-    `checkBranchBuildStrategiesManifest`, and `checkFolderLibraryPluginsManifest`
-    (every folder library's `RequiredPlugins` must be pinned); after the
+    calls `bundle.TenantItemsManifest` (dropped-key checks, `bundle.ParseTenantItems`
+    (resolve, `bundle.RemainingVarRefs`, `items.ParseStrict`), `items.ReRoot`, and
+    `lint.Run` against `lint.CellRules()` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
+    `NoControllerConfigDependencyRule`, `NoJobDSLRule`)), then the plugin checks
+    `checkBranchBuildStrategiesManifest`, `checkFolderLibraryPluginsManifest`
+    (every folder library's `RequiredPlugins` must be pinned), and
+    `checkGiteaPluginManifest`; after the
     tenant's credentials project, `checkFolderLibraryCredentials`
     (`cell_library_credentials.go`) holds the tenant when a library names a
     credential its folder cannot see or one of a kind its source rejects (the same
     `checkLibraryCredentials` walker that a plain controller uses in
     `library_credentials_plain.go`); the tenant's template fragment runs
-    `lintTenantTemplates` first. The cell lint (`cellLintRules`) checks each inline
+    `bundle.LintTenantTemplates` first. The cell lint (`lint.CellRules()`) checks each inline
     `jenkinsfile`; an `scmDefinition` template passes; only a failing template leaves
     the fragment. The filtered fragment must also load (`bundle.InjectPipelineTemplates`) against the base
     `applyCellContent` builds: the cell's `jenkins.yaml` with the cell

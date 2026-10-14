@@ -475,10 +475,11 @@ federation, activity persistence, and SSE fanout.
   A branch run carries no `changeRequest`.
 - **Item manifest source** (`controllerItemManifest`) — a placed Team
   (`TenantRef.Folder` set) reads its own tenant bundle's `items.yaml`
-  (`teamPipelineBundleContent`) and parses it with `bundle.ParseTenantItems`:
-  it resolves the tenant's `variables.yaml`, then parses strictly, as the cell
-  does. A manifest the cell holds yields no definition. It re-roots the result
-  under the Team folder with `items.ReRoot`. The cell's bundle holds the cell's
+  (`teamPipelineBundleContent`) and runs `bundle.TenantItemsManifest` (dropped-key,
+  strict-parse, re-root, and `lint.CellRules` checks, as the cell does), then the
+  template lint (`bundle.LintTenantTemplates`). A manifest the cell holds yields no
+  definition. The plugin-set, template fragment, and credential checks run only on
+  the cell. The cell's bundle holds the cell's
   own items and never a tenant job, so reading it lists the starter bundle's
   jobs under a tenant. A single-controller tenant (empty `Folder`) reads its
   controller's bundle with the lenient `items.Parse`. Job paths on this surface

@@ -64,13 +64,12 @@ names the run's top-level stage in progress. A running build with no stage in pr
 
 **Pipelines** holds the team's folder tree. A job row carries its health, its last build, its
 branch, its last eight build durations, and when it last ran. **Queue wait** shows the job's
-median wait from queue entry to start, quiet period included, over the last 30 days. Health is a weather
-glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
-or more failed. A job that has never run shows no glyph and an empty last build.
+median wait from queue entry to start over the last 30 days. Health is a weather glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
+or more failed. A job that never ran shows no glyph and an empty last build.
 
-A folder held for a parse or variable fault shows no declared job; run history shows.
+A folder held for a variable, parse, unknown-key, `root`, or lint fault shows no declared job; run history shows. Other holds show their jobs.
 
-A job or multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it yet. A cell creates it at its next apply. The job page shows the note; **Run** stays available. The badge appears only when every cell reports a full job list.
+A job or multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it. A cell creates it at its next apply. The job page shows the note; **Run** stays available. The badge appears only when every cell reports a full job list.
 
 A folder row carries a fold control, its name, and two counts: the jobs below it, and how
 many build now. A folder reports no health value.
