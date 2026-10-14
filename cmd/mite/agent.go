@@ -1580,6 +1580,19 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 
 // runCommand executes a single command and sends its result.
 // On send error it closes the connection (unblocks the recv loop).
+// isGenericTriggerPath reports whether a replay path names exactly the generic
+// webhook trigger's invoke endpoint. It accepts one leading slash and one
+// trailing slash, and it drops a query. Any other suffix, such as "invoker",
+// is a different path.
+func isGenericTriggerPath(p string) bool {
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+	return p == hibernation.GenericTriggerPath
+}
+
 func (a *Agent) runCommand(_ context.Context, w commandWork) {
 	deadline := defaultCommandDeadline
 	if w.desiredStateCmd != nil && w.desiredStateCmd.CommandDeadlineSec > 0 {
@@ -1674,8 +1687,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				errStr = fmt.Sprintf("build replay request: %v", reqErr)
 				break
 			}
-			// Apply envelope headers from the original webhook plus the
-			// operator JWT as Bearer auth (D4).
+			// Apply envelope headers from the original webhook.
 			for k, v := range payload.Headers {
 				req.Header.Set(k, v)
 			}
@@ -1685,7 +1697,14 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			if payload.DeliveryId != "" {
 				req.Header.Set("X-Varroa-Delivery", payload.DeliveryId)
 			}
-			req.Header.Set("Authorization", "Bearer "+a.currentJenkinsToken())
+			// The generic trigger reads a Bearer value as the job token
+			// before X-Gitlab-Token. Its own crumb exclusion needs no
+			// credential, so this path sends no Authorization header.
+			if isGenericTriggerPath(payload.Path) {
+				req.Header.Del("Authorization")
+			} else {
+				req.Header.Set("Authorization", "Bearer "+a.currentJenkinsToken())
+			}
 			// 15s timeout for the upstream call.
 			httpClient := &http.Client{Timeout: 15 * time.Second}
 			resp, httpErr := httpClient.Do(req)

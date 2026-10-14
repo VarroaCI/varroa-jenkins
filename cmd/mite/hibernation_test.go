@@ -598,3 +598,121 @@ func TestReplayWebhookNonAllowlistedRefusedWithoutHTTP(t *testing.T) {
 		t.Errorf("error should say 'not allowlisted', got: %q", result.Error)
 	}
 }
+
+// TestIsGenericTriggerPath asserts that only the exact invoke path, with at
+// most one leading or trailing slash and no query, selects the no-Bearer
+// replay. Prefix matches such as "invoker" keep the Bearer.
+func TestIsGenericTriggerPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"generic-webhook-trigger/invoke", true},
+		{"/generic-webhook-trigger/invoke", true},
+		{"generic-webhook-trigger/invoke/", true},
+		{"generic-webhook-trigger/invoke?token=t", true},
+		{"generic-webhook-trigger/invoker", false},
+		{"generic-webhook-trigger/invoke/extra", false},
+		{"generic-webhook-trigger/invoke//", false},
+		{"github-webhook/", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isGenericTriggerPath(tt.path); got != tt.want {
+			t.Errorf("isGenericTriggerPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// replayGenericTrigger replays a generic-webhook-trigger payload to a stub
+// upstream on localhost:8080 and returns the headers and query Jenkins saw.
+// It skips the test when the port is busy.
+func replayGenericTrigger(t *testing.T, headers map[string]string) (http.Header, string, *mitev1.CommandResult) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var gotHeader http.Header
+	var gotQuery string
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotHeader = r.Header.Clone()
+			gotQuery = r.URL.RawQuery
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path:       "generic-webhook-trigger/invoke",
+			Query:      "",
+			Headers:    headers,
+			Body:       []byte("payload-body"),
+			DeliveryId: "delivery-gitlab",
+		},
+	}
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+	return gotHeader, gotQuery, captured.Load()
+}
+
+// TestReplayWebhookGenericTriggerOmitsBearer asserts that a GitLab replay on
+// the generic trigger path carries X-Gitlab-Token and no Authorization
+// header. The trigger would otherwise read the operator JWT as the job token.
+func TestReplayWebhookGenericTriggerOmitsBearer(t *testing.T) {
+	gotHeader, gotQuery, result := replayGenericTrigger(t, map[string]string{
+		"X-Gitlab-Event": "Push Hook",
+		"X-Gitlab-Token": "deploy-token",
+	})
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if !result.Success {
+		t.Errorf("expected success for upstream 200, got error: %s", result.Error)
+	}
+	if v, ok := gotHeader["Authorization"]; ok {
+		t.Errorf("Authorization must be absent on the generic trigger path, got %q", v)
+	}
+	if got := gotHeader.Get("X-Gitlab-Token"); got != "deploy-token" {
+		t.Errorf("X-Gitlab-Token = %q, want deploy-token", got)
+	}
+	if gotQuery != "" {
+		t.Errorf("RawQuery = %q, want empty", gotQuery)
+	}
+}
+
+// TestReplayWebhookGenericTriggerDropsEnvelopeAuthorization asserts that an
+// Authorization header a forge sent in the envelope does not reach Jenkins on
+// the generic trigger path.
+func TestReplayWebhookGenericTriggerDropsEnvelopeAuthorization(t *testing.T) {
+	gotHeader, _, result := replayGenericTrigger(t, map[string]string{
+		"Authorization":  "Bearer forged",
+		"X-Gitlab-Token": "deploy-token",
+	})
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if v, ok := gotHeader["Authorization"]; ok {
+		t.Errorf("forged Authorization must not reach Jenkins, got %q", v)
+	}
+}

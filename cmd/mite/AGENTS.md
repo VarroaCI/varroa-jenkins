@@ -126,6 +126,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     header under that name cannot survive the replay; it sets nothing
     when `delivery_id` is empty. Correlation with the operator's own
     command tracking still rides `CommandId`, a separate field.
+  - **`REPLAY_WEBHOOK` credential** — the replay sends the cached operator
+    Bearer on every allowlisted path except `generic-webhook-trigger/invoke`.
+    The generic trigger reads a Bearer value as the job token before
+    `X-Gitlab-Token`, so that path sends no `Authorization` header and drops
+    any forged one from the envelope.
   - **gRPC keepalive** — `connect` (`agent.go:566`) dials with
     `grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30s, Timeout:
     10s})` (`agent.go:598-602`). Must stay compatible with the gateway's
