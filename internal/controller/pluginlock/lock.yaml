@@ -27,6 +27,7 @@ sets:
       - gitea
       - generic-webhook-trigger
       - github-checks
+      - skip-notifications-trait
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -218,6 +219,8 @@ sets:
         version: "728.vc30dcf7a_0df5"
       - artifactId: script-security
         version: "1415.v9a_f9b_3a_c253d"
+      - artifactId: skip-notifications-trait
+        version: "625.vb_f5e11e9b_158"
       - artifactId: slack
         version: "795.v4b_9705b_e6d47"
       - artifactId: snakeyaml-api
@@ -434,6 +437,7 @@ sets:
       - gitea
       - generic-webhook-trigger
       - github-checks
+      - skip-notifications-trait
     plugins:
       - artifactId: antisamy-markup-formatter
         version: "173.v680e3a_b_69ff3"
@@ -625,6 +629,8 @@ sets:
         version: "728.vc30dcf7a_0df5"
       - artifactId: script-security
         version: "1415.v9a_f9b_3a_c253d"
+      - artifactId: skip-notifications-trait
+        version: "625.vb_f5e11e9b_158"
       - artifactId: slack
         version: "795.v4b_9705b_e6d47"
       - artifactId: snakeyaml-api

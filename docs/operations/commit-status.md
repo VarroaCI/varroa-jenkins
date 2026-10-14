@@ -8,11 +8,13 @@ A multibranch job or an organization-folder job on a cell reports a status by it
 `github-branch-source` plugin sends the status for a GitHub source. The `gitea` plugin sends
 the status for a Gitea or Forgejo source. You do not add a step.
 
+To stop the status on a GitHub source of a `multibranch` item, declare the `githubSkipNotifications` trait. See [GitHub sources](../config/items.md#github-sources). An organization folder does not support the trait.
+
 ## GitHub Checks
 
 A multibranch build on a cell publishes a GitHub check when its source credential is a
 `githubApp` credential. The check is named `Jenkins`. The build also publishes a commit status.
-Varroa does not turn the status off.
+To stop the commit status, declare the `githubSkipNotifications` trait on the source. The check still publishes.
 
 The check links to the Varroa build page. The link is the same as the status link.
 

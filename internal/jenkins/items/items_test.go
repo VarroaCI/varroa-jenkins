@@ -1937,6 +1937,7 @@ func TestGenerateConfigXML_GitHubSourceDeclaredTraits(t *testing.T) {
 					{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 1, Trust: GitHubTrust{GitHubTrustEveryone: &GitHubTrustEveryone{}}}},
 					{HeadWildcardFilter: &HeadWildcardFilter{Includes: "main release/*", Excludes: "wip/*"}},
 					{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh-key"}},
+					{GitHubSkipNotifications: &GitHubSkipNotifications{}},
 				},
 			},
 		}}}},
@@ -1954,6 +1955,7 @@ func TestGenerateConfigXML_GitHubSourceDeclaredTraits(t *testing.T) {
 		`<trust class="org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustEveryone"></trust>`,
 		`<jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait plugin="scm-api"><includes>main release/*</includes><excludes>wip/*</excludes></jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait>`,
 		"<org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait><credentialsId>ssh-key</credentialsId></org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait>",
+		`<org.jenkinsci.plugins.github.notifications.GithubSkipNotifications plugin="skip-notifications-trait"></org.jenkinsci.plugins.github.notifications.GithubSkipNotifications>`,
 	} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("config.xml missing %q:\n%s", want, xml)
@@ -2096,6 +2098,13 @@ func TestParse_GitHubTraitValidation(t *testing.T) {
 			"gitHubPullRequestDiscovery strategyId 4 must be 1, 2, or 3"},
 		{"empty SSH credentialsId", mb(GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "  "}}),
 			"gitHubSshCheckout requires credentialsId"},
+		{"duplicate skip notifications", mb(GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}},
+			GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}}),
+			"github trait githubSkipNotifications is declared more than once"},
+		{"skip notifications with another key", mb(GitHubTrait{
+			GitHubSkipNotifications: &GitHubSkipNotifications{},
+			GitHubBranchDiscovery:   &GitHubBranchDiscovery{StrategyID: 1},
+		}), "a github trait entry must set exactly one key"},
 		{"library strategyId 4", lib(GitHubTrait{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 4}}),
 			`item "apps": folder library "gh-lib": modernSCM.scm.github: gitHubForkDiscovery strategyId 4`},
 	}
@@ -2110,9 +2119,43 @@ func TestParse_GitHubTraitValidation(t *testing.T) {
 			}
 		})
 	}
-	valid := mb(branch(3), GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh"}})
+	valid := mb(branch(3), GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh"}},
+		GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}})
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid GitHub traits rejected: %v", err)
+	}
+}
+
+func TestParse_GitHubSkipNotificationsTrait(t *testing.T) {
+	yaml := `items:
+  - kind: multibranch
+    name: mb
+    sourcesList:
+      - branchSource:
+          source:
+            github:
+              repoOwner: org
+              repository: repo
+              traits:
+                - githubSkipNotifications: {}`
+	m, err := Parse(yaml)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gh := m.Items[0].SourcesList[0].BranchSource.Source.GitHub
+	if gh == nil || len(gh.Traits) != 1 {
+		t.Fatalf("expected one GitHub trait, got %+v", gh)
+	}
+	if gh.Traits[0].GitHubSkipNotifications == nil {
+		t.Fatal("githubSkipNotifications trait was not parsed")
+	}
+	xml, err := GenerateConfigXML(m.Items[0])
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	want := `<org.jenkinsci.plugins.github.notifications.GithubSkipNotifications plugin="skip-notifications-trait">`
+	if !strings.Contains(flattenXML(xml), want) {
+		t.Errorf("config.xml missing %q:\n%s", want, xml)
 	}
 }
 

@@ -870,6 +870,14 @@ type gitHubTraitsXML struct {
 	Fork        *gitHubForkXML     `xml:"org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait"`
 	Wildcard    *wildcardFilterXML `xml:"jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait"`
 	SSHCheckout *gitHubSSHXML      `xml:"org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait"`
+	// SkipNotifications renders the skip-notifications-trait plugin's trait.
+	SkipNotifications *gitHubSkipNotificationsXML `xml:"org.jenkinsci.plugins.github.notifications.GithubSkipNotifications"`
+}
+
+// gitHubSkipNotificationsXML is the skip notifications trait from the
+// skip-notifications-trait plugin. It carries no settings.
+type gitHubSkipNotificationsXML struct {
+	Plugin string `xml:"plugin,attr"`
 }
 
 type gitHubStrategyXML struct {
@@ -927,6 +935,8 @@ func gitHubTraitsFor(traits []GitHubTrait) *gitHubTraitsXML {
 			x.Wildcard = &wildcardFilterXML{Plugin: "scm-api", Includes: includes, Excludes: w.Excludes}
 		case t.GitHubSshCheckout != nil:
 			x.SSHCheckout = &gitHubSSHXML{CredentialsID: t.GitHubSshCheckout.CredentialsID}
+		case t.GitHubSkipNotifications != nil:
+			x.SkipNotifications = &gitHubSkipNotificationsXML{Plugin: "skip-notifications-trait"}
 		}
 	}
 	return x

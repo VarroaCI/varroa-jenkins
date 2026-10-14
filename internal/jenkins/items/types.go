@@ -1012,13 +1012,15 @@ type GiteaNavigator struct {
 }
 
 // GitHubTrait is a union of GitHub branch source traits: discovery, the head
-// wildcard filter, and SSH checkout. Exactly one field is set in each entry.
+// wildcard filter, SSH checkout, and skip notifications. Exactly one field is
+// set in each entry.
 type GitHubTrait struct {
 	GitHubBranchDiscovery      *GitHubBranchDiscovery      `yaml:"gitHubBranchDiscovery,omitempty"`
 	GitHubPullRequestDiscovery *GitHubPullRequestDiscovery `yaml:"gitHubPullRequestDiscovery,omitempty"`
 	GitHubForkDiscovery        *GitHubForkDiscovery        `yaml:"gitHubForkDiscovery,omitempty"`
 	HeadWildcardFilter         *HeadWildcardFilter         `yaml:"headWildcardFilter,omitempty"`
 	GitHubSshCheckout          *GitHubSshCheckout          `yaml:"gitHubSshCheckout,omitempty"`
+	GitHubSkipNotifications    *GitHubSkipNotifications    `yaml:"githubSkipNotifications,omitempty"`
 }
 
 // GitHubBranchDiscovery trait.
@@ -1055,6 +1057,10 @@ type HeadWildcardFilter struct {
 type GitHubSshCheckout struct {
 	CredentialsID string `yaml:"credentialsId"`
 }
+
+// GitHubSkipNotifications stops the GitHub source from sending a commit status.
+// It carries no settings.
+type GitHubSkipNotifications struct{}
 
 // ProjectFactory for multibranch (and organization folders).
 type ProjectFactory struct {
@@ -1323,6 +1329,10 @@ func validateGitHubTraits(prefix string, traits []GitHubTrait) error {
 			if strings.TrimSpace(s.CredentialsID) == "" {
 				return fmt.Errorf("%sgitHubSshCheckout requires credentialsId", prefix)
 			}
+		}
+		if t.GitHubSkipNotifications != nil {
+			set++
+			kind = "githubSkipNotifications"
 		}
 		if set != 1 {
 			return fmt.Errorf("%sa github trait entry must set exactly one key", prefix)
