@@ -177,7 +177,9 @@ func (a *Agent) scheduleExportOpen() bool {
 // openScheduleExport opens the export gate and wakes the poller, so the
 // first set after an apply describes the applied jobs. It wakes the
 // poller only when the gate was closed: a wake on every apply would
-// bypass the minimum poll interval.
+// bypass the minimum poll interval. An items apply that writes the
+// section also wakes the poller (handleDesiredState), so a new job reaches
+// the inventory without waiting for the interval.
 func (a *Agent) openScheduleExport() {
 	if !a.jobScheduleExportOpen.CompareAndSwap(false, true) {
 		return

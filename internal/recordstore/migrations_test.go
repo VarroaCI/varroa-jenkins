@@ -45,6 +45,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00032_job_branch_projects.sql":                    false,
 		"00033_upstream_origins.sql":                       false,
 		"00034_webhook_synthetic_ends.sql":                 false,
+		"00035_job_inventory_truncation.sql":               false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

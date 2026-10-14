@@ -273,7 +273,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   **The export gate** — `scheduleExportOpen` is true once the convergence
   marker exists or `runCommand` saw a desired-state result with
   `ItemsSuccess` (`openScheduleExport`). The gate never closes in one
-  process, and only the apply that opens it wakes the poller. While it is closed the mite neither polls nor attaches: a cell's
+  process. The apply that opens it wakes the poller, and so does every items apply that writes the section. While it is closed the mite neither polls nor attaches: a cell's
   `emptyDir` home answers an empty or partial set before the items apply,
   and the recorder would delete every row of the cell. `openScheduleExport`
   wakes the poller through `jobSchedulePollNow`. **The cadence** — a

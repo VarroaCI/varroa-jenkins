@@ -91,6 +91,12 @@ type Reader interface {
 	// never run and carries no trigger.
 	ListJobSchedules(ctx context.Context, cluster, tenant string) ([]JobSchedule, error)
 
+	// JobInventory reads the live job inventory of a tenant: which declared
+	// jobs and multibranch projects the active member cells last reported,
+	// and whether each report is complete. A kind that is not known must
+	// not be read as absent.
+	JobInventory(ctx context.Context, cluster, tenant string) (JobInventory, error)
+
 	// GetJobBranches reads the stored branch and change-request inventory
 	// of one multibranch job of tenant. The bool is false when no row
 	// exists, which is the state before the cell's first export.

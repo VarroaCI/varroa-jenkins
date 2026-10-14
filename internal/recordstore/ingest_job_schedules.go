@@ -192,9 +192,9 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 	}
 
 	if _, err := tx.Exec(ctx, `
-		UPDATE varroa.job_schedule_cells SET observed_at = $4
+		UPDATE varroa.job_schedule_cells SET observed_at = $4, schedules_truncated = $5
 		WHERE cluster = $1 AND namespace = $2 AND cell = $3
-	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt); err != nil {
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt, payload.Truncated); err != nil {
 		return ApplyResult{}, fmt.Errorf("raise job schedule cell watermark: %w", err)
 	}
 

@@ -24,6 +24,8 @@ type columnSpec struct {
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
 // migration 00017's "run_test_cases", migration 00030's "run_waits", and
 // migration 00032's "job_branch_projects", and migration 00033's "upstream_origins".
+// Migration 00035 adds two truncation columns to "job_schedule_cells" and
+// creates no table.
 // Migration 00007 adds three columns to "job_schedules" and creates no
 // table. Migration 00011 adds two columns to "tenant_placements" and
 // creates no table. Migration 00012 adds one column to "runs" and creates
@@ -205,6 +207,8 @@ var expectedColumns = map[string][]columnSpec{
 		{"cell", "text", false},
 		{"observed_at", "timestamp with time zone", false},
 		{"branches_observed_at", "timestamp with time zone", false},
+		{"schedules_truncated", "boolean", false},
+		{"branches_truncated", "boolean", false},
 	},
 	"job_branch_projects": {
 		{"cluster", "text", false},

@@ -2509,6 +2509,10 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				if err := os.WriteFile(filepath.Join(a.miteDir, "last-items.yaml"), []byte(cmd.ItemsYaml), 0600); err != nil {
 					a.Logger.Error("store items failed", "error", err)
 				}
+				// The applied items may create jobs. Wake the schedule
+				// poller so the inventory reports them without waiting
+				// for the next interval.
+				a.wakeSchedulePoller()
 			}
 		}
 	} else {

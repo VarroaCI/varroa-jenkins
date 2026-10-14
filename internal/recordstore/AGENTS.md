@@ -667,6 +667,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   clause, since `GrantResult`'s shape stays fixed to the `FenceResult`
   fields `ledger_fence_placement.go`'s direct type conversion depends
   on); `dispatchCrossTenant` records both on every call.
+- **Job inventory readiness** (`reader_job_inventory.go`) — `Reader.JobInventory`
+  answers a tenant's live inventory from the active member cells only; a standby never counts.
+  A kind is known only when every active member holds a `job_schedule_cells` watermark for it
+  with its truncation flag false (`schedules_truncated`, `branches_truncated`, migration `00035`).
+  A tenant with no placement, or no active member, answers nothing known. A consumer must read
+  an unknown kind as unknown, never as absent.
 - **Fleet locks** (`fleet_lock_acquire.go`, `fleet_lock_renew.go`,
   `fleet_lock_release.go`, `fleet_lock_metrics.go`,
   `reader_fleetlocks.go`) — the cross-tenant responder's
