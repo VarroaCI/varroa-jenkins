@@ -1835,6 +1835,7 @@ export interface PipelineTemplateInfo {
 export interface PipelineTriggers {
   push?: boolean;
   pullRequest?: boolean;
+  webhook?: boolean;
   schedule?: string;
   concurrency?: number;
 }

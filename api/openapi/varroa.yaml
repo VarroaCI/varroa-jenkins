@@ -2142,6 +2142,10 @@ components:
           type: boolean
         schedule:
           type: string
+        webhook:
+          description: True when the job declares a genericTrigger. The token is not
+            returned.
+          type: boolean
       type: object
     PluginAdvisory:
       additionalProperties: false
@@ -8135,6 +8139,10 @@ components:
           type: boolean
         schedule:
           type: string
+        webhook:
+          description: True when the job declares a genericTrigger. The token is not
+            returned.
+          type: boolean
       type: object
     components_schemas_PluginAdvisory:
       additionalProperties: false

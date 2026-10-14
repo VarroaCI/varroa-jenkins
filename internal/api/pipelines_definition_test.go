@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -686,6 +687,38 @@ func TestBuildPipelineTriggersGitHubPushShowsPush(t *testing.T) {
 	}
 	if got.Schedule != "" {
 		t.Errorf("Schedule = %q, want empty", got.Schedule)
+	}
+}
+
+func TestBuildPipelineTriggersGenericTriggerShowsWebhook(t *testing.T) {
+	item := &items.Item{Kind: "pipeline", Name: "app", Triggers: []items.Trigger{
+		{GenericTrigger: &items.GenericTrigger{Token: "payments:deploy"}},
+	}}
+	got := buildPipelineTriggers(item)
+	if got == nil || !got.Webhook {
+		t.Fatalf("buildPipelineTriggers() = %+v, want Webhook true", got)
+	}
+	if got.Push || got.Schedule != "" {
+		t.Errorf("Push = %v, Schedule = %q, want false and empty", got.Push, got.Schedule)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if s := string(raw); strings.Contains(s, "payments:deploy") || strings.Contains(s, "token") {
+		t.Errorf("triggers JSON leaks the webhook token: %s", s)
+	}
+}
+
+func TestBuildPipelineTriggersGenericTriggerInPipelineTriggersProperty(t *testing.T) {
+	item := &items.Item{Kind: "pipeline", Name: "app", Properties: []items.Property{
+		{PipelineTriggers: &items.PipelineTriggers{Triggers: []items.Trigger{
+			{GenericTrigger: &items.GenericTrigger{Token: "payments:deploy"}},
+		}}},
+	}}
+	got := buildPipelineTriggers(item)
+	if got == nil || !got.Webhook {
+		t.Fatalf("buildPipelineTriggers() = %+v, want Webhook true", got)
 	}
 }
 

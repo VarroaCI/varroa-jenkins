@@ -540,6 +540,20 @@ describe("PipelinePage — dependency edges", () => {
     expect(row?.textContent).toContain("grant missing");
     expect(screen.queryByText("Upstream")).not.toBeInTheDocument();
   });
+
+  it("shows Webhook Yes for a job with a generic trigger", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ triggers: { webhook: true } }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Webhook")).toBeInTheDocument());
+    expect(triggersRow("Webhook")?.textContent).toBe("Yes");
+  });
+
+  it("shows Webhook No when the job declares no generic trigger", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ triggers: { push: true } }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Webhook")).toBeInTheDocument());
+    expect(triggersRow("Webhook")?.textContent).toBe("No");
+  });
 });
 
 describe("PipelinePage — live run events", () => {

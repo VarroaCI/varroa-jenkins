@@ -109,6 +109,9 @@ triggers:
 The `genericVariables` entries set build variables from the request body. The `expressionType`
 is `JSONPath` (the default) or `XPath`. A header value is not extractable from `items.yaml` today.
 
+The job page **Triggers** card shows **Webhook: Yes** for a job that declares a `genericTrigger`.
+The card does not show the token.
+
 ## Pins for air-gapped installs
 
 The baseline lock pins `generic-webhook-trigger` and `github-checks`. An air-gapped install must

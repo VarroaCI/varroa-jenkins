@@ -130,6 +130,7 @@ type pipelineTemplateInfoJSON struct {
 type pipelineTriggersJSON struct {
 	Push        bool   `json:"push,omitempty"`
 	PullRequest bool   `json:"pullRequest,omitempty"`
+	Webhook     bool   `json:"webhook,omitempty"`
 	Schedule    string `json:"schedule,omitempty"`
 	Concurrency int    `json:"concurrency,omitempty"`
 }

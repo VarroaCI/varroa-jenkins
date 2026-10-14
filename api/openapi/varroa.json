@@ -2893,6 +2893,10 @@
           },
           "schedule": {
             "type": "string"
+          },
+          "webhook": {
+            "description": "True when the job declares a genericTrigger. The token is not returned.",
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -10820,6 +10824,10 @@
           },
           "schedule": {
             "type": "string"
+          },
+          "webhook": {
+            "description": "True when the job declares a genericTrigger. The token is not returned.",
+            "type": "boolean"
           }
         },
         "type": "object"

@@ -3056,6 +3056,9 @@ type ComponentsSchemasPipelineTriggers struct {
 	PullRequest *bool   `json:"pullRequest,omitempty"`
 	Push        *bool   `json:"push,omitempty"`
 	Schedule    *string `json:"schedule,omitempty"`
+
+	// Webhook True when the job declares a genericTrigger. The token is not returned.
+	Webhook *bool `json:"webhook,omitempty"`
 }
 
 // ComponentsSchemasPluginAdvisory A non-classification finding (e.g. dependencyMinimumUnsatisfied).

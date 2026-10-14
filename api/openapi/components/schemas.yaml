@@ -4932,6 +4932,9 @@ PipelineTriggers:
       type: boolean
     pullRequest:
       type: boolean
+    webhook:
+      type: boolean
+      description: "True when the job declares a genericTrigger. The token is not returned."
     schedule:
       type: string
     concurrency:

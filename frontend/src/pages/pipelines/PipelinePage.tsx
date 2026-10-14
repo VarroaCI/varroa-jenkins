@@ -434,6 +434,8 @@ export default function PipelinePage() {
             <dd>{jobDetail.triggers?.push ? "Yes" : "No"}</dd>
             <dt>Pull request</dt>
             <dd>{jobDetail.triggers?.pullRequest ? "Yes" : "No"}</dd>
+            <dt>Webhook</dt>
+            <dd>{jobDetail.triggers?.webhook ? "Yes" : "No"}</dd>
             <dt>Schedule</dt>
             <dd>{jobDetail.triggers?.schedule ?? <span className={styles.dim}>—</span>}</dd>
             <dt>Concurrency</dt>

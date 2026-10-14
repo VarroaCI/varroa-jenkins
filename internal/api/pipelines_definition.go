@@ -627,6 +627,10 @@ func buildPipelineTriggers(item *items.Item) *pipelineTriggersJSON {
 		case trig.GitHubPush != nil:
 			t.Push = true
 			found = true
+		case trig.GenericTrigger != nil:
+			// The token is the job's webhook secret. Never read or return it.
+			t.Webhook = true
+			found = true
 		}
 	}
 	if item.Kind == "multibranch" {
