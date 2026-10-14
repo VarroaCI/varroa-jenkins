@@ -18,6 +18,8 @@ plugins:
       version: latest
     - artifactId: github-branch-source
       version: latest
+    - artifactId: gitea
+      version: latest
     - artifactId: pipeline-groovy-lib
       version: latest
     - artifactId: pipeline-model-definition
