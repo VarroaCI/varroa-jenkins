@@ -112,6 +112,7 @@ type pipelineDefinitionJSON struct {
 	Source            string          `json:"source"`
 	JenkinsfileRepo   string          `json:"jenkinsfileRepo,omitempty"`
 	JenkinsfileCommit string          `json:"jenkinsfileCommit,omitempty"`
+	JenkinsfileForge  string          `json:"jenkinsfileForge,omitempty"`
 	Profile           string          `json:"profile,omitempty"`
 	DeclaredBy        *declaredByJSON `json:"declaredBy,omitempty"`
 	DefinitionPath    string          `json:"definitionPath,omitempty"`
@@ -712,6 +713,15 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 			// only a repository script carries one.
 			if detail.Definition.Source == "jenkinsfile" && summary.LastRun != nil {
 				detail.Definition.DefinitionPath = lastRunDefinitionPath(summary.LastRun)
+			}
+			// The forge belongs to the host of a repository. The declared
+			// source and the last run both name that host.
+			hints := jobForgeHints(item, summary.LastRun)
+			if detail.Definition.Source == "jenkinsfile" {
+				detail.Definition.JenkinsfileForge = forgeForRepo(hints, detail.Definition.JenkinsfileRepo)
+			}
+			if db := detail.Definition.DeclaredBy; db != nil && db.Kind == "gitSource" {
+				db.Forge = forgeForRepo(hints, db.RepoURL)
 			}
 		}
 		detail.Triggers = buildPipelineTriggers(item)

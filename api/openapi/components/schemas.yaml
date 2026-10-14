@@ -4838,6 +4838,12 @@ PipelineDefinition:
     jenkinsfileCommit:
       type: string
       description: The last build's checked-out commit, from its run record.
+    jenkinsfileForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea.
+        The field is absent when the forge is unknown.
     profile:
       type: string
       description: The version profile in effect for this job's controller.
@@ -4878,6 +4884,12 @@ JobDeclaredBy:
     repoURL:
       type: string
       description: Present only for kind gitSource.
+    forge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        gitSource only: the forge that hosts repoURL. A Forgejo host reads
+        gitea. The field is absent when the forge is unknown.
     path:
       type: string
       description: The input's sub-path. Absent when the input declares no sub-path.

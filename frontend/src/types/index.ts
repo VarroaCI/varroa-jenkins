@@ -1778,6 +1778,8 @@ export interface PipelineDefinition {
   source: PipelineDefinitionSource;
   jenkinsfileRepo?: string;
   jenkinsfileCommit?: string;
+  /** The forge that hosts jenkinsfileRepo. Absent when the forge is unknown. */
+  jenkinsfileForge?: "github" | "gitlab" | "gitea";
   profile?: string;
   /** Which input of the job's composed bundle declared the job. */
   declaredBy?: JobDeclaredBy;
@@ -1809,6 +1811,8 @@ export interface JobDeclaredBy {
   revision?: string;
   bundle: BundleRef;
   repoURL?: string;
+  /** gitSource only: the forge that hosts repoURL. Absent when unknown. */
+  forge?: "github" | "gitlab" | "gitea";
   path?: string;
   ociRef?: string;
   catalogItem?: CatalogItemRef;

@@ -873,3 +873,29 @@ func TestControllerItemManifest_SyntheticTenantStaysLenient(t *testing.T) {
 		t.Fatalf("manifest = %+v, want one item from the lenient parse", manifest)
 	}
 }
+
+// TestMultibranchRemote_NamesForgeOfSource asserts each source form names
+// its forge, and that the URL matches multibranchRemoteURL.
+func TestMultibranchRemote_NamesForgeOfSource(t *testing.T) {
+	cases := []struct {
+		name    string
+		sources []items.BranchSourceEntry
+		forge   string
+	}{
+		{"gitea", []items.BranchSourceEntry{{BranchSource: items.BranchSource{Source: items.BranchSourceConfig{Gitea: &items.GiteaSCMSource{
+			ServerURL: "https://gitea.example.com", RepoOwner: "acme", Repository: "svc"}}}}}, "gitea"},
+		{"branchSource github", []items.BranchSourceEntry{{BranchSource: items.BranchSource{Source: items.BranchSourceConfig{GitHub: &items.GitHubSCMSource{
+			RepositoryURL: "https://github.com/acme/svc"}}}}}, "github"},
+		{"legacy github", []items.BranchSourceEntry{{GitHub: &items.GitHubSCMSource{RepositoryURL: "https://github.com/acme/svc"}}}, "github"},
+		{"git", []items.BranchSourceEntry{{Git: &items.GitSCMSource{Remote: "https://git.example.org/acme/svc"}}}, ""},
+	}
+	for _, tc := range cases {
+		url, forge := multibranchRemote(tc.sources)
+		if forge != tc.forge {
+			t.Errorf("%s: forge = %q, want %q", tc.name, forge, tc.forge)
+		}
+		if url != multibranchRemoteURL(tc.sources) {
+			t.Errorf("%s: url = %q, differs from multibranchRemoteURL", tc.name, url)
+		}
+	}
+}

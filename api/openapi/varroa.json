@@ -2633,6 +2633,15 @@
             "description": "The last build's checked-out commit, from its run record.",
             "type": "string"
           },
+          "jenkinsfileForge": {
+            "description": "The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
           "jenkinsfileRepo": {
             "type": "string"
           },
@@ -9746,6 +9755,15 @@
           "catalogItem": {
             "$ref": "#/components/schemas/components_schemas_CatalogItemRef"
           },
+          "forge": {
+            "description": "gitSource only: the forge that hosts repoURL. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "gitSource",
@@ -10251,6 +10269,15 @@
           },
           "jenkinsfileCommit": {
             "description": "The last build's checked-out commit, from its run record.",
+            "type": "string"
+          },
+          "jenkinsfileForge": {
+            "description": "The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
             "type": "string"
           },
           "jenkinsfileRepo": {

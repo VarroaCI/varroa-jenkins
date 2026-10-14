@@ -466,6 +466,9 @@ federation, activity persistence, and SSE fanout.
   The run detail and the run summary carry `scmUrl`, `scmForge`, and `triggerSource`, read from `runs.payload`
   by `runOriginOf` (`run_origin.go`). `scmUrl` and `scmForge` come from one event: the `run.source` pair
   when its URL is set, else the `run.started` pair. `scmForge` answers only `github`, `gitlab`, or `gitea`.
+  The job detail's `definition.jenkinsfileForge` and `definition.declaredBy.forge` come from a host
+  to forge map (`jobForgeHints`, `job_forge.go`). The last run's `scmUrl` and `scmForge` fill it first,
+  and the declared multibranch source overwrites it on the same host. Both fields are absent when the host is unknown.
   `triggerSource` classifies `cause_types` in a fixed order; an empty list yields no value.
   The run summary, the running row, and the run detail carry `changeRequest`, read from
   `run.started.payload.change_request` by `changeRequestOf` (`run_change_request.go`).

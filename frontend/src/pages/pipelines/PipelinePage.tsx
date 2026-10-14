@@ -14,7 +14,7 @@ import JobBreadcrumbs from "./JobBreadcrumbs";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { RunDrawer } from "./RunDrawer";
 import { MultibranchCard } from "./MultibranchCard";
-import { matchForgeShape, repositoryHref, fileHref } from "./forgeLink";
+import { forgeFileHref, forgeTreeHref } from "./forgeLink";
 import { RevisionLink } from "./RevisionLink";
 import { TRIGGER_LABEL, changeRequestLabel, queueWaitMs, safeWebUrl } from "./runMeta";
 import type {
@@ -170,28 +170,28 @@ function renderDependencyRow(label: string, edges: PipelineDependencyEdge[]) {
 
 /**
  * renderJenkinsfileRow renders the "Defined by" card's Jenkinsfile row
- * value. The row links to the file when four conditions hold: the
- * definition source is "jenkinsfile", the repository matches a
- * recognized forge shape, the commit is present, and the script path is
- * present. Every other case prints the repository and, when present, the
- * short commit as plain text, with no link. The text and the truncation
- * do not change.
+ * value. The row links to the file when the definition source is
+ * "jenkinsfile", the commit and script path are present, and the forge
+ * is known from the server or from a recognized GitHub or GitLab URL.
+ * Every other case prints the repository and, when present, the short
+ * commit as plain text, with no link. The text and the truncation do not
+ * change.
  */
 function renderJenkinsfileRow(definition: PipelineDefinition) {
   const { jenkinsfileRepo, jenkinsfileCommit, definitionPath } = definition;
   if (!jenkinsfileRepo) return null;
-  const match = matchForgeShape(jenkinsfileRepo);
+  const href = forgeFileHref(jenkinsfileRepo, definition.jenkinsfileForge, jenkinsfileCommit, definitionPath);
   const text = (
     <>
       {jenkinsfileRepo}
       {jenkinsfileCommit ? ` @ ${jenkinsfileCommit.slice(0, 7)}` : ""}
     </>
   );
-  if (definition.source !== "jenkinsfile" || !match || !jenkinsfileCommit || !definitionPath) {
+  if (definition.source !== "jenkinsfile" || !href) {
     return text;
   }
   return (
-    <a href={fileHref(match, jenkinsfileCommit, definitionPath)} target="_blank" rel="noreferrer">
+    <a href={href} target="_blank" rel="noreferrer">
       {text}
     </a>
   );
@@ -201,8 +201,9 @@ function renderJenkinsfileRow(definition: PipelineDefinition) {
  * renderSourceInputRow renders the "Defined by" card's Source input row
  * value. A catalog item input prints the item name and the namespace as
  * text. A git or OCI input prints the URL and, when present, the first 12
- * characters of the revision. The row links to the repository only when
- * the URL matches a recognized forge shape and the revision is present.
+ * characters of the revision. A git input links to the repository when
+ * the forge is known from the server or from a recognized GitHub or GitLab
+ * URL, and the revision is present. An OCI input never links.
  */
 function renderSourceInputRow(declaredBy: JobDeclaredBy) {
   if (declaredBy.kind === "itemRef") {
@@ -214,11 +215,11 @@ function renderSourceInputRow(declaredBy: JobDeclaredBy) {
   }
   const url = declaredBy.kind === "gitSource" ? declaredBy.repoURL : declaredBy.ociRef;
   if (!url) return declaredBy.name;
-  const match = declaredBy.kind === "gitSource" ? matchForgeShape(url) : null;
+  const href = declaredBy.kind === "gitSource" ? forgeTreeHref(url, declaredBy.forge, declaredBy.revision) : null;
   const revisionText = declaredBy.revision ? ` @ ${declaredBy.revision.slice(0, 12)}` : "";
-  if (match && declaredBy.revision) {
+  if (href) {
     return (
-      <a href={repositoryHref(match, declaredBy.revision)} target="_blank" rel="noreferrer">
+      <a href={href} target="_blank" rel="noreferrer">
         {url}
         {revisionText}
       </a>

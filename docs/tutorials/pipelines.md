@@ -71,17 +71,17 @@ or more failed. A job that has never run shows no glyph and an empty last build.
 
 A folder held for a parse or variable fault shows no declared job; run history shows.
 
-A job row or a multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it yet. A cell creates the job at its next apply. The job page shows the note; **Run** stays available. Varroa shows the badge only when every cell reports a full job list.
+A job or multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it yet. A cell creates it at its next apply. The job page shows the note; **Run** stays available. The badge appears only when every cell reports a full job list.
 
 A folder row carries a fold control, its name, and two counts: the jobs below it, and how
 many build now. A folder reports no health value.
 
-A multibranch item is a folder row that counts branches instead of jobs. It offers no **Run**
-control, because it does not build. Its branches sit below it.
+A multibranch item is a folder row that counts branches. It offers no **Run** control, because
+it does not build.
 
-Row order is fixed: at each level, folders come first, then jobs, each group alphabetical.
+Each level lists folders, then jobs, alphabetically.
 
-A first load unfolds the top two levels and folds every deeper level.
+A first load unfolds the top two levels and folds deeper levels.
 
 The fold state lives in the page URL, as one `open` value per unfolded folder:
 
@@ -112,6 +112,8 @@ The **Defined by** card states where the job's script comes from. A job that rea
 from source control shows the repository and the last built commit. A job with an inline script shows a **Script** row. The card names any catalog template and the version profile.
 
 A shared library in the **Ran with** row links to its repository: the commit, or on GitHub and GitLab the version. An unknown host shows text.
+
+The **Jenkinsfile** and **Source input** rows link GitHub, GitLab, Gitea, and Forgejo hosts when the forge is known. Other hosts show text.
 
 The page lists the job's builds, filterable by branch, result, actor, and cause. Each filter
 stays in the page URL, so a filtered view is shareable and survives a reload.

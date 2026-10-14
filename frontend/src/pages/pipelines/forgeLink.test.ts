@@ -7,6 +7,8 @@ import {
   libraryHref,
   repositoryBase,
   revisionHref,
+  forgeFileHref,
+  forgeTreeHref,
 } from "./forgeLink";
 
 describe("libraryHref", () => {
@@ -217,5 +219,69 @@ describe("revisionHref", () => {
   it("answers null without a URL or a revision", () => {
     expect(revisionHref(undefined, "gitea", "abc123")).toBeNull();
     expect(revisionHref("https://gitea.example.com/o/r", "gitea", "")).toBeNull();
+  });
+});
+
+describe("forgeFileHref", () => {
+  const sha = "abc123";
+  it("links a Gitea file through the src commit path", () => {
+    expect(forgeFileHref("https://gitea.example.com/acme/app", "gitea", sha, "ci/Jenkinsfile")).toBe(
+      `https://gitea.example.com/acme/app/src/commit/${sha}/ci/Jenkinsfile`,
+    );
+  });
+
+  it("links a GitLab and a GitHub file through their blob paths", () => {
+    expect(forgeFileHref("https://gitlab.example.com/acme/app", "gitlab", sha, "Jenkinsfile")).toBe(
+      `https://gitlab.example.com/acme/app/-/blob/${sha}/Jenkinsfile`,
+    );
+    expect(forgeFileHref("https://github.com/acme/app", "github", sha, "Jenkinsfile")).toBe(
+      `https://github.com/acme/app/blob/${sha}/Jenkinsfile`,
+    );
+  });
+
+  it("encodes each path segment", () => {
+    expect(forgeFileHref("https://gitea.example.com/acme/app", "gitea", sha, "ci/my file")).toBe(
+      `https://gitea.example.com/acme/app/src/commit/${sha}/ci/my%20file`,
+    );
+  });
+
+  it("falls back to the GitHub shape with no forge, and answers null for an unknown host", () => {
+    const url = "https://github.com/acme/app";
+    expect(forgeFileHref(url, undefined, sha, "Jenkinsfile")).toBe(
+      fileHref(matchForgeShape(url)!, sha, "Jenkinsfile"),
+    );
+    expect(forgeFileHref("https://git.example.com/acme/app", undefined, sha, "Jenkinsfile")).toBeNull();
+  });
+
+  it("answers null when the commit or the path is missing", () => {
+    expect(forgeFileHref("https://gitea.example.com/acme/app", "gitea", undefined, "Jenkinsfile")).toBeNull();
+    expect(forgeFileHref("https://gitea.example.com/acme/app", "gitea", sha, "")).toBeNull();
+  });
+});
+
+describe("forgeTreeHref", () => {
+  const sha = "abc123";
+  it("links each forge at a revision through its tree path", () => {
+    expect(forgeTreeHref("https://gitea.example.com/acme/app", "gitea", sha)).toBe(
+      `https://gitea.example.com/acme/app/src/commit/${sha}`,
+    );
+    expect(forgeTreeHref("https://gitlab.example.com/acme/app", "gitlab", sha)).toBe(
+      `https://gitlab.example.com/acme/app/-/tree/${sha}`,
+    );
+    expect(forgeTreeHref("https://github.com/acme/app", "github", sha)).toBe(
+      `https://github.com/acme/app/tree/${sha}`,
+    );
+  });
+
+  it("falls back to the GitHub shape with no forge, and answers null for an unknown host", () => {
+    expect(forgeTreeHref("https://github.com/acme/app", undefined, sha)).toBe(
+      `https://github.com/acme/app/tree/${sha}`,
+    );
+    expect(forgeTreeHref("https://git.example.com/acme/app", undefined, sha)).toBeNull();
+  });
+
+  it("answers null when the URL or the revision is missing", () => {
+    expect(forgeTreeHref(undefined, "gitea", sha)).toBeNull();
+    expect(forgeTreeHref("https://gitea.example.com/acme/app", "gitea", "")).toBeNull();
   });
 });

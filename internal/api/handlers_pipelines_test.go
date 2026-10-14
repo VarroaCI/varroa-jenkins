@@ -1011,7 +1011,7 @@ func TestHandleGetPipelineJob_NoDefinitionCarriesNoProvenance(t *testing.T) {
 	if detail.Definition != nil {
 		t.Errorf("definition = %+v, want nil for a job with no declared item", detail.Definition)
 	}
-	if strings.Contains(body, "declaredBy") || strings.Contains(body, "definitionPath") {
+	if strings.Contains(body, "declaredBy") || strings.Contains(body, "definitionPath") || strings.Contains(body, "jenkinsfileForge") {
 		t.Errorf("provenance leaked for a job with no definition: %s", body)
 	}
 }
@@ -1241,5 +1241,78 @@ func TestListRunsRowCarriesChangeRequest(t *testing.T) {
 	branch := buildRunSummary(recordstore.Run{RunID: "r2", Status: "COMPLETED"})
 	if branch.ChangeRequest != nil {
 		t.Fatalf("branch run row carries changeRequest %+v", branch.ChangeRequest)
+	}
+}
+
+// giteaItemsYAML declares acme/app-a with a Gitea-hosted repository.
+const giteaItemsYAML = `
+items:
+  - kind: folder
+    name: acme
+    items:
+      - kind: pipeline
+        name: app-a
+        definition:
+          cpsScmFlowDefinition:
+            scm:
+              gitSCM:
+                userRemoteConfigs:
+                  - userRemoteConfig:
+                      url: https://gitea.example.com/acme/svc
+`
+
+// TestHandleGetPipelineJob_ForgeHintsFromLastRun asserts a Gitea host
+// takes its forge from the last run's recorded forge.
+func TestHandleGetPipelineJob_ForgeHintsFromLastRun(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	client.configMaps["bundle-a-content"] = map[string]string{"items.yaml": giteaItemsYAML}
+	client.composedBundles["bundle-a"].Spec.Inputs = []v1alpha1.ComposedInput{
+		{GitSource: &v1alpha1.GitBundleSource{RepoURL: "https://gitea.example.com/acme/bundles"}},
+	}
+	client.composedBundles["bundle-a"].Status.ObservedRevisions = map[string]string{"0": "sha-git"}
+
+	rev := "sha-checkout"
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{{
+		JobPath: "acme/app-a",
+		LastRun: &recordstore.Run{
+			JobPath:     "acme/app-a",
+			Source:      json.RawMessage(runSourceColumnJSON),
+			SCMRevision: &rev,
+			Payload:     json.RawMessage(`{"run.started":{"payload":{"scm_url":"https://gitea.example.com/acme/svc.git","scm_forge":"gitea"}}}`),
+		},
+	}}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
+
+	var detail pipelineJobDetailJSON
+	if err := json.Unmarshal([]byte(pipelinesJobDetailBody(t, srv, "ctrl-a", "acme/app-a")), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.Definition == nil {
+		t.Fatal("definition is nil, want the job's jenkinsfile definition")
+	}
+	if got := detail.Definition.JenkinsfileForge; got != "gitea" {
+		t.Errorf("jenkinsfileForge = %q, want gitea", got)
+	}
+	if detail.Definition.DeclaredBy == nil || detail.Definition.DeclaredBy.Forge != "gitea" {
+		t.Errorf("declaredBy.forge = %+v, want gitea", detail.Definition.DeclaredBy)
+	}
+}
+
+// TestHandleGetPipelineJob_UnknownForgeStaysAbsent asserts a job with no
+// forge hint carries neither forge field.
+func TestHandleGetPipelineJob_UnknownForgeStaysAbsent(t *testing.T) {
+	client := newSingleControllerFixture(t)
+	client.configMaps["bundle-a-content"] = map[string]string{"items.yaml": jenkinsfileItemsYAML}
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/test-ns/ctrl-a"] = []recordstore.JobSummary{{
+		JobPath: "acme/app-a",
+		LastRun: &recordstore.Run{JobPath: "acme/app-a"},
+	}}
+	srv := pipelinesTestServer(client, pipelineGrantAuthorizer([]string{"read"}, "test-ns/ctrl-a"), reader, nil)
+
+	body := pipelinesJobDetailBody(t, srv, "ctrl-a", "acme/app-a")
+	if strings.Contains(body, "jenkinsfileForge") || strings.Contains(body, `"forge"`) {
+		t.Errorf("forge leaked for a job with no forge hint: %s", body)
 	}
 }

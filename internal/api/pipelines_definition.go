@@ -27,6 +27,7 @@ type declaredByJSON struct {
 	Revision    string              `json:"revision,omitempty"`
 	Bundle      bundleRefJSON       `json:"bundle"`
 	RepoURL     string              `json:"repoURL,omitempty"`
+	Forge       string              `json:"forge,omitempty"`
 	Path        string              `json:"path,omitempty"`
 	OCIRef      string              `json:"ociRef,omitempty"`
 	CatalogItem *catalogItemRefJSON `json:"catalogItem,omitempty"`
@@ -583,24 +584,32 @@ func gitRemoteURL(scm *items.GitSCM) string {
 // checking both the official-spec branchSource form and the legacy
 // top-level git/github form.
 func multibranchRemoteURL(sources []items.BranchSourceEntry) string {
+	url, _ := multibranchRemote(sources)
+	return url
+}
+
+// multibranchRemote returns the first branch source's remote URL and the
+// forge that hosts it. The forge is "github" or "gitea" for a GitHub or
+// Gitea source, and the empty string for a plain git source.
+func multibranchRemote(sources []items.BranchSourceEntry) (url, forge string) {
 	for _, src := range sources {
 		if src.Git != nil && src.Git.Remote != "" {
-			return src.Git.Remote
+			return src.Git.Remote, ""
 		}
 		if src.GitHub != nil && src.GitHub.RepositoryURL != "" {
-			return src.GitHub.RepositoryURL
+			return src.GitHub.RepositoryURL, "github"
 		}
 		if git := src.BranchSource.Source.Git; git != nil && git.Remote != "" {
-			return git.Remote
+			return git.Remote, ""
 		}
 		if gh := src.BranchSource.Source.GitHub; gh != nil && gh.RepositoryURL != "" {
-			return gh.RepositoryURL
+			return gh.RepositoryURL, "github"
 		}
 		if g := src.BranchSource.Source.Gitea; g != nil && g.ServerURL != "" {
-			return strings.TrimRight(g.ServerURL, "/") + "/" + g.RepoOwner + "/" + g.Repository
+			return strings.TrimRight(g.ServerURL, "/") + "/" + g.RepoOwner + "/" + g.Repository, "gitea"
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // buildPipelineTriggers converts one declared item's trigger declarations

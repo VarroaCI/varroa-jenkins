@@ -98,6 +98,46 @@ export function revisionHref(repoUrl?: string, forge?: string, sha?: string): st
   return match ? commitHref(match, sha) : null;
 }
 
+/** forgeFileHref links a file at a revision. A known forge builds the path
+ * from its repository base, so a Gitea or Forgejo host links. With no known
+ * forge, the URL shape must name GitHub or GitLab. Answers null when an
+ * argument is missing or the URL is unparsable. */
+export function forgeFileHref(
+  repoUrl?: string,
+  forge?: string,
+  revision?: string,
+  path?: string,
+): string | null {
+  if (!repoUrl || !revision || !path) return null;
+  if (forge === "github" || forge === "gitlab" || forge === "gitea") {
+    const base = repositoryBase(repoUrl);
+    if (!base) return null;
+    const rev = encodeURIComponent(revision);
+    const p = path.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/");
+    if (forge === "github") return `${base}/blob/${rev}/${p}`;
+    if (forge === "gitlab") return `${base}/-/blob/${rev}/${p}`;
+    return `${base}/src/commit/${rev}/${p}`;
+  }
+  const match = matchForgeShape(repoUrl);
+  return match ? fileHref(match, revision, path) : null;
+}
+
+/** forgeTreeHref links a repository at a revision. It follows the same forge
+ * rules as forgeFileHref. Answers null when the URL or revision is missing. */
+export function forgeTreeHref(repoUrl?: string, forge?: string, revision?: string): string | null {
+  if (!repoUrl || !revision) return null;
+  if (forge === "github" || forge === "gitlab" || forge === "gitea") {
+    const base = repositoryBase(repoUrl);
+    if (!base) return null;
+    const rev = encodeURIComponent(revision);
+    if (forge === "github") return `${base}/tree/${rev}`;
+    if (forge === "gitlab") return `${base}/-/tree/${rev}`;
+    return `${base}/src/commit/${rev}`;
+  }
+  const match = matchForgeShape(repoUrl);
+  return match ? repositoryHref(match, revision) : null;
+}
+
 /** libraryHref links a shared library to its repository. It targets the
  * commit when a revision is known, and the version otherwise. Answers null
  * for an unknown forge, an unparsable URL, or a library with neither a

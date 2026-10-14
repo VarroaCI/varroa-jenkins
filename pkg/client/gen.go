@@ -332,6 +332,13 @@ const (
 	Pattern ComponentsSchemasJenkinsScopeType = "Pattern"
 )
 
+// Defines values for ComponentsSchemasJobDeclaredByForge.
+const (
+	ComponentsSchemasJobDeclaredByForgeGitea  ComponentsSchemasJobDeclaredByForge = "gitea"
+	ComponentsSchemasJobDeclaredByForgeGithub ComponentsSchemasJobDeclaredByForge = "github"
+	ComponentsSchemasJobDeclaredByForgeGitlab ComponentsSchemasJobDeclaredByForge = "gitlab"
+)
+
 // Defines values for ComponentsSchemasJobDeclaredByKind.
 const (
 	GitSource ComponentsSchemasJobDeclaredByKind = "gitSource"
@@ -359,6 +366,13 @@ const (
 	Always       ComponentsSchemasMiteSpecImagePullPolicy = "Always"
 	IfNotPresent ComponentsSchemasMiteSpecImagePullPolicy = "IfNotPresent"
 	Never        ComponentsSchemasMiteSpecImagePullPolicy = "Never"
+)
+
+// Defines values for ComponentsSchemasPipelineDefinitionJenkinsfileForge.
+const (
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGitea  ComponentsSchemasPipelineDefinitionJenkinsfileForge = "gitea"
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGithub ComponentsSchemasPipelineDefinitionJenkinsfileForge = "github"
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGitlab ComponentsSchemasPipelineDefinitionJenkinsfileForge = "gitlab"
 )
 
 // Defines values for ComponentsSchemasPipelineDefinitionSource.
@@ -2586,9 +2600,12 @@ type ComponentsSchemasJobBranchList struct {
 
 // ComponentsSchemasJobDeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
 type ComponentsSchemasJobDeclaredBy struct {
-	Bundle      ComponentsSchemasBundleRef         `json:"bundle"`
-	CatalogItem *ComponentsSchemasCatalogItemRef   `json:"catalogItem,omitempty"`
-	Kind        ComponentsSchemasJobDeclaredByKind `json:"kind"`
+	Bundle      ComponentsSchemasBundleRef       `json:"bundle"`
+	CatalogItem *ComponentsSchemasCatalogItemRef `json:"catalogItem,omitempty"`
+
+	// Forge gitSource only: the forge that hosts repoURL. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	Forge *ComponentsSchemasJobDeclaredByForge `json:"forge,omitempty"`
+	Kind  ComponentsSchemasJobDeclaredByKind   `json:"kind"`
 
 	// Name gitSource: the input's repoURL. ociSource: the input's ociRef. itemRef: the CatalogItem name.
 	Name string `json:"name"`
@@ -2605,6 +2622,9 @@ type ComponentsSchemasJobDeclaredBy struct {
 	// Revision A git SHA (gitSource), an OCI manifest digest (ociSource), or a CatalogItem content hash (itemRef). Absent when the composed bundle has not resolved this input yet.
 	Revision *string `json:"revision,omitempty"`
 }
+
+// ComponentsSchemasJobDeclaredByForge gitSource only: the forge that hosts repoURL. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasJobDeclaredByForge string
 
 // ComponentsSchemasJobDeclaredByKind defines model for ComponentsSchemasJobDeclaredBy.Kind.
 type ComponentsSchemasJobDeclaredByKind string
@@ -2805,7 +2825,10 @@ type ComponentsSchemasPipelineDefinition struct {
 
 	// JenkinsfileCommit The last build's checked-out commit, from its run record.
 	JenkinsfileCommit *string `json:"jenkinsfileCommit,omitempty"`
-	JenkinsfileRepo   *string `json:"jenkinsfileRepo,omitempty"`
+
+	// JenkinsfileForge The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	JenkinsfileForge *ComponentsSchemasPipelineDefinitionJenkinsfileForge `json:"jenkinsfileForge,omitempty"`
+	JenkinsfileRepo  *string                                              `json:"jenkinsfileRepo,omitempty"`
 
 	// Profile The version profile in effect for this job's controller.
 	Profile *string `json:"profile,omitempty"`
@@ -2813,6 +2836,9 @@ type ComponentsSchemasPipelineDefinition struct {
 	// Source jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
 	Source ComponentsSchemasPipelineDefinitionSource `json:"source"`
 }
+
+// ComponentsSchemasPipelineDefinitionJenkinsfileForge The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasPipelineDefinitionJenkinsfileForge string
 
 // ComponentsSchemasPipelineDefinitionSource jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
 type ComponentsSchemasPipelineDefinitionSource string

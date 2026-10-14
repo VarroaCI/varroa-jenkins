@@ -902,6 +902,37 @@ describe("PipelinePage — provenance rows", () => {
     expect(row.textContent).toBe("https://github.com/example/app");
   });
 
+  it("links the Jenkinsfile row on a Gitea host when the forge is gitea", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      jenkinsfileRepo: "https://gitea.example.com/team/app",
+      jenkinsfileCommit: "9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+      jenkinsfileForge: "gitea",
+      definitionPath: "Jenkinsfile",
+    });
+
+    const link = within(definedByRow("Jenkinsfile")!).getByRole("link");
+    expect(link.getAttribute("href")).toBe(
+      "https://gitea.example.com/team/app/src/commit/9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293/Jenkinsfile",
+    );
+  });
+
+  it("links the Source input row on a Gitea host when the forge is gitea", async () => {
+    await renderJobWithDefinition({
+      source: "jenkinsfile",
+      declaredBy: declaredByGitSource({
+        name: "https://gitea.example.com/acme/casc-bundles",
+        repoURL: "https://gitea.example.com/acme/casc-bundles",
+        forge: "gitea",
+      }),
+    });
+
+    const link = within(definedByRow("Source input")!).getByRole("link", { name: /casc-bundles/ });
+    expect(link.getAttribute("href")).toBe(
+      "https://gitea.example.com/acme/casc-bundles/src/commit/9f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293",
+    );
+  });
+
   it("never links the Jenkinsfile row for a template source", async () => {
     await renderJobWithDefinition({
       source: "template",
