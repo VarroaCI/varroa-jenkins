@@ -1011,7 +1011,8 @@ type GiteaNavigator struct {
 	Traits        []GiteaTrait `yaml:"traits,omitempty"`
 }
 
-// GitHubTrait is a union of GitHub branch source discovery traits.
+// GitHubTrait is a union of GitHub branch source traits: discovery, the head
+// wildcard filter, and SSH checkout. Exactly one field is set in each entry.
 type GitHubTrait struct {
 	GitHubBranchDiscovery      *GitHubBranchDiscovery      `yaml:"gitHubBranchDiscovery,omitempty"`
 	GitHubPullRequestDiscovery *GitHubPullRequestDiscovery `yaml:"gitHubPullRequestDiscovery,omitempty"`
@@ -1169,6 +1170,16 @@ func (i *Item) Validate() error {
 			return fmt.Errorf("item %q: kind=multibranch requires at least one branch source in sourcesList", i.Name)
 		}
 		for _, entry := range i.SourcesList {
+			if gh := entry.BranchSource.Source.GitHub; gh != nil {
+				if err := validateGitHubTraits(fmt.Sprintf("item %q: ", i.Name), gh.Traits); err != nil {
+					return err
+				}
+			}
+			if gh := entry.GitHub; gh != nil {
+				if err := validateGitHubTraits(fmt.Sprintf("item %q: ", i.Name), gh.Traits); err != nil {
+					return err
+				}
+			}
 			if g := entry.BranchSource.Source.Gitea; g != nil {
 				if err := validateGiteaServer(i.Name, g.ServerURL, g.RepoOwner); err != nil {
 					return err
@@ -1273,6 +1284,65 @@ func validateGiteaStrategy(itemName, kind string, id int) error {
 	return nil
 }
 
+// validateGitHubTraits checks each declared GitHub trait. The prefix names the
+// item, and the library when the traits belong to a folder library. A trait
+// entry sets exactly one key, and each kind appears at most once.
+func validateGitHubTraits(prefix string, traits []GitHubTrait) error {
+	seen := map[string]bool{}
+	for _, t := range traits {
+		set := 0
+		kind := ""
+		if b := t.GitHubBranchDiscovery; b != nil {
+			set++
+			kind = "gitHubBranchDiscovery"
+			if err := validateGitHubStrategy(prefix, kind, b.StrategyID); err != nil {
+				return err
+			}
+		}
+		if p := t.GitHubPullRequestDiscovery; p != nil {
+			set++
+			kind = "gitHubPullRequestDiscovery"
+			if err := validateGitHubStrategy(prefix, kind, p.StrategyID); err != nil {
+				return err
+			}
+		}
+		if f := t.GitHubForkDiscovery; f != nil {
+			set++
+			kind = "gitHubForkDiscovery"
+			if err := validateGitHubStrategy(prefix, kind, f.StrategyID); err != nil {
+				return err
+			}
+		}
+		if t.HeadWildcardFilter != nil {
+			set++
+			kind = "headWildcardFilter"
+		}
+		if s := t.GitHubSshCheckout; s != nil {
+			set++
+			kind = "gitHubSshCheckout"
+			if strings.TrimSpace(s.CredentialsID) == "" {
+				return fmt.Errorf("%sgitHubSshCheckout requires credentialsId", prefix)
+			}
+		}
+		if set != 1 {
+			return fmt.Errorf("%sa github trait entry must set exactly one key", prefix)
+		}
+		if seen[kind] {
+			return fmt.Errorf("%sgithub trait %s is declared more than once", prefix, kind)
+		}
+		seen[kind] = true
+	}
+	return nil
+}
+
+// validateGitHubStrategy checks the strategy id of a GitHub discovery trait.
+func validateGitHubStrategy(prefix, kind string, id int) error {
+	if id < 1 || id > 3 {
+		return fmt.Errorf("%s%s strategyId %d must be 1, 2, or 3", prefix, kind, id)
+	}
+	return nil
+}
+
 // EffectiveGiteaTraits returns the discovery traits a Gitea source or
 // navigator renders. An empty list selects the defaults: branch discovery
 // (1), origin pull request discovery (1), and fork pull request discovery
@@ -1330,6 +1400,9 @@ func validateLibrary(itemName string, c LibraryConfiguration) error {
 				}
 			} else if gh.RepoOwner == "" || gh.Repository == "" {
 				return fmt.Errorf("%smodernSCM.scm.github requires repoOwner and repository", prefix)
+			}
+			if err := validateGitHubTraits(prefix+"modernSCM.scm.github: ", gh.Traits); err != nil {
+				return err
 			}
 		}
 		if g := s.Git; g != nil && g.Remote == "" {

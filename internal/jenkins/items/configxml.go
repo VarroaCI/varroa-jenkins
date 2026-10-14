@@ -811,8 +811,8 @@ type branchSourceData struct {
 }
 
 type branchSourceItemXML struct {
-	// Source is a *branchSourceSourceXML for the git and github sources, or a
-	// *giteaSourceXML for a Gitea source.
+	// Source is a *branchSourceSourceXML for a git source, a *gitHubSourceXML
+	// for a GitHub source, or a *giteaSourceXML for a Gitea source.
 	Source          any                 `xml:"source"`
 	BuildStrategies *buildStrategiesXML `xml:"buildStrategies"`
 }
@@ -839,18 +839,111 @@ func skipInitialBuildStrategies() *buildStrategiesXML {
 	}
 }
 
-// branchSourceSourceXML holds either a git or github SCM source.
-// Only one is populated; omitempty ensures clean XML.
+// branchSourceSourceXML is a git SCM source.
 type branchSourceSourceXML struct {
-	Class           string               `xml:"class,attr"`
-	Plugin          string               `xml:"plugin,attr,omitempty"`
-	Remote          string               `xml:"remote,omitempty"`
-	CredentialsID   string               `xml:"credentialsId,omitempty"`
-	RepoOwner       string               `xml:"repoOwner,omitempty"`
-	Repository      string               `xml:"repository,omitempty"`
-	RepositoryURL   string               `xml:"repositoryUrl,omitempty"`
-	ConfiguredByURL bool                 `xml:"configuredByUrl,omitempty"`
-	Traits          *gitLibraryTraitsXML `xml:"traits,omitempty"`
+	Class         string               `xml:"class,attr"`
+	Plugin        string               `xml:"plugin,attr,omitempty"`
+	Remote        string               `xml:"remote,omitempty"`
+	CredentialsID string               `xml:"credentialsId,omitempty"`
+	Traits        *gitLibraryTraitsXML `xml:"traits,omitempty"`
+}
+
+// gitHubSourceXML is a GitHub branch source. Its traits follow the scalar
+// fields. The element names come from XStream, which writes each underscore
+// in a Java class name as a double underscore.
+type gitHubSourceXML struct {
+	Class           string           `xml:"class,attr"`
+	Plugin          string           `xml:"plugin,attr,omitempty"`
+	CredentialsID   string           `xml:"credentialsId,omitempty"`
+	RepoOwner       string           `xml:"repoOwner,omitempty"`
+	Repository      string           `xml:"repository,omitempty"`
+	RepositoryURL   string           `xml:"repositoryUrl,omitempty"`
+	ConfiguredByURL bool             `xml:"configuredByUrl,omitempty"`
+	Traits          *gitHubTraitsXML `xml:"traits,omitempty"`
+}
+
+// gitHubTraitsXML lists the declared GitHub traits in a fixed order. A nil
+// field is omitted, so the plugin applies its own default for that kind.
+type gitHubTraitsXML struct {
+	Branch      *gitHubStrategyXML `xml:"org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait"`
+	PullRequest *gitHubStrategyXML `xml:"org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait"`
+	Fork        *gitHubForkXML     `xml:"org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait"`
+	Wildcard    *wildcardFilterXML `xml:"jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait"`
+	SSHCheckout *gitHubSSHXML      `xml:"org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait"`
+}
+
+type gitHubStrategyXML struct {
+	StrategyID int `xml:"strategyId"`
+}
+
+type gitHubForkXML struct {
+	StrategyID int            `xml:"strategyId"`
+	Trust      gitHubTrustXML `xml:"trust"`
+}
+
+// gitHubTrustXML names the trust class of the fork trait. The class attribute
+// carries the Java nested class name.
+type gitHubTrustXML struct {
+	Class string `xml:"class,attr"`
+}
+
+// wildcardFilterXML is the head wildcard filter from the scm-api plugin.
+type wildcardFilterXML struct {
+	Plugin   string `xml:"plugin,attr"`
+	Includes string `xml:"includes"`
+	Excludes string `xml:"excludes"`
+}
+
+type gitHubSSHXML struct {
+	CredentialsID string `xml:"credentialsId"`
+}
+
+// gitHubTraitsFor renders the declared GitHub traits. It returns nil for an
+// empty list, so the source has no traits element.
+func gitHubTraitsFor(traits []GitHubTrait) *gitHubTraitsXML {
+	if len(traits) == 0 {
+		return nil
+	}
+	x := &gitHubTraitsXML{}
+	for _, t := range traits {
+		switch {
+		case t.GitHubBranchDiscovery != nil:
+			x.Branch = &gitHubStrategyXML{StrategyID: t.GitHubBranchDiscovery.StrategyID}
+		case t.GitHubPullRequestDiscovery != nil:
+			x.PullRequest = &gitHubStrategyXML{StrategyID: t.GitHubPullRequestDiscovery.StrategyID}
+		case t.GitHubForkDiscovery != nil:
+			f := t.GitHubForkDiscovery
+			trust := "org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission"
+			if f.Trust.GitHubTrustEveryone != nil {
+				trust = "org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustEveryone"
+			}
+			x.Fork = &gitHubForkXML{StrategyID: f.StrategyID, Trust: gitHubTrustXML{Class: trust}}
+		case t.HeadWildcardFilter != nil:
+			w := t.HeadWildcardFilter
+			includes := w.Includes
+			if includes == "" {
+				includes = "*"
+			}
+			x.Wildcard = &wildcardFilterXML{Plugin: "scm-api", Includes: includes, Excludes: w.Excludes}
+		case t.GitHubSshCheckout != nil:
+			x.SSHCheckout = &gitHubSSHXML{CredentialsID: t.GitHubSshCheckout.CredentialsID}
+		}
+	}
+	return x
+}
+
+// gitHubSourceFor renders a GitHub branch source with its declared traits.
+func gitHubSourceFor(gh *GitHubSCMSource) *gitHubSourceXML {
+	return &gitHubSourceXML{
+		Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
+		Plugin:          "github-branch-source",
+		CredentialsID:   gh.CredentialsID,
+		RepoOwner:       gh.RepoOwner,
+		Repository:      gh.Repository,
+		RepositoryURL:   gh.RepositoryURL,
+		ConfiguredByURL: gh.ConfiguredByURL,
+		Traits:          gitHubTraitsFor(gh.Traits),
+	}
 }
 
 type mbFactoryXML struct {
@@ -872,17 +965,9 @@ func multibranchConfigXML(item Item) xmlConfig {
 	}
 	for _, entry := range item.SourcesList {
 		// Official spec: branchSource.source.github
-		if entry.BranchSource.Source.GitHub != nil {
+		if gh := entry.BranchSource.Source.GitHub; gh != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
-				Source: &branchSourceSourceXML{
-					Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-					Plugin:          "github-branch-source",
-					RepoOwner:       entry.BranchSource.Source.GitHub.RepoOwner,
-					Repository:      entry.BranchSource.Source.GitHub.Repository,
-					RepositoryURL:   entry.BranchSource.Source.GitHub.RepositoryURL,
-					ConfiguredByURL: entry.BranchSource.Source.GitHub.ConfiguredByURL,
-					CredentialsID:   entry.BranchSource.Source.GitHub.CredentialsID,
-				},
+				Source:          gitHubSourceFor(gh),
 				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
@@ -924,11 +1009,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 		// Legacy format: bare github at top level
 		if entry.GitHub != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
-				Source: &branchSourceSourceXML{
-					Class:     "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-					Plugin:    "github-branch-source",
-					RepoOwner: entry.GitHub.RepoOwner,
-				},
+				Source:          gitHubSourceFor(entry.GitHub),
 				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
@@ -1276,18 +1357,9 @@ func libraryRetrieverXML(r LibraryRetriever) (*retrieverXML, error) {
 	case s.GitHub != nil && s.Git != nil:
 		return nil, fmt.Errorf("modernSCM.scm must set exactly one of github and git")
 	case s.GitHub != nil:
-		gh := s.GitHub
 		return &retrieverXML{
 			Class: retrieverClass,
-			SCM: &branchSourceSourceXML{
-				Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-				Plugin:          "github-branch-source",
-				RepoOwner:       gh.RepoOwner,
-				Repository:      gh.Repository,
-				RepositoryURL:   gh.RepositoryURL,
-				ConfiguredByURL: gh.ConfiguredByURL,
-				CredentialsID:   gh.CredentialsID,
-			},
+			SCM:   gitHubSourceFor(s.GitHub),
 		}, nil
 	case s.Git != nil:
 		g := s.Git

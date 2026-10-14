@@ -93,7 +93,9 @@ reading each package's entry point):
   cache, matched on whole path segments. Only the cell merge writes it, for
   a held tenant folder; `ReRoot` drops it. A `gitea` source or navigator
   always renders its discovery traits (the defaults when none are declared)
-  and a `WebhookRegistrationTrait` set to `DISABLE`. The sibling
+  and a `WebhookRegistrationTrait` set to `DISABLE`. A `github` source
+  renders its declared traits, and renders no `traits` element when it
+  declares none. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
   `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
   tenant's re-rooted manifest before a push; `items.Parse` itself is

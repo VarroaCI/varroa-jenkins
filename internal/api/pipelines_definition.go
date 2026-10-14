@@ -675,7 +675,7 @@ func multibranchDiscoveryTraits(sources []items.BranchSourceEntry) (push, pullRe
 			if trait.GitHubBranchDiscovery != nil {
 				push = true
 			}
-			if trait.GitHubPullRequestDiscovery != nil {
+			if trait.GitHubPullRequestDiscovery != nil || trait.GitHubForkDiscovery != nil {
 				pullRequest = true
 			}
 		}

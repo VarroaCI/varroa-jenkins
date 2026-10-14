@@ -13,6 +13,11 @@
               <credentialsId>github-lib</credentialsId>
               <repoOwner>fake-org</repoOwner>
               <repository>shared-library</repository>
+              <traits>
+                <org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>
+                  <strategyId>3</strategyId>
+                </org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>
+              </traits>
             </scm>
           </retriever>
           <allowVersionOverride>true</allowVersionOverride>

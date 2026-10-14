@@ -203,6 +203,51 @@ follows `removeStrategy.items`. Deletion also removes build history.
 Unsafe removals appear in `status.pendingItemDeletions` and need the `approve-deletion`
 capability. A running job or unreadable build state defers deletion.
 
+## GitHub sources
+
+A `multibranch` item can scan a GitHub repository. Use the `github` key under `branchSource.source`. Declare the branch source traits under `traits`:
+
+```yaml
+items:
+  - kind: multibranch
+    name: payments-web
+    sourcesList:
+      - branchSource:
+          source:
+            github:
+              repoOwner: acme
+              repository: web
+              credentialsId: github-token
+              traits:
+                - gitHubBranchDiscovery:
+                    strategyId: 3
+                - gitHubPullRequestDiscovery:
+                    strategyId: 1
+                - gitHubForkDiscovery:
+                    strategyId: 1
+                    trust:
+                      gitHubTrustEveryone: {}
+                - headWildcardFilter:
+                    includes: main release/*
+                    excludes: wip/*
+                - gitHubSshCheckout:
+                    credentialsId: github-ssh-key
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile
+```
+
+Each trait entry sets exactly one key. Each key appears at most once in the list. The keys are:
+
+- `gitHubBranchDiscovery` and `gitHubPullRequestDiscovery` take a `strategyId` of `1`, `2`, or `3`.
+- `gitHubForkDiscovery` takes a `strategyId` of `1`, `2`, or `3`. Set `trust.gitHubTrustEveryone` to trust every fork. Omit it to trust only forks whose owner has write permission.
+- `headWildcardFilter` takes `includes` and `excludes`. Separate the patterns with a space. An empty `includes` matches `*`.
+- `gitHubSshCheckout` takes a `credentialsId`. The checkout uses SSH with that credential.
+
+A declared `traits` list replaces the plugin defaults. Name every discovery trait that the item needs. An empty or absent `traits` list renders no `traits` element. The plugin then applies its own defaults.
+
+The same keys apply to the `modernSCM.scm.github` retriever of a folder library.
+
 ## Gitea and Forgejo sources
 
 A `multibranch` item or an `organizationFolder` item can scan a Gitea or Forgejo server. Use

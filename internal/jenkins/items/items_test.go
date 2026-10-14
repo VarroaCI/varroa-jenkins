@@ -1913,6 +1913,209 @@ func TestValidate_GiteaSourceRejects(t *testing.T) {
 	}
 }
 
+// flattenXML joins the trimmed lines of an indented config.xml so a test can
+// match one element with its children on a single line.
+func flattenXML(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		b.WriteString(strings.TrimSpace(line))
+	}
+	return b.String()
+}
+
+func TestGenerateConfigXML_GitHubSourceDeclaredTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{
+				RepoOwner:  "org",
+				Repository: "repo",
+				Traits: []GitHubTrait{
+					{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: 3}},
+					{GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 2}},
+					{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 1, Trust: GitHubTrust{GitHubTrustEveryone: &GitHubTrustEveryone{}}}},
+					{HeadWildcardFilter: &HeadWildcardFilter{Includes: "main release/*", Excludes: "wip/*"}},
+					{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh-key"}},
+				},
+			},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	flat := flattenXML(xml)
+	for _, want := range []string{
+		"<traits>",
+		"<org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait><strategyId>3</strategyId></org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>",
+		"<org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait><strategyId>2</strategyId></org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait>",
+		"<org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait><strategyId>1</strategyId>",
+		`<trust class="org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustEveryone"></trust>`,
+		`<jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait plugin="scm-api"><includes>main release/*</includes><excludes>wip/*</excludes></jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait>`,
+		"<org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait><credentialsId>ssh-key</credentialsId></org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait>",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "<org.jenkinsci.plugins.github_branch_source.") {
+		t.Errorf("trait element names must escape underscores as double underscores:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubSourceNoTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if strings.Contains(xml, "<traits") {
+		t.Errorf("a GitHub source with no declared traits must render no traits element:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubForkTrustDefault(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: []GitHubTrait{
+				{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 2}},
+			}},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(flattenXML(xml), `ForkPullRequestDiscoveryTrait$TrustPermission"`) {
+		t.Errorf("fork trust without gitHubTrustEveryone must render TrustPermission:\n%s", xml)
+	}
+	if strings.Contains(xml, "TrustEveryone") {
+		t.Errorf("fork trust must not render TrustEveryone by default:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubWildcardIncludesDefault(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: []GitHubTrait{
+				{HeadWildcardFilter: &HeadWildcardFilter{Excludes: "wip/*"}},
+			}},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<includes>*</includes>") {
+		t.Errorf("a wildcard filter with no includes must render includes *:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_LegacyGitHubSourceFields(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "repo", RepositoryURL: "https://github.example.com/org/repo",
+			CredentialsID: "gh-cred",
+		}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		"<repository>repo</repository>",
+		"<repositoryUrl>https://github.example.com/org/repo</repositoryUrl>",
+		"<credentialsId>gh-cred</credentialsId>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("legacy github source missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitHubTraits(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "gh-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "lib", Traits: []GitHubTrait{
+				{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: 1}},
+			},
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(flattenXML(xml), "<org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait><strategyId>1</strategyId>") {
+		t.Errorf("folder library GitHub source missing declared branch trait:\n%s", xml)
+	}
+}
+
+func TestParse_GitHubTraitValidation(t *testing.T) {
+	mb := func(traits ...GitHubTrait) Item {
+		return Item{Kind: "multibranch", Name: "mb", SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{
+			Source: BranchSourceConfig{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: traits}}}}}}
+	}
+	lib := func(traits ...GitHubTrait) Item {
+		return folderLibraryItem(LibraryConfiguration{
+			Name: "gh-lib", DefaultVersion: "main",
+			Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+				RepoOwner: "org", Repository: "lib", Traits: traits,
+			}}}},
+		})
+	}
+	branch := func(id int) GitHubTrait {
+		return GitHubTrait{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: id}}
+	}
+	tests := []struct {
+		name string
+		item Item
+		want string
+	}{
+		{"two keys in one trait", mb(GitHubTrait{
+			GitHubBranchDiscovery:      &GitHubBranchDiscovery{StrategyID: 1},
+			GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 1},
+		}), "a github trait entry must set exactly one key"},
+		{"empty trait entry", mb(GitHubTrait{}), "a github trait entry must set exactly one key"},
+		{"duplicate kind", mb(branch(1), branch(2)), "github trait gitHubBranchDiscovery is declared more than once"},
+		{"strategyId 0", mb(branch(0)), "gitHubBranchDiscovery strategyId 0 must be 1, 2, or 3"},
+		{"strategyId 4", mb(GitHubTrait{GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 4}}),
+			"gitHubPullRequestDiscovery strategyId 4 must be 1, 2, or 3"},
+		{"empty SSH credentialsId", mb(GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "  "}}),
+			"gitHubSshCheckout requires credentialsId"},
+		{"library strategyId 4", lib(GitHubTrait{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 4}}),
+			`item "apps": folder library "gh-lib": modernSCM.scm.github: gitHubForkDiscovery strategyId 4`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.item.Validate()
+			if err == nil {
+				t.Fatal("expected a validation error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not contain %q", err, tt.want)
+			}
+		})
+	}
+	valid := mb(branch(3), GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh"}})
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid GitHub traits rejected: %v", err)
+	}
+}
+
 func TestGitHubAppCredential_MarshalsJCasCShape(t *testing.T) {
 	cred := FolderCredential{GitHubApp: &GitHubAppCredential{
 		ID:         "github-app",

@@ -765,3 +765,19 @@ func TestMultibranchGiteaRemoteAndDiscoveryTraits(t *testing.T) {
 		t.Fatalf("fork-only gitea traits: push=%v pullRequest=%v, want push false and pullRequest true", push, pr)
 	}
 }
+
+func TestMultibranchGitHubForkDiscoveryCountsAsPullRequest(t *testing.T) {
+	onlyFork := []items.BranchSourceEntry{
+		{BranchSource: items.BranchSource{Source: items.BranchSourceConfig{GitHub: &items.GitHubSCMSource{
+			RepoOwner:  "acme",
+			Repository: "app",
+			Traits: []items.GitHubTrait{
+				{GitHubForkDiscovery: &items.GitHubForkDiscovery{StrategyID: 1}},
+			},
+		}}}},
+	}
+	push, pr := multibranchDiscoveryTraits(onlyFork)
+	if push || !pr {
+		t.Fatalf("fork-only github traits: push=%v pullRequest=%v, want push false and pullRequest true", push, pr)
+	}
+}
