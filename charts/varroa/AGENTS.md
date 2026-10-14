@@ -228,6 +228,10 @@ the packaged CRDs. Does not own the Go source it packages
   plugin-store PVC — otherwise the cached blobs are lost), `secret.yaml`
   (`varroa-updatecenter-import-token`, idempotent),
   `updatecenter-cr.yaml` (the `varroa-update-center` singleton CR).
+  `updateCenter.pullThrough.prefetch` renders `spec.pullThrough.prefetch`; the
+  render fails when pull-through is off. `tests/test-updatecenter-prefetch.sh`
+  asserts it. The operator reads the token Secret through the API, so the chart
+  adds no mount.
   `updateCenter.uploads.enabled` (default true) is the SINGLE source for both
   the single-writer topology (`replicas: 1` + `Recreate`, regardless of storage
   type) and `VARROA_UC_SINGLE_WRITER`, so the two cannot drift — replica count

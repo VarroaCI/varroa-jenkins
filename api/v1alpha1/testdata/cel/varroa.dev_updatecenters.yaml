@@ -49,3 +49,22 @@ cases:
     field: spec.storage
     new: {spec: {storage: {type: oci, local: null, oci: {ref: registry.example.com/update-center:1}}}}
     want: accept
+
+  - name: pullThrough prefetch without enabled refused
+    rule: |-
+      !has(self.prefetch) || !self.prefetch || (has(self.enabled) && self.enabled)
+    field: spec.pullThrough
+    new: {spec: {pullThrough: {prefetch: true}}}
+    want: reject
+  - name: pullThrough prefetch with enabled accepted
+    rule: |-
+      !has(self.prefetch) || !self.prefetch || (has(self.enabled) && self.enabled)
+    field: spec.pullThrough
+    new: {spec: {pullThrough: {enabled: true, prefetch: true}}}
+    want: accept
+  - name: pullThrough disabled accepted
+    rule: |-
+      !has(self.prefetch) || !self.prefetch || (has(self.enabled) && self.enabled)
+    field: spec.pullThrough
+    new: {spec: {pullThrough: {enabled: false}}}
+    want: accept

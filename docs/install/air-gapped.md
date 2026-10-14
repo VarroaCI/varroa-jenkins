@@ -119,6 +119,17 @@ kubectl get updatecenter varroa-update-center -o yaml
 
 `status.gaps` lists missing plugin versions, and `status.unservable` lists the ones the update center cannot serve, each with a reason. A `latest` pin needs one stored version of the plugin, because pull-through is off. With pull-through disabled, an affected controller reports `WaitingForUpdateCenter` and remains blocked until `PluginsServable` is `True`. The condition message states the cause. A coverage gap points at seeding the missing plugins or setting an explicit `pluginUpdateCenterURL`/`pluginUpdateCenterDownloadURL` override in `ProvisioningDefaults`. Any other not-Ready cause points at the `varroa-update-center` resource itself. An explicit download URL must end in `/download/plugins`. Otherwise every plugin falls back to the public archive, which an offline pod cannot reach. See [Update Center](../operations/update-center.md#set-an-explicit-download-url).
 
+## Fill the Store Before an Offline Cutover
+
+Prefetch fetches every declared plugin that pull-through can serve. Use it to fill the store before you disconnect the cluster.
+
+1. Set `updateCenter.pullThrough.enabled=true` and `updateCenter.pullThrough.prefetch=true`.
+2. Wait until `PluginsPrefetched` and `CoverageComplete` are True. Run `kubectl get updatecenter varroa-update-center -o yaml` and read both conditions.
+3. Set `updateCenter.pullThrough.enabled=false` and `updateCenter.pullThrough.prefetch=false`. Disable `networkPolicy.pullThroughEgress` too.
+4. Check that `PluginsServable` is True.
+
+The hosts named in `updateCenter.pullThrough.upstreamURL`, `downloadURL`, and `archiveURL` must stay reachable until step 2 completes. A plugin whose host is blocked stays a gap.
+
 ## Enforce the Offline Boundary
 
 The chart isolates only `varroa-system`. Apply default-deny egress and explicit allow rules in every controller namespace. Allow DNS, the Kubernetes API when needed, the mite gateway, internal registries, internal Git or OCI sources, the update center, identity services, and approved build destinations.

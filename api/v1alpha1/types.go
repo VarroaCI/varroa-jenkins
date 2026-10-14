@@ -3548,6 +3548,7 @@ type UpdateCenterLocalStorage struct {
 }
 
 // UpdateCenterPullThrough configures pull-through proxy behavior.
+// +kubebuilder:validation:XValidation:rule="!has(self.prefetch) || !self.prefetch || (has(self.enabled) && self.enabled)",message="pullThrough.prefetch requires pullThrough.enabled"
 type UpdateCenterPullThrough struct {
 	// Enabled enables pull-through caching from an upstream update center.
 	// +optional
@@ -3558,6 +3559,11 @@ type UpdateCenterPullThrough struct {
 	// DownloadURL is the upstream download URL (default https://updates.jenkins.io/download).
 	// +optional
 	DownloadURL string `json:"downloadURL,omitempty"`
+	// Prefetch makes the operator fetch each declared plugin that pull-through can serve
+	// but the store does not hold, in batches, before any controller requests it.
+	// It requires Enabled.
+	// +optional
+	Prefetch bool `json:"prefetch,omitempty"`
 }
 
 // UpdateCenterSeed configures the initial plugin seed.

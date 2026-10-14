@@ -347,6 +347,8 @@ reading each package's entry point):
   request with `400` when any plugin pack layer has a version that
   `ucmeta.IsLatest` matches. It copies nothing.), and the `/api/v1/inventory`
   JSON consumed by the operator's gap reconciler and the BFF proxy.
+  `POST /api/v1/prefetch` (Bearer import token, 409 when pull-through is off)
+  fetches posted plugins through the `/download` path and shares its `dlGroup` key.
   `ResolveAvailable` resolves `latest` to the highest version a healthy metadata
   source lists. `/download` resolves `latest` from the served metadata first.
   The upload planner checks a `latest`-only declaration against the version it

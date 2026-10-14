@@ -25,6 +25,7 @@ Choose one or more sources:
 | Pull-through | Fetch missing artifacts from the configured upstream. |
 | Upload | Add an `.hpi` through the authenticated API or CLI. |
 | Import | Transfer a plugin pack from an OCI, directory, or tar source. |
+| Prefetch | Fetch every declared plugin that pull-through can serve, before a controller asks for it. |
 
 ```bash
 varroactl upload plugin <file.hpi>
@@ -38,6 +39,33 @@ A bundle plugin that declares no version is declared at `latest`. An upload neve
 Enable pull-through only when the update center may reach its configured upstream and archive hosts. In an air-gapped environment, seed or import every required plugin before deploying controllers. See [Air-gapped installation](../install/air-gapped.md) and [Plugin packs](../config/plugin-packs.md).
 
 `seed.secretRef` names a `.dockerconfigjson` or `username`/`password` Secret in the operator namespace. It holds pull credentials for every ref in `seed.refs`, so it must contain exactly one registry entry.
+
+## Prefetch declared plugins
+
+Pull-through stores a plugin only when a Jenkins pod requests it. A declared pin that no pod requests, such as a pin in an unused profile or an open candidate, stays a gap. Set prefetch to fetch these pins before any request:
+
+```yaml
+updateCenter:
+  pullThrough:
+    enabled: true
+    prefetch: true
+```
+
+Prefetch requires `pullThrough.enabled`. The chart fails to render when prefetch is on and pull-through is off. The operator reads the import token from the `varroa-updatecenter-import-token` Secret. It posts the servable gaps to `POST /api/v1/prefetch`. Each reconcile posts at most 20 plugins. A plugin that fails waits 10 minutes before the operator posts it again.
+
+The `PluginsPrefetched` condition reports the state:
+
+| Reason | Status | Meaning |
+|---|---|---|
+| `PrefetchComplete` | True | Every servable declared plugin is in the store. |
+| `PrefetchInProgress` | False | The operator fetched a batch, and more servable plugins remain. |
+| `PrefetchFailed` | False | At least one plugin failed to fetch, or every remaining plugin waits for a retry. |
+| `TokenUnavailable` | False | The import token Secret or its key is missing. |
+| `TokenRejected` | False | The update center rejected the import token. |
+| `PrefetchUnsupported` | False | The update center does not serve the prefetch endpoint. |
+| `ServabilityUnavailable` | Unknown | The servability check did not answer, so prefetch waits. |
+
+`PluginsPrefetched` is informational. It does not gate `Ready` or the phase. When prefetch is off, the operator removes the condition.
 
 ## Set an explicit download URL
 
@@ -65,7 +93,7 @@ varroactl get versionprofiles
 
 The update center reports two signals about the declared plugins:
 
-- `CoverageComplete`, `status.gapCount`, and `status.gaps` report declared plugins that are not in the store. The list is informational while pull-through is on, because pull-through fetches a missing plugin on demand. Check it before an air-gapped cutover.
+- `CoverageComplete`, `status.gapCount`, and `status.gaps` report declared plugins that are not in the store. The list is informational while pull-through is on, because pull-through fetches a missing plugin on demand. Check it before an air-gapped cutover. With prefetch on, `CoverageComplete` reaches True without a controller request.
 - `PluginsServable`, `status.unservableCount`, and `status.unservable` report declared plugins the update center cannot serve, from the store or by pull-through. Each entry has a reason:
 
 | Reason | Meaning |

@@ -179,6 +179,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/plugins", s.handleUpload)
 	mux.HandleFunc("/api/v1/inventory", s.handleInventory)
 	mux.HandleFunc("/api/v1/servability", s.handleServability)
+	mux.HandleFunc("/api/v1/prefetch", s.handlePrefetch)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 }

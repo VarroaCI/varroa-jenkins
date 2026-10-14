@@ -207,6 +207,15 @@ func TestUpdateCenterReconciler(t *testing.T) {
 	t.Run("seed-credentials-reach-every-store", testSeedCredentialsReachEveryStore)
 	t.Run("seed-multi-registry-secret-rejected", testSeedMultiRegistrySecretRejected)
 	t.Run("seed-failed-import-is-retried-next-tick", testSeedFailedImportIsRetriedNextTick)
+	t.Run("prefetch-disabled-removes-condition", testPrefetchDisabledRemovesCondition)
+	t.Run("prefetch-posts-servable-gaps-only", testPrefetchPostsServableGapsOnly)
+	t.Run("prefetch-caps-batch-at-20", testPrefetchCapsBatchAt20)
+	t.Run("prefetch-token-missing-is-status-reason", testPrefetchTokenMissingIsStatusReason)
+	t.Run("prefetch-failure-does-not-gate-ready", testPrefetchFailureDoesNotGateReady)
+	t.Run("prefetch-failure-backoff", testPrefetchFailureBackoff)
+	t.Run("prefetch-latest-posts-resolved-version", testPrefetchLatestPostsResolvedVersion)
+	t.Run("prefetch-unsupported", testPrefetchUnsupported)
+	t.Run("prefetch-undecided-waits", testPrefetchUndecidedWaits)
 }
 
 // addProfileWithPlugins registers a JenkinsVersionProfile whose materialized

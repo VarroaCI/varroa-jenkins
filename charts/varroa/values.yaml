@@ -899,6 +899,10 @@ updateCenter:
     # which is the right call when egress cannot reach it — aged pins then report as gaps
     # instead of stalling on a blocked lookup.
     archiveURL: "https://repo.jenkins-ci.org/releases"
+    # -- Fetch every declared plugin that pull-through can serve, before any
+    # controller requests it. The operator fetches at most 20 plugins each 30 s pass.
+    # Requires pullThrough.enabled.
+    prefetch: false
   # -- Seed plugin references imported on first reconciliation.
   seed:
     # -- List of OCI refs to seed (e.g. ["registry.example.org/plugins/pack:v1"]).

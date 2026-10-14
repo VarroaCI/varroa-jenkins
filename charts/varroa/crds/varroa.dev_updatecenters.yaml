@@ -65,11 +65,21 @@ spec:
                     description: Enabled enables pull-through caching from an upstream
                       update center.
                     type: boolean
+                  prefetch:
+                    description: |-
+                      Prefetch makes the operator fetch each declared plugin that pull-through can serve
+                      but the store does not hold, in batches, before any controller requests it.
+                      It requires Enabled.
+                    type: boolean
                   upstreamURL:
                     description: UpstreamURL is the upstream update center URL (default
                       https://updates.jenkins.io).
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: pullThrough.prefetch requires pullThrough.enabled
+                  rule: '!has(self.prefetch) || !self.prefetch || (has(self.enabled)
+                    && self.enabled)'
               seed:
                 description: Seed configures the initial plugin seed. Optional.
                 properties:
