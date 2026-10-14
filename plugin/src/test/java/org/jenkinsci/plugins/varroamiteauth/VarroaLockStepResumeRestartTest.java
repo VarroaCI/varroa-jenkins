@@ -44,7 +44,7 @@ public class VarroaLockStepResumeRestartTest {
 
     private static final String SCRIPT = "varroaLock(name: 'deploy-prod') {\n"
             + "  echo 'in-body'\n"
-            + "  sleep(time: 2, unit: 'SECONDS')\n"
+            + "  sleep(time: 10, unit: 'SECONDS')\n"
             + "  echo 'after-sleep'\n"
             + "}";
 
@@ -52,9 +52,12 @@ public class VarroaLockStepResumeRestartTest {
     // varroa.Varroa instance, so the restart must load that class by name.
     private static final String GLOBAL_VARIABLE_SCRIPT = "varroa.lock(name: 'deploy-prod') {\n"
             + "  echo 'in-body'\n"
-            + "  sleep(time: 2, unit: 'SECONDS')\n"
+            + "  sleep(time: 10, unit: 'SECONDS')\n"
             + "  echo 'after-sleep'\n"
             + "}";
+
+    /** The length of the body's sleep, in milliseconds. It must outlast the session stop. */
+    private static final long SLEEP_MILLIS = 10_000L;
 
     @Rule
     public JenkinsSessionRule sessions = new JenkinsSessionRule();
@@ -64,6 +67,8 @@ public class VarroaLockStepResumeRestartTest {
 
     private HttpServer server;
     private final RecorderStub recorder = new RecorderStub();
+    /** The wall-clock time at which the body's sleep ends. */
+    private volatile long sleepEndsAtMillis;
 
     @Before
     public void startRecorder() throws Exception {
@@ -145,15 +150,17 @@ public class VarroaLockStepResumeRestartTest {
             p.setDefinition(new CpsFlowDefinition(script, true));
             WorkflowRun run = (WorkflowRun) p.scheduleBuild2(0,
                     new VarroaIntentAction("run-restart", "", null, System.currentTimeMillis())).waitForStart();
-            j.waitForMessage("in-body", run);
+            j.waitForMessage("Sleeping for", run);
+            sleepEndsAtMillis = System.currentTimeMillis() + SLEEP_MILLIS;
             assertEquals("no renew before the restart", 0, recorder.renews.get());
         });
     }
 
     /**
-     * Waits until the resumed step sends its first renew, then gives the
-     * sleep, which ended during the restart, time to complete if the
-     * program were running.
+     * Waits until the resumed step sends its first renew, then waits past the
+     * sleep end. The sleep outlasts the session stop, so the program saves at
+     * the sleep step. The wait passes the sleep end, so a running program would
+     * print after-sleep.
      */
     private WorkflowRun awaitGate(org.jvnet.hudson.test.JenkinsRule j) throws Exception {
         WorkflowJob p = j.jenkins.getItemByFullName("alpha/deploy", WorkflowJob.class);
@@ -164,7 +171,10 @@ public class VarroaLockStepResumeRestartTest {
         }
         assertTrue("the resumed step must renew; result " + run.getResult() + ", log:\n"
                 + org.apache.commons.io.IOUtils.toString(run.getLogReader()), recorder.renews.get() > 0);
-        Thread.sleep(3_000L);
+        long waitUntil = Math.max(System.currentTimeMillis(), sleepEndsAtMillis) + 3_000L;
+        while (System.currentTimeMillis() < waitUntil) {
+            Thread.sleep(50);
+        }
         assertTrue(run.isBuilding());
         j.assertLogContains("confirming the hold on alpha/deploy-prod after a resume", run);
         return run;

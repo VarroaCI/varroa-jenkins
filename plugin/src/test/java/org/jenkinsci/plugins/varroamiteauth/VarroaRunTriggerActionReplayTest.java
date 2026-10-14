@@ -19,6 +19,8 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Queue;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
+import hudson.model.queue.CauseOfBlockage;
+import hudson.model.queue.QueueTaskDispatcher;
 import hudson.plugins.git.GitSCM;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
@@ -48,6 +50,7 @@ import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.MockFolder;
+import org.jvnet.hudson.test.TestExtension;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.WebMethod;
@@ -74,6 +77,7 @@ public class VarroaRunTriggerActionReplayTest {
 
     @After
     public void tearDown() {
+        HoldReplayDispatcher.holdRunId = null;
         VarroaTemplateDefinitions.setClassNamesForTesting(null);
         Queue.getInstance().clear();
     }
@@ -257,7 +261,8 @@ public class VarroaRunTriggerActionReplayTest {
 
     @Test
     public void aRedeliveredReplayQueuesOneBuild() throws Exception {
-        j.jenkins.setNumExecutors(0);
+        // A pipeline job is a flyweight task, so zero executors do not hold it; the dispatcher does.
+        HoldReplayDispatcher.holdRunId = "run-replay-10";
         WorkflowJob job = pipeline("echo 'FROM-JOB'\n");
         String json = body("run-replay-10", job.getFullName(), "src-run-1", "echo 'FROM-REPLAY'\n",
                 actingUser("ada"), null);
@@ -305,6 +310,30 @@ public class VarroaRunTriggerActionReplayTest {
         j.waitForCompletion(run);
         j.waitUntilNoActivity();
         assertEquals("a repeat must start no second build", 1, job.getLastBuild().getNumber());
+    }
+
+    /** Holds the queued replay whose run identifier matches {@code holdRunId}. */
+    @TestExtension
+    public static class HoldReplayDispatcher extends QueueTaskDispatcher {
+        static volatile String holdRunId;
+
+        @Override
+        public CauseOfBlockage canRun(Queue.Item item) {
+            String held = holdRunId;
+            if (held == null) {
+                return null;
+            }
+            VarroaIntentAction intent = item.getAction(VarroaIntentAction.class);
+            if (intent != null && held.equals(intent.getRunId())) {
+                return new CauseOfBlockage() {
+                    @Override
+                    public String getShortDescription() {
+                        return "held by the replay test";
+                    }
+                };
+            }
+            return null;
+        }
     }
 
     // ---- The SCM definition ----

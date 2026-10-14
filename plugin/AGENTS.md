@@ -759,6 +759,7 @@ the root AGENTS.md greenfield rule.
 - Changes to `ActivityEvent`'s JSON shape or the `/varroa-activity/events` response need
   a matching update to whatever parses it downstream, in the same change.
 - Keep `ActivitySaveableListener` opt-in — it fires on every item config save.
+- A restart test that crosses a `sleep` uses at least 10 seconds, so the session stop suspends the program first. A test that must keep a pipeline item queued holds it with a `@TestExtension` `QueueTaskDispatcher`; zero executors do not hold a flyweight task.
 
 ## Verification
 
