@@ -1280,6 +1280,7 @@ public final class VarroaRunRecorder {
         b.scmHead(source.scmHead);
         b.branch(source.branch);
         b.scmUrl(source.scmUrl);
+        b.scmForge(source.scmForge);
 
         ParametersAction params = run.getAction(ParametersAction.class);
         Map<String, String> values = new LinkedHashMap<>();
@@ -1443,16 +1444,18 @@ public final class VarroaRunRecorder {
         final String scmHead;
         final String scmRevision;
         final String scmUrl;
+        final String scmForge;
         final String definitionPath;
         final List<BuildLibrary> libraries;
         final List<BuildPodTemplate> podTemplates;
 
-        SourceFacts(String branch, String scmHead, String scmRevision, String scmUrl,
+        SourceFacts(String branch, String scmHead, String scmRevision, String scmUrl, String scmForge,
                 String definitionPath, List<BuildLibrary> libraries, List<BuildPodTemplate> podTemplates) {
             this.branch = branch;
             this.scmHead = scmHead;
             this.scmRevision = scmRevision;
             this.scmUrl = scmUrl;
+            this.scmForge = scmForge;
             this.definitionPath = definitionPath;
             this.libraries = libraries;
             this.podTemplates = podTemplates;
@@ -1472,7 +1475,7 @@ public final class VarroaRunRecorder {
         if (revision.isEmpty()) {
             // The probe short-circuits here: a run with no revision yet
             // pays no graph walk.
-            return new SourceFacts("", "", "", "", "", List.of(), List.of());
+            return new SourceFacts("", "", "", "", "", "", List.of(), List.of());
         }
         String branch = branchFrom(run, scmApi, git);
         return new SourceFacts(
@@ -1480,6 +1483,7 @@ public final class VarroaRunRecorder {
                 branch,
                 revision,
                 git.scmUrl,
+                git.scmForge,
                 resolveDefinitionPath(run),
                 resolveLibraries(run),
                 resolvePodTemplates(run, state, walk));
@@ -1503,7 +1507,7 @@ public final class VarroaRunRecorder {
         SourceFacts scmApi = resolveScmApiFacts(run);
         SourceFacts git = resolveGitFacts(run);
         String branch = branchFrom(run, scmApi, git);
-        return new SourceFacts(branch, branch, "", git.scmUrl, "", List.of(), List.of());
+        return new SourceFacts(branch, branch, "", git.scmUrl, git.scmForge, "", List.of(), List.of());
     }
 
     /**
@@ -1572,7 +1576,7 @@ public final class VarroaRunRecorder {
             head = scmHead != null ? orEmpty(scmHead.getName()) : "";
             revision = stringOf(invokeNoArg(scmRevision, "getHash"));
         }
-        return new SourceFacts(head, head, revision, "", "", List.of(), List.of());
+        return new SourceFacts(head, head, revision, "", "", "", List.of(), List.of());
     }
 
     /**
@@ -1612,7 +1616,8 @@ public final class VarroaRunRecorder {
         String url = !jobRemote.isEmpty()
                 ? jobRemote
                 : buildData == null ? "" : firstStringOf(invokeNoArg(buildData, "getRemoteUrls"));
-        return new SourceFacts(branch, branch, revision, truncate(url, MAX_FIELD_512), "", List.of(), List.of());
+        String forge = url.isEmpty() ? "" : VarroaRunCheckouts.forgeFor(VarroaRunCheckouts.jobSourceClassName(run), url);
+        return new SourceFacts(branch, branch, revision, truncate(url, MAX_FIELD_512), forge, "", List.of(), List.of());
     }
 
     /**
@@ -1845,7 +1850,7 @@ public final class VarroaRunRecorder {
      * libraries. E1 reads no SCM fact and walks no flow graph.
      */
     private static SourceFacts resolveDefinitionFacts(Run<?, ?> run) {
-        return new SourceFacts("", "", "", "", resolveDefinitionPath(run), resolveLibraries(run), List.of());
+        return new SourceFacts("", "", "", "", "", resolveDefinitionPath(run), resolveLibraries(run), List.of());
     }
 
     /**
@@ -1871,7 +1876,7 @@ public final class VarroaRunRecorder {
             if (templates.isEmpty()) {
                 return;
             }
-            SourceFacts facts = new SourceFacts("", "", "", "",
+            SourceFacts facts = new SourceFacts("", "", "", "", "",
                     resolveDefinitionPath(run), resolveLibraries(run), templates);
             emitRunSource(run, state, facts, true, false);
         } catch (Exception e) {
@@ -1918,6 +1923,9 @@ public final class VarroaRunRecorder {
             if (!source.scmUrl.isEmpty()) {
                 b.scmUrl(source.scmUrl);
             }
+            if (!source.scmForge.isEmpty()) {
+                b.scmForge(source.scmForge);
+            }
             if (!source.podTemplates.isEmpty()) {
                 b.podTemplates(source.podTemplates);
             }
@@ -1931,6 +1939,7 @@ public final class VarroaRunRecorder {
             // branch carries the multibranch name alone.
             b.scmHead("");
             b.scmUrl("");
+            b.scmForge("");
             b.branch(truncate(IntentKey.branchNameFor(run.getParent()), MAX_FIELD_512));
         }
         emitCapped(b.build());

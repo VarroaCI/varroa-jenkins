@@ -213,6 +213,7 @@ public class VarroaRunSourceTest {
         assertTrue("the SCM head names the same branch", e2.getScmHead().endsWith("master"));
         assertEquals(commitId, e2.getScmRevision());
         assertTrue("the SCM URL names the sample repository", e2.getScmUrl().startsWith("file:"));
+        assertEquals("a file: remote names no forge", "", e2.getScmForge());
 
         assertTrue("a node after the second emission still emits its stage event",
                 sawStage(events, "build"));
@@ -487,6 +488,7 @@ public class VarroaRunSourceTest {
         List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
         assertEquals(2, sources.size());
         assertEquals(app[0], sources.get(1).getScmUrl());
+        assertEquals("a branch under no folder names no forge", "", sources.get(1).getScmForge());
     }
 
     // --- The two existing revision writers survive both emissions ---

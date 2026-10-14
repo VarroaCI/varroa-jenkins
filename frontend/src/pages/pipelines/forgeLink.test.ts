@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { matchForgeShape, repositoryHref, fileHref, commitHref, libraryHref, repositoryBase } from "./forgeLink";
+import {
+  matchForgeShape,
+  repositoryHref,
+  fileHref,
+  commitHref,
+  libraryHref,
+  repositoryBase,
+  revisionHref,
+} from "./forgeLink";
 
 describe("libraryHref", () => {
   it("links a github library at its commit and at its version", () => {
@@ -174,5 +182,40 @@ describe("commitHref", () => {
     expect(commitHref({ host: "gitlab.com", owner: "group", repo: "app" }, "abc123")).toBe(
       "https://gitlab.com/group/app/-/commit/abc123",
     );
+  });
+});
+
+describe("revisionHref", () => {
+  it("links a Gitea repository through the commit path", () => {
+    expect(revisionHref("https://gitea.example.com/acme/app", "gitea", "abc123")).toBe(
+      "https://gitea.example.com/acme/app/commit/abc123",
+    );
+  });
+
+  it("reads a Gitea scp-like remote as its https base", () => {
+    expect(revisionHref("git@gitea.example.com:acme/app.git", "gitea", "abc123")).toBe(
+      "https://gitea.example.com/acme/app/commit/abc123",
+    );
+  });
+
+  it("uses the dash segment for a self-hosted GitLab with a forge", () => {
+    expect(revisionHref("https://gitlab.example.org/g/app", "gitlab", "abc123")).toBe(
+      "https://gitlab.example.org/g/app/-/commit/abc123",
+    );
+  });
+
+  it("answers null for an unknown forge on an unknown host", () => {
+    expect(revisionHref("https://git.example.org/x/y", undefined, "abc123")).toBeNull();
+  });
+
+  it("links a github.com repository with no forge through the shape", () => {
+    expect(revisionHref("https://github.com/example/app", undefined, "abc123")).toBe(
+      "https://github.com/example/app/commit/abc123",
+    );
+  });
+
+  it("answers null without a URL or a revision", () => {
+    expect(revisionHref(undefined, "gitea", "abc123")).toBeNull();
+    expect(revisionHref("https://gitea.example.com/o/r", "gitea", "")).toBeNull();
   });
 });

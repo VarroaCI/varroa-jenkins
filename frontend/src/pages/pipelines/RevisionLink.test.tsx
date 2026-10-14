@@ -22,6 +22,18 @@ describe("RevisionLink", () => {
     expect(screen.getByRole("button", { name: `Copy commit ${SHA}` })).toBeInTheDocument();
   });
 
+  it("links a Gitea repository when the run names its forge", () => {
+    render(<RevisionLink revision={SHA} repoUrl="https://gitea.example.com/acme/app" forge="gitea" length={8} />);
+    const link = screen.getByRole("link", { name: "abcdef12" });
+    expect(link).toHaveAttribute("href", `https://gitea.example.com/acme/app/commit/${SHA}`);
+  });
+
+  it("shows a copy button for a Gitea host when the run names no forge", () => {
+    render(<RevisionLink revision={SHA} repoUrl="https://gitea.example.com/acme/app" length={8} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByRole("button", { name: `Copy commit ${SHA}` })).toBeInTheDocument();
+  });
+
   it("shows a copy button when no repository is known", () => {
     render(<RevisionLink revision={SHA} length={7} />);
     expect(screen.getByRole("button", { name: `Copy commit ${SHA}` })).toBeInTheDocument();

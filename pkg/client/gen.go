@@ -451,11 +451,18 @@ const (
 	ProceedInput ComponentsSchemasRunCommandRefusalCommand = "proceed_input"
 )
 
+// Defines values for ComponentsSchemasRunDetailScmForge.
+const (
+	ComponentsSchemasRunDetailScmForgeGitea  ComponentsSchemasRunDetailScmForge = "gitea"
+	ComponentsSchemasRunDetailScmForgeGithub ComponentsSchemasRunDetailScmForge = "github"
+	ComponentsSchemasRunDetailScmForgeGitlab ComponentsSchemasRunDetailScmForge = "gitlab"
+)
+
 // Defines values for ComponentsSchemasRunDetailSourceLibrariesRepositoryForge.
 const (
-	Gitea  ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitea"
-	Github ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "github"
-	Gitlab ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitlab"
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGitea  ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitea"
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGithub ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "github"
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGitlab ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitlab"
 )
 
 // Defines values for ComponentsSchemasRunDetailTriggerSource.
@@ -474,6 +481,13 @@ const (
 const (
 	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
 	ComponentsSchemasRunScriptDefinitionKindTemplate ComponentsSchemasRunScriptDefinitionKind = "template"
+)
+
+// Defines values for ComponentsSchemasRunSummaryScmForge.
+const (
+	Gitea  ComponentsSchemasRunSummaryScmForge = "gitea"
+	Github ComponentsSchemasRunSummaryScmForge = "github"
+	Gitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
 )
 
 // Defines values for ComponentsSchemasRunSummaryTriggerSource.
@@ -3540,9 +3554,12 @@ type ComponentsSchemasRunDetail struct {
 	Result       *string `json:"result,omitempty"`
 
 	// RetryRunId An existing retry's run id, when one already exists.
-	RetryRunId  *string `json:"retryRunId,omitempty"`
-	RunId       string  `json:"runId"`
-	ScmRevision *string `json:"scmRevision,omitempty"`
+	RetryRunId *string `json:"retryRunId,omitempty"`
+	RunId      string  `json:"runId"`
+
+	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	ScmForge    *ComponentsSchemasRunDetailScmForge `json:"scmForge,omitempty"`
+	ScmRevision *string                             `json:"scmRevision,omitempty"`
 
 	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
 	ScmUrl *string `json:"scmUrl,omitempty"`
@@ -3606,6 +3623,9 @@ type ComponentsSchemasRunDetail struct {
 	// Waiting The concurrency cap that holds a queued run. Absent from a run that no cap holds.
 	Waiting *ComponentsSchemasRunWait `json:"waiting,omitempty"`
 }
+
+// ComponentsSchemasRunDetailScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasRunDetailScmForge string
 
 // ComponentsSchemasRunDetailSourceLibrariesRepositoryForge The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
 type ComponentsSchemasRunDetailSourceLibrariesRepositoryForge string
@@ -3759,7 +3779,10 @@ type ComponentsSchemasRunSummary struct {
 	QueuedAt      *time.Time                      `json:"queuedAt,omitempty"`
 	Result        *string                         `json:"result,omitempty"`
 	RunId         string                          `json:"runId"`
-	ScmRevision   *string                         `json:"scmRevision,omitempty"`
+
+	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	ScmForge    *ComponentsSchemasRunSummaryScmForge `json:"scmForge,omitempty"`
+	ScmRevision *string                              `json:"scmRevision,omitempty"`
 
 	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
 	ScmUrl    *string    `json:"scmUrl,omitempty"`
@@ -3769,6 +3792,9 @@ type ComponentsSchemasRunSummary struct {
 	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
 	TriggerSource *ComponentsSchemasRunSummaryTriggerSource `json:"triggerSource,omitempty"`
 }
+
+// ComponentsSchemasRunSummaryScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasRunSummaryScmForge string
 
 // ComponentsSchemasRunSummaryTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
 type ComponentsSchemasRunSummaryTriggerSource string

@@ -471,6 +471,7 @@ var runListOutputSchema = listOutputSchema("Run summary.", []schemaField{
 	{Name: "actor", Type: "string", Desc: "User who started the run, if any."},
 	{Name: "cause", Type: "string", Desc: "Short cause description."},
 	{Name: "scmUrl", Type: "string", Desc: "Repository URL, if any."},
+	{Name: "scmForge", Type: "string", Desc: "Forge that hosts scmUrl: github, gitlab, or gitea. Absent when unknown."},
 	{Name: "triggerSource", Type: "string", Desc: "Kind of cause: user, webhook, cron, upstream, replay, restart, scm, or other. Absent when unknown."},
 	{Name: "changeRequest", Type: "object", Desc: "Change request of the run: id, title, sourceBranch, targetBranch, url. Absent for a branch run."},
 	{Name: "queuedAt", Type: "string", Desc: "Queue time, RFC3339."},

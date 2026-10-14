@@ -404,3 +404,35 @@ func TestApplyRunSourceBeforeRunStartedInsertsQueuedRow(t *testing.T) {
 		t.Fatalf("definition_path = %q, want Jenkinsfile", definitionPath)
 	}
 }
+
+// TestApplyRunSourceKeepsTheScmForge asserts the stored source object keeps
+// the forge hint the run.source payload carries.
+func TestApplyRunSourceKeepsTheScmForge(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:source-forge")
+	g := NewIngester(pool, nil, nil)
+
+	env := newTestEnvelope(t, runID, "manual:source-forge", KindRunSource, RunSourcePayload{
+		Seq:      0,
+		SCMURL:   "https://gitea.example.com/o/r",
+		SCMForge: "gitea",
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply run.source: %v", err)
+	}
+
+	// The forge hint lives in the payload copy of the event, the path the
+	// BFF reads. The source column keeps only the three keys it merges.
+	var forge string
+	if err := db.QueryRow(`
+		SELECT COALESCE(payload->'run.source'->>'scm_forge', '')
+		FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&forge); err != nil {
+		t.Fatalf("read run.source scm_forge: %v", err)
+	}
+	if forge != "gitea" {
+		t.Fatalf("scm_forge = %q, want gitea", forge)
+	}
+}

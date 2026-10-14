@@ -383,6 +383,9 @@ func startedPayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	if evt.ScmUrl != "" {
 		p["scm_url"] = evt.ScmUrl
 	}
+	if evt.ScmForge != "" {
+		p["scm_forge"] = evt.ScmForge
+	}
 	if evt.ScmRevision != "" {
 		p["scm_revision"] = evt.ScmRevision
 	}
@@ -536,6 +539,9 @@ func sourcePayload(evt *mitev1.BuildEvent) map[string]interface{} {
 	}
 	if evt.ScmUrl != "" {
 		p["scm_url"] = evt.ScmUrl
+	}
+	if evt.ScmForge != "" {
+		p["scm_forge"] = evt.ScmForge
 	}
 	if evt.DefinitionPath != "" {
 		p["definition_path"] = evt.DefinitionPath

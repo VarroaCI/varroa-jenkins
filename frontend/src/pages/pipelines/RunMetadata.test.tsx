@@ -46,6 +46,14 @@ describe("RunMetadata", () => {
     );
   });
 
+  it("links the run revision on a Gitea host that the run names", () => {
+    renderMeta({ ...baseRun, scmUrl: "https://gitea.example.com/acme/app", scmForge: "gitea" });
+    expect(screen.getByRole("link", { name: "abcdef12" })).toHaveAttribute(
+      "href",
+      "https://gitea.example.com/acme/app/commit/abcdef1234567890",
+    );
+  });
+
   it("names the trigger source in the actor tooltip", () => {
     renderMeta({ ...baseRun, actor: "alice", triggerSource: "cron" });
     expect(screen.getByText("alice")).toHaveAttribute("title", "Triggered by a schedule");

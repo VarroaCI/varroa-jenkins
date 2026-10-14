@@ -4,6 +4,8 @@ import hudson.model.Action;
 import hudson.model.Job;
 import hudson.model.Run;
 import jenkins.branch.Branch;
+import jenkins.branch.MultiBranchProject;
+import jenkins.scm.api.SCMSource;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
 
@@ -55,6 +57,37 @@ final class VarroaRunCheckouts {
             LOGGER.log(Level.FINE, "VarroaRunCheckouts: the job SCM read failed", e);
             return null;
         }
+    }
+
+    /**
+     * Answers the simple class name of the SCM source that owns the run's
+     * job. A branch job of a multibranch project answers its source class.
+     * Answers an empty string when no source owns the job.
+     */
+    static String jobSourceClassName(Run<?, ?> run) {
+        try {
+            Job<?, ?> parent = run.getParent();
+            BranchJobProperty property = parent.getProperty(BranchJobProperty.class);
+            Branch branch = property == null ? null : property.getBranch();
+            if (branch == null || !(parent.getParent() instanceof MultiBranchProject)) {
+                return "";
+            }
+            SCMSource source = ((MultiBranchProject<?, ?>) parent.getParent()).getSCMSource(branch.getSourceId());
+            return source == null ? "" : source.getClass().getSimpleName();
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.FINE, "VarroaRunCheckouts: the job source read failed", e);
+            return "";
+        }
+    }
+
+    /**
+     * Answers the forge that hosts a run's revision. The multibranch source
+     * class names the forge first. The host of the URL names it otherwise.
+     * Answers an empty string when neither names one.
+     */
+    static String forgeFor(String sourceSimpleName, String url) {
+        String forge = VarroaLibrarySources.forgeFromSourceClass(sourceSimpleName == null ? "" : sourceSimpleName);
+        return forge.isEmpty() ? VarroaLibrarySources.forgeForHost(VarroaLibrarySources.hostOf(url)) : forge;
     }
 
     /** Answers the raw remote of the run's job SCM. Answers an empty string when none exists. */

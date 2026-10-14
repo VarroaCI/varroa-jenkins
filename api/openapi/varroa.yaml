@@ -2710,6 +2710,14 @@ components:
           type: string
         runId:
           type: string
+        scmForge:
+          description: |
+            The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+          enum:
+          - github
+          - gitlab
+          - gitea
+          type: string
         scmRevision:
           type: string
         scmUrl:
@@ -3035,6 +3043,14 @@ components:
         result:
           type: string
         runId:
+          type: string
+        scmForge:
+          description: |
+            The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+          enum:
+          - github
+          - gitlab
+          - gitea
           type: string
         scmRevision:
           type: string
@@ -8994,6 +9010,14 @@ components:
           type: string
         runId:
           type: string
+        scmForge:
+          description: |
+            The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+          enum:
+          - github
+          - gitlab
+          - gitea
+          type: string
         scmRevision:
           type: string
         scmUrl:
@@ -9382,6 +9406,14 @@ components:
         result:
           type: string
         runId:
+          type: string
+        scmForge:
+          description: |
+            The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+          enum:
+          - github
+          - gitlab
+          - gitea
           type: string
         scmRevision:
           type: string

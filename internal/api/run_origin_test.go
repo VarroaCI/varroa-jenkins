@@ -13,9 +13,8 @@ import (
 func TestRunOriginOf_PrefersRunSourceURL(t *testing.T) {
 	payload := json.RawMessage(`{"run.source":{"scm_url":"https://github.com/o/r"},` +
 		`"run.started":{"payload":{"scm_url":"https://example.org/other"}}}`)
-	scm, _ := runOriginOf(payload)
-	if scm != "https://github.com/o/r" {
-		t.Fatalf("scmUrl = %q", scm)
+	if got := runOriginOf(payload).SCMURL; got != "https://github.com/o/r" {
+		t.Fatalf("scmUrl = %q", got)
 	}
 }
 
@@ -23,9 +22,31 @@ func TestRunOriginOf_PrefersRunSourceURL(t *testing.T) {
 // serves when no run.source copy exists.
 func TestRunOriginOf_FallsBackToStartedURL(t *testing.T) {
 	payload := json.RawMessage(`{"run.started":{"payload":{"scm_url":"https://gitlab.com/o/r"}}}`)
-	scm, _ := runOriginOf(payload)
-	if scm != "https://gitlab.com/o/r" {
-		t.Fatalf("scmUrl = %q", scm)
+	if got := runOriginOf(payload).SCMURL; got != "https://gitlab.com/o/r" {
+		t.Fatalf("scmUrl = %q", got)
+	}
+}
+
+// TestRunOriginOfPairsTheForgeWithItsURL asserts the forge comes from the
+// same event as the URL it describes.
+func TestRunOriginOfPairsTheForgeWithItsURL(t *testing.T) {
+	payload := json.RawMessage(`{"run.source":{"scm_url":"https://gitea.example.com/o/r","scm_forge":"gitea"},` +
+		`"run.started":{"payload":{"scm_url":"https://github.com/o/r","scm_forge":"github"}}}`)
+	if got := runOriginOf(payload); got.SCMURL != "https://gitea.example.com/o/r" || got.SCMForge != "gitea" {
+		t.Fatalf("runOriginOf = %+v, want the run.source pair", got)
+	}
+	started := json.RawMessage(`{"run.started":{"payload":{"scm_url":"https://github.com/o/r","scm_forge":"github"}}}`)
+	if got := runOriginOf(started); got.SCMURL != "https://github.com/o/r" || got.SCMForge != "github" {
+		t.Fatalf("runOriginOf = %+v, want the run.started pair", got)
+	}
+}
+
+// TestRunOriginOfDropsAnUnknownForge asserts a forge outside the three
+// UI forges answers the empty string and keeps the URL.
+func TestRunOriginOfDropsAnUnknownForge(t *testing.T) {
+	payload := json.RawMessage(`{"run.source":{"scm_url":"https://example.org/o/r","scm_forge":"bitbucket"}}`)
+	if got := runOriginOf(payload); got.SCMURL != "https://example.org/o/r" || got.SCMForge != "" {
+		t.Fatalf("runOriginOf = %+v, want the URL with no forge", got)
 	}
 }
 
@@ -33,9 +54,8 @@ func TestRunOriginOf_FallsBackToStartedURL(t *testing.T) {
 // is not a JSON object yields two empty strings.
 func TestRunOriginOf_MalformedPayloadAnswersEmpty(t *testing.T) {
 	for _, payload := range []json.RawMessage{nil, json.RawMessage(`{"run.started":`), json.RawMessage(`[1]`)} {
-		scm, trigger := runOriginOf(payload)
-		if scm != "" || trigger != "" {
-			t.Fatalf("runOriginOf(%s) = %q, %q", payload, scm, trigger)
+		if got := runOriginOf(payload); got != (runOrigin{}) {
+			t.Fatalf("runOriginOf(%s) = %+v, want the zero value", payload, got)
 		}
 	}
 }
@@ -75,6 +95,29 @@ func TestClassifyTriggerSource(t *testing.T) {
 				t.Fatalf("classifyTriggerSource(%v) = %q, want %q", tc.causes, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGetRunCarriesScmForge asserts GET /runs/{run} returns the forge of
+// the run's repository from the run.source payload.
+func TestGetRunCarriesScmForge(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r2"] = recordstore.Run{
+		RunID: "r2", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
+		Payload: json.RawMessage(`{"run.source":{"scm_url":"https://gitea.example.com/o/r","scm_forge":"gitea"}}`),
+	}
+	srv := newRunFixtureServer(reader, nil)
+
+	rec := doRunRequest(t, srv.handleGetRun, "/runs/r2", map[string]string{"run": "r2"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var detail runDetailJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.SCMForge != "gitea" {
+		t.Fatalf("scmForge = %q, want gitea", detail.SCMForge)
 	}
 }
 

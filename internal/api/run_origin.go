@@ -31,32 +31,60 @@ var triggerCauseClasses = []struct {
 	{triggerSourceSCM, []string{"SCMTriggerCause", "BranchIndexingCause"}},
 }
 
-// runOriginOf reads the repository URL and the trigger source from a
-// runs.payload column. The run.source copy of scm_url wins over the
-// run.started copy. A malformed payload answers two empty strings.
-func runOriginOf(payload json.RawMessage) (scmURL, triggerSource string) {
+// runOrigin holds the repository facts and the trigger source of a run.
+// SCMForge is empty when the forge is unknown or not one of the three
+// forges the UI links to.
+type runOrigin struct {
+	SCMURL        string
+	SCMForge      string
+	TriggerSource string
+}
+
+// runOriginOf reads the repository URL, its forge, and the trigger source
+// from a runs.payload column. The URL and the forge come from the same
+// event: the run.source pair wins when its URL is set, else the run.started
+// pair serves. A malformed payload answers the zero value.
+func runOriginOf(payload json.RawMessage) runOrigin {
 	if len(payload) == 0 {
-		return "", ""
+		return runOrigin{}
 	}
 	var doc struct {
 		Source struct {
-			SCMURL string `json:"scm_url"`
+			SCMURL   string `json:"scm_url"`
+			SCMForge string `json:"scm_forge"`
 		} `json:"run.source"`
 		Started struct {
 			Payload struct {
 				SCMURL     string   `json:"scm_url"`
+				SCMForge   string   `json:"scm_forge"`
 				CauseTypes []string `json:"cause_types"`
 			} `json:"payload"`
 		} `json:"run.started"`
 	}
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return "", ""
+		return runOrigin{}
 	}
-	scmURL = doc.Source.SCMURL
-	if scmURL == "" {
-		scmURL = doc.Started.Payload.SCMURL
+	origin := runOrigin{
+		SCMURL:        doc.Started.Payload.SCMURL,
+		SCMForge:      doc.Started.Payload.SCMForge,
+		TriggerSource: classifyTriggerSource(doc.Started.Payload.CauseTypes),
 	}
-	return scmURL, classifyTriggerSource(doc.Started.Payload.CauseTypes)
+	if doc.Source.SCMURL != "" {
+		origin.SCMURL, origin.SCMForge = doc.Source.SCMURL, doc.Source.SCMForge
+	}
+	origin.SCMForge = knownForge(origin.SCMForge)
+	return origin
+}
+
+// knownForge answers the forge when it is one the UI links to. It answers
+// the empty string for any other value.
+func knownForge(forge string) string {
+	switch forge {
+	case "github", "gitlab", "gitea":
+		return forge
+	default:
+		return ""
+	}
 }
 
 // runRejectedSignatureOf reads the script signature the sandbox refused in a

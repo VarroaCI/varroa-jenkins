@@ -337,6 +337,18 @@ func TestStartedPayload_MasksParameters(t *testing.T) {
 	}
 }
 
+// TestStartedPayload_CarriesScmForge proves the run.started payload copies
+// the forge hint and omits it when the forge is unknown.
+func TestStartedPayload_CarriesScmForge(t *testing.T) {
+	p := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "r", ScmForge: "gitlab"})
+	if p["scm_forge"] != "gitlab" {
+		t.Fatalf("scm_forge = %v, want gitlab", p["scm_forge"])
+	}
+	if _, ok := startedPayload(&mitev1.BuildEvent{Phase: phaseStarted, RunId: "r"})["scm_forge"]; ok {
+		t.Fatal("scm_forge present for an unknown forge")
+	}
+}
+
 // --- 6.3/6.4: template fields reach the ingest envelope ---
 
 // TestTemplateFields_ReachStartedAndCompletedPayloads proves the gateway
@@ -912,6 +924,7 @@ func TestBuildPayloadGroup_RunSourceMapsSourceThenChanges(t *testing.T) {
 		ScmRevision:    "abc123",
 		ScmHead:        "main",
 		ScmUrl:         "https://example.invalid/repo.git",
+		ScmForge:       "gitea",
 		DefinitionPath: "Jenkinsfile",
 		Libraries:      []*mitev1.BuildLibrary{{Name: "shared", Version: "1.0", Revision: "def456"}},
 		PodTemplates:   []*mitev1.BuildPodTemplate{{Name: "pod-1", Label: "linux", Image: "img:1"}},
@@ -932,6 +945,9 @@ func TestBuildPayloadGroup_RunSourceMapsSourceThenChanges(t *testing.T) {
 	}
 	if src["branch"] != "main" || src["scm_revision"] != "abc123" || src["scm_head"] != "main" {
 		t.Fatalf("source payload = %+v", src)
+	}
+	if src["scm_forge"] != "gitea" {
+		t.Fatalf("scm_forge = %v, want gitea", src["scm_forge"])
 	}
 	if src["definition_path"] != "Jenkinsfile" {
 		t.Fatalf("definition_path = %v, want the Jenkinsfile path", src["definition_path"])
@@ -960,7 +976,7 @@ func TestBuildPayloadGroup_RunSourceWithoutChanges(t *testing.T) {
 	if p["seq"] != int64(3) {
 		t.Fatalf("seq = %v, want 3", p["seq"])
 	}
-	for _, key := range []string{"branch", "scm_revision", "scm_head", "scm_url", "definition_path", "libraries", "pod_templates"} {
+	for _, key := range []string{"branch", "scm_revision", "scm_head", "scm_url", "scm_forge", "definition_path", "libraries", "pod_templates"} {
 		if _, ok := p[key]; ok {
 			t.Fatalf("payload carries %q for an empty value: %+v", key, p)
 		}

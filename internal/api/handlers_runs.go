@@ -104,6 +104,7 @@ type runDetailJSON struct {
 	Actor             string             `json:"actor,omitempty"`
 	Cause             string             `json:"cause,omitempty"`
 	SCMURL            string             `json:"scmUrl,omitempty"`
+	SCMForge          string             `json:"scmForge,omitempty"`
 	TriggerSource     string             `json:"triggerSource,omitempty"`
 	ChangeRequest     *changeRequestJSON `json:"changeRequest,omitempty"`
 	Params            map[string]string  `json:"params,omitempty"`
@@ -465,7 +466,8 @@ func buildRunDetail(run recordstore.Run, stages []recordstore.Stage, retryRunID,
 		d.Actor = *run.Actor
 	}
 	d.Cause = causeSummary(run.Cause)
-	d.SCMURL, d.TriggerSource = runOriginOf(run.Payload)
+	o := runOriginOf(run.Payload)
+	d.SCMURL, d.SCMForge, d.TriggerSource = o.SCMURL, o.SCMForge, o.TriggerSource
 	d.ChangeRequest = changeRequestOf(run.Payload)
 	if d.Result == "FAILURE" {
 		d.RejectedSignature = runRejectedSignatureOf(run.Payload)

@@ -584,6 +584,8 @@ message BuildEvent {
   // rejected_signature is the script signature the sandbox refused in a
   // failed build. Empty when the build did not fail on a signature.
   string rejected_signature = 57;
+  // The forge that hosts scm_url: github, gitlab, or gitea. Empty when unknown.
+  string scm_forge = 58;
 }
 
 message ClaimRequest {

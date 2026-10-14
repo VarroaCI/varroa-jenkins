@@ -38,7 +38,7 @@ The card reports one of five states.
 | State | What the card shows |
 |---|---|
 | Placed | the whole card |
-| Moving | the whole card, plus a note that Varroa is moving the team to another cell |
+| Moving | the whole card, plus a note that Varroa is moving the team |
 | Rehydrating | the whole card, plus a note that the cell is rebuilding the team's folders |
 | Not placed | the badge and the reason only. The team waits for its first cell |
 | No card | the team runs on its own controller, so no cell hosts it |
@@ -116,7 +116,7 @@ A shared library in the **Ran with** row links to its repository: the commit, or
 The page lists the job's builds, filterable by branch, result, actor, and cause. Each filter
 stays in the page URL, so a filtered view is shareable and survives a reload.
 
-The commit opens on GitHub or GitLab. Other hosts get a copy button.
+The commit opens on GitHub, GitLab, Gitea, or Forgejo. Other hosts get a copy button.
 The branch opens the pipeline page filtered to that branch. The **Queue** column shows each build's wait.
 
 The build page shows the parameters that the build ran with. A masked value appears as four dots.

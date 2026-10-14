@@ -82,6 +82,22 @@ export function repositoryBase(url: string): string | null {
   return `${scheme}://${host}/${segments.join("/")}`;
 }
 
+/** revisionHref links a run's own commit to its repository. A known forge
+ * builds the commit path directly, so a Gitea or Forgejo host links. With no
+ * known forge, the URL shape must name GitHub or GitLab. Answers null for a
+ * missing URL or revision, or an unparsable URL. */
+export function revisionHref(repoUrl?: string, forge?: string, sha?: string): string | null {
+  if (!repoUrl || !sha) return null;
+  if (forge === "github" || forge === "gitlab" || forge === "gitea") {
+    const base = repositoryBase(repoUrl);
+    if (!base) return null;
+    const dash = forge === "gitlab" ? "/-" : "";
+    return `${base}${dash}/commit/${encodeURIComponent(sha)}`;
+  }
+  const match = matchForgeShape(repoUrl);
+  return match ? commitHref(match, sha) : null;
+}
+
 /** libraryHref links a shared library to its repository. It targets the
  * commit when a revision is known, and the version otherwise. Answers null
  * for an unknown forge, an unparsable URL, or a library with neither a
@@ -98,7 +114,7 @@ export function libraryHref(
   if (!base) return null;
   const dash = forge === "gitlab" ? "/-" : "";
   if (revision) {
-    return `${base}${dash}/commit/${encodeURIComponent(revision)}`;
+    return revisionHref(repositoryUrl, forge, revision);
   }
   // Gitea needs the ref kind (branch or tag) in its src path, and the record
   // does not carry it. A Gitea library with no revision therefore shows text.

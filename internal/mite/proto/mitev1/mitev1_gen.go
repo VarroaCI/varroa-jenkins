@@ -120,6 +120,7 @@ type BuildEvent struct {
 	RestartRefusal          string              `json:"restart_refusal,omitempty"`
 	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
 	RejectedSignature       string              `json:"rejected_signature,omitempty"`
+	ScmForge                string              `json:"scm_forge,omitempty"`
 }
 
 type BuildInput struct {

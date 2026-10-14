@@ -104,6 +104,7 @@ public final class BuildEvent implements PostableEvent {
     private final Map<String, String> parameters;
     private final List<String> maskedParameterNames;
     private final String scmUrl;
+    private final String scmForge;
     private final String scmHead;
     private final String scmRevision;
     private final List<BuildChange> changes;
@@ -163,6 +164,7 @@ public final class BuildEvent implements PostableEvent {
         this.parameters = new LinkedHashMap<>(b.parameters);
         this.maskedParameterNames = List.copyOf(b.maskedParameterNames);
         this.scmUrl = orEmpty(b.scmUrl);
+        this.scmForge = orEmpty(b.scmForge);
         this.scmHead = orEmpty(b.scmHead);
         this.scmRevision = orEmpty(b.scmRevision);
         this.changes = List.copyOf(b.changes);
@@ -310,6 +312,10 @@ public final class BuildEvent implements PostableEvent {
 
     public String getScmUrl() {
         return scmUrl;
+    }
+
+    public String getScmForge() {
+        return scmForge;
     }
 
     public String getScmHead() {
@@ -496,6 +502,7 @@ public final class BuildEvent implements PostableEvent {
         o.put("parameters", params);
         o.put("masked_parameter_names", stringArray(maskedParameterNames));
         o.put("scm_url", scmUrl);
+        o.put("scm_forge", scmForge);
         o.put("scm_head", scmHead);
         o.put("scm_revision", scmRevision);
         JSONArray changesArr = new JSONArray();
@@ -631,6 +638,7 @@ public final class BuildEvent implements PostableEvent {
                 .parameters(parameters)
                 .maskedParameterNames(maskedParameterNames)
                 .scmUrl(scmUrl)
+                .scmForge(scmForge)
                 .scmHead(scmHead)
                 .scmRevision(scmRevision)
                 .changes(changes)
@@ -750,6 +758,7 @@ public final class BuildEvent implements PostableEvent {
         private Map<String, String> parameters = new LinkedHashMap<>();
         private List<String> maskedParameterNames = new ArrayList<>();
         private String scmUrl;
+        private String scmForge;
         private String scmHead;
         private String scmRevision;
         private List<BuildChange> changes = new ArrayList<>();
@@ -908,6 +917,11 @@ public final class BuildEvent implements PostableEvent {
 
         public Builder scmUrl(String v) {
             this.scmUrl = v;
+            return this;
+        }
+
+        public Builder scmForge(String v) {
+            this.scmForge = v;
             return this;
         }
 

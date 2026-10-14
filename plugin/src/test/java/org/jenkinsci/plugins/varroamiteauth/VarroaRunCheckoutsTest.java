@@ -99,4 +99,21 @@ public class VarroaRunCheckoutsTest {
             throw new AssertionError("the library remotes must not be read");
         }, List.of(app)));
     }
+
+    @Test
+    public void forgeForNamesGiteaFromTheSourceClass() {
+        assertEquals("gitea", VarroaRunCheckouts.forgeFor("GiteaSCMSource", "https://gitea.example.com/acme/app"));
+    }
+
+    @Test
+    public void forgeForFallsBackToTheHost() {
+        assertEquals("github", VarroaRunCheckouts.forgeFor("GitSCM", "https://github.com/a/b.git"));
+        assertEquals("gitlab", VarroaRunCheckouts.forgeFor("", "git@gitlab.com:a/b.git"));
+    }
+
+    @Test
+    public void forgeForAnswersEmptyForAnUnknownHost() {
+        assertEquals("", VarroaRunCheckouts.forgeFor("GitSCM", "file:///tmp/x"));
+        assertEquals("", VarroaRunCheckouts.forgeFor("", ""));
+    }
 }

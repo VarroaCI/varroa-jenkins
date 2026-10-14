@@ -41,7 +41,7 @@ export function RunMetadata({ run, team, job }: RunMetadataProps) {
           ) : (
             <span>{run.branch}</span>
           ))}
-        {run.scmRevision && <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} length={8} />}
+        {run.scmRevision && <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} forge={run.scmForge} length={8} />}
         {run.actor && (
           <span title={run.triggerSource ? `Triggered by ${TRIGGER_LABEL[run.triggerSource]}` : undefined}>
             {run.actor}

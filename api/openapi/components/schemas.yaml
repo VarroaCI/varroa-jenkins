@@ -4632,6 +4632,12 @@ RunSummary:
     scmUrl:
       type: string
       description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    scmForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts scmUrl. A Forgejo host reads gitea. The field
+        is absent when the forge is unknown.
     triggerSource:
       type: string
       enum: [user, webhook, cron, upstream, replay, restart, scm, other]
@@ -5574,6 +5580,12 @@ RunDetail:
     scmUrl:
       type: string
       description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    scmForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts scmUrl. A Forgejo host reads gitea. The field
+        is absent when the forge is unknown.
     triggerSource:
       type: string
       enum: [user, webhook, cron, upstream, replay, restart, scm, other]

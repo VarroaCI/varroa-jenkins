@@ -1678,6 +1678,8 @@ export interface RunSummary {
   actor?: string;
   cause?: string;
   scmUrl?: string;
+  /** The forge that hosts scmUrl. Absent when the forge is unknown. */
+  scmForge?: "github" | "gitlab" | "gitea";
   triggerSource?: TriggerSource;
   changeRequest?: ChangeRequest;
   queuedAt?: string;
@@ -2007,6 +2009,8 @@ export interface RunDetail {
   actor?: string;
   cause?: string;
   scmUrl?: string;
+  /** The forge that hosts scmUrl. Absent when the forge is unknown. */
+  scmForge?: "github" | "gitlab" | "gitea";
   triggerSource?: TriggerSource;
   changeRequest?: ChangeRequest;
   params?: Record<string, string>;

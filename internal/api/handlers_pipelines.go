@@ -47,6 +47,7 @@ type runSummaryJSON struct {
 	Actor         string             `json:"actor,omitempty"`
 	Cause         string             `json:"cause,omitempty"`
 	SCMURL        string             `json:"scmUrl,omitempty"`
+	SCMForge      string             `json:"scmForge,omitempty"`
 	TriggerSource string             `json:"triggerSource,omitempty"`
 	ChangeRequest *changeRequestJSON `json:"changeRequest,omitempty"`
 	QueuedAt      *time.Time         `json:"queuedAt,omitempty"`
@@ -336,7 +337,8 @@ func buildRunSummary(run recordstore.Run) runSummaryJSON {
 		s.Actor = *run.Actor
 	}
 	s.Cause = causeSummary(run.Cause)
-	s.SCMURL, s.TriggerSource = runOriginOf(run.Payload)
+	o := runOriginOf(run.Payload)
+	s.SCMURL, s.SCMForge, s.TriggerSource = o.SCMURL, o.SCMForge, o.TriggerSource
 	s.ChangeRequest = changeRequestOf(run.Payload)
 	s.QueuedAt = run.QueuedAt
 	s.StartedAt = run.StartedAt

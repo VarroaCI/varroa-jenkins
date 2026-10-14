@@ -3663,6 +3663,15 @@
           "runId": {
             "type": "string"
           },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
           "scmRevision": {
             "type": "string"
           },
@@ -4053,6 +4062,15 @@
             "type": "string"
           },
           "runId": {
+            "type": "string"
+          },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
             "type": "string"
           },
           "scmRevision": {
@@ -11969,6 +11987,15 @@
           "runId": {
             "type": "string"
           },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
+            "type": "string"
+          },
           "scmRevision": {
             "type": "string"
           },
@@ -12441,6 +12468,15 @@
             "type": "string"
           },
           "runId": {
+            "type": "string"
+          },
+          "scmForge": {
+            "description": "The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.\n",
+            "enum": [
+              "github",
+              "gitlab",
+              "gitea"
+            ],
             "type": "string"
           },
           "scmRevision": {

@@ -577,7 +577,7 @@ export default function PipelinePage() {
                   </td>
                   <td>
                     {run.scmRevision ? (
-                      <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} length={7} />
+                      <RevisionLink revision={run.scmRevision} repoUrl={run.scmUrl} forge={run.scmForge} length={7} />
                     ) : (
                       <span className={styles.dim}>—</span>
                     )}

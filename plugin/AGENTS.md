@@ -159,7 +159,7 @@ the root AGENTS.md greenfield rule.
   `VarroaTemplateParams` needs its `GlobalVariable`; test-scope `workflow-basic-steps`
   exercises the pipeline graph in tests only). `VarroaRunRecorder.java` sends `queued_at`
   from the queue item's `inQueueSince`. The intent admission time is the fallback, and
-  the run creation time is the last resort. `VarroaLibrarySources` finds each loaded library's repository reflectively, by the simple names `FolderLibraries`, `GlobalLibraries`, `GlobalUntrustedLibraries`, and `GiteaServers`, and matches a `hudson.plugins.git.util.BuildData` checkout to fill the revision. `VarroaRunCheckouts` picks the run's checkout: the job SCM remote's `BuildData`, else the first non-library `BuildData`. It is an outer class with three static `@Extension` nested classes, because `RunListener` and
+  the run creation time is the last resort. `VarroaLibrarySources` finds each loaded library's repository reflectively, by the simple names `FolderLibraries`, `GlobalLibraries`, `GlobalUntrustedLibraries`, and `GiteaServers`, and matches a `hudson.plugins.git.util.BuildData` checkout to fill the revision. `VarroaRunCheckouts` picks the run's checkout: the job SCM remote's `BuildData`, else the first non-library `BuildData`. The run forge comes from the multibranch source class, then from the host. It is an outer class with three static `@Extension` nested classes, because `RunListener` and
   `FlowExecutionListener` are abstract classes: `Runs` (`RunListener`) emits `STARTED`
   and `COMPLETED`; `Flows` (`FlowExecutionListener`) attaches and detaches `Graph` on a
   running pipeline; `Graph` (`GraphListener`) emits `STAGE_STARTED` on a labelled block

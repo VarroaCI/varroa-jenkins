@@ -463,8 +463,9 @@ federation, activity persistence, and SSE fanout.
   response field. `runDetailJSON` (`handlers_runs.go`) and `RunDetail`
   (`pipelines_service.go`) must carry the same JSON tags, because
   `convertJSON` matches them by tag.
-  The run detail and the run summary carry `scmUrl` and `triggerSource`, read from `runs.payload`
-  by `runOriginOf` (`run_origin.go`). `scmUrl` prefers the `run.source` copy over the `run.started` copy.
+  The run detail and the run summary carry `scmUrl`, `scmForge`, and `triggerSource`, read from `runs.payload`
+  by `runOriginOf` (`run_origin.go`). `scmUrl` and `scmForge` come from one event: the `run.source` pair
+  when its URL is set, else the `run.started` pair. `scmForge` answers only `github`, `gitlab`, or `gitea`.
   `triggerSource` classifies `cause_types` in a fixed order; an empty list yields no value.
   The run summary, the running row, and the run detail carry `changeRequest`, read from
   `run.started.payload.change_request` by `changeRequestOf` (`run_change_request.go`).

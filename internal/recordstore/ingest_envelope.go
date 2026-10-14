@@ -298,6 +298,7 @@ type RunSourcePayload struct {
 	SCMRevision    *string             `json:"scm_revision,omitempty"`
 	SCMHead        string              `json:"scm_head,omitempty"`
 	SCMURL         string              `json:"scm_url,omitempty"`
+	SCMForge       string              `json:"scm_forge,omitempty"`
 	DefinitionPath string              `json:"definition_path,omitempty"`
 	Libraries      []SourceLibrary     `json:"libraries,omitempty"`
 	PodTemplates   []SourcePodTemplate `json:"pod_templates,omitempty"`

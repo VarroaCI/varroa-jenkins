@@ -22,6 +22,13 @@ public class BuildEventJsonTest {
     }
 
     @Test
+    public void buildEventWritesTheScmForgeJsonName() {
+        JSONObject o = BuildEvent.builder().scmUrl("https://gitea.example.com/o/r").scmForge("gitea").build().toJson();
+
+        assertEquals("gitea", o.getString("scm_forge"));
+    }
+
+    @Test
     public void buildLibraryWritesTheProtoJsonNames() {
         JSONObject o = library("shared-lib", "1.2.0", "abc123").toJson();
 

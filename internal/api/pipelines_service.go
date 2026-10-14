@@ -45,6 +45,7 @@ type RunSummary struct {
 	Actor         string             `json:"actor,omitempty"`
 	Cause         string             `json:"cause,omitempty"`
 	SCMURL        string             `json:"scmUrl,omitempty"`
+	SCMForge      string             `json:"scmForge,omitempty"`
 	TriggerSource string             `json:"triggerSource,omitempty"`
 	ChangeRequest *changeRequestJSON `json:"changeRequest,omitempty"`
 	QueuedAt      *time.Time         `json:"queuedAt,omitempty"`
@@ -93,6 +94,7 @@ type RunDetail struct {
 	Actor             string                   `json:"actor,omitempty"`
 	Cause             string                   `json:"cause,omitempty"`
 	SCMURL            string                   `json:"scmUrl,omitempty"`
+	SCMForge          string                   `json:"scmForge,omitempty"`
 	TriggerSource     string                   `json:"triggerSource,omitempty"`
 	ChangeRequest     *changeRequestJSON       `json:"changeRequest,omitempty"`
 	Params            map[string]string        `json:"params,omitempty"`
