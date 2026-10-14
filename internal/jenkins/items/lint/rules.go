@@ -108,9 +108,10 @@ var jobDSLStep = regexp.MustCompile(`(?:^|[^\w$])jobDsl\s*(?:\(|\s\w+\s*:)|\bExe
 // NoJobDSLRule rejects an inline pipeline script that runs a Job DSL step.
 // A cell home is temporary, so jobs a seed job creates are lost when the
 // cell restarts, exist on only one member of the tenant, and can name a
-// path outside the tenant folder. Every job comes from items.yaml. The rule
+// path outside the tenant folder. Every job comes from items.yaml. The lint
 // reads an inline script and the inline jenkinsfile of a pipeline template.
-// A Jenkinsfile in SCM is not visible here.
+// A Jenkinsfile in SCM is not visible here. The plugin blocks the step at run
+// time on a cell, for every script source.
 type NoJobDSLRule struct{}
 
 // ID returns the rule id.

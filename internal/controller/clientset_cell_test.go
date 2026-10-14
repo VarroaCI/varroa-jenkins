@@ -93,6 +93,41 @@ func TestBuildStatefulSetCellUseItemPermission(t *testing.T) {
 	}
 }
 
+// TestBuildStatefulSetCellEnv asserts that only a cell stamps VARROA_CELL on
+// the jenkins container. The plugin blocks the jobDsl step only when the
+// variable is "true". A headless controller is not a cell, so it must not
+// carry the variable.
+func TestBuildStatefulSetCellEnv(t *testing.T) {
+	cases := []struct {
+		name     string
+		cell     bool
+		headless bool
+	}{
+		{name: "normal controller", cell: false, headless: false},
+		{name: "cell", cell: true, headless: false},
+		{name: "headless controller", cell: false, headless: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sts := buildStatefulSet(StatefulSetSpec{
+				Name: "ci-00000000", Namespace: "team-a", ControllerName: "ci",
+				Cell: tc.cell, Headless: tc.headless,
+			})
+			env := builtContainerEnv(t, sts, "jenkins")
+			val, ok := env["VARROA_CELL"]
+			if tc.cell {
+				if !ok || val != "true" {
+					t.Errorf("VARROA_CELL = %q (present %v), want \"true\"", val, ok)
+				}
+				return
+			}
+			if _, ok := env["VARROA_CELL"]; ok {
+				t.Errorf("VARROA_CELL present on a non-cell controller, want absent")
+			}
+		})
+	}
+}
+
 // TestDeleteCellNetworkPolicyToleratesNotFound guards the Finalize path: a
 // cell that never had NetworkPolicy isolation enabled must not fail
 // finalization.

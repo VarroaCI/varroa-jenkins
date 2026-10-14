@@ -976,7 +976,9 @@ type StatefulSetSpec struct {
 	// Cell is true when the Controller runs as a cell: a disposable
 	// Jenkins JVM with no durable state. buildStatefulSet omits
 	// volumeClaimTemplates and renders the jenkins-home pod volume as an
-	// emptyDir instead of a claim.
+	// emptyDir instead of a claim. buildStatefulSet also stamps
+	// VARROA_CELL=true on the jenkins container, which the plugin reads to
+	// block the jobDsl step at run time.
 	Cell bool
 
 	// CellPool is the varroa.dev/cell-pool label of a cell, and empty for a

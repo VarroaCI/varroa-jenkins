@@ -1700,6 +1700,14 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 												})
 											}
 										}
+										// The plugin blocks the jobDsl step at run time only when
+										// this is set. A cell must carry it. A plain controller
+										// must not.
+										if spec.Cell {
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_CELL", "value": "true",
+											})
+										}
 										jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
 											"name": "VARROA_CLAIM_GATE", "value": claimGate,
 										})

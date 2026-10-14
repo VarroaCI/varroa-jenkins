@@ -57,6 +57,11 @@ the root AGENTS.md greenfield rule.
   (`controller.breakglass.session`, plus `controller.breakglass.script` on a
   sensitive path such as `/script` or `/manage`), both deduplicated per principal in a
   capped, self-clearing `ConcurrentHashMap`.
+- **`VarroaCellJobDslBlock.java`** is a `StepListener` that is active only when
+  `VARROA_CELL=true`. It reads the env once, so a change needs a pod restart. It
+  fails a `CoreStep` whose `delegate` is `ExecuteDslScripts` through
+  `context.onFailure`, because `DSL.invokeStep` only logs a thrown exception. The
+  `job-dsl` test dependency version must equal the pin in `pluginlock/lock.yaml`.
 - **Activity emitters** (feed the push-based Activity page): `ActivitySink.java`
   (bounded, non-blocking, in-memory), `ActivityEvent.java` (normalized shape — actor,
   itemPath, buildNumber, result, url, message; `controller`/`namespace`/`phase`/`reason`

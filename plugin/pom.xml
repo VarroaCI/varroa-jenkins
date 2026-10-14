@@ -199,6 +199,16 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- job-dsl, test scope only: the cell run-time block test runs a real
+             jobDsl step to prove the step is stopped. No main-scope class names
+             it. The version equals the pin in internal/controller/pluginlock/lock.yaml. -->
+        <dependency>
+            <groupId>org.jenkins-ci.plugins</groupId>
+            <artifactId>job-dsl</artifactId>
+            <version>3732.v9a_c49a_61a_313</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- junit, test scope only (D14): the recorder reads the test result
              action and its suites and cases by method name, so a test that
              proves a real junit report reached the archive needs the real

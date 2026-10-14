@@ -103,7 +103,9 @@ reading each package's entry point):
   inline `jenkinsfile` of each tenant pipeline template (`lint.RunScript`).
   `items.Parse` still accepts every shape a non-cell controller accepts and
   ignores an unknown key. `items.ParseStrict` refuses an unknown key, and only
-  the cell's tenant materialization calls it; the mite engine keeps `Parse`. An item declares its build parameters two ways — a flat list at
+  the cell's tenant materialization calls it; the mite engine keeps `Parse`.
+  The plugin's `VarroaCellJobDslBlock` blocks the step at run time on a cell
+  (`VARROA_CELL`), for every script source. An item declares its build parameters two ways — a flat list at
   the item level (`Item.Parameters`) or a parameters property nested under
   `properties` (`Property.Parameters`) — and `configxml.go` merges both
   sources into one `ParametersDefinitionProperty`, the same merge the
