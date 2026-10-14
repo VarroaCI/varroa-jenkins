@@ -797,6 +797,13 @@ type CellRehydrationEntry struct {
 	// +kubebuilder:validation:MaxItems=50
 	// +optional
 	Deferred []string `json:"deferred,omitempty"`
+	// Unseeded lists the job paths that wait for a number seed on CellInstance:
+	// the jobs no bundle covers, and the jobs of an outstanding bundle that no
+	// earlier apply covered. An entry whose UnseededJobs is above the length of
+	// this list holds the whole tenant.
+	// +kubebuilder:validation:MaxItems=256
+	// +optional
+	Unseeded []string `json:"unseeded,omitempty"`
 	// Error is the whole-bundle rehydration failure the mite reported, or
 	// empty.
 	// +optional

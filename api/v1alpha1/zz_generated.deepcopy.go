@@ -515,6 +515,11 @@ func (in *CellRehydrationEntry) DeepCopyInto(out *CellRehydrationEntry) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Unseeded != nil {
+		in, out := &in.Unseeded, &out.Unseeded
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.At != nil {
 		in, out := &in.At, &out.At
 		*out = (*in).DeepCopy()

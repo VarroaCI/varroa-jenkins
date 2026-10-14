@@ -9,13 +9,15 @@ import (
 // rehydrationApplied implements task 6.3's applied predicate (design
 // D13): a tenant's rehydration counts as applied only when its entry's
 // Generation and CellInstance match the cell's current placement,
-// Applied is true, Error is empty, Deferred is empty, and UnseededJobs
-// is zero. Any other state means the controller reconciler must keep
-// building a new bundle for this tenant, until rehydrationExpired says
-// otherwise. UnseededJobs above zero means a number-only round applied
-// but did not yet cover every job (design D4): treating that state as
-// applied would stop the per-tick number-only progression before every
-// job of the tenant holds its number.
+// Applied is true, Error is empty, Deferred is empty, UnseededJobs is
+// zero, and Unseeded is empty. Any other state means the controller
+// reconciler must keep building a new bundle for this tenant, until
+// rehydrationExpired says otherwise. UnseededJobs above zero means a
+// number-only round applied but did not yet cover every job (design D4):
+// treating that state as applied would stop the per-tick number-only
+// progression before every job of the tenant holds its number. A listed
+// unseeded path keeps the tenant pending too, so a lost in-flight record
+// heals on the next round.
 func rehydrationApplied(entry *v1alpha1.CellRehydrationEntry, generation int64, cellInstance string) bool {
 	return entry != nil &&
 		entry.Generation == generation &&
@@ -23,7 +25,8 @@ func rehydrationApplied(entry *v1alpha1.CellRehydrationEntry, generation int64, 
 		entry.Applied &&
 		entry.Error == "" &&
 		len(entry.Deferred) == 0 &&
-		entry.UnseededJobs == 0
+		entry.UnseededJobs == 0 &&
+		len(entry.Unseeded) == 0
 }
 
 // rehydrationExpired reports whether a still-pending tenant has retried

@@ -40,13 +40,18 @@ func deliverRehydration(rec *Reconciler, cr *v1alpha1.Controller, plan *rehydrat
 func answerRehydration(rec *Reconciler, cr *v1alpha1.Controller, commandID string, success bool, rehydrationErr string, now time.Time) {
 	cellKey := cr.Namespace + "/" + cr.Name
 	id := commandID
-	var paths []string
-	if stamped, p, ok := rec.takeRehydrationResult(cellKey, commandID); ok {
-		id = stamped
-		paths = p
+	var match rehydrationResultMatch
+	if m, ok := rec.takeRehydrationResult(cellKey, commandID); ok {
+		id = m.StampedID
+		match = m
 	}
-	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, id, success, rehydrationErr, map[string][]string{}, now)
-	rec.commitNumberOnlyProgress(cellKey, paths, success, rehydrationErr, nil)
+	tenants := make([]string, 0, len(cr.Status.Cell.Rehydration))
+	for _, e := range cr.Status.Cell.Rehydration {
+		tenants = append(tenants, e.Tenant)
+	}
+	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, id, success, rehydrationErr,
+		map[string][]string{}, partitionJobPathsByTenant(match.CoveredJobPaths, tenants), now)
+	rec.commitNumberOnlyProgress(cellKey, match.CellInstance, match.NumberOnlyJobPaths, success, rehydrationErr, nil)
 }
 
 // TestAttachCellRehydration_AppliedTenantSendsNoBundle covers task 6.4:
@@ -510,9 +515,9 @@ func TestNumberOnlyCaches_ConcurrentCellsDoNotRace(t *testing.T) {
 				plan := &rehydrationSendPlan{Bundle: bundle, NumberOnlyJobPaths: []string{"a", "b"}}
 				r.markRehydrationSent(cr, plan, &mitev1.DesiredStateCommand{CommandId: id, Rehydration: bundle}, time.Now())
 				_ = r.rehydrationInFlightFor(key)
-				_ = r.numberSeededJobsCopy(key)
-				_, paths, _ := r.takeRehydrationResult(key, id)
-				r.commitNumberOnlyProgress(key, paths, true, "", nil)
+				_ = r.numberSeededJobsCopy(key, "uid-1")
+				match, _ := r.takeRehydrationResult(key, id)
+				r.commitNumberOnlyProgress(key, match.CellInstance, match.NumberOnlyJobPaths, true, "", nil)
 				r.dropRehydrationInFlight(key)
 			}
 		}(i)

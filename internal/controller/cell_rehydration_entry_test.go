@@ -2,6 +2,7 @@ package controller
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,7 +188,7 @@ func TestApplyRehydrationResult_OnlyMatchingCommandUpdated(t *testing.T) {
 		{Tenant: "team-a", CommandID: "cmd-1"},
 		{Tenant: "team-b", CommandID: "cmd-old"},
 	}
-	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, nil, rehydrationTestNow)
 	if !out[0].Applied {
 		t.Fatalf("expected the matching entry updated, got %+v", out[0])
 	}
@@ -205,7 +206,7 @@ func TestApplyRehydrationResult_ThreeTenantsOneCommand(t *testing.T) {
 		{Tenant: "team-b", CommandID: "cmd-1"},
 		{Tenant: "team-c", CommandID: "cmd-1"},
 	}
-	out := applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, nil, rehydrationTestNow)
 	for _, e := range out {
 		if e.Applied || e.Error != "mite rejected a path" {
 			t.Fatalf("expected every entry of the command to carry the whole-bundle error, got %+v", e)
@@ -219,7 +220,7 @@ func TestApplyRehydrationResult_PerTenantDeferred(t *testing.T) {
 		{Tenant: "team-b", CommandID: "cmd-1"},
 	}
 	deferred := map[string][]string{"team-a": {"team-a/job-x"}}
-	out := applyRehydrationResult(entries, "cmd-1", true, "", deferred, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", true, "", deferred, nil, rehydrationTestNow)
 	if len(out[0].Deferred) != 1 || !out[0].Applied {
 		t.Fatalf("expected team-a applied with its deferred job, got %+v", out[0])
 	}
@@ -234,18 +235,21 @@ func TestSeedAnswerOf(t *testing.T) {
 		name         string
 		entry        v1alpha1.CellRehydrationEntry
 		wantInstance string
-		wantDeferred []string
+		wantPending  []string
 	}{
 		{"pre-send holds the whole tenant", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1"}, "", nil},
 		{"applied with deferred job", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}}, "uid-1", []string{"t/x"}},
 		{"applied without deferred job", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true}, "uid-1", nil},
 		{"released give-up", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}, Error: "rehydration deadline exceeded"}, "uid-1", nil},
 		{"never-applied give-up", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Deferred: []string{"t/x"}, Error: "rehydration deadline exceeded"}, "", []string{"t/x"}},
+		{"applied number-only round holds uncovered jobs", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, UnseededJobs: 2, Unseeded: []string{"t/b", "t/c"}, Deferred: []string{"t/x"}}, "uid-1", []string{"t/b", "t/c", "t/x"}},
+		{"applied with overflowed unseeded list holds the tenant", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, UnseededJobs: 3}, "", nil},
+		{"released give-up with unseeded job", v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Unseeded: []string{"t/b"}, Error: "rehydration deadline exceeded"}, "uid-1", nil},
 	}
 	for _, tc := range cases {
 		got := seedAnswerOf(&tc.entry)
-		if got.instance != tc.wantInstance || !slices.Equal(got.deferred, tc.wantDeferred) {
-			t.Errorf("%s: seedAnswerOf = (%q, %v), want (%q, %v)", tc.name, got.instance, got.deferred, tc.wantInstance, tc.wantDeferred)
+		if got.instance != tc.wantInstance || !slices.Equal(got.pending, tc.wantPending) {
+			t.Errorf("%s: seedAnswerOf = (%q, %v), want (%q, %v)", tc.name, got.instance, got.pending, tc.wantInstance, tc.wantPending)
 		}
 	}
 }
@@ -253,12 +257,12 @@ func TestSeedAnswerOf(t *testing.T) {
 // TestCarryAppliedSeed pins which earlier entries keep their applied seed
 // across a resend.
 func TestCarryAppliedSeed(t *testing.T) {
-	applied := v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}, Error: "old"}
+	applied := v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Applied: true, Deferred: []string{"t/x"}, Unseeded: []string{"t/y"}, Error: "old"}
 	next := v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1"}
 
 	kept := carryAppliedSeed(next, &applied)
-	if !kept.Applied || !slices.Equal(kept.Deferred, []string{"t/x"}) || kept.Error != "" {
-		t.Fatalf("same generation and instance: want applied with deferred and no error, got %+v", kept)
+	if !kept.Applied || !slices.Equal(kept.Deferred, []string{"t/x"}) || !slices.Equal(kept.Unseeded, []string{"t/y"}) || kept.Error != "" {
+		t.Fatalf("same generation and instance: want applied with deferred and unseeded, no error, got %+v", kept)
 	}
 	otherInstance := applied
 	otherInstance.CellInstance = "uid-2"
@@ -288,8 +292,8 @@ func TestExpiredEntry_ReleasesOnlyAfterAnApply(t *testing.T) {
 	if !released.Applied || !slices.Equal(released.Deferred, []string{"t/x"}) || released.Error == "" {
 		t.Fatalf("released give-up: want applied, deferred kept in the message, error set; got %+v", released)
 	}
-	if got := seedAnswerOf(&released); got.instance != "uid-1" || len(got.deferred) != 0 {
-		t.Fatalf("released give-up answers (%q, %v), want (uid-1, none)", got.instance, got.deferred)
+	if got := seedAnswerOf(&released); got.instance != "uid-1" || len(got.pending) != 0 {
+		t.Fatalf("released give-up answers (%q, %v), want (uid-1, none)", got.instance, got.pending)
 	}
 
 	st.existing = &v1alpha1.CellRehydrationEntry{Tenant: "t", Generation: 1, CellInstance: "uid-1", Deferred: []string{"t/x"}}
@@ -308,15 +312,126 @@ func TestCellRehydrationEntryDeferred_GiveUpAnswersNone(t *testing.T) {
 	cell := cellWithSeeds(v1alpha1.CellRehydrationEntry{Tenant: "team-a", CellInstance: "uid-1", Applied: true, Deferred: []string{"team-a/x"}, Error: "rehydration deadline exceeded"})
 	cells := map[string]*v1alpha1.Controller{teamCellKey("ns", "cell"): cell}
 	status := &v1alpha1.TeamStatus{Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell", CellNamespace: "ns"}}
-	if got := cellRehydrationEntryDeferred(status, cells, "team-a"); len(got) != 0 {
+	if got := cellRehydrationEntryPending(status, cells, "team-a"); len(got) != 0 {
 		t.Fatalf("released give-up announced deferred %v, want none", got)
 	}
 }
 
-// --- partitionDeferredJobs ---
+// TestApplyRehydrationResult_DropsCoveredUnseededPaths pins that a
+// successful apply removes the covered job paths from the unseeded list,
+// and that a failed apply keeps the list.
+func TestApplyRehydrationResult_DropsCoveredUnseededPaths(t *testing.T) {
+	entries := []v1alpha1.CellRehydrationEntry{
+		{Tenant: "team-a", CommandID: "cmd-1", Unseeded: []string{"team-a/b", "team-a/c"}},
+	}
+	covered := map[string][]string{"team-a": {"team-a/b"}}
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, covered, rehydrationTestNow)
+	if !slices.Equal(out[0].Unseeded, []string{"team-a/c"}) || !out[0].Applied {
+		t.Fatalf("successful apply: want unseeded [team-a/c] and applied, got %+v", out[0])
+	}
+	out = applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, covered, rehydrationTestNow)
+	if !slices.Equal(out[0].Unseeded, []string{"team-a/b", "team-a/c"}) || out[0].Applied {
+		t.Fatalf("failed apply: want the unseeded list kept and not applied, got %+v", out[0])
+	}
+}
 
-func TestPartitionDeferredJobs(t *testing.T) {
-	out := partitionDeferredJobs([]string{"team-a/job-x", "team-b/job-y", "team-a/job-z"}, []string{"team-a", "team-b"})
+// TestBoundUnseeded pins the cap: a list above the limit, or a carried
+// list that was incomplete, is dropped and clears Applied.
+func TestBoundUnseeded(t *testing.T) {
+	applied := v1alpha1.CellRehydrationEntry{Tenant: "t", Applied: true, UnseededJobs: 2}
+	got := boundUnseeded(applied, []string{"t/c", "t/a", "t/a"}, true, 2)
+	if !slices.Equal(got.Unseeded, []string{"t/a", "t/c"}) || !got.Applied {
+		t.Fatalf("within the limit: want sorted unique [t/a t/c] and applied, got %+v", got)
+	}
+	if got := boundUnseeded(applied, []string{"t/a", "t/b", "t/c"}, true, 2); got.Unseeded != nil || got.Applied {
+		t.Fatalf("above the limit: want no list and not applied, got %+v", got)
+	}
+	if got := boundUnseeded(applied, []string{"t/a"}, false, 2); got.Unseeded != nil || got.Applied {
+		t.Fatalf("incomplete carried list: want no list and not applied, got %+v", got)
+	}
+}
+
+// TestCellSeedStateChanged_UnseededListChange pins that a change of the
+// unseeded list alone wakes the Team ticker.
+func TestCellSeedStateChanged_UnseededListChange(t *testing.T) {
+	at := metav1.NewTime(rehydrationTestNow)
+	before := v1alpha1.CellRehydrationEntry{Tenant: "t", CellInstance: "uid-1", Applied: true, At: &at, Unseeded: []string{"t/a"}}
+	after := before
+	after.Unseeded = []string{"t/a", "t/b"}
+	if !CellSeedStateChanged(cellWithSeeds(before), cellWithSeeds(after)) {
+		t.Fatalf("an unseeded list change must wake the ticker")
+	}
+}
+
+// TestCapCellUnseeded pins the per-cell byte budget. Each path counts its
+// length plus three bytes. Under the budget nothing changes. Over it, the
+// entry with the largest size drops first, ties by tenant name, and a
+// dropped entry waits whole.
+func TestCapCellUnseeded(t *testing.T) {
+	// Ten-byte paths: 13 encoded bytes each. team-a and team-b hold three
+	// paths (39 bytes), team-c holds one (13 bytes). Total 91.
+	mk := func() []v1alpha1.CellRehydrationEntry {
+		return []v1alpha1.CellRehydrationEntry{
+			{Tenant: "team-b", Applied: true, Unseeded: []string{"team-b/a", "team-b/b", "team-b/c"}},
+			{Tenant: "team-a", Applied: true, Unseeded: []string{"team-a/a", "team-a/b", "team-a/c"}},
+			{Tenant: "team-c", Applied: true, Unseeded: []string{"team-c/a"}},
+		}
+	}
+
+	under := mk()
+	capCellUnseeded(under, 91)
+	if !slices.Equal(under[0].Unseeded, mk()[0].Unseeded) || !under[1].Applied || len(under[2].Unseeded) != 1 {
+		t.Fatalf("under the budget: want entries unchanged, got %+v", under)
+	}
+
+	// Total 91, budget 60: team-a and team-b tie at 39 bytes, so team-a
+	// drops first, and that alone brings the total to 52.
+	over := mk()
+	capCellUnseeded(over, 60)
+	if over[1].Applied || over[1].Unseeded != nil {
+		t.Fatalf("over the budget: want team-a dropped whole, got %+v", over[1])
+	}
+	if !over[0].Applied || len(over[0].Unseeded) != 3 || len(over[2].Unseeded) != 1 {
+		t.Fatalf("over the budget: want team-b and team-c kept, got %+v", over)
+	}
+
+	// Few long paths: one 300-byte path is 303 encoded bytes, two short
+	// paths are 26. Budget 300 drops the long one even though it has fewer
+	// paths.
+	long := []string{"team-x/" + strings.Repeat("p", 293)}
+	few := []v1alpha1.CellRehydrationEntry{
+		{Tenant: "team-y", Applied: true, Unseeded: []string{"team-y/a", "team-y/b"}},
+		{Tenant: "team-x", Applied: true, Unseeded: long},
+	}
+	capCellUnseeded(few, 300)
+	if few[1].Applied || few[1].Unseeded != nil || !few[0].Applied || len(few[0].Unseeded) != 2 {
+		t.Fatalf("few long paths: want team-x dropped, team-y kept, got %+v", few)
+	}
+
+	// Two 140 KiB paths exceed the 256 KiB budget together. The tie drops
+	// by name, and one entry alone fits.
+	big := []v1alpha1.CellRehydrationEntry{
+		{Tenant: "team-q", Applied: true, Unseeded: []string{"team-q/" + strings.Repeat("q", 140<<10)}},
+		{Tenant: "team-p", Applied: true, Unseeded: []string{"team-p/" + strings.Repeat("p", 140<<10)}},
+	}
+	capCellUnseeded(big, maxUnseededBytesPerCell)
+	if big[1].Applied || big[1].Unseeded != nil || !big[0].Applied || len(big[0].Unseeded) != 1 {
+		t.Fatalf("256 KiB budget: want team-p dropped by name, team-q kept, got %+v", big)
+	}
+
+	// Reversed input order gives the same drop.
+	rev := mk()
+	rev[0], rev[1] = rev[1], rev[0]
+	capCellUnseeded(rev, 60)
+	if rev[0].Tenant != "team-a" || rev[0].Applied || rev[0].Unseeded != nil || !rev[1].Applied {
+		t.Fatalf("reversed order: want team-a dropped, got %+v", rev)
+	}
+}
+
+// --- partitionJobPathsByTenant ---
+
+func TestPartitionJobPathsByTenant(t *testing.T) {
+	out := partitionJobPathsByTenant([]string{"team-a/job-x", "team-b/job-y", "team-a/job-z"}, []string{"team-a", "team-b"})
 	if len(out["team-a"]) != 2 || len(out["team-b"]) != 1 {
 		t.Fatalf("expected 2 team-a and 1 team-b deferred jobs, got %+v", out)
 	}

@@ -58,31 +58,40 @@ func (r *Reconciler) clearRehydrationPendingSince(cellKey, tenant string) {
 	delete(r.rehydrationPendingSince, cellKey+"/"+tenant)
 }
 
+// numberSeededSet is one cell's confirmed number-seeded job paths and the
+// cell instance they were confirmed on.
+type numberSeededSet struct {
+	instance string
+	paths    map[string]bool
+}
+
 // numberSeededJobsLocked answers cellKey's own in-memory number-seeded-job
 // set (design.md D4 order 4, task 5.7), creating it on first use. A
 // path enters this set only through commitNumberOnlyProgress, once a
 // matching, successful DesiredStateResult confirms the mite wrote it —
-// never merely because a tick selected it for sending. The caller holds
-// numberCacheMu. The returned map is the live set: a caller that reads
-// it after the lock is released must copy it first.
-func (r *Reconciler) numberSeededJobsLocked(cellKey string) map[string]bool {
+// never merely because a tick selected it for sending. The set belongs to
+// one cell instance: a rolled pod holds no number file, so the set starts
+// empty when cellInstance differs from the instance it was built for. The
+// caller holds numberCacheMu. The returned map is the live set: a caller
+// that reads it after the lock is released must copy it first.
+func (r *Reconciler) numberSeededJobsLocked(cellKey, cellInstance string) map[string]bool {
 	if r.numberSeededJobs == nil {
-		r.numberSeededJobs = make(map[string]map[string]bool)
+		r.numberSeededJobs = make(map[string]*numberSeededSet)
 	}
 	seeded, ok := r.numberSeededJobs[cellKey]
-	if !ok {
-		seeded = make(map[string]bool)
+	if !ok || seeded.instance != cellInstance {
+		seeded = &numberSeededSet{instance: cellInstance, paths: make(map[string]bool)}
 		r.numberSeededJobs[cellKey] = seeded
 	}
-	return seeded
+	return seeded.paths
 }
 
-// numberSeededJobsCopy returns a copy of cellKey's confirmed seeded set,
-// safe to read and mutate outside numberCacheMu.
-func (r *Reconciler) numberSeededJobsCopy(cellKey string) map[string]bool {
+// numberSeededJobsCopy returns a copy of cellKey's confirmed seeded set for
+// cellInstance, safe to read and mutate outside numberCacheMu.
+func (r *Reconciler) numberSeededJobsCopy(cellKey, cellInstance string) map[string]bool {
 	r.numberCacheMu.Lock()
 	defer r.numberCacheMu.Unlock()
-	seeded := r.numberSeededJobsLocked(cellKey)
+	seeded := r.numberSeededJobsLocked(cellKey, cellInstance)
 	out := make(map[string]bool, len(seeded))
 	for p := range seeded {
 		out[p] = true
@@ -102,7 +111,7 @@ func (r *Reconciler) numberSeededJobsCopy(cellKey string) map[string]bool {
 // the mite deferred (write rule 1: its folder did not exist yet) never
 // counts as seeded even on a success result, because its
 // nextBuildNumber file was not written.
-func (r *Reconciler) commitNumberOnlyProgress(cellKey string, jobPaths []string, success bool, rehydrationErr string, deferredJobs []string) {
+func (r *Reconciler) commitNumberOnlyProgress(cellKey, cellInstance string, jobPaths []string, success bool, rehydrationErr string, deferredJobs []string) {
 	if len(jobPaths) == 0 || !success || rehydrationErr != "" {
 		return
 	}
@@ -112,7 +121,7 @@ func (r *Reconciler) commitNumberOnlyProgress(cellKey string, jobPaths []string,
 	for _, p := range deferredJobs {
 		deferred[p] = true
 	}
-	seeded := r.numberSeededJobsLocked(cellKey)
+	seeded := r.numberSeededJobsLocked(cellKey, cellInstance)
 	for _, p := range jobPaths {
 		if !deferred[p] {
 			seeded[p] = true
@@ -329,7 +338,12 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	}
 
 	var numberOnlyJobPaths []string
+	// numberOnlyRound is true when this tick's push carries a number-only
+	// block. The jobs of that block wait for their seed until the result
+	// applies, so they join the tenant's pending list.
+	numberOnlyRound := false
 	if result.NumberOnly {
+		numberOnlyRound = true
 		// Order 4 triggers only when the bare NumberFiles for every job
 		// of the cell already exceed the budget (design.md D4): job
 		// count, not record volume, is what forced this branch, and
@@ -347,7 +361,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		// tick's candidate block must not commit it. A block counts as
 		// seeded only once commitNumberOnlyProgress sees the successful
 		// DesiredStateResult of the push that carried it (task 5.7).
-		candidate := r.numberSeededJobsCopy(cellKey)
+		candidate := r.numberSeededJobsCopy(cellKey, cellInstance)
 		blockResult, _, blockErr := rehydrate.AdvanceNumberOnlyRound(allSeeds, candidate, rehydrate.BundleBudgetBytes)
 		if blockErr != nil {
 			if r.Logger != nil {
@@ -416,10 +430,40 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		if result.NumberOnly || tenantCovered == 0 {
 			entries[i].Records = 0
 		}
+
+		// Unseeded lists the jobs of this tenant that wait for a number
+		// seed: the jobs no bundle covers, and this block's jobs while the
+		// push is outstanding. A carried list (an applied seed that a
+		// resend keeps) joins it, but only the paths this tick still
+		// enumerates.
+		tenantSet := make(map[string]bool, len(tenantJobPaths[tenant]))
+		var pending []string
+		for _, p := range tenantJobPaths[tenant] {
+			tenantSet[p] = true
+			if unseeded[p] || (numberOnlyRound && covered[p]) {
+				pending = append(pending, p)
+			}
+		}
+		complete := true
+		if entries[i].Applied {
+			ex := existingByTenant[tenant]
+			complete = ex != nil && int(ex.UnseededJobs) <= len(ex.Unseeded)
+			for _, p := range entries[i].Unseeded {
+				if tenantSet[p] {
+					pending = append(pending, p)
+				}
+			}
+		}
+		entries[i] = boundUnseeded(entries[i], pending, complete, maxUnseededPaths)
 	}
 
+	capCellUnseeded(entries, maxUnseededBytesPerCell)
 	deferredEntries := publishRehydrationEntries(cr, entries, keep, existingByTenant)
-	return &rehydrationSendPlan{Bundle: bundle, Tenants: sentTenants, NumberOnlyJobPaths: numberOnlyJobPaths, Entries: deferredEntries}
+	return &rehydrationSendPlan{
+		Bundle: bundle, Tenants: sentTenants, NumberOnlyJobPaths: numberOnlyJobPaths,
+		CoveredJobPaths: append([]string(nil), result.JobPaths...), CellInstance: cellInstance,
+		Entries: deferredEntries,
+	}
 }
 
 // tenantSeedOutcome is one pending tenant's seeds for a tick. fetchErr

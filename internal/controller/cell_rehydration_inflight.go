@@ -36,8 +36,12 @@ type rehydrationSendPlan struct {
 	Bundle             *mitev1.RehydrationBundle
 	Tenants            map[string]rehydrationPlacement
 	NumberOnlyJobPaths []string
-	Held               bool
-	Entries            map[string]v1alpha1.CellRehydrationEntry
+	// CoveredJobPaths lists every job path Bundle carries a seed for.
+	CoveredJobPaths []string
+	// CellInstance is the cell instance Bundle was built for.
+	CellInstance string
+	Held         bool
+	Entries      map[string]v1alpha1.CellRehydrationEntry
 }
 
 // rehydrationPush is one cell's delivered rehydration push that has no
@@ -53,7 +57,20 @@ type rehydrationPush struct {
 	Bundle             *mitev1.RehydrationBundle
 	Tenants            map[string]rehydrationPlacement
 	NumberOnlyJobPaths []string
+	CoveredJobPaths    []string
+	CellInstance       string
 	Until              time.Time
+}
+
+// rehydrationResultMatch is the in-flight push that one DesiredStateResult
+// answers. StampedID is the command ID the entries carry. The job path
+// lists and CellInstance come from the push, so the result commits the
+// seeds that the push actually sent.
+type rehydrationResultMatch struct {
+	StampedID          string
+	NumberOnlyJobPaths []string
+	CoveredJobPaths    []string
+	CellInstance       string
 }
 
 // rehydrationPushWindow answers how long a delivered push holds: the
@@ -90,22 +107,27 @@ func (r *Reconciler) dropRehydrationInFlight(cellKey string) {
 }
 
 // takeRehydrationResult consumes cellKey's in-flight push when commandID
-// is one of its commands. It answers the command ID the entries carry and
-// the number-only job paths the push covered.
-func (r *Reconciler) takeRehydrationResult(cellKey, commandID string) (stampedID string, numberOnlyJobPaths []string, ok bool) {
+// is one of its commands. It answers the push's match, and ok is false
+// when no in-flight push holds commandID.
+func (r *Reconciler) takeRehydrationResult(cellKey, commandID string) (match rehydrationResultMatch, ok bool) {
 	r.numberCacheMu.Lock()
 	defer r.numberCacheMu.Unlock()
 	push, found := r.rehydrationInFlight[cellKey]
 	if !found {
-		return "", nil, false
+		return rehydrationResultMatch{}, false
 	}
 	for _, id := range push.CommandIDs {
 		if id == commandID {
 			delete(r.rehydrationInFlight, cellKey)
-			return push.CommandIDs[0], push.NumberOnlyJobPaths, true
+			return rehydrationResultMatch{
+				StampedID:          push.CommandIDs[0],
+				NumberOnlyJobPaths: push.NumberOnlyJobPaths,
+				CoveredJobPaths:    push.CoveredJobPaths,
+				CellInstance:       push.CellInstance,
+			}, true
 		}
 	}
-	return "", nil, false
+	return rehydrationResultMatch{}, false
 }
 
 // markRehydrationSent records a delivered push that carried a
@@ -148,6 +170,8 @@ func (r *Reconciler) markRehydrationSent(cr *v1alpha1.Controller, plan *rehydrat
 		Bundle:             plan.Bundle,
 		Tenants:            plan.Tenants,
 		NumberOnlyJobPaths: append([]string(nil), plan.NumberOnlyJobPaths...),
+		CoveredJobPaths:    append([]string(nil), plan.CoveredJobPaths...),
+		CellInstance:       plan.CellInstance,
 		Until:              now.Add(rehydrationPushWindow(desired)),
 	}
 }
@@ -172,5 +196,8 @@ func heldRehydrationPlan(push *rehydrationPush, pending map[string]rehydrationPl
 			return nil
 		}
 	}
-	return &rehydrationSendPlan{Bundle: push.Bundle, Tenants: push.Tenants, NumberOnlyJobPaths: push.NumberOnlyJobPaths, Held: true}
+	return &rehydrationSendPlan{
+		Bundle: push.Bundle, Tenants: push.Tenants, NumberOnlyJobPaths: push.NumberOnlyJobPaths,
+		CoveredJobPaths: push.CoveredJobPaths, CellInstance: push.CellInstance, Held: true,
+	}
 }

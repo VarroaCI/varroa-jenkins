@@ -237,11 +237,11 @@ type Reconciler struct {
 	buildBundle func(result rehydrate.BudgetResult) (*mitev1.RehydrationBundle, error)
 	// numberSeededJobs tracks, per cell key ("ns/name"), the job paths a
 	// prior tick's number-only bundle already covered AND a matching
-	// DesiredStateResult confirmed applied (design.md D4 order 4, task
-	// 5.7). Losing it (an operator restart) costs one harmless repeated
-	// round: design.md D5's write rule 3 makes resending an
-	// already-seeded nextBuildNumber a no-op.
-	numberSeededJobs map[string]map[string]bool
+	// DesiredStateResult confirmed applied, on one cell instance (design.md
+	// D4 order 4, task 5.7). Losing it (an operator restart) costs one
+	// harmless repeated round: design.md D5's write rule 3 makes resending
+	// an already-seeded nextBuildNumber a no-op.
+	numberSeededJobs map[string]*numberSeededSet
 	// rehydrationInFlight tracks, per cell key, the delivered
 	// rehydration push that has no result yet, with the number-only block
 	// it carried (task 5.7). markRehydrationSent writes it after a
@@ -1252,7 +1252,7 @@ func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceC
 		clusterName:             "core",
 		buildJobSeed:            rehydrate.BuildJobSeed,
 		buildBundle:             rehydrate.BuildBundle,
-		numberSeededJobs:        make(map[string]map[string]bool),
+		numberSeededJobs:        make(map[string]*numberSeededSet),
 		rehydrationInFlight:     make(map[string]*rehydrationPush),
 		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
 		controllerLocks:         newKeyLock(),
@@ -3989,11 +3989,11 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// partitioned back to each tenant by its own job-path
 				// prefix first.
 				rehydrationID := res.CommandId
-				var numberOnlyJobPaths []string
+				var resultMatch rehydrationResultMatch
 				if isCellController(cr) {
-					if stamped, paths, ok := recv.takeRehydrationResult(cr.Namespace+"/"+cr.Name, res.CommandId); ok {
-						rehydrationID = stamped
-						numberOnlyJobPaths = paths
+					if match, ok := recv.takeRehydrationResult(cr.Namespace+"/"+cr.Name, res.CommandId); ok {
+						rehydrationID = match.StampedID
+						resultMatch = match
 					}
 				}
 				if isCellController(cr) && cr.Status.Cell != nil && len(cr.Status.Cell.Rehydration) > 0 {
@@ -4001,18 +4001,19 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					for _, e := range cr.Status.Cell.Rehydration {
 						tenants = append(tenants, e.Tenant)
 					}
-					deferredByTenant := partitionDeferredJobs(r.DesiredState.RehydrationDeferredJobs, tenants)
+					deferredByTenant := partitionJobPathsByTenant(r.DesiredState.RehydrationDeferredJobs, tenants)
+					coveredByTenant := partitionJobPathsByTenant(resultMatch.CoveredJobPaths, tenants)
 					cr.Status.Cell.Rehydration = applyRehydrationResult(
 						cr.Status.Cell.Rehydration, rehydrationID,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
-						deferredByTenant, time.Now(),
+						deferredByTenant, coveredByTenant, time.Now(),
 					)
 				}
 				// Number-only progress (design D4, task 5.7): a block
 				// counts as seeded only once this matching, successful
 				// result confirms it. See commitNumberOnlyProgress.
 				if isCellController(cr) {
-					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, numberOnlyJobPaths,
+					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, resultMatch.CellInstance, resultMatch.NumberOnlyJobPaths,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
 						r.DesiredState.RehydrationDeferredJobs)
 				}

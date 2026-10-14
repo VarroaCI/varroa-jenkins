@@ -1251,7 +1251,7 @@ sections describe.
   `desired.Rehydration` and `Controller.status.cell.rehydration`
   (`preSendEntry` before the send, `applyRehydrationResult` after the mite's
   `DesiredStateResult` returns, attributing `rehydration_deferred_jobs` back
-  to each tenant by job-path prefix with `partitionDeferredJobs`).
+  to each tenant by job-path prefix with `partitionJobPathsByTenant`).
   **An entry carries a command ID only for a delivered push with a bundle.**
   `preSendEntry` writes no command ID; `markRehydrationSent`
   (`cell_rehydration_inflight.go`) stamps it after a delivered push that
@@ -1270,8 +1270,10 @@ sections describe.
   sends once more.
   **A number-only block never joins the process-local seeded-job cache on
   send.** `AdvanceNumberOnlyRound` runs against a copy of
-  `numberSeededJobsFor`'s set, and the in-flight record keeps the sent
-  block's job paths. `handleConnected`'s result-drain calls
+  `numberSeededJobsCopy`'s set for the cell instance, and the in-flight record
+  keeps the sent block's job paths and the instance it was built for. The
+  seeded set belongs to one instance: a rolled pod holds no number file, so
+  the set starts empty on a new instance. `handleConnected`'s result-drain calls
   `commitNumberOnlyProgress` with the block that `takeRehydrationResult`
   returns, which copies the paths into the real seeded set only on
   `rehydration_success` with no error, minus any path the mite deferred. A
@@ -1281,10 +1283,24 @@ sections describe.
   sets `Applied` from the success and the error only. `carryAppliedSeed`
   keeps `Applied` and `Deferred` on the pre-send entry of a resend, for the
   same generation and cell instance. `seedAnswerOf` answers an applied entry's
-  instance and its deferred jobs, so only those jobs wait. A give-up
-  (`deadlineEntry`, `released`) keeps `Applied` true only when an earlier
-  apply exists on the same generation and instance. That release answers no
-  deferred jobs. A bundle that never applied stays held as a whole.
+  instance and its pending jobs (the deferred and unseeded paths), so only
+  those jobs wait. A give-up (`deadlineEntry`, `released`) keeps `Applied`
+  true only when an earlier apply exists on the same generation and instance.
+  That release answers no pending jobs. A bundle that never applied stays
+  held as a whole.
+  **A number-only round holds only its uncovered jobs.** `CellRehydrationEntry.Unseeded`
+  lists the jobs that wait for a number seed on the instance: the jobs no bundle
+  covers, the jobs of the outstanding block while its push is outstanding, and a
+  carried path that the tick still enumerates. A successful apply removes the
+  covered paths (`applyRehydrationResult`). An applied entry whose `UnseededJobs`
+  exceeds the length of `Unseeded` holds the whole tenant. `boundUnseeded` caps the
+  list at `maxUnseededPaths` (256); a longer list is dropped and clears `Applied`.
+  `capCellUnseeded` caps the encoded size of all `Unseeded` lists in one cell at
+  `maxUnseededBytesPerCell` (256 KiB; each path counts its length plus 3 bytes),
+  dropping the largest list first (ties by tenant name) until the total fits.
+  `rehydrationApplied` also requires an empty `Unseeded`, so a lost in-flight
+  record sends the next block on the next tick. The Team reconciler's `PendingJobs`
+  input is `cellRehydrationEntryPending`, which returns `seedAnswerOf(...).pending`.
   `cells.RehydrationPass`, called from `TeamReconciler.Reconcile` inside the
   same status patch, derives `Team.status.rehydration` and the `Rehydrated`
   condition from the tenant's own entry on the bound cell by comparing

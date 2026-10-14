@@ -116,8 +116,8 @@ func TestReconcileConnected_AutomaticCellSendsNothingForAPendingTenantWithNoBund
 				if !e.Applied || !slices.Equal(e.Deferred, []string{"team-a/build"}) {
 					t.Fatalf("entry = %+v, want the released give-up applied with its deferred job", e)
 				}
-				if got := seedAnswerOf(&e); got.instance != cr.Status.Cell.Instance || len(got.deferred) != 0 {
-					t.Fatalf("seed answer = (%q, %v), want (%q, none)", got.instance, got.deferred, cr.Status.Cell.Instance)
+				if got := seedAnswerOf(&e); got.instance != cr.Status.Cell.Instance || len(got.pending) != 0 {
+					t.Fatalf("seed answer = (%q, %v), want (%q, none)", got.instance, got.pending, cr.Status.Cell.Instance)
 				}
 			}
 		})

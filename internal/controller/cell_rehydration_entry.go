@@ -3,13 +3,24 @@ package controller
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/rehydrate"
 )
+
+// maxUnseededPaths bounds CellRehydrationEntry.Unseeded. It must equal the MaxItems marker on that field.
+const maxUnseededPaths = 256
+
+// maxUnseededBytesPerCell bounds the encoded size of the Unseeded lists of
+// every entry of one cell, so the status stays far below the object size
+// limit. Each path is measured as its length plus three JSON bytes (two
+// quotes and a comma).
+const maxUnseededBytesPerCell = 256 << 10
 
 // emptySelectionEntry implements task 6.0a: a tenant whose enumeration
 // returns no job path is applied at once, with zero records, no
@@ -74,10 +85,10 @@ func deadlineEntry(tenant string, generation int64, cellInstance string, deferre
 	}
 }
 
-// carryAppliedSeed keeps the applied flag and the deferred list of an
-// existing entry for the same generation and cell instance. The seed of
-// an earlier apply stays on the cell while a resend is outstanding. The
-// Error of the existing entry is not carried.
+// carryAppliedSeed keeps the applied flag, the deferred list, and the
+// unseeded list of an existing entry for the same generation and cell
+// instance. The seed of an earlier apply stays on the cell while a resend
+// is outstanding. The Error of the existing entry is not carried.
 func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
 	if existing == nil || !existing.Applied ||
 		existing.Generation != next.Generation || existing.CellInstance != next.CellInstance {
@@ -85,30 +96,37 @@ func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.Cel
 	}
 	next.Applied = true
 	next.Deferred = append([]string(nil), existing.Deferred...)
+	next.Unseeded = append([]string(nil), existing.Unseeded...)
 	return next
 }
 
 // seedAnswer is the seed state of one tenant on one member cell: the cell
-// instance the tenant may build on, and the job paths still deferred.
+// instance the tenant may build on, and the job paths still pending a
+// seed on that instance.
 type seedAnswer struct {
 	instance string
-	deferred []string
+	pending  []string
 }
 
 // seedAnswerOf returns the seed answer that the Team reconciler reads from
 // one rehydration entry. An entry that is not applied answers no instance,
 // which holds every build on the member until its seed lands. An applied
-// entry answers its instance and its deferred jobs, so only those jobs
-// wait. A released give-up is applied with an error and answers no
-// deferred jobs, so they build with no seeded history.
+// entry answers its instance and its pending jobs, the deferred and the
+// unseeded paths, so only those jobs wait. A released give-up is applied
+// with an error and answers no pending jobs, so they build with no seeded
+// history. An applied entry whose unseeded list is shorter than its
+// UnseededJobs count dropped the list, so it holds the whole tenant.
 func seedAnswerOf(e *v1alpha1.CellRehydrationEntry) seedAnswer {
+	pending := rehydrate.PendingJobPaths(e.Deferred, e.Unseeded)
 	switch {
 	case !e.Applied:
-		return seedAnswer{deferred: e.Deferred}
+		return seedAnswer{pending: pending}
 	case e.Error != "":
 		return seedAnswer{instance: e.CellInstance}
+	case int(e.UnseededJobs) > len(e.Unseeded):
+		return seedAnswer{pending: pending}
 	default:
-		return seedAnswer{instance: e.CellInstance, deferred: e.Deferred}
+		return seedAnswer{instance: e.CellInstance, pending: pending}
 	}
 }
 
@@ -129,7 +147,7 @@ func seedAnswersOf(cr *v1alpha1.Controller) map[string]seedAnswer {
 // CellSeedStateChanged reports whether a Controller update changed the seed
 // answer of any tenant on a cell. The Controller informer handler calls it
 // on every replica. A true answer wakes the Team ticker, which reads the same
-// answers through memberSeedReader. Only the instance and the deferred job
+// answers through memberSeedReader. Only the instance and the pending job
 // paths count. A change of the entry time alone is false.
 func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
 	if newCR == nil || !v1alpha1.IsCell(newCR) || newCR.Status.Cell == nil {
@@ -139,7 +157,7 @@ func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
 	newAnswers := seedAnswersOf(newCR)
 	for tenant, now := range newAnswers {
 		prev := oldAnswers[tenant]
-		if prev.instance != now.instance || !slices.Equal(prev.deferred, now.deferred) {
+		if prev.instance != now.instance || !slices.Equal(prev.pending, now.pending) {
 			return true
 		}
 	}
@@ -147,11 +165,85 @@ func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
 		if _, ok := newAnswers[tenant]; ok {
 			continue
 		}
-		if prev.instance != "" || len(prev.deferred) > 0 {
+		if prev.instance != "" || len(prev.pending) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// boundUnseeded sets e.Unseeded to the sorted, unique paths. A list above
+// limit, or a carried list that was already incomplete, is dropped, and
+// Applied is cleared so the whole tenant waits for the result.
+func boundUnseeded(e v1alpha1.CellRehydrationEntry, paths []string, complete bool, limit int) v1alpha1.CellRehydrationEntry {
+	p := rehydrate.PendingJobPaths(paths, nil)
+	if !complete || len(p) > limit {
+		e.Unseeded = nil
+		e.Applied = false
+		return e
+	}
+	e.Unseeded = p
+	return e
+}
+
+// unseededBytes measures one entry's Unseeded list in encoded bytes: each
+// path counts its length plus three JSON bytes.
+func unseededBytes(e *v1alpha1.CellRehydrationEntry) int {
+	n := 0
+	for _, p := range e.Unseeded {
+		n += len(p) + 3
+	}
+	return n
+}
+
+// capCellUnseeded keeps the sum of unseededBytes over entries within budget.
+// While the total exceeds budget, it drops the entry with the largest size,
+// ties by tenant name. Each dropped entry waits whole: boundUnseeded clears
+// its list and Applied.
+func capCellUnseeded(entries []v1alpha1.CellRehydrationEntry, budget int) {
+	total := 0
+	for i := range entries {
+		total += unseededBytes(&entries[i])
+	}
+	if total <= budget {
+		return
+	}
+	order := make([]int, len(entries))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool {
+		ba, bb := unseededBytes(&entries[order[a]]), unseededBytes(&entries[order[b]])
+		if ba != bb {
+			return ba > bb
+		}
+		return entries[order[a]].Tenant < entries[order[b]].Tenant
+	})
+	for _, i := range order {
+		if total <= budget {
+			break
+		}
+		total -= unseededBytes(&entries[i])
+		entries[i] = boundUnseeded(entries[i], nil, false, maxUnseededPaths)
+	}
+}
+
+// withoutPaths returns paths minus drop, or nil when nothing is left.
+func withoutPaths(paths, drop []string) []string {
+	if len(drop) == 0 {
+		return paths
+	}
+	gone := make(map[string]bool, len(drop))
+	for _, p := range drop {
+		gone[p] = true
+	}
+	var out []string
+	for _, p := range paths {
+		if !gone[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // applyRehydrationResult implements task 6.2: it updates only the
@@ -159,9 +251,11 @@ func CellSeedStateChanged(oldCR, newCR *v1alpha1.Controller) bool {
 // rehydrationError applies to every one of them, because the mite
 // applies the rehydration section as one unit; each tenant otherwise
 // gets its own deferred job paths (already partitioned by
-// partitionDeferredJobs). A deferred job does not clear Applied: the
-// flag is derived from success and the error only.
-func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID string, success bool, rehydrationError string, deferredByTenant map[string][]string, now time.Time) []v1alpha1.CellRehydrationEntry {
+// partitionJobPathsByTenant). A deferred job does not clear Applied: the
+// flag is derived from success and the error only. A successful apply
+// removes the tenant's covered job paths from its unseeded list, because
+// the mite now holds their number seeds. A failed apply keeps the list.
+func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID string, success bool, rehydrationError string, deferredByTenant, coveredByTenant map[string][]string, now time.Time) []v1alpha1.CellRehydrationEntry {
 	out := make([]v1alpha1.CellRehydrationEntry, len(entries))
 	at := metav1.NewTime(now)
 	for i, e := range entries {
@@ -173,21 +267,24 @@ func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID s
 		e.Deferred = tenantDeferred
 		e.Error = rehydrationError
 		e.Applied = success && rehydrationError == ""
+		if e.Applied {
+			e.Unseeded = withoutPaths(e.Unseeded, coveredByTenant[e.Tenant])
+		}
 		e.At = &at
 		out[i] = e
 	}
 	return out
 }
 
-// partitionDeferredJobs implements task 6.2's per-tenant attribution of
-// DesiredStateResult.rehydration_deferred_jobs — a flat job-path list
-// across every tenant of one cell, because one command covers every
-// tenant on it — back to each path's owning tenant, by that tenant's
-// own job-path prefix (a pipelines tenant's jobs all live under its own
-// top-level folder, its Team name).
-func partitionDeferredJobs(deferredJobs []string, tenants []string) map[string][]string {
+// partitionJobPathsByTenant attributes a flat job-path list across every
+// tenant of one cell, because one command covers every tenant on it. It
+// uses each path's owning tenant, by that tenant's own job-path prefix (a
+// pipelines tenant's jobs all live under its own top-level folder, its
+// Team name). It serves the deferred list of DesiredStateResult
+// (task 6.2) and the covered job paths of a number-only push.
+func partitionJobPathsByTenant(jobPaths []string, tenants []string) map[string][]string {
 	out := make(map[string][]string, len(tenants))
-	for _, path := range deferredJobs {
+	for _, path := range jobPaths {
 		for _, tenant := range tenants {
 			if path == tenant || strings.HasPrefix(path, tenant+"/") {
 				out[tenant] = append(out[tenant], path)

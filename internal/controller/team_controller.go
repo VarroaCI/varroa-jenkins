@@ -22,7 +22,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
-	"github.com/varroaci/varroa-jenkins/internal/controller/rehydrate"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
@@ -500,14 +499,12 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			RequestPurge:       r.requestPurge,
 			Announce:           r.loggedAnnounce(),
 			LastSync:           lastSync,
-			// PendingJobs (task 5.7a, design D13): the Deferred job
-			// paths of this tenant's own cell entry, as seedAnswerOf
-			// reports them. CellRehydrationEntry carries no path list
-			// for the uncovered jobs, only a count (UnseededJobs), so
-			// this call site supplies only the Deferred half. A tenant
-			// with no applied seed holds as a whole through its empty
-			// rehydrated instance, so the uncovered jobs stay held.
-			PendingJobs: rehydrate.PendingJobPaths(cellRehydrationEntryDeferred(status, cellsByKey, team.Name), nil),
+			// PendingJobs is the pending set of the tenant's slot-0 entry:
+			// the deferred jobs and the jobs with no number seed. An
+			// applied seed answers its instance, so only these jobs wait.
+			// An entry that is not applied, or whose list overflowed,
+			// answers no instance and holds every job.
+			PendingJobs: cellRehydrationEntryPending(status, cellsByKey, team.Name),
 			// MemberSeed reads each member cell's own rehydration entry,
 			// so one member's deferred job never holds another member's
 			// build.
@@ -715,7 +712,7 @@ func cellRehydrationEntryFor(status *v1alpha1.TeamStatus, cellsByKey map[string]
 // read from that cell's status.cell.rehydration entry through seedAnswerOf.
 // A cell with no entry, or one whose bundle is not applied, answers an
 // empty instance, which holds every build on that member until its seed
-// lands. An applied entry answers its deferred jobs, which alone wait.
+// lands. An applied entry answers its pending jobs, which alone wait.
 func memberSeedReader(cellsByKey map[string]*v1alpha1.Controller, teamName string) func(string, string) (string, []string) {
 	return func(namespace, cellName string) (string, []string) {
 		cell := cellsByKey[teamCellKey(namespace, cellName)]
@@ -728,7 +725,7 @@ func memberSeedReader(cellsByKey map[string]*v1alpha1.Controller, teamName strin
 				continue
 			}
 			answer := seedAnswerOf(entry)
-			return answer.instance, answer.deferred
+			return answer.instance, answer.pending
 		}
 		return "", nil
 	}
@@ -852,14 +849,14 @@ func (r *TeamReconciler) confirmDepartedInstances(ctx context.Context, last *cel
 	return out
 }
 
-// cellRehydrationEntryDeferred answers the deferred job paths that teamName's
+// cellRehydrationEntryPending answers the pending job paths that teamName's
 // own cell entry announces, or nil when no entry exists yet (task 5.7a).
-func cellRehydrationEntryDeferred(status *v1alpha1.TeamStatus, cellsByKey map[string]*v1alpha1.Controller, teamName string) []string {
+func cellRehydrationEntryPending(status *v1alpha1.TeamStatus, cellsByKey map[string]*v1alpha1.Controller, teamName string) []string {
 	entry := cellRehydrationEntryFor(status, cellsByKey, teamName)
 	if entry == nil {
 		return nil
 	}
-	return seedAnswerOf(entry).deferred
+	return seedAnswerOf(entry).pending
 }
 
 // patchStatus patches the status subresource of a Team.

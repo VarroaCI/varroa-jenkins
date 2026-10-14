@@ -4252,6 +4252,16 @@ spec:
                             Truncated is true when the bundle dropped changelogs or older
                             records to fit the byte budget.
                           type: boolean
+                        unseeded:
+                          description: |-
+                            Unseeded lists the job paths that wait for a number seed on CellInstance:
+                            the jobs no bundle covers, and the jobs of an outstanding bundle that no
+                            earlier apply covered. An entry whose UnseededJobs is above the length of
+                            this list holds the whole tenant.
+                          items:
+                            type: string
+                          maxItems: 256
+                          type: array
                         unseededJobs:
                           description: UnseededJobs counts the jobs no bundle has
                             covered yet.

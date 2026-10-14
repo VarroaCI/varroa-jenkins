@@ -297,9 +297,9 @@ func manualCellWithPendingRehydration(t *testing.T, name string, records cells.R
 	// The mite answers the first push. When that push carried a bundle,
 	// its rehydration section deferred the tenant's job, so the tenant
 	// stays pending with no push in flight.
-	if stamped, _, ok := rec.takeRehydrationResult(cr.Namespace+"/"+cr.Name, tr.last.CommandId); ok {
-		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, stamped, true, "",
-			map[string][]string{"team-a": {"team-a/build"}}, time.Now())
+	if match, ok := rec.takeRehydrationResult(cr.Namespace+"/"+cr.Name, tr.last.CommandId); ok {
+		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, match.StampedID, true, "",
+			map[string][]string{"team-a": {"team-a/build"}}, nil, time.Now())
 	}
 	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
 	return rec, tr, cr

@@ -52,6 +52,13 @@ func TestRehydrationApplied_UnseededJobsAboveZero(t *testing.T) {
 	}
 }
 
+func TestRehydrationApplied_UnseededListNonEmpty(t *testing.T) {
+	entry := &v1alpha1.CellRehydrationEntry{CellInstance: "uid-1", Applied: true, Unseeded: []string{"t/b"}}
+	if rehydrationApplied(entry, 1, "uid-1") {
+		t.Fatalf("a listed unseeded path must keep the tenant pending")
+	}
+}
+
 func TestRehydrationApplied_Matches(t *testing.T) {
 	entry := &v1alpha1.CellRehydrationEntry{Generation: 1, CellInstance: "uid-1", Applied: true}
 	if !rehydrationApplied(entry, 1, "uid-1") {
