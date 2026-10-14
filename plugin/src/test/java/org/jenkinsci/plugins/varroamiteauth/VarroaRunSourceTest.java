@@ -8,20 +8,24 @@ import hudson.model.FreeStyleProject;
 import hudson.model.InvisibleAction;
 import hudson.model.Run;
 import hudson.model.TaskListener;
+import hudson.plugins.git.GitSCM;
 import hudson.slaves.DumbSlave;
 
 import java.io.File;
+import java.lang.reflect.Constructor;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import jenkins.branch.Branch;
 import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.SCMRevisionAction;
 
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
@@ -410,6 +414,81 @@ public class VarroaRunSourceTest {
         assertEquals(0, byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE).size());
     }
 
+    // --- The run's own checkout, not a library checkout ---
+
+    @Test
+    public void anInlineRunSkipsALibraryCheckoutForItsScmFacts() throws Exception {
+        String[] library = newRepository("library-repo");
+        String[] app = newRepository("app-repo");
+        Folder folder = j.jenkins.createProject(Folder.class, "inline-team");
+        folder.addProperty(new FolderLibraries("shared-lib", library[0]));
+        WorkflowJob job = folder.createProject(WorkflowJob.class, "inline-run");
+        job.setDefinition(new SourceFactsFlowDefinition("node {\n"
+                + "  git url: '" + library[0] + "', branch: 'master'\n"
+                + "  git url: '" + app[0] + "', branch: 'master'\n"
+                + "  echo 'built'\n"
+                + "}", false, "shared-lib", false, null));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(2, sources.size());
+        BuildEvent e2 = sources.get(1);
+        assertEquals("the inline run reports its own checkout, not the library's",
+                app[0], e2.getScmUrl());
+        assertEquals(app[1], e2.getScmRevision());
+    }
+
+    @Test
+    public void anScmDefinedRunReportsItsOwnRepositoryAfterAnotherCheckout() throws Exception {
+        String[] library = newRepository("library-repo");
+        String[] app = newRepository("app-repo");
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "scm-run");
+        job.setDefinition(new SourceFactsFlowDefinition("node {\n"
+                + "  git url: '" + library[0] + "', branch: 'master'\n"
+                + "  git url: '" + app[0] + "', branch: 'master'\n"
+                + "  echo 'built'\n"
+                + "}", false, "shared-lib", false, new GitSCM(app[0])));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        BuildEvent e2 = sources.get(sources.size() - 1);
+        assertEquals(app[0], e2.getScmUrl());
+        assertEquals(app[1], e2.getScmRevision());
+    }
+
+    @Test
+    public void anScmDefinedRunReportsItsRepositoryWhenOnlyALibraryWasCheckedOut() throws Exception {
+        String[] library = newRepository("library-repo");
+        String[] app = newRepository("app-repo");
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "library-only-run");
+        job.setDefinition(new SourceFactsFlowDefinition("node {\n"
+                + "  git url: '" + library[0] + "', branch: 'master'\n"
+                + "  echo 'built'\n"
+                + "}", false, "shared-lib", false, new GitSCM(app[0])));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        BuildEvent completed = byPhase(drainEvents(), BuildEvent.PHASE_COMPLETED).get(0);
+        assertEquals("the job SCM names the run's repository even with no checkout of it",
+                app[0], completed.getScmUrl());
+    }
+
+    @Test
+    public void aMultibranchChildReportsItsBranchScmRemote() throws Exception {
+        String[] app = newRepository("branch-repo");
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "branch-run");
+        job.addProperty(branchProperty(new Branch("src", new SCMHead("main"), new GitSCM(app[0]), List.of())));
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", true));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(2, sources.size());
+        assertEquals(app[0], sources.get(1).getScmUrl());
+    }
+
     // --- The two existing revision writers survive both emissions ---
 
     @Test
@@ -442,6 +521,13 @@ public class VarroaRunSourceTest {
                 secondCommitId, completed.get(0).getScmRevision());
     }
 
+    /** The branch job property has a package-private constructor, so the test builds it reflectively. */
+    private static BranchJobProperty branchProperty(Branch branch) throws Exception {
+        Constructor<BranchJobProperty> constructor = BranchJobProperty.class.getDeclaredConstructor(Branch.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(branch);
+    }
+
     private static boolean sawStage(List<BuildEvent> events, String name) {
         for (BuildEvent event : byPhase(events, BuildEvent.PHASE_STAGE)) {
             for (BuildStage stage : event.getStages()) {
@@ -459,14 +545,20 @@ public class VarroaRunSourceTest {
      * home path that the git step refuses.
      */
     private void createRepository() throws Exception {
-        File repo = new File(j.jenkins.getRootDir(), "sample-repo");
+        String[] repository = newRepository("sample-repo");
+        repoUrl = repository[0];
+        commitId = repository[1];
+    }
+
+    /** Builds a repository under the test home. Answers its {@code file:} URL and its head commit. */
+    private String[] newRepository(String dirName) throws Exception {
+        File repo = new File(j.jenkins.getRootDir(), dirName);
         repo.mkdirs();
         git(repo, "init", "-b", "master");
         git(repo, "config", "user.email", "varroa@example.com");
         git(repo, "config", "user.name", "Varroa Test");
         commitFile(repo, "hello\n", "the first commit");
-        commitId = git(repo, "rev-parse", "HEAD").trim();
-        repoUrl = repo.toURI().toString();
+        return new String[] {repo.toURI().toString(), git(repo, "rev-parse", "HEAD").trim()};
     }
 
     private void commitAgain() throws Exception {
@@ -504,21 +596,34 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
     private final boolean attachRevisionAction;
     private final String libraryName;
     private final Boolean libraryTrusted;
+    private final Object scm;
 
     SourceFactsFlowDefinition(String script, boolean attachRevisionAction) {
-        this(script, attachRevisionAction, "shared-lib", null);
+        this(script, attachRevisionAction, "shared-lib", null, null);
     }
 
     SourceFactsFlowDefinition(String script, boolean attachRevisionAction, String libraryName, Boolean libraryTrusted) {
+        this(script, attachRevisionAction, libraryName, libraryTrusted, null);
+    }
+
+    /** A definition whose {@code scm} is the job's SCM. A null {@code scm} is an inline script. */
+    SourceFactsFlowDefinition(String script, boolean attachRevisionAction, String libraryName,
+            Boolean libraryTrusted, Object scm) {
         this.script = script;
         this.attachRevisionAction = attachRevisionAction;
         this.libraryName = libraryName;
         this.libraryTrusted = libraryTrusted;
+        this.scm = scm;
     }
 
     /** The Jenkinsfile path a consumer repository's CpsScmFlowDefinition answers. */
     public String getScriptPath() {
         return "ci/Jenkinsfile";
+    }
+
+    /** The job SCM a CpsScmFlowDefinition answers. Null for an inline script. */
+    public Object getScm() {
+        return scm;
     }
 
     @Override

@@ -202,8 +202,7 @@ final class VarroaLibrarySources {
         java.util.Set<String> shas = new java.util.LinkedHashSet<>();
         for (Object buildData : buildDatas) {
             try {
-                Object remotes = VarroaRunRecorder.invokeNoArg(buildData, "getRemoteUrls");
-                if (!(remotes instanceof Iterable) || !containsRemote((Iterable<?>) remotes, want)) {
+                if (!remotesContain(buildData, want)) {
                     continue;
                 }
                 Object revision = VarroaRunRecorder.invokeNoArg(buildData, "getLastBuiltRevision");
@@ -219,6 +218,15 @@ final class VarroaLibrarySources {
             return shas.iterator().next();
         }
         return "";
+    }
+
+    /**
+     * Answers whether one git checkout names the remote. The remote must
+     * already be normalized with {@link #normalizeForMatch}.
+     */
+    static boolean remotesContain(Object buildData, String normalizedRemote) {
+        Object remotes = VarroaRunRecorder.invokeNoArg(buildData, "getRemoteUrls");
+        return remotes instanceof Iterable && containsRemote((Iterable<?>) remotes, normalizedRemote);
     }
 
     /** Answers the git checkout actions of a run, in order. */
@@ -309,7 +317,10 @@ final class VarroaLibrarySources {
     }
 
     /** Reads the remote of an SCM source, trying each supported shape in order. */
-    private static String remoteOf(Object scm) {
+    static String remoteOf(Object scm) {
+        if (scm == null) {
+            return "";
+        }
         Object remote = VarroaRunRecorder.invokeNoArg(scm, "getRemote");
         if (remote instanceof String && !((String) remote).isEmpty()) {
             return (String) remote;
@@ -338,7 +349,7 @@ final class VarroaLibrarySources {
         return "";
     }
 
-    private static String forgeFromSourceClass(String simpleName) {
+    static String forgeFromSourceClass(String simpleName) {
         switch (simpleName) {
             case "GitHubSCMSource":
                 return FORGE_GITHUB;

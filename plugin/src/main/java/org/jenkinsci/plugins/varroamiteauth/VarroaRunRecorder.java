@@ -1459,9 +1459,6 @@ public final class VarroaRunRecorder {
         }
     }
 
-    /** The exact class name of the git plugin's per-run build record. */
-    private static final String BUILD_DATA_CLASS_NAME = "hudson.plugins.git.util.BuildData";
-
     /**
      * Resolves every source fact of a run. Each field takes the first
      * non-empty answer of its own chain. The pod templates are the run
@@ -1594,22 +1591,28 @@ public final class VarroaRunRecorder {
     }
 
     /**
-     * Reads the git facts from the run's build record of the git plugin.
-     * The lookup matches the class name exactly, because that name is the
-     * plugin's identity. An absent action leaves every value empty.
+     * Reads the git facts from the run's own checkout, the git plugin's
+     * build record of the job's repository. A library checkout can precede
+     * it, so {@link VarroaRunCheckouts} picks the record. The URL is the
+     * job's SCM remote when the job has one. Otherwise it is the picked
+     * record's first remote. An absent record leaves every value empty.
      */
     private static SourceFacts resolveGitFacts(Run<?, ?> run) {
         String branch = "";
         String revision = "";
-        String url = "";
-        Object buildData = findActionByClassName(run, BUILD_DATA_CLASS_NAME);
+        String jobRemote = VarroaRunCheckouts.jobRemote(run);
+        Object buildData = VarroaRunCheckouts.select(jobRemote,
+                () -> VarroaRunCheckouts.libraryRemotes(run),
+                VarroaLibrarySources.buildDataActions(run));
         if (buildData != null) {
             Object builtRevision = invokeNoArg(buildData, "getLastBuiltRevision");
             revision = stringOf(invokeNoArg(builtRevision, "getSha1String"));
             branch = firstBranchName(invokeNoArg(builtRevision, "getBranches"));
-            url = firstStringOf(invokeNoArg(buildData, "getRemoteUrls"));
         }
-        return new SourceFacts(branch, branch, revision, url, "", List.of(), List.of());
+        String url = !jobRemote.isEmpty()
+                ? jobRemote
+                : buildData == null ? "" : firstStringOf(invokeNoArg(buildData, "getRemoteUrls"));
+        return new SourceFacts(branch, branch, revision, truncate(url, MAX_FIELD_512), "", List.of(), List.of());
     }
 
     /**

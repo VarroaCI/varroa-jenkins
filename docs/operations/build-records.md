@@ -164,12 +164,12 @@ recordStore:
     activity: 30d
 ```
 
-Size Postgres for the retention you configure. An activity row is roughly 400 bytes, and a busy
+Size Postgres for the retention you configure. An activity row is about 400 bytes, and a busy
 fleet of 400 controllers writes about 40 MB a day, so `30d` needs about 1.2 GB and `90d` about
 3.6 GB, plus the sizing above.
 
-Enabling the store against a fleet that ran without one imports history once, from the oldest
-message the 72-hour buffer still holds. It discards an event older than `retention.activity`.
+Enabling the store on an existing fleet imports the 72-hour buffer once. It discards an event
+older than `retention.activity`.
 
 ## Source fields
 
@@ -182,11 +182,13 @@ A build reports its definition in four kinds of event.
 | Each allocation of a new pod template after that node. | Every source field again, and every pod template the run has allocated. No change list. |
 | Completion of a run with no revision. | Its pod templates, and no revision fields. |
 
+The repository URL is the job's own. A library checkout never sets it.
+
 A template-defined run reports no script path. The plugin reads each pod template at agent attach, so an early leaver stays recorded. Each entry names a pod template, at most 50. A non-Kubernetes agent,
 or an agent gone before the read, reports its node name and no image.
 
-Each `libraries` entry also carries `repositoryUrl` and `repositoryForge`. The URL reads the current library configuration.
-The forge is `github`, `gitlab`, or `gitea`, and is absent when unknown. The revision is empty for a cached library.
+Each `libraries` entry also carries `repositoryUrl` and `repositoryForge`. The URL reads the current configuration.
+The forge is `github`, `gitlab`, or `gitea`, or absent when unknown. The revision is empty for a cached library.
 
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
 `podTemplates[]`.
