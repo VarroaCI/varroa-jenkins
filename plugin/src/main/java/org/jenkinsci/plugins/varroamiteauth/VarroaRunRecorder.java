@@ -1606,6 +1606,7 @@ public final class VarroaRunRecorder {
      * it, so {@link VarroaRunCheckouts} picks the record. The URL is the
      * job's SCM remote when the job has one. Otherwise it is the picked
      * record's first remote. An absent record leaves every value empty.
+     * The URL carries no credentials, query, or fragment.
      */
     private static SourceFacts resolveGitFacts(Run<?, ?> run) {
         String branch = "";
@@ -1619,9 +1620,9 @@ public final class VarroaRunRecorder {
             revision = stringOf(invokeNoArg(builtRevision, "getSha1String"));
             branch = firstBranchName(invokeNoArg(builtRevision, "getBranches"));
         }
-        String url = !jobRemote.isEmpty()
+        String url = VarroaLibrarySources.stripCredentials(!jobRemote.isEmpty()
                 ? jobRemote
-                : buildData == null ? "" : firstStringOf(invokeNoArg(buildData, "getRemoteUrls"));
+                : buildData == null ? "" : firstStringOf(invokeNoArg(buildData, "getRemoteUrls")));
         String forge = url.isEmpty() ? "" : VarroaRunCheckouts.forgeFor(VarroaRunCheckouts.jobSourceClassName(run), url);
         return new SourceFacts(branch, branch, revision, truncate(url, MAX_FIELD_512), forge, "", List.of(), List.of());
     }

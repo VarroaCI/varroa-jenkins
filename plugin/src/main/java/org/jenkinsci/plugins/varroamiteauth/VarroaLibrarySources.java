@@ -167,6 +167,38 @@ final class VarroaLibrarySources {
         return "";
     }
 
+    /**
+     * Removes credentials from a remote and keeps its scheme, so a file: URL stays.
+     * Drops the query and the fragment, because either can carry a token.
+     * Keeps an ssh or scp user with no password, because the forge link needs it.
+     */
+    static String stripCredentials(String url) {
+        if (url == null) {
+            return "";
+        }
+        String s = url.trim();
+        int scheme = s.indexOf("://");
+        int start = scheme < 0 ? 0 : scheme + 3;
+        int slash = s.indexOf('/', start);
+        int end = slash < 0 ? s.length() : slash;
+        int at = end > start ? s.lastIndexOf('@', end - 1) : -1;
+        if (at >= start) {
+            String userinfo = s.substring(start, at);
+            boolean sshUser = scheme < 0
+                    ? isScpLike(s)
+                    : s.substring(0, scheme).equalsIgnoreCase("ssh");
+            if (!sshUser || userinfo.indexOf(':') >= 0) {
+                s = s.substring(0, start) + s.substring(at + 1);
+            }
+        }
+        int cut = s.indexOf('?');
+        int hash = s.indexOf('#');
+        if (cut < 0 || (hash >= 0 && hash < cut)) {
+            cut = hash;
+        }
+        return cut < 0 ? s : s.substring(0, cut);
+    }
+
     /** Maps a host to a forge: github.com, gitlab.com, or a configured Gitea server. */
     static String forgeForHost(String host) {
         if (host == null || host.isEmpty()) {

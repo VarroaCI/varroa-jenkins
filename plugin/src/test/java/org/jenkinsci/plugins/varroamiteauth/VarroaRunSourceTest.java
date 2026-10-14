@@ -6,6 +6,7 @@ import hudson.EnvVars;
 import hudson.model.Action;
 import hudson.model.FreeStyleProject;
 import hudson.model.InvisibleAction;
+import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import hudson.plugins.git.GitSCM;
@@ -25,6 +26,7 @@ import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.SCMRevisionAction;
 
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition;
 import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
 import org.jenkinsci.plugins.workflow.flow.FlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
@@ -474,6 +476,19 @@ public class VarroaRunSourceTest {
         BuildEvent completed = byPhase(drainEvents(), BuildEvent.PHASE_COMPLETED).get(0);
         assertEquals("the job SCM names the run's repository even with no checkout of it",
                 app[0], completed.getScmUrl());
+    }
+
+    @Test
+    public void aCompletedRunCarriesItsJobRemoteWithoutCredentials() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "credentialed-remote-run");
+        job.setDefinition(new CpsScmFlowDefinition(
+                new GitSCM("https://user:token@127.0.0.1:1/example/app.git"), "Jenkinsfile"));
+
+        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, grantedAction()));
+
+        BuildEvent completed = byPhase(drainEvents(), BuildEvent.PHASE_COMPLETED).get(0);
+        assertEquals("https://127.0.0.1:1/example/app.git", completed.getScmUrl());
+        assertFalse("the SCM URL must not carry the token", completed.getScmUrl().contains("token"));
     }
 
     @Test

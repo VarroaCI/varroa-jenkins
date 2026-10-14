@@ -198,4 +198,59 @@ public class VarroaLibrarySourcesTest {
         assertEquals("",
                 VarroaLibrarySources.revisionFor("https://github.com/example/shared-lib", List.of(checkout)));
     }
+
+    @Test
+    public void stripCredentialsDropsHttpsUserinfo() {
+        assertEquals("https://github.com/example/app.git",
+                VarroaLibrarySources.stripCredentials("https://user:token@github.com/example/app.git"));
+        assertEquals("https://github.com/example/app.git",
+                VarroaLibrarySources.stripCredentials("https://token@github.com/example/app.git"));
+    }
+
+    @Test
+    public void stripCredentialsDropsAnSshPasswordAndKeepsAnSshUser() {
+        assertEquals("ssh://host.example.com/org/app.git",
+                VarroaLibrarySources.stripCredentials("ssh://user:secret@host.example.com/org/app.git"));
+        assertEquals("ssh://git@host.example.com/org/app.git",
+                VarroaLibrarySources.stripCredentials("ssh://git@host.example.com/org/app.git"));
+    }
+
+    @Test
+    public void stripCredentialsKeepsAnScpUser() {
+        assertEquals("git@github.com:example/app.git",
+                VarroaLibrarySources.stripCredentials("git@github.com:example/app.git"));
+    }
+
+    @Test
+    public void stripCredentialsDropsAnScpLikePassword() {
+        assertEquals("host.example.com:org/app.git",
+                VarroaLibrarySources.stripCredentials("user:pw@host.example.com:org/app.git"));
+    }
+
+    @Test
+    public void stripCredentialsDropsAQueryAndAFragment() {
+        assertEquals("https://github.com/org/app.git",
+                VarroaLibrarySources.stripCredentials("https://github.com/org/app.git?access_token=secret"));
+        assertEquals("https://github.com/org/app",
+                VarroaLibrarySources.stripCredentials("https://github.com/org/app#frag"));
+        assertEquals("https://github.com/org/app.git",
+                VarroaLibrarySources.stripCredentials("https://user:pa#ss@github.com/org/app.git"));
+    }
+
+    @Test
+    public void stripCredentialsKeepsAFileUrl() {
+        assertEquals("file:/srv/repos/app", VarroaLibrarySources.stripCredentials("file:/srv/repos/app"));
+        assertEquals("file:///srv/repos/app", VarroaLibrarySources.stripCredentials("file:///srv/repos/app"));
+    }
+
+    @Test
+    public void stripCredentialsKeepsAnAtSignInThePath() {
+        assertEquals("https://host.example.com/org/a@b.git",
+                VarroaLibrarySources.stripCredentials("https://host.example.com/org/a@b.git"));
+    }
+
+    @Test
+    public void stripCredentialsAnswersEmptyForNull() {
+        assertEquals("", VarroaLibrarySources.stripCredentials(null));
+    }
 }

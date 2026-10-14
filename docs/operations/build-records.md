@@ -1,10 +1,10 @@
 # Build Records
 
 The build record store keeps build history outside each Jenkins controller. It records one run
-per build: its stages, its test summary, its artifact index, and a durable build-number ledger.
+per build: stages, tests, artifacts, and build-number ledger.
 It is optional and off by default.
 
-Logs and artifacts live in a separate blob store, and the record store holds only their index. See [Build logs and
+Logs and artifacts live in a blob store, and the record store holds only their index. See [Build logs and
 artifacts](build-logs-and-artifacts.md).
 
 ## Enable the store
@@ -182,7 +182,7 @@ A build reports its definition in four kinds of event.
 | Each allocation of a new pod template after that node. | Every source field again, and every pod template the run has allocated. No change list. |
 | Completion of a run with no revision. | Its pod templates, and no revision fields. |
 
-The repository URL is the job's own. A library checkout never sets it.
+The repository URL is the job's own. A library checkout never sets it. The URL carries no credentials, query, or fragment.
 
 A template-defined run reports no script path. The plugin reads each pod template at agent attach, so an early leaver stays recorded. Each entry names a pod template, at most 50. A non-Kubernetes agent,
 or an agent gone before the read, reports its node name and no image.
