@@ -30,3 +30,25 @@ func Run(m *items.Manifest, rules []Rule) []Finding {
 	}
 	return findings
 }
+
+// ScriptRule is a Rule that also checks a Groovy pipeline body that no
+// item holds, such as a pipeline template body.
+type ScriptRule interface {
+	Rule
+	CheckScript(script, path string) []Finding
+}
+
+// RunScript applies each rule in rules that is a ScriptRule to script.
+// A rule that is not a ScriptRule does not run. path names the script in
+// each finding.
+func RunScript(script, path string, rules []Rule) []Finding {
+	var findings []Finding
+	for _, r := range rules {
+		sr, ok := r.(ScriptRule)
+		if !ok {
+			continue
+		}
+		findings = append(findings, sr.CheckScript(script, path)...)
+	}
+	return findings
+}

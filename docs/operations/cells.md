@@ -110,7 +110,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   - an item still holds `${`, a `${varroa_*}` name too;
   - the items do not parse, set `root`, or fail a lint rule;
   - an item needs a plugin the cell does not pin;
-  - a pipeline template does not load;
+  - a pipeline template does not load, or its body fails a lint rule. Only a failing template
+    leaves the fragment; the tenant's other templates stay;
   - the bundle is missing or has no content yet.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no

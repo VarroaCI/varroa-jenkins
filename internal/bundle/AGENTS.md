@@ -91,6 +91,10 @@ index parsing, and pre-apply content validation.
   `garbageCollection: {timeout: <n>}` with no `namespaces` key, so the
   kubernetes plugin garbage-collects orphan pods in the cloud's own namespace
   only. Zero writes no key; the caller owns the value.
+- **`ParsePipelineTemplates(templatesYAML)` / `RenderPipelineTemplates(docs)`**
+  (`pipelinetemplates.go`) — parse a `pipeline-templates.yaml` body into its
+  documents (blank gives nil) and write documents back in the same shape (empty gives "").
+  The controller lints a tenant fragment with them.
 - **`InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder)`**
   (`pipelinetemplates.go`) — appends every document in `templatesYAML` to
   `unclassified.varroaPipelineTemplates.templates` in `jenkinsYAML`, flattening

@@ -333,13 +333,13 @@ checks it against four rules, only on a cell.
 | No poll SCM | A `pollSCM` trigger, on an item or inside `pipelineTriggers`. Use a webhook instead. |
 | No global credentials | A credential declared outside a tenant folder's own credentials property, or a folder credential scoped outside `GLOBAL`. |
 | No controller-config dependency | Any item property outside a fixed allow-list of folder- and job-scoped properties. |
-| No Job DSL | An inline pipeline `script` that calls the `jobDsl` step or `ExecuteDslScripts`. Declare each job in `items.yaml`. |
+| No Job DSL | An inline pipeline `script`, or the inline `jenkinsfile` of a pipeline template body, that calls the `jobDsl` step or `ExecuteDslScripts`. Declare each job in `items.yaml`. |
 
 A tenant manifest that fails a rule holds only that tenant's folder. The cell keeps the folder as it is and pushes the other tenants. The `ItemsHeld` warning names the rule and the item path.
 
 ### Job DSL on a cell
 
-Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`. The cell home is temporary, so a cell restart deletes the jobs that a seed job made. A seeded job exists only on the member that ran the seed, and a build for it can go to another member. The lint reads only an inline `script`. It does not read a Jenkinsfile in SCM, a pipeline template body, or a step name built at run time. The `job-dsl` plugin stays installed because a non-cell controller uses it.
+Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`. The cell home is temporary, so a cell restart deletes the jobs that a seed job made. A seeded job exists only on the member that ran the seed, and a build for it can go to another member. The lint reads an inline `script` and the inline `jenkinsfile` of a pipeline template. It does not read a Jenkinsfile in SCM or a step name built at run time. The `job-dsl` plugin stays installed because a non-cell controller uses it.
 
 ## Troubleshoot
 

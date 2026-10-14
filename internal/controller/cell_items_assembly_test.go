@@ -1224,3 +1224,163 @@ func TestAssembleCellContent_LibraryProjectedCredentialPasses(t *testing.T) {
 		t.Errorf("expected ItemsYAML to name gitlab-lib:\n%s", state.ItemsYAML)
 	}
 }
+
+// tenantTemplateBodyFixtureYAML is tenantTemplateFixtureYAML with the
+// jenkinsfile body given by the caller.
+func tenantTemplateBodyFixtureYAML(name, body string) string {
+	return fmt.Sprintf(`templates:
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: %s
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      jenkinsfile: "%s"
+`, name, body)
+}
+
+// TestAssembleCellContent_TemplateJobDSLStepHoldsOnlyThatTenant proves a
+// template body that runs a Job DSL step holds the tenant that delivers it,
+// and no other tenant, and that its fragment is not carried.
+func TestAssembleCellContent_TemplateJobDSLStepHoldsOnlyThatTenant(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	good := pipelinesTeam("good")
+	seedTenantBundle(client, good, "good-bundle", cleanPipelineItemsYAML)
+	bad := pipelinesTeam("bad")
+	seedTenantBundle(client, bad, "bad-bundle", cleanPipelineItemsYAML)
+	client.configMapData["bad-bundle-content"]["pipeline-templates.yaml"] =
+		tenantTemplateBodyFixtureYAML("seed-tmpl", "jobDsl targets: 'jobs/*.groovy'")
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{good, bad}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 1 || held[0] != "bad" {
+		t.Fatalf("expected held [bad], got %v: %+v", held, state.Warnings)
+	}
+	msg := heldMessage(state.Warnings, "bad")
+	if !strings.Contains(msg, "no-job-dsl") || !strings.Contains(msg, "seed-tmpl@1.0.0") {
+		t.Errorf("expected the message to name no-job-dsl and seed-tmpl@1.0.0, got %q", msg)
+	}
+	if heldMessage(state.Warnings, "good") != "" {
+		t.Errorf("expected good not held, got %+v", state.Warnings)
+	}
+	for _, f := range state.TemplateFragments {
+		if strings.Contains(f.TemplatesYAML, "jobDsl") {
+			t.Errorf("expected no fragment carrying the Job DSL body, got %+v", f)
+		}
+	}
+}
+
+// TestAssembleCellContent_TemplateLintDropsOnlyFailingTemplate proves a
+// failing template is dropped from a tenant's fragment and the clean
+// template stays, and that the tenant is held.
+func TestAssembleCellContent_TemplateLintDropsOnlyFailingTemplate(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("payments")
+	seedTenantBundle(client, team, "payments-bundle", cleanPipelineItemsYAML)
+	client.configMapData["payments-bundle-content"]["pipeline-templates.yaml"] = `templates:
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: go-build
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      jenkinsfile: "pipeline { stages { stage('build') { steps { echo 'hi' } } } }"
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: seed-tmpl
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      jenkinsfile: "jobDsl targets: 'jobs/*.groovy'"
+`
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 1 || held[0] != "payments" {
+		t.Fatalf("expected held [payments], got %v: %+v", held, state.Warnings)
+	}
+	if len(state.TemplateFragments) != 1 {
+		t.Fatalf("expected one fragment, got %+v", state.TemplateFragments)
+	}
+	frag := state.TemplateFragments[0].TemplatesYAML
+	if !strings.Contains(frag, "go-build") || strings.Contains(frag, "seed-tmpl") {
+		t.Errorf("expected go-build kept and seed-tmpl dropped, got:\n%s", frag)
+	}
+}
+
+// TestAssembleCellContent_SCMDefinitionTemplatePassesLint proves a template
+// that names a Jenkinsfile in SCM has no body to lint and is not held.
+func TestAssembleCellContent_SCMDefinitionTemplatePassesLint(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("scm")
+	seedTenantBundle(client, team, "scm-bundle", cleanPipelineItemsYAML)
+	client.configMapData["scm-bundle-content"]["pipeline-templates.yaml"] = `templates:
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: scm-build
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      scmDefinition:
+        remote: https://git.example.test/team/build.git
+        credentialsId: git-cred
+        scriptPath: Jenkinsfile
+`
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if held := parseCellItems(t, state.ItemsYAML).Retain; len(held) != 0 {
+		t.Errorf("expected no held tenant, got %v: %+v", held, state.Warnings)
+	}
+}
+
+// TestAssembleCellContent_CleanTemplateFragmentUnchanged proves a fragment
+// that passes the lint reaches the cell byte for byte.
+func TestAssembleCellContent_CleanTemplateFragmentUnchanged(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	team := pipelinesTeam("clean")
+	seedTenantBundle(client, team, "clean-bundle", cleanPipelineItemsYAML)
+	fixture := tenantTemplateFixtureYAML("go-build")
+	client.configMapData["clean-bundle-content"]["pipeline-templates.yaml"] = fixture
+
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{team}, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if len(state.TemplateFragments) != 1 {
+		t.Fatalf("expected one fragment, got %+v", state.TemplateFragments)
+	}
+	if got := state.TemplateFragments[0].TemplatesYAML; got != fixture {
+		t.Errorf("expected the fragment unchanged, got:\n%s", got)
+	}
+}

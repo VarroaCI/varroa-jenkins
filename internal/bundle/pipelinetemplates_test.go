@@ -369,3 +369,45 @@ func TestEscapeJCasCVariables(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePipelineTemplates_BlankIsEmpty(t *testing.T) {
+	docs, err := ParsePipelineTemplates("  \n")
+	if err != nil {
+		t.Fatalf("blank input: %v", err)
+	}
+	if docs != nil {
+		t.Errorf("expected nil, got %+v", docs)
+	}
+}
+
+func TestRenderPipelineTemplates_RoundTrips(t *testing.T) {
+	docs, err := ParsePipelineTemplates(oneTemplateYAML)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	out, err := RenderPipelineTemplates(docs)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	again, err := ParsePipelineTemplates(out)
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if len(again) != len(docs) {
+		t.Fatalf("expected %d documents, got %d", len(docs), len(again))
+	}
+	for i := range docs {
+		if again[i].Metadata != docs[i].Metadata {
+			t.Errorf("metadata: got %+v, want %+v", again[i].Metadata, docs[i].Metadata)
+		}
+		if again[i].Spec.Version != docs[i].Spec.Version {
+			t.Errorf("version: got %q, want %q", again[i].Spec.Version, docs[i].Spec.Version)
+		}
+		if again[i].Spec.Jenkinsfile != docs[i].Spec.Jenkinsfile {
+			t.Errorf("jenkinsfile: got %q, want %q", again[i].Spec.Jenkinsfile, docs[i].Spec.Jenkinsfile)
+		}
+	}
+	if empty, err := RenderPipelineTemplates(nil); err != nil || empty != "" {
+		t.Errorf("empty render: got %q, %v", empty, err)
+	}
+}

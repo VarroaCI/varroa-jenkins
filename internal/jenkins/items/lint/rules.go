@@ -109,8 +109,8 @@ var jobDSLStep = regexp.MustCompile(`(?:^|[^\w$])jobDsl\s*(?:\(|\s\w+\s*:)|\bExe
 // A cell home is temporary, so jobs a seed job creates are lost when the
 // cell restarts, exist on only one member of the tenant, and can name a
 // path outside the tenant folder. Every job comes from items.yaml. The rule
-// reads only an inline script: a Jenkinsfile in SCM or a template body is
-// not visible here.
+// reads an inline script and the inline jenkinsfile of a pipeline template.
+// A Jenkinsfile in SCM is not visible here.
 type NoJobDSLRule struct{}
 
 // ID returns the rule id.
@@ -118,7 +118,15 @@ func (NoJobDSLRule) ID() string { return "no-job-dsl" }
 
 // Check reports a finding for an inline script that calls a Job DSL step.
 func (r NoJobDSLRule) Check(item items.Item, path string) []Finding {
-	if item.Definition == nil || !jobDSLStep.MatchString(item.Definition.Script) {
+	if item.Definition == nil {
+		return nil
+	}
+	return r.CheckScript(item.Definition.Script, path)
+}
+
+// CheckScript reports a finding for a Groovy body that calls a Job DSL step.
+func (r NoJobDSLRule) CheckScript(script, path string) []Finding {
+	if !jobDSLStep.MatchString(script) {
 		return nil
 	}
 	return []Finding{{Rule: r.ID(), Path: path, Message: "a Job DSL step is not allowed on a cell; declare each job in items.yaml"}}

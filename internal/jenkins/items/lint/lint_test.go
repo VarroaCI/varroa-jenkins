@@ -72,3 +72,22 @@ func TestRun_TwoOffendingItemsProduceTwoFindings(t *testing.T) {
 		t.Fatalf("expected two findings, one per offending item, got %d: %+v", len(findings), findings)
 	}
 }
+
+// TestRunScript_SkipsItemOnlyRules proves RunScript applies only the rules
+// that read a script. The three item-only rules do not run, so only
+// no-job-dsl fires, and its finding names the label given to RunScript.
+func TestRunScript_SkipsItemOnlyRules(t *testing.T) {
+	rules := []Rule{
+		NoPollSCMRule{},
+		NoGlobalCredentialsRule{},
+		NoControllerConfigDependencyRule{},
+		NoJobDSLRule{},
+	}
+	findings := RunScript("jobDsl targets: 'jobs/*.groovy'", "pipeline template seed-tmpl@1.0.0", rules)
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Rule != "no-job-dsl" || findings[0].Path != "pipeline template seed-tmpl@1.0.0" {
+		t.Errorf("unexpected finding: %+v", findings[0])
+	}
+}

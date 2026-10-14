@@ -98,7 +98,9 @@ reading each package's entry point):
   declares none. The sibling
   `items/lint` package runs cell-only policy rules (`no-poll-scm`,
   `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
-  tenant's re-rooted manifest before a push; `items.Parse` itself is
+  tenant's re-rooted manifest before a push. `no-job-dsl` also runs over the
+  inline `jenkinsfile` of each tenant pipeline template (`lint.RunScript`).
+  `items.Parse` itself is
   unchanged and still accepts every shape a non-cell controller accepts
   today. An item declares its build parameters two ways — a flat list at
   the item level (`Item.Parameters`) or a parameters property nested under

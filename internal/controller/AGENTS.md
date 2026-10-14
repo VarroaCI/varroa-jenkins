@@ -1090,8 +1090,10 @@ sections describe.
     (`cell_library_credentials.go`) holds the tenant when a library names a
     credential its folder cannot see or one of a kind its source rejects (the same
     `checkLibraryCredentials` walker that a plain controller uses in
-    `library_credentials_plain.go`); the tenant's
-    template fragment must also load (`bundle.InjectPipelineTemplates`) against the base
+    `library_credentials_plain.go`); the tenant's template fragment runs
+    `lintTenantTemplates` first. The cell lint (`cellLintRules`) checks each inline
+    `jenkinsfile`; an `scmDefinition` template passes; only a failing template leaves
+    the fragment. The filtered fragment must also load (`bundle.InjectPipelineTemplates`) against the base
     `applyCellContent` builds: the cell's `jenkins.yaml` with the cell
     bundle's own templates in it. A failed
     check **holds** the tenant: its folder is left out of

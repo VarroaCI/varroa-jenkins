@@ -13,6 +13,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/lint"
@@ -122,7 +123,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		// provision an agent. A draining tenant is never held, because a
 		// held folder would never drain.
 		if !draining {
-			fragment := data["pipeline-templates.yaml"]
+			fragment, templateFindings := lintTenantTemplates(data["pipeline-templates.yaml"])
 			// Two tenant folders never overlap, so two tenant fragments never
 			// conflict: each fragment loads against the cell's own base only.
 			_, fragErr := bundle.InjectPipelineTemplates(templateBase, fragment, team.Name)
@@ -132,6 +133,9 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			}
 			if err == nil && fragErr != nil {
 				err = fmt.Errorf("pipeline-templates.yaml: %w", fragErr)
+			}
+			if err == nil && len(templateFindings) > 0 {
+				err = fmt.Errorf("pipeline template lint failed: %s", findingsSummary(templateFindings))
 			}
 			if err != nil {
 				hold(team.Name, err)
@@ -164,7 +168,9 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 			// A tenant held for its items keeps its template fragment, so
 			// the held jobs can still name a template of the tenant. A
 			// fragment that does not load is dropped, because it would
-			// fail the cell for every tenant.
+			// fail the cell for every tenant. A template that fails the
+			// lint is dropped from the fragment; the tenant's other
+			// templates stay.
 			if fragErr == nil && strings.TrimSpace(fragment) != "" {
 				fragments = append(fragments, bundle.CellTemplateFragment{
 					Folder:        team.Name,
@@ -264,6 +270,41 @@ func tenantBundleCloudContent(team, agentNamespace string, data map[string]strin
 		}
 	}
 	return lift.Templates, warnings
+}
+
+// lintTenantTemplates runs cellLintRules over the inline jenkinsfile of
+// each template in fragment. It returns fragment without the failing
+// templates, and the findings. A template with an scmDefinition has no
+// body here and passes. A fragment that does not parse returns
+// unchanged with no finding; InjectPipelineTemplates reports that fault.
+func lintTenantTemplates(fragment string) (string, []lint.Finding) {
+	docs, err := bundle.ParsePipelineTemplates(fragment)
+	if err != nil {
+		return fragment, nil
+	}
+	var findings []lint.Finding
+	kept := make([]pipelinetemplate.Document, 0, len(docs))
+	for _, doc := range docs {
+		if doc.Spec.Jenkinsfile == "" {
+			kept = append(kept, doc)
+			continue
+		}
+		label := "pipeline template " + doc.Metadata.Name + "@" + doc.Spec.Version
+		docFindings := lint.RunScript(doc.Spec.Jenkinsfile, label, cellLintRules)
+		if len(docFindings) == 0 {
+			kept = append(kept, doc)
+			continue
+		}
+		findings = append(findings, docFindings...)
+	}
+	if len(findings) == 0 {
+		return fragment, nil
+	}
+	rendered, err := bundle.RenderPipelineTemplates(kept)
+	if err != nil {
+		return "", findings
+	}
+	return rendered, findings
 }
 
 // materializeTenantManifest returns a tenant's items.yaml re-rooted under

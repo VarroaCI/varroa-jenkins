@@ -17,6 +17,32 @@ type pipelineTemplatesWrapper struct {
 	Templates []pipelinetemplate.Document `yaml:"templates"`
 }
 
+// ParsePipelineTemplates returns the documents of templatesYAML. A blank
+// templatesYAML returns nil and no error.
+func ParsePipelineTemplates(templatesYAML string) ([]pipelinetemplate.Document, error) {
+	if strings.TrimSpace(templatesYAML) == "" {
+		return nil, nil
+	}
+	var wrapper pipelineTemplatesWrapper
+	if err := yaml.Unmarshal([]byte(templatesYAML), &wrapper); err != nil {
+		return nil, fmt.Errorf("parse pipeline templates for injection: %w", err)
+	}
+	return wrapper.Templates, nil
+}
+
+// RenderPipelineTemplates writes docs in the pipeline-templates.yaml shape.
+// It returns "" when docs is empty.
+func RenderPipelineTemplates(docs []pipelinetemplate.Document) (string, error) {
+	if len(docs) == 0 {
+		return "", nil
+	}
+	out, err := yaml.Marshal(pipelineTemplatesWrapper{Templates: docs})
+	if err != nil {
+		return "", fmt.Errorf("render pipeline templates: %w", err)
+	}
+	return string(out), nil
+}
+
 // InjectPipelineTemplates appends every document in templatesYAML to
 // unclassified.varroaPipelineTemplates.templates in jenkinsYAML. It stamps
 // folder on each appended entry. It never replaces an existing entry, like
@@ -28,15 +54,11 @@ type pipelineTemplatesWrapper struct {
 // check. A template body holds its own ${...} Groovy text. That text is
 // not a catalog variable, and it must not pass through either step.
 func InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder string) (string, error) {
-	if strings.TrimSpace(templatesYAML) == "" {
-		return jenkinsYAML, nil
+	templates, err := ParsePipelineTemplates(templatesYAML)
+	if err != nil {
+		return "", err
 	}
-
-	var wrapper pipelineTemplatesWrapper
-	if err := yaml.Unmarshal([]byte(templatesYAML), &wrapper); err != nil {
-		return "", fmt.Errorf("parse pipeline templates for injection: %w", err)
-	}
-	if len(wrapper.Templates) == 0 {
+	if len(templates) == 0 {
 		return jenkinsYAML, nil
 	}
 
@@ -72,7 +94,7 @@ func InjectPipelineTemplates(jenkinsYAML, templatesYAML, folder string) (string,
 	}
 
 	byIdentity := existingTemplatesByIdentity(existing)
-	for _, t := range wrapper.Templates {
+	for _, t := range templates {
 		entry, err := pipelineTemplateEntry(t, folder)
 		if err != nil {
 			return "", err

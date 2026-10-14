@@ -323,3 +323,19 @@ func TestNoGlobalCredentialsRule_AllowsGitHubAppGlobalScope(t *testing.T) {
 		t.Fatalf("expected no findings, got %+v", findings)
 	}
 }
+
+func TestNoJobDSLRule_CheckScriptRejectsStep(t *testing.T) {
+	findings := NoJobDSLRule{}.CheckScript("jobDsl targets: 'jobs/*.groovy'", "pipeline template seed-tmpl@1.0.0")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Rule != "no-job-dsl" || findings[0].Path != "pipeline template seed-tmpl@1.0.0" {
+		t.Errorf("unexpected finding: %+v", findings[0])
+	}
+}
+
+func TestNoJobDSLRule_CheckScriptAllowsCleanBody(t *testing.T) {
+	if findings := (NoJobDSLRule{}).CheckScript("pipeline { stages { stage('build') { steps { echo 'hi' } } } }", "pipeline template go-build@1.0.0"); len(findings) != 0 {
+		t.Errorf("expected no findings, got %+v", findings)
+	}
+}
