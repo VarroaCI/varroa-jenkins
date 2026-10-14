@@ -1064,6 +1064,85 @@ public class VarroaClaimQueueTest {
         assertFalse("a shutdown cancels no queue item", isCancelled(firstItem));
     }
 
+    // ---- A replay or a restart never forwards ----
+
+    /** Schedules an item with the given cause, such as a replay or a restart. */
+    private Queue.Item scheduleItemWithCause(FreeStyleProject project, hudson.model.Cause cause) {
+        VarroaIntentAction action = new VarroaIntentAction("run-1", "", null, 1_000_000L);
+        ScheduleResult result = Queue.getInstance().schedule2(project, QUIET_PERIOD, action,
+                new hudson.model.CauseAction(cause));
+        assertTrue(result.isAccepted());
+        return result.getItem();
+    }
+
+    @Test
+    public void aReplayNotHomeVetoCancelsAndNeverForwards() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "replayed");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/replayed", 0));
+        homes.stub().setClaimResponder(n -> new StubLoopback.Reply(200,
+                "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\",\"home_slot\":1}"));
+        Queue.Item item = scheduleItemWithCause(project, new VarroaReplayCause("src"));
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                (task, d) -> task.run(), homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the replay to be cancelled on the not-home veto");
+        assertEquals("the veto must cost exactly one claim", 1, homes.stub().claimCallCount());
+        assertEquals("a replay must never forward", 0, homes.stub().forwardCallCount());
+    }
+
+    @Test
+    public void aRestartNotHomeVetoCancelsAndNeverForwards() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "restarted");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/restarted", 0));
+        homes.stub().setClaimResponder(n -> new StubLoopback.Reply(200,
+                "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\",\"home_slot\":1}"));
+        Queue.Item item = scheduleItemWithCause(project, new VarroaRestartCause("src", "deploy"));
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                (task, d) -> task.run(), homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the restart to be cancelled on the not-home veto");
+        assertEquals("the veto must cost exactly one claim", 1, homes.stub().claimCallCount());
+        assertEquals("a restart must never forward", 0, homes.stub().forwardCallCount());
+    }
+
+    @Test
+    public void aReplayOfANonHomeJobClaimsInsteadOfForwarding() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "deploy");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/deploy", 1));
+        homes.stub().setClaimResponder(
+                n -> new StubLoopback.Reply(200, "{\"decision\":\"granted\",\"run_id\":\"run-1\",\"build_number\":1}"));
+        Queue.Item item = scheduleItemWithCause(project, new VarroaReplayCause("src"));
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                (task, d) -> task.run(), homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> item.getAction(VarroaIntentAction.class).isGranted(), "the replay to be granted");
+        assertEquals("a replay must never forward", 0, homes.stub().forwardCallCount());
+        assertEquals("a replay must claim", 1, homes.stub().claimCallCount());
+    }
+
+    @Test
+    public void aReplayOfANonHomeJobVetoedNotHomeCancels() throws Exception {
+        FreeStyleProject project = tenantJob("payments", "moved-replay");
+        homes.seedHomes("payments", 0, "active", java.util.Map.of("payments/moved-replay", 1));
+        homes.stub().setClaimResponder(
+                n -> new StubLoopback.Reply(200, "{\"decision\":\"vetoed\",\"reason_code\":\"NOT_HOME\"}"));
+        Queue.Item item = scheduleItemWithCause(project, new VarroaReplayCause("src"));
+
+        VarroaClaimQueue queue = new VarroaClaimQueue(homes.client(), System::currentTimeMillis,
+                (task, d) -> task.run(), homes.cache());
+        queue.offer(item, project);
+
+        awaitTrue(() -> isCancelled(item), "the replay to be cancelled");
+        assertEquals("the veto must cost exactly one claim", 1, homes.stub().claimCallCount());
+        assertEquals("a replay must never forward", 0, homes.stub().forwardCallCount());
+    }
+
     // ---- A revision wait holds no claimer thread ----
 
     /** Schedules an item with a branch event cause and the given admission revision. */

@@ -1,6 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import groovy.json.JsonSlurper;
+import hudson.model.Cause;
 import hudson.model.Job;
 import hudson.model.Queue;
 import net.sf.json.JSONObject;
@@ -417,7 +418,7 @@ public class VarroaClaimQueue {
 
         // A refused forward proves the cached map disagrees with the
         // recorder. The next attempt claims, so the fence names the home.
-        OptionalInt home = last.forwardRefused ? OptionalInt.empty()
+        OptionalInt home = last.forwardRefused || pinnedToThisCell(item) ? OptionalInt.empty()
                 : homeCache.forwardSlotFor(job.getFullName());
         last.forwardRefused = false;
         last.notReady = false;
@@ -460,7 +461,8 @@ public class VarroaClaimQueue {
      * refreshes the cache and forwards at once, and it cancels no item:
      * the one-hour budget bounds a repeat. It forwards to the slot the
      * veto names, else to the refreshed cache's slot. With neither, the
-     * caller retries.
+     * caller retries. A replay or a restart item is the exception: it
+     * never forwards, so a {@code NOT_HOME} veto cancels it.
      */
     private boolean claimOnce(Queue.Item item, Job<?, ?> job, VarroaIntentAction action,
             IntentKey.Result derived, int attempt, LastAnswer last) {
@@ -489,6 +491,13 @@ public class VarroaClaimQueue {
                 return true;
             case VETOED_NOT_HOME:
                 homeCache.refresh();
+                if (pinnedToThisCell(item)) {
+                    LOGGER.log(Level.WARNING,
+                            "VarroaClaimQueue: the home of job {0} is another slot; run {1} replays or restarts on this cell only; cancelled the queue item",
+                            new Object[] {job.getFullName(), action.getRunId()});
+                    cancel(item);
+                    return true;
+                }
                 OptionalInt target = decision.homeSlot.isPresent() ? decision.homeSlot
                         : homeCache.forwardSlotFor(job.getFullName());
                 return target.isPresent() && forwardOnce(item, job, action, derived, target.getAsInt(), last);
@@ -508,6 +517,20 @@ public class VarroaClaimQueue {
                 cancel(item);
                 return true;
         }
+    }
+
+    /**
+     * True when the item must run on this cell or not at all. A replay or
+     * a restart holds actions that a forward cannot carry, and a restart
+     * needs the source build on this cell.
+     */
+    private static boolean pinnedToThisCell(Queue.Item item) {
+        for (Cause cause : item.getCauses()) {
+            if (cause instanceof VarroaReplayCause || cause instanceof VarroaRestartCause) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- The intra-tenant forward ---

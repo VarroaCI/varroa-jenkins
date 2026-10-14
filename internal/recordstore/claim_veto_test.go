@@ -123,6 +123,48 @@ func TestMarkableVeto(t *testing.T) {
 	}
 }
 
+// TestMarkableVetoFor asserts NOT_HOME marks a run only for a replay or a
+// restart key, and that an unparseable key marks nothing.
+func TestMarkableVetoFor(t *testing.T) {
+	runID := newTestUUIDv7String()
+	for _, tc := range []struct {
+		code, key string
+		want      bool
+	}{
+		{ReasonNotHome, "replay:" + runID + ":src", true},
+		{ReasonNotHome, "restart:" + runID + ":src", true},
+		{ReasonNotHome, "manual:" + runID, false},
+		{ReasonNotHome, "bogus", false},
+		{ReasonNotHome, "", false},
+		{ReasonFenced, "manual:" + runID, true},
+		{ReasonFenced, "replay:" + runID + ":src", true},
+		{ReasonNotReady, "replay:" + runID + ":src", false},
+	} {
+		if got := markableVetoFor(tc.code, tc.key); got != tc.want {
+			t.Errorf("markableVetoFor(%q, %q) = %v, want %v", tc.code, tc.key, got, tc.want)
+		}
+	}
+}
+
+// TestNotHomeMarksAReplayOrRestartRun asserts a NOT_HOME veto of a replay
+// or a restart marks the run TRIGGER_FAILED, because the plugin cancels
+// that item and no later event moves it.
+func TestNotHomeMarksAReplayOrRestartRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	ledger := newVetoMarkingLedger(pool, denyingFence{reasonCode: ReasonNotHome}, nil)
+
+	for _, scheme := range []string{"replay", "restart"} {
+		runID := newTestUUIDv7String()
+		acceptRun(t, pool, runID)
+		req := newVarroaClaim(runID)
+		req.IntentKey = scheme + ":" + runID + ":src"
+		claimThroughResponder(t, ledger, nil, req)
+		assertVetoMarked(t, db, runID, ReasonNotHome)
+	}
+}
+
 // TestVetoMarksAnAcceptedRun asserts a CROSS_TENANT veto of an accepted
 // Varroa run marks the row at once, keeps the accepted keys, writes one
 // activity row, publishes one notification, and counts one mark.

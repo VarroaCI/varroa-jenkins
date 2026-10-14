@@ -407,7 +407,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   marks only a code `markableVeto` admits (`FENCED`, `CROSS_TENANT`,
   `INVALID_KEY`, `THROTTLED`). That set mirrors the plugin's
   `VETOED_OTHER` cancel branch, so change both together. It never marks
-  on `NOT_READY` or `NOT_HOME`. It marks only a claim with origin
+  on `NOT_READY`. It marks `NOT_HOME` only for a `replay:` or `restart:`
+  key (`markableVetoFor`), because the plugin cancels those items on
+  `NOT_HOME`. It marks only a claim with origin
   `VARROA_INTENT`, so a Jenkins-native trigger gets no synthetic row. It
   always names `req.RunID`, never `resp.RunID`: a `FENCED` answer from
   the intent table names the stored run. One upsert on `runs` covers
@@ -632,7 +634,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   answered run `QUEUED`. A forward answers `NOT_READY` and publishes nothing
   when the home slot holds no cell or the home is the calling cell, because
   its claimer cancels its item on an answer with no reason code. `crossTenantSuppliedKey` validates it with `ParseIntentKey`
-  (`reason_code=INVALID_KEY` for an unparsable key) and answers `code=INTERNAL`
+  (`reason_code=INVALID_KEY` for an unparsable key, and for a `replay:` or
+  `restart:` key, which a forward cannot carry) and answers `code=INTERNAL`
   for a cross-tenant request that carries one, because grant order 8 tests the
   scheme of a key the recorder derived. `status` and
   `last_successful` (`crosstenant_status.go`) and `artifact_list`/`artifact_url`

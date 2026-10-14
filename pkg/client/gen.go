@@ -3568,7 +3568,7 @@ type ComponentsSchemasRunDetail struct {
 	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
 	TriggerError *string `json:"triggerError,omitempty"`
 
-	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, and THROTTLED. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last four name a build claim that the record store refused. Set only when result is TRIGGER_FAILED.
+	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, THROTTLED, and NOT_HOME. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last five name a build claim that the record store refused. NOT_HOME names a replay or a restart whose job home moved to another slot before it claimed. Set only when result is TRIGGER_FAILED.
 	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
 
 	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.

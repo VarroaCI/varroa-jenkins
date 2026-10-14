@@ -187,8 +187,16 @@ func crossTenantSuppliedKey(req CrossTenantRequest) (string, CrossTenantResponse
 		return "", CrossTenantResponse{Code: CodeInternal,
 			Error: "intent_key is allowed only when the caller tenant equals the target tenant"}, false
 	}
-	if _, err := ParseIntentKey(req.IntentKey); err != nil {
+	scheme, err := ParseIntentKey(req.IntentKey)
+	if err != nil {
 		return "", CrossTenantResponse{ReasonCode: ReasonInvalidKey, Message: err.Error()}, false
+	}
+	// A replay or a restart carries actions a forward cannot send. The
+	// home would run a full build under that key, so the responder refuses
+	// the key. The caller's pinned item never forwards.
+	if scheme == IntentSchemeReplay || scheme == IntentSchemeRestart {
+		return "", CrossTenantResponse{ReasonCode: ReasonInvalidKey,
+			Message: "a replay or a restart key cannot forward"}, false
 	}
 	return req.IntentKey, CrossTenantResponse{}, true
 }

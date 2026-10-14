@@ -144,6 +144,32 @@ func TestCrossTenantBuild_CrossTenantCallMayNotSupplyAKey(t *testing.T) {
 	}
 }
 
+// TestSuppliedReplayOrRestartKeyIsRefused asserts a same-tenant forward
+// that carries a replay or a restart key answers INVALID_KEY and publishes
+// nothing, because the home would run a full build under that key.
+func TestSuppliedReplayOrRestartKeyIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, scheme := range []string{"replay", "restart"} {
+		deps, _ := buildForwardTestDeps(t)
+		actions := subscribeLedgerActions(t, deps)
+
+		resp, err := handleCrossTenantBuild(context.Background(), deps,
+			forwardRequest(scheme+":"+forwardCallerRunID+":s1"))
+		if err != nil {
+			t.Fatalf("%s: handleCrossTenantBuild: %v", scheme, err)
+		}
+		if resp.ReasonCode != ReasonInvalidKey {
+			t.Fatalf("%s: reason_code = %q, want %q", scheme, resp.ReasonCode, ReasonInvalidKey)
+		}
+		select {
+		case extra := <-actions:
+			t.Fatalf("%s: got action %+v, want none", scheme, extra)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 // TestCrossTenantBuild_UnparsableKeyAnswersInvalidKey asserts a supplied
 // key outside the allocated schemes answers reason_code=INVALID_KEY and
 // publishes nothing.

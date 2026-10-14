@@ -98,8 +98,9 @@ var ReasonCodes = []string{
 // for the run record. The set mirrors the plugin's VETOED_OTHER branch:
 // the plugin cancels the queue item on every veto but NOT_READY and
 // NOT_HOME, so no later event moves the run. NOT_READY retries, and
-// NOT_HOME forwards the item to the home slot. Change this set and that
-// plugin branch together.
+// NOT_HOME forwards the item to the home slot. A replay or a restart is
+// the exception to NOT_HOME; markableVetoFor covers it. Change this set
+// and that plugin branch together.
 func markableVeto(code string) bool {
 	switch code {
 	case ReasonFenced, ReasonCrossTenant, ReasonInvalidKey, ReasonThrottled:
@@ -107,6 +108,24 @@ func markableVeto(code string) bool {
 	default:
 		return false
 	}
+}
+
+// markableVetoFor extends markableVeto with the key it answers. A replay
+// or a restart item never forwards, so the plugin cancels it on NOT_HOME
+// too, and no later event moves the run. The key decides the exception.
+// An unparseable key marks nothing.
+func markableVetoFor(code, intentKey string) bool {
+	if markableVeto(code) {
+		return true
+	}
+	if code != ReasonNotHome {
+		return false
+	}
+	scheme, err := ParseIntentKey(intentKey)
+	if err != nil {
+		return false
+	}
+	return scheme == IntentSchemeReplay || scheme == IntentSchemeRestart
 }
 
 // Failure codes a ClaimResponse carries in Code, following the

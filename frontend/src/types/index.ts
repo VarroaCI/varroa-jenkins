@@ -2016,7 +2016,7 @@ export interface RunDetail {
   interruptedReason?: string;
   /** The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED. */
   triggerError?: string;
-  /** Why no build exists for the trigger: a controller refusal, CLAIM_EXPIRED, CLAIM_ABANDONED, or a refused build claim (FENCED, CROSS_TENANT, INVALID_KEY, THROTTLED). Set only when result is TRIGGER_FAILED. */
+  /** Why no build exists for the trigger: a controller refusal, CLAIM_EXPIRED, CLAIM_ABANDONED, or a refused build claim (FENCED, CROSS_TENANT, INVALID_KEY, THROTTLED, NOT_HOME). Set only when result is TRIGGER_FAILED. */
   triggerReasonCode?: string;
   /** An existing retry's run id, when one already exists. */
   retryRunId?: string;

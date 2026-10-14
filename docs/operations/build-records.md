@@ -106,8 +106,7 @@ Set a shorter window per tenant or job. See [Tenant and job retention windows](m
 
 ## A trigger that fails
 
-Jenkins or the recorder can refuse a trigger. The store then holds one run with result
-`TRIGGER_FAILED` and its reason.
+Jenkins or the recorder can refuse a trigger. The store then holds one `TRIGGER_FAILED` run with its reason.
 
 | Reason code | What it means |
 |---|---|
@@ -117,11 +116,11 @@ Jenkins or the recorder can refuse a trigger. The store then holds one run with 
 | `TRIGGER_UNREACHABLE` | After five minutes, the trigger found no ready Jenkins with its tenant's items. |
 | `CLAIM_EXPIRED`, `CLAIM_ABANDONED` | No claim, or no build after a granted claim, in 75 minutes. See [Build claims](build-claims.md). |
 | `FENCED`, `CROSS_TENANT`, `INVALID_KEY`, `THROTTLED` | The recorder refused the build claim. |
+| `NOT_HOME` | A replay or restart whose job moved. |
 
 The cron backstop retries only `TRIGGER_UNREACHABLE`; see
 [Cell loss](cell-loss.md#a-backstop-fire-during-a-cell-roll).
-The run page also shows the reported error text. Such a run holds no build number,
-no log, and no stage. `Re-run` starts a fresh run with each parameter's declared default.
+The run page shows the error text. It holds no build number, log, or stage. `Re-run` starts a fresh run with each parameter's declared default.
 
 A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median
 duration, and no last-build tile. It still appears in the run list, and retention bounds it under

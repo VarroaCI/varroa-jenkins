@@ -98,6 +98,7 @@ const TRIGGER_REASON_SENTENCES: Record<string, string> = {
   CROSS_TENANT: "Another team may not start this job.",
   INVALID_KEY: "The build request was not valid.",
   THROTTLED: "The record store refused the build because of a limit.",
+  NOT_HOME: "The job moved to another cell before the build started, so the build did not run.",
 };
 const TRIGGER_REASON_FALLBACK = "The controller refused the trigger.";
 

@@ -27,7 +27,7 @@ const vetoedRunMessage = "the record store refused the build claim"
 // row, in its own transaction, after the claim transaction rolled back.
 // It reports whether it wrote the row.
 //
-// It marks only a veto the plugin cancels on (markableVeto), and only for
+// It marks only a veto the plugin cancels on (markableVetoFor), and only for
 // a claim with origin VARROA_INTENT: a Jenkins-native trigger has no row
 // that waits for its claim, and a synthetic row would record a build no
 // Varroa path asked for. It always names req.RunID. A FENCED answer from
@@ -46,7 +46,7 @@ func (l *Ledger) markVetoedRun(ctx context.Context, req ClaimRequest, resp Claim
 	if !l.vetoMarking || l.pool == nil {
 		return false, nil
 	}
-	if resp.Decision != DecisionVetoed || !markableVeto(resp.ReasonCode) {
+	if resp.Decision != DecisionVetoed || !markableVetoFor(resp.ReasonCode, req.IntentKey) {
 		return false, nil
 	}
 	if req.Origin != ClaimOriginVarroaIntent {

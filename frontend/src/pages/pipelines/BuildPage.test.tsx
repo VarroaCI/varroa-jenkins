@@ -781,6 +781,7 @@ describe("BuildPage — a refused build trigger", () => {
     ["CROSS_TENANT", "Another team may not start this job."],
     ["INVALID_KEY", "The build request was not valid."],
     ["THROTTLED", "The record store refused the build because of a limit."],
+    ["NOT_HOME", "The job moved to another cell before the build started, so the build did not run."],
     ["A_FUTURE_CODE", "The controller refused the trigger."],
   ];
 

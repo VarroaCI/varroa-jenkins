@@ -298,7 +298,10 @@ the root AGENTS.md greenfield rule.
   cancel: it refreshes the cache and forwards to the reply's `home_slot`, else to the
   refreshed cache's slot, else retries; the one-hour budget bounds a repeat. A failed
   forward joins the claim's own retry class, and a forward answered with a reason code
-  makes the next attempt claim instead of forward.
+  makes the next attempt claim instead of forward. A replay or a restart item never
+  forwards: it always claims, and a `NOT_HOME` veto cancels it (`pinnedToThisCell`).
+  The item carries actions a forward cannot send, and a restart needs the source build
+  on this cell.
   `VarroaQueueDecisionHandler` gains one refusal: a **waiting** `build` step for a
   non-home job, detected by an action whose class simple name is
   `BuildTriggerAction`, because `Queue.schedule2` refuses on the first `false` and

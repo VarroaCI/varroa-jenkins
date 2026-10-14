@@ -76,15 +76,16 @@ A missing `decision` key counts as empty. The mite omits the key from every fail
 | `FENCED` | the cell holds no member of the tenant | cancel |
 | `CROSS_TENANT` | the trigger names a job of another tenant | cancel |
 | `NOT_READY` | the placement is missing or behind, or another pod holds the grant | retry at most every 10 s |
-| `NOT_HOME` | a standby or a slot that is not the home | forward to the veto's `home_slot` |
+| `NOT_HOME` | a standby or a slot that is not the home | forward to the veto's `home_slot`; cancel a replay or a restart |
 
 A cancel logs the `WARNING` `claim refused for job <job>, run <run_id>: <reason>: <message>`. The recorder
 logs each veto at `INFO` as `claim refused`, with `reason_code`, `tenant`, `run_id`, `job_path`,
 `cell`, and `message`. It counts each veto in `recorder_claims_vetoed_total`, labelled `reason`.
 
 A cancel on `INVALID_KEY`, `FENCED`, `CROSS_TENANT`, or `THROTTLED` ends a Varroa-started run at
-once. The recorder marks it `TRIGGER_FAILED` with the veto code before it replies. A
-Jenkins-native trigger gets no run record, and `NOT_READY` and `NOT_HOME` mark nothing.
+once. The recorder marks it `TRIGGER_FAILED` with the veto code before it replies. A cancel on
+`NOT_HOME` does the same for a replay or a restart. A Jenkins-native trigger gets no run record,
+and `NOT_READY` marks nothing.
 
 A retried request with the same `intent_key` and `run_id` reads `granted` again while the run has
 not started. A `duplicate` means the intent key belongs to a different run, for example two
