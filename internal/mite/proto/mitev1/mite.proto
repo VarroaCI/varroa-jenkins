@@ -384,7 +384,11 @@ message ObservabilityReport {
 }
 
 message JenkinsActivityEvent {
-  string type         = 1;   // taxonomy: build.started|build.completed|job.created|job.updated|job.deleted
+  // The Jenkins plugin sets the type. The values are build.started,
+  // build.completed, item.created, item.updated, item.deleted, item.moved,
+  // config.changed, pipeline.marker.rejected, controller.breakglass.session,
+  // and controller.breakglass.script.
+  string type         = 1;
   string actor        = 2;   // Jenkins user id/email that triggered the event ("" if system/anonymous)
   string message      = 3;   // human-readable summary
   string item_path    = 4;   // full job/folder path, e.g. "team-a/folder/job"
