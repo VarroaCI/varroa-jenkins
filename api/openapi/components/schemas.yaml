@@ -6090,20 +6090,38 @@ RunTestReport:
         the file locally. The download path then answers 409.
   additionalProperties: false
 
+RunTestTotals:
+  type: object
+  description: >
+    The run's aggregate test counters. Jenkins reports them. They count
+    every suite, including a suite the items list omits.
+  required: [total, failed, skipped]
+  properties:
+    total:
+      type: integer
+    failed:
+      type: integer
+    skipped:
+      type: integer
+  additionalProperties: false
+
 RunTestListResponse:
   type: object
   description: >
-    GET /runs/{run}/tests. items holds the run's aggregate counter row,
-    with suite "_total". items is empty when the run reported no test
-    result. cases holds the run's stored failed and skipped cases, failed
-    cases first. cases is always present, and an empty array is a valid
-    value.
+    GET /runs/{run}/tests. items holds one row per suite, at most 500, the
+    most failed suites first, then by suite name. items is empty when the
+    run reported no suite. totals holds the run's aggregate counters, and
+    it is absent when the run reported no test result. cases holds the
+    run's stored failed and skipped cases, failed cases first. cases is
+    always present, and an empty array is a valid value.
   required: [items, cases]
   properties:
     items:
       type: array
       items:
         $ref: '#/RunTestSuite'
+    totals:
+      $ref: '#/RunTestTotals'
     cases:
       type: array
       items:

@@ -193,32 +193,37 @@ The forge is `github`, `gitlab`, or `gitea`, or absent when unknown. The revisio
 `GET /runs/{run}` answers them in one `source` object: `definitionPath`, `libraries[]`,
 `podTemplates[]`.
 
+## Test suites
+
+The completion event carries one counter row per junit suite, at most 500. The recorder
+replaces the suite rows with that set. `GET /runs/{run}/tests` serves `items` and
+`totals`.
+
 ## Test cases
 
 When a run completes, the plugin writes every junit case, passed cases included, to
-`.varroa/tests.json`. It archives that file as an ordinary run artifact. Download it through
+`.varroa/tests.json`. Download it through
 `GET /runs/{run}/artifacts/.varroa/tests.json`, which answers `409` when Jenkins stored the file
 locally.
 
-The completion event carries the run's failed and skipped cases, at most 500. The recorder
-writes them into the `run_test_cases` table, one row for each case. `GET /runs/{run}/tests`
+The completion event carries the failed and skipped cases, at most 500. The recorder
+stores one `run_test_cases` row per case. `GET /runs/{run}/tests`
 serves them in `cases`, failed cases first, and the report file in `report`.
 
-`retention.runs` controls the case rows. `retention.artifacts` controls the report bytes. When
-the report leaves, the tests read answers `downloadable` false.
+`retention.runs` controls the case rows. `retention.artifacts` controls the report. Without
+the report, `downloadable` is false.
 
 `GET /pipelines/{team}/jobs/{job}/tests/{case}` answers the recent outcomes of one case, newest
-first. `{case}` is a `caseKey` value from the tests read, encoded again for one path segment.
+first. `{case}` is a `caseKey` value from the tests read, encoded for one path segment.
 The read answers 50 rows, and `limit` accepts at most 200. It covers the `retention.runs`
 window.
 
 ## Job schedules
 
 The `job_schedules` table holds the fleet's cron inventory: one row per job trigger, plus one
-`none` row for a job with no trigger. A cell's set is its whole job inventory. After a cell restart, a Jenkinsfile trigger has no row until the job builds again.
+`none` row for a job with no trigger. A cell's set is its whole job inventory. After a cell restart, a Jenkinsfile trigger has no row until its next build.
 
-The plugin computes each cron row's next three occurrences with Jenkins's cron engine, so the
-times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`
+The plugin computes each cron row's next three occurrences with Jenkins's cron engine, so the times match the Jenkins job page. An `scm-poll`, `upstream`, or `other` row, and every `none`
 row, carries no occurrence.
 
 The mite sends no set until its Jenkins holds an applied desired state, because a new cell pod's
@@ -229,15 +234,15 @@ changed, on a reconnect, when a sent occurrence has passed, or every thirty minu
 its job's home cell, its only writer. A home move moves the row at once. The backstop fires only
 a row on its job's home. An envelope deletes only rows that name its cell.
 
-A row's `next_fire_times` also keeps its passed occurrences from the last
+A row's `next_fire_times` keeps its passed occurrences from the last
 `max(3 × cronGrace, 2 × cronGrace + 10m) + 2m`, at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state
 replaces the list.
 
 `job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.
-An occurrence that never fired under a watermark at most thirty minutes old is a missed fire. An older watermark means the cell has not reported, so the whole set is stale.
+An occurrence that never fired under a watermark at most thirty minutes old is a missed fire. An older watermark means the cell has not reported, so its set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
-came first. The recorder deletes no row, because a partial set would erase schedules the plugin never reached.
+came first. The recorder deletes no row, because a partial set would erase schedules the plugin missed.
 
 ## Multibranch inventory
 

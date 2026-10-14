@@ -678,4 +678,71 @@ public class VarroaTestReportTest {
             }
         }
     }
+
+    // ---- The suite rows ----
+
+    @Test
+    public void boundedSuitesCountsEachSuiteFromItsCases() {
+        List<FakeCase> unit = List.of(
+                fcase("com.example.A", "passes", FakeStatus.PASSED),
+                fcase("com.example.A", "fails", FakeStatus.FAILED),
+                fcase("com.example.A", "skips", FakeStatus.SKIPPED));
+        List<BuildTestSuite> rows = VarroaTestReport.boundedSuites(
+                VarroaTestReport.readCases(new FakeResult(List.of(new FakeSuite("unit", unit)))));
+
+        assertEquals(1, rows.size());
+        BuildTestSuite row = rows.get(0);
+        assertEquals("unit", row.getName());
+        assertEquals(3, row.getTotal());
+        assertEquals(1, row.getFailed());
+        assertEquals(1, row.getSkipped());
+        assertEquals("the duration is the sum of the case durations", 1500L, row.getDurationMs());
+    }
+
+    @Test
+    public void boundedSuitesSortsByFailedThenName() {
+        List<FakeSuite> suites = List.of(
+                new FakeSuite("c", List.of(fcase("C", "x", FakeStatus.FAILED))),
+                new FakeSuite("a", List.of(fcase("A", "x", FakeStatus.PASSED))),
+                new FakeSuite("b", List.of(fcase("B", "x", FakeStatus.FAILED))));
+        List<BuildTestSuite> rows = VarroaTestReport.boundedSuites(
+                VarroaTestReport.readCases(new FakeResult(suites)));
+
+        assertEquals("b", rows.get(0).getName());
+        assertEquals("c", rows.get(1).getName());
+        assertEquals("a", rows.get(2).getName());
+    }
+
+    @Test
+    public void boundedSuitesCapsAtMaxTestSuites() {
+        List<FakeSuite> suites = new ArrayList<>();
+        for (int i = 0; i < 501; i++) {
+            suites.add(new FakeSuite("suite-" + i, List.of(fcase("C", "x", FakeStatus.PASSED))));
+        }
+        List<BuildTestSuite> rows = VarroaTestReport.boundedSuites(
+                VarroaTestReport.readCases(new FakeResult(suites)));
+
+        assertEquals(500, rows.size());
+    }
+
+    @Test
+    public void boundedSuitesMergesSuitesWhoseCutNamesMatch() {
+        String shared = "a".repeat(600);
+        List<FakeSuite> suites = List.of(
+                new FakeSuite(shared, List.of(fcase("C", "x", FakeStatus.PASSED))),
+                new FakeSuite(shared + "tail", List.of(fcase("C", "y", FakeStatus.FAILED))));
+        List<BuildTestSuite> rows = VarroaTestReport.boundedSuites(
+                VarroaTestReport.readCases(new FakeResult(suites)));
+
+        assertEquals("the two cut names are one key", 1, rows.size());
+        assertEquals(512, utf8(rows.get(0).getName()));
+        assertEquals(2, rows.get(0).getTotal());
+        assertEquals(1, rows.get(0).getFailed());
+    }
+
+    @Test
+    public void boundedSuitesAnswersEmptyForNull() {
+        assertTrue(VarroaTestReport.boundedSuites(null).isEmpty());
+    }
+
 }

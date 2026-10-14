@@ -131,6 +131,11 @@ public final class VarroaRunRecorder {
     private static final int MAX_ALLOCATED_NODES = 1024;
     /** The number of test cases one event carries. The list is priority ordered, so the cap keeps the head. */
     static final int MAX_TEST_CASES = 500;
+    /**
+     * The number of test suite rows one event carries. The list is sorted
+     * by failed count, most failed first, so the cap keeps the head.
+     */
+    static final int MAX_TEST_SUITES = 500;
     private static final int MAX_STAGE_ERROR = 2048;
     private static final int LADDER_ERROR_LIMIT = 512;
     private static final int MAX_EVENT_BYTES = 512 * 1024;
@@ -818,6 +823,7 @@ public final class VarroaRunRecorder {
                 b.artifacts(artifacts);
                 if (testCases != null) {
                     b.testCases(VarroaTestReport.boundedCases(testCases));
+                    b.testSuites(VarroaTestReport.boundedSuites(testCases));
                     if (reportSize >= 0) {
                         b.testReport(VarroaTestReport.reportPointer(artifacts, reportSize, testCases.size()));
                     }
@@ -2529,13 +2535,18 @@ public final class VarroaRunRecorder {
             b.testCases(keepFirst(event.getTestCases(), MAX_TEST_CASES));
             changed = true;
         }
+        if (event.getTestSuites().size() > MAX_TEST_SUITES) {
+            b.testSuites(keepFirst(event.getTestSuites(), MAX_TEST_SUITES));
+            changed = true;
+        }
         return changed ? b.build() : event;
     }
 
     /**
      * While the serialized event stays above 512 KiB, clears the parameter
      * lists of its {@code inputs} oldest first, then drops {@code
-     * test_cases} entries from the end, then drops {@code stages}
+     * test_cases} entries from the end, then drops {@code test_suites}
+     * entries from the end, then drops {@code stages}
      * entries from the oldest, then {@code changes} entries, then {@code
      * parameters} entries, then {@code pod_templates} entries, then {@code
      * libraries} entries, then truncates every remaining stage's error to
@@ -2551,7 +2562,7 @@ public final class VarroaRunRecorder {
      * list holds five bounded strings, so twenty such inputs always fit
      * and the rung terminates.
      *
-     * <p>The test case rung drops the last entry, and every other rung
+     * <p>The test case rung and the test suite rung drop the last entry, and every other rung
      * drops the oldest. The case list holds the failed cases first, so the
      * last entry is the case with the lowest priority (D3). No rung drops
      * {@code test_report}.
@@ -2566,6 +2577,9 @@ public final class VarroaRunRecorder {
         }
         while (serializedSize(current) > MAX_EVENT_BYTES && !current.getTestCases().isEmpty()) {
             current = current.toBuilder().testCases(dropLast(current.getTestCases())).build();
+        }
+        while (serializedSize(current) > MAX_EVENT_BYTES && !current.getTestSuites().isEmpty()) {
+            current = current.toBuilder().testSuites(dropLast(current.getTestSuites())).build();
         }
         // The restart list is the first to go: the restart route still
         // checks the stage against the run's own record, so a dropped list

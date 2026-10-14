@@ -267,7 +267,7 @@ func TestPlaceholdersRemoveAcceptedKeys(t *testing.T) {
 		{"run.log", KindRunLog, map[string]any{"chunk_count": 3}},
 		{"run.changes", KindRunChanges, RunChangesPayload{Changes: json.RawMessage(`[]`)}},
 		{"run.heartbeat", KindRunHeartbeat, map[string]any{}},
-		{"run.tests", KindRunTests, RunTestsPayload{Suite: "unit", Total: 1}},
+		{"run.tests", KindRunTests, RunTestsPayload{Total: 1, Suites: []RunTestSuitePayload{{Suite: "unit", Total: 1}}}},
 	}
 
 	for _, tc := range cases {

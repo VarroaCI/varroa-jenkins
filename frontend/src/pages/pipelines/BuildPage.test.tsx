@@ -162,7 +162,7 @@ beforeEach(() => {
   mockUseParams.mockReturnValue({ team: "payments", job: "checkout-api/main", run: "run-1" });
   grantTenantPipelinesWrite();
   mockListRunArtifacts.mockResolvedValue({ items: [] });
-  mockListRunTests.mockResolvedValue({ items: [{ suite: "_total", total: 0, failed: 0, skipped: 0 }], cases: [] });
+  mockListRunTests.mockResolvedValue({ items: [], totals: { total: 0, failed: 0, skipped: 0 }, cases: [] });
   mockListRunChanges.mockResolvedValue({ items: [] });
   mockListRuns.mockResolvedValue({ items: [] });
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
@@ -182,7 +182,8 @@ describe("BuildPage — test cases and the test report", () => {
    * page keeps the response order. */
   function testsRead(overrides: Partial<RunTestListResponse> = {}): RunTestListResponse {
     return {
-      items: [{ suite: "_total", total: 12, failed: 2, skipped: 1 }],
+      items: [],
+      totals: { total: 12, failed: 2, skipped: 1 },
       cases: [
         {
           suite: "unit",
@@ -400,7 +401,9 @@ describe("BuildPage — record and recovery states", () => {
       ],
     });
     mockListRunTests.mockResolvedValue({
-      items: [{ suite: "_total", total: 10, failed: 1, skipped: 0 }],
+      items: [],
+      totals: { total: 10, failed: 1, skipped: 0 },
+      cases: [],
     });
     renderPage();
     await screen.findByText(/Build #42/);
@@ -420,10 +423,11 @@ describe("BuildPage — record and recovery states", () => {
     fireEvent.click(screen.getByRole("tab", { name: /^Changes/ }));
   });
 
-  it("shows the totals line and no suite table for a total-only run", async () => {
+  it("shows the totals line and no suite table for a run with no suite row", async () => {
     mockGetRun.mockResolvedValue(baseRun());
     mockListRunTests.mockResolvedValue({
-      items: [{ suite: "_total", total: 11746, failed: 0, skipped: 756 }],
+      items: [],
+      totals: { total: 11746, failed: 0, skipped: 756 },
       cases: [],
     });
     renderPage();
@@ -453,6 +457,47 @@ describe("BuildPage — record and recovery states", () => {
     await screen.findByText(/Build #42/);
     fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
 
+    expect(await screen.findByText("The run reported no test results.")).toBeInTheDocument();
+  });
+
+  it("renders the suite table in response order below the case table", async () => {
+    mockGetRun.mockResolvedValue(baseRun({ result: "FAILURE" }));
+    mockListRunTests.mockResolvedValue({
+      items: [
+        { suite: "zeta", total: 4, failed: 2, skipped: 0 },
+        { suite: "alpha", total: 3, failed: 0, skipped: 1 },
+      ],
+      totals: { total: 7, failed: 2, skipped: 1 },
+      cases: [
+        { suite: "zeta", className: "com.example.ZedTest", name: "zeta", status: "FAILED", caseKey: "com.example.ZedTest/zeta" },
+      ],
+    });
+    renderPage();
+    await screen.findByText(/Build #42/);
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
+
+    const caseTable = await screen.findByRole("table", { name: "Test cases" });
+    const suiteTable = screen.getByRole("table", { name: "Test suites" });
+    expect(caseTable.compareDocumentPosition(suiteTable)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText("The suite table shows at most 500 suites.")).toBeInTheDocument();
+    const rows = within(suiteTable)
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
+    expect(rows).toEqual([
+      ["zeta", "4", "2", "0"],
+      ["alpha", "3", "0", "1"],
+    ]);
+  });
+
+  it("shows no totals count in the tab label when totals are absent", async () => {
+    mockGetRun.mockResolvedValue(baseRun());
+    mockListRunTests.mockResolvedValue({ items: [], cases: [] });
+    renderPage();
+    await screen.findByText(/Build #42/);
+
+    expect(screen.getByRole("tab", { name: "Tests" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^Tests/ }));
     expect(await screen.findByText("The run reported no test results.")).toBeInTheDocument();
   });
 });

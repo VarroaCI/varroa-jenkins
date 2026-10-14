@@ -121,6 +121,7 @@ type BuildEvent struct {
 	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
 	RejectedSignature       string              `json:"rejected_signature,omitempty"`
 	ScmForge                string              `json:"scm_forge,omitempty"`
+	TestSuites              []*BuildTestSuite   `json:"test_suites,omitempty"`
 }
 
 type BuildInput struct {
@@ -185,6 +186,15 @@ type BuildTestReport struct {
 	BlobKey   string `json:"blob_key,omitempty"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
 	CaseCount int    `json:"case_count,omitempty"`
+}
+
+// BuildTestSuite is the counter row of one test suite of a run.
+type BuildTestSuite struct {
+	Name       string `json:"name"`
+	Total      int    `json:"total"`
+	Failed     int    `json:"failed"`
+	Skipped    int    `json:"skipped"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
 }
 
 type CancelBuildPayload struct {

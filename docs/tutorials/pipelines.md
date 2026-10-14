@@ -185,7 +185,7 @@ for the storage modes that make an artifact downloadable.
 The tab omits the files Varroa archives for its own use under `.varroa/`. Download the test
 report from the **Tests** tab.
 
-The **Tests** tab shows the test totals, then the failed and skipped cases, at most 500, grouped by suite.
+The **Tests** tab shows the totals, the failed and skipped cases (at most 500), and a suite table.
 The **Class** column shows only when a suite holds more than one class.
 
 ## Run a job with parameters

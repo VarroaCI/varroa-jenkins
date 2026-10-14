@@ -21,7 +21,8 @@ func TestApplyRunTestsReplaysToOneRow(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	env := newTestEnvelope(t, runID, "manual:tests-replay-1", KindRunTests, RunTestsPayload{
-		Suite: "unit", Total: 10, Failed: 1, Skipped: 2,
+		Total: 10, Failed: 1, Skipped: 2,
+		Suites: []RunTestSuitePayload{{Suite: "unit", Total: 10, Failed: 1, Skipped: 2}},
 	})
 	for i := 0; i < 2; i++ {
 		if _, err := g.Apply(context.Background(), env); err != nil {
@@ -48,40 +49,198 @@ func TestApplyRunTestsReplaysToOneRow(t *testing.T) {
 	}
 }
 
-// TestApplyRunTestsSumsAcrossSuites asserts runs.tests_total sums every
-// suite the run has reported, so a replay never double counts one.
-func TestApplyRunTestsSumsAcrossSuites(t *testing.T) {
+// TestApplyRunTestsCountersComeFromPayload asserts that runs.tests_*
+// takes the payload's own counters and never a sum of the suite rows.
+// The Jenkins counters can cover a suite the suite list omits, so a sum
+// would undercount. A replayed envelope keeps the same counters.
+func TestApplyRunTestsCountersComeFromPayload(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
 	runID := seedGrantedIntent(t, pool, "manual:tests-sum-1")
 	g := NewIngester(pool, nil, nil)
 
-	unit := newTestEnvelope(t, runID, "manual:tests-sum-1", KindRunTests, RunTestsPayload{
-		Suite: "unit", Total: 10, Failed: 1, Skipped: 0,
+	env := newTestEnvelope(t, runID, "manual:tests-sum-1", KindRunTests, RunTestsPayload{
+		Total: 20, Failed: 2, Skipped: 1,
+		Suites: []RunTestSuitePayload{
+			{Suite: "unit", Total: 10, Failed: 1, Skipped: 0},
+			{Suite: "integration", Total: 5, Failed: 0, Skipped: 1},
+		},
 	})
-	integration := newTestEnvelope(t, runID, "manual:tests-sum-1", KindRunTests, RunTestsPayload{
-		Suite: "integration", Total: 5, Failed: 0, Skipped: 1,
-	})
-	if _, err := g.Apply(context.Background(), unit); err != nil {
-		t.Fatalf("apply unit: %v", err)
+	for i := 0; i < 2; i++ {
+		if _, err := g.Apply(context.Background(), env); err != nil {
+			t.Fatalf("apply delivery %d: %v", i, err)
+		}
+		var total, failed, skipped int
+		if err := db.QueryRow(`SELECT tests_total, tests_failed, tests_skipped FROM varroa.runs WHERE run_id = $1`,
+			runID).Scan(&total, &failed, &skipped); err != nil {
+			t.Fatalf("read runs counters: %v", err)
+		}
+		if total != 20 || failed != 2 || skipped != 1 {
+			t.Fatalf("delivery %d counters = (%d,%d,%d), want (20,2,1), not the sum (15,1,1)", i, total, failed, skipped)
+		}
 	}
-	if _, err := g.Apply(context.Background(), integration); err != nil {
-		t.Fatalf("apply integration: %v", err)
-	}
-	// Replay unit; the sum must not double count it.
-	if _, err := g.Apply(context.Background(), unit); err != nil {
-		t.Fatalf("replay unit: %v", err)
-	}
+}
 
-	var total, failed, skipped int
-	if err := db.QueryRow(`SELECT tests_total, tests_failed, tests_skipped FROM varroa.runs WHERE run_id = $1`,
-		runID).Scan(&total, &failed, &skipped); err != nil {
-		t.Fatalf("read runs counters: %v", err)
+// TestApplyRunTestsReplacesSuiteSet asserts that a later envelope replaces
+// the run's suite set. A suite the later envelope omits leaves the set.
+func TestApplyRunTestsReplacesSuiteSet(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-replace-1")
+	g := NewIngester(pool, nil, nil)
+
+	first := newTestEnvelope(t, runID, "manual:suites-replace-1", KindRunTests, RunTestsPayload{
+		Total: 2, Suites: []RunTestSuitePayload{{Suite: "a", Total: 1}, {Suite: "b", Total: 1}},
+	})
+	second := newTestEnvelope(t, runID, "manual:suites-replace-1", KindRunTests, RunTestsPayload{
+		Total: 1, Suites: []RunTestSuitePayload{{Suite: "b", Total: 1}},
+	})
+	if _, err := g.Apply(context.Background(), first); err != nil {
+		t.Fatalf("apply first: %v", err)
 	}
-	if total != 15 || failed != 1 || skipped != 1 {
-		t.Fatalf("counters = (%d,%d,%d), want (15,1,1)", total, failed, skipped)
+	if _, err := g.Apply(context.Background(), second); err != nil {
+		t.Fatalf("apply second: %v", err)
 	}
+	if got := storedSuiteNames(t, db, runID); fmt.Sprint(got) != "[b]" {
+		t.Fatalf("stored suites = %v, want [b]", got)
+	}
+}
+
+// TestApplyRunTestsAbsentSuitesKeepsSet asserts that a payload with no
+// suites key changes no suite row.
+func TestApplyRunTestsAbsentSuitesKeepsSet(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-absent-1")
+	g := NewIngester(pool, nil, nil)
+
+	seed := newTestEnvelope(t, runID, "manual:suites-absent-1", KindRunTests, RunTestsPayload{
+		Total: 1, Suites: []RunTestSuitePayload{{Suite: "a", Total: 1}},
+	})
+	if _, err := g.Apply(context.Background(), seed); err != nil {
+		t.Fatalf("apply seed: %v", err)
+	}
+	absent := newTestEnvelope(t, runID, "manual:suites-absent-1", KindRunTests, map[string]any{
+		"total": 1, "failed": 0, "skipped": 0,
+	})
+	if _, err := g.Apply(context.Background(), absent); err != nil {
+		t.Fatalf("apply absent: %v", err)
+	}
+	if got := storedSuiteNames(t, db, runID); fmt.Sprint(got) != "[a]" {
+		t.Fatalf("stored suites after an absent key = %v, want [a]", got)
+	}
+}
+
+// TestApplyRunTestsEmptySuitesClearsSet asserts that an empty suites list
+// clears the run's suite set.
+func TestApplyRunTestsEmptySuitesClearsSet(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-empty-1")
+	g := NewIngester(pool, nil, nil)
+
+	seed := newTestEnvelope(t, runID, "manual:suites-empty-1", KindRunTests, RunTestsPayload{
+		Total: 1, Suites: []RunTestSuitePayload{{Suite: "a", Total: 1}},
+	})
+	if _, err := g.Apply(context.Background(), seed); err != nil {
+		t.Fatalf("apply seed: %v", err)
+	}
+	empty := newTestEnvelope(t, runID, "manual:suites-empty-1", KindRunTests, map[string]any{
+		"total": 0, "failed": 0, "skipped": 0, "suites": []any{},
+	})
+	if _, err := g.Apply(context.Background(), empty); err != nil {
+		t.Fatalf("apply empty: %v", err)
+	}
+	if got := storedSuiteNames(t, db, runID); len(got) != 0 {
+		t.Fatalf("stored suites after an empty list = %v, want none", got)
+	}
+}
+
+// TestApplyRunTestsDedupesSuites asserts that a payload naming one suite
+// twice writes one row, keeps the first, and fails no transaction.
+func TestApplyRunTestsDedupesSuites(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-dup-1")
+	g := NewIngester(pool, nil, nil)
+
+	env := newTestEnvelope(t, runID, "manual:suites-dup-1", KindRunTests, RunTestsPayload{
+		Total: 2,
+		Suites: []RunTestSuitePayload{
+			{Suite: "unit", Total: 10, Failed: 1},
+			{Suite: "unit", Total: 99, Failed: 9},
+			{Suite: "integration", Total: 2},
+		},
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got := storedSuiteNames(t, db, runID); fmt.Sprint(got) != "[integration unit]" {
+		t.Fatalf("stored suites = %v, want [integration unit]", got)
+	}
+	var total int
+	if err := db.QueryRow(`SELECT total FROM varroa.run_tests WHERE run_id = $1 AND suite = 'unit'`,
+		runID).Scan(&total); err != nil {
+		t.Fatalf("read unit total: %v", err)
+	}
+	if total != 10 {
+		t.Fatalf("unit total = %d, want the first entry's 10", total)
+	}
+}
+
+// TestApplyRunTestsOldTotalPayload asserts that an envelope from a plugin
+// that still sends the sentinel suite writes no suite row, and that its
+// counters still reach the run.
+func TestApplyRunTestsOldTotalPayload(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-old-1")
+	g := NewIngester(pool, nil, nil)
+
+	env := newTestEnvelope(t, runID, "manual:suites-old-1", KindRunTests, map[string]any{
+		"total": 4, "failed": 1, "skipped": 0,
+	})
+	if _, err := g.Apply(context.Background(), env); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got := storedSuiteNames(t, db, runID); len(got) != 0 {
+		t.Fatalf("stored suites = %v, want none for the sentinel payload", got)
+	}
+	var total int
+	if err := db.QueryRow(`SELECT tests_total FROM varroa.runs WHERE run_id = $1`, runID).Scan(&total); err != nil {
+		t.Fatalf("read tests_total: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("tests_total = %d, want 4", total)
+	}
+}
+
+// storedSuiteNames reads the run's suite rows, ordered by name.
+func storedSuiteNames(t *testing.T, db *sql.DB, runID uuid.UUID) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT suite FROM varroa.run_tests WHERE run_id = $1 ORDER BY suite`, runID)
+	if err != nil {
+		t.Fatalf("query run_tests: %v", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan run_tests: %v", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate run_tests: %v", err)
+	}
+	return names
 }
 
 // TestApplyRunArtifactsReplaysToOneRow delivers a run.artifacts envelope
@@ -180,7 +339,7 @@ func TestApplyRunTestsReplacesCaseSet(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	first := newTestEnvelope(t, runID, "manual:cases-replace-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 3, Failed: 3,
+		Total: 3, Failed: 3,
 		Cases: []RunTestCasePayload{failedCase("a"), failedCase("b"), failedCase("c")},
 	})
 	for i := 0; i < 2; i++ {
@@ -213,7 +372,7 @@ func TestApplyRunTestsReplacesCaseSet(t *testing.T) {
 	}
 
 	second := newTestEnvelope(t, runID, "manual:cases-replace-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 1, Failed: 1,
+		Total: 1, Failed: 1,
 		Cases: []RunTestCasePayload{failedCase("z")},
 	})
 	if _, err := g.Apply(context.Background(), second); err != nil {
@@ -234,14 +393,14 @@ func TestApplyRunTestsAbsentCasesKeepsSet(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	seed := newTestEnvelope(t, runID, "manual:cases-absent-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 1, Failed: 1, Cases: []RunTestCasePayload{failedCase("a")},
+		Total: 1, Failed: 1, Cases: []RunTestCasePayload{failedCase("a")},
 	})
 	if _, err := g.Apply(context.Background(), seed); err != nil {
 		t.Fatalf("apply seed: %v", err)
 	}
 
 	absent := newTestEnvelope(t, runID, "manual:cases-absent-1", KindRunTests, map[string]any{
-		"suite": "_total", "total": 1, "failed": 1, "skipped": 0,
+		"total": 1, "failed": 1, "skipped": 0,
 	})
 	if _, err := g.Apply(context.Background(), absent); err != nil {
 		t.Fatalf("apply absent: %v", err)
@@ -251,7 +410,7 @@ func TestApplyRunTestsAbsentCasesKeepsSet(t *testing.T) {
 	}
 
 	empty := newTestEnvelope(t, runID, "manual:cases-absent-1", KindRunTests, map[string]any{
-		"suite": "_total", "total": 1, "failed": 0, "skipped": 0, "cases": []any{},
+		"total": 1, "failed": 0, "skipped": 0, "cases": []any{},
 	})
 	if _, err := g.Apply(context.Background(), empty); err != nil {
 		t.Fatalf("apply empty: %v", err)
@@ -273,7 +432,7 @@ func TestApplyRunTestsDedupesCases(t *testing.T) {
 	dup := failedCase("a")
 	dup.Status = "REGRESSION"
 	env := newTestEnvelope(t, runID, "manual:cases-dup-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 2, Failed: 2,
+		Total: 2, Failed: 2,
 		Cases: []RunTestCasePayload{failedCase("a"), dup, failedCase("b")},
 	})
 	if _, err := g.Apply(context.Background(), env); err != nil {
@@ -301,7 +460,7 @@ func TestApplyRunTestsStoresReport(t *testing.T) {
 	g := NewIngester(pool, nil, nil)
 
 	withReport := newTestEnvelope(t, runID, "manual:report-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 4, Failed: 1,
+		Total: 4, Failed: 1,
 		TestReport: &RunTestReportPayload{BlobKey: "artifacts/core/job/1/artifacts/.varroa/tests.json", SizeBytes: 2048, CaseCount: 4},
 	})
 	if _, err := g.Apply(context.Background(), withReport); err != nil {
@@ -324,7 +483,7 @@ func TestApplyRunTestsStoresReport(t *testing.T) {
 	assertReport("artifacts/core/job/1/artifacts/.varroa/tests.json", 2048, 4)
 
 	noReport := newTestEnvelope(t, runID, "manual:report-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 4, Failed: 1,
+		Total: 4, Failed: 1,
 	})
 	if _, err := g.Apply(context.Background(), noReport); err != nil {
 		t.Fatalf("apply without report: %v", err)
@@ -332,7 +491,7 @@ func TestApplyRunTestsStoresReport(t *testing.T) {
 	assertReport("artifacts/core/job/1/artifacts/.varroa/tests.json", 2048, 4)
 
 	emptyKey := newTestEnvelope(t, runID, "manual:report-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 4, Failed: 1,
+		Total: 4, Failed: 1,
 		TestReport: &RunTestReportPayload{SizeBytes: 4096, CaseCount: 5},
 	})
 	if _, err := g.Apply(context.Background(), emptyKey); err != nil {
@@ -351,7 +510,7 @@ func TestApplyRunTestsMergesReportOntoNullPayload(t *testing.T) {
 	runID := seedGrantedIntent(t, pool, "manual:report-null-1")
 	g := NewIngester(pool, nil, nil)
 
-	seed := newTestEnvelope(t, runID, "manual:report-null-1", KindRunTests, RunTestsPayload{Suite: "_total", Total: 1})
+	seed := newTestEnvelope(t, runID, "manual:report-null-1", KindRunTests, RunTestsPayload{Total: 1})
 	if _, err := g.Apply(context.Background(), seed); err != nil {
 		t.Fatalf("apply seed: %v", err)
 	}
@@ -360,7 +519,7 @@ func TestApplyRunTestsMergesReportOntoNullPayload(t *testing.T) {
 	}
 
 	env := newTestEnvelope(t, runID, "manual:report-null-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 1,
+		Total:      1,
 		TestReport: &RunTestReportPayload{SizeBytes: 100, CaseCount: 0},
 	})
 	if _, err := g.Apply(context.Background(), env); err != nil {

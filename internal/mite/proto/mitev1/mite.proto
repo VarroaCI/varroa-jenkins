@@ -440,6 +440,19 @@ message BuildTestCase {
   string error_details = 6;
 }
 
+// BuildTestSuite is the counter row of one test suite of a run.
+message BuildTestSuite {
+  // @required
+  string name = 1;
+  // @required
+  int32 total = 2;
+  // @required
+  int32 failed = 3;
+  // @required
+  int32 skipped = 4;
+  int64 duration_ms = 5;
+}
+
 message BuildInputParameter {
   // @required
   string name = 1;
@@ -586,6 +599,8 @@ message BuildEvent {
   string rejected_signature = 57;
   // The forge that hosts scm_url: github, gitlab, or gitea. Empty when unknown.
   string scm_forge = 58;
+  // test_suites holds one counter row per test suite, at most 500, the most failed suites first. Only COMPLETED carries it.
+  repeated BuildTestSuite test_suites = 59;
 }
 
 message ClaimRequest {

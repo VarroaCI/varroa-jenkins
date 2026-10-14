@@ -60,7 +60,8 @@ func TestIngestConsumerReplaySafety(t *testing.T) {
 	stage.OccurredAt = occurredAt
 
 	testsEnv := newTestEnvelope(t, runID, "manual:replay-all-1", KindRunTests, RunTestsPayload{
-		Suite: "unit", Total: 10, Failed: 1, Skipped: 0,
+		Total: 10, Failed: 1, Skipped: 0,
+		Suites: []RunTestSuitePayload{{Suite: "unit", Total: 10, Failed: 1}},
 	})
 	testsEnv.OccurredAt = occurredAt
 

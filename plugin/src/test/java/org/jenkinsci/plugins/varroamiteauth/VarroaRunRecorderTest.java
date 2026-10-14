@@ -721,4 +721,39 @@ public class VarroaRunRecorderTest {
         }
         return null;
     }
+
+    @Test
+    public void hardCapKeepsFirstFiveHundredSuites() {
+        List<BuildTestSuite> suites = new ArrayList<>();
+        for (int i = 0; i < 700; i++) {
+            suites.add(BuildTestSuite.builder().name("suite-" + i).total(1).build());
+        }
+        BuildEvent event = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).testSuites(suites).build();
+
+        BuildEvent capped = VarroaRunRecorder.applyCaps(event);
+
+        assertEquals(500, capped.getTestSuites().size());
+        assertEquals("suite-0", capped.getTestSuites().get(0).getName());
+        assertEquals("suite-499", capped.getTestSuites().get(499).getName());
+    }
+
+    @Test
+    public void ladderDropsLastSuiteWhenTheSuitesAloneOverflow() {
+        // Each name holds 500 control characters, which JSON writes as six-byte escapes.
+        String heavy = "\u0001".repeat(500);
+        List<BuildTestSuite> suites = new ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            suites.add(BuildTestSuite.builder().name(heavy + i).total(1).build());
+        }
+        BuildEvent event = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).testSuites(suites).build();
+        assertTrue("fixture must start oversize", serializedBytes(event) > 512 * 1024);
+
+        BuildEvent shrunk = VarroaRunRecorder.applyCaps(event);
+
+        assertTrue("the shrunk event fits the size limit", serializedBytes(shrunk) <= 512 * 1024);
+        int kept = shrunk.getTestSuites().size();
+        assertTrue("some suites were dropped, kept=" + kept, kept < 500 && kept > 0);
+        assertEquals("the first suite survives", heavy + 0, shrunk.getTestSuites().get(0).getName());
+    }
+
 }

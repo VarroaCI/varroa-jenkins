@@ -19,7 +19,7 @@ func TestListTestCasesOrdersFailedFirst(t *testing.T) {
 	ctx := context.Background()
 
 	env := newTestEnvelope(t, runID, "manual:cases-order-1", KindRunTests, RunTestsPayload{
-		Suite: "_total", Total: 5, Failed: 3, Skipped: 2,
+		Total: 5, Failed: 3, Skipped: 2,
 		Cases: []RunTestCasePayload{
 			{Suite: "b", ClassName: "C", Name: "skip1", Status: "SKIPPED"},
 			{Suite: "b", ClassName: "C", Name: "fail2", Status: "FAILED"},
@@ -75,7 +75,7 @@ func TestListTestCaseHistoryNewestFirst(t *testing.T) {
 			id = newer
 		}
 		env := newTestEnvelope(t, id, runID.key, KindRunTests, RunTestsPayload{
-			Suite: "_total", Total: 2, Failed: 1,
+			Total: 2, Failed: 1,
 			Cases: []RunTestCasePayload{
 				{Suite: "unit", ClassName: "com.example.FooTest", Name: "bar", Status: runID.status, ErrorDetails: "boom"},
 				{Suite: "unit", ClassName: "com.example.FooTest", Name: "other", Status: "FAILED"},
@@ -124,5 +124,40 @@ func TestListTestCaseHistoryNewestFirst(t *testing.T) {
 	}
 	if len(none) != 0 {
 		t.Fatalf("missing case answered %d rows, want none", len(none))
+	}
+}
+
+// TestListTestsOrdersByFailedThenSuite asserts that the suite rows sort by
+// failed count, most failed first, and then by suite name.
+func TestListTestsOrdersByFailedThenSuite(t *testing.T) {
+	t.Parallel()
+
+	pool, _ := setupLedgerPool(t)
+	runID := seedGrantedIntent(t, pool, "manual:suites-order-1")
+	g := NewIngester(pool, nil, nil)
+	reader := NewReader(pool)
+	ctx := context.Background()
+
+	env := newTestEnvelope(t, runID, "manual:suites-order-1", KindRunTests, RunTestsPayload{
+		Total: 6, Failed: 4,
+		Suites: []RunTestSuitePayload{
+			{Suite: "b", Total: 2, Failed: 2},
+			{Suite: "a", Total: 2, Failed: 0},
+			{Suite: "c", Total: 2, Failed: 2},
+		},
+	})
+	if _, err := g.Apply(ctx, env); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	suites, err := reader.ListTests(ctx, runID.String())
+	if err != nil {
+		t.Fatalf("ListTests: %v", err)
+	}
+	got := make([]string, 0, len(suites))
+	for _, s := range suites {
+		got = append(got, s.Suite)
+	}
+	if fmt.Sprint(got) != "[b c a]" {
+		t.Fatalf("suite order = %v, want [b c a]", got)
 	}
 }

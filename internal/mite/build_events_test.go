@@ -1296,8 +1296,11 @@ func TestTestsPayload_CarriesCasesAndReport(t *testing.T) {
 		TestReport: &mitev1.BuildTestReport{BlobKey: "artifacts/x/.varroa/tests.json", SizeBytes: 4096, CaseCount: 3},
 	}
 	p := testsPayload(evt)
-	if p["suite"] != "_total" {
-		t.Fatalf("aggregate keys changed: %+v", p)
+	if _, present := p["suite"]; present {
+		t.Fatalf("the payload carries no suite key: %+v", p)
+	}
+	if fmt.Sprint(p["total"]) != "3" || fmt.Sprint(p["failed"]) != "1" {
+		t.Fatalf("aggregate counters = %+v, want total 3 and failed 1", p)
 	}
 	cases, ok := p["cases"].([]testCaseEntry)
 	if !ok || len(cases) != 2 {
@@ -1374,7 +1377,7 @@ func TestShrinkToBudget_DropsLastCasesBeforeChanges(t *testing.T) {
 	}
 	env := ingestEnvelope{
 		Kind:    kindRunTests,
-		Payload: map[string]interface{}{"suite": "_total", "cases": cases, "changes": changes},
+		Payload: map[string]interface{}{"cases": cases, "changes": changes},
 	}
 	data, _ := json.Marshal(env)
 	if len(data) <= gatewayEnvelopeBudget {
@@ -1408,7 +1411,7 @@ func TestShrinkToBudget_RemovesTheCasesKeyWhenEveryCaseDrops(t *testing.T) {
 	changes := []changeEntry{{CommitID: "commit-0", Message: strings.Repeat("m", gatewayEnvelopeBudget)}}
 	env := ingestEnvelope{
 		Kind:    kindRunTests,
-		Payload: map[string]interface{}{"suite": "_total", "cases": cases, "changes": changes},
+		Payload: map[string]interface{}{"cases": cases, "changes": changes},
 	}
 	if !shrinkToBudget(&env) {
 		t.Fatal("shrinkToBudget should fit by dropping every case and then the change")
@@ -1469,5 +1472,109 @@ func TestStartedPayloadOmitsEmptyChangeRequest(t *testing.T) {
 		if _, ok := startedPayload(evt)["change_request"]; ok {
 			t.Errorf("%s: run.started payload carries change_request, want no key", name)
 		}
+	}
+}
+
+func TestTestsPayload_CarriesSuites(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase: phaseCompleted,
+		TestSuites: []*mitev1.BuildTestSuite{
+			{Name: "unit", Total: 3, Failed: 1, Skipped: 0, DurationMs: 1500},
+			nil,
+			{Name: "integration", Total: 2, Failed: 0, Skipped: 1},
+		},
+	}
+	p := testsPayload(evt)
+	suites, ok := p["suites"].([]testSuiteEntry)
+	if !ok || len(suites) != 2 {
+		t.Fatalf("suites = %+v, want two entries", p["suites"])
+	}
+	if suites[0].Suite != "unit" || suites[0].Total != 3 || suites[0].Failed != 1 || suites[0].DurationMs != 1500 {
+		t.Fatalf("suites[0] = %+v", suites[0])
+	}
+	if suites[1].Suite != "integration" || suites[1].Skipped != 1 {
+		t.Fatalf("suites[1] = %+v, want the event's order", suites[1])
+	}
+	data, err := json.Marshal(suites[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "duration_ms") {
+		t.Fatalf("a zero duration reached the payload: %s", data)
+	}
+	if _, present := testsPayload(&mitev1.BuildEvent{Phase: phaseCompleted, TestTotal: 1})["suites"]; present {
+		t.Fatal("suites present without suites on the event")
+	}
+}
+
+func TestBuildPayloadGroup_PublishesTestsForSuitesAlone(t *testing.T) {
+	evt := &mitev1.BuildEvent{
+		Phase:      phaseCompleted,
+		RunId:      "run-1",
+		TestSuites: []*mitev1.BuildTestSuite{{Name: "unit", Total: 1, Failed: 0}},
+	}
+	h := newBuildEventTestHandler(nil)
+	kps, err := h.buildPayloadGroup(evt)
+	if err != nil {
+		t.Fatalf("buildPayloadGroup: %v", err)
+	}
+	count := 0
+	for _, kp := range kps {
+		if kp.kind == kindRunTests {
+			count++
+			if _, ok := kp.payload["suites"]; !ok {
+				t.Fatalf("run.tests payload = %+v, want the suites key", kp.payload)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("run.tests envelopes = %d, want one", count)
+	}
+}
+
+func TestShrinkToBudget_DropsLastSuitesAfterCases(t *testing.T) {
+	const suiteCount = 1000
+	suites := make([]testSuiteEntry, 0, suiteCount)
+	for i := 0; i < suiteCount; i++ {
+		suites = append(suites, testSuiteEntry{
+			Suite: fmt.Sprintf("suite-%04d-", i) + strings.Repeat("s", 1024),
+			Total: 1,
+		})
+	}
+	cases := []testCaseEntry{{Suite: "s", Name: "case-0", Status: "FAILED"}}
+	changes := []changeEntry{{CommitID: "commit-0", Message: "m"}, {CommitID: "commit-1", Message: "m"}}
+	env := ingestEnvelope{
+		Kind:    kindRunTests,
+		Payload: map[string]interface{}{"cases": cases, "suites": suites, "changes": changes},
+	}
+	if !shrinkToBudget(&env) {
+		t.Fatal("shrinkToBudget should fit by dropping the cases and the last suites")
+	}
+	if _, present := env.Payload["cases"]; present {
+		t.Fatal("cases should drop before any suite")
+	}
+	remaining, ok := env.Payload["suites"].([]testSuiteEntry)
+	if !ok || len(remaining) == 0 || len(remaining) >= suiteCount {
+		t.Fatalf("suites remaining = %d, want some but not all dropped", len(remaining))
+	}
+	if remaining[0].Suite != suites[0].Suite {
+		t.Fatalf("the head of the suite list must survive, got %q", remaining[0].Suite)
+	}
+	if got := env.Payload["changes"].([]changeEntry); len(got) != 2 {
+		t.Fatalf("changes = %d entries, want the suites rung to run before the changes rung", len(got))
+	}
+}
+
+func TestShrinkToBudget_RemovesTheSuitesKeyWhenEverySuiteDrops(t *testing.T) {
+	suites := []testSuiteEntry{{Suite: strings.Repeat("s", gatewayEnvelopeBudget), Total: 1}}
+	env := ingestEnvelope{
+		Kind:    kindRunTests,
+		Payload: map[string]interface{}{"suites": suites},
+	}
+	if !shrinkToBudget(&env) {
+		t.Fatal("shrinkToBudget should fit by dropping every suite")
+	}
+	if _, present := env.Payload["suites"]; present {
+		t.Fatalf("suites = %+v, want the key absent once every suite drops", env.Payload["suites"])
 	}
 }

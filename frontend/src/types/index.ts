@@ -2260,8 +2260,18 @@ export interface RunTestReport {
   downloadable: boolean;
 }
 
+/** The run's aggregate test counters. Jenkins reports them, so they count every suite. */
+export interface RunTestTotals {
+  total: number;
+  failed: number;
+  skipped: number;
+}
+
 export interface RunTestListResponse {
+  /** One row per suite, at most 500, the most failed suites first. Empty when the run reported no suite. */
   items: RunTestSuite[];
+  /** The run's aggregate counters. Absent when the run reported no test result. */
+  totals?: RunTestTotals;
   /** The failed cases first, then the skipped cases. Never null. */
   cases: RunTestCase[];
   /** Absent when the run holds no report. */

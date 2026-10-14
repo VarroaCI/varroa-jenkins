@@ -130,4 +130,29 @@ public class BuildEventJsonTest {
         JSONObject without = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).build().toJson();
         assertFalse(without.has("rejected_signature"));
     }
+
+    @Test
+    public void testSuitesSerializeWithProtoNames() {
+        BuildTestSuite suite = BuildTestSuite.builder()
+                .name("unit").total(3).failed(1).skipped(1).durationMs(42L).build();
+        JSONObject json = BuildEvent.builder()
+                .phase(BuildEvent.PHASE_COMPLETED)
+                .testSuites(List.of(suite))
+                .build()
+                .toJson();
+
+        JSONObject row = json.getJSONArray("test_suites").getJSONObject(0);
+        assertEquals("unit", row.getString("name"));
+        assertEquals(3, row.getInt("total"));
+        assertEquals(1, row.getInt("failed"));
+        assertEquals(1, row.getInt("skipped"));
+        assertEquals(42L, row.getLong("duration_ms"));
+    }
+
+    @Test
+    public void emptyTestSuitesWriteNoKey() {
+        JSONObject json = BuildEvent.builder().phase(BuildEvent.PHASE_COMPLETED).build().toJson();
+        assertFalse(json.has("test_suites"));
+    }
+
 }

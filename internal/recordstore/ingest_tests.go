@@ -8,12 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// applyRunTests upserts run_tests on the natural key (run_id, suite),
-// copying created_at from the intent, then recomputes runs.tests_total,
-// tests_failed, and tests_skipped as the sum over every suite the run
-// has reported. Recomputing from run_tests, rather than accumulating in
-// place, keeps a replayed or redelivered run.tests envelope from double
-// counting one suite.
+// applyRunTests takes runs.tests_total, tests_failed, and tests_skipped
+// from the payload's own aggregate counters. It never sums run_tests:
+// the suite rows are a breakdown, and a capped suite list would undercount
+// a sum. The payload's suites key, when present, replaces the run's suite
+// set in replaceRunTests.
 //
 // The same transaction replaces the run's run_test_cases set when the
 // payload carries a cases key, and stores the test report on the runs
@@ -25,24 +24,10 @@ func applyRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 		return fmt.Errorf("%w: decode run.tests payload: %v", ErrMalformedEnvelope, err)
 	}
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO varroa.run_tests (run_id, suite, created_at, total, failed, skipped, duration_ms)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (run_id, suite) DO UPDATE SET
-			total       = EXCLUDED.total,
-			failed      = EXCLUDED.failed,
-			skipped     = EXCLUDED.skipped,
-			duration_ms = EXCLUDED.duration_ms
-	`, intent.runID, payload.Suite, intent.createdAt, payload.Total, payload.Failed, payload.Skipped, payload.DurationMs); err != nil {
-		return fmt.Errorf("upsert run_tests: %w", err)
-	}
-
-	var total, failed, skipped int
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(SUM(total), 0), COALESCE(SUM(failed), 0), COALESCE(SUM(skipped), 0)
-		FROM varroa.run_tests WHERE run_id = $1
-	`, intent.runID).Scan(&total, &failed, &skipped); err != nil {
-		return fmt.Errorf("sum run_tests: %w", err)
+	if payload.Suites != nil {
+		if err := replaceRunTests(ctx, tx, intent, dedupeSuites(payload.Suites)); err != nil {
+			return err
+		}
 	}
 
 	if payload.Cases != nil {
@@ -74,10 +59,67 @@ func applyRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 			                  || EXCLUDED.payload
 	`,
 		intent.runID, intent.createdAt, intent.intentKey, intent.cluster, intent.namespace,
-		intent.cellValue(), intent.tenant, intent.jobPath, total, failed, skipped,
+		intent.cellValue(), intent.tenant, intent.jobPath, payload.Total, payload.Failed, payload.Skipped,
 		reportKey, reportPayload,
 	); err != nil {
 		return fmt.Errorf("update runs test counters: %w", err)
+	}
+	return nil
+}
+
+// dedupeSuites keeps the first entry of each suite name and drops every
+// later one. PostgreSQL refuses an INSERT ... ON CONFLICT whose own
+// proposed rows hold one conflict key twice.
+func dedupeSuites(in []RunTestSuitePayload) []RunTestSuitePayload {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]RunTestSuitePayload, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s.Suite]; ok {
+			continue
+		}
+		seen[s.Suite] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+// replaceRunTests deletes the run's run_tests rows, then inserts suites.
+// The payload carries the run's whole bounded suite set and never a
+// delta, so a merge would keep a suite the run no longer reports. An
+// empty suites list runs the delete alone. The rows take created_at from
+// the intent row, so retention deletes a suite row on the run's own
+// cutoff. suites must hold no suite name twice; the ON CONFLICT arm is a
+// guard, never an update.
+func replaceRunTests(ctx context.Context, tx pgx.Tx, intent *intentRow, suites []RunTestSuitePayload) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM varroa.run_tests WHERE run_id = $1`, intent.runID); err != nil {
+		return fmt.Errorf("delete run_tests: %w", err)
+	}
+	if len(suites) == 0 {
+		return nil
+	}
+
+	names := make([]string, len(suites))
+	totals := make([]int32, len(suites))
+	faileds := make([]int32, len(suites))
+	skippeds := make([]int32, len(suites))
+	durations := make([]*int64, len(suites))
+	for i, s := range suites {
+		names[i] = s.Suite
+		totals[i] = int32(s.Total)
+		faileds[i] = int32(s.Failed)
+		skippeds[i] = int32(s.Skipped)
+		durations[i] = s.DurationMs
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO varroa.run_tests (run_id, suite, created_at, total, failed, skipped, duration_ms)
+		SELECT $1, s, $2, t, f, k, d
+		FROM unnest($3::text[], $4::int[], $5::int[], $6::int[], $7::bigint[]) AS x(s, t, f, k, d)
+		ON CONFLICT (run_id, suite) DO NOTHING
+	`,
+		intent.runID, intent.createdAt, names, totals, faileds, skippeds, durations,
+	); err != nil {
+		return fmt.Errorf("insert run_tests: %w", err)
 	}
 	return nil
 }

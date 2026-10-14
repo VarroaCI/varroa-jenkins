@@ -3,6 +3,7 @@ package recordstore
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -133,5 +134,62 @@ func TestMigrationBackfillsTheFleetLockOwner(t *testing.T) {
 		if got != owner {
 			t.Fatalf("owner_tenant of %s = %q, want %q", runID, got, owner)
 		}
+	}
+}
+
+// TestMigration00036DropsTotalRows asserts that migration 00036 deletes the
+// stored sentinel suite rows and keeps every real suite row and the run's
+// counters.
+func TestMigration00036DropsTotalRows(t *testing.T) {
+	t.Parallel()
+
+	dsn := emptyTestDB(t)
+	ctx := context.Background()
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open test connection: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.ExecContext(ctx, "CREATE SCHEMA varroa"); err != nil {
+		t.Fatalf("create schema varroa: %v", err)
+	}
+	migrateTo(t, db, 35)
+
+	created := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	runID := uuid.New()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO varroa.runs (
+			run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status
+		) VALUES ($1, $2, 'manual:drop-total', 'core', 'ns', 'cell-a', 'payments', 'team/job', $3)`,
+		runID, created, StatusCompleted); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	for _, suite := range []string{"_total", "unit"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO varroa.run_tests (run_id, suite, created_at, total, failed, skipped)
+			VALUES ($1, $2, $3, 4, 1, 0)`, runID, suite, created); err != nil {
+			t.Fatalf("seed run_tests %q: %v", suite, err)
+		}
+	}
+
+	migrateTo(t, db, 36)
+
+	rows, err := db.QueryContext(ctx, `SELECT suite FROM varroa.run_tests WHERE run_id = $1 ORDER BY suite`, runID)
+	if err != nil {
+		t.Fatalf("read run_tests: %v", err)
+	}
+	defer rows.Close()
+	var suites []string
+	for rows.Next() {
+		var suite string
+		if err := rows.Scan(&suite); err != nil {
+			t.Fatalf("scan run_tests: %v", err)
+		}
+		suites = append(suites, suite)
+	}
+	if fmt.Sprint(suites) != "[unit]" {
+		t.Fatalf("run_tests suites after 00036 = %v, want [unit]", suites)
 	}
 }

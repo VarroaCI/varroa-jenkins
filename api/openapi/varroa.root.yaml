@@ -602,6 +602,8 @@ components:
       $ref: './components/schemas.yaml#/RunArtifactListResponse'
     RunTestSuite:
       $ref: './components/schemas.yaml#/RunTestSuite'
+    RunTestTotals:
+      $ref: './components/schemas.yaml#/RunTestTotals'
     RunTestListResponse:
       $ref: './components/schemas.yaml#/RunTestListResponse'
     RunTestCase:

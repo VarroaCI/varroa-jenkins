@@ -572,10 +572,10 @@ export default function BuildPage() {
     return () => document.removeEventListener("keydown", handleKey);
   }, [openAdjacentBuild, legendOpen, closeLegend]);
 
-  const totalsRow = useMemo(
-    () => testsQuery.data?.items.find((i) => i.suite === "_total"),
-    [testsQuery.data],
-  );
+  const testTotals = testsQuery.data?.totals;
+  // The suite rows arrive sorted by the reader. The tab shows them in
+  // response order and sorts no row.
+  const suiteRows = testsQuery.data?.items ?? [];
   // The response carries the failed cases first and the skipped cases
   // after. The tab keeps that order and sorts no row.
   const caseRows = testsQuery.data?.cases ?? [];
@@ -685,7 +685,7 @@ export default function BuildPage() {
   const tabs = [
     { id: "log", label: "Log" },
     { id: "artifacts", label: `Artifacts${artifactsQuery.data ? ` (${artifactsQuery.data.items.length})` : ""}` },
-    { id: "tests", label: `Tests${totalsRow ? ` (${totalsRow.total})` : ""}` },
+    { id: "tests", label: `Tests${testTotals ? ` (${testTotals.total})` : ""}` },
     { id: "changes", label: `Changes${changesQuery.data ? ` (${changesQuery.data.items.length})` : ""}` },
   ];
 
@@ -940,7 +940,7 @@ export default function BuildPage() {
           {testsQuery.isError ? (
             <p className={styles.testsNotice}>The run's test results could not be loaded.</p>
           ) : (
-            <p className={styles.testsSummary}>{testsSummary(totalsRow)}</p>
+            <p className={styles.testsSummary}>{testsSummary(testTotals)}</p>
           )}
           <p className={styles.testsNotice}>
             The case table shows the failed and skipped cases the run reported, at most 500. The
@@ -1007,6 +1007,33 @@ export default function BuildPage() {
                 ))}
               </table>
             </div>
+          )}
+          {suiteRows.length > 0 && (
+            <>
+              <p className={styles.testsNotice}>The suite table shows at most 500 suites.</p>
+              <div className={styles.tableScroll}>
+                <table className={styles.table} aria-label="Test suites">
+                  <thead>
+                    <tr>
+                      <th>Suite</th>
+                      <th>Total</th>
+                      <th>Failed</th>
+                      <th>Skipped</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suiteRows.map((s) => (
+                      <tr key={s.suite}>
+                        <td>{breakablePath(s.suite)}</td>
+                        <td>{s.total}</td>
+                        <td>{s.failed}</td>
+                        <td>{s.skipped}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

@@ -3135,7 +3135,7 @@ components:
     RunTestListResponse:
       additionalProperties: false
       description: |
-        GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+        GET /runs/{run}/tests. items holds one row per suite, at most 500, the most failed suites first, then by suite name. items is empty when the run reported no suite. totals holds the run's aggregate counters, and it is absent when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
       properties:
         cases:
           items:
@@ -3147,6 +3147,8 @@ components:
           type: array
         report:
           $ref: '#/components/schemas/components_schemas_RunTestReport'
+        totals:
+          $ref: '#/components/schemas/components_schemas_RunTestTotals'
       required:
       - items
       - cases
@@ -3195,6 +3197,22 @@ components:
           type: integer
       required:
       - suite
+      - total
+      - failed
+      - skipped
+      type: object
+    RunTestTotals:
+      additionalProperties: false
+      description: |
+        The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+      properties:
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        total:
+          type: integer
+      required:
       - total
       - failed
       - skipped
@@ -9514,7 +9532,7 @@ components:
     components_schemas_RunTestListResponse:
       additionalProperties: false
       description: |
-        GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+        GET /runs/{run}/tests. items holds one row per suite, at most 500, the most failed suites first, then by suite name. items is empty when the run reported no suite. totals holds the run's aggregate counters, and it is absent when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
       properties:
         cases:
           items:
@@ -9526,6 +9544,8 @@ components:
           type: array
         report:
           $ref: '#/components/schemas/components_schemas_RunTestReport'
+        totals:
+          $ref: '#/components/schemas/components_schemas_RunTestTotals'
       required:
       - items
       - cases
@@ -9574,6 +9594,22 @@ components:
           type: integer
       required:
       - suite
+      - total
+      - failed
+      - skipped
+      type: object
+    components_schemas_RunTestTotals:
+      additionalProperties: false
+      description: |
+        The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+      properties:
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        total:
+          type: integer
+      required:
       - total
       - failed
       - skipped
@@ -15853,7 +15889,7 @@ paths:
   /api/v1/runs/{run}/tests:
     get:
       description: |
-        items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds every case. Download that file through the run's artifact path.
+        items holds one row per suite, at most 500, the most failed suites first, then by suite name. items is empty when the run reported no suite. totals holds the run's aggregate counters, and it is absent when the run reported no test result. cases holds the run's stored failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds every case. Download that file through the run's artifact path.
       operationId: listRunTests
       parameters:
       - $ref: '#/components/parameters/components_parameters_run'
@@ -15874,8 +15910,7 @@ paths:
           description: The run does not exist, or the caller may not read it.
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
-      summary: Lists one run's test suite totals, its stored test cases, and its test
-        report.
+      summary: Lists one run's test suites, totals, stored test cases, and test report.
       tags:
       - Pipelines
   /api/v1/search:

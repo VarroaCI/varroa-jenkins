@@ -521,7 +521,9 @@ func scanArtifact(row pgx.Row) (Artifact, error) {
 	return a, nil
 }
 
-// ListTests reads every run_tests row for runID, ordered by suite.
+// ListTests reads every run_tests row for runID. The rows sort by failed
+// count, most failed first, then by suite name, so a caller shows the
+// suites that need attention first without sorting again.
 func (r *pgReader) ListTests(ctx context.Context, runID string) ([]TestSuite, error) {
 	if err := r.checkSchema(ctx); err != nil {
 		return nil, err
@@ -530,7 +532,7 @@ func (r *pgReader) ListTests(ctx context.Context, runID string) ([]TestSuite, er
 		SELECT run_id, suite, created_at, total, failed, skipped, duration_ms
 		FROM varroa.run_tests
 		WHERE run_id = $1
-		ORDER BY suite
+		ORDER BY failed DESC, suite
 	`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list tests: %w", err)

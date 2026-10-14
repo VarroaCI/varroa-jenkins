@@ -207,10 +207,14 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `restart_stage` for a restarted build (fields 52 and 53). `completedPayload` writes
   `restart_stages` (field 54) and `restart_refusal` (field 55) only when the plugin sent them.
   A `COMPLETED` event publishes `run.tests` when it carries a
-  test counter, a test case, or a test report, so a report whose case count
-  is zero still reaches the store. `shrinkToBudget`'s `cases` rung runs after
-  the `error` truncation and drops the **last** case, because the plugin
-  sends the cases in priority order.
+  test counter, a test case, a test suite, or a test report, so a report whose
+  case count is zero still reaches the store. `run.tests` carries the four
+  aggregate counters and no `suite` key. It carries `suites` (from
+  `test_suites`, field 59) only when the event holds suites, and no `_total`
+  sentinel exists. `shrinkToBudget`'s `cases` rung runs after the `error`
+  truncation and drops the **last** case, because the plugin sends the cases
+  in priority order. The `suites` rung follows `cases` and drops the last
+  suite the same way.
 - **Command outcomes** (`bus_handler.go`, `build_events.go`) — a
   `CommandResult` for a pending imperative publishes one envelope on the
   same `builds.<cluster>.<ns>.<cell>` subject the build events use.

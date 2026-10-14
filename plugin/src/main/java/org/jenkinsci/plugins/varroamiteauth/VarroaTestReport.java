@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
@@ -349,6 +350,46 @@ final class VarroaTestReport {
                 .durationMs(c.durationMs)
                 .errorDetails(c.errorDetails)
                 .build();
+    }
+
+    /**
+     * Counts each suite of the walk, and answers one row per suite. Rows
+     * sort by failed count, most failed first, then by name. The list
+     * keeps the first {@link VarroaRunRecorder#MAX_TEST_SUITES} rows.
+     * Suites whose cut names are equal merge into one row, so the name
+     * stays a unique key. A null walk answers an empty list.
+     */
+    static List<BuildTestSuite> boundedSuites(List<Case> cases) {
+        List<BuildTestSuite> bounded = new ArrayList<>();
+        if (cases == null) {
+            return bounded;
+        }
+        Map<String, long[]> counts = new LinkedHashMap<>();
+        for (Case c : cases) {
+            String name = VarroaRunRecorder.truncateUtf8Bytes(c.suite, BuildTestSuite.MAX_STRING_BYTES);
+            long[] row = counts.computeIfAbsent(name, k -> new long[4]);
+            row[0]++;
+            if (c.isFailed() && !c.isSkipped()) {
+                row[1]++;
+            }
+            if (c.isSkipped()) {
+                row[2]++;
+            }
+            row[3] += c.durationMs;
+        }
+        for (Map.Entry<String, long[]> e : counts.entrySet()) {
+            long[] row = e.getValue();
+            bounded.add(BuildTestSuite.builder()
+                    .name(e.getKey())
+                    .total((int) row[0])
+                    .failed((int) row[1])
+                    .skipped((int) row[2])
+                    .durationMs(row[3])
+                    .build());
+        }
+        bounded.sort(Comparator.comparingInt(BuildTestSuite::getFailed).reversed()
+                .thenComparing(BuildTestSuite::getName));
+        return VarroaRunRecorder.keepFirst(bounded, VarroaRunRecorder.MAX_TEST_SUITES);
     }
 
     /**

@@ -184,6 +184,14 @@ type runTestSuiteJSON struct {
 	DurationMs int64  `json:"durationMs,omitempty"`
 }
 
+// runTestTotalsJSON is the run's aggregate test counters. Jenkins reports
+// them, so they count every suite, including a suite the items list omits.
+type runTestTotalsJSON struct {
+	Total   int32 `json:"total"`
+	Failed  int32 `json:"failed"`
+	Skipped int32 `json:"skipped"`
+}
+
 // testReportPath is the archived path of the per-case test report, the
 // one the record store names.
 const testReportPath = recordstore.TestReportPath
@@ -218,10 +226,13 @@ type runTestReportDetailJSON struct {
 	CaseCount int32  `json:"caseCount"`
 }
 
-// runTestListResponse is the tests read. Cases is never null: an empty
-// array is its value for a run with no case row.
+// runTestListResponse is the tests read. Items holds one row per suite,
+// and it is empty when the run reported no suite. Totals is absent when
+// the run reported no test result. Cases is never null: an empty array is
+// its value for a run with no case row.
 type runTestListResponse struct {
 	Items  []runTestSuiteJSON `json:"items"`
+	Totals *runTestTotalsJSON `json:"totals,omitempty"`
 	Cases  []runTestCaseJSON  `json:"cases"`
 	Report *runTestReportJSON `json:"report,omitempty"`
 }
@@ -637,10 +648,25 @@ func (s *Server) handleListRunTests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp := runTestListResponse{Items: out, Cases: buildRunTestCases(cases)}
+	if run.TestsTotal != nil {
+		resp.Totals = &runTestTotalsJSON{
+			Total:   *run.TestsTotal,
+			Failed:  int32Value(run.TestsFailed),
+			Skipped: int32Value(run.TestsSkipped),
+		}
+	}
 	if size, count, key, found := storedTestReport(run); found {
 		resp.Report = &runTestReportJSON{Path: testReportPath, SizeBytes: size, CaseCount: count, Downloadable: key != ""}
 	}
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// int32Value answers the value of p, and zero for a nil pointer.
+func int32Value(p *int32) int32 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // --- GET /runs/{run}/changes ---

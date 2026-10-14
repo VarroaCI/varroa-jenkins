@@ -3843,13 +3843,16 @@ type ComponentsSchemasRunTestCase struct {
 	Suite  string `json:"suite"`
 }
 
-// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds the run's aggregate counter row, with suite "_total". items is empty when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds one row per suite, at most 500, the most failed suites first, then by suite name. items is empty when the run reported no suite. totals holds the run's aggregate counters, and it is absent when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
 type ComponentsSchemasRunTestListResponse struct {
 	Cases []ComponentsSchemasRunTestCase  `json:"cases"`
 	Items []ComponentsSchemasRunTestSuite `json:"items"`
 
 	// Report The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
 	Report *ComponentsSchemasRunTestReport `json:"report,omitempty"`
+
+	// Totals The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+	Totals *ComponentsSchemasRunTestTotals `json:"totals,omitempty"`
 }
 
 // ComponentsSchemasRunTestReport The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
@@ -3874,6 +3877,13 @@ type ComponentsSchemasRunTestSuite struct {
 	Skipped    int    `json:"skipped"`
 	Suite      string `json:"suite"`
 	Total      int    `json:"total"`
+}
+
+// ComponentsSchemasRunTestTotals The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+type ComponentsSchemasRunTestTotals struct {
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
+	Total   int `json:"total"`
 }
 
 // ComponentsSchemasRunWait The concurrency cap that holds a queued run. Absent from a run that no cap holds.

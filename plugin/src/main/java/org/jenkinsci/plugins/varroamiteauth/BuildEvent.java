@@ -61,6 +61,10 @@ import java.util.Map;
  * sandbox refused in a failed build. Only the {@code COMPLETED} event
  * carries it. {@link #toJson()} writes no key for it when it is empty.
  *
+ * <p>Field 59, {@code test_suites}, holds one counter row per test suite,
+ * at most 500, the most failed suites first. Only the {@code COMPLETED}
+ * event carries it. {@link #toJson()} writes no key for an empty list.
+ *
  * <p>Field 56, {@code change_request}, names the change request a
  * multibranch pull-request run builds. Only the {@code STARTED} event
  * carries it. {@link #toJson()} writes no key for a null value or an
@@ -129,6 +133,7 @@ public final class BuildEvent implements PostableEvent {
     private final List<BuildInput> inputs;
     private final BuildTestReport testReport;
     private final List<BuildTestCase> testCases;
+    private final List<BuildTestSuite> testSuites;
     private final String replayOf;
     private final long grantedBuildNumber;
     private final String restartOf;
@@ -189,6 +194,7 @@ public final class BuildEvent implements PostableEvent {
         this.inputs = List.copyOf(b.inputs);
         this.testReport = b.testReport;
         this.testCases = List.copyOf(b.testCases);
+        this.testSuites = List.copyOf(b.testSuites);
         this.replayOf = orEmpty(b.replayOf);
         this.grantedBuildNumber = b.grantedBuildNumber;
         this.restartOf = orEmpty(b.restartOf);
@@ -432,6 +438,11 @@ public final class BuildEvent implements PostableEvent {
         return testCases;
     }
 
+    /** Field 59: one counter row per test suite, at most 500. Empty for a run that reported no suite. */
+    public List<BuildTestSuite> getTestSuites() {
+        return testSuites;
+    }
+
     /** Field 50: the run a replayed build copied its script from. Empty for a build with no source. */
     public String getReplayOf() {
         return replayOf;
@@ -571,6 +582,13 @@ public final class BuildEvent implements PostableEvent {
             }
             o.put("test_cases", testCasesArr);
         }
+        if (!testSuites.isEmpty()) {
+            JSONArray testSuitesArr = new JSONArray();
+            for (BuildTestSuite s : testSuites) {
+                testSuitesArr.add(s.toJson());
+            }
+            o.put("test_suites", testSuitesArr);
+        }
         if (!replayOf.isEmpty()) {
             o.put("replay_of", replayOf);
         }
@@ -663,6 +681,7 @@ public final class BuildEvent implements PostableEvent {
                 .inputs(inputs)
                 .testReport(testReport)
                 .testCases(testCases)
+                .testSuites(testSuites)
                 .replayOf(replayOf)
                 .grantedBuildNumber(grantedBuildNumber)
                 .restartOf(restartOf)
@@ -783,6 +802,7 @@ public final class BuildEvent implements PostableEvent {
         private List<BuildInput> inputs = new ArrayList<>();
         private BuildTestReport testReport;
         private List<BuildTestCase> testCases = new ArrayList<>();
+        private List<BuildTestSuite> testSuites = new ArrayList<>();
         private String replayOf;
         private long grantedBuildNumber;
         private String restartOf;
@@ -1064,6 +1084,12 @@ public final class BuildEvent implements PostableEvent {
         /** Field 49: the failed cases, then the skipped cases, in walk order. */
         public Builder testCases(List<BuildTestCase> v) {
             this.testCases = v != null ? new ArrayList<>(v) : new ArrayList<>();
+            return this;
+        }
+
+        /** Field 59: one counter row per test suite. A null list becomes empty. */
+        public Builder testSuites(List<BuildTestSuite> v) {
+            this.testSuites = v != null ? new ArrayList<>(v) : new ArrayList<>();
             return this;
         }
 

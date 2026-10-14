@@ -595,12 +595,17 @@ func assertStageWithoutLogTail(t *testing.T, srv *Server) {
 func newTestCaseReader(blobKey *string) *fakeRecordReader {
 	reader := newFakeRecordReader()
 	duration := int64(1250)
+	totals, failed, skipped := int32(7), int32(2), int32(1)
 	reader.runs["r1"] = recordstore.Run{
 		RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED",
 		Payload:       json.RawMessage(`{"log_summary":{"finalized":true},"test_report":{"size_bytes":2048,"case_count":7}}`),
 		TestReportKey: blobKey,
+		TestsTotal:    &totals, TestsFailed: &failed, TestsSkipped: &skipped,
 	}
-	reader.tests["r1"] = []recordstore.TestSuite{{RunID: "r1", Suite: "_total", Total: 7, Failed: 2, Skipped: 1}}
+	reader.tests["r1"] = []recordstore.TestSuite{
+		{RunID: "r1", Suite: "unit", Total: 5, Failed: 2, Skipped: 0},
+		{RunID: "r1", Suite: "it", Total: 2, Failed: 0, Skipped: 1},
+	}
 	reader.testCases["r1"] = []recordstore.TestCase{
 		{Suite: "unit", ClassName: "com.example.FooTest", Name: "bar", Status: "FAILED", DurationMs: &duration, ErrorDetails: "boom"},
 		{Suite: "unit", ClassName: "com.example.FooTest", Name: "baz", Status: "REGRESSION"},
@@ -619,8 +624,15 @@ func TestHandleListRunTests_CarriesCasesAndReport(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].Suite != "_total" {
-		t.Fatalf("items = %+v, want the suite row unchanged", resp.Items)
+	suites := make([]string, 0, len(resp.Items))
+	for _, it := range resp.Items {
+		suites = append(suites, it.Suite)
+	}
+	if strings.Join(suites, ",") != "unit,it" {
+		t.Fatalf("items = %v, want the reader's own order", suites)
+	}
+	if resp.Totals == nil || *resp.Totals != (runTestTotalsJSON{Total: 7, Failed: 2, Skipped: 1}) {
+		t.Fatalf("totals = %+v, want {7 2 1}", resp.Totals)
 	}
 	names := make([]string, 0, len(resp.Cases))
 	for _, c := range resp.Cases {
@@ -637,6 +649,19 @@ func TestHandleListRunTests_CarriesCasesAndReport(t *testing.T) {
 	want := runTestReportJSON{Path: ".varroa/tests.json", SizeBytes: 2048, CaseCount: 7, Downloadable: true}
 	if resp.Report == nil || *resp.Report != want {
 		t.Fatalf("report = %+v, want %+v", resp.Report, want)
+	}
+}
+
+func TestHandleListRunTests_OmitsTotalsWithoutCounters(t *testing.T) {
+	reader := newFakeRecordReader()
+	reader.runs["r1"] = recordstore.Run{RunID: "r1", Tenant: "test-ns/ctrl-a", JobPath: "svc/main", Status: "COMPLETED"}
+	srv := newRunFixtureServer(reader, nil)
+	rec := doRunRequest(t, srv.handleListRunTests, "/runs/r1/tests", map[string]string{"run": "r1"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"totals"`) {
+		t.Fatalf("body = %s, want no totals for a run with no counters", rec.Body.String())
 	}
 }
 

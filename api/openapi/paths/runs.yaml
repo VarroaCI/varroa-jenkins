@@ -144,12 +144,13 @@
   get:
     operationId: listRunTests
     tags: [Pipelines]
-    summary: Lists one run's test suite totals, its stored test cases, and its test report.
+    summary: Lists one run's test suites, totals, stored test cases, and test report.
     description: >
-      items holds the run's aggregate counter row, with suite "_total".
-      items is empty when the run reported no test result. cases holds
-      the run's stored failed and skipped cases, at most 500, failed
-      cases first. report describes the archived report file, which holds
+      items holds one row per suite, at most 500, the most failed suites
+      first, then by suite name. items is empty when the run reported no
+      suite. totals holds the run's aggregate counters, and it is absent
+      when the run reported no test result. cases holds the run's stored
+      failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds
       every case. Download that file through the run's artifact path.
     parameters:
       - $ref: '../components/parameters.yaml#/run'

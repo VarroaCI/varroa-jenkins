@@ -240,18 +240,31 @@ type RunStagePayload struct {
 }
 
 // RunTestsPayload is the payload of a run.tests envelope, mapped onto
-// run_tests, run_test_cases, and runs. It reports one suite's counters per
-// envelope. Cases spans every suite, because the plugin sends one bounded
+// run_tests, run_test_cases, and runs. One envelope carries the run's
+// aggregate counters and its whole bounded suite set. The counters come
+// from Jenkins, so they count every suite, including a suite the Suites
+// list omits. A nil Suites means the key is absent, and the write then
+// changes no suite row. An empty non-nil Suites clears the run's stored
+// suite set. Cases spans every suite, because the plugin sends one bounded
 // set per run. A nil Cases means the key is absent, and the write then
 // changes no case row. An empty non-nil Cases clears the run's stored set.
 type RunTestsPayload struct {
-	Suite      string                `json:"suite"`
 	Total      int                   `json:"total"`
 	Failed     int                   `json:"failed"`
 	Skipped    int                   `json:"skipped"`
-	DurationMs *int64                `json:"duration_ms,omitempty"`
+	Suites     []RunTestSuitePayload `json:"suites"`
 	Cases      []RunTestCasePayload  `json:"cases"`
 	TestReport *RunTestReportPayload `json:"test_report,omitempty"`
+}
+
+// RunTestSuitePayload is one entry of a run.tests payload's suites list,
+// mapped onto one run_tests row.
+type RunTestSuitePayload struct {
+	Suite      string `json:"suite"`
+	Total      int    `json:"total"`
+	Failed     int    `json:"failed"`
+	Skipped    int    `json:"skipped"`
+	DurationMs *int64 `json:"duration_ms,omitempty"`
 }
 
 // RunTestCasePayload is one entry of a run.tests payload's cases list,

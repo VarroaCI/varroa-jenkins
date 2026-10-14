@@ -81,7 +81,8 @@ the root AGENTS.md greenfield rule.
   `ScriptRejections` joins up to three requesters per signature from a bounded
   in-memory map. The operator filters pool-approved signatures as a second guard.
   `VarroaRunRecorder` stamps `rejected_signature` (BuildEvent field 57) on the
-  COMPLETED event. The same class's `doSchedules` serves
+  COMPLETED event. The COMPLETED event also carries `test_suites` (field 59, cap 500),
+  derived from the case walk by `VarroaTestReport.boundedSuites`. The same class's `doSchedules` serves
   `GET /varroa-activity/schedules`, reusing its method gate and
   `Items.getAllItems(Job.class)` walk: one row per job trigger, plus one `none`
   row for a job with no trigger, so the response is the cell's whole job

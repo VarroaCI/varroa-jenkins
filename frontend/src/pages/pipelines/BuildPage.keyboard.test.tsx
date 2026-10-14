@@ -77,7 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetRun.mockResolvedValue(run());
   mockListRunArtifacts.mockResolvedValue({ items: [] });
-  mockListRunTests.mockResolvedValue({ items: [{ suite: "_total", total: 0, failed: 0, skipped: 0 }] });
+  mockListRunTests.mockResolvedValue({ items: [], totals: { total: 0, failed: 0, skipped: 0 }, cases: [] });
   mockListRunChanges.mockResolvedValue({ items: [] });
   mockListRuns.mockResolvedValue({
     items: [

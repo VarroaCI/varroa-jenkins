@@ -138,6 +138,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   adds `log_chunks.writer`, the writer a part was last written with
   (`blob.Store.PartStamp`); `varroa_gateway` holds `UPDATE` on it, and
   `Overwrite`'s `WHERE digest = … AND writer = …` needs only its `SELECT`.
+  `00036_run_tests_drop_total.sql` deletes every stored `_total` row of
+  `run_tests`.
   `00028_runs_upstream.sql` adds four nullable `runs` columns: `upstream_run_id`,
   `upstream_tenant`, `upstream_job` (tenant-qualified), and `upstream_number`. Only
   `run.started` writes them, through `COALESCE`. The partial index `runs_upstream_run_id_idx`
@@ -811,8 +813,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   `runsStatusMergeSQL` (`ingest_common.go`) is the
   one CASE expression every `runs` writer reuses to keep `status` monotonic
   and `DUPLICATE` terminal.
-  `applyRunTests` (`ingest_tests.go`) also writes the payload's `cases` and
-  `test_report` in the same transaction. A `cases` key replaces the run's
+  `applyRunTests` (`ingest_tests.go`) takes `runs.tests_*` from the payload's
+  own `total`, `failed`, and `skipped`, never from a sum of `run_tests`. A
+  `suites` key replaces the run's `run_tests` set (`replaceRunTests`): an
+  absent key changes no row, and an empty list clears the set. It also writes
+  the payload's `cases` and `test_report` in the same transaction. A `cases` key replaces the run's
   whole `run_test_cases` set: a delete, then one `unnest` insert of the
   cases `dedupeCases` keeps. An absent `cases` key changes no case row.
   `test_report.blob_key` reaches `runs.test_report_key` only when it is
