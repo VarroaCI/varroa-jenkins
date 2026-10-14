@@ -3062,16 +3062,43 @@ func PodName(cr *v1alpha1.Controller, ordinal int) string {
 	return fmt.Sprintf("%s-%d", controllerPrefix(cr), ordinal)
 }
 
+// cellExcludedPlugins lists the plugins that a cell never installs. A cell
+// home is temporary, so a Job DSL seed job cannot keep the jobs it makes.
+var cellExcludedPlugins = map[string]bool{"job-dsl": true}
+
+// cellInstalledSet returns set without the cellExcludedPlugins entries when cr
+// is a cell. Every other controller gets set unchanged.
+func cellInstalledSet(cr *v1alpha1.Controller, set []pluginlock.PluginEntry) []pluginlock.PluginEntry {
+	if !isCellController(cr) {
+		return set
+	}
+	kept := make([]pluginlock.PluginEntry, 0, len(set))
+	for _, e := range set {
+		if !cellExcludedPlugins[e.ArtifactID] {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
 // managedPluginLines returns the ordered, deduplicated managed plugin lines for
 // plugins.txt. Core lockfile entries come first (pinned); non-core entries from
 // PluginSpec (if non-empty) or bundle plugins.yaml follow, with duplicates of
 // core entries dropped. Each line is "artifactId[:version]".
 // coreSet is the resolved plugin set from a JenkinsVersionProfile (or the
 // embedded baseline when no profile matched).
+// On a cell, the function drops each plugin in cellExcludedPlugins from the core set and from the bundle or pluginSpec entries.
 func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) []string {
+	var excluded map[string]bool
+	if isCellController(cr) {
+		excluded = cellExcludedPlugins
+	}
 	coreIDs := make(map[string]bool, len(coreSet))
 	var lines []string
 	for _, e := range coreSet {
+		if excluded[e.ArtifactID] {
+			continue
+		}
 		coreIDs[e.ArtifactID] = true
 		if e.Version != "" {
 			lines = append(lines, e.ArtifactID+":"+e.Version)
@@ -3083,7 +3110,7 @@ func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBu
 	nonCore, _ := nonCorePluginEntries(cr, resolved)
 
 	for _, e := range nonCore {
-		if e.ArtifactId == "" {
+		if e.ArtifactId == "" || excluded[e.ArtifactId] {
 			continue
 		}
 		if coreIDs[e.ArtifactId] {
@@ -3434,17 +3461,20 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		return fmt.Errorf("version upgrade blocked: %s", compat.Message)
 	}
 	coreSet := r.resolveCoreSet(ctx, cr, profile, r.Logger)
+	// The pin gates judge only the plugins this controller installs. A cell
+	// never installs a cellExcludedPlugins entry, so its pin is not a conflict.
+	installedSet := cellInstalledSet(cr, coreSet)
 	// PluginPinConflict runs before the blocking pluginVersionConflict gate below
 	// so it still fires on the same reconcile that gate blocks on — placing it
 	// after would skip this independent signal exactly when it's most relevant.
-	if report, pinErr := bundle.CheckPluginPins(resolved.RawPluginsYAML, coreSet); pinErr == nil {
+	if report, pinErr := bundle.CheckPluginPins(resolved.RawPluginsYAML, installedSet); pinErr == nil {
 		if len(report.Conflicts) > 0 {
 			r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
 		} else {
 			r.clearPluginPinConflict(ctx, cr, bundleIdent)
 		}
 	}
-	if conflict := pluginVersionConflict(cr, resolved, coreSet); conflict != "" {
+	if conflict := pluginVersionConflict(cr, resolved, installedSet); conflict != "" {
 		r.surfacePluginConflict(ctx, cr, conflict)
 		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedPluginConflict, conflict)
 		return fmt.Errorf("plugin version conflict: %s", conflict)
@@ -4210,7 +4240,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// Detection-only plugin lock conflict check (C4): surface the condition,
 		// metric, and edge event but do NOT disrupt a running Connected controller.
 		// The provisioning path (handleProvisioning) blocks on this same check.
-		if conflict := pluginVersionConflict(cr, resolvedBundle, coreSet); conflict != "" {
+		if conflict := pluginVersionConflict(cr, resolvedBundle, cellInstalledSet(cr, coreSet)); conflict != "" {
 			r.surfacePluginConflict(ctx, cr, conflict)
 		} else {
 			r.clearPluginConflict(ctx, cr)
@@ -4218,7 +4248,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 		// PluginPinConflict (C1): same detection-only treatment as above, but an
 		// independent condition/event pair — see surfacePluginPinConflict.
-		if report, pinErr := bundle.CheckPluginPins(resolvedBundle.RawPluginsYAML, coreSet); pinErr == nil {
+		if report, pinErr := bundle.CheckPluginPins(resolvedBundle.RawPluginsYAML, cellInstalledSet(cr, coreSet)); pinErr == nil {
 			if len(report.Conflicts) > 0 {
 				r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
 			} else {

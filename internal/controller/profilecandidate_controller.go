@@ -810,7 +810,7 @@ func (r *ProfileCandidateReconciler) checkPreflight(ctx context.Context, candida
 		if !ok {
 			continue
 		}
-		report, err := bundle.CheckPluginPins(pluginsYAML, set)
+		report, err := bundle.CheckPluginPins(pluginsYAML, cellInstalledSet(cr, set))
 		if err != nil {
 			logger.Warn("failed to check plugin pins during pre-flight", "controller", cr.Name, "namespace", cr.Namespace, "error", err)
 			continue

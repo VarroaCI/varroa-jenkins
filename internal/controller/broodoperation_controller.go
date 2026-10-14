@@ -1035,7 +1035,7 @@ func (r *BroodOperationReconciler) dispatchUpgrade(ctx context.Context, op *v1al
 
 	pluginSet := r.upgradePluginSet(ctx, pinVersion, pinProfile)
 	if pluginsYAML, ok := r.upgradeTargetPluginsYAML(ctx, cr); ok {
-		report, checkErr := bundle.CheckPluginPins(pluginsYAML, pluginSet)
+		report, checkErr := bundle.CheckPluginPins(pluginsYAML, cellInstalledSet(cr, pluginSet))
 		if checkErr == nil && len(report.Conflicts) > 0 {
 			message := pluginPinConflictMessage(report)
 			r.failUpgradeTarget(op, t, message)

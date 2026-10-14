@@ -12,7 +12,7 @@ Varroa combines the selected Jenkins core lock with one non-core plugin source.
 
 The controller list replaces the bundle list. It does not merge with it. Core
 pins always win. A conflicting non-core pin sets `PluginConflict=True` and
-blocks provisioning.
+blocks provisioning. On a cell, a pin on a plugin that the cell never installs (`job-dsl`) is not compared and sets neither condition.
 
 ## Preflight bundle pins before they block anything
 

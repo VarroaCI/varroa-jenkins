@@ -511,7 +511,7 @@ sections describe.
   `coreSetForCr` (`controller_controller.go:822`/`850`) turn the matched profile (or
   baseline) into `[]pluginlock.PluginEntry`, fed into `managedPluginLines` for both
   provisioning-time `plugins.txt` and connected-phase drift detection — these two call
-  sites must stay in sync or plugin drift will fire spuriously.
+  sites must stay in sync or plugin drift will fire spuriously. On a cell, `managedPluginLines` drops each `cellExcludedPlugins` entry (today `job-dsl`) from the core set and from the bundle or `pluginSpec` entries. The pin gates (`CheckPluginPins`, `pluginVersionConflict`) judge the same reduced set (`cellInstalledSet`).
 - `ResourceClient` (`controller_controller.go`, ~40 methods) is the operator's deep-op
   K8s surface (StatefulSet/Service/Ingress/Secret/ConfigMap/pod/wake operations, including
   `DeleteControllerPodGrace` for a short-grace, UID-fenced pod delete, plus the

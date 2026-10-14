@@ -109,7 +109,7 @@ A phase says where the controller is in its lifecycle. It does not say whether t
 | Signal | Shown as | Meaning |
 |---|---|---|
 | `status.phase: Failed` | Failed | A blocking provisioning or operation error. See the `Failed` condition. |
-| `ReconcileBlocked` condition | Blocked | The operator cannot proceed. The bundle is unreadable, or a plugin pin conflicts with the version-profile lock. The message names the fix. |
+| `ReconcileBlocked` condition | Blocked | The operator cannot proceed. The bundle is unreadable, or a plugin pin conflicts with the version-profile lock (a cell ignores a pin on `job-dsl`). The message names the fix. |
 | `JenkinsBootFailed` condition | Boot failed | The Jenkins container is crash-looping, or its image cannot be pulled. The message carries the exit code and restart count. Read the container logs. |
 | `PluginRollFailed` condition | Plugin roll failed | The `plugins-init` step failed. |
 | `status.lastApplyResult.succeeded: false` | Apply failed | The mite could not apply the last desired state. |
