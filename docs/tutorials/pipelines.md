@@ -69,10 +69,12 @@ median wait from queue entry to start, quiet period included, over the last 30 d
 glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
 or more failed. A job that has never run shows no glyph and an empty last build.
 
-A job row or a multibranch row can show a **Pending** badge. The team's bundle declares the job, but no cell has created it yet. A cell creates the job at its next apply. The job page shows the same note, and **Run** stays available. Varroa shows the badge only when each cell of a tenant that declares the job reported a complete job list.
+A folder held for a parse or variable fault shows no declared job; run history shows.
 
-A folder row carries a fold control, the folder name, and two counts: the jobs below it, and how
-many of those build now. A folder reports no health value.
+A job row or a multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it yet. A cell creates the job at its next apply. The job page shows the note; **Run** stays available. Varroa shows the badge only when every cell reports a full job list.
+
+A folder row carries a fold control, its name, and two counts: the jobs below it, and how
+many build now. A folder reports no health value.
 
 A multibranch item is a folder row that counts branches instead of jobs. It offers no **Run**
 control, because it does not build. Its branches sit below it.

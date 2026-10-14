@@ -2913,12 +2913,12 @@ func TestResolveBundleForController_PipelineTemplateBodySurvivesInjection(t *tes
 }
 
 // TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVar
-// is C8's owed acceptance test (design D7). findUnresolvedVars must not
+// is C8's owed acceptance test (design D7). bundle.RemainingVarRefs must not
 // report the ${env.BRANCH_NAME} Groovy text in
 // pipelineTemplatesFixtureYAML's jenkinsfile body. That text is not an
 // unresolved catalog variable. resolveBundleForController runs the
 // unresolved-variable check before InjectPipelineTemplates. The check never
-// sees a template body. findUnresolvedVars does not recognize and skip
+// sees a template body. bundle.RemainingVarRefs does not recognize and skip
 // template text on its own.
 //
 // A success (err == nil) proves the check passed. The template's
@@ -2943,8 +2943,8 @@ func TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVa
 	if !strings.Contains(mat.JenkinsYAML, "^${env.BRANCH_NAME}") {
 		t.Fatalf("final jenkins.yaml lacks the escaped template variable:\n%s", mat.JenkinsYAML)
 	}
-	if got := findUnresolvedVars(true, mat.JenkinsYAML); len(got) != 0 {
-		t.Fatalf("findUnresolvedVars on the final jenkins.yaml = %v, want none (the escape hides the body)", got)
+	if got := bundle.RemainingVarRefs(true, mat.JenkinsYAML); len(got) != 0 {
+		t.Fatalf("bundle.RemainingVarRefs on the final jenkins.yaml = %v, want none (the escape hides the body)", got)
 	}
 }
 
@@ -3182,37 +3182,6 @@ func TestHandlePending_RejectsMissingBundle(t *testing.T) {
 	}
 	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
 		t.Errorf("expected phase Failed, got %s", cr.Status.Phase)
-	}
-}
-
-func TestFindUnresolvedVars(t *testing.T) {
-	vars := findUnresolvedVars(true,
-		"jenkins:\n  url: ${MY_URL}\n  name: ${MY_NAME}\n",
-		"",
-		"items:\n- name: ${MY_ITEM}\n",
-		"",
-	)
-	if len(vars) != 3 {
-		t.Errorf("expected 3 unresolved vars, got %d: %v", len(vars), vars)
-	}
-	for _, want := range []string{"MY_URL", "MY_NAME", "MY_ITEM"} {
-		found := false
-		for _, v := range vars {
-			if v == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected %q in unresolved vars", want)
-		}
-	}
-}
-
-func TestFindUnresolvedVars_None(t *testing.T) {
-	vars := findUnresolvedVars(true, "jenkins:\n  key: value\n", "", "", "")
-	if len(vars) != 0 {
-		t.Errorf("expected 0 unresolved vars, got %d: %v", len(vars), vars)
 	}
 }
 

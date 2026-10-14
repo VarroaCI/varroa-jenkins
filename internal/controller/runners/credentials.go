@@ -23,7 +23,7 @@ const (
 const runnerCredentialLabelSelector = "varroa.dev/runner-credential=true"
 
 // unresolvedVarToken marks a JCasC substitution the operator refuses to
-// carry into a credential value. findUnresolvedVars runs earlier in
+// carry into a credential value. bundle.RemainingVarRefs runs earlier in
 // desired-state assembly, before this Secret is read, so a value carrying
 // this token would otherwise reach core unresolved.
 const unresolvedVarToken = "${"

@@ -10,6 +10,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -149,14 +150,16 @@ func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1
 }
 
 // controllerItemManifest reads and parses the items.yaml that declares
-// ref's jobs. A placed Team (ref.Folder set) reads its own tenant bundle
-// and re-roots the manifest under the Team folder, which is how the cell
-// assembles it; the cell's bundle never carries a tenant job. A synthetic
+// ref's jobs. A placed Team (ref.Folder set) reads its own tenant bundle.
+// It resolves the tenant's variables, then parses strictly, as the cell
+// does. A manifest that the cell holds gives no definition. The gate is
+// ref.Folder, so a placed Team with no local controller is covered. The
+// read re-roots the manifest under the Team folder. A synthetic
 // single-controller tenant (ref.Folder empty) reads its controller's
-// bundle. It returns the bundle it read, and a nil manifest, with no
-// error, when the controller, the bundle, or an items.yaml key cannot be
-// found: a tenant with no declared item still serves record-derived data
-// alone.
+// bundle and parses it leniently. It returns the bundle it read, and a
+// nil manifest, with no error, when the controller, the bundle, or an
+// items.yaml key cannot be found, or when the manifest fails to parse: a
+// tenant with no declared item still serves record-derived data alone.
 func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *v1alpha1.ComposedBundle, *items.Manifest, error) {
 	var (
 		cr  *v1alpha1.Controller
@@ -185,7 +188,12 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 	if !ok || content == "" {
 		return cr, cb, nil, nil
 	}
-	manifest, err := items.Parse(content)
+	var manifest *items.Manifest
+	if ref.Folder != "" {
+		manifest, err = bundle.ParseTenantItems(cm)
+	} else {
+		manifest, err = items.Parse(content)
+	}
 	if err != nil {
 		// An items.yaml that fails to parse leaves the pipeline surface
 		// without a definition rather than failing the read: the

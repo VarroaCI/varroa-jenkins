@@ -781,3 +781,95 @@ func TestMultibranchGitHubForkDiscoveryCountsAsPullRequest(t *testing.T) {
 		t.Fatalf("fork-only github traits: push=%v pullRequest=%v, want push false and pullRequest true", push, pr)
 	}
 }
+
+// tenantUnknownKeyItems holds one item with a key the strict parser refuses.
+const tenantUnknownKeyItems = `items:
+  - kind: freeStyle
+    name: job
+    notAKey: x
+`
+
+// tenantVarInKeyItems names its builder field with a variable. Resolving
+// the variable first gives a valid manifest.
+const tenantVarInKeyItems = `items:
+  - kind: freeStyle
+    name: job
+    ${field}:
+      - shell:
+          command: echo hi
+`
+
+// TestControllerItemManifest_PlacedTeamUnknownKeyGivesNoManifest asserts a
+// placed Team whose items.yaml holds an unknown key gives no definition, as
+// the cell holds that tenant.
+func TestControllerItemManifest_PlacedTeamUnknownKeyGivesNoManifest(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
+	srv := definitionTestServer(client)
+
+	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "cell-1", Namespace: "test-ns"}
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: the cell holds a tenant with an unknown key", manifest)
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamVarInKeyKeepsManifest asserts a
+// placed Team that names a key with ${var} keeps its definition: the
+// variable resolves before the strict parse, as in the cell.
+func TestControllerItemManifest_PlacedTeamVarInKeyKeepsManifest(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{
+		"items.yaml":     tenantVarInKeyItems,
+		"variables.yaml": "field: builders\n",
+	}
+	srv := definitionTestServer(client)
+
+	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "cell-1", Namespace: "test-ns"}
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest == nil || len(manifest.Items) != 1 {
+		t.Fatalf("manifest = %+v, want one item after variable resolution", manifest)
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamWithNoLocalControllerParsesStrictly
+// asserts the strict read does not depend on a controller in the Team's
+// own namespace. The gate is the placement, not the controller.
+func TestControllerItemManifest_PlacedTeamWithNoLocalControllerParsesStrictly(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
+	srv := definitionTestServer(client)
+
+	ref := TenantRef{Folder: "payments", Team: "payments", Controller: "absent", Namespace: "test-ns"}
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: a placed Team with no local controller parses strictly", manifest)
+	}
+}
+
+// TestControllerItemManifest_SyntheticTenantStaysLenient asserts a
+// single-controller tenant (no folder) keeps the lenient parse, so an
+// unknown key does not hide its definition.
+func TestControllerItemManifest_SyntheticTenantStaysLenient(t *testing.T) {
+	client := newMultibranchControllerFixture()
+	client.configMaps["bundle-a-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
+	srv := definitionTestServer(client)
+
+	ref := TenantRef{Controller: "ctrl-a", Namespace: "test-ns"}
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest == nil || len(manifest.Items) != 1 {
+		t.Fatalf("manifest = %+v, want one item from the lenient parse", manifest)
+	}
+}

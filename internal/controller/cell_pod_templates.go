@@ -82,7 +82,7 @@ func liftTenantPodTemplates(team, agentNamespace, jenkinsYAML string, vars bundl
 	}
 	var keptTemplates []kept
 	seen := map[string]bool{}
-	resolver := tenantVarsReplacer(vars)
+	resolver := bundle.VarsReplacer(vars)
 	for _, e := range entries {
 		if _, ok := e.value.(map[string]any); !ok {
 			skip(e.path, "entry is not a map")
@@ -225,25 +225,6 @@ func collectTenantPodTemplates(doc map[string]any) ([]tenantPodTemplateEntry, []
 		}
 	}
 	return entries, residue
-}
-
-// tenantVarsReplacer builds one replacer that swaps each "${name}" of vars
-// for its value. A strings.Replacer makes one pass and never scans a
-// replacement again. bundle.ResolveVars loops over a map, so a value that
-// names another variable would resolve on some ticks and not on others,
-// and the lift would then flip between keeping and skipping the template.
-// With one pass, such a value always keeps its "${" and is always skipped.
-func tenantVarsReplacer(vars bundle.Variables) *strings.Replacer {
-	names := make([]string, 0, len(vars))
-	for name := range vars {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	pairs := make([]string, 0, 2*len(names))
-	for _, name := range names {
-		pairs = append(pairs, "${"+name+"}", vars[name])
-	}
-	return strings.NewReplacer(pairs...)
 }
 
 // resolveTemplateStrings returns a deep copy of v with the tenant's

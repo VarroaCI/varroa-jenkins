@@ -258,7 +258,7 @@ func (r *Reconciler) readTenantBundleContent(ctx context.Context, team *v1alpha1
 // for a non-empty plugins.yaml or rbac.yaml, which a cell never applies.
 // It runs for a draining tenant too.
 func tenantBundleCloudContent(team, agentNamespace string, data map[string]string) ([]bundle.TenantCloudTemplate, []v1alpha1.TenantWarning) {
-	lift := liftTenantPodTemplates(team, agentNamespace, data["jenkins.yaml"], parseBundleVariables(data["variables.yaml"]))
+	lift := liftTenantPodTemplates(team, agentNamespace, data["jenkins.yaml"], bundle.ParseVariables(data["variables.yaml"]))
 	warnings := lift.Warnings
 	for _, key := range []string{"plugins.yaml", "rbac.yaml"} {
 		if strings.TrimSpace(data[key]) != "" {
@@ -366,13 +366,9 @@ func materializeTenantManifest(team string, data map[string]string, coreSet []pl
 			return nil, fmt.Errorf("item manifest sets top-level key \"root\" (from %s); a tenant may not set root", d.Source)
 		}
 	}
-	resolved := tenantVarsReplacer(parseBundleVariables(data["variables.yaml"])).Replace(data["items.yaml"])
-	if unresolved := findUnresolvedVars(false, resolved); len(unresolved) > 0 {
-		return nil, fmt.Errorf("items.yaml holds unresolved variables: %s", strings.Join(unresolved, ", "))
-	}
-	manifest, err := items.ParseStrict(resolved)
+	manifest, err := bundle.ParseTenantItems(data)
 	if err != nil {
-		return nil, fmt.Errorf("parse tenant items.yaml: %w", err)
+		return nil, err
 	}
 	rerooted, err := items.ReRoot(manifest, team)
 	if err != nil {

@@ -105,24 +105,24 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   [pod templates](tenant-pod-templates.md). A job that the bundle drops leaves the
   folder; its next trigger fails with `JOB_NOT_FOUND`. See
   [Build records](build-records.md).
-- **Held folder.** Tenant items resolve only their own bundle's variables. The operator
-  keeps the folder and its jobs as they are on one of these faults:
+- **Held folder.** Tenant items resolve only their own variables. The operator
+  keeps the folder and jobs on one of these faults:
   - an item still holds `${`, a `${varroa_*}` name too;
   - the items do not parse, hold an unknown key, set `root`, or fail a lint rule;
   - the item manifest holds an undefined top-level key, such as `item`, or a top-level `root` key;
   - an item needs a plugin the cell does not pin;
   - a pipeline template does not load, or its body fails a lint rule. Only a failing template
     leaves the fragment; the tenant's other templates stay;
-  - the bundle is missing or not yet built.
+  - the bundle is missing or not built.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until fixed.
+  folder until fixed. A folder held for a parse or variable fault shows no declared job.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
-- **Service identity.** Builds in the folder run as `svc-<team>`, a plugin-synthesized identity
-  with no Jenkins user record.
+- **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
+  with no user record.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
-  `spec.pipelines.agentNamespace`. The folder permits only that cloud. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
+  `spec.pipelines.agentNamespace`. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
   `agent any` lands on the default cloud, which the agent fence refuses.
 - **Projected credentials.** A `Secret` labelled `varroa.dev/tenant-credential: "true"` in the
   agent namespace becomes a folder-scoped Jenkins credential:

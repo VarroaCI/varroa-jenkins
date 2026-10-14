@@ -18,7 +18,10 @@ index parsing, and pre-apply content validation.
   file merging (`manifest.go`), catalog index/content validation
   (`catalog.go`, `catalog_validate.go`), the `${var}` substitution primitive
   `ResolveVars` + canonical `InjectedVariableNames` (`resolver.go`),
-  unresolved-variable scanning (`unresolved.go`), `unclassified.location.url`
+  unresolved-variable scanning (`unresolved.go`), the tenant `variables.yaml`
+  parse, single-pass replacer, and strict tenant items parse (`tenantvars.go`:
+  `ParseVariables`, `VarsReplacer`, `RemainingVarRefs`, `ParseTenantItems`,
+  shared by the cell and the pipelines read), `unclassified.location.url`
   injection (`location.go`), structural/content validation (`validator.go`),
   the pipeline-template set (`pipelinetemplates.go`'s
   `InjectPipelineTemplates`, package `pipelinetemplate/`), and tenant-cloud

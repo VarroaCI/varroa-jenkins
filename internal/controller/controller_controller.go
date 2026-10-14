@@ -549,7 +549,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	}
 
 	// Restore bundle-defined variables from the ConfigMap.
-	vars := parseBundleVariables(data["variables.yaml"])
+	vars := bundle.ParseVariables(data["variables.yaml"])
 
 	// Inject varroa_controller_* variables (highest priority).
 	// The endpoint must point at the UID-named Service (controllerPrefix(cr)+"-svc",
@@ -688,12 +688,12 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.RbacYAML = bundle.ResolveVars(mat.RbacYAML, vars)
 		duration := time.Since(resolveStart).Seconds()
 		result := "success"
-		unresolved := findUnresolvedVars(true, mat.JenkinsYAML, mat.RbacYAML)
+		unresolved := bundle.RemainingVarRefs(true, mat.JenkinsYAML, mat.RbacYAML)
 		checked := []string{mat.PluginsYAML}
 		if !cell {
 			checked = append(checked, mat.ItemsYAML)
 		}
-		for _, v := range findUnresolvedVars(false, checked...) {
+		for _, v := range bundle.RemainingVarRefs(false, checked...) {
 			if !slices.Contains(unresolved, v) {
 				unresolved = append(unresolved, v)
 			}
@@ -811,57 +811,6 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	clearBundleFailed(cr)
 
 	return mat, cb.Status.ResolvedHash, ident, artifactCond, nil
-}
-
-// parseBundleVariables reads the "name: value" lines of a content
-// ConfigMap's variables.yaml. It skips blank lines and "#" comments. The
-// controller's own bundle and a cell tenant's pod-template lift both use
-// it, so both read one format the same way.
-func parseBundleVariables(varYAML string) bundle.Variables {
-	vars := make(bundle.Variables)
-	for _, line := range strings.Split(varYAML, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
-	}
-	return vars
-}
-
-// findUnresolvedVars scans content for remaining ${var} placeholders.
-// JCasC literal escapes (^${var}) are skipped: Jenkins strips the caret and
-// the value is not Varroa's to resolve. JCasC secret-source references
-// (${readFile:...}, ${base64:...}) are also skipped: they must reach Jenkins
-// byte-for-byte so configuration-as-code's own SecretSourceResolver can
-// resolve them at Jenkins startup.
-func findUnresolvedVars(allowJcascSecretSources bool, contents ...string) []string {
-	var found []string
-	seen := make(map[string]bool)
-	for _, c := range contents {
-		for {
-			start := strings.Index(c, "${")
-			if start < 0 {
-				break
-			}
-			rel := strings.Index(c[start:], "}")
-			if rel < 0 {
-				break
-			}
-			end := start + rel
-			escaped := start > 0 && c[start-1] == '^'
-			varName := c[start+2 : end]
-			if !escaped && (!allowJcascSecretSources || !bundle.IsJCascSecretSourceRef(varName)) && !seen[varName] {
-				found = append(found, varName)
-				seen[varName] = true
-			}
-			c = c[end+1:]
-		}
-	}
-	return found
 }
 
 // StatefulSetSpec carries the spec for a Jenkins + mite StatefulSet.

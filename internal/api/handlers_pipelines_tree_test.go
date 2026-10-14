@@ -451,3 +451,21 @@ func TestHandleListPipelines_NarrowedCallerStillReadsTheTeamPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestHandleListPipelines_HeldTenantListsNoDeclaredJobs asserts a placed
+// Team whose items the cell holds shows no declared job, while its run
+// history still lists.
+func TestHandleListPipelines_HeldTenantListsNoDeclaredJobs(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantUnknownKeyItems}
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
+		{JobPath: "payments/release/eu", RecentResults: []string{"SUCCESS"}},
+	}
+	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), reader, nil)
+
+	resp := listPipelinesFor(t, srv, "payments")
+	if got := kindOf(t, resp, "payments/release/eu"); got != "unknown" {
+		t.Errorf("kind = %q, want unknown: a held tenant declares no job", got)
+	}
+}

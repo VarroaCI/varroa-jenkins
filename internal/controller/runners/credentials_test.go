@@ -174,7 +174,7 @@ func TestReadCredential_MissingRequiredKey(t *testing.T) {
 
 // TestReadCredential_UnresolvedTokenInEachValue is task 5.1's "a ${ in each
 // of the three values" acceptance: every one of username, privateKey, and
-// passphrase is injected after findUnresolvedVars has run, so each carries
+// passphrase is injected after bundle.RemainingVarRefs has run, so each carries
 // its own check.
 func TestReadCredential_UnresolvedTokenInEachValue(t *testing.T) {
 	cases := []struct {

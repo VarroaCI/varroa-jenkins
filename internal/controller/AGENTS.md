@@ -376,7 +376,7 @@ sections describe.
   plugin set omits `basic-branch-build-strategies` — a missing class would
   make XStream drop the rendered `buildStrategies` element or fail the item
   create, so a silent omission would produce an initial-index build storm
-  with no warning; then resolves all vars and runs `findUnresolvedVars` as the
+  with no warning; then resolves all vars and runs `bundle.RemainingVarRefs` as the
   completeness check — any leftover `${...}` fails resolution. A non-cell
   controller then runs `checkPlainFolderLibraryCredentials`
   (`library_credentials_plain.go`), which reads the GLOBAL-scope system store of
@@ -1072,7 +1072,7 @@ sections describe.
     `tenantAgentGCTimeoutSeconds`; no other cloud sets it), `cell_pod_templates.go` (`liftTenantPodTemplates` reads
     every kubernetes cloud's `templates` list of a tenant's `jenkins.yaml` in
     bundle order. It resolves the tenant's own `variables.yaml`
-    (`parseBundleVariables`, shared with `resolveBundleForController`) once,
+    (`bundle.ParseVariables`, shared with `resolveBundleForController`) once,
     then applies the six skip rules in fixed order, each a
     `PodTemplateSkipped` warning. It stamps `name`, `namespace`,
     `serviceAccount`, and `label`, drops `labels`, rewrites `inheritFrom`,
@@ -1088,7 +1088,7 @@ sections describe.
     tenant only, `materializeTenantManifest` and the folder.
     `materializeTenantManifest` resolves the tenant's own `variables.yaml`
     in one pass (no cell variable, so `${varroa_*}` stays unresolved), then
-    runs `findUnresolvedVars`, `items.Parse`, `items.ReRoot`, `lint.Run`
+    runs `bundle.ParseTenantItems` (resolve, `bundle.RemainingVarRefs`, `items.ParseStrict`), `items.ReRoot`, `lint.Run`
     against `cellLintRules` (`NoPollSCMRule`, `NoGlobalCredentialsRule`,
     `NoControllerConfigDependencyRule`, `NoJobDSLRule`), and
     `checkBranchBuildStrategiesManifest`, and `checkFolderLibraryPluginsManifest`

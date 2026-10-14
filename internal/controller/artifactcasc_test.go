@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
 
@@ -891,10 +892,10 @@ func TestCreateStatefulSet_CellInstanceEnv(t *testing.T) {
 	}
 }
 
-// TestFindUnresolvedVars_ArtifactFragmentPassesThrough asserts the
+// TestRemainingVarRefs_ArtifactFragmentPassesThrough asserts the
 // readFile reference the credential injector writes survives
-// findUnresolvedVars unchanged (task 5.7).
-func TestFindUnresolvedVars_ArtifactFragmentPassesThrough(t *testing.T) {
+// bundle.RemainingVarRefs unchanged (task 5.7).
+func TestRemainingVarRefs_ArtifactFragmentPassesThrough(t *testing.T) {
 	p := blobstoreParams{IsS3: true, Container: "b", Region: "us-east-1"}
 	fragment, err := renderArtifactStorageFragment(p, "core", "ns", "cell", false)
 	if err != nil {
@@ -904,8 +905,8 @@ func TestFindUnresolvedVars_ArtifactFragmentPassesThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("injectArtifactCredential: %v", err)
 	}
-	if got := findUnresolvedVars(true, withCred); len(got) != 0 {
-		t.Errorf("findUnresolvedVars = %v, want empty (readFile refs must pass through)", got)
+	if got := bundle.RemainingVarRefs(true, withCred); len(got) != 0 {
+		t.Errorf("RemainingVarRefs = %v, want empty (readFile refs must pass through)", got)
 	}
 }
 
