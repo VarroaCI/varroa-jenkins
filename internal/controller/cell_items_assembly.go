@@ -311,15 +311,15 @@ func lintTenantTemplates(fragment string) (string, []lint.Finding) {
 // its folder, or the first check it fails. It resolves the tenant's own
 // variables.yaml in one pass and no cell variable, so a tenant item never
 // reads a cell value. Any "${" reference left after that pass fails, a
-// ${varroa_*} name included. Then the manifest must parse, must set no
-// root, must pass cellLintRules, and must not need a plugin that coreSet
+// ${varroa_*} name included. Then the manifest must parse with no unknown
+// key, must set no root, must pass cellLintRules, and must not need a plugin that coreSet
 // omits. Nil data gives an empty folder.
 func materializeTenantManifest(team string, data map[string]string, coreSet []pluginlock.PluginEntry) (*items.Manifest, error) {
 	resolved := tenantVarsReplacer(parseBundleVariables(data["variables.yaml"])).Replace(data["items.yaml"])
 	if unresolved := findUnresolvedVars(false, resolved); len(unresolved) > 0 {
 		return nil, fmt.Errorf("items.yaml holds unresolved variables: %s", strings.Join(unresolved, ", "))
 	}
-	manifest, err := items.Parse(resolved)
+	manifest, err := items.ParseStrict(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("parse tenant items.yaml: %w", err)
 	}

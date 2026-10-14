@@ -339,6 +339,8 @@ checks it against four rules, only on a cell.
 
 A tenant manifest that fails a rule holds only that tenant's folder. The cell keeps the folder as it is and pushes the other tenants. The `ItemsHeld` warning names the rule and the item path.
 
+A cell also refuses a key that the items schema does not define. A non-cell controller ignores such a key. The `ItemsHeld` warning names each unknown key, its item path, and its key path, for example `items[0].builders[0].jobDsl`.
+
 ### Job DSL on a cell
 
 Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`. The cell home is temporary, so a cell restart deletes the jobs that a seed job made. A seeded job exists only on the member that ran the seed, and a build for it can go to another member. The lint reads an inline `script` and the inline `jenkinsfile` of a pipeline template. It does not read a Jenkinsfile in SCM or a step name built at run time. The `job-dsl` plugin stays installed because a non-cell controller uses it.

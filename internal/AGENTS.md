@@ -101,9 +101,9 @@ reading each package's entry point):
   `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) over each
   tenant's re-rooted manifest before a push. `no-job-dsl` also runs over the
   inline `jenkinsfile` of each tenant pipeline template (`lint.RunScript`).
-  `items.Parse` itself is
-  unchanged and still accepts every shape a non-cell controller accepts
-  today. An item declares its build parameters two ways — a flat list at
+  `items.Parse` still accepts every shape a non-cell controller accepts and
+  ignores an unknown key. `items.ParseStrict` refuses an unknown key, and only
+  the cell's tenant materialization calls it; the mite engine keeps `Parse`. An item declares its build parameters two ways — a flat list at
   the item level (`Item.Parameters`) or a parameters property nested under
   `properties` (`Property.Parameters`) — and `configxml.go` merges both
   sources into one `ParametersDefinitionProperty`, the same merge the

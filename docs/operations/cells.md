@@ -102,20 +102,20 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
 - **Folder.** The tenant's `items.yaml` goes under one top-level folder named for the `Team`.
   The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
-  [pod templates](tenant-pod-templates.md). A job the bundle no longer declares leaves the
-  folder, and its next trigger fails with `JOB_NOT_FOUND`. See
+  [pod templates](tenant-pod-templates.md). A job that the bundle drops leaves the
+  folder; its next trigger fails with `JOB_NOT_FOUND`. See
   [Build records](build-records.md).
 - **Held folder.** Tenant items resolve only their own bundle's variables. The operator
   keeps the folder and its jobs as they are on one of these faults:
   - an item still holds `${`, a `${varroa_*}` name too;
-  - the items do not parse, set `root`, or fail a lint rule;
+  - the items do not parse, hold an unknown key, set `root`, or fail a lint rule;
   - an item needs a plugin the cell does not pin;
   - a pipeline template does not load, or its body fails a lint rule. Only a failing template
     leaves the fragment; the tenant's other templates stay;
   - the bundle is missing or has no content yet.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until the fault is fixed.
+  folder until the fix.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a plugin-synthesized identity

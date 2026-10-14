@@ -1384,3 +1384,29 @@ func TestAssembleCellContent_CleanTemplateFragmentUnchanged(t *testing.T) {
 		t.Errorf("expected the fragment unchanged, got:\n%s", got)
 	}
 }
+
+func TestAssembleCellContent_UnknownKeyHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, `items:
+  - kind: freeStyle
+    name: build
+    builders:
+      - jobDsl:
+          targets: x
+`)
+	for _, want := range []string{"jobDsl", `"build"`, "builders[0].jobDsl"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected the message to contain %q, got %q", want, msg)
+		}
+	}
+}
+
+func TestAssembleCellContent_DuplicateKeyHoldsOnlyThatTenant(t *testing.T) {
+	msg := assertHeldAlone(t, `items:
+  - kind: freeStyle
+    name: one
+    name: two
+`)
+	if !strings.Contains(msg, "parse tenant items.yaml") {
+		t.Errorf("expected a parse fault in the message, got %q", msg)
+	}
+}
