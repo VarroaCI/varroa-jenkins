@@ -72,6 +72,8 @@ than 1024 characters is not listed.
 
 When a build fails because the sandbox refused a signature, the build page shows a banner. The
 banner names the signature. The record of the run keeps the signature for the same reason.
+The completion webhook carries the signature in `rejected_signature`. See
+[Notifications](notifications.md).
 
 ## Limits
 

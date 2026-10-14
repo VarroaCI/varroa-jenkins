@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,6 +67,13 @@ func newTestDispatcher(pool *pgxpool.Pool, srv *httptest.Server, now time.Time) 
 // points at url, and applies its owner run.completed. It returns the run id.
 func seedWebhookRun(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url string) uuid.UUID {
 	t.Helper()
+	return seedWebhookRunWith(t, pool, db, intentKey, url, RunCompletedPayload{Result: strPtr("SUCCESS")})
+}
+
+// seedWebhookRunWith behaves like seedWebhookRun and applies payload as the
+// owner run.completed.
+func seedWebhookRunWith(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url string, payload RunCompletedPayload) uuid.UUID {
+	t.Helper()
 	runID := seedGrantedIntent(t, pool, intentKey)
 	seedTenantPlacement(t, db, testTenant, testNamespace, "cell-a", 0, "pod-a", "", nil)
 	if url != "" {
@@ -78,12 +86,64 @@ func seedWebhookRun(t *testing.T, pool *pgxpool.Pool, db *sql.DB, intentKey, url
 	}
 	g := NewIngester(pool, nil, nil)
 	g.SetWebhooks("https://varroa.example.test", nil)
-	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted,
-		RunCompletedPayload{Result: strPtr("SUCCESS")})
+	env := newTestEnvelope(t, runID, intentKey, KindRunCompleted, payload)
 	if _, err := g.Apply(context.Background(), env); err != nil {
 		t.Fatalf("apply run.completed: %v", err)
 	}
 	return runID
+}
+
+// readRawWebhookBody returns the stored bytes of the row of runID that
+// carries delivery key key, without decoding them.
+func readRawWebhookBody(t *testing.T, db *sql.DB, runID uuid.UUID, key string) []byte {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRow(`SELECT body FROM varroa.webhook_deliveries WHERE run_id = $1 AND delivery_key = $2`,
+		runID, key).Scan(&raw); err != nil {
+		t.Fatalf("read raw webhook body %q: %v", key, err)
+	}
+	return raw
+}
+
+// TestRunCompleted_WebhookBodyNamesRejectedSignature asserts a FAILURE
+// completion that names a refused signature puts it in the body.
+func TestRunCompleted_WebhookBodyNamesRejectedSignature(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	const sig = "method java.lang.System exit int"
+	runID := seedWebhookRunWith(t, pool, db, "manual:webhook-rejected", "https://receiver.example.test/hook",
+		RunCompletedPayload{Result: strPtr("FAILURE"), RejectedSignature: strPtr(sig)})
+	body := readWebhookBody(t, db, runID, webhookKeyCompleted)
+	if body.RejectedSignature != sig {
+		t.Fatalf("rejected_signature = %q, want %q", body.RejectedSignature, sig)
+	}
+}
+
+// TestRunCompleted_WebhookBodyOmitsSignatureUnlessFailure asserts a SUCCESS
+// completion never carries rejected_signature, even when the payload names one.
+func TestRunCompleted_WebhookBodyOmitsSignatureUnlessFailure(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedWebhookRunWith(t, pool, db, "manual:webhook-success-sig", "https://receiver.example.test/hook",
+		RunCompletedPayload{Result: strPtr("SUCCESS"), RejectedSignature: strPtr("method java.lang.System exit int")})
+	if raw := readRawWebhookBody(t, db, runID, webhookKeyCompleted); strings.Contains(string(raw), "rejected_signature") {
+		t.Fatalf("SUCCESS body carries rejected_signature: %s", raw)
+	}
+}
+
+// TestRunCompleted_WebhookBodyOmitsEmptySignature asserts a FAILURE completion
+// with no refused signature omits the key.
+func TestRunCompleted_WebhookBodyOmitsEmptySignature(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedWebhookRunWith(t, pool, db, "manual:webhook-failure-nosig", "https://receiver.example.test/hook",
+		RunCompletedPayload{Result: strPtr("FAILURE")})
+	if raw := readRawWebhookBody(t, db, runID, webhookKeyCompleted); strings.Contains(string(raw), "rejected_signature") {
+		t.Fatalf("FAILURE body without a signature carries rejected_signature: %s", raw)
+	}
 }
 
 func webhookRowCount(t *testing.T, db *sql.DB, runID uuid.UUID) int {

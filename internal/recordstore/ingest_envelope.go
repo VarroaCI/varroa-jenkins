@@ -167,7 +167,11 @@ type RunCompletedPayload struct {
 	// and never replaces a stored value.
 	SCMRevision *string `json:"scm_revision,omitempty"`
 	Summary     *string `json:"summary,omitempty"`
-	Seq         int64   `json:"seq"`
+	// RejectedSignature names the script signature that the sandbox
+	// refused in a failed build. The plugin sets it only when a refusal
+	// failed the run.
+	RejectedSignature *string `json:"rejected_signature,omitempty"`
+	Seq               int64   `json:"seq"`
 }
 
 // RunStatePayload is the payload of a run.state envelope. It takes one

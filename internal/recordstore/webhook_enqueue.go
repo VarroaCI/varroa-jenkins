@@ -40,7 +40,10 @@ type WebhookPayload struct {
 	CompletedAt time.Time  `json:"completed_at"`
 	DurationMs  int64      `json:"duration_ms"`
 	SCMRevision string     `json:"scm_revision,omitempty"`
-	URL         string     `json:"url,omitempty"`
+	// RejectedSignature names the script signature that the sandbox
+	// refused. It is set only for a FAILURE result.
+	RejectedSignature string `json:"rejected_signature,omitempty"`
+	URL               string `json:"url,omitempty"`
 	// Synthetic is true for a delivery the backstop wrote for a run the
 	// recorder ended. Its Result is INTERRUPTED.
 	Synthetic bool `json:"synthetic,omitempty"`
@@ -152,6 +155,9 @@ func enqueueWebhookDelivery(ctx context.Context, tx pgx.Tx, intent *intentRow, p
 		body.SCMRevision = *scmRevision
 	case payload.SCMRevision != nil:
 		body.SCMRevision = *payload.SCMRevision
+	}
+	if body.Result == "FAILURE" && payload.RejectedSignature != nil {
+		body.RejectedSignature = *payload.RejectedSignature
 	}
 	body.URL = webhookRunURL(dashboardURL, intent.tenant, intent.jobPath, intent.runID.String())
 

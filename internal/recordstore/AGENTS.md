@@ -287,7 +287,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   `interrupted:<reason>` and body `synthetic: true`, through
   `enqueueInterruptedWebhookDelivery`. It writes nothing for a run with no
   `run_intents` row. `dashboardURL` threads from `BackstopConfig.DashboardURL`
-  and the tenant sync responder to every mark.
+  and the tenant sync responder to every mark. The completion body carries
+  `rejected_signature` only for a `FAILURE` result that names one; a
+  synthetic body never carries it.
 - **Grants, not a migration** (`grants.go`) — `EnsureGrants` grants role
   `varroa_client` its read privileges when that role exists, and is a
   no-op otherwise. It never creates a role. CloudNativePG creates the role
