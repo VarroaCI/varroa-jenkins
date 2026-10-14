@@ -97,26 +97,32 @@ func main() {
 		logger.Error("invalid VARROA_RETENTION_ACTIVITY", "error", err)
 		os.Exit(1)
 	}
+	retentionRestartSource, err := restartSourceRetentionFromEnv(retentionRuns, logger)
+	if err != nil {
+		logger.Error("invalid VARROA_RETENTION_RESTART_SOURCE", "error", err)
+		os.Exit(1)
+	}
 
 	cfg := Config{
-		Listen:             *listen,
-		RecordStoreDSN:     dsn,
-		BlobStoreURL:       blobURL,
-		BusURL:             *busURL,
-		BusUser:            *busUser,
-		BusPassFile:        *busPassFile,
-		BusCAFile:          *busCAFile,
-		ClusterName:        cluster,
-		JetStreamReplicas:  jetStreamReplicasFromEnv(),
-		RetentionRuns:      retentionRuns,
-		RetentionLogs:      retentionLogs,
-		RetentionArtifacts: retentionArtifacts,
-		RetentionActivity:  retentionActivity,
-		FinalizeWait:       envDurationMillis("VARROA_RECORDSTORE_LOG_FINALIZE_WAIT", defaultFinalizeWaitMs),
-		SweepMaxPending:    sweepMaxPendingFromEnv(),
-		ConfirmedGoneGrace: confirmedGoneGraceFromEnv(),
-		DashboardURL:       dashboardURLFromEnv(),
-		Logger:             logger,
+		Listen:                 *listen,
+		RecordStoreDSN:         dsn,
+		BlobStoreURL:           blobURL,
+		BusURL:                 *busURL,
+		BusUser:                *busUser,
+		BusPassFile:            *busPassFile,
+		BusCAFile:              *busCAFile,
+		ClusterName:            cluster,
+		JetStreamReplicas:      jetStreamReplicasFromEnv(),
+		RetentionRuns:          retentionRuns,
+		RetentionLogs:          retentionLogs,
+		RetentionArtifacts:     retentionArtifacts,
+		RetentionActivity:      retentionActivity,
+		RetentionRestartSource: retentionRestartSource,
+		FinalizeWait:           envDurationMillis("VARROA_RECORDSTORE_LOG_FINALIZE_WAIT", defaultFinalizeWaitMs),
+		SweepMaxPending:        sweepMaxPendingFromEnv(),
+		ConfirmedGoneGrace:     confirmedGoneGraceFromEnv(),
+		DashboardURL:           dashboardURLFromEnv(),
+		Logger:                 logger,
 	}
 	if cfg.BusPassFile == "" {
 		cfg.BusPassword = os.Getenv("BUS_PASSWORD")
@@ -136,6 +142,22 @@ func main() {
 // webhook payload uses to link a run. An empty value omits that link.
 func dashboardURLFromEnv() string {
 	return os.Getenv("VARROA_DASHBOARD_URL")
+}
+
+// restartSourceRetentionFromEnv parses VARROA_RETENTION_RESTART_SOURCE, whose
+// default is 7d. A window longer than the run window is clamped to it, and
+// the clamp is logged, so a value set by hand cannot outlive the run record.
+func restartSourceRetentionFromEnv(runs time.Duration, logger *slog.Logger) (time.Duration, error) {
+	d, err := recordstore.ParseRetention(envDefault("VARROA_RETENTION_RESTART_SOURCE", "7d"))
+	if err != nil {
+		return 0, err
+	}
+	if d > runs {
+		logger.Warn("VARROA_RETENTION_RESTART_SOURCE exceeds VARROA_RETENTION_RUNS; using the runs window",
+			"restart_source", d, "runs", runs)
+		d = runs
+	}
+	return d, nil
 }
 
 // envDefault returns the value of the environment variable key, or

@@ -1277,27 +1277,31 @@ type ResumeStateFile struct {
 }
 
 type RunStateAck struct {
-	RunId    string `json:"run_id"`
-	Relpath  string `json:"relpath,omitempty"`
-	StateGen int64  `json:"state_gen,omitempty"`
-	Status   string `json:"status"`
-	Reason   string `json:"reason,omitempty"`
-	PauseMs  int    `json:"pause_ms,omitempty"`
+	RunId         string `json:"run_id"`
+	Relpath       string `json:"relpath,omitempty"`
+	StateGen      int64  `json:"state_gen,omitempty"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
+	PauseMs       int    `json:"pause_ms,omitempty"`
+	RestartSource bool   `json:"restart_source,omitempty"`
 }
 
 type RunStateChunk struct {
-	RunId        string `json:"run_id"`
-	JobPath      string `json:"job_path,omitempty"`
-	BuildNumber  int64  `json:"build_number,omitempty"`
-	Relpath      string `json:"relpath"`
-	StateGen     int64  `json:"state_gen,omitempty"`
-	Seq          int64  `json:"seq,omitempty"`
-	Total        int64  `json:"total,omitempty"`
-	GzipContent  []byte `json:"gzip_content,omitempty"`
-	RawSize      int64  `json:"raw_size,omitempty"`
-	CellInstance string `json:"cell_instance,omitempty"`
-	ObjectSize   int64  `json:"object_size,omitempty"`
-	PusherEpoch  int64  `json:"pusher_epoch,omitempty"`
+	RunId         string `json:"run_id"`
+	JobPath       string `json:"job_path,omitempty"`
+	BuildNumber   int64  `json:"build_number,omitempty"`
+	Relpath       string `json:"relpath"`
+	StateGen      int64  `json:"state_gen,omitempty"`
+	Seq           int64  `json:"seq,omitempty"`
+	Total         int64  `json:"total,omitempty"`
+	GzipContent   []byte `json:"gzip_content,omitempty"`
+	RawSize       int64  `json:"raw_size,omitempty"`
+	CellInstance  string `json:"cell_instance,omitempty"`
+	ObjectSize    int64  `json:"object_size,omitempty"`
+	PusherEpoch   int64  `json:"pusher_epoch,omitempty"`
+	RestartSource bool   `json:"restart_source,omitempty"`
+	CopyFiles     int64  `json:"copy_files,omitempty"`
+	CopyBytes     int64  `json:"copy_bytes,omitempty"`
 }
 
 type RunStateRequest struct {

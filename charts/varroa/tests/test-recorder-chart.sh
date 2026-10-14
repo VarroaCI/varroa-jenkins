@@ -95,6 +95,8 @@ RENDER_FULL=$(helm template "$ROOT" $COMMON --set recordStore.enabled=true 2>/de
 }
 
 DEPLOY=$(extract_doc "Deployment" "varroa-recorder" "$RENDER_FULL")
+if grep -q -A1 'name: VARROA_RETENTION_RESTART_SOURCE' <<< "$DEPLOY" && grep -A1 'name: VARROA_RETENTION_RESTART_SOURCE' <<< "$DEPLOY" | grep -q 'value: "7d"'; then rc=0; else rc=1; fi
+check "recorder renders VARROA_RETENTION_RESTART_SOURCE as 7d" "$rc"
 failureThreshold=$(grep -o 'failureThreshold: [0-9]*' <<< "$DEPLOY" | head -1 | grep -o '[0-9]*')
 periodSeconds=$(grep -B1 "failureThreshold: $failureThreshold" <<< "$DEPLOY" | grep -o 'periodSeconds: [0-9]*' | head -1 | grep -o '[0-9]*')
 if [[ -n "$failureThreshold" && -n "$periodSeconds" && $((failureThreshold * periodSeconds)) -eq 240 ]]; then rc=0; else rc=1; fi
@@ -352,6 +354,8 @@ expect_fail "retention.runs=0d" "--set recordStore.enabled=true --set recordStor
 expect_fail "retention.runs=3651d" "--set recordStore.enabled=true --set recordStore.retention.runs=3651d" "recordStore.retention.runs must be at most 3650 days"
 expect_fail "retention.runs=999999999999999999999d" "--set recordStore.enabled=true --set recordStore.retention.runs=999999999999999999999d" "recordStore.retention.runs must match"
 expect_fail "retention.activity=0d" "--set recordStore.enabled=true --set recordStore.retention.activity=0d" "recordStore.retention.activity must match"
+expect_fail "retention.restartSource=0d" "--set recordStore.enabled=true --set recordStore.retention.restartSource=0d" "recordStore.retention.restartSource must match"
+expect_fail "restartSource longer than runs" "--set recordStore.enabled=true --set recordStore.retention.runs=5d --set recordStore.retention.restartSource=7d" "must not be longer than recordStore.retention.runs"
 expect_fail "the retired activity values block" "--set activity.retention=7d" "the \"activity\" values block no longer exists"
 
 # The guard also runs in hive mode: a stray blob mode still fails there.

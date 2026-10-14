@@ -38,6 +38,8 @@ final class PluginCounters {
     static final String FORWARDED_OTHER = "varroa_plugin_forwarded_other";
     static final String FORWARD_REFUSED = "varroa_plugin_forward_refused";
     static final String RUNS_RECONCILED_AT_BOOT = "varroa_plugin_runs_reconciled_at_boot";
+    static final String RESTART_SOURCE_KEPT = "varroa_plugin_restart_source_kept";
+    static final String RESTART_SOURCE_DROPPED = "varroa_plugin_restart_source_dropped";
 
     private static final ConcurrentHashMap<String, AtomicLong> OWNED = new ConcurrentHashMap<>();
 
@@ -92,6 +94,8 @@ final class PluginCounters {
         out.put(FORWARDED_OTHER, ownedValue(FORWARDED_OTHER));
         out.put(FORWARD_REFUSED, ownedValue(FORWARD_REFUSED));
         out.put(RUNS_RECONCILED_AT_BOOT, ownedValue(RUNS_RECONCILED_AT_BOOT));
+        out.put(RESTART_SOURCE_KEPT, ownedValue(RESTART_SOURCE_KEPT));
+        out.put(RESTART_SOURCE_DROPPED, ownedValue(RESTART_SOURCE_DROPPED));
         return out;
     }
 

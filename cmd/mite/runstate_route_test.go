@@ -155,3 +155,103 @@ func TestHandleRunState_ForwardsMiteOwnCellInstance(t *testing.T) {
 		t.Errorf("CellInstance = %q, want the mite's own %q", sent.CellInstance, "pod-uid-7")
 	}
 }
+
+// setRestartSourceHeaders marks a request as one chunk of a restart copy.
+// An empty files or bytes value leaves that header unset.
+func setRestartSourceHeaders(req *http.Request, files, bytes string) {
+	req.Header.Set(hdrStateRestartSource, "1")
+	if files != "" {
+		req.Header.Set(hdrStateCopyFiles, files)
+	}
+	if bytes != "" {
+		req.Header.Set(hdrStateCopyBytes, bytes)
+	}
+}
+
+func TestHandleRunState_RestartSourceForwardsFlagAndCounts(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	var sent *mitev1.RunStateChunk
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		sent = m.GetRunStateChunk()
+		return nil
+	}})
+
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
+	setRestartSourceHeaders(req, "3", "4096")
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if sent == nil || !sent.RestartSource || sent.CopyFiles != 3 || sent.CopyBytes != 4096 {
+		t.Fatalf("forwarded chunk = %+v, want the restart flag and the copy counts", sent)
+	}
+}
+
+func TestHandleRunState_RestartSourceMissingCountIs400(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
+	setRestartSourceHeaders(req, "", "4096")
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a missing file count, got %d", rec.Code)
+	}
+}
+
+func TestHandleRunState_RestartSourceCountsOutOfRangeIs400(t *testing.T) {
+	for _, tc := range []struct{ files, bytes string }{
+		{"0", "4096"},
+		{"513", "4096"},
+		{"3", "0"},
+		{"3", strconv.Itoa(restartSourceMaxBytes + 1)},
+	} {
+		agent := newRunStateTestAgent(t)
+		req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
+		setRestartSourceHeaders(req, tc.files, tc.bytes)
+		rec := httptest.NewRecorder()
+		agent.handleRunState(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("files %s bytes %s: expected 400, got %d", tc.files, tc.bytes, rec.Code)
+		}
+	}
+}
+
+func TestHandleRunState_RestartSourceBadFlagIs400(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
+	req.Header.Set(hdrStateRestartSource, "yes")
+	req.Header.Set(hdrStateCopyFiles, "3")
+	req.Header.Set(hdrStateCopyBytes, "4096")
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a flag other than 1, got %d", rec.Code)
+	}
+}
+
+func TestRunStateAckStore_MeshRefusalDoesNotBlockRestartSource(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	agent.runStateAcks.record(&mitev1.RunStateAck{RunId: "run-1", Status: ackStatusRejected, Reason: stateReasonStateCap})
+
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
+	setRestartSourceHeaders(req, "3", "4096")
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("a mesh refusal blocked a restart chunk: got %d", rec.Code)
+	}
+}
+
+func TestRunStateAckStore_RestartRefusalDoesNotBlockMesh(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	agent.runStateAcks.record(&mitev1.RunStateAck{RunId: "run-1", Status: ackStatusRejected, Reason: stateReasonStateCap, RestartSource: true})
+
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello")
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("a restart refusal blocked a mesh chunk: got %d", rec.Code)
+	}
+}

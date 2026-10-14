@@ -223,6 +223,13 @@ public class MiteLoopbackClient {
                     .header("X-Varroa-Object-Size", Long.toString(record.getLong("object_size")))
                     .header("X-Varroa-Pusher-Epoch", Long.toString(record.getLong("pusher_epoch")))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(gzipBody));
+            // A restart copy names itself and its copy counts. A mesh chunk
+            // carries none of the three headers.
+            if (record.optBoolean("restart_source", false)) {
+                b.header("X-Varroa-Restart-Source", "1")
+                        .header("X-Varroa-Copy-Files", Long.toString(record.getLong("copy_files")))
+                        .header("X-Varroa-Copy-Bytes", Long.toString(record.getLong("copy_bytes")));
+            }
             if (token != null) {
                 b.header("Authorization", "Bearer " + token);
             }

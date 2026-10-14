@@ -185,9 +185,13 @@ func TestDeleteTenantExpiredRunsPurgesRunAndChildren(t *testing.T) {
 			t.Fatalf("blob %q was not deleted; deleted = %v", k, store.deleted)
 		}
 	}
-	wantPrefix := blob.RunStatePrefix(runID.String())
-	if len(store.prefixes) != 1 || store.prefixes[0] != wantPrefix {
-		t.Fatalf("DeletePrefix calls = %v, want [%s]", store.prefixes, wantPrefix)
+	wantPrefixes := []string{
+		blob.RunStatePrefix(runID.String()),
+		blob.RestartSourcePrefix(runID.String()),
+	}
+	if len(store.prefixes) != len(wantPrefixes) ||
+		store.prefixes[0] != wantPrefixes[0] || store.prefixes[1] != wantPrefixes[1] {
+		t.Fatalf("DeletePrefix calls = %v, want %v", store.prefixes, wantPrefixes)
 	}
 
 	var intents, numbers int

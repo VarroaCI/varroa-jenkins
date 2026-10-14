@@ -213,7 +213,8 @@ type rowCheckingStore struct {
 func (r *rowCheckingStore) DeletePrefix(ctx context.Context, prefix string) error {
 	_ = r.prefixRecordingStore.DeletePrefix(ctx, prefix)
 	var n int
-	runID := prefix[len("runstate/") : len(prefix)-1]
+	// The round also deletes the restart-copy prefix of the same run.
+	runID := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(prefix, "runstate/"), "restartsource/"), "/")
 	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM varroa.runs WHERE run_id = $1`, runID).Scan(&n); err != nil {
 		return err
 	}
@@ -272,8 +273,9 @@ func TestRetentionRoundDeletesTheRetainedScriptBeforeThePartitionDrop(t *testing
 	}
 
 	expiredPrefix := blob.RunStatePrefix(expired.String())
-	if !reflect.DeepEqual(store.prefixes, []string{expiredPrefix}) {
-		t.Fatalf("deleted prefixes = %v, want [%s]", store.prefixes, expiredPrefix)
+	wantPrefixes := []string{expiredPrefix, blob.RestartSourcePrefix(expired.String())}
+	if !reflect.DeepEqual(store.prefixes, wantPrefixes) {
+		t.Fatalf("deleted prefixes = %v, want %v", store.prefixes, wantPrefixes)
 	}
 	present := store.rowPresent[expiredPrefix]
 	if !present {
@@ -320,7 +322,8 @@ func TestDeleteRetainedRunScriptsTestsCreatedAtAlone(t *testing.T) {
 	if n, err := deleteRetainedRunScripts(ctx, pool, after, createdAt.Add(time.Second)); err != nil || n != 1 {
 		t.Fatalf("cutoff after the run: n = %d, err = %v, want 1 and no error", n, err)
 	}
-	if !reflect.DeepEqual(after.prefixes, []string{blob.RunStatePrefix(runID)}) {
-		t.Fatalf("deleted prefixes = %v, want [%s]", after.prefixes, blob.RunStatePrefix(runID))
+	wantPrefixes := []string{blob.RunStatePrefix(runID), blob.RestartSourcePrefix(runID)}
+	if !reflect.DeepEqual(after.prefixes, wantPrefixes) {
+		t.Fatalf("deleted prefixes = %v, want %v", after.prefixes, wantPrefixes)
 	}
 }

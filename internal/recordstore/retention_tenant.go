@@ -288,6 +288,9 @@ func deleteRunBlobs(ctx context.Context, db maintDB, store ObjectDeleter, runIDs
 		if err := store.DeletePrefix(ctx, blob.RunStatePrefix(id)); err != nil {
 			return fmt.Errorf("delete run state %s: %w", id, err)
 		}
+		if err := store.DeletePrefix(ctx, blob.RestartSourcePrefix(id)); err != nil {
+			return fmt.Errorf("delete restart copy %s: %w", id, err)
+		}
 	}
 	return nil
 }

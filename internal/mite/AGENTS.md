@@ -503,6 +503,17 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   forces a re-read of the recorder and sets no owner. Answers ride
   `OperatorMessage.run_state_ack`, which mirrors `LogAck`; the mite records
   the answer and raises its own `503` on that run's next post.
+  The mesh path drops a terminal run's entry and answers `STORED` for
+  each later chunk. **The restart copy is the exception.** It arrives
+  after the run is terminal, so `onRestartSourceChunk` (`run_state_restart.go`)
+  skips that drop and checks only the owner. Its entries live in
+  `restartRuns`, apart from `stateRuns`, so a mesh drop never touches them.
+  Each file is stored under `restartsource/<run_id>/<relpath>` (class
+  `state`), with no epoch and no generation, through `Replace`. The copy
+  caps are 512 files and 32 MiB. An entry lives until every declared file
+  is stored, its cell disconnects, or it sits idle for 15 minutes. A copy
+  answers `STORED` for a file it already holds. Its acks carry
+  `RestartSource`, so a copy refusal never blocks a mesh chunk of the same run.
 - **Live tail** (`tail.go`) — `runTailLease` is a 90-second lease
   (`tailLeaseSeconds`) per run, held in `BusHandler.tailLeases`.
   `watchTail` subscribes `bus.TailSubject` (request-reply, queue group

@@ -77,6 +77,12 @@ func applyRunState(ctx context.Context, tx pgx.Tx, intent *intentRow, env Ingest
 		return dispatchResult{}, fmt.Errorf("ensure run row for run.state: %w", err)
 	}
 
+	// A restart copy keeps its own manifest. Its files are final, so the
+	// run's mesh anchor and its mesh files do not move.
+	if payload.RestartSource {
+		return dispatchResult{}, applyRestartSourceFile(ctx, tx, intent, env, payload)
+	}
+
 	if payload.RelPath == "" {
 		return dispatchResult{}, applyRunStateRefusal(ctx, tx, intent, env, payload)
 	}

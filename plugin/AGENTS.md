@@ -409,7 +409,9 @@ the root AGENTS.md greenfield rule.
   call `POST /v1/claim` and `POST /v1/events` against `http://127.0.0.1:9095`, bearer
   token cached from `/var/run/varroa/loopback-token` and re-read after a `401`.
   `postRunState` posts `POST /v1/run-state` instead as nine headers and a raw
-  gzip body, because base64 in a JSON body would add a third to every byte. The mite
+  gzip body, because base64 in a JSON body would add a third to every byte. A record
+  with `restart_source` adds three headers (`X-Varroa-Restart-Source`, `X-Varroa-Copy-Files`,
+  `X-Varroa-Copy-Bytes`). The mite
   retains each forwarded event until the gateway's JetStream publish acknowledgement, and
   replays after a reconnect. `Uuid7.java` mints every run id. `VarroaBuildEventLifecycle.java`
   starts `BuildEventDispatcher` from an `@Initializer(after = PLUGINS_STARTED)`, replaying
@@ -704,6 +706,15 @@ the root AGENTS.md greenfield rule.
   delete against a window's own append, so a window that is already past
   its stopped test leaves no record behind. The monitor is never held
   across a post, so a run's completion never waits on the network.
+  **The restart copy is separate.** `RestartSourcePusher` (`Runs.onFinalized`)
+  copies `build.xml`, `workflow-completed/**`, and `libs/**` of a finalized
+  declarative cell run once, after Jenkins writes the final record. It runs
+  only on a cell with the run-state URL set, for a `WorkflowRun` that is not
+  template-defined and has restartable stages. Its caps are 512 files and
+  32 MiB, and it has no disk spool. It posts on one daemon thread, behind a
+  64-entry queue, and each chunk carries `restart_source`, `copy_files`, and
+  `copy_bytes`. Counters: `varroa_plugin_restart_source_kept` and
+  `varroa_plugin_restart_source_dropped`.
   Every post carries `PUSHER_EPOCH`, the JVM start time, which names this
   Jenkins process to the gateway: the push generation counts inside one
   process and starts again after a restart. A flow

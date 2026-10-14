@@ -65,3 +65,25 @@ func TestRunStatePrefix(t *testing.T) {
 		t.Fatalf("RunStatePrefix: got %q, want %q", got, want)
 	}
 }
+
+func TestRestartSourceKey(t *testing.T) {
+	got := RestartSourceKey("r1", "jobs/team-a/jobs/app/builds/7/build.xml")
+	want := "restartsource/r1/jobs/team-a/jobs/app/builds/7/build.xml"
+	if got != want {
+		t.Fatalf("RestartSourceKey: got %q, want %q", got, want)
+	}
+}
+
+func TestRestartSourcePrefixCoversKey(t *testing.T) {
+	key := RestartSourceKey("r1", "jobs/team-a/jobs/app/builds/7/build.xml")
+	prefix := RestartSourcePrefix("r1")
+	if prefix != "restartsource/r1/" {
+		t.Fatalf("RestartSourcePrefix: got %q", prefix)
+	}
+	if !strings.HasPrefix(key, prefix) {
+		t.Fatalf("key %q is outside the prefix %q", key, prefix)
+	}
+	if strings.HasPrefix(RestartSourceKey("r10", "build.xml"), prefix) {
+		t.Fatalf("prefix of r1 covers the copy of r10")
+	}
+}

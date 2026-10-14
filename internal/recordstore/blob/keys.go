@@ -37,3 +37,17 @@ func RunStateKey(runID string, pusherEpoch, stateGen int64, relpath string) stri
 func RunStatePrefix(runID string) string {
 	return fmt.Sprintf("runstate/%s/", runID)
 }
+
+// RestartSourceKey returns the object key that holds one file of a
+// run's restart copy. relpath is that file's own path under the Jenkins
+// home. The key carries no pusher epoch and no push generation, because
+// the copied files are final once the run is finalized.
+func RestartSourceKey(runID, relpath string) string {
+	return fmt.Sprintf("restartsource/%s/%s", runID, relpath)
+}
+
+// RestartSourcePrefix returns the key prefix that holds a run's whole
+// restart copy. One prefix delete removes the whole copy.
+func RestartSourcePrefix(runID string) string {
+	return fmt.Sprintf("restartsource/%s/", runID)
+}

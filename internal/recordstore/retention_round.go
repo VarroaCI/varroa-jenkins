@@ -38,6 +38,10 @@ type MaintenanceConfig struct {
 	// ActivityRetention is recordStore.retention.activity, parsed by
 	// ParseRetention. It replaces the activity.retention dial.
 	ActivityRetention time.Duration
+	// RestartSourceRetention is recordStore.retention.restartSource, parsed
+	// by ParseRetention. A zero value takes the default, and a value above
+	// RunRetention is clamped to it.
+	RestartSourceRetention time.Duration
 	// LogStore deletes log and artifact blob objects. A nil LogStore
 	// skips both object deletes, which a test that only exercises the
 	// row-level steps relies on. cmd/recorder passes a blob.Store value,
@@ -65,6 +69,20 @@ type MaintenanceConfig struct {
 	// test reaches it only through WithTestBarrier in export_test.go, to
 	// prove a second round cannot take the lock while the first holds it.
 	testBarrier func()
+}
+
+// restartSourceRetention returns the window a restart copy lasts. It is
+// never longer than RunRetention when RunRetention is set, so no copy
+// outlives its run row.
+func (cfg MaintenanceConfig) restartSourceRetention() time.Duration {
+	d := cfg.RestartSourceRetention
+	if d <= 0 {
+		d = defaultRestartSourceRetention
+	}
+	if cfg.RunRetention > 0 && d > cfg.RunRetention {
+		d = cfg.RunRetention
+	}
+	return d
 }
 
 // now returns cfg.Now(), or time.Now in UTC when cfg.Now is nil.
@@ -127,6 +145,11 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 
 	if _, err := deleteExpiredRunState(ctx, db, cfg.LogStore, now); err != nil {
 		return fmt.Errorf("delete expired run state: %w", err)
+	}
+
+	restartSourceCutoff := now.Add(-cfg.restartSourceRetention())
+	if _, err := deleteExpiredRestartSources(ctx, db, cfg.LogStore, restartSourceCutoff); err != nil {
+		return fmt.Errorf("delete expired restart copies: %w", err)
 	}
 
 	artifactsCutoff := now.Add(-cfg.ArtifactRetention)

@@ -855,6 +855,28 @@ public final class VarroaRunRecorder {
             }
         }
 
+        /**
+         * Keeps the restart copy of a finalized run. Jenkins writes the final
+         * build record after the completion listener, so the copy starts
+         * here and not at completion. The copy posts on its own executor and
+         * never delays Jenkins.
+         */
+        @Override
+        public void onFinalized(Run<?, ?> run) {
+            try {
+                if (!gateEnabled()) {
+                    return;
+                }
+                VarroaIntentAction action = run.getAction(VarroaIntentAction.class);
+                if (action == null || action.getRunId().isEmpty()) {
+                    return;
+                }
+                RestartSourcePusher.scheduleFor(run, resolveRunId(action));
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "VarroaRunRecorder.Runs: failed to schedule a restart copy", e);
+            }
+        }
+
         @Override
         public void onDeleted(Run<?, ?> run) {
             try {

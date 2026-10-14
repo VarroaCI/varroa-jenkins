@@ -91,14 +91,15 @@ recordStore:
     runs: 365d
     logs: 90d
     artifacts: 30d
+    restartSource: 7d
 ```
 
 Each value is a day count from `1d` to `3650d`. `runs` controls how long
 a build's row and stages stay queryable. `logs` and `artifacts` control blobs.
+`restartSource` keeps a restart copy of a cell run's build. It cannot exceed `runs`.
 
 Store-wide retention rounds up to a month, because the recorder drops whole monthly partitions.
-A `runs` value of `365d` keeps a build 365 to 396 days. The build-number watermark
-is permanent.
+A `runs` value of `365d` keeps a build 365 to 396 days. The build-number watermark is permanent.
 
 ## Tenant and job windows
 
@@ -122,9 +123,7 @@ The cron backstop retries only `TRIGGER_UNREACHABLE`; see
 [Cell loss](cell-loss.md#a-backstop-fire-during-a-cell-roll).
 The run page shows the error text. It holds no build number, log, or stage. `Re-run` starts a fresh run with each parameter's declared default.
 
-A `TRIGGER_FAILED` run counts in no job statistic: no pass rate, no result count, no median
-duration, and no last-build tile. It still appears in the run list, and retention bounds it under
-`runs` above.
+A `TRIGGER_FAILED` run counts in no job statistic. It appears in the run list until `runs` expires it.
 
 ## A trigger that a cell loses
 

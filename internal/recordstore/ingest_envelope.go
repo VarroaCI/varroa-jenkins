@@ -189,6 +189,11 @@ type RunStatePayload struct {
 	// without it.
 	PusherEpoch    int64  `json:"pusher_epoch,omitempty"`
 	RejectedReason string `json:"rejected_reason,omitempty"`
+	// RestartSource marks a file of a run's restart copy. The copy's
+	// declared file count and byte total ride on every file.
+	RestartSource bool  `json:"restart_source,omitempty"`
+	CopyFiles     int64 `json:"copy_files,omitempty"`
+	CopyBytes     int64 `json:"copy_bytes,omitempty"`
 }
 
 // RunTriggerFailedPayload is the payload of a run.trigger_failed

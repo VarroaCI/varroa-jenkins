@@ -89,7 +89,7 @@ the gateway writes log chunks to the core database. Renders no objects.
 {{- end -}}
 {{- end -}}
 
-{{- $retentionKeys := list "runs" "logs" "artifacts" "activity" -}}
+{{- $retentionKeys := list "runs" "logs" "artifacts" "activity" "restartSource" -}}
 {{- range $key := $retentionKeys -}}
 {{- $val := index $.Values.recordStore.retention $key -}}
 {{- if not (regexMatch "^[1-9][0-9]{0,3}d$" $val) -}}
@@ -99,6 +99,11 @@ the gateway writes log chunks to the core database. Renders no objects.
 {{- if gt $days 3650 -}}
 {{- fail (printf "recordStore.retention.%s must be at most 3650 days, got %q" $key $val) -}}
 {{- end -}}
+{{- end -}}
+{{- $restartDays := int (trimSuffix "d" $.Values.recordStore.retention.restartSource) -}}
+{{- $runDays := int (trimSuffix "d" $.Values.recordStore.retention.runs) -}}
+{{- if gt $restartDays $runDays -}}
+{{- fail (printf "recordStore.retention.restartSource must not be longer than recordStore.retention.runs, got %q and %q" $.Values.recordStore.retention.restartSource $.Values.recordStore.retention.runs) -}}
 {{- end -}}
 
 {{- end -}}

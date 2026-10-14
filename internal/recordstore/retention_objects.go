@@ -127,6 +127,9 @@ func deleteRetainedRunScripts(ctx context.Context, db maintDB, store ObjectDelet
 			if err := store.DeletePrefix(ctx, blob.RunStatePrefix(runID)); err != nil {
 				return total, fmt.Errorf("delete retained run state for %s: %w", runID, err)
 			}
+			if err := store.DeletePrefix(ctx, blob.RestartSourcePrefix(runID)); err != nil {
+				return total, fmt.Errorf("delete retained restart copy for %s: %w", runID, err)
+			}
 			total++
 		}
 

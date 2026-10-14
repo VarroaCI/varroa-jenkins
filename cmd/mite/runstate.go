@@ -40,6 +40,17 @@ const (
 	// hdrStateReason names the gateway's refusal on a 503.
 	hdrStateReason = "X-Varroa-State-Reason"
 
+	// The optional headers that mark a chunk of a restart copy. The copy
+	// counts are required when the flag is 1, and absent on a mesh chunk.
+	hdrStateRestartSource = "X-Varroa-Restart-Source"
+	hdrStateCopyFiles     = "X-Varroa-Copy-Files"
+	hdrStateCopyBytes     = "X-Varroa-Copy-Bytes"
+
+	// restartSourceMaxFiles and restartSourceMaxBytes cap one restart
+	// copy. They match the plugin's own caps.
+	restartSourceMaxFiles = 512
+	restartSourceMaxBytes = 32 << 20
+
 	// runStateChunkMaxBytes is the mite's own cap on one POST
 	// /v1/run-state body, matching every other loopback route.
 	runStateChunkMaxBytes = 1 << 20 // 1 MiB
@@ -124,7 +135,9 @@ type runStateRefusal struct {
 
 // runStateAckStore holds the gateway's last answer per run, so the
 // loopback route can name a refusal reason on the run's next post. The
-// log route's own pause window has the same shape.
+// log route's own pause window has the same shape. The mesh chunks and
+// the restart-copy chunks of one run keep separate entries, so a refusal
+// of one kind never blocks the other.
 type runStateAckStore struct {
 	mu       sync.Mutex
 	refusals map[string]runStateRefusal
@@ -134,39 +147,50 @@ func newRunStateAckStore() *runStateAckStore {
 	return &runStateAckStore{refusals: make(map[string]runStateRefusal)}
 }
 
-// record stores one gateway answer. A stored answer clears the run's
-// entry.
+// runStateAckKey names the ack entry of one run and one kind of chunk.
+func runStateAckKey(runID string, restart bool) string {
+	if restart {
+		return runID + "\x00restart"
+	}
+	return runID
+}
+
+// record stores one gateway answer. A stored answer clears the entry of
+// its own kind.
 func (s *runStateAckStore) record(ack *mitev1.RunStateAck) {
 	if ack == nil || ack.RunId == "" {
 		return
 	}
+	key := runStateAckKey(ack.RunId, ack.RestartSource)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch ack.Status {
 	case ackStatusStored:
-		delete(s.refusals, ack.RunId)
+		delete(s.refusals, key)
 	case ackStatusBusy:
 		pause := ack.PauseMs
 		if pause <= 0 {
 			pause = defaultLogBusyPauseMS
 		}
-		s.refusals[ack.RunId] = runStateRefusal{
+		s.refusals[key] = runStateRefusal{
 			reason: ack.Reason,
 			until:  time.Now().Add(time.Duration(pause) * time.Millisecond),
 		}
 	case ackStatusRejected:
 		permanent := ack.Reason == stateReasonStateCap || ack.Reason == stateReasonForeignRun
-		s.refusals[ack.RunId] = runStateRefusal{reason: ack.Reason, permanent: permanent}
+		s.refusals[key] = runStateRefusal{reason: ack.Reason, permanent: permanent}
 	}
 }
 
-// take answers the refusal that applies to runID's next post, and
-// removes a transient one so it applies once. A permanent refusal stays
-// and a busy window stays until it passes.
-func (s *runStateAckStore) take(runID string) (runStateRefusal, bool) {
+// take answers the refusal that applies to the next post of runID, for
+// the kind of chunk the post carries, and removes a transient one so it
+// applies once. A permanent refusal stays and a busy window stays until
+// it passes.
+func (s *runStateAckStore) take(runID string, restart bool) (runStateRefusal, bool) {
+	key := runStateAckKey(runID, restart)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.refusals[runID]
+	r, ok := s.refusals[key]
 	if !ok {
 		return runStateRefusal{}, false
 	}
@@ -177,10 +201,10 @@ func (s *runStateAckStore) take(runID string) (runStateRefusal, bool) {
 		if time.Now().Before(r.until) {
 			return r, true
 		}
-		delete(s.refusals, runID)
+		delete(s.refusals, key)
 		return runStateRefusal{}, false
 	default:
-		delete(s.refusals, runID)
+		delete(s.refusals, key)
 		return r, true
 	}
 }
@@ -228,7 +252,7 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	}
 	chunk.GzipContent = body
 
-	if refusal, refused := a.runStateAcks.take(chunk.RunId); refused {
+	if refusal, refused := a.runStateAcks.take(chunk.RunId, chunk.RestartSource); refused {
 		w.Header().Set(hdrStateReason, refusal.reason)
 		if refusal.reason == stateReasonBudgetFull {
 			if left := pauseLeftMS(refusal.until, time.Now()); left > 0 {
@@ -294,11 +318,30 @@ func parseRunStateHeaders(h http.Header) (*mitev1.RunStateChunk, bool) {
 	if err != nil || pusherEpoch <= 0 {
 		return nil, false
 	}
-	return &mitev1.RunStateChunk{
+	chunk := &mitev1.RunStateChunk{
 		RunId: runID, JobPath: jobPath, BuildNumber: buildNumber, Relpath: relpath,
 		StateGen: stateGen, Seq: seq, Total: total, RawSize: rawSize, ObjectSize: objectSize,
 		PusherEpoch: pusherEpoch,
-	}, true
+	}
+	switch h.Get(hdrStateRestartSource) {
+	case "":
+		// A mesh chunk carries no copy counts.
+	case "1":
+		copyFiles, err := strconv.ParseInt(h.Get(hdrStateCopyFiles), 10, 64)
+		if err != nil || copyFiles < 1 || copyFiles > restartSourceMaxFiles {
+			return nil, false
+		}
+		copyBytes, err := strconv.ParseInt(h.Get(hdrStateCopyBytes), 10, 64)
+		if err != nil || copyBytes < 1 || copyBytes > restartSourceMaxBytes {
+			return nil, false
+		}
+		chunk.RestartSource = true
+		chunk.CopyFiles = copyFiles
+		chunk.CopyBytes = copyBytes
+	default:
+		return nil, false
+	}
+	return chunk, true
 }
 
 // sendRunStateChunkLocked sends one chunk on the command stream under

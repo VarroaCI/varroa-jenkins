@@ -1048,6 +1048,8 @@ recordStore:
     artifacts: 30d
     # -- How long an activity event is kept.
     activity: 30d
+    # -- How long a run's restart copy is kept. It cannot be longer than runs.
+    restartSource: 7d
   # -- Cell-loss detection. The operator confirms a lost cell with its own
   # pod read; these settings control what the recorder then does.
   cellLoss:

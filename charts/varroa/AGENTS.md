@@ -295,7 +295,10 @@ the packaged CRDs. Does not own the Go source it packages
   `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE` as a **Go duration string**,
   not a millisecond count), the recorder PDB, and every
   `recordstore-guard.yaml` failure mode, including the retired `activity`
-  values block. `recordStore.retention.activity` (default `30d`) replaced the
+  values block. `recordStore.retention.restartSource` (default `7d`) sets
+  `VARROA_RETENTION_RESTART_SOURCE`. The guard fails the render when it is longer
+  than `runs`, and the recorder clamps it the same way at startup.
+  `recordStore.retention.activity` (default `30d`) replaced the
   old `activity.retention` dial: the recorder gets `VARROA_RETENTION_ACTIVITY`,
   the BFF gets `VARROA_ACTIVITY_RETENTION_DAYS` and `VARROA_RETENTION_RUNS`
   (the store-wide runs cap for tenant windows; all gated on

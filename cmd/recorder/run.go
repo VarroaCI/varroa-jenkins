@@ -40,7 +40,10 @@ type Config struct {
 	RetentionLogs      time.Duration
 	RetentionArtifacts time.Duration
 	RetentionActivity  time.Duration
-	FinalizeWait       time.Duration
+	// RetentionRestartSource is VARROA_RETENTION_RESTART_SOURCE, already
+	// clamped to RetentionRuns.
+	RetentionRestartSource time.Duration
+	FinalizeWait           time.Duration
 	// SweepMaxPending is VARROA_SWEEP_MAX_PENDING, the interrupted
 	// sweep's consumer-freshness gate (design D9, task 9.6a).
 	SweepMaxPending uint64
@@ -224,15 +227,16 @@ func run(ctx context.Context, cfg Config) error {
 	ingester.SetWebhooks(cfg.DashboardURL, webhookDispatcher.Nudge)
 
 	maintCfg := recordstore.MaintenanceConfig{
-		RunRetention:      cfg.RetentionRuns,
-		LogRetention:      cfg.RetentionLogs,
-		ArtifactRetention: cfg.RetentionArtifacts,
-		ActivityRetention: cfg.RetentionActivity,
-		LogStore:          store,
-		Liveness:          recordstore.NewPlacementLiveness(pool, confirmedGoneGrace),
-		FinalizeWait:      cfg.FinalizeWait,
-		FleetLockMetrics:  fleetLockMetrics,
-		LockNotifier:      runNotifier,
+		RunRetention:           cfg.RetentionRuns,
+		LogRetention:           cfg.RetentionLogs,
+		ArtifactRetention:      cfg.RetentionArtifacts,
+		ActivityRetention:      cfg.RetentionActivity,
+		RestartSourceRetention: cfg.RetentionRestartSource,
+		LogStore:               store,
+		Liveness:               recordstore.NewPlacementLiveness(pool, confirmedGoneGrace),
+		FinalizeWait:           cfg.FinalizeWait,
+		FleetLockMetrics:       fleetLockMetrics,
+		LockNotifier:           runNotifier,
 	}
 
 	goroutineCtx, cancelGoroutines := context.WithCancel(ctx)

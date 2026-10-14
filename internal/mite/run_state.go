@@ -185,6 +185,13 @@ func (h *BusHandler) dropCellStateEntries(ns, name string) {
 		}
 		delete(h.stateRuns, runID)
 	}
+	for runID, e := range h.restartRuns {
+		if e.ns != ns || e.name != name {
+			continue
+		}
+		h.dropRestartBuffersLocked(e)
+		delete(h.restartRuns, runID)
+	}
 	if h.stateTotalPendingBytes < 0 {
 		h.stateTotalPendingBytes = 0
 	}
@@ -196,6 +203,12 @@ func (h *BusHandler) dropCellStateEntries(ns, name string) {
 // recorder must record.
 func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {
 	if h.logStore == nil {
+		return
+	}
+	// A restart copy follows its own path. It is posted after the run
+	// finalizes, so the terminal drop below never applies to it.
+	if chunk.RestartSource {
+		h.onRestartSourceChunk(name, ns, chunk)
 		return
 	}
 	ctx := context.Background()
@@ -523,6 +536,13 @@ func (h *BusHandler) rejectRunState(ctx context.Context, ns, name string, chunk 
 // connection. It is a no-op when no connection is current: the pusher
 // retries from its own spool.
 func (h *BusHandler) sendRunStateAck(ns, name string, chunk *mitev1.RunStateChunk, status, reason string, pauseMS int) {
+	h.sendRunStateAckKind(ns, name, chunk, status, reason, pauseMS, false)
+}
+
+// sendRunStateAckKind answers one RunStateAck and names the kind of chunk
+// it answers, so the mite keeps a restart copy's refusal apart from a mesh
+// refusal.
+func (h *BusHandler) sendRunStateAckKind(ns, name string, chunk *mitev1.RunStateChunk, status, reason string, pauseMS int, restart bool) {
 	send := h.currentSender(ns, name)
 	if send == nil {
 		return
@@ -530,7 +550,7 @@ func (h *BusHandler) sendRunStateAck(ns, name string, chunk *mitev1.RunStateChun
 	msg := &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_RunStateAck{RunStateAck: &mitev1.RunStateAck{
 			RunId: chunk.RunId, Relpath: chunk.Relpath, StateGen: chunk.StateGen,
-			Status: status, Reason: reason, PauseMs: pauseMS,
+			Status: status, Reason: reason, PauseMs: pauseMS, RestartSource: restart,
 		}},
 	}
 	if err := send(msg); err != nil {
@@ -566,6 +586,15 @@ func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunSt
 		return
 	}
 
+	h.publishRunStateEnvelope(ns, name, chunk, payload)
+}
+
+// publishRunStateEnvelope publishes one run.state envelope for chunk with
+// the given payload. It publishes nothing when the tenant does not resolve.
+func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunStateChunk, payload map[string]interface{}) {
+	if h.publisher == nil {
+		return
+	}
 	if chunk.JobPath == "" {
 		// A cell derives the tenant from the first path segment, so no
 		// envelope publishes there. A controller tenant publishes the

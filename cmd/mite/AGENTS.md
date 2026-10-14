@@ -181,7 +181,12 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   (`handleRunState`, `runstate.go`) reads nine `X-Varroa-*` headers plus a
   raw gzip body, stamps the same pod identity, and forwards it as
   `MiteMessage.run_state_chunk`. The tenth header is the pusher epoch,
-  which names the Jenkins process behind the push generation. Every request carries
+  which names the Jenkins process behind the push generation. Three optional
+  headers mark a restart-copy chunk: `X-Varroa-Restart-Source: 1`, plus
+  `X-Varroa-Copy-Files` and `X-Varroa-Copy-Bytes`, which both name the whole
+  copy and are required with the flag. The ack store (`runStateAckStore`)
+  keys each refusal by run and kind (`runStateAckKey`), so a copy refusal never
+  blocks a mesh post. Every request carries
   `Authorization: Bearer <token>`, checked
   with `crypto/subtle.ConstantTimeCompare` against the token the mite wrote
   to `/var/run/varroa/loopback-token` before the listener opened — the mite

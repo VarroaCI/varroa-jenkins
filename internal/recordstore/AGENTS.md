@@ -35,8 +35,11 @@ of the fleet's audit activity, once a controller becomes disposable.
   generation for every row of every tenant; the BFF's `GET /pipelines`
   landing list reads it. A generation-0 row names a torn-down tenant.
 - **The pipeline mesh** (`mesh_takeover.go`, `resume_target.go`,
-  `ingest_state.go`, `ingest_resume_failed.go`) — C3's run-state
-  replication and cross-cell resume.
+  `ingest_state.go`, `ingest_restart_source.go`, `ingest_resume_failed.go`)
+  — C3's run-state replication and cross-cell resume. A `run.state` with
+  `restart_source` is a restart-copy file: `applyRestartSourceFile` keeps its
+  manifest under `runs.payload->'restart_source'` and never touches the
+  mesh anchor. `RestartSourceOf` answers the files of a complete copy only.
   `applyRunState` merges each `run.state` outcome into
   `runs.payload->'mesh'`; the recorder alone owns the 64 MiB cap, and the
   cap path clears `mesh.state_at`, `mesh.resume`, and the run's stored
@@ -139,7 +142,9 @@ of the fleet's audit activity, once a controller becomes disposable.
   (`blob.Store.PartStamp`); `varroa_gateway` holds `UPDATE` on it, and
   `Overwrite`'s `WHERE digest = … AND writer = …` needs only its `SELECT`.
   `00036_run_tests_drop_total.sql` deletes every stored `_total` row of
-  `run_tests`.
+  `run_tests`. `00037_runs_restart_source_idx.sql` adds the partial index
+  `runs_restart_source_idx` on `(created_at, run_id)` for runs whose payload
+  holds `restart_source`.
   `00028_runs_upstream.sql` adds four nullable `runs` columns: `upstream_run_id`,
   `upstream_tenant`, `upstream_job` (tenant-qualified), and `upstream_number`. Only
   `run.started` writes them, through `COALESCE`. The partial index `runs_upstream_run_id_idx`
@@ -1025,7 +1030,15 @@ of the fleet's audit activity, once a controller becomes disposable.
   reads a different cutoff. The prompt delete runs after the terminal
   commit instead, from `Apply` and from each `markInterrupted` caller.
   `deleteRetainedRunScripts` deletes the whole run-state prefix of every
-  run past the `retention.runs` cutoff, before the `runs` partition drop. `finalizeStaleLogs` (`retention_finalize.go`) is step
+  run past the `retention.runs` cutoff, before the `runs` partition drop. Both
+  that step and the tenant purge (`deleteRunBlobs`) also delete
+  `RestartSourcePrefix(run_id)`. `deleteExpiredRestartSources`
+  (`retention_restart_source.go`) runs each hourly round after the mesh
+  backstop. It deletes `restartsource/<run_id>/` and clears
+  `payload->'restart_source'` for every run whose end, or creation when the
+  run never ended, is past `recordStore.retention.restartSource`. The
+  window defaults to `7d`, and `MaintenanceConfig.restartSourceRetention`
+  clamps it to `runs`. A failed delete keeps the manifest for the next round. `finalizeStaleLogs` (`retention_finalize.go`) is step
   10, the log-finalization sweep C3's `build-log-externalization`
   capability defines; it never lowers a stored `finalized` true. The
   exported `Liveness` interface answers whether a run's owning cell is

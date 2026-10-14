@@ -75,6 +75,7 @@ Wait for all control-plane pods to become `Ready`. NATS cannot start until its v
 | Control-plane capacity | `operator.*`, `gateway.hpa.*`, `bff.hpa.*` |
 | NATS server and storage | `nats.container.image`, `nats.config.cluster.*`, `nats.config.jetstream.fileStore.pvc.*`, `jetStreamReplicas` |
 | Activity retention | `recordStore.retention.activity` |
+| Restart copy retention | `recordStore.retention.restartSource` |
 | Network isolation | `networkPolicy.*` |
 | Plugin service | `updateCenter.*` |
 | Build record store | `recordStore.*` |
@@ -120,8 +121,9 @@ namespace, so the grant still works.
 The build record store defaults to off (`recordStore.enabled: false`). When enabled,
 `recordStore.postgres.mode` defaults to `cnpg` and needs the CloudNativePG operator installed
 first; `recordStore.blobs.mode` defaults to `postgres`; and `recordStore.retention` defaults to
-`runs: 365d`, `logs: 90d`, `artifacts: 30d`, `activity: 30d`. Each retention value takes the form
-`<n>d`, a whole number of days from `1` to `3650`. `recorder.replicas` defaults to `1`.
+`runs: 365d`, `logs: 90d`, `artifacts: 30d`, `activity: 30d`, `restartSource: 7d`. Each retention
+value takes the form `<n>d`, a whole number of days from `1` to `3650`. `restartSource` must not
+be longer than `runs`. `recorder.replicas` defaults to `1`.
 `networkPolicy.recordStorePostgresEgress` and `networkPolicy.recordStoreBlobEgress` both default
 to `enabled: true`, on ports `5432` and `443`. See [Build records](../operations/build-records.md)
 for the CloudNativePG prerequisite and the full value tree.

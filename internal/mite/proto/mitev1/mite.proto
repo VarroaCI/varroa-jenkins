@@ -742,6 +742,12 @@ message RunStateChunk {
   string cell_instance = 10;
   int64 object_size = 11;
   int64 pusher_epoch = 12;
+  // A restart copy is a one-time, final copy of a finalized run. Its key carries no epoch or generation.
+  bool restart_source = 13;
+  // The file count of the whole restart copy. Set only when restart_source is true.
+  int64 copy_files = 14;
+  // The byte count of the whole restart copy. Set only when restart_source is true.
+  int64 copy_bytes = 15;
 }
 
 message RunStateRequest {
@@ -781,6 +787,8 @@ message RunStateAck {
   string status = 4;
   string reason = 5;
   int32 pause_ms = 6;
+  // Set when the ack answers a restart-copy chunk. A mesh ack never carries it.
+  bool restart_source = 7;
 }
 
 // ResumeStateFile is one stored file a resume must materialize: the path

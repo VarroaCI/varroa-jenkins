@@ -671,6 +671,14 @@ public final class RunStatePusher {
 
     /** The path prefix of this build's own directory under the Jenkins home. */
     String buildRelPathPrefix() {
+        return buildRelPathPrefix(jobPath, buildNumber);
+    }
+
+    /**
+     * The path prefix of one build's directory under the Jenkins home. The
+     * gateway holds the same rule, so a copy's file names match its build.
+     */
+    static String buildRelPathPrefix(String jobPath, long buildNumber) {
         StringBuilder sb = new StringBuilder();
         for (String seg : jobPath.split("/")) {
             if (!seg.isEmpty()) {

@@ -228,7 +228,8 @@ type BusHandler struct {
 	// counter. It is separate from logMu, so a run-state push never
 	// contends with the console-log append path.
 	stateMu                sync.Mutex
-	stateRuns              map[string]*runStateEntry // keyed by run_id
+	stateRuns              map[string]*runStateEntry      // keyed by run_id
+	restartRuns            map[string]*restartSourceEntry // restart copies, keyed by run_id
 	stateTotalPendingBytes int64
 	// stateBudgetCrossedAt is when the gateway-wide run-state pending
 	// bound was first crossed. It grows the busy pause on the log
