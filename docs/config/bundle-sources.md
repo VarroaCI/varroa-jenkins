@@ -28,9 +28,6 @@ items:
 variables:
   - variables.yaml
 jcascMergeStrategy: errorOnConflict
-itemRemoveStrategy:
-  items: none
-  rbac: sync
 ```
 
 | Field | Contract |
@@ -39,8 +36,8 @@ itemRemoveStrategy:
 | `jcasc` | One or more JCasC files |
 | `plugins`, `items`, `rbac`, `variables` | Optional file lists |
 | `jcascMergeStrategy` | `errorOnConflict` or `override` |
-| `itemRemoveStrategy.items` | `none`, `sync`, `remove-supported`, or `remove-all` |
-| `itemRemoveStrategy.rbac` | `sync` or `update` |
+
+Item removal does not come from `bundle.yaml`. See [Control removal](items.md#control-removal).
 
 Use [plugin pinning](plugin-pinning.md) and [jobs and items](items.md) for those
 file formats. Configure authorization through

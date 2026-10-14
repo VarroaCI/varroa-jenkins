@@ -29,9 +29,6 @@ when the plugin set omits it.
 ## Define a pipeline
 
 ```yaml
-removeStrategy:
-  items: none
-  rbac: sync
 items:
   - kind: folder
     name: platform
@@ -190,18 +187,20 @@ then has no effect until the job builds again. Declare a schedule in `items.yaml
 
 ## Control removal
 
-| `removeStrategy.items` | Undeclared items |
-|---|---|
-| `none` | Keep all; formerly managed items stop converging |
-| `sync` | Remove undeclared managed items |
-| `remove-supported` | Remove undeclared managed items of supported kinds |
-| `remove-all` | Remove undeclared items, including unmanaged items |
+A composed bundle keeps only the `items` key of each item manifest.
+It drops `removeStrategy`, `retain`, `root`, and every other top-level key.
+The `ComposedBundle` `status.warnings` names each dropped key and its source.
+The `dropped-item-keys.yaml` key of the bundle content ConfigMap lists the same keys.
 
-Renaming creates the new path and treats the old path as undeclared. Its removal
-follows `removeStrategy.items`. Deletion also removes build history.
+A non-cell controller does not remove an undeclared item.
+A renamed item creates the new path and keeps the old path.
+Delete an old item from the Jenkins UI.
 
+A cell removes undeclared managed items in each tenant folder.
+A held tenant's folder stays as it is.
 Unsafe removals appear in `status.pendingItemDeletions` and need the `approve-deletion`
 capability. A running job or unreadable build state defers deletion.
+Deletion also removes build history.
 
 ## GitHub sources
 
@@ -343,7 +342,7 @@ A cell also refuses a key that the items schema does not define. A non-cell cont
 
 ### Top-level keys
 
-A composed bundle keeps only the `items` key of each item manifest. Every other top-level key is dropped. The `ComposedBundle` `status.warnings` names each dropped key and its source, for example `item manifest from itemRef "x": top-level key "item" is dropped`.
+See [Control removal](#control-removal) for the dropped keys.
 
 On a cell, the drop has these effects:
 
@@ -360,6 +359,7 @@ Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`
 | Symptom | Check |
 |---|---|
 | Unknown kind | Use one of the five supported values |
+| Old item stays after a rename | A non-cell controller keeps undeclared items. Delete it from the Jenkins UI |
 | Setting is absent | Field spelling and indentation |
 | Deletion is pending | Pending path, build state, and approval |
 | Kind is unsupported | Keep it unmanaged |
