@@ -367,6 +367,12 @@ export default function PipelinePage() {
         )}
       </div>
 
+      {jobDetail.pending && (
+        <p className={styles.pendingNote} role="note">
+          The bundle declares this job, but no cell has created it yet. A cell creates the job at its next apply.
+        </p>
+      )}
+
       <div className={styles.cardGrid}>
         <Card title="Defined by">
           <dl className={styles.kv}>

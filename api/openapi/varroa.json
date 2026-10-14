@@ -2711,6 +2711,10 @@
             },
             "type": "array"
           },
+          "pending": {
+            "description": "True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.\n",
+            "type": "boolean"
+          },
           "template": {
             "allOf": [
               {
@@ -2742,6 +2746,7 @@
         "required": [
           "jobPath",
           "kind",
+          "pending",
           "health",
           "last30Days",
           "tenantFolder",
@@ -2870,12 +2875,17 @@
             "description": "The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.\n",
             "format": "int64",
             "type": "integer"
+          },
+          "pending": {
+            "description": "True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.\n",
+            "type": "boolean"
           }
         },
         "required": [
           "jobPath",
           "health",
-          "kind"
+          "kind",
+          "pending"
         ],
         "type": "object"
       },
@@ -10360,6 +10370,10 @@
             },
             "type": "array"
           },
+          "pending": {
+            "description": "True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.\n",
+            "type": "boolean"
+          },
           "template": {
             "allOf": [
               {
@@ -10391,6 +10405,7 @@
         "required": [
           "jobPath",
           "kind",
+          "pending",
           "health",
           "last30Days",
           "tenantFolder",
@@ -10692,12 +10707,17 @@
             "description": "The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.\n",
             "format": "int64",
             "type": "integer"
+          },
+          "pending": {
+            "description": "True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.\n",
+            "type": "boolean"
           }
         },
         "required": [
           "jobPath",
           "health",
-          "kind"
+          "kind",
+          "pending"
         ],
         "type": "object"
       },

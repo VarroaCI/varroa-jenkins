@@ -402,7 +402,10 @@ federation, activity persistence, and SSE fanout.
   it) and each item carries `kind`, merged through `kindByJob` rather than on the
   row: a record summary writes no kind, a declared item sets it when unset,
   `multibranch` replaces a stored `pipeline`, and the assembly loop defaults an
-  absent entry to `unknown`. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
+  absent entry to `unknown`. `pendingByJob` marks a declared job pending only when every
+  tenant that declares it reads it absent from a complete `JobInventory`
+  (`declaredJobPending`); `hasRun` clears the flag for a job with a run. The job detail
+  applies the same rule to its one ref. Every handler on this surface answers `503` when `deps.RecordStore` is nil,
   through `pipelinesUnavailable`; a handler that also reads console log or artifact
   bytes answers the same `503` when `deps.BlobStore` is nil. `GET /runs/{run}` is the stated
   exception: `run_digest.go` reads the console log for the digest's `logTail`, and a nil blob

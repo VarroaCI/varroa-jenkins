@@ -4700,7 +4700,7 @@ PipelineSummary:
   description: >
     One job's run-history summary for the Pipelines table. A job that has
     never run carries no lastBuild.
-  required: [jobPath, health, kind]
+  required: [jobPath, health, kind, pending]
   properties:
     jobPath:
       type: string
@@ -4718,6 +4718,13 @@ PipelineSummary:
         The item kind the tenant's bundle declares. A job the record store
         alone holds reports unknown. A declared item of any other kind also
         reports unknown.
+    pending:
+      type: boolean
+      description: >
+        True when every tenant that declares this job reports a complete job
+        list that lacks it. False when a declaring tenant has an unknown
+        inventory, when a declaring tenant holds the job, when the job has a
+        run, and when no tenant declares the job.
     lastBuild:
       $ref: '#/RunSummary'
     durationTrendMs:
@@ -4969,7 +4976,7 @@ PipelineParameter:
 PipelineJobDetail:
   type: object
   description: GET /pipelines/{team}/jobs/{job}.
-  required: [jobPath, kind, health, last30Days, tenantFolder, tenant, dependencies]
+  required: [jobPath, kind, pending, health, last30Days, tenantFolder, tenant, dependencies]
   properties:
     jobPath:
       type: string
@@ -4980,6 +4987,13 @@ PipelineJobDetail:
         The job's kind. A declared pipeline or multibranch item sets it.
         Otherwise a branch inventory row marks a multibranch job, and a
         run marks a pipeline job.
+    pending:
+      type: boolean
+      description: >
+        True when every tenant that declares this job reports a complete job
+        list that lacks it. False when a declaring tenant has an unknown
+        inventory, when a declaring tenant holds the job, when the job has a
+        run, and when no tenant declares the job.
     health:
       type: string
       enum: [clear, cloudy, rain, unknown]

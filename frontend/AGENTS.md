@@ -323,7 +323,8 @@ Equivalent repo-root targets: `make frontend-install`, `make frontend-build`,
   decides default-versus-explicit with `searchParams.has("open")`, never with
   the number of values. `JobBreadcrumbs.tsx` renders the pipeline page's own
   trail; `src/components/Topbar.tsx` keeps its single area crumb and is not
-  merged with it.
+  merged with it. `JobTree.tsx` shows a `Pending` badge on a job row or a multibranch node when
+  `pending` is true; `PipelinePage.tsx` shows a note above the cards for a pending job.
 - **`src/components/TenantScopeEditor.tsx`** owns the whole `tenants`
   dimension of a `VarroaRoleBinding` scope: the entry list, the `Team` name
   control, the `jobs` glob list, the grammar help, the six client-side

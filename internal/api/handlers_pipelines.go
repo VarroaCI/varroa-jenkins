@@ -76,7 +76,10 @@ type pipelineSummaryJSON struct {
 	// Kind is the item kind the tenant's bundle declares: "pipeline",
 	// "multibranch", or "unknown". It is set at assembly, never on the row,
 	// because a record summary replaces the whole row.
-	Kind            string          `json:"kind"`
+	Kind string `json:"kind"`
+	// Pending is true when the tenant's complete inventory lacks this
+	// declared job. It is set at assembly, like Kind.
+	Pending         bool            `json:"pending"`
 	LastBuild       *runSummaryJSON `json:"lastBuild,omitempty"`
 	DurationTrendMs []int64         `json:"durationTrendMs,omitempty"`
 	// MedianQueueWaitMs is the job's median queue wait in milliseconds
@@ -148,7 +151,10 @@ type pipelineJobDetailJSON struct {
 	JobPath string `json:"jobPath"`
 	// Kind is pipeline, multibranch, or unknown. The job page reads it to
 	// choose its card.
-	Kind            string                  `json:"kind"`
+	Kind string `json:"kind"`
+	// Pending is true when the tenant's complete inventory lacks this
+	// declared job. It is set at assembly, like Kind.
+	Pending         bool                    `json:"pending"`
 	Health          string                  `json:"health"`
 	TenantFolder    string                  `json:"tenantFolder"`
 	Tenant          string                  `json:"tenant"`
@@ -510,6 +516,8 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	jobs := map[string]pipelineSummaryJSON{}
 	trendByJob := map[string][]int64{}
 	kindByJob := map[string]string{}
+	pendingByJob := map[string]bool{}
+	hasRun := map[string]bool{}
 	var runningRuns []recordstore.Run
 	truncated := false
 
@@ -545,8 +553,16 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 			if len(js.DurationTrendMs) > 0 {
 				trendByJob[js.JobPath] = js.DurationTrendMs
 			}
+			if js.LastRun != nil {
+				hasRun[js.JobPath] = true
+			}
 		}
-		for _, dj := range s.catalogDeclaredJobPaths(ctx, ref) {
+		declared := s.catalogDeclaredJobPaths(ctx, ref)
+		var inv recordstore.JobInventory
+		if len(declared) > 0 {
+			inv = s.readJobInventory(ctx, ref)
+		}
+		for _, dj := range declared {
 			if !granted || !grantsAllow(grants, ref.Folder, dj.Path, "read") {
 				continue
 			}
@@ -559,6 +575,13 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 			// different kinds agree whichever one the handler reads first.
 			if stored, ok := kindByJob[dj.Path]; !ok || (stored == "pipeline" && dj.Kind == "multibranch") {
 				kindByJob[dj.Path] = dj.Kind
+			}
+			// Any tenant that does not report the job pending wins.
+			p := declaredJobPending(inv, dj.Path, dj.Kind)
+			if prev, seen := pendingByJob[dj.Path]; seen {
+				pendingByJob[dj.Path] = prev && p
+			} else {
+				pendingByJob[dj.Path] = p
 			}
 		}
 
@@ -585,6 +608,7 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		if js.Kind == "" {
 			js.Kind = "unknown"
 		}
+		js.Pending = pendingByJob[js.JobPath] && !hasRun[js.JobPath]
 		items = append(items, js)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].JobPath < items[j].JobPath })
@@ -719,8 +743,82 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 		declaredKind = item.Kind
 	}
 	detail.Kind = pipelineJobKind(declaredKind, hasBranches, summary.LastRun != nil)
+	if summary.LastRun == nil {
+		detail.Pending = s.jobPendingAcross(ctx, claims, refs, jobPath)
+	}
 
 	s.writeJSON(w, http.StatusOK, detail)
+}
+
+// declaredJobPending answers whether inv proves that the declared job at
+// path is absent from its cell. An unknown inventory proves nothing.
+func declaredJobPending(inv recordstore.JobInventory, path, kind string) bool {
+	switch kind {
+	case "pipeline":
+		if !inv.JobsKnown {
+			return false
+		}
+		_, ok := inv.Jobs[path]
+		return !ok
+	case "multibranch":
+		if !inv.ProjectsKnown {
+			return false
+		}
+		_, ok := inv.Projects[path]
+		return !ok
+	}
+	return false
+}
+
+// jobPendingAcross answers whether a job of the team is pending. It runs in
+// two passes over the refs the caller reads. First, a run of jobPath on any
+// readable tenant means not pending, the same rule the list applies through
+// hasRun. A summary read that fails also means not pending. Second, every
+// tenant that declares jobPath must report it absent from a complete
+// inventory. No declaring tenant answers false.
+func (s *Server) jobPendingAcross(ctx context.Context, claims *auth.Claims, refs []TenantRef, jobPath string) bool {
+	var readable []TenantRef
+	for _, ref := range refs {
+		grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
+		if !granted || !grantsAllow(grants, ref.Folder, jobPath, "read") {
+			continue
+		}
+		readable = append(readable, ref)
+		summary, err := s.deps.RecordStore.GetJobSummary(ctx, ref.Cluster, ref.Tenant, jobPath)
+		if err != nil || summary.LastRun != nil {
+			return false
+		}
+	}
+
+	declaredAny := false
+	for _, ref := range readable {
+		kind := ""
+		for _, dj := range s.catalogDeclaredJobPaths(ctx, ref) {
+			if dj.Path == jobPath {
+				kind = dj.Kind
+				break
+			}
+		}
+		if kind == "" {
+			continue
+		}
+		if !declaredJobPending(s.readJobInventory(ctx, ref), jobPath, kind) {
+			return false
+		}
+		declaredAny = true
+	}
+	return declaredAny
+}
+
+// readJobInventory reads ref's job inventory. A failed read answers the
+// zero value, which marks no job pending.
+func (s *Server) readJobInventory(ctx context.Context, ref TenantRef) recordstore.JobInventory {
+	inv, err := s.deps.RecordStore.JobInventory(ctx, ref.Cluster, ref.Tenant)
+	if err != nil {
+		s.deps.Logger.Warn("read job inventory failed", "cluster", ref.Cluster, "tenant", ref.Tenant, "error", err)
+		return recordstore.JobInventory{}
+	}
+	return inv
 }
 
 // pipelineJobKind answers the kind the job page renders. A declared

@@ -144,3 +144,12 @@
   font-size: 0.75rem;
   color: var(--bad-text);
 }
+
+.pendingNote {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--info-soft);
+  color: var(--info-text);
+  font-size: 0.875rem;
+}

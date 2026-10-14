@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import JobTree from "./JobTree";
 import type { JobTreeNode } from "./jobTree";
+import { createPipelineSummary } from "../../test/factories";
 
 // multibranchNode is a folder-relative multibranch item with no built
 // branch yet, so it has no child rows.
@@ -37,5 +38,53 @@ describe("JobTree multibranch rows", () => {
 
     const link = screen.getByRole("link", { name: "app" });
     expect(link.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Fapp");
+  });
+});
+
+// jobNode builds a "job" row node whose summary carries the pending flag.
+function jobNode(path: string, pending: boolean): JobTreeNode {
+  return {
+    name: path.split("/").pop(),
+    path,
+    depth: 0,
+    kind: "job",
+    children: [],
+    jobCount: 1,
+    runningCount: 0,
+    branchCount: 0,
+    summary: createPipelineSummary({ jobPath: path, pending }),
+  } as unknown as JobTreeNode;
+}
+
+function renderRows(rows: JobTreeNode[]) {
+  render(
+    <MemoryRouter>
+      <table>
+        <tbody>
+          <JobTree team="alpha" folder="alpha" rows={rows} openPaths={new Set()} onToggle={() => {}} />
+        </tbody>
+      </table>
+    </MemoryRouter>,
+  );
+}
+
+describe("JobTree pending badge", () => {
+  it("shows a Pending badge on a pending job row", () => {
+    renderRows([jobNode("acme/app-a", true)]);
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+  });
+
+  it("shows no badge when pending is false", () => {
+    renderRows([jobNode("acme/app-a", false)]);
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+  });
+
+  it("shows a Pending badge on a pending multibranch node", () => {
+    const node = {
+      ...multibranchNode,
+      summary: createPipelineSummary({ jobPath: "app", kind: "multibranch", pending: true }),
+    } as unknown as JobTreeNode;
+    renderRows([node]);
+    expect(screen.getByText("Pending")).toBeInTheDocument();
   });
 });

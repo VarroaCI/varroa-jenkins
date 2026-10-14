@@ -480,6 +480,7 @@ export function createPipelineSummary(
     jobPath: "payments/app-a",
     health: "unknown",
     kind: "pipeline",
+    pending: false,
     ...overrides,
   };
 }

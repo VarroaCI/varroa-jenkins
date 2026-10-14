@@ -100,6 +100,7 @@ const jobDetail = (overrides: Record<string, unknown> = {}) => ({
   health: "clear",
   last30Days: null,
   dependencies: { upstream: [], downstream: [] },
+  pending: false,
   ...overrides,
 });
 
@@ -248,6 +249,28 @@ describe("PipelinePage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
+  });
+
+  it("shows the pending note and keeps Run enabled for a pending job", async () => {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { write: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ pending: true }));
+    renderPage();
+    await screen.findByRole("note");
+    expect(screen.getByRole("note")).toHaveTextContent("but no cell has created it yet");
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+  });
+
+  it("shows no pending note when pending is false", async () => {
+    mockGetPipelineJob.mockResolvedValue(jobDetail());
+    renderPage();
+    await waitFor(() => expect(document.title).toBe("payments/checkout-api/main · acme"));
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 
   it("opens the Run drawer for a caller holding the tenant write grant", async () => {

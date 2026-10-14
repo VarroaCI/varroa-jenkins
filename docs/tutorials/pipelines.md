@@ -43,12 +43,9 @@ The card reports one of five states.
 | Not placed | the badge and the reason only. The team waits for its first cell |
 | No card | the team runs on its own controller, so no cell hosts it |
 
-A team waiting for its first cell shows only the pill and a note. The page reads again every 30 seconds.
-
 Callers who can read a team with no pipelines see No pipelines. Other callers see Not found.
 
-**Reason** carries the operator's own text for the placement, such as `TenantPlaced` or
-`CellNotReady`. Ask an operator about an unknown reason.
+**Reason** carries the operator's text, such as `CellNotReady`.
 
 A cell in another cluster reports no queue length. The **Queue** figure then reads `not reported`,
 which is not an empty queue.
@@ -71,6 +68,8 @@ branch, its last eight build durations, and when it last ran. **Queue wait** sho
 median wait from queue entry to start, quiet period included, over the last 30 days. Health is a weather
 glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
 or more failed. A job that has never run shows no glyph and an empty last build.
+
+A job row or a multibranch row can show a **Pending** badge. The team's bundle declares the job, but no cell has created it yet. A cell creates the job at its next apply. The job page shows the same note, and **Run** stays available. Varroa shows the badge only when each cell of a tenant that declares the job reported a complete job list.
 
 A folder row carries a fold control, the folder name, and two counts: the jobs below it, and how
 many of those build now. A folder reports no health value.
@@ -99,8 +98,6 @@ folder holding no readable job does not appear at all. See
 [Varroa RBAC](../security/varroa-rbac.md#scope-a-binding-to-a-pipelines-tenant) for how an
 administrator writes those globs.
 
-Select a job's name to open its pipeline page.
-
 ## Open a build
 
 Breadcrumbs name the team, each folder, and the job. Select a folder crumb to open the team page
@@ -124,16 +121,13 @@ The branch opens the pipeline page filtered to that branch. The **Queue** column
 The build page shows the parameters that the build ran with. A masked value appears as four dots.
 A replayed build names the build that it copied, with a link. A restarted build names the build
 and the stage that it restarted from. A queue wait longer than five seconds appears on the meta
-line. Point at the actor to see the trigger source, such as a schedule or a webhook.
-
+line.
 Select a build number to open its build page: the status, the stage graph, and four
 tabs: **Log**, **Artifacts**, **Tests**, and **Changes**. The **Older** and **Newer** buttons
 beside the build number open the adjacent builds. The buttons cover the newest 100 builds
-of the job. The page keeps the active tab in the `tab` URL parameter, so a link opens the same
-tab.
+of the job. The `tab` URL parameter keeps the active tab.
 
-Each pipelines page sets the browser tab title. A build title starts with the build state, so
-the state stays visible in a narrow tab.
+Each pipelines page sets the browser tab title.
 
 An interrupted build shows a banner naming the reason, and a link to its retry when one exists.
 
@@ -199,6 +193,8 @@ tenant's `pipelines` write grant.
 The drawer renders the job's declared parameters: a text field, a checkbox, a choice selection,
 a text area, or a password field. Fill them in and submit. A repeated submit of the same drawer
 starts one build, not two.
+
+You can start a pending job, but the run can fail until the cell creates the job.
 
 Submitting navigates to the new build's page, which shows `Requested` until the build starts. A
 build that has not started within one minute shows `Not started`; the page keeps polling, so a

@@ -2850,6 +2850,9 @@ type ComponentsSchemasPipelineJobDetail struct {
 	LastBuild  *ComponentsSchemasRunSummary          `json:"lastBuild,omitempty"`
 	Parameters *[]ComponentsSchemasPipelineParameter `json:"parameters,omitempty"`
 
+	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
+	Pending bool `json:"pending"`
+
 	// Template Absent for a job with no catalog template (a Jenkinsfile job).
 	Template *ComponentsSchemasPipelineTemplateInfo `json:"template,omitempty"`
 
@@ -2994,6 +2997,9 @@ type ComponentsSchemasPipelineSummary struct {
 
 	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.
 	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
+
+	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
+	Pending bool `json:"pending"`
 }
 
 // ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.

@@ -149,6 +149,7 @@ function FolderRow({
             <span className={styles.nodeName}>{node.name}</span>
           )}
           <span className={styles.counts}>{countLabel(node)}</span>
+          {node.kind === "multibranch" && node.summary?.pending && <PendingBadge />}
           {node.runningCount > 0 && (
             <span className={styles.running}>{node.runningCount} running</span>
           )}
@@ -164,6 +165,15 @@ function FolderRow({
   );
 }
 
+/** PendingBadge marks a declared job the cell has not created yet. */
+function PendingBadge() {
+  return (
+    <span className={styles.pendingBadge} title="The bundle declares this job, but no cell has created it yet.">
+      Pending
+    </span>
+  );
+}
+
 /** JobRow renders one job node. It shows its own path segment, and carries
  * the whole job path in text only a screen reader reads. */
 function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: PipelineSummary }) {
@@ -172,6 +182,7 @@ function JobRow({ team, node, item }: { team: string; node: JobTreeNode; item: P
       <td className={`${styles.nameCell} ${styles.pipelineCell}`}>
         <Link to={jobHref(team, item.jobPath)}>{node.name}</Link>
         <span className={styles.hiddenPath}>{item.jobPath}</span>
+        {item.pending && <PendingBadge />}
       </td>
       <td>
         <HealthGlyph health={item.health} />

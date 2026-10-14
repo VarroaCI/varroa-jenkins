@@ -29,6 +29,10 @@ type fakeRecordReader struct {
 
 	schemaTooOld bool
 
+	// jobInventory is keyed by tenantKey, "<cluster>/<tenant>".
+	jobInventory    map[string]recordstore.JobInventory
+	jobInventoryErr error
+
 	// jobBranches is keyed by branchTestKey, "<cluster>/<tenant>/<job path>".
 	jobBranches map[string]recordstore.JobBranchProject
 	// runWaits is keyed by run id; jobWaits is keyed by the tenant-qualified job path.
@@ -600,4 +604,13 @@ func (f *fakeRecordReader) GetRunWait(_ context.Context, runID string) (recordst
 
 func (f *fakeRecordReader) ListJobRunWaits(_ context.Context, _, _, jobPath string) ([]recordstore.RunWait, error) {
 	return f.jobWaits[jobPath], nil
+}
+
+// JobInventory answers the fake tenant's job inventory. The fake embeds a
+// nil Reader, so every list and detail test needs this method.
+func (f *fakeRecordReader) JobInventory(_ context.Context, cluster, tenant string) (recordstore.JobInventory, error) {
+	if f.jobInventoryErr != nil {
+		return recordstore.JobInventory{}, f.jobInventoryErr
+	}
+	return f.jobInventory[f.tenantKey(cluster, tenant)], nil
 }

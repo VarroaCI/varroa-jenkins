@@ -1723,6 +1723,8 @@ export interface PipelineSummary {
   jobPath: string;
   health: PipelineHealth;
   kind: PipelineItemKind;
+  /** True when every tenant that declares this job reports a complete job list that lacks it. */
+  pending: boolean;
   lastBuild?: RunSummary;
   durationTrendMs?: number[];
   medianQueueWaitMs?: number;
@@ -1910,6 +1912,8 @@ export interface PipelineJobDetail {
   jobPath: string;
   /** pipeline, multibranch, or unknown. The job page picks its card from it. */
   kind: "pipeline" | "multibranch" | "unknown";
+  /** True when every tenant that declares this job reports a complete job list that lacks it. */
+  pending: boolean;
   /** The tenant's Jenkins folder prefix (for example "payments"). Empty for
    * a root-hosted tenant. jobPath carries this prefix; strip it before
    * matching a grant's folder-relative job glob. */
