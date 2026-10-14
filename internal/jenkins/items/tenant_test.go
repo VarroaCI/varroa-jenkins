@@ -66,6 +66,29 @@ func TestReRoot_RejectsGenericTokenOutsideTenantPrefix(t *testing.T) {
 	}
 }
 
+func TestCheckGenericTokensErrorOmitsToken(t *testing.T) {
+	const secret = "secret-value"
+	items := []Item{{
+		Kind:     "freeStyle",
+		Name:     "deploy-job",
+		Triggers: []Trigger{{GenericTrigger: &GenericTrigger{Token: "other:" + secret}}},
+	}}
+
+	err := checkGenericTokens(items, "payments")
+	if err == nil {
+		t.Fatal("expected an error for a token outside the tenant prefix")
+	}
+	msg := err.Error()
+	for _, want := range []string{"payments", "deploy-job", "payments:"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, secret) {
+		t.Errorf("error %q leaks the genericTrigger token", msg)
+	}
+}
+
 func TestReRoot_RejectsNonEmptyRoot(t *testing.T) {
 	in := &Manifest{Root: "some/prefix", Items: []Item{{Kind: "folder", Name: "x"}}}
 

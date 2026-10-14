@@ -34,6 +34,7 @@ func ReRoot(in *Manifest, tenant string) (*Manifest, error) {
 // with "<tenant>:". The tenant door fences a call by that prefix, so a
 // token outside the prefix would let another tenant's door fire the job.
 // It walks every nested item and every pipelineTriggers entry.
+// The error never names the token, because the token is the job's webhook secret.
 func checkGenericTokens(items []Item, tenant string) error {
 	for _, it := range items {
 		for _, tr := range collectTriggers(it) {
@@ -42,7 +43,7 @@ func checkGenericTokens(items []Item, tenant string) error {
 			}
 			tok, prefix := tr.GenericTrigger.Token, tenant+":"
 			if !strings.HasPrefix(tok, prefix) || len(tok) == len(prefix) {
-				return fmt.Errorf("tenant %q: item %q genericTrigger token %q must start with %q", tenant, it.Name, tr.GenericTrigger.Token, tenant+":")
+				return fmt.Errorf("tenant %q: item %q genericTrigger token must start with %q", tenant, it.Name, prefix)
 			}
 		}
 		if err := checkGenericTokens(it.Items, tenant); err != nil {
