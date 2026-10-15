@@ -792,6 +792,8 @@ message RunStateAck {
   int32 pause_ms = 6;
   // Set when the ack answers a restart-copy chunk. A mesh ack never carries it.
   bool restart_source = 7;
+  // The sequence of the chunk the ack answers.
+  int64 seq = 8;
 }
 
 // ResumeStateFile is one stored file a resume must materialize: the path

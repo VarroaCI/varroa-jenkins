@@ -551,6 +551,7 @@ func (h *BusHandler) sendRunStateAckKind(ns, name string, chunk *mitev1.RunState
 		Message: &mitev1.OperatorMessage_RunStateAck{RunStateAck: &mitev1.RunStateAck{
 			RunId: chunk.RunId, Relpath: chunk.Relpath, StateGen: chunk.StateGen,
 			Status: status, Reason: reason, PauseMs: pauseMS, RestartSource: restart,
+			Seq: chunk.Seq,
 		}},
 	}
 	if err := send(msg); err != nil {

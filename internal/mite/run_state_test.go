@@ -1148,6 +1148,9 @@ func TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope(t *testing.T) {
 	if len(acks) != 1 || acks[0].Status != stateAckStatusStored {
 		t.Fatalf("acks = %+v, want one STORED ack", acks)
 	}
+	if acks[0].Seq != chunk.Seq {
+		t.Fatalf("mesh ack seq = %d, want the chunk seq %d", acks[0].Seq, chunk.Seq)
+	}
 	if _, err := h.logStore.NewRangeReader(context.Background(),
 		blob.RunStateKey(runID, oneChunkEpoch, 1, relpath), 0, -1); err != nil {
 		t.Fatalf("expected the file stored, NewRangeReader error = %v", err)

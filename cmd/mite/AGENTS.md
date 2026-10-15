@@ -184,7 +184,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   which names the Jenkins process behind the push generation. Three optional
   headers mark a restart-copy chunk: `X-Varroa-Restart-Source: 1`, plus
   `X-Varroa-Copy-Files` and `X-Varroa-Copy-Bytes`, which both name the whole
-  copy and are required with the flag. The ack store (`runStateAckStore`)
+  copy and are required with the flag. A copy chunk holds its HTTP answer until
+  its `RunStateAck` arrives (`restartAckWaiterMap`, 4 s, reason `ack-timeout`);
+  a mesh chunk still answers 202 at once. The ack store (`runStateAckStore`)
   keys each refusal by run and kind (`runStateAckKey`), so a copy refusal never
   blocks a mesh post. Every request carries
   `Authorization: Bearer <token>`, checked

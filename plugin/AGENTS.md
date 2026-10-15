@@ -715,7 +715,9 @@ the root AGENTS.md greenfield rule.
   32 MiB, and it has no disk spool. It posts on one daemon thread, behind a
   64-entry queue, and each chunk carries `restart_source`, `copy_files`, and
   `copy_bytes`. Counters: `varroa_plugin_restart_source_kept` and
-  `varroa_plugin_restart_source_dropped`.
+  `varroa_plugin_restart_source_dropped`. Kept means the gateway answered
+  `STORED` for every chunk of every file. A refused chunk, including the last
+  one, counts as dropped.
   Every post carries `PUSHER_EPOCH`, the JVM start time, which names this
   Jenkins process to the gateway: the push generation counts inside one
   process and starts again after a restart. A flow
