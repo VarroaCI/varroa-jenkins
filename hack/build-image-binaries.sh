@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds the Go binaries of the backend image into one directory.
-# The Dockerfile source stage and the release workflow both call this script.
+# The Dockerfile source stage (binaries-source) calls this script. The release
+# workflow does not; see the root AGENTS.md CI section for the runner-storage reason.
 # Usage: hack/build-image-binaries.sh <out-dir>. GIT_SHA sets main.version. The go toolchain's GOARCH selects the arch.
 set -eu
 out="${1:?usage: build-image-binaries.sh <out-dir>}"
