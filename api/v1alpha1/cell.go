@@ -12,3 +12,19 @@ func IsCell(cr *Controller) bool {
 	}
 	return cr.Spec.Cell != nil && cr.Spec.Cell.Enabled
 }
+
+// CellHoldsTenant reports whether the cell cr holds tenant: its
+// status.cell.tenantWarnings carries an ItemsHeld entry for tenant.
+// A held tenant's declared jobs are not the cell's jobs, so a read
+// of the tenant's definition declares no job while this is true.
+func CellHoldsTenant(cr *Controller, tenant string) bool {
+	if cr == nil || cr.Status.Cell == nil || tenant == "" {
+		return false
+	}
+	for _, w := range cr.Status.Cell.TenantWarnings {
+		if w.Tenant == tenant && w.Reason == TeamReasonItemsHeld {
+			return true
+		}
+	}
+	return false
+}

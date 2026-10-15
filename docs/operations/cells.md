@@ -115,9 +115,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   - the bundle is missing or not built.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until fixed. Pipelines pages declare no job for a folder held for a variable, parse,
-  unknown-key, `root`, or lint fault, template bodies included. Other holds show their jobs.
-  The `TenantWarnings` condition names it.
+  folder until fixed. Pipelines pages declare no job for a held folder; run history shows.
+  The pages read the hold from the cell, so a change shows after the next cell reconcile.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity

@@ -11,18 +11,18 @@ import (
 // answers. None of these fakes backs a member cluster's Team bundles.
 var errNoTeamBundle = errors.New("this test ConfigBrood serves no member team bundle")
 
-func (f *stubConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, error) {
-	return nil, nil, errNoTeamBundle
+func (f *stubConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	return nil, nil, false, errNoTeamBundle
 }
 
-func (f *fakeConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, error) {
-	return nil, nil, errNoTeamBundle
+func (f *fakeConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	return nil, nil, false, errNoTeamBundle
 }
 
-func (f *fakeConfigBroodForTest) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, error) {
-	return nil, nil, errNoTeamBundle
+func (f *fakeConfigBroodForTest) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	return nil, nil, false, errNoTeamBundle
 }
 
-func (f *scopeTestConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, error) {
-	return nil, nil, errNoTeamBundle
+func (f *scopeTestConfigBrood) GetTeamBundleContent(context.Context, string, string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	return nil, nil, false, errNoTeamBundle
 }

@@ -67,7 +67,7 @@ branch, its last eight build durations, and when it last ran. **Queue wait** sho
 median wait from queue entry to start over the last 30 days. Health is a weather glyph: clear when the last five runs passed, cloudy when one or two failed, and rain when three
 or more failed. A job that never ran shows no glyph and an empty last build.
 
-A folder held for a variable, parse, unknown-key, `root`, or lint fault shows no declared job; run history shows. Other holds show their jobs.
+A folder that its cell holds shows no declared job; run history shows. See [Cells and Pipelines Tenants](../operations/cells.md).
 
 A job or multibranch row can show a **Pending** badge: the bundle declares the job, but no cell has created it. A cell creates it at its next apply. The job page shows the note; **Run** stays available. The badge appears only when every cell reports a full job list.
 

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -108,6 +109,99 @@ func TestHandleBundlesTeamContent_MissingConfigMapAnswersBundleOnly(t *testing.T
 	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
 	if resp.Code != "" || len(resp.Bundle) == 0 || resp.Content != nil {
 		t.Fatalf("reply = %+v, want bundle only", resp)
+	}
+}
+
+// placedTeamHoldFixture is teamBundleFixture with the Team placed on cell-1.
+// cell-1 carries the given status. A nil status leaves cell-1 absent.
+func placedTeamHoldFixture(t *testing.T, cellStatus *v1alpha1.CellStatus) *ConfigCRUD {
+	t.Helper()
+	return placedTeamHoldFixtureWithContent(t, cellStatus, map[string]string{"items.yaml": "items: []\n"})
+}
+
+// placedTeamHoldFixtureWithContent is placedTeamHoldFixture with the
+// bundle's content ConfigMap set to content. A nil content leaves it absent.
+func placedTeamHoldFixtureWithContent(t *testing.T, cellStatus *v1alpha1.CellStatus, content map[string]string) *ConfigCRUD {
+	t.Helper()
+	cc := teamBundleFixture(t, "payments-content", content)
+	st := cc.Store.(*crdstore.Fake)
+	team, err := crdstore.Get[v1alpha1.Team](context.Background(), st, "payments", "")
+	if err != nil {
+		t.Fatalf("get team: %v", err)
+	}
+	team.Status.Placement = &v1alpha1.TeamPlacementStatus{Cell: "cell-1", CellNamespace: "test-ns"}
+	if err := crdstore.Update(context.Background(), st, team); err != nil {
+		t.Fatalf("place team: %v", err)
+	}
+	if cellStatus != nil {
+		crdstore.MustSeed(st, &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "cell-1", Namespace: "test-ns"},
+			Status:     v1alpha1.ControllerStatus{Cell: cellStatus},
+		})
+	}
+	return cc
+}
+
+func itemsHeldStatus(tenant string) *v1alpha1.CellStatus {
+	return &v1alpha1.CellStatus{TenantWarnings: []v1alpha1.TenantWarning{{
+		Tenant: tenant, Reason: v1alpha1.TeamReasonItemsHeld, Message: "tenant folder held: plugin not pinned",
+	}}}
+}
+
+func TestHandleBundlesTeamContent_HeldTenantAnswersHeld(t *testing.T) {
+	cc := placedTeamHoldFixture(t, itemsHeldStatus("payments"))
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Code != "" {
+		t.Fatalf("code = %q (%s), want none", resp.Code, resp.Error)
+	}
+	if !resp.Held {
+		t.Fatal("held = false, want true: the cell records an ItemsHeld hold")
+	}
+}
+
+// TestHandleBundlesTeamContent_HeldTenantWithoutContentAnswersHeld asserts the
+// hold reaches the reply even when the content ConfigMap is absent, since the
+// reply then carries no items and an early return would drop the flag.
+func TestHandleBundlesTeamContent_HeldTenantWithoutContentAnswersHeld(t *testing.T) {
+	cc := placedTeamHoldFixtureWithContent(t, itemsHeldStatus("payments"), nil)
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Code != "" || len(resp.Bundle) == 0 {
+		t.Fatalf("reply = %+v, want the bundle without content", resp)
+	}
+	if !resp.Held {
+		t.Fatal("held = false, want true: the cell records an ItemsHeld hold")
+	}
+}
+
+func TestHandleBundlesTeamContent_UnheldTenantAnswersNotHeld(t *testing.T) {
+	cc := placedTeamHoldFixture(t, &v1alpha1.CellStatus{})
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Held {
+		t.Fatal("held = true, want false: the cell records no hold")
+	}
+	if resp.Content["items.yaml"] == "" {
+		t.Fatal("content lacks items.yaml, want the tenant's items")
+	}
+}
+
+func TestHandleBundlesTeamContent_MissingCellAnswersNotHeld(t *testing.T) {
+	cc := placedTeamHoldFixture(t, nil)
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Code != "" || resp.Held {
+		t.Fatalf("reply = %+v, want no code and not held", resp)
+	}
+}
+
+func TestHandleBundlesTeamContent_UnplacedTeamAnswersNotHeld(t *testing.T) {
+	cc := teamBundleFixture(t, "payments-content", map[string]string{"items.yaml": "items: []\n"})
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Held {
+		t.Fatal("held = true, want false: the Team has no placement")
 	}
 }
 

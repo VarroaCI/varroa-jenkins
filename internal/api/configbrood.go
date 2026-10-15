@@ -94,7 +94,8 @@ type ConfigBrood interface {
 	// --- Member-placed Team bundles (member clusters only) ---
 	// GetTeamBundleContent reads a Team that only a member cluster holds.
 	// It refuses the local cluster, whose Teams the caller reads on its own store.
-	GetTeamBundleContent(ctx context.Context, cluster, team string) (*v1alpha1.ComposedBundle, map[string]string, error)
+	// held is true while the member cell holds the Team's items.
+	GetTeamBundleContent(ctx context.Context, cluster, team string) (cb *v1alpha1.ComposedBundle, content map[string]string, held bool, err error)
 }
 
 // busConfigBrood implements ConfigBrood over the NATS bus (with direct k8s

@@ -20,13 +20,14 @@ func TestConfigBrood_GetTeamBundleContentDecodesReply(t *testing.T) {
 	reply, err := json.Marshal(bus.TeamBundleContentResponse{
 		Bundle:  rawBundle,
 		Content: map[string]string{"items.yaml": "items: []\n"},
+		Held:    true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f, calls := cellPoolConfigBrood(func(string, []byte) ([]byte, error) { return reply, nil })
 
-	cb, content, err := f.GetTeamBundleContent(context.Background(), "member-a", "payments")
+	cb, content, held, err := f.GetTeamBundleContent(context.Background(), "member-a", "payments")
 	if err != nil {
 		t.Fatalf("GetTeamBundleContent: %v", err)
 	}
@@ -42,6 +43,9 @@ func TestConfigBrood_GetTeamBundleContentDecodesReply(t *testing.T) {
 	if content["items.yaml"] != "items: []\n" {
 		t.Fatalf("content = %v, want items.yaml", content)
 	}
+	if !held {
+		t.Fatal("held = false, want the member's hold")
+	}
 }
 
 func TestConfigBrood_GetTeamBundleContentRefusesLocal(t *testing.T) {
@@ -49,7 +53,7 @@ func TestConfigBrood_GetTeamBundleContentRefusesLocal(t *testing.T) {
 		t.Fatal("a local read must not reach the bus")
 		return nil, nil
 	})
-	_, _, err := f.GetTeamBundleContent(context.Background(), "core", "payments")
+	_, _, _, err := f.GetTeamBundleContent(context.Background(), "core", "payments")
 	var be *BroodError
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v, want a *BroodError", err)
@@ -65,7 +69,7 @@ func TestConfigBrood_GetTeamBundleContentMapsCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	f, _ := cellPoolConfigBrood(func(string, []byte) ([]byte, error) { return reply, nil })
-	_, _, err = f.GetTeamBundleContent(context.Background(), "member-a", "absent")
+	_, _, _, err = f.GetTeamBundleContent(context.Background(), "member-a", "absent")
 	var be *BroodError
 	if !errors.As(err, &be) || be.Code != bus.CodeNotFound {
 		t.Fatalf("err = %v, want a *BroodError with code %q", err, bus.CodeNotFound)

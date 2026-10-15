@@ -24,17 +24,18 @@ type memberTeamBrood struct {
 type memberTeamReply struct {
 	cb      *v1alpha1.ComposedBundle
 	content map[string]string
+	held    bool
 	err     error
 }
 
-func (f *memberTeamBrood) GetTeamBundleContent(_ context.Context, cluster, team string) (*v1alpha1.ComposedBundle, map[string]string, error) {
+func (f *memberTeamBrood) GetTeamBundleContent(_ context.Context, cluster, team string) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
 	key := cluster + "/" + team
 	f.calls = append(f.calls, key)
 	r, ok := f.replies[key]
 	if !ok {
-		return nil, nil, &BroodError{Code: bus.CodeNotFound, Msg: "team not found"}
+		return nil, nil, false, &BroodError{Code: bus.CodeNotFound, Msg: "team not found"}
 	}
-	return r.cb, r.content, r.err
+	return r.cb, r.content, r.held, r.err
 }
 
 // memberTeamRef is a placed Team that member-a holds and the core does not.
@@ -119,7 +120,7 @@ func TestTeamPipelineBundleContent_MemberNotFoundAnswersNil(t *testing.T) {
 	}}
 	srv := memberTeamServer(t, brood)
 
-	cb, content, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef)
+	cb, content, _, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef)
 	if cb != nil || content != nil || err != nil {
 		t.Fatalf("got (%v, %v, %v), want nil, nil, nil", cb, content, err)
 	}
@@ -131,7 +132,7 @@ func TestTeamPipelineBundleContent_MemberUnreachableReturnsError(t *testing.T) {
 	}}
 	srv := memberTeamServer(t, brood)
 
-	if _, _, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef); err == nil {
+	if _, _, _, err := srv.teamPipelineBundleContent(context.Background(), memberTeamRef); err == nil {
 		t.Fatal("err = nil, want the unreachable member error")
 	}
 }
@@ -142,7 +143,7 @@ func TestTeamPipelineBundleContent_LocalClusterNotFoundDoesNotCallMember(t *test
 
 	localRef := memberTeamRef
 	localRef.Cluster = "core"
-	cb, content, err := srv.teamPipelineBundleContent(context.Background(), localRef)
+	cb, content, _, err := srv.teamPipelineBundleContent(context.Background(), localRef)
 	if cb != nil || content != nil || err != nil {
 		t.Fatalf("got (%v, %v, %v), want nil, nil, nil", cb, content, err)
 	}

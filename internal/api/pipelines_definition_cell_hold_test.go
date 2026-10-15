@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
@@ -202,6 +203,102 @@ func TestControllerItemManifest_MemberPlacedTeamDroppedRootGivesNoManifest(t *te
 func TestListPipelines_PlacedTeamLintHoldDeclaresNoJob(t *testing.T) {
 	client := newPlacedTeamFixture(t)
 	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantLintFindingItems}
+	reader := newFakeRecordReader()
+	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
+		{JobPath: "payments/job", RecentResults: []string{"SUCCESS"}},
+	}
+	srv := pipelinesTestServer(client, resolverAuthorizer("payments"), reader, nil)
+
+	resp := listPipelinesFor(t, srv, "payments")
+	if got := kindOf(t, resp, "payments/job"); got != "unknown" {
+		t.Fatalf("kind = %q, want unknown: the held tenant declares no job", got)
+	}
+}
+
+// itemsHeldOn returns a cell status that records an ItemsHeld hold for tenant.
+func itemsHeldOn(tenant string) *v1alpha1.CellStatus {
+	return &v1alpha1.CellStatus{TenantWarnings: []v1alpha1.TenantWarning{{
+		Tenant: tenant, Reason: v1alpha1.TeamReasonItemsHeld, Message: "tenant folder held: plugin not pinned",
+	}}}
+}
+
+// TestControllerItemManifest_PlacedTeamCellHoldGivesNoManifest asserts a
+// placed Team whose items pass every local check declares no job while its
+// cell records an ItemsHeld hold for the tenant.
+func TestControllerItemManifest_PlacedTeamCellHoldGivesNoManifest(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-1"].Status.Cell = itemsHeldOn("payments")
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: the cell holds the tenant", manifest)
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamOtherTenantHoldKeepsManifest asserts
+// a hold that names another tenant does not change this tenant's read.
+func TestControllerItemManifest_PlacedTeamOtherTenantHoldKeepsManifest(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-1"].Status.Cell = itemsHeldOn("other")
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest == nil {
+		t.Fatal("manifest = nil, want the payments definition")
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamNonHoldWarningKeepsManifest asserts a
+// warning that is not an ItemsHeld hold does not hide the tenant's jobs.
+func TestControllerItemManifest_PlacedTeamNonHoldWarningKeepsManifest(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-1"].Status.Cell = &v1alpha1.CellStatus{TenantWarnings: []v1alpha1.TenantWarning{{
+		Tenant: "payments", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: "key ignored",
+	}}}
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest == nil {
+		t.Fatal("manifest = nil, want the payments definition")
+	}
+}
+
+// TestControllerItemManifest_MemberPlacedTeamHeldGivesNoManifest asserts the
+// member-placed read declares no job while the member's cell holds the Team.
+func TestControllerItemManifest_MemberPlacedTeamHeldGivesNoManifest(t *testing.T) {
+	brood := &memberTeamBrood{replies: map[string]memberTeamReply{
+		"member-a/payments": {cb: memberBundle(), content: map[string]string{"items.yaml": tenantCleanItems}, held: true},
+	}}
+	srv := memberTeamServer(t, brood)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), memberTeamRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: the member cell holds the tenant", manifest)
+	}
+}
+
+// TestListPipelines_PlacedTeamCellHoldDeclaresNoJob asserts the pipelines
+// listing declares no job for a placed Team whose cell holds the tenant.
+func TestListPipelines_PlacedTeamCellHoldDeclaresNoJob(t *testing.T) {
+	client := newPlacedTeamFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-1"].Status.Cell = itemsHeldOn("payments")
 	reader := newFakeRecordReader()
 	reader.jobSummaries["core/payments"] = []recordstore.JobSummary{
 		{JobPath: "payments/job", RecentResults: []string{"SUCCESS"}},

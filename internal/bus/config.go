@@ -60,10 +60,12 @@ type TeamBundleContentRequest struct {
 // Bundle means the Team has no pipelines bundle ref, or the ref names no
 // ComposedBundle. A nil Content means the bundle has no contentRef, or its
 // ConfigMap is absent. Code CodeNotFound means the member holds no such Team.
-// Content holds only the keys a pipeline read needs.
+// Content holds only the keys a pipeline read needs. Held is true when the
+// Team's slot-0 cell records an ItemsHeld warning for the Team.
 type TeamBundleContentResponse struct {
 	Bundle  json.RawMessage   `json:"bundle,omitempty"`
 	Content map[string]string `json:"content,omitempty"`
+	Held    bool              `json:"held,omitempty"`
 	Code    string            `json:"code,omitempty"`
 	Error   string            `json:"error,omitempty"`
 }
