@@ -489,14 +489,24 @@ func (r *CatalogReconciler) reconcileUpdateCenterSource(ctx context.Context, src
 				item.Status.Message = resErr.Error()
 				break
 			}
+			item.Status.Closure = closureStatus(cl)
+			compat := evaluateCompat(cl, inv, profiles)
+			item.Status.Compat = compat
+			complete, incomplete := closureCompleteness(cl)
+			item.Status.Conditions = []v1alpha1.TemplateCatalogCondition{
+				compatWarning(compat, cl.UnknownDeps), complete,
+			}
+			if incomplete != "" {
+				// An invalid item stores no content. A bundle must not compose
+				// a partial closure, so the composer skips this item.
+				item.Status.Valid = false
+				item.Status.Message = incomplete
+				break
+			}
 			content := closureContent(cl)
 			item.Status.Valid = true
 			item.Status.Content = content
 			item.Status.ContentHash = sha256Hex([]byte(content))
-			item.Status.Closure = closureStatus(cl)
-			compat := evaluateCompat(cl, inv, profiles)
-			item.Status.Compat = compat
-			item.Status.Conditions = []v1alpha1.TemplateCatalogCondition{compatWarning(compat)}
 		}
 
 		itemWarnings, failed := r.writeCatalogItem(ctx, src, item, desired)

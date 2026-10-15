@@ -787,6 +787,10 @@ sections describe.
     it truncates at the first `-` and would make two distinct plugin releases
     compare equal. Verdicts are advisory: they never set `status.valid = false`,
     and `EvaluateCoreCompat`/`pluginVersionConflict` remain the only gates.
+    An incomplete closure is not a verdict. It sets `status.valid = false`,
+    stores no content, and sets `ClosureComplete=False` with each unread
+    `name@version` (`ucclosurecomplete.go`). A lock-sourced member never counts
+    as unknown.
     A lock pin that `ucmeta.IsLatest` matches sets no floor and names no version.
   - `GroupReconciler`, `UserReconciler`, `TeamReconciler` (`group_controller.go`,
     `user_controller.go`, `team_controller.go`) — Group/User/Team CRDs; Team also

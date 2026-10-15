@@ -84,6 +84,8 @@ The Jenkins plugin installer reads these entries for the `latest` version of a p
 
 A plugin whose manifest cannot be read is left out of the metadata document. The service logs a warning. The plugin stays downloadable at its explicit version. The operator reports these plugins in `status.unknownDependencies`. See [Check readiness](#check-readiness). A slow blob store can delay a manifest read. The inventory waits at most 15 seconds for these reads, reports a plugin whose read is not complete as unknown, and lists it on the next pass.
 
+A derived catalog item is invalid while its closure holds a plugin version whose dependency list is unknown. Its `status.message` and its `ClosureComplete` condition name each unread version. A `ComposedBundle` that selects the item fails to compose and keeps its last good content. Store the plugin again from a pack that carries the `dev.varroa.plugin.dependencies` annotation. The item becomes valid on the next catalog sync. A manifest read that runs past the 15-second wait also makes the item invalid for that pass.
+
 ## Check readiness
 
 ```bash
@@ -104,7 +106,7 @@ The update center reports two signals about the declared plugins:
 
 A `ProfileCandidate` uses the same servability answers for its own closure.
 
-- `DependenciesKnown`, `status.unknownDependencyCount`, and `status.unknownDependencies` report stored plugin versions whose dependency list the update center cannot read. The list holds the first 50 entries, sorted by name and version. The `DependenciesKnown` condition is `False` while any such version exists. These fields are informational. They do not affect `Ready`.
+- `DependenciesKnown`, `status.unknownDependencyCount`, and `status.unknownDependencies` report stored plugin versions whose dependency list the update center cannot read. The list holds the first 50 entries, sorted by name and version. The `DependenciesKnown` condition is `False` while any such version exists. These fields are informational. They do not affect `Ready`. Derived catalog items are affected. See [Plugin dependencies](#plugin-dependencies).
 
 A plugin pinned at `latest` counts as stored when the store holds a version that runs on the lowest core that requests it. The Jenkins plugin installer sends the controller core version in the metadata request (`?version=<core>`). For that request, the update center advertises the highest stored version that the core runs. If no stored version runs on the core, it advertises the highest stored version, and the installer stops with a requires-a-greater-version-of-Jenkins error. A plugin that the declared set pins at a stored version always advertises that pinned version, whatever core the request names. With pull-through on, a declared `latest` plugin with no compatible stored version gets the newest compatible version from upstream metadata. The update center reads upstream metadata from the weekly source and from the LTS line of each version profile. A controller whose LTS line has no version profile reads only the weekly source. The download path does not carry a core version. It serves the stored version that the metadata advertises without a core filter. A `latest` pin that no source lists reports `NotListed`.
 

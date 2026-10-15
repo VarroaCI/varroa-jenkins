@@ -65,8 +65,10 @@ func verdictBlocking(v string) bool {
 // whenever the store supplied the version — the common case.
 //
 // Verdicts never set status.valid = false, never prevent an item being selected
-// into a ComposedBundle, and never block provisioning. EvaluateCoreCompat and
-// pluginVersionConflict remain the only enforcement.
+// into a ComposedBundle, and never block provisioning. An incomplete closure is
+// not a verdict. It sets status.valid = false on its own terms (see
+// closureCompleteness). EvaluateCoreCompat and pluginVersionConflict remain the
+// only enforcement for verdicts.
 func evaluateCompat(cl *ucClosure, inv *ucInventory, profiles []ucProfile) []v1alpha1.CatalogItemCompat {
 	if len(profiles) == 0 {
 		return nil
@@ -220,8 +222,7 @@ func evaluateProfileCompat(cl *ucClosure, inv *ucInventory, p ucProfile) v1alpha
 	// being judged complete.
 	if len(cl.UnknownDeps) > 0 {
 		res.Verdict = verdictUnknown
-		res.Message = fmt.Sprintf("dependency list unknown for %s; the closure may be incomplete",
-			strings.Join(cl.UnknownDeps, ", "))
+		res.Message = unknownDepsPhrase(cl.UnknownDeps) + "; the closure may be incomplete"
 		return res
 	}
 
@@ -229,18 +230,29 @@ func evaluateProfileCompat(cl *ucClosure, inv *ucInventory, p ucProfile) v1alpha
 	return res
 }
 
+// unknownDepsPhrase names the closure members whose dependency list cannot be
+// read. The caller passes a non-empty list.
+func unknownDepsPhrase(members []string) string {
+	return "dependency list unknown for " + strings.Join(members, ", ")
+}
+
 // compatWarning summarizes an item's verdicts as a condition. With zero
 // profiles the verdict list is empty and the condition is Unknown: there is
 // nothing to judge against, and evaluating against the embedded pluginlock
-// baseline is deliberately out of scope.
-func compatWarning(compat []v1alpha1.CatalogItemCompat) v1alpha1.TemplateCatalogCondition {
+// baseline is deliberately out of scope. unknownDeps names the closure members
+// whose dependency list is unread; the message names them when it is not empty.
+func compatWarning(compat []v1alpha1.CatalogItemCompat, unknownDeps []string) v1alpha1.TemplateCatalogCondition {
 	now := metav1.Now()
 	if len(compat) == 0 {
+		msg := "no JenkinsVersionProfile exists to evaluate compatibility against"
+		if len(unknownDeps) > 0 {
+			msg += "; " + unknownDepsPhrase(unknownDeps)
+		}
 		return v1alpha1.TemplateCatalogCondition{
 			Type:               compatWarningCondition,
 			Status:             metav1.ConditionUnknown,
 			Reason:             "NoProfiles",
-			Message:            "no JenkinsVersionProfile exists to evaluate compatibility against",
+			Message:            msg,
 			LastTransitionTime: now,
 		}
 	}
@@ -256,11 +268,15 @@ func compatWarning(compat []v1alpha1.CatalogItemCompat) v1alpha1.TemplateCatalog
 		}
 	}
 	if len(offenders) == 0 {
+		msg := "no profile reports a compatibility warning"
+		if len(unknownDeps) > 0 {
+			msg += "; " + unknownDepsPhrase(unknownDeps)
+		}
 		return v1alpha1.TemplateCatalogCondition{
 			Type:               compatWarningCondition,
 			Status:             metav1.ConditionFalse,
 			Reason:             worst,
-			Message:            "no profile reports a compatibility warning",
+			Message:            msg,
 			LastTransitionTime: now,
 		}
 	}
@@ -273,6 +289,9 @@ func compatWarning(compat []v1alpha1.CatalogItemCompat) v1alpha1.TemplateCatalog
 		len(offenders), len(compat), strings.Join(shown, ", "))
 	if len(offenders) > len(shown) {
 		msg += fmt.Sprintf(" (+%d more)", len(offenders)-len(shown))
+	}
+	if len(unknownDeps) > 0 {
+		msg += "; " + unknownDepsPhrase(unknownDeps)
 	}
 	return v1alpha1.TemplateCatalogCondition{
 		Type:               compatWarningCondition,

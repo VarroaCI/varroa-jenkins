@@ -164,7 +164,7 @@ func TestUCDispatch_ThreeWay(t *testing.T) {
 		seedSingleton(tc)
 		uc := newUCTestServer(t)
 		uc.entries = []inventoryEntry{
-			{Name: "acme-widget", Version: "1.2.0", SHA256: "sha256:a", DisplayName: "Acme Widget", Tags: []string{"ui"}},
+			{Name: "acme-widget", Version: "1.2.0", SHA256: "sha256:a", DependenciesKnown: true, DisplayName: "Acme Widget", Tags: []string{"ui"}},
 		}
 		r := newUCReconciler(t, tc, uc.URL)
 		src := reservedSource(testOperatorNS)
@@ -304,8 +304,8 @@ func TestUCPrune_OnPluginRemoval(t *testing.T) {
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "keep", Version: "1.0", SHA256: "sha256:k"},
-		{Name: "drop", Version: "1.0", SHA256: "sha256:d"},
+		{Name: "keep", Version: "1.0", SHA256: "sha256:k", DependenciesKnown: true},
+		{Name: "drop", Version: "1.0", SHA256: "sha256:d", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
@@ -347,7 +347,7 @@ func TestUCPrune_NothingPrunedOnFetchFailure(t *testing.T) {
 			tc := newCatalogTestClient()
 			seedSingleton(tc)
 			uc := newUCTestServer(t)
-			uc.entries = []inventoryEntry{{Name: "keep", Version: "1.0", SHA256: "sha256:k"}}
+			uc.entries = []inventoryEntry{{Name: "keep", Version: "1.0", SHA256: "sha256:k", DependenciesKnown: true}}
 			r := newUCReconciler(t, tc, uc.URL)
 			src := reservedSource(testOperatorNS)
 			crdstore.MustSeed(tc.store, src)
@@ -392,8 +392,8 @@ func TestUCPrune_WithheldOnPartialInventory(t *testing.T) {
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "keep", Version: "1.0", SHA256: "sha256:k"},
-		{Name: "at-risk", Version: "1.0", SHA256: "sha256:a"},
+		{Name: "keep", Version: "1.0", SHA256: "sha256:k", DependenciesKnown: true},
+		{Name: "at-risk", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
@@ -429,7 +429,7 @@ func TestUCPrune_EmptyButSuccessfulResponsePrunesEverything(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "gone", Version: "1.0", SHA256: "sha256:g"}}
+	uc.entries = []inventoryEntry{{Name: "gone", Version: "1.0", SHA256: "sha256:g", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -458,9 +458,9 @@ func TestUCConflictingEntries_InvalidateOneItemAndKeepTheSourceReady(t *testing.
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "conflicted", Version: "1.0", SHA256: "sha256:a"},
-		{Name: "conflicted", Version: "1.0", SHA256: "sha256:b"},
-		{Name: "clean", Version: "2.0", SHA256: "sha256:c"},
+		{Name: "conflicted", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true},
+		{Name: "conflicted", Version: "1.0", SHA256: "sha256:b", DependenciesKnown: true},
+		{Name: "clean", Version: "2.0", SHA256: "sha256:c", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
@@ -515,7 +515,7 @@ func TestUCProfileReadFailure_AbortsBeforeAnyWriteOrPrune(t *testing.T) {
 		},
 	})
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "would-be-pruned", Version: "1.0", SHA256: "sha256:x"}}
+	uc.entries = []inventoryEntry{{Name: "would-be-pruned", Version: "1.0", SHA256: "sha256:x", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -566,7 +566,7 @@ func TestUCProfileParseFailure_AbortsBeforeAnyWriteOrPrune(t *testing.T) {
 		},
 	})
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "p", Version: "1.0", SHA256: "sha256:x"}}
+	uc.entries = []inventoryEntry{{Name: "p", Version: "1.0", SHA256: "sha256:x", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -599,9 +599,9 @@ func TestUCSync_PopulatesClosureCompatAndCondition(t *testing.T) {
 	})
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "acme-widget", Version: "1.2.0", SHA256: "sha256:a", RequiredCore: "2.479.1",
+		{Name: "acme-widget", Version: "1.2.0", SHA256: "sha256:a", DependenciesKnown: true, RequiredCore: "2.479.1",
 			Dependencies: []pluginDep{{Name: "mailer", Min: "2.0"}}},
-		{Name: "mailer", Version: "2.0", SHA256: "sha256:m"},
+		{Name: "mailer", Version: "2.0", SHA256: "sha256:m", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
@@ -629,11 +629,15 @@ func TestUCSync_PopulatesClosureCompatAndCondition(t *testing.T) {
 	if widget.Compat[0].Verdict != verdictLockTooOld {
 		t.Errorf("verdict = %q, want lock-too-old", widget.Compat[0].Verdict)
 	}
-	if len(widget.Conditions) != 1 || widget.Conditions[0].Type != compatWarningCondition {
+	if len(widget.Conditions) != 2 || widget.Conditions[0].Type != compatWarningCondition ||
+		widget.Conditions[1].Type != closureCompleteCondition {
 		t.Fatalf("conditions = %+v", widget.Conditions)
 	}
 	if widget.Conditions[0].Status != metav1.ConditionTrue {
 		t.Errorf("CompatWarning should be True: %+v", widget.Conditions[0])
+	}
+	if widget.Conditions[1].Status != metav1.ConditionTrue {
+		t.Errorf("ClosureComplete should be True: %+v", widget.Conditions[1])
 	}
 	// Advisory only: the item is still valid and still has content.
 	if !widget.Valid || widget.Content == "" {
@@ -850,8 +854,8 @@ func TestUCSync_UnchangedInputsSkipDerivation(t *testing.T) {
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "a", Version: "1.0", SHA256: "sha256:a"},
-		{Name: "b", Version: "2.0", SHA256: "sha256:b"},
+		{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true},
+		{Name: "b", Version: "2.0", SHA256: "sha256:b", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
@@ -894,7 +898,7 @@ func TestUCSync_ProfileChangeDefeatsTheSkipGate(t *testing.T) {
 	seedSingleton(tc)
 	ucReadyProfile(tc, "plugins:\n  - artifactId: a\n    version: 1.0\n")
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -926,7 +930,7 @@ func TestUCSync_RepairPassAfterTheFullPassInterval(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -973,7 +977,7 @@ func TestUCSync_ManualRequestBypassesTheSkipGate(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -1103,7 +1107,7 @@ func TestUCSync_SkipAfterErrorClearsTheStaleMessage(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -1145,7 +1149,7 @@ func TestUCSync_PartialFailureDisarmsAnEarlierArm(t *testing.T) {
 	tc := newCatalogTestClient()
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
-	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	uc.entries = []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a", DependenciesKnown: true}}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
 	crdstore.MustSeed(tc.store, src)
@@ -1161,7 +1165,7 @@ func TestUCSync_PartialFailureDisarmsAnEarlierArm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uc.entries = append(uc.entries, inventoryEntry{Name: "b", Version: "2.0", SHA256: "sha256:b"})
+	uc.entries = append(uc.entries, inventoryEntry{Name: "b", Version: "2.0", SHA256: "sha256:b", DependenciesKnown: true})
 	tc.store.FailNext("patchstatus", gvr, errors.New("transient"))
 	elapseSync(src)
 	r.Reconcile(ctx, src)
@@ -1187,8 +1191,8 @@ func TestUCSync_PruneFailureBlocksTheGate(t *testing.T) {
 	seedSingleton(tc)
 	uc := newUCTestServer(t)
 	uc.entries = []inventoryEntry{
-		{Name: "keep", Version: "1.0", SHA256: "sha256:k"},
-		{Name: "drop", Version: "1.0", SHA256: "sha256:d"},
+		{Name: "keep", Version: "1.0", SHA256: "sha256:k", DependenciesKnown: true},
+		{Name: "drop", Version: "1.0", SHA256: "sha256:d", DependenciesKnown: true},
 	}
 	r := newUCReconciler(t, tc, uc.URL)
 	src := reservedSource(testOperatorNS)
