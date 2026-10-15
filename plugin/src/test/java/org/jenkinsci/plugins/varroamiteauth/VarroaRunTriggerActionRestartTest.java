@@ -229,6 +229,7 @@ public class VarroaRunTriggerActionRestartTest {
 
         RefusalAssert.assertRefused(rsp, 409, "Conflict: build 99 of " + job.getFullName()
                 + " is no longer on this cell");
+        verify(rsp).setHeader("X-Varroa-Restart-Refusal", "source-missing");
         assertEquals(0, Queue.getInstance().getItems().length);
     }
 

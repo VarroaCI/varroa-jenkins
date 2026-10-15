@@ -102,6 +102,15 @@ public class VarroaRunTriggerAction implements RootAction {
 
     private static final Logger LOGGER = Logger.getLogger(VarroaRunTriggerAction.class.getName());
 
+    /**
+     * The response header of a restart refusal that a restart copy can answer. The mite reads
+     * it and restores the source build before it retries the restart once.
+     */
+    static final String RESTART_REFUSAL_HEADER = "X-Varroa-Restart-Refusal";
+
+    /** The header value of a refusal whose source build is missing from this cell. */
+    static final String RESTART_REFUSAL_SOURCE_MISSING = "source-missing";
+
     @Override
     public String getUrlName() {
         return "varroa-run";
@@ -573,8 +582,10 @@ public class VarroaRunTriggerAction implements RootAction {
                 Run<?, ?> origin = job.getBuildByNumber(number);
                 VarroaIntentAction originIntent = origin == null ? null : origin.getAction(VarroaIntentAction.class);
                 if (origin == null || originIntent == null || !sourceRunId.equals(originIntent.getRunId())) {
+                    // The header tells the mite that a restart copy can restore the
+                    // missing build. Every other refusal stays header-free.
                     PlainTextRefusal.refuse(rsp, 409, "Conflict: build " + number + " of " + jobPath
-                            + " is no longer on this cell");
+                            + " is no longer on this cell", RESTART_REFUSAL_HEADER, RESTART_REFUSAL_SOURCE_MISSING);
                     return;
                 }
                 if (origin.isBuilding()) {

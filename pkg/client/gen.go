@@ -3748,7 +3748,7 @@ type ComponentsSchemasRunListResponse struct {
 
 // ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
 type ComponentsSchemasRunRestart struct {
-	// Reason Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved.
+	// Reason Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. The job moved and no restart copy is kept.
 	Reason      *string `json:"reason,omitempty"`
 	Restartable bool    `json:"restartable"`
 

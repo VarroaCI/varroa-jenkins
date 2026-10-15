@@ -874,24 +874,31 @@ public final class RunStatePusher {
 
         Answer post(String url, JSONObject record);
 
-        /** One post's outcome: accepted, or refused with a reason. */
+        /** One post's outcome: accepted, or refused with a status and a reason. */
         final class Answer {
             final boolean accepted;
+            /** The HTTP status of the answer, or 0 when no answer arrived. */
+            final int status;
             final String reason;
             final long pauseMillis;
 
-            Answer(boolean accepted, String reason, long pauseMillis) {
+            Answer(boolean accepted, int status, String reason, long pauseMillis) {
                 this.accepted = accepted;
+                this.status = status;
                 this.reason = reason;
                 this.pauseMillis = pauseMillis;
             }
 
             static Answer accepted() {
-                return new Answer(true, null, 0);
+                return new Answer(true, 202, null, 0);
             }
 
             static Answer refused(String reason, long pauseMillis) {
-                return new Answer(false, reason, pauseMillis);
+                return new Answer(false, 0, reason, pauseMillis);
+            }
+
+            static Answer refused(int status, String reason, long pauseMillis) {
+                return new Answer(false, status, reason, pauseMillis);
             }
         }
     }
@@ -909,7 +916,7 @@ public final class RunStatePusher {
                 return Answer.accepted();
             }
             String reason = answer.reason != null ? answer.reason : "transport";
-            return Answer.refused(reason, answer.pauseMillis);
+            return Answer.refused(answer.statusCode, reason, answer.pauseMillis);
         }
     }
 

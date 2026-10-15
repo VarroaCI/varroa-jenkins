@@ -88,7 +88,7 @@ cell is not a move.
 | Workspace of a running `node` block | No | No |
 | Workspace of an earlier build | No, unless an idle pod kept it | No |
 | Stash of the running build | Yes | No |
-| Preserved stash, for a restart | No, the restart is refused | No, the restart is refused |
+| Preserved stash, for a restart | Yes | No, the `unstash` of a restarted stage fails |
 | Archived artifact, read through Varroa | Yes | Yes |
 | Archived artifact, read by Jenkins | Yes | No |
 
@@ -111,7 +111,9 @@ A later stage can `unstash` a stash from an earlier stage, on any agent pod. Aft
 `unstash` of a stash from before the move fails with `No such saved stash`. Run the build again.
 
 `preserveStashes` keeps stashes only for a [restart from a stage](../tutorials/run-operations.md).
-A restart needs the source build on the job's current cell.
+A preserved stash survives a pod roll of the same cell. A move of the job to another cell ends it.
+A restart keeps its restart copy for 7 days by default. A restart after a move does not restore
+a stash from the old cell.
 
 ### Artifacts
 

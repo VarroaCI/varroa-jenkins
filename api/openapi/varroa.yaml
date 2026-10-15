@@ -9341,7 +9341,7 @@ components:
       properties:
         reason:
           description: |
-            Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved.
+            Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. The job moved and no restart copy is kept.
           type: string
         restartable:
           type: boolean
@@ -15847,7 +15847,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/components_schemas_Error'
           description: |
-            The run does not restart, or the stage is not restartable. The message names the reason: not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. An unlisted stage answers "stage <name> is not restartable".
+            The run does not restart, or the stage is not restartable. The message names the reason: not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. The job moved and no restart copy is kept. An unlisted stage answers "stage <name> is not restartable".
         "413":
           content:
             application/json:

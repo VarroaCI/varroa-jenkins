@@ -62,7 +62,8 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 func registerRestartRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	restartTool := mcp.NewTool("restart_run",
 		mcp.WithDescription("Rerun a completed declarative build from one stage, as the calling "+
-			"user. The build must still sit on the cell that ran it, and the stage must be in the "+
+			"user. The job's home must still be the cell that ran the build, unless the run keeps a "+
+			"complete restart copy. The stage must be in the "+
 			"restart object of get_run. The BFF mints a fresh run identifier and publishes a "+
 			"RESTART_BUILD command; it does not wait for the build to start. Use get_run to follow it."),
 		mcp.WithString("run", mcp.Required(), mcp.Description("Run identifier of the build to restart")),

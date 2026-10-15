@@ -1250,13 +1250,20 @@ type ReplayWebhookPayload struct {
 }
 
 type RestartBuildPayload struct {
-	RunId             string      `json:"run_id"`
-	IntentKey         string      `json:"intent_key"`
-	JobPath           string      `json:"job_path"`
-	SourceRunId       string      `json:"source_run_id"`
-	SourceBuildNumber int64       `json:"source_build_number"`
-	Stage             string      `json:"stage"`
-	ActingUser        *ActingUser `json:"acting_user,omitempty"`
+	RunId             string               `json:"run_id"`
+	IntentKey         string               `json:"intent_key"`
+	JobPath           string               `json:"job_path"`
+	SourceRunId       string               `json:"source_run_id"`
+	SourceBuildNumber int64                `json:"source_build_number"`
+	Stage             string               `json:"stage"`
+	ActingUser        *ActingUser          `json:"acting_user,omitempty"`
+	SourceFiles       []*RestartSourceFile `json:"source_files,omitempty"`
+}
+
+// RestartSourceFile names one file of a run's restart copy: its path
+type RestartSourceFile struct {
+	Relpath string `json:"relpath"`
+	Bytes   int64  `json:"bytes"`
 }
 
 type ResumeBuildPayload struct {
@@ -1305,11 +1312,12 @@ type RunStateChunk struct {
 }
 
 type RunStateRequest struct {
-	RequestId   *uint64 `json:"request_id,omitempty"`
-	RunId       string  `json:"run_id"`
-	Relpath     string  `json:"relpath"`
-	PusherEpoch int64   `json:"pusher_epoch,omitempty"`
-	StateGen    int64   `json:"state_gen,omitempty"`
+	RequestId     *uint64 `json:"request_id,omitempty"`
+	RunId         string  `json:"run_id"`
+	Relpath       string  `json:"relpath"`
+	PusherEpoch   int64   `json:"pusher_epoch,omitempty"`
+	StateGen      int64   `json:"state_gen,omitempty"`
+	RestartSource bool    `json:"restart_source,omitempty"`
 }
 
 type RunStateResponse struct {

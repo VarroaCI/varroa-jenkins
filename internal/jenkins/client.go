@@ -33,6 +33,18 @@ const retryAfterCap = 30 * time.Second
 // Callers can use errors.Is to distinguish not-found from other errors.
 var ErrItemNotFound = errors.New("jenkins: item not found")
 
+// ErrRestartSourceMissing reports that the plugin refused a restart because
+// the source build is no longer on the cell. A restart copy can restore it.
+var ErrRestartSourceMissing = errors.New("jenkins: restart source build is missing")
+
+// restartRefusalHeader names the plugin's machine-readable reason for a
+// restart refusal. Its value sourceMissingRefusal marks the case a restart
+// copy can answer.
+const (
+	restartRefusalHeader = "X-Varroa-Restart-Refusal"
+	sourceMissingRefusal = "source-missing"
+)
+
 // Client is an HTTP client for the Jenkins API with basic auth and CSRF crumb support.
 // It applies rate limiting (5 req/s, burst 10) and retries transient failures
 // (429, 502, 503, 504, and transport errors) up to 3 times with exponential backoff.
@@ -1304,6 +1316,10 @@ func (c *Client) RestartBuild(ctx context.Context, req RestartBuildRequest) (int
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode == http.StatusConflict && resp.Header.Get(restartRefusalHeader) == sourceMissingRefusal {
+			return resp.StatusCode, fmt.Errorf("restart build %s: %w: HTTP %d: %s",
+				req.JobPath, ErrRestartSourceMissing, resp.StatusCode, refusalText(errBody))
+		}
 		return resp.StatusCode, fmt.Errorf("restart build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
 	}
 	return resp.StatusCode, nil

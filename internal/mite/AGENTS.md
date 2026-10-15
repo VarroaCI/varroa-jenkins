@@ -514,6 +514,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   is stored, its cell disconnects, or it sits idle for 15 minutes. A copy
   answers `STORED` for a file it already holds. Its acks carry
   `RestartSource`, so a copy refusal never blocks a mesh chunk of the same run.
+  A fetch with `RunStateRequest.restart_source` set reads `restartsource/<run_id>/<relpath>`
+  and skips the epoch and generation checks. The mite's restore uses that fetch.
 - **Live tail** (`tail.go`) — `runTailLease` is a 90-second lease
   (`tailLeaseSeconds`) per run, held in `BusHandler.tailLeases`.
   `watchTail` subscribes `bus.TailSubject` (request-reply, queue group

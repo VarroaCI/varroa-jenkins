@@ -164,13 +164,19 @@ A build shows the control only when it meets all of these conditions:
 | It is declarative | The build used a `pipeline { }` definition. Jenkins does not restart a scripted pipeline from a stage. |
 | It has a restartable stage | At least one stage of the build can restart. A stage skipped for a failure in an earlier stage cannot restart. |
 | It is not template defined | No pipeline template or marker file defined the job |
-| It ran on the job's current cell | The cell that ran the build is still the job's home cell |
+| It ran on the job's current cell, or keeps a restart copy | The cell that ran the build is still the job's home cell, or the run has a complete restart copy |
 
-The source build must still sit on that cell. Varroa stores the build on the cell disk only while
-the cell runs. A pod roll or a move of the job to another cell removes the source build, and the
-restart is then refused.
+Varroa keeps a restart copy of a declarative cell run. The copy holds the build's `build.xml`, its
+`workflow-completed` files, and its `libs` files. Varroa writes the copy to the blob store after the
+run ends. The copy stays for 7 days by default, set by `recordStore.retention.restartSource`. It
+never lasts longer than the run record. After the copy expires, a restart needs the source build on
+the job's current cell.
 
-A restarted stage can use `unstash` only when the job keeps its stashes. Add this option to the
+A restart of a build whose job moved, or whose cell pod rolled, restores the copy before it runs.
+When no complete copy exists, and the job moved, the restart is refused with `home-moved`.
+
+A restarted stage can use `unstash` only when the job keeps its stashes. A preserved stash survives
+a pod roll of the same cell, but not a move of the job to another cell. Add this option to the
 job:
 
 ```groovy

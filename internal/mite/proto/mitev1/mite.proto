@@ -766,6 +766,9 @@ message RunStateRequest {
   // two pushes of one process name two objects.
   // @required
   int64 state_gen = 5;
+  // Set when the fetch wants a restart-copy object. The key then carries
+  // no epoch or generation, so pusher_epoch and state_gen are not read.
+  bool restart_source = 6;
 }
 
 message RunStateResponse {
@@ -979,6 +982,19 @@ message RestartBuildPayload {
   // @required
   string stage = 6;
   ActingUser acting_user = 7;
+  // source_files lists the files of the source build's restart copy. The
+  // mite restores them when the cell no longer holds the source build.
+  // Empty when no complete copy exists.
+  repeated RestartSourceFile source_files = 8;
+}
+
+// RestartSourceFile names one file of a run's restart copy: its path
+// relative to JENKINS_HOME and its size in bytes.
+message RestartSourceFile {
+  // @required
+  string relpath = 1;
+  // @required
+  int64 bytes = 2;
 }
 
 message CancelBuildPayload {

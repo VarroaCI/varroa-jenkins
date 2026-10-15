@@ -650,17 +650,24 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 		h.sendRunStateError(send, req, "the request names no run or no usable path")
 		return
 	}
-	// The key carries the pusher epoch and the push generation, so a
-	// request without both names no object. It is refused here rather
-	// than read as a miss, because the two failures need different
-	// repairs.
-	if req.PusherEpoch <= 0 {
-		h.sendRunStateError(send, req, "the request names no pusher epoch")
-		return
-	}
-	if req.StateGen <= 0 {
-		h.sendRunStateError(send, req, "the request names no push generation")
-		return
+	// A restart copy is final, so its key carries no epoch or generation
+	// and the request names none. Every other fetch names both, because
+	// the key carries both. A request without them names no object, and
+	// it is refused here rather than read as a miss, because the two
+	// failures need different repairs.
+	var key string
+	if req.RestartSource {
+		key = blob.RestartSourceKey(req.RunId, req.Relpath)
+	} else {
+		if req.PusherEpoch <= 0 {
+			h.sendRunStateError(send, req, "the request names no pusher epoch")
+			return
+		}
+		if req.StateGen <= 0 {
+			h.sendRunStateError(send, req, "the request names no push generation")
+			return
+		}
+		key = blob.RunStateKey(req.RunId, req.PusherEpoch, req.StateGen, req.Relpath)
 	}
 
 	h.invalidateOwnerOnFirstFetch(req.RunId, ns, name)
@@ -668,7 +675,6 @@ func (h *BusHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequ
 	ctx := context.Background()
 	// Replace writes through Put, which both drivers store as chunked
 	// part 0, so the chunked read is the matching read.
-	key := blob.RunStateKey(req.RunId, req.PusherEpoch, req.StateGen, req.Relpath)
 	r, err := h.logStore.NewRangeReader(ctx, key, 0, -1)
 	if err != nil {
 		h.sendRunStateError(send, req, "the gateway cannot read the stored file")

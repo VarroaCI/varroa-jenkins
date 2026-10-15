@@ -26,11 +26,23 @@ final class PlainTextRefusal {
      * to a partial success body.
      */
     static void refuse(StaplerResponse2 rsp, int code, String msg) throws IOException {
+        refuse(rsp, code, msg, null, null);
+    }
+
+    /**
+     * Answers like {@link #refuse(StaplerResponse2, int, String)} and adds one response header
+     * when {@code headerName} is not null. The header is set after the reset, so it survives.
+     */
+    static void refuse(StaplerResponse2 rsp, int code, String msg, String headerName, String headerValue)
+            throws IOException {
         if (!rsp.isCommitted()) {
             rsp.reset();
         }
         rsp.setStatus(code);
         rsp.setContentType(CONTENT_TYPE);
+        if (headerName != null) {
+            rsp.setHeader(headerName, headerValue);
+        }
         PrintWriter writer = rsp.getWriter();
         writer.write(msg);
         writer.flush();

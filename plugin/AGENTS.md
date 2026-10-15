@@ -609,7 +609,8 @@ the root AGENTS.md greenfield rule.
   build from one stage as the acting user. It keeps the source build's parameter values. It refuses
   `409` when the job's home moved off this cell (`VarroaHomeCache.forwardSlotFor`), when the source
   build number no longer names the source run, when the source build has not ended, when the
-  declarative inspection refuses, and when the stage is not listed. Every check after the item
+  declarative inspection refuses, and when the stage is not listed. The source-missing `409`
+  (`X-Varroa-Restart-Refusal: source-missing`) lets the mite restore a restart copy. Every check after the item
   lookup runs inside the acting user's `ACL.as2`, because `RestartDeclarativePipelineAction`
   reads `Item.BUILD` of the current identity. `VarroaDeclarativeRestart` reaches the declarative
   plugin through the uber class loader only (test scope in this module). It answers the restartable

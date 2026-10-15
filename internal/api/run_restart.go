@@ -64,8 +64,10 @@ type restartCompletedEnvelope struct {
 // completed. It never calls Jenkins.
 //
 // The rules run in a fixed order, and the first failure names itself. A
-// stage name is restartable only while the job's home is still the cell
-// that ran the build, because the source build exists only on that cell.
+// stage name is restartable while the job's home is the cell that ran the
+// build, or while the run keeps a complete restart copy. The copy lets a
+// restart run after the job moved, or after the cell lost its disposable
+// home. Without a copy, the source build exists only on that cell.
 //
 // It answers an error only for a home read that failed.
 func (s *Server) runRestartSource(ctx context.Context, run recordstore.Run) (RunRestart, *ServiceError) {
@@ -97,7 +99,9 @@ func (s *Server) runRestartSource(ctx context.Context, run recordstore.Run) (Run
 			return RunRestart{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "resolve the job home member failed"}
 		}
 		if home.Placed && home.Cell != run.Cell {
-			return refused(restartReasonHomeMoved)
+			if _, complete := recordstore.RestartSourceOf(run); !complete {
+				return refused(restartReasonHomeMoved)
+			}
 		}
 	}
 	return RunRestart{Restartable: true, Stages: append([]string{}, stages...)}, nil
@@ -153,6 +157,17 @@ func (s *Server) restartRun(ctx context.Context, claims *auth.Claims, runID, sta
 		return "", "", "", &ServiceError{Status: http.StatusConflict, Message: "run does not restart: " + restartReasonNotRecorded}
 	}
 
+	// The copy's file list rides on the command whenever a complete copy
+	// exists. The mite restores the files only when the plugin answers that
+	// the source build is missing, so a copy never replaces a build the
+	// cell still holds.
+	var sourceFiles []*mitev1.RestartSourceFile
+	if files, complete := recordstore.RestartSourceOf(sourceRun); complete {
+		for _, f := range files {
+			sourceFiles = append(sourceFiles, &mitev1.RestartSourceFile{Relpath: f.RelPath, Bytes: f.Bytes})
+		}
+	}
+
 	id, mintErr := uuid.NewV7()
 	if mintErr != nil {
 		s.deps.Logger.Error("mint restart run id", "error", mintErr)
@@ -176,6 +191,7 @@ func (s *Server) restartRun(ctx context.Context, claims *auth.Claims, runID, sta
 			SourceBuildNumber: *sourceRun.BuildNumber,
 			Stage:             stage,
 			ActingUser:        actingUserFrom(claims),
+			SourceFiles:       sourceFiles,
 		},
 	}
 	if err := s.publishImperative(ctx, target, cmd); err != nil {

@@ -1,6 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -45,10 +46,12 @@ public class RestartSourcePusherTest {
     /** Records every post and answers from a script; accepted once the script is empty. */
     private static final class Recording implements RunStatePusher.RunStateSender {
         final List<JSONObject> records = new ArrayList<>();
+        final List<String> urls = new ArrayList<>();
         final Deque<Answer> answers = new ArrayDeque<>();
 
         @Override
         public Answer post(String url, JSONObject record) {
+            urls.add(url);
             records.add(record);
             Answer next = answers.poll();
             return next != null ? next : Answer.accepted();
@@ -261,6 +264,29 @@ public class RestartSourcePusherTest {
 
         assertEquals(1, sender.records.size());
         assertEquals(1L, counter(PluginCounters.RESTART_SOURCE_DROPPED));
+    }
+
+    @Test
+    public void copyPostsToTheRunStateRoute() throws IOException {
+        write("build.xml", "abc");
+        write("workflow-completed/x.xml", "de");
+
+        RestartSourcePusher.copy(root(), JOB, BUILD, "run-1", URL);
+
+        assertFalse(sender.urls.isEmpty());
+        for (String url : sender.urls) {
+            assertEquals(URL + "/v1/run-state", url);
+        }
+    }
+
+    @Test
+    public void deadlineDropNamesTheLastAnswer() {
+        assertEquals("404 (gateway-budget-full)",
+                RestartSourcePusher.describe(RunStatePusher.RunStateSender.Answer.refused(404, "gateway-budget-full", 0)));
+        assertEquals("no answer (transport)",
+                RestartSourcePusher.describe(RunStatePusher.RunStateSender.Answer.refused(0, "transport", 0)));
+        assertEquals("404",
+                RestartSourcePusher.describe(RunStatePusher.RunStateSender.Answer.refused(404, null, 0)));
     }
 
     @Test

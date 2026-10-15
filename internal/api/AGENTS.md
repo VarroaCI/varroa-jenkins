@@ -436,7 +436,8 @@ federation, activity persistence, and SSE fanout.
   `restartable`, `reason`, and `stages` without a Jenkins call. `POST /runs/{run}/restart` takes
   `{stage}`, runs the same rules, mints a UUIDv7, keys it `restart:<source>:<new>`, and publishes one
   `RESTART_BUILD` to the job's `homeRef`. Both answer `home-moved` when the job's home is no longer the
-  cell that ran the build. `GET /runs/{run}` carries `restart` on a terminal run, plus `restartOf` and
+  cell that ran the build and the run keeps no complete restart copy (`recordstore.RestartSourceOf`).
+  `POST` also sends the copy's file list in `source_files` whenever a complete copy exists. `GET /runs/{run}` carries `restart` on a terminal run, plus `restartOf` and
   `restartStage`. The live log tail
   (`GET /runs/{run}/log`) authenticates over SSE's `?ticket=` query param with scope
   `run:<run_id>`, minted by `POST /stream/ticket`, never a bearer token. `runTailRegistry`

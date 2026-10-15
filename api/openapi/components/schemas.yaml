@@ -6146,7 +6146,8 @@ RunRestart:
         Why the run does not restart. The field is absent when restartable
         is true. The value is one of not-terminal, template-defined,
         not-recorded, not-declarative, disabled, unavailable,
-        no-restartable-stage, or home-moved.
+        no-restartable-stage, or home-moved. The job moved and no restart
+        copy is kept.
     stages:
       type: array
       description: The stages the restart can begin at, in run order.

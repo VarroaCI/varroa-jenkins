@@ -1877,7 +1877,7 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				user := actingUserOf(payload.ActingUser)
 				acting = &user
 			}
-			restartStatus, restartErr := a.getJenkinsClient().RestartBuild(cctx, jenkins.RestartBuildRequest{
+			restartStatus, restartErr := a.restartWithRestore(cctx, payload, jenkins.RestartBuildRequest{
 				RunID:             payload.RunId,
 				IntentKey:         payload.IntentKey,
 				JobPath:           payload.JobPath,

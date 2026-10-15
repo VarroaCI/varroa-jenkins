@@ -230,7 +230,7 @@ final class RestartSourcePusher {
                 }
                 if (again) {
                     if (clock.getAsLong() + RETRY_MIN > deadline) {
-                        dropped(runId, "the copy missed its deadline");
+                        dropped(runId, "the copy missed its deadline before every file was stored");
                         return;
                     }
                     sleeper.sleep(RETRY_MIN);
@@ -264,7 +264,7 @@ final class RestartSourcePusher {
             byte[] part = Arrays.copyOfRange(content, start, end);
             JSONObject record = record(runId, jobPath, number, relpath, seq, chunks, part, content.length,
                     copyFiles, copyBytes);
-            RunStatePusher.RunStateSender.Answer answer = sender.post(url, record);
+            RunStatePusher.RunStateSender.Answer answer = sender.post(url + RunStatePusher.ROUTE, record);
             if (answer.accepted) {
                 seq++;
                 backoff = RETRY_MIN;
@@ -281,13 +281,21 @@ final class RestartSourcePusher {
             }
             long wait = answer.pauseMillis > 0 ? answer.pauseMillis : backoff;
             if (clock.getAsLong() + wait > deadline) {
-                dropped(runId, "the copy missed its deadline");
+                dropped(runId, "the copy missed its deadline; last answer " + describe(answer));
                 return Push.STOP;
             }
             sleeper.sleep(wait);
             backoff = Math.min(backoff * 2, RETRY_MAX);
         }
         return Push.ACCEPTED;
+    }
+
+    /** Names the last answer of a refused post: its status, and its reason when the gateway gave one. */
+    static String describe(RunStatePusher.RunStateSender.Answer answer) {
+        if (answer.status == 0) {
+            return "no answer" + (answer.reason != null ? " (" + answer.reason + ")" : "");
+        }
+        return answer.status + (answer.reason != null ? " (" + answer.reason + ")" : "");
     }
 
     /** Builds the record one chunk posts. It has the mesh record's shape plus the copy's flag and counts. */

@@ -252,3 +252,97 @@ func TestRestartRunKeepsAPaddedStageNameExact(t *testing.T) {
 		t.Fatalf("stage = %q, want the padded name unchanged", got)
 	}
 }
+
+// withRestartCopy adds a restart-copy manifest to a run's payload. The copy
+// holds one file of 10 bytes, and complete sets whether that file arrived.
+func withRestartCopy(t *testing.T, run *recordstore.Run, complete bool) {
+	t.Helper()
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(run.Payload, &doc); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	files := []map[string]any{{"relpath": "jobs/svc/jobs/main/builds/7/build.xml", "bytes": 10}}
+	if !complete {
+		files = []map[string]any{}
+	}
+	copyRec := map[string]any{
+		"epoch": 1, "expected_files": 1, "expected_bytes": 10, "complete": complete, "files": files,
+	}
+	raw, err := json.Marshal(copyRec)
+	if err != nil {
+		t.Fatalf("marshal copy: %v", err)
+	}
+	doc["restart_source"] = raw
+	run.Payload, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+}
+
+// TestRunRestartSource_MovedJobWithCopyIsRestartable asserts a moved job
+// stays restartable while the run keeps a complete copy, and answers
+// home-moved when the copy is partial.
+func TestRunRestartSource_MovedJobWithCopyIsRestartable(t *testing.T) {
+	tests := []struct {
+		name       string
+		complete   bool
+		wantReason string
+	}{
+		{name: "complete copy", complete: true, wantReason: ""},
+		{name: "partial copy", complete: false, wantReason: restartReasonHomeMoved},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, reader, _ := restartFixture(t, []string{"read", "write"}, []string{"build", "deploy"})
+			reader.jobHomes["core/test-ns/ci/svc/main"] = jobHomeAnswer{namespace: "cells-ns", cell: "cell-b"}
+			run := reader.runs[scriptRunID]
+			withRestartCopy(t, &run, tc.complete)
+			got, serr := srv.runRestartSource(context.Background(), run)
+			if serr != nil {
+				t.Fatalf("runRestartSource error: %v", serr)
+			}
+			if got.Reason != tc.wantReason || got.Restartable != (tc.wantReason == "") {
+				t.Fatalf("answer = %+v, want reason %q", got, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestRestartRunSendsCopyFilesAfterPodRoll asserts the command carries the
+// copy's file list whenever a complete copy exists, even on the same cell.
+func TestRestartRunSendsCopyFilesAfterPodRoll(t *testing.T) {
+	srv, reader, mt := restartFixture(t, []string{"read", "write"}, []string{"build", "deploy"})
+	run := reader.runs[scriptRunID]
+	withRestartCopy(t, &run, true)
+	reader.runs[scriptRunID] = run
+
+	req := doWriteRequest("/runs/"+scriptRunID+"/restart", map[string]string{"run": scriptRunID}, testClaims(), restartRunRequest{Stage: "deploy"})
+	rec := httptest.NewRecorder()
+	srv.handleRestartRun(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+	}
+	calls := mt.calls()
+	if len(calls) != 1 {
+		t.Fatalf("published %d commands, want 1", len(calls))
+	}
+	files := calls[0].cmd.RestartBuild.SourceFiles
+	if len(files) != 1 || files[0].Relpath != "jobs/svc/jobs/main/builds/7/build.xml" || files[0].Bytes != 10 {
+		t.Fatalf("source files = %+v, want the one copied build.xml", files)
+	}
+}
+
+// TestRestartRunOmitsCopyFilesWithoutCopy asserts a run with no copy sends no
+// file list.
+func TestRestartRunOmitsCopyFilesWithoutCopy(t *testing.T) {
+	srv, _, mt := restartFixture(t, []string{"read", "write"}, []string{"build", "deploy"})
+	req := doWriteRequest("/runs/"+scriptRunID+"/restart", map[string]string{"run": scriptRunID}, testClaims(), restartRunRequest{Stage: "deploy"})
+	rec := httptest.NewRecorder()
+	srv.handleRestartRun(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s, want 202", rec.Code, rec.Body.String())
+	}
+	if files := mt.calls()[0].cmd.RestartBuild.SourceFiles; len(files) != 0 {
+		t.Fatalf("source files = %+v, want none", files)
+	}
+}

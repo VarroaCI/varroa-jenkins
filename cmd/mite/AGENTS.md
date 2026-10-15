@@ -362,6 +362,15 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   the generation, so each fetch sets `RunStateRequest.pusher_epoch` and
   `RunStateRequest.state_gen`, and the gateway reads that exact object. A
   path alone names nothing.
+  A `RESTART_BUILD` that carries `source_files` restores a missing source build.
+  `restartWithRestore` posts the restart, and retries it once only after the plugin answers
+  `409` with `X-Varroa-Restart-Refusal: source-missing` (`jenkins.ErrRestartSourceMissing`).
+  `restoreRestartSource` fetches each copy file with `restart_source` set. It stages the files
+  under a hidden directory in the home, renames the directory to `jobs/<seg>/…/builds/<n>/`,
+  then reloads the job and calls `load-build`. It refuses a file outside that exact build
+  prefix (`checkRestartSourceRelpath`). An existing build directory that holds every copy file at
+  its declared size skips the write and repeats the reload and load. Any other existing directory
+  is refused.
   A `log_next_seq` above 0 is written to `varroa-log-next-seq` in the
   restored build directory before the reload, so every load path finds it.
   The plugin reads the same file name. A failed write is logged and does

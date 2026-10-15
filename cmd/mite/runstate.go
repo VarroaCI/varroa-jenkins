@@ -16,9 +16,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -841,6 +843,25 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 	if pusherEpoch <= 0 || stateGen <= 0 {
 		return nil, fmt.Errorf("fetch %s: the file names no pusher epoch or no push generation", relPath)
 	}
+	return retryRunStateFetch(ctx, relPath, func() ([]byte, error) {
+		return a.fetchRunStateFile(ctx, runID, relPath, pusherEpoch, stateGen)
+	})
+}
+
+// fetchRestartSourceFileWithRetry fetches one file of a restart copy with
+// the same retry. A restart copy's key carries no epoch or generation, so
+// the request names none.
+func (a *Agent) fetchRestartSourceFileWithRetry(ctx context.Context, runID, relPath string) ([]byte, error) {
+	return retryRunStateFetch(ctx, relPath, func() ([]byte, error) {
+		return a.fetchRunStateObject(ctx, relPath, &mitev1.RunStateRequest{
+			RunId: runID, Relpath: relPath, RestartSource: true,
+		})
+	})
+}
+
+// retryRunStateFetch runs one fetch, retrying a failed attempt with a
+// doubling wait until the attempts or the context run out.
+func retryRunStateFetch(ctx context.Context, relPath string, fetch func() ([]byte, error)) ([]byte, error) {
 	var lastErr error
 	wait := runStateFetchBackoff
 	for attempt := 0; attempt < runStateFetchAttempts; attempt++ {
@@ -855,7 +876,7 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 			timer.Stop()
 			wait *= 2
 		}
-		data, err := a.fetchRunStateFile(ctx, runID, relPath, pusherEpoch, stateGen)
+		data, err := fetch()
 		if err == nil {
 			return data, nil
 		}
@@ -871,6 +892,15 @@ func (a *Agent) fetchRunStateFileWithRetry(ctx context.Context, runID, relPath s
 // inflated bytes. A response carrying an error fails the fetch, so the
 // caller writes no partial file.
 func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pusherEpoch, stateGen int64) ([]byte, error) {
+	return a.fetchRunStateObject(ctx, relPath, &mitev1.RunStateRequest{
+		RunId: runID, Relpath: relPath, PusherEpoch: pusherEpoch, StateGen: stateGen,
+	})
+}
+
+// fetchRunStateObject sends one prepared fetch and reads its answer. The
+// caller sets the object's identity on req; this function sets only the
+// request identifier.
+func (a *Agent) fetchRunStateObject(ctx context.Context, relPath string, req *mitev1.RunStateRequest) ([]byte, error) {
 	requestID := a.runStateSeq.Add(1)
 	ch, ok := a.runStateWaiters.register(requestID)
 	if !ok {
@@ -878,10 +908,7 @@ func (a *Agent) fetchRunStateFile(ctx context.Context, runID, relPath string, pu
 	}
 	defer a.runStateWaiters.cancel(requestID)
 
-	req := &mitev1.RunStateRequest{
-		RequestId: &requestID, RunId: runID, Relpath: relPath,
-		PusherEpoch: pusherEpoch, StateGen: stateGen,
-	}
+	req.RequestId = &requestID
 	if err := a.sendRunStateRequestLocked(req); err != nil {
 		a.logForwardFailure(err)
 		return nil, fmt.Errorf("fetch %s: %w", relPath, err)
@@ -965,4 +992,202 @@ func (a *Agent) adoptNode(ctx context.Context, name string) error {
 		return nil
 	}
 	return fmt.Errorf("adopt node %s: Jenkins answered %d", name, resp.StatusCode)
+}
+
+// restartWithRestore posts one restart. When the plugin refuses it because
+// the source build is missing, and the command carries a restart copy, the
+// mite restores the copy and posts the restart once more. Every other
+// outcome passes through unchanged.
+func (a *Agent) restartWithRestore(ctx context.Context, payload *mitev1.RestartBuildPayload, request jenkins.RestartBuildRequest) (int, error) {
+	status, err := a.getJenkinsClient().RestartBuild(ctx, request)
+	if err == nil || !errors.Is(err, jenkins.ErrRestartSourceMissing) || len(payload.SourceFiles) == 0 {
+		return status, err
+	}
+	if restoreErr := a.restoreRestartSource(ctx, payload); restoreErr != nil {
+		return status, fmt.Errorf("restore the restart source: %w", restoreErr)
+	}
+	return a.getJenkinsClient().RestartBuild(ctx, request)
+}
+
+// restoreRestartSource writes a run's restart copy back under the Jenkins
+// home, so the restart finds the source build the cell lost. It writes the
+// files into a staging directory under the home first, then renames the
+// directory into place. The rename is the only write the build directory
+// sees, so a failed copy leaves no partial build behind.
+//
+// The copy's files are checked against the build prefix of the source
+// build. A file outside that prefix, or a build directory that already
+// exists, refuses the restore.
+func (a *Agent) restoreRestartSource(ctx context.Context, payload *mitev1.RestartBuildPayload) error {
+	home := a.jenkinsHomeDir
+	if home == "" {
+		return errors.New("restart_build has no Jenkins home")
+	}
+	if n := len(payload.SourceFiles); n == 0 || n > restartSourceMaxFiles {
+		return fmt.Errorf("the restart copy holds %d files, not 1 to %d", n, restartSourceMaxFiles)
+	}
+	prefix, err := restartSourceBuildPrefix(payload.JobPath, payload.SourceBuildNumber)
+	if err != nil {
+		return err
+	}
+	var total int64
+	for _, file := range payload.SourceFiles {
+		if err := checkRestartSourceRelpath(file.Relpath, prefix); err != nil {
+			return err
+		}
+		if file.Bytes <= 0 {
+			return fmt.Errorf("restart copy file %s names no size", file.Relpath)
+		}
+		total += file.Bytes
+	}
+	if total > restartSourceMaxBytes {
+		return fmt.Errorf("the restart copy holds %d bytes, above the %d cap", total, restartSourceMaxBytes)
+	}
+
+	buildDir := filepath.Join(home, filepath.FromSlash(strings.TrimSuffix(prefix, "/")))
+	// An earlier attempt may have moved the copy into place and then failed
+	// at the reload or the load. Such a directory holds every copy file at
+	// its declared size, and the restore then only repeats the reload and
+	// the load. Any other directory is refused, because it may hold a build
+	// this copy did not write.
+	restored := false
+	if info, err := os.Stat(buildDir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("the build path %s is not a directory", buildDir)
+		}
+		if err := checkRestartSourceFilesPresent(buildDir, prefix, payload.SourceFiles); err != nil {
+			return fmt.Errorf("the build directory %s already exists and does not hold the copy: %w", buildDir, err)
+		}
+		restored = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat the build directory: %w", err)
+	}
+
+	if !restored {
+		if err := a.stageRestartSource(ctx, home, buildDir, prefix, payload); err != nil {
+			return err
+		}
+	}
+
+	if err := a.getJenkinsClient().ReloadItem(ctx, payload.JobPath); err != nil {
+		return fmt.Errorf("reload %s: %w", payload.JobPath, err)
+	}
+	// The restored build is a finished build, so the load must answer
+	// without a running build. Jenkins loads a build on demand, so the
+	// load-build route is what makes the restart find it.
+	answer, err := a.loadResumedBuild(ctx, payload.JobPath, payload.SourceBuildNumber)
+	if err != nil {
+		return err
+	}
+	if answer.Building {
+		return fmt.Errorf("build %d of %s runs after the restore", payload.SourceBuildNumber, payload.JobPath)
+	}
+	a.Logger.Info("restart source restored",
+		"run_id", payload.RunId, "source_run_id", payload.SourceRunId,
+		"job_path", payload.JobPath, "build_number", payload.SourceBuildNumber,
+		"files", len(payload.SourceFiles), "bytes", total)
+	return nil
+}
+
+// stageRestartSource fetches the copy's files into a staging directory under
+// the home and renames it to buildDir. The staging directory is readable by
+// the Jenkins process as well, because os.MkdirTemp creates it owner-only.
+func (a *Agent) stageRestartSource(ctx context.Context, home, buildDir, prefix string, payload *mitev1.RestartBuildPayload) error {
+	staging, err := os.MkdirTemp(home, ".varroa-restart-source-")
+	if err != nil {
+		return fmt.Errorf("make the staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return fmt.Errorf("make the staging directory readable: %w", err)
+	}
+	for _, file := range payload.SourceFiles {
+		data, err := a.fetchRestartSourceFileWithRetry(ctx, payload.SourceRunId, file.Relpath)
+		if err != nil {
+			return err
+		}
+		if int64(len(data)) != file.Bytes {
+			return fmt.Errorf("restart copy file %s holds %d bytes, not %d", file.Relpath, len(data), file.Bytes)
+		}
+		dst := filepath.Join(staging, filepath.FromSlash(strings.TrimPrefix(file.Relpath, prefix)))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("make the directory of %s: %w", file.Relpath, err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", file.Relpath, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(buildDir), 0o755); err != nil {
+		return fmt.Errorf("make the builds directory: %w", err)
+	}
+	if err := os.Rename(staging, buildDir); err != nil {
+		return fmt.Errorf("move the restored build into place: %w", err)
+	}
+	return nil
+}
+
+// checkRestartSourceFilesPresent reports whether buildDir holds every copy
+// file at its declared size.
+func checkRestartSourceFilesPresent(buildDir, prefix string, files []*mitev1.RestartSourceFile) error {
+	for _, file := range files {
+		info, err := os.Stat(filepath.Join(buildDir, filepath.FromSlash(strings.TrimPrefix(file.Relpath, prefix))))
+		if err != nil {
+			return fmt.Errorf("copy file %s: %w", file.Relpath, err)
+		}
+		if info.Size() != file.Bytes {
+			return fmt.Errorf("copy file %s holds %d bytes, not %d", file.Relpath, info.Size(), file.Bytes)
+		}
+	}
+	return nil
+}
+
+// restartSourceBuildPrefix returns the relative path prefix of one build's
+// directory under the Jenkins home. It follows the same rule as the plugin's
+// run-state prefix, so a copy's file names match the directory they restore.
+func restartSourceBuildPrefix(jobPath string, buildNumber int64) (string, error) {
+	if buildNumber <= 0 {
+		return "", fmt.Errorf("the source build number %d is not a build", buildNumber)
+	}
+	var b strings.Builder
+	for _, seg := range strings.Split(jobPath, "/") {
+		if seg == "" {
+			continue
+		}
+		if err := validateJobSegment(seg); err != nil {
+			return "", err
+		}
+		b.WriteString("jobs/" + seg + "/")
+	}
+	if b.Len() == 0 {
+		return "", errors.New("the restart names no job")
+	}
+	b.WriteString("builds/" + strconv.FormatInt(buildNumber, 10) + "/")
+	return b.String(), nil
+}
+
+// checkRestartSourceRelpath accepts one copy file only when it sits under
+// the source build's directory and is one of the three kinds a copy holds:
+// build.xml, a file under workflow-completed/, or a file under libs/.
+func checkRestartSourceRelpath(relpath, prefix string) error {
+	if relpath == "" || strings.HasPrefix(relpath, "/") || strings.Contains(relpath, `\`) {
+		return fmt.Errorf("restart copy path %q is not a relative path", relpath)
+	}
+	for _, seg := range strings.Split(relpath, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("restart copy path %q holds an empty or dot segment", relpath)
+		}
+	}
+	if !strings.HasPrefix(relpath, prefix) {
+		return fmt.Errorf("restart copy path %q is outside %s", relpath, prefix)
+	}
+	rest := relpath[len(prefix):]
+	switch {
+	case rest == "build.xml":
+		return nil
+	case strings.HasPrefix(rest, "workflow-completed/") && len(rest) > len("workflow-completed/"):
+		return nil
+	case strings.HasPrefix(rest, "libs/") && len(rest) > len("libs/"):
+		return nil
+	}
+	return fmt.Errorf("restart copy path %q is not a kind a copy holds", relpath)
 }
