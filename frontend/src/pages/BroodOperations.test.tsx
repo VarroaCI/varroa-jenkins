@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
+import { stubVirtualViewport } from "../test/virtualViewport";
 import BroodOperations from "./BroodOperations";
 
 const mockNavigate = vi.fn();
@@ -76,6 +77,8 @@ const ctrlFixture = (name: string, overrides?: Record<string, unknown>) => ({
 });
 
 describe("BroodOperations", () => {
+  stubVirtualViewport();
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
@@ -98,6 +101,25 @@ describe("BroodOperations", () => {
     renderPage();
     expect(await screen.findByText("ns1/op-running")).toBeInTheDocument();
     expect(screen.getByText("ns1/op-done")).toBeInTheDocument();
+  });
+
+  it("names each failed cluster and its error", async () => {
+    mockList.mockResolvedValue({
+      items: [runningRow],
+      clusters: [
+        { cluster: "core", ok: true },
+        { cluster: "member-b", ok: false, error: "cluster unreachable" },
+        { cluster: "member-c", ok: false },
+      ],
+    });
+    renderPage();
+    const notices = await screen.findAllByRole("status");
+    const memberB = notices.find((n) => n.textContent?.includes("member-b"));
+    const memberC = notices.find((n) => n.textContent?.includes("member-c"));
+    expect(memberB?.textContent).toContain("cluster unreachable");
+    expect(memberC?.textContent).toContain("the cluster did not answer");
+    expect(notices).toHaveLength(2);
+    expect(screen.queryByText(/Some clusters are unreachable/)).not.toBeInTheDocument();
   });
 
   it("shows verb, phase, and summary columns", async () => {

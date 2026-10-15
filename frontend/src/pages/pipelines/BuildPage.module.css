@@ -1,0 +1,287 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  max-width: 1100px;
+}
+
+.loading,
+.notFound,
+.pending {
+  color: var(--text-2);
+  font-size: 14px;
+  padding: 40px 0;
+}
+
+.notFound h1,
+.pending h1 {
+  color: var(--text);
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.headTop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.buildNav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* The anchor holds the Shortcuts legend, which hangs below the button. */
+.shortcutsAnchor {
+  position: relative;
+}
+
+.statusPill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+
+.tone_ok { background: var(--ok-soft); color: var(--ok-text); }
+.tone_bad { background: var(--bad-soft); color: var(--bad-text); }
+.tone_warn { background: var(--warn-soft); color: var(--warn-text); }
+.tone_idle { background: var(--idle-soft); color: var(--idle-text); }
+
+/* The "Ran with" row sits under the meta line. */
+.ranWith {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.ranWithLabel {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* The digest card's log tail wraps, and a long tail scrolls inside the card. */
+.digestTail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24em;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.triggerFailed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 13.5px;
+}
+
+.triggerFailed h1 {
+  color: var(--bad-text);
+  font-size: 20px;
+  margin: 0;
+}
+
+.triggerFailed p {
+  margin: 0;
+}
+
+.interruptedBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
+.refusalNotice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.rejectedBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bad-soft);
+  color: var(--bad-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
+.rejectedBanner code {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
+.waitNotice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.interruptedBanner a {
+  color: var(--bad-text);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  color: var(--text-2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: 8px 10px;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+
+/* A suite header row names the cases below it. */
+.groupRow th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: .3px;
+  color: var(--text);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.groupSecondary {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.testsSummary {
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.testsNotice {
+  color: var(--text-2);
+  font-size: 13px;
+  margin: 0;
+}
+
+.testsTab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The report line names the report path and its size, then the download. */
+.reportLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* A stack trace wraps, and a long trace scrolls inside its cell. */
+.caseError {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12em;
+  overflow-y: auto;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.digestCases {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.changesList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+}

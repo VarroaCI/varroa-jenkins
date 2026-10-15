@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
 // handleStreamTicket mints a short-lived, single-purpose SSE stream ticket bound to
@@ -72,6 +74,14 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+	case strings.HasPrefix(scope, "run:"):
+		if !s.mintRunTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "run:")) {
+			return
+		}
+	case strings.HasPrefix(scope, "pipelines:"):
+		if !s.mintPipelinesTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "pipelines:")) {
+			return
+		}
 	}
 
 	ticket, ttl, err := s.deps.TicketIssuer.Mint(claims, scope)
@@ -89,8 +99,10 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 // validStreamScope accepts the canonical stream scopes: "brood", "activity",
-// "controller:{cluster}/{ns}/{name}", or "broodop:{ns}/{name}". It mirrors sseScope in the auth
-// middleware. Three-token form only; two-token form is rejected.
+// "controller:{cluster}/{ns}/{name}", "broodop:{ns}/{name}", "run:{run_id}", or
+// "pipelines:{team}". It mirrors sseScope in the auth middleware. Three-token form
+// only for "controller:"; two-token form is rejected. "run:" and "pipelines:" each
+// take exactly one token after the prefix.
 func validStreamScope(scope string) bool {
 	switch scope {
 	case "brood", "activity":
@@ -107,5 +119,60 @@ func validStreamScope(scope string) bool {
 		ns, name, found := strings.Cut(rest, "/")
 		return found && ns != "" && name != "" && !strings.Contains(name, "/")
 	}
+	if rest, ok := strings.CutPrefix(scope, "run:"); ok {
+		return rest != "" && !strings.Contains(rest, "/")
+	}
+	if rest, ok := strings.CutPrefix(scope, "pipelines:"); ok {
+		return rest != "" && !strings.Contains(rest, "/")
+	}
 	return false
+}
+
+// mintRunTicketAuthorized reads runID's record and applies the run read
+// check before a "run:" ticket mints (run-log-viewer's sse-auth-transport
+// delta): 503 when the record store is unavailable, 404 for an unknown
+// run, 403 for a run whose tenant claims may not read. It reads no
+// controller and no placement, so a run whose cell was deleted still
+// mints a ticket for a permitted caller.
+func (s *Server) mintRunTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, runID string) bool {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return false
+	}
+	run, _, err := s.deps.RecordStore.GetRun(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, recordstore.ErrRunNotFound) {
+			s.writeJSONError(w, http.StatusNotFound, "run not found")
+			return false
+		}
+		if s.handleReaderError(w, err, "get run") {
+			return false
+		}
+	}
+	if !s.canReadRun(claims, run.Tenant, run.JobPath) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
+}
+
+// mintPipelinesTicketAuthorized resolves team before a "pipelines:" ticket
+// mints. It answers 503 through pipelinesUnavailable when the record store
+// is absent. It writes the resolution error unchanged, so a team the caller
+// may not read answers 404, exactly as the team read does.
+func (s *Server) mintPipelinesTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, team string) bool {
+	if s.deps.RecordStore == nil {
+		s.pipelinesUnavailable(w)
+		return false
+	}
+	refs, serr := s.resolveTeamTenants(r.Context(), claims, team)
+	if serr != nil {
+		s.writeServiceError(w, serr)
+		return false
+	}
+	if len(refs) == 0 {
+		s.writeJSONError(w, http.StatusNotFound, "not found")
+		return false
+	}
+	return true
 }

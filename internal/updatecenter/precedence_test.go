@@ -45,6 +45,30 @@ func TestPrecedence_UploadDoesNotShadowDeclaredVersion(t *testing.T) {
 	}
 }
 
+// TestDeclaredSet_HighestSkipsUnpinned: an unpinned declaration never sets the
+// highest pin, and a plugin declared only at latest has no pin.
+func TestDeclaredSet_HighestSkipsUnpinned(t *testing.T) {
+	only := DeclaredSet{"x": {"latest"}}
+	if v, ok := only.Highest("x"); ok || v != "" {
+		t.Fatalf("Highest(latest only) = (%q,%v), want (\"\",false)", v, ok)
+	}
+	if !only.Unpinned("x") {
+		t.Fatalf("Unpinned(latest only) = false, want true")
+	}
+
+	mixed := DeclaredSet{"x": {"latest", "1.0", "2.0"}}
+	if v, ok := mixed.Highest("x"); !ok || v != "2.0" {
+		t.Fatalf("Highest(mixed) = (%q,%v), want (2.0,true)", v, ok)
+	}
+	if mixed.Unpinned("x") {
+		t.Fatalf("Unpinned(mixed) = true, want false")
+	}
+
+	if (DeclaredSet{}).Unpinned("y") {
+		t.Fatalf("Unpinned(undeclared) = true, want false")
+	}
+}
+
 // TestPrecedence_NewerUndeclaredUploadWins: with nothing declared, the highest
 // version by pluginver is served and the older stays downloadable.
 func TestPrecedence_NewerUndeclaredUploadWins(t *testing.T) {

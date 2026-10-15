@@ -25,6 +25,9 @@ import type {
   ObjectMeta,
   ComposedBundlePreview,
   ControllerCondition,
+  PipelineSummary,
+  RunningRun,
+  FleetLock,
 } from "../types";
 import type { Permissions, MeResponse, AuthConfig } from "../types/auth";
 import type { ControllerListItem, ControllerDetail } from "../hooks/useControllers";
@@ -98,8 +101,37 @@ export function createControllerListItem(
     endpoint: "https://jenkins.example.com",
     miteConnected: true,
     composedBundleRef: { name: "base-bundle" },
+    kind: "stateful",
+    createdAt: "2026-01-02T03:04:05Z",
     ...overrides,
   };
+}
+
+// createControllerFleet builds a deterministic fleet of n controllers for
+// scale tests. The phase mix repeats every 20 rows so every bucket is present.
+export function createControllerFleet(n: number): ControllerListItem[] {
+  return Array.from({ length: n }, (_, i) => {
+    const isCell = i % 10 === 5;
+    const base = {
+      name: `fleet-${String(i).padStart(4, "0")}`,
+      namespace: `ns-${i % 20}`,
+      cluster: i % 10 === 0 ? "member-1" : "core",
+      kind: (isCell ? "cell" : "stateful") as ControllerListItem["kind"],
+      jenkinsVersion: "2.504.3",
+      version: "2.504.3",
+      jenkinsHealth: "healthy",
+      lastSeen: "2026-10-08T12:00:00Z",
+    };
+    const cell = isCell ? { cellPool: "default", tenantCount: 2, maxTenants: 8, warm: false } : {};
+    const phase = i % 20;
+    if (phase === 0) {
+      return createControllerListItem({ ...base, ...cell, phase: "Failed", miteConnected: false, attention: { kind: "bootFailed", message: "exit 5" } });
+    }
+    if (phase === 1) return createControllerListItem({ ...base, ...cell, phase: "Provisioning", miteConnected: false });
+    if (phase === 2) return createControllerListItem({ ...base, ...cell, phase: "Hibernated", miteConnected: false });
+    if (phase === 3) return createControllerListItem({ ...base, ...cell, phase: "Running", miteConnected: false });
+    return createControllerListItem({ ...base, ...cell, phase: "Connected", miteConnected: true });
+  });
 }
 
 export function createControllerDetail(
@@ -120,6 +152,8 @@ export function createControllerDetail(
     // reconcileBlocked is always present on the detail contract (never nil
     // server-side); default to the not-blocked shape.
     reconcileBlocked: { blocked: false },
+    // kind is always present on the detail contract; the Cell tab reads it.
+    kind: "stateful",
     ...overrides,
   };
 }
@@ -414,6 +448,7 @@ export function createMeResponse(
 export function createAuthConfig(overrides?: Partial<AuthConfig>): AuthConfig {
   return {
     mode: "local",
+    localAccounts: false,
     ...overrides,
   };
 }
@@ -430,6 +465,56 @@ export function createActivityEvent(
     controller: "test-ctrl",
     namespace: "default",
     message: "Controller test-ctrl created",
+    ...overrides,
+  };
+}
+
+// ---- Pipelines ----
+
+/** createPipelineSummary sets every required field of PipelineSummary,
+ * including kind. */
+export function createPipelineSummary(
+  overrides?: Partial<PipelineSummary>,
+): PipelineSummary {
+  return {
+    jobPath: "payments/app-a",
+    health: "unknown",
+    kind: "pipeline",
+    pending: false,
+    ...overrides,
+  };
+}
+
+/** createRunningRun sets every required field of RunningRun, which carries
+ * no kind: a running build names a job, never an item declaration. */
+export function createRunningRun(overrides?: Partial<RunningRun>): RunningRun {
+  return {
+    runId: nextId("run"),
+    jobPath: "payments/app-a",
+    status: "RUNNING",
+    ...overrides,
+  };
+}
+
+// ---- Fleet locks ----
+
+/** createFleetLock sets every required field of FleetLock. runLink is
+ * absent by default, because the BFF sends it only to a caller whose
+ * grant covers the run. A waiting row carries waitingSince, and a held or
+ * a releasing row carries acquiredAt, as the BFF answers them. */
+export function createFleetLock(overrides?: Partial<FleetLock>): FleetLock {
+  const state = overrides?.state ?? "held";
+  const since = state === "waiting"
+    ? { waitingSince: "2026-01-01T00:00:00Z" }
+    : { acquiredAt: "2026-01-01T00:00:00Z" };
+  return {
+    name: "payments/smoke-lock",
+    cluster: "core",
+    tenant: "payments",
+    jobPath: "payments/app-a",
+    state,
+    runId: nextId("run"),
+    ...since,
     ...overrides,
   };
 }

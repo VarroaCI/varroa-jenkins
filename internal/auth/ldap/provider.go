@@ -207,6 +207,11 @@ func (p *Provider) Login(_ context.Context, username, password string) (idToken 
 		// when the password is empty.
 		return "", 0, ErrInvalidCredentials
 	}
+	if strings.HasPrefix(username, auth.LocalSubjectPrefix) {
+		// The prefix marks a local account beside OIDC; no LDAP subject may
+		// carry it.
+		return "", 0, ErrInvalidCredentials
+	}
 
 	conn, err := p.dial(p.cfg)
 	if err != nil {
@@ -447,13 +452,17 @@ func (p *Provider) Verify(_ context.Context, rawToken string) (*auth.Claims, err
 		return nil, ErrExpiredToken
 	}
 
-	return &auth.Claims{
+	claims := &auth.Claims{
 		Subject:           lc.Sub,
 		Email:             lc.Email,
 		Name:              lc.Name,
 		PreferredUsername: lc.PreferredUsername,
 		Groups:            lc.Groups,
-	}, nil
+	}
+	if lc.Iat > 0 {
+		claims.IssuedAt = time.Unix(lc.Iat, 0)
+	}
+	return claims, nil
 }
 
 // --- LDAP connection helpers ---

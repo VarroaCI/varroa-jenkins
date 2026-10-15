@@ -34,6 +34,16 @@ Conflict:
       schema:
         $ref: './schemas.yaml#/Error'
 
+ApproveConflict:
+  description: >-
+    Conflict — no pending restart, no pending plugin roll, the pending change is
+    not the one the caller approved, or the pending plugin roll changed after it
+    was read.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/ApproveConflict'
+
 MethodNotAllowed:
   description: Method not allowed on this endpoint.
   content:
@@ -56,7 +66,10 @@ ClusterUnreachable:
         $ref: './schemas.yaml#/Error'
 
 ServiceUnavailable:
-  description: Search sources are temporarily unavailable.
+  description: >
+    The upstream data source is temporarily unavailable (search sources,
+    or the build record store when it is disabled or its schema is too
+    old).
   content:
     application/json:
       schema:

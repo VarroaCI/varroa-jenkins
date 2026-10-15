@@ -4,6 +4,7 @@ import { listRoles, deleteRole } from "../api/client";
 import type { VarroaRole } from "../types";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { FederationSummary } from "../components/FederationStatus";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import styles from "./Roles.module.css";
@@ -116,7 +117,17 @@ export default function Roles() {
           </div>
           {filtered.map((role) => (
             <div key={role.metadata.name} className={styles.roleRow}>
-              <span className={styles.roleName}>{role.metadata.name}</span>
+              <span className={styles.roleName}>
+                {role.metadata.name}
+                {(role.status?.federation?.length ?? 0) > 0 && (
+                  <span
+                    className={styles.federationFault}
+                    title="Hives where the delete of a stale federated JenkinsRole failed. Read status.federation for the reason."
+                  >
+                    <FederationSummary status={role.status} />
+                  </span>
+                )}
+              </span>
               <span className={styles.monoMuted}>
                 {role.metadata.labels?.["varroa.dev/builtin"] === "true" ? "Yes" : "No"}
               </span>

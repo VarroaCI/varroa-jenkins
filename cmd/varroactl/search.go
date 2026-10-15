@@ -47,10 +47,25 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	body, _ := io.ReadAll(httpResp.Body)
 	var env struct {
-		Items []map[string]any `json:"items"`
+		Items    []map[string]any `json:"items"`
+		Clusters []struct {
+			Name  string `json:"name"`
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"clusters"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return fmt.Errorf("failed to decode: %w", err)
+	}
+
+	for _, st := range env.Clusters {
+		if !st.OK {
+			msg := "no answer"
+			if st.Error != "" {
+				msg = st.Error
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cluster %s: %s; its search results are incomplete\n", st.Name, msg)
+		}
 	}
 
 	return renderList(env.Items, o, noHeaders, searchColumns, []string{"TYPE", "CLUSTER", "NAMESPACE", "NAME"})

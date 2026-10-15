@@ -253,7 +253,7 @@ func runEditProvisioningDefaults(cmd *cobra.Command, args []string) error {
 			}
 			return doc, nil
 		},
-		func(doc map[string]any) error {
+		func(_, doc map[string]any) error {
 			jsonBody, _ := json.Marshal(doc)
 			httpResp, err := rawRequest(cmd, "PUT", path, jsonBody)
 			if err != nil {

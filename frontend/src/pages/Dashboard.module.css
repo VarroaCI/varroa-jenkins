@@ -177,6 +177,7 @@
 .activityIcon[data-style="softOk"] { background: var(--ok-soft); color: var(--ok-text); }
 .activityIcon[data-style="softWarn"] { background: var(--warn-soft); color: var(--warn-text); }
 .activityIcon[data-style="softBad"] { background: var(--bad-soft); color: var(--bad-text); }
+.activityIcon[data-style="softMuted"] { background: var(--surface-3); color: var(--text-2); }
 
 .activityContent { min-width: 0; }
 
@@ -284,3 +285,52 @@
   .twoCol { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+.phaseBar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  gap: 2px;
+}
+
+.phaseSeg {
+  min-width: 4px;
+}
+
+.phaseLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.phaseDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.healthMore {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.phaseSeg[data-phase="Connected"],
+.phaseDot[data-phase="Connected"] { background: var(--ok); }
+.phaseSeg[data-phase="Running"],
+.phaseDot[data-phase="Running"] { background: var(--info); }
+.phaseSeg[data-phase="Provisioning"],
+.phaseDot[data-phase="Provisioning"] { background: var(--warn); }
+.phaseSeg[data-phase="Failed"],
+.phaseDot[data-phase="Failed"] { background: var(--bad); }
+.phaseSeg[data-phase="Hibernated"],
+.phaseDot[data-phase="Hibernated"],
+.phaseSeg[data-phase="Other"],
+.phaseDot[data-phase="Other"] { background: var(--idle); }

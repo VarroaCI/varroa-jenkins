@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
+	"go.opentelemetry.io/otel/metric/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -132,14 +133,15 @@ func runSelfContained(N int, rampRate int, dur time.Duration, cluster, busUser, 
 		slog.Default().Error("presence kv", "error", err)
 		os.Exit(1)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		slog.Default().Error("desired kv", "error", err)
-		os.Exit(1)
-	}
 	srv := mitesrv.NewServer(certAuth, tokenSigner, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
-	srv.SetStreamHandler(mitesrv.NewBusHandler(cluster, busConn, snapshotKV, presenceKV, desiredKV, nil))
+	// fakemite starts no telemetry, so its handler counts on a no-op provider.
+	handler, err := mitesrv.NewBusHandler(noop.NewMeterProvider(), cluster, busConn, snapshotKV, presenceKV, nil)
+	if err != nil {
+		slog.Default().Error("stream handler", "error", err)
+		os.Exit(1)
+	}
+	srv.SetStreamHandler(handler)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -270,7 +272,7 @@ func runFakeMite(ctx context.Context, addr string, certAuth *ca.CA, name, ns str
 		return
 	}
 
-	cert, err := certAuth.IssueMiteCert(name, ns, pub)
+	cert, err := certAuth.IssueMiteCert(name, ns, pub, "")
 	if err != nil {
 		connectErrors.Add(1)
 		return

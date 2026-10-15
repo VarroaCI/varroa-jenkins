@@ -46,7 +46,7 @@ func TestHibernationIgnoreRegex_Set(t *testing.T) {
 
 func TestMintWakeToken_EnabledAndEmpty(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
-	token, err := mintWakeToken(spec, false, "")
+	token, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestMintWakeToken_EnabledAndEmpty(t *testing.T) {
 }
 
 func TestMintWakeToken_HibernatedFlagAndEmpty(t *testing.T) {
-	token, err := mintWakeToken(nil, true, "")
+	token, err := mintWakeToken(nil, true, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestMintWakeToken_HibernatedFlagAndEmpty(t *testing.T) {
 
 func TestMintWakeToken_Idempotent(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
-	token, err := mintWakeToken(spec, false, "existing-token-123")
+	token, err := mintWakeToken(spec, false, "existing-token-123", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestMintWakeToken_Idempotent(t *testing.T) {
 
 func TestMintWakeToken_NotNeeded(t *testing.T) {
 	// Not enabled, not hibernated, no token.
-	token, err := mintWakeToken(nil, false, "")
+	token, err := mintWakeToken(nil, false, "", false)
 	if err != nil {
 		t.Fatalf("mintWakeToken failed: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestMintWakeToken_NotNeeded(t *testing.T) {
 func TestMintWakeToken_RotationOnClear(t *testing.T) {
 	spec := &v1alpha1.HibernationSpec{Enabled: true}
 	// First call: token created.
-	token1, err := mintWakeToken(spec, false, "")
+	token1, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("first mintWakeToken failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 		t.Fatalf("expected 32-char token, got %q", token1)
 	}
 	// Token now exists: second call returns empty (no mint).
-	token2, err := mintWakeToken(spec, false, token1)
+	token2, err := mintWakeToken(spec, false, token1, false)
 	if err != nil {
 		t.Fatalf("second mintWakeToken failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 		t.Errorf("expected empty when token already exists, got %q", token2)
 	}
 	// Token cleared: third call creates a new token.
-	token3, err := mintWakeToken(spec, false, "")
+	token3, err := mintWakeToken(spec, false, "", false)
 	if err != nil {
 		t.Fatalf("third mintWakeToken failed: %v", err)
 	}
@@ -115,6 +115,30 @@ func TestMintWakeToken_RotationOnClear(t *testing.T) {
 	}
 	if token3 == token1 {
 		t.Errorf("expected different token after clear, got same: %q", token3)
+	}
+}
+
+// TestMintWakeToken_CellExcluded asserts task 5.7: a cell mints no wake
+// token even though it legally carries hibernation.enabled=true (which the
+// operator otherwise ignores) and an empty stored token.
+func TestMintWakeToken_CellExcluded(t *testing.T) {
+	spec := &v1alpha1.HibernationSpec{Enabled: true}
+	token, err := mintWakeToken(spec, false, "", true)
+	if err != nil {
+		t.Fatalf("mintWakeToken failed: %v", err)
+	}
+	if token != "" {
+		t.Errorf("expected empty token for a cell, got %q", token)
+	}
+
+	// Already hibernated (status.hibernated=true) is the other minting
+	// trigger; a cell excludes that path too.
+	token, err = mintWakeToken(nil, true, "", true)
+	if err != nil {
+		t.Fatalf("mintWakeToken failed: %v", err)
+	}
+	if token != "" {
+		t.Errorf("expected empty token for a hibernated cell, got %q", token)
 	}
 }
 
@@ -259,21 +283,24 @@ func TestHibernateController_RefusesStopped(t *testing.T) {
 // captureTransport (connected, healthy, Send succeeds without a gRPC stream).
 type idleTransport struct {
 	*captureTransport
+	// timerTriggerJobs is the TimerTriggerJobs gauge the mite reports.
+	timerTriggerJobs int
 }
 
 func (t *idleTransport) IdleGauges(_, _ string) (*mitev1.IdleGauges, time.Time, bool) {
-	return freshGauges(), time.Now(), true
+	g := freshGauges()
+	g.TimerTriggerJobs = t.timerTriggerJobs
+	return g, time.Now(), true
 }
 
 func TestAutoHibernateWritesStatusNotSpec(t *testing.T) {
 	client := newTestClient()
-	client.hibernatedChanged = true
 	rec := newTestReconciler(client)
 	rec.miteTransport = &idleTransport{captureTransport: &captureTransport{}}
 
 	now := time.Now()
 	cr := &v1alpha1.Controller{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(now)},
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(now), ResourceVersion: "7"},
 		Spec: v1alpha1.ControllerSpec{
 			PowerState:  "Running",
 			Hibernation: &v1alpha1.HibernationSpec{Enabled: true, GracePeriodMinutes: 60},
@@ -294,17 +321,58 @@ func TestAutoHibernateWritesStatusNotSpec(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// The auto-hibernate write must go to status via SetHibernated(true)...
-	if len(client.hibernatedWrites) != 1 {
-		t.Fatalf("expected exactly 1 SetHibernated write, got %d", len(client.hibernatedWrites))
+	// The auto-hibernate write must go to status through the conditional
+	// SetHibernatedAt at the tick's read version, never the fresh-read
+	// SetHibernated...
+	if len(client.hibernatedWrites) != 0 {
+		t.Fatalf("the tick called SetHibernated: %+v", client.hibernatedWrites)
 	}
-	w := client.hibernatedWrites[0]
-	if w.name != "test" || w.namespace != "ns" || !w.want {
-		t.Errorf("SetHibernated = %+v, want {test ns true}", w)
+	if len(client.tickHibernatedWrites) != 1 {
+		t.Fatalf("expected exactly 1 SetHibernatedAt write, got %d", len(client.tickHibernatedWrites))
+	}
+	w := client.tickHibernatedWrites[0]
+	if w.name != "test" || w.namespace != "ns" || !w.want || w.resourceVersion != "7" {
+		t.Errorf("SetHibernatedAt = %+v, want {test ns 7 true}", w)
 	}
 	// ...and must not touch spec: powerState is unchanged.
 	if cr.Spec.PowerState != "Running" {
 		t.Errorf("spec.powerState = %q, want Running (auto-hibernate must not write spec)", cr.Spec.PowerState)
+	}
+}
+
+// TestReconcile_AutoHibernateEndWriteLands pins that the tick's own
+// hibernation write moves its resourceVersion chain forward. The end status
+// write of the same tick then lands, so the HibernationCronTriggersSkipped
+// condition that the tick sets is saved.
+func TestReconcile_AutoHibernateEndWriteLands(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.statusToStore = true
+	rec := newTestReconciler(client)
+	rec.miteTransport = &idleTransport{captureTransport: &captureTransport{}, timerTriggerJobs: 2}
+	crdstore.MustSeed(client.store, idleConnectedController())
+
+	res, err := rec.Reconcile(context.Background(), mineRequest)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.RequeueAfter == tickConflictRequeue {
+		t.Fatal("the tick conflicted on its own hibernation write")
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "mine", "ns")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !got.Status.Hibernated || got.Status.HibernatedAt == nil {
+		t.Fatalf("hibernated = %v, hibernatedAt = %v; want true and set", got.Status.Hibernated, got.Status.HibernatedAt)
+	}
+	skipped := false
+	for _, c := range got.Status.Conditions {
+		if c.Type == v1alpha1.ConditionHibernationCronTriggersSkipped && c.Status == metav1.ConditionTrue {
+			skipped = true
+		}
+	}
+	if !skipped {
+		t.Fatalf("conditions = %+v, want HibernationCronTriggersSkipped True from the end write", got.Status.Conditions)
 	}
 }
 
@@ -331,9 +399,9 @@ func TestStopThenStartCoalescedStartsAndDoesNotRehibernate(t *testing.T) {
 	if cr.Status.Phase != v1alpha1.ControllerPhasePending {
 		t.Fatalf("phase = %q, want Pending (waking from hibernation)", cr.Status.Phase)
 	}
-	// Must not re-park: no SetHibernated(true) and no scale-to-0.
-	if len(client.hibernatedWrites) != 0 {
-		t.Errorf("expected no SetHibernated writes, got %+v", client.hibernatedWrites)
+	// Must not re-park: no hibernation write and no scale-to-0.
+	if len(client.hibernatedWrites) != 0 || len(client.tickHibernatedWrites) != 0 {
+		t.Errorf("expected no hibernation writes, got %+v and %+v", client.hibernatedWrites, client.tickHibernatedWrites)
 	}
 	if len(client.scaleCalls) != 0 {
 		t.Errorf("expected no ScaleStatefulSet calls (must not re-hibernate), got %+v", client.scaleCalls)
@@ -413,6 +481,21 @@ func TestShouldHibernate_Gate1_NilSpec(t *testing.T) {
 	ok, _ := shouldHibernate(cr, freshGauges(), time.Now(), time.Now())
 	if ok {
 		t.Error("gate 1: expected false when hibernation spec is nil")
+	}
+}
+
+// Gate 6: the controller is a cell. Every other gate passes (hibernation
+// enabled, idle past grace, no running or queued builds, fresh gauges), so
+// this isolates the cell exclusion (task 5.6).
+func TestShouldHibernate_Gate6_Cell(t *testing.T) {
+	cr := baseController()
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	ok, lastActivity := shouldHibernate(cr, freshGauges(), time.Now(), time.Now())
+	if ok {
+		t.Error("gate 6: expected false for a cell")
+	}
+	if !lastActivity.IsZero() {
+		t.Errorf("gate 6: expected zero lastActivity, got %v", lastActivity)
 	}
 }
 

@@ -33,6 +33,10 @@ type spyBrood struct {
 	listAllErr         error
 
 	known map[string]bool
+
+	// listAllCtx and isKnownCtx record the context each call received.
+	listAllCtx context.Context
+	isKnownCtx context.Context
 }
 
 func (s *spyBrood) LocalCluster() string { return s.cluster }
@@ -45,6 +49,7 @@ func (s *spyBrood) Clusters(ctx context.Context) ([]ClusterInfo, error) {
 	return infos, nil
 }
 func (s *spyBrood) IsKnown(ctx context.Context, cluster string) bool {
+	s.isKnownCtx = ctx
 	if cluster == s.cluster {
 		return true
 	}
@@ -52,6 +57,7 @@ func (s *spyBrood) IsKnown(ctx context.Context, cluster string) bool {
 }
 func (s *spyBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
 	s.listAllCalls++
+	s.listAllCtx = ctx
 	return s.listAllControllers, s.listAllStatuses, s.listAllErr
 }
 func (s *spyBrood) Get(ctx context.Context, cluster, ns, name string) (*v1alpha1.Controller, error) {
@@ -190,6 +196,54 @@ func TestHandleFleetPlugins_PresentButBlankAffected(t *testing.T) {
 	srv.HandleFleetPlugins(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for present-but-blank affected, got %d", w.Code)
+	}
+}
+
+func TestHandleFleetPlugins_PassesRequestContext(t *testing.T) {
+	type ctxKey struct{}
+	reader := newFakeFleetInventory(nil, nil)
+	spy := &spyBrood{
+		cluster:         "core",
+		known:           map[string]bool{},
+		listAllStatuses: []ClusterFanoutStatus{{Name: "core", OK: true}},
+	}
+	srv := makeTestServer(reader, spy, nil)
+	req := httptest.NewRequest(http.MethodGet, "/fleet/plugins?cluster=core", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxKey{}, "marker"))
+	w := httptest.NewRecorder()
+	srv.HandleFleetPlugins(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := spy.listAllCtx.Value(ctxKey{}); got != "marker" {
+		t.Errorf("ListAll did not receive the request context: got %v", got)
+	}
+	if got := spy.isKnownCtx.Value(ctxKey{}); got != "marker" {
+		t.Errorf("IsKnown did not receive the request context: got %v", got)
+	}
+}
+
+func TestHandleFleetPluginDetail_PassesRequestContext(t *testing.T) {
+	type ctxKey struct{}
+	reader := newFakeFleetInventory(nil, nil)
+	spy := &spyBrood{
+		cluster:         "core",
+		known:           map[string]bool{},
+		listAllStatuses: []ClusterFanoutStatus{{Name: "core", OK: true}},
+	}
+	srv := makeTestServer(reader, spy, nil)
+	req := httptest.NewRequest(http.MethodGet, "/fleet/plugins/git?cluster=core", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxKey{}, "marker"))
+	w := httptest.NewRecorder()
+	srv.HandleFleetPluginDetail(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := spy.listAllCtx.Value(ctxKey{}); got != "marker" {
+		t.Errorf("ListAll did not receive the request context: got %v", got)
+	}
+	if got := spy.isKnownCtx.Value(ctxKey{}); got != "marker" {
+		t.Errorf("IsKnown did not receive the request context: got %v", got)
 	}
 }
 

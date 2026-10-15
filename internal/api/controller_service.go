@@ -38,6 +38,9 @@ type ServiceError struct {
 	Conflicts []bus.FieldConflict
 	// Checks carries failing preflight checks for 400 responses.
 	Checks []preflight.Check
+	// HolderCell names the cell that still runs a fleet lock's holder,
+	// for the 409 a force release answers on holder_live.
+	HolderCell *FleetLockHolderCell
 }
 
 func (e *ServiceError) Error() string { return e.Message }
@@ -45,7 +48,11 @@ func (e *ServiceError) Error() string { return e.Message }
 // ValidateIngress enforces the ingress rules shared by create and update:
 // mode enum, path-mode locality and dashboard-host equality (create only),
 // and annotation safety. controllerName is used only for log context.
-func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCreate bool, cluster, controllerName string) *ServiceError {
+// headless skips only the dashboard-host-equality check, with one WARN log
+// instead of a rejection: a headless controller renders no Ingress, so its
+// host never reaches an ingress controller and a mismatch has no effect.
+// The mode-enum check above and path-mode locality below still apply.
+func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCreate bool, cluster, controllerName string, headless bool) *ServiceError {
 	if spec == nil {
 		return nil
 	}
@@ -56,10 +63,12 @@ func (svc *ControllerService) ValidateIngress(spec *v1alpha1.IngressSpec, forCre
 		if svc.LocalCluster != "" && cluster != svc.LocalCluster {
 			return &ServiceError{Status: http.StatusBadRequest, Message: "path mode is only supported on the local cluster"}
 		}
-		if svc.DashboardHost != "" && spec.Host != svc.DashboardHost {
+		switch {
+		case headless:
+			svc.Logger.Warn("controller is headless; skipping path-mode shared-host check", "host", spec.Host, "controller", controllerName)
+		case svc.DashboardHost != "" && spec.Host != svc.DashboardHost:
 			return &ServiceError{Status: http.StatusBadRequest, Message: fmt.Sprintf("path mode requires ingressSpec.host to equal the dashboard host %q", svc.DashboardHost)}
-		}
-		if svc.DashboardHost == "" {
+		case svc.DashboardHost == "":
 			svc.Logger.Warn("dashboard host unknown; skipping path-mode host check", "host", spec.Host, "controller", controllerName)
 		}
 	}
@@ -108,15 +117,16 @@ func (s *Server) controllerSvc() *ControllerService {
 
 // controllerDetail is the single projection from a Controller CR to the
 // ControllerDetail response shape, shared by the detail, create, and update
-// handlers (both brood and local paths).
-func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) controllerDetailResponse {
+// handlers (both brood and local paths). The endpoint read uses ctx.
+func (s *Server) controllerDetail(ctx context.Context, cr *v1alpha1.Controller, cluster string) controllerDetailResponse {
 	resp := controllerDetailResponse{
 		Spec:              cr.Spec,
 		Name:              cr.Name,
 		Namespace:         cr.Namespace,
 		Cluster:           cluster,
 		Phase:             string(cr.Status.Phase),
-		Endpoint:          s.controllerEndpoint(cr),
+		Endpoint:          s.controllerEndpoint(ctx, cr, cluster),
+		Headless:          v1alpha1.IsHeadless(cr),
 		Version:           cr.Spec.Version,
 		PowerState:        cr.Spec.PowerState,
 		Hibernated:        cr.Status.Hibernated,
@@ -129,6 +139,8 @@ func (s *Server) controllerDetail(cr *v1alpha1.Controller, cluster string) contr
 		Attention:         buildAttentionJSON(cr),
 		PluginConflict:    buildPluginConflict(cr.Status.Conditions),
 		PluginInventory:   buildPluginInventorySummary(cr.Status.PluginInventory),
+		Kind:              controllerKind(cr),
+		Cell:              buildCellStatusJSON(cr),
 	}
 	if cr.Status.HibernatedAt != nil {
 		resp.HibernatedAt = cr.Status.HibernatedAt.Format(time.RFC3339)
@@ -161,6 +173,11 @@ func (s *Server) writeServiceError(w http.ResponseWriter, serr *ServiceError) {
 		s.writeJSON(w, serr.Status, map[string]interface{}{
 			"error":  serr.Message,
 			"checks": serr.Checks,
+		})
+	case serr.HolderCell != nil:
+		s.writeJSON(w, serr.Status, map[string]interface{}{
+			"error":      serr.Message,
+			"holderCell": serr.HolderCell,
 		})
 	default:
 		s.writeJSONError(w, serr.Status, serr.Message)

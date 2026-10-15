@@ -16,6 +16,11 @@ import (
 // last-applied content (offline, unsupported version, or timeout).
 var ErrContentUnavailable = errors.New("mite last-applied content unavailable")
 
+// ErrMiteUnreachable is returned by Send when no gateway confirms that it
+// forwarded the desired state to a live mite stream. The command is not
+// stored anywhere, so the caller must send it again.
+var ErrMiteUnreachable = errors.New("no gateway forwarded the desired state to the mite")
+
 // Transport is how the operator talks to a mite. The interface uses
 // (ns, name) argument order — the conventional Kubernetes ordering.
 type Transport interface {
@@ -49,7 +54,7 @@ type Transport interface {
 	IdleGauges(ns, name string) (*mitev1.IdleGauges, time.Time, bool)
 
 	// StreamDegraded reports whether the gateway's bus→gRPC bridge for this
-	// mite is currently broken (a KV watch or JetStream subscription failed and
+	// mite is currently broken (a subscription or JetStream consumer failed and
 	// is being retried), with the underlying reason. A degraded bridge means
 	// operator-published desired state is NOT reaching the mite even though its
 	// gRPC stream looks healthy. False for transports that do not
@@ -61,11 +66,6 @@ type Transport interface {
 	// so callers can detect a restart. The second return value is false if
 	// no mite has ever registered under this key.
 	ConnEpoch(ns, name string) (int64, bool)
-
-	// ClearDesired removes any stored desired state for the mite. Called on
-	// Controller deletion so the value does not outlive the resource. No-op for
-	// transports that do not persist desired state.
-	ClearDesired(ctx context.Context, ns, name string) error
 
 	// ObservabilityReport returns the latest mite observability report for
 	// the controller, or nil if none has been received.
@@ -90,4 +90,17 @@ type Transport interface {
 
 	// PutPluginClassification stores a classified inventory in the read model.
 	PutPluginClassification(ctx context.Context, ns, name string, c *ClassifiedInventory) error
+
+	// Forget drops every per-mite entry that the transport keeps for ns/name:
+	// an inbound subscription, buffered command results, and a cached report.
+	// The reconciler calls it when the controller is deleted, so a new
+	// controller of the same name drains no result of the old mite. A
+	// transport that keeps no such entry does nothing.
+	Forget(ns, name string)
+
+	// ForgetMatching does what Forget does for every mite whose ns and name
+	// match. The operator calls it for the mites of controllers that it no
+	// longer owns, so only the owning replica answers a mite. match runs
+	// under the transport lock and must not call the transport.
+	ForgetMatching(match func(ns, name string) bool)
 }

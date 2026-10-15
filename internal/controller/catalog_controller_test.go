@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -86,7 +88,7 @@ func newComposedBundleReconciler(tc *catalogTestClient, t *testing.T) *CatalogRe
 	t.Helper()
 	cloner := bundle.NewGitCloner()
 	cloner.AllowLocalTransportForTest()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	resolver.Cloner().AllowLocalTransportForTest()
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(), discardLogger(), "", "", nil)
 }
@@ -95,6 +97,27 @@ func jcascItem(name, content string) *v1alpha1.CatalogItem {
 	return &v1alpha1.CatalogItem{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
 		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
+		Status:     v1alpha1.CatalogItemStatus{Content: content, Valid: true},
+	}
+}
+
+// pipelineTemplateItem builds a valid pipeline-template CatalogItem naming
+// templateName at version 1.0.0, for task 3.1's content ConfigMap test.
+func pipelineTemplateItem(name, templateName string) *v1alpha1.CatalogItem {
+	content := fmt.Sprintf(`apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: %s
+spec:
+  version: 1.0.0
+  parameters:
+    type: object
+    additionalProperties: false
+  jenkinsfile: "pipeline {}"
+`, templateName)
+	return &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate},
 		Status:     v1alpha1.CatalogItemStatus{Content: content, Valid: true},
 	}
 }
@@ -132,6 +155,35 @@ func TestReconcileComposedBundle_CatalogItemMaterializesWithOwnerRef(t *testing.
 	owners := tc.configMapOwners["cb1-content"]
 	if len(owners) != 1 || owners[0].Kind != "ComposedBundle" || owners[0].Name != "cb1" {
 		t.Fatalf("content ConfigMap owner ref = %+v, want ComposedBundle/cb1", owners)
+	}
+}
+
+// TestReconcileComposedBundle_ContentConfigMapCarriesPipelineTemplates is
+// task 3.1's acceptance: the content ConfigMap gains the
+// pipeline-templates.yaml key, alongside the existing keys.
+func TestReconcileComposedBundle_ContentConfigMapCarriesPipelineTemplates(t *testing.T) {
+	tc := newCatalogTestClient()
+	tc.seedItem(pipelineTemplateItem("pt-1", "go-service"))
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb2", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{ItemRef: &v1alpha1.ComposedItemRef{Name: "pt-1"}}},
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("expected Ready, got %+v", tc.lastStatus())
+	}
+	data, ok := tc.configMapData["cb2-content"]
+	if !ok {
+		t.Fatal("content ConfigMap not written")
+	}
+	if !strings.Contains(data["pipeline-templates.yaml"], "go-service") {
+		t.Errorf("expected pipeline-templates.yaml to hold go-service, got: %q", data["pipeline-templates.yaml"])
 	}
 }
 
@@ -212,11 +264,65 @@ func TestReconcileComposedBundle_OversizeContentInvalid(t *testing.T) {
 	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleInvalid {
 		t.Fatalf("phase = %v, want Invalid", tc.lastStatus())
 	}
-	if !strings.Contains(strings.Join(tc.lastStatus().Errors, " "), "too large") {
-		t.Errorf("expected 'too large' error, got %v", tc.lastStatus().Errors)
+	errText := strings.Join(tc.lastStatus().Errors, " ")
+	for _, want := range []string{"content too large", "921600", "largest key jenkins.yaml"} {
+		if !strings.Contains(errText, want) {
+			t.Errorf("error %q does not contain %q", errText, want)
+		}
 	}
 	if _, ok := tc.configMapData["cb-big-content"]; ok {
 		t.Error("oversize content should not be written")
+	}
+}
+
+func TestReconcileComposedBundle_OversizeKeepsLastGoodContentRef(t *testing.T) {
+	tc := newCatalogTestClient()
+	huge := "jenkins:\n  systemMessage: \"" + strings.Repeat("x", 950*1024) + "\"\n"
+	tc.seedItem(jcascItem("big", huge))
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb-big", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{ItemRef: &v1alpha1.ComposedItemRef{Name: "big"}}},
+		},
+		Status: v1alpha1.ComposedBundleStatus{
+			Phase:      v1alpha1.ComposedBundleReady,
+			ContentRef: "cb-big-content",
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	st := tc.lastStatus()
+	if st == nil || st.Phase != v1alpha1.ComposedBundleInvalid {
+		t.Fatalf("phase = %v, want Invalid", st)
+	}
+	if st.ContentRef != "cb-big-content" {
+		t.Errorf("contentRef = %q, want the last-good cb-big-content", st.ContentRef)
+	}
+}
+
+func TestComposedContentSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    map[string]string
+		total   int
+		key     string
+		largest int
+	}{
+		{name: "empty", data: map[string]string{}, total: 0, key: "", largest: 0},
+		{name: "largest wins", data: map[string]string{"a": "xx", "b": "xxxxx", "c": "x"}, total: 8, key: "b", largest: 5},
+		{name: "tie picks smaller key", data: map[string]string{"z": "abc", "a": "abc"}, total: 6, key: "a", largest: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total, key, n := composedContentSize(tt.data)
+			if total != tt.total || key != tt.key || n != tt.largest {
+				t.Errorf("composedContentSize = (%d, %q, %d), want (%d, %q, %d)",
+					total, key, n, tt.total, tt.key, tt.largest)
+			}
+		})
 	}
 }
 
@@ -457,8 +563,8 @@ func TestReconcileComposedBundle_ItemRefDisappearanceReMaterializes(t *testing.T
 	if st.Phase != v1alpha1.ComposedBundleInvalid {
 		t.Errorf("phase = %q, want Invalid once the only input stopped resolving", st.Phase)
 	}
-	if got := st.ObservedRevisions["0"]; got != itemMissingRevision {
-		t.Errorf("observedRevisions[0] = %q, want %q", got, itemMissingRevision)
+	if got := st.ObservedRevisions["0"]; got != ItemMissingRevision {
+		t.Errorf("observedRevisions[0] = %q, want %q", got, ItemMissingRevision)
 	}
 	// Last-good content is retained rather than blanked.
 	if st.ContentRef != "item-gone-cb-content" {
@@ -484,7 +590,7 @@ func newComposedBundleReconcilerWithNS(tc *catalogTestClient, t *testing.T, oper
 	t.Helper()
 	cloner := bundle.NewGitCloner()
 	cloner.AllowLocalTransportForTest()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	resolver.Cloner().AllowLocalTransportForTest()
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(), discardLogger(), operatorNamespace, "", nil)
 }
@@ -708,6 +814,50 @@ func TestReconcileComposedBundle_OCISourceInputSummary(t *testing.T) {
 	}
 	if tc.lastStatus().InputSummary[0].Type != "oci" {
 		t.Errorf("expected type 'oci', got %q", tc.lastStatus().InputSummary[0].Type)
+	}
+}
+
+// TestReconcileComposedBundle_InputSummaryPinsPipelineTemplateAndGroovyTypes
+// pins the bundle-composition-surface delta's completed enumeration: an
+// itemRef's inputSummary entry passes the referenced CatalogItem's
+// Spec.Type through verbatim, including "pipeline-template" and "groovy".
+func TestReconcileComposedBundle_InputSummaryPinsPipelineTemplateAndGroovyTypes(t *testing.T) {
+	tc := newCatalogTestClient()
+	tc.seedItem(
+		&v1alpha1.CatalogItem{
+			ObjectMeta: metav1.ObjectMeta{Name: "pt-1", Namespace: "ns"},
+			Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate},
+		},
+		&v1alpha1.CatalogItem{
+			ObjectMeta: metav1.ObjectMeta{Name: "groovy-1", Namespace: "ns"},
+			Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemGroovy},
+		},
+	)
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "types-cb", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "pt-1"}},
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "groovy-1"}},
+			},
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	if tc.lastStatus() == nil {
+		t.Fatal("no status patched")
+	}
+	sum := tc.lastStatus().InputSummary
+	if len(sum) != 2 {
+		t.Fatalf("expected 2 inputSummary entries, got %d: %+v", len(sum), sum)
+	}
+	if sum[0].Type != "pipeline-template" {
+		t.Errorf("expected type 'pipeline-template', got %q", sum[0].Type)
+	}
+	if sum[1].Type != "groovy" {
+		t.Errorf("expected type 'groovy', got %q", sum[1].Type)
 	}
 }
 
@@ -1207,5 +1357,39 @@ func TestReconcileComposedBundle_TransientItemReadDoesNotFabricateDeletion(t *te
 
 	if after := len(tc.store.StatusPatches(cbGVR)); after != before {
 		t.Errorf("a transient read error recomposed the bundle (%d new status patches); it is not a deletion", after-before)
+	}
+}
+
+func TestReconcileComposedBundle_WritesDroppedItemKeys(t *testing.T) {
+	tc := newCatalogTestClient()
+	tc.seedItem(&v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: "items-1", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem},
+		Status: v1alpha1.CatalogItemStatus{
+			Content: "item:\n- kind: folder\n  name: a\nitems:\n- kind: folder\n  name: b\n",
+			Valid:   true,
+		},
+	})
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb-drop", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{ItemRef: &v1alpha1.ComposedItemRef{Name: "items-1"}}},
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("expected Ready, got %+v", tc.lastStatus())
+	}
+	data := tc.configMapData["cb-drop-content"]
+	keys, err := bundle.ParseDroppedItemKeys(data[bundle.DroppedItemKeysConfigMapKey])
+	if err != nil {
+		t.Fatalf("parse dropped-item-keys.yaml: %v", err)
+	}
+	if len(keys) != 1 || keys[0].Key != "item" || keys[0].Source != `itemRef "items-1"` {
+		t.Errorf("dropped keys = %+v, want one item key from itemRef items-1", keys)
 	}
 }

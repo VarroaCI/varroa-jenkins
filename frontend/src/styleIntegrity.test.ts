@@ -208,3 +208,45 @@ describe("style integrity — text-color token ratchet", () => {
     expect(rawStatusViolations).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  (d) Colour scheme of the code surfaces                             */
+/* ------------------------------------------------------------------ */
+describe("style integrity — color-scheme", () => {
+  const tokensPath = path.join(srcDir, "styles", "tokens.css");
+  const tokens = fs.readFileSync(tokensPath, "utf-8");
+
+  // Returns the body of the first rule whose selector text matches, or an
+  // empty string when the rule is absent.
+  function ruleBody(css: string, selector: string): string {
+    const start = css.indexOf(selector);
+    if (start === -1) return "";
+    const open = css.indexOf("{", start);
+    const close = css.indexOf("}", open);
+    return css.slice(open + 1, close);
+  }
+
+  it("tokens.css sets the light scheme on :root", () => {
+    expect(ruleBody(tokens, ":root {")).toMatch(/color-scheme:\s*light/);
+  });
+
+  it("tokens.css sets the dark scheme on the dark theme", () => {
+    expect(ruleBody(tokens, 'html[data-theme="dark"] {')).toMatch(/color-scheme:\s*dark/);
+  });
+
+  it("every block that paints a --code-bg surface declares color-scheme: dark", () => {
+    const cssFiles = findFiles(srcDir, (name) => name.endsWith(".module.css"));
+    const violations: string[] = [];
+    for (const cssPath of cssFiles) {
+      const cssText = fs.readFileSync(cssPath, "utf-8");
+      const rel = path.relative(srcDir, cssPath).split(path.sep).join("/");
+      for (const block of cssText.split("}")) {
+        const paintsCode = /(?<![\w-])background:[^;]*var\(\s*--code-bg\s*\)/.test(block);
+        if (paintsCode && !/color-scheme:\s*dark/.test(block)) {
+          violations.push(rel);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});

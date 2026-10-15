@@ -2,10 +2,14 @@ package bundle
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
@@ -43,7 +47,7 @@ func TestComposer_JcascMerge(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "unclassified:\n  url: https://example.com\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jcasc-1"),
@@ -74,7 +78,7 @@ func TestComposer_MergeConflict(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "security:\n  realm: saml\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jcasc-1"),
@@ -97,7 +101,7 @@ func TestComposer_MergeOverride(t *testing.T) {
 		"ns/jcasc-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "security:\n  realm: saml\n", ContentHash: "a2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		JcascMergeStrategy: "override",
 		Inputs: []v1alpha1.ComposedInput{
@@ -126,7 +130,7 @@ func TestComposer_PodTemplateWrap(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: maven\n  image: maven:3.9\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pod-1")},
 	}
@@ -163,7 +167,7 @@ func TestComposer_MultiplePodTemplates(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: maven\n  image: maven:3.9\n", ContentHash: "p1", Valid: true}},
 		"ns/pod-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: node\n  image: node:20\n", ContentHash: "p2", Valid: true}},
 	}}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pod-1"), itemRef("pod-2")},
 	}
@@ -197,7 +201,7 @@ func TestComposer_PodTemplateWithJCasCCloud(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-cloud"), itemRef("pod-1")},
 	}
@@ -234,7 +238,7 @@ func TestComposer_PodTemplateWithJCasCCloudAndExistingTemplates(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-cloud"), itemRef("pod-1")},
 	}
@@ -263,7 +267,7 @@ func TestComposer_PodTemplateWithMultipleKubernetesClouds(t *testing.T) {
 		"ns/pod-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPodTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "- name: dind\n  image: docker:dind\n", ContentHash: "p1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jcasc-clouds"), itemRef("pod-1")},
 	}
@@ -291,7 +295,7 @@ func TestComposer_VariablePrecedence(t *testing.T) {
 		}, Status: v1alpha1.CatalogItemStatus{Content: "namespace: ${namespace}\nreplicas: ${replicas}\n", ContentHash: "v1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Variables: map[string]string{"namespace": "spec-val"},
 		Inputs: []v1alpha1.ComposedInput{
@@ -323,17 +327,34 @@ func TestComposer_VariablePrecedence(t *testing.T) {
 	}
 }
 
-// TestComposer_PipelineTemplateReachesItemsYAML is a regression test for the
-// silent-drop bug found during explore: Compose's groups map is a hardcoded
-// 5-key map, so a pipeline-template item's content would be silently dropped
-// from every composed bundle without the groupKey alias in Compose.
-func TestComposer_PipelineTemplateReachesItemsYAML(t *testing.T) {
+// pipelineTemplateDoc builds a minimal, valid PipelineTemplate document with
+// the given name and version, for composer fixtures.
+func pipelineTemplateDoc(name, version string) string {
+	return fmt.Sprintf(`
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: %s
+spec:
+  version: %s
+  parameters:
+    type: object
+    additionalProperties: false
+  jenkinsfile: "pipeline {}"
+`, name, version)
+}
+
+// TestComposer_PipelineTemplateReachesTemplateSet proves the ADDED
+// "pipeline-template content composes into the template set" requirement: a
+// pipeline-template item's content lands in PipelineTemplatesYAML, never in
+// ItemsYAML, while a plain item still reaches ItemsYAML alongside it.
+func TestComposer_PipelineTemplateReachesTemplateSet(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
-		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: templated-job\n  kind: pipeline\n", ContentHash: "pt1", Valid: true}},
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: plain-job\n", ContentHash: "i1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
 	}
@@ -344,31 +365,58 @@ func TestComposer_PipelineTemplateReachesItemsYAML(t *testing.T) {
 	if result.Materialized == nil {
 		t.Fatal("expected Materialized bundle, got nil")
 	}
-	if !strings.Contains(result.Materialized.ItemsYAML, "templated-job") {
-		t.Errorf("expected pipeline-template content to reach ItemsYAML (silent-drop regression), got: %s", result.Materialized.ItemsYAML)
+	if strings.Contains(result.Materialized.ItemsYAML, "go-service") {
+		t.Errorf("expected pipeline-template content NOT to reach ItemsYAML, got: %s", result.Materialized.ItemsYAML)
+	}
+	if !strings.Contains(result.Materialized.PipelineTemplatesYAML, "go-service") {
+		t.Errorf("expected pipeline-template content to reach PipelineTemplatesYAML, got: %s", result.Materialized.PipelineTemplatesYAML)
 	}
 	if !strings.Contains(result.Materialized.ItemsYAML, "plain-job") {
-		t.Errorf("expected plain item content to still reach ItemsYAML alongside it, got: %s", result.Materialized.ItemsYAML)
+		t.Errorf("expected plain item content to still reach ItemsYAML, got: %s", result.Materialized.ItemsYAML)
 	}
 }
 
-// TestComposer_PipelineTemplateVariablePrecedence proves a pipeline-template
-// item's declared variables participate in the normal item-default <
-// spec-wide < per-ref precedence chain, identically to plain item-type
-// content.
-func TestComposer_PipelineTemplateVariablePrecedence(t *testing.T) {
+// TestComposer_PipelineTemplateOnlyBundleEmitsNoItems proves the ADDED
+// "A bundle with only templates emits no items" scenario.
+func TestComposer_PipelineTemplateOnlyBundleEmitsNoItems(t *testing.T) {
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("node-service", "2.0.0"), ContentHash: "pt2", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if result.Materialized.ItemsYAML != "" {
+		t.Errorf("expected no items output, got: %s", result.Materialized.ItemsYAML)
+	}
+	if !strings.Contains(result.Materialized.PipelineTemplatesYAML, "go-service") || !strings.Contains(result.Materialized.PipelineTemplatesYAML, "node-service") {
+		t.Errorf("expected both templates in PipelineTemplatesYAML, got: %s", result.Materialized.PipelineTemplatesYAML)
+	}
+}
+
+// TestComposer_PipelineTemplateVariablesDoNotResolve proves a
+// pipeline-template item's declared CatalogVariable never parameterizes the
+// template body: pipeline-templates.yaml never passes through ResolveVars,
+// so neither the item's default nor a per-ref override reaches rawVars
+// through this input.
+func TestComposer_PipelineTemplateVariablesDoNotResolve(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
 		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{
 			Type: v1alpha1.CatalogItemPipelineTemplate,
 			Variables: []v1alpha1.CatalogVariable{
 				{Name: "environment", Default: "default-val"},
 			},
-		}, Status: v1alpha1.CatalogItemStatus{Content: "items:\n- name: templated-job\n  kind: pipeline\n  env: ${environment}\n", ContentHash: "pt1", Valid: true}},
+		}, Status: v1alpha1.CatalogItemStatus{Content: pipelineTemplateDoc("go-service", "1.0.0"), ContentHash: "pt1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
-		Variables: map[string]string{"environment": "spec-val"},
 		Inputs: []v1alpha1.ComposedInput{
 			{ItemRef: &v1alpha1.ComposedItemRef{Name: "pt-1", Variables: map[string]string{"environment": "ref-val"}}},
 		},
@@ -377,9 +425,235 @@ func TestComposer_PipelineTemplateVariablePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compose error: %v", err)
 	}
-	// ref.Variables overrides everything else → environment=ref-val.
-	if result.Materialized.Variables["environment"] != "ref-val" {
-		t.Errorf("expected environment=ref-val (per-ref precedence), got: %s", result.Materialized.Variables["environment"])
+	if _, present := result.Materialized.Variables["environment"]; present {
+		t.Errorf("expected a pipeline-template item's variables not to reach rawVars, got: %q", result.Materialized.Variables["environment"])
+	}
+}
+
+// TestComposer_PipelineTemplateIdentityCollision_DifferingContentIsError
+// proves the D5 identity-collision rule: the same name and version with
+// different content is an error naming both itemRefs.
+func TestComposer_PipelineTemplateIdentityCollision_DifferingContentIsError(t *testing.T) {
+	docA := pipelineTemplateDoc("go-service", "1.0.0")
+	docB := strings.Replace(docA, "pipeline {}", "pipeline { echo 'different' }", 1)
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: docA, ContentHash: "a", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: docB, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "pt-1") && strings.Contains(e, "pt-2") && strings.Contains(e, "go-service") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an identity-collision error naming both itemRefs, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_PipelineTemplateIdentityCollision_IdenticalContentDeduplicates
+// proves the D5 rule's other half: the same name, version, and content is
+// de-duplicated silently, with no error and no warning.
+func TestComposer_PipelineTemplateIdentityCollision_IdenticalContentDeduplicates(t *testing.T) {
+	doc := pipelineTemplateDoc("go-service", "1.0.0")
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: doc, ContentHash: "a", Valid: true}},
+		"ns/pt-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: doc, ContentHash: "a", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("pt-2")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected no errors for an identical duplicate, got: %v", result.Errors)
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings for an identical duplicate, got: %v", result.Warnings)
+	}
+	count := strings.Count(result.Materialized.PipelineTemplatesYAML, "name: go-service")
+	if count != 1 {
+		t.Errorf("expected the template to appear exactly once, got %d: %s", count, result.Materialized.PipelineTemplatesYAML)
+	}
+}
+
+// templateWithRequiredGoVersion is a PipelineTemplate document whose schema
+// requires a "goVersion" string property, used by the
+// items-declared-template-values tests below.
+const templateWithRequiredGoVersion = `
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: go-service
+spec:
+  version: 1.0.0
+  parameters:
+    type: object
+    properties:
+      goVersion:
+        type: string
+    required: [goVersion]
+    additionalProperties: false
+  jenkinsfile: "pipeline {}"
+`
+
+// TestComposer_ItemDeclaredTemplateValues_Valid proves task 2.7: an
+// items-declared definition.varroaTemplate whose values satisfy the
+// resolved template's schema produces no composition error.
+func TestComposer_ItemDeclaredTemplateValues_Valid(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: go-service
+      templateVersion: "1.0.0"
+      values:
+        goVersion: "1.24"
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected valid values to produce no errors, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_MissingRequiredIsError proves the
+// values-against-schema half of task 2.7 on the failing path.
+func TestComposer_ItemDeclaredTemplateValues_MissingRequiredIsError(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: go-service
+      templateVersion: "1.0.0"
+      values: {}
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-job") && strings.Contains(e, "goVersion") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the item and the missing property, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_UnresolvedTemplateIsError proves
+// an items-declared template that names an undelivered template is a
+// composition error, not a silent no-op.
+func TestComposer_ItemDeclaredTemplateValues_UnresolvedTemplateIsError(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-job
+  kind: pipeline
+  definition:
+    varroaTemplate:
+      template: does-not-exist
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-job") && strings.Contains(e, "does-not-exist") && strings.Contains(e, "not delivered") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the item and the undelivered template, got: %v", result.Errors)
+	}
+}
+
+// TestComposer_ItemDeclaredTemplateValues_NestedFolderIsValidated proves
+// 🔴2 of review round 1: a folder-nested pipeline's
+// definition.varroaTemplate values are validated at composition time,
+// the same as a root-level item's (design D10).
+func TestComposer_ItemDeclaredTemplateValues_NestedFolderIsValidated(t *testing.T) {
+	itemsContent := `
+items:
+- name: my-folder
+  kind: folder
+  items:
+  - name: my-job
+    kind: pipeline
+    definition:
+      varroaTemplate:
+        template: go-service
+        templateVersion: "1.0.0"
+`
+	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+		"ns/pt-1":   {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPipelineTemplate}, Status: v1alpha1.CatalogItemStatus{Content: templateWithRequiredGoVersion, ContentHash: "a", Valid: true}},
+		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: itemsContent, ContentHash: "b", Valid: true}},
+	}}
+
+	c := NewComposer(f, nil, "", "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{itemRef("pt-1"), itemRef("item-1")},
+	}
+	result, err := c.Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "my-folder/my-job") && strings.Contains(e, "goVersion") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an error naming the nested item's path and the missing property, got: %v", result.Errors)
 	}
 }
 
@@ -389,7 +663,7 @@ func TestComposer_PluginDedup(t *testing.T) {
 		"ns/plug-2": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemPlugin}, Status: v1alpha1.CatalogItemStatus{Content: "plugins:\n- artifactId: git\n  version: \"6.0\"\n", ContentHash: "pl2", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("plug-1"), itemRef("plug-2")},
 	}
@@ -431,7 +705,7 @@ func TestComposer_JcascEmbeddedPlugins(t *testing.T) {
 		}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("theme")},
 	}
@@ -461,7 +735,7 @@ func TestComposer_PinnedHashDrift(t *testing.T) {
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "key: val\n", ContentHash: "abc123", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{ItemRef: &v1alpha1.ComposedItemRef{Name: "item-1", PinnedContentHash: "def456"}},
@@ -483,7 +757,7 @@ func TestComposer_PinnedHashDrift(t *testing.T) {
 func TestComposer_MissingItem(t *testing.T) {
 	f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("nonexistent")},
 	}
@@ -501,7 +775,7 @@ func TestComposer_ResolvedHash(t *testing.T) {
 		"ns/jc-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC}, Status: v1alpha1.CatalogItemStatus{Content: "key: val\n", ContentHash: "a1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("jc-1")},
 	}
@@ -525,7 +799,7 @@ func TestComposer_AllFiveSections(t *testing.T) {
 		"ns/rbac-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemRBAC}, Status: v1alpha1.CatalogItemStatus{Content: "roles:\n  admin:\n    permissions:\n    - Overall/Administer\n", ContentHash: "r1", Valid: true}},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			itemRef("jc-1"), itemRef("plug-1"), itemRef("item-1"), itemRef("rbac-1"),
@@ -556,7 +830,7 @@ func TestComposer_AllFiveSections(t *testing.T) {
 }
 
 func TestComposer_UnionValidation(t *testing.T) {
-	c := NewComposer(&fakeItemLookup{}, nil, "", "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, nil, "", "")
 
 	// Neither set.
 	_, err := c.Compose(context.Background(), "ns", &v1alpha1.ComposedBundleSpec{
@@ -584,12 +858,12 @@ func TestComposeItems_MalformedFragment(t *testing.T) {
 		"this is not valid yaml {{",
 		"items:\n- name: another-job\n",
 	}
-	result, err := composeItems(yamls)
+	result, _, err := composeItems(yamls, []string{"a", "b", "c"})
 	if err == nil {
 		t.Fatal("expected error for malformed fragment")
 	}
-	if !strings.Contains(err.Error(), "input 1") {
-		t.Errorf("expected error to name input 1, got: %v", err)
+	if !strings.Contains(err.Error(), "b:") {
+		t.Errorf("expected error to name source b, got: %v", err)
 	}
 	if result != "" {
 		t.Errorf("expected empty result on parse error, got: %s", result)
@@ -601,7 +875,7 @@ func TestComposeItems_AllValid(t *testing.T) {
 		"items:\n- name: job-a\n",
 		"items:\n- name: job-b\n",
 	}
-	result, err := composeItems(yamls)
+	result, _, err := composeItems(yamls, []string{"a", "b"})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -648,7 +922,7 @@ func TestComposer_ComposeErrorsSurfaced(t *testing.T) {
 		"ns/item-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: "bad yaml {{{", ContentHash: "i1", Valid: true}},
 		"ns/rbac-1": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemRBAC}, Status: v1alpha1.CatalogItemStatus{Content: "also bad {{{", ContentHash: "r1", Valid: true}},
 	}}
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("item-1"), itemRef("rbac-1")},
 	}
@@ -672,7 +946,7 @@ func TestComposer_GitInputMissingWorkDir(t *testing.T) {
 		t.Fatalf("precondition: workDir should not exist yet, stat err=%v", err)
 	}
 
-	c := NewComposer(&fakeItemLookup{}, NewResolver(t.TempDir()), workDir, "", "", "", "")
+	c := NewComposer(&fakeItemLookup{}, NewResolver(noop.NewMeterProvider(), t.TempDir()), workDir, "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{
 			{GitSource: &v1alpha1.GitBundleSource{
@@ -704,7 +978,7 @@ func TestComposer_ItemRef_LocalHit(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: local\n", ContentHash: "abc", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("my-item")},
 	}
@@ -731,7 +1005,7 @@ func TestComposer_ItemRef_OperatorFallback(t *testing.T) {
 		Status: v1alpha1.CatalogItemStatus{Content: "key: operator\n", ContentHash: "def", Valid: true},
 	})
 	// No item in bundle ns.
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("platform-item")},
 	}
@@ -761,7 +1035,7 @@ func TestComposer_ItemRef_LocalWinsOverOperator(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: operator\n", ContentHash: "operator", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("shared-item")},
 	}
@@ -783,7 +1057,7 @@ func TestComposer_ItemRef_LocalWinsOverOperator(t *testing.T) {
 func TestComposer_ItemRef_BothMiss(t *testing.T) {
 	// (d) absent from both → name in result.Missing.
 	f := &fakeItemLookup{}
-	c := NewComposer(f, nil, "", "", "", "", "operator-ns")
+	c := NewComposer(f, nil, "", "operator-ns")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("nowhere-item")},
 	}
@@ -803,7 +1077,7 @@ func TestComposer_ItemRef_NoOperatorNamespace(t *testing.T) {
 		Spec:   v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemJCasC},
 		Status: v1alpha1.CatalogItemStatus{Content: "key: op\n", ContentHash: "op", Valid: true},
 	})
-	c := NewComposer(f, nil, "", "", "", "", "") // empty operatorNamespace
+	c := NewComposer(f, nil, "", "") // empty operatorNamespace
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("only-op-item")},
 	}
@@ -831,7 +1105,7 @@ func TestComposer_RejectsGroovyItemRefAsInput(t *testing.T) {
 		},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("groovy-item"), itemRef("jcasc-item")},
 	}
@@ -891,7 +1165,7 @@ func TestComposer_RejectsInvalidItemRefAsInput(t *testing.T) {
 		},
 	}}
 
-	c := NewComposer(f, nil, "", "", "", "", "")
+	c := NewComposer(f, nil, "", "")
 	spec := &v1alpha1.ComposedBundleSpec{
 		Inputs: []v1alpha1.ComposedInput{itemRef("bad-item"), itemRef("good-item")},
 	}
@@ -914,5 +1188,149 @@ func TestComposer_RejectsInvalidItemRefAsInput(t *testing.T) {
 	// The valid item still composes.
 	if result.Materialized == nil || !strings.Contains(result.Materialized.JenkinsYAML, "key: val") {
 		t.Errorf("good-item content missing from composed output")
+	}
+}
+
+// A git input whose remote never answers ends at the compose deadline. The
+// compose then reports a compose error for the input as data.
+func TestCompose_GitInputStopsAtDeadline(t *testing.T) {
+	remote := newSilentRemote(t)
+	c := NewComposer(&fakeItemLookup{}, NewResolver(noop.NewMeterProvider(), t.TempDir()), t.TempDir(), "")
+	spec := &v1alpha1.ComposedBundleSpec{
+		Inputs: []v1alpha1.ComposedInput{
+			{GitSource: &v1alpha1.GitBundleSource{RepoURL: remote.url, Path: ".", Revision: "main"}},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, err := c.Compose(ctx, "ns", spec, nil, nil)
+	elapsed := time.Since(start)
+	if elapsed > time.Second+deadlineReturnBound {
+		t.Errorf("Compose returned after %v, want at most %v", elapsed, time.Second+deadlineReturnBound)
+	}
+	if err != nil {
+		t.Fatalf("Compose returned a hard error, want the failure as data: %v", err)
+	}
+	if len(result.Errors) != 1 ||
+		!strings.Contains(result.Errors[0], "git input[0]") ||
+		!strings.Contains(result.Errors[0], context.DeadlineExceeded.Error()) {
+		t.Errorf("result.Errors = %q, want one git input[0] deadline error", result.Errors)
+	}
+	remote.assertPeerClosed(t)
+}
+
+func TestComposeItems_ReportsTypoTopLevelKey(t *testing.T) {
+	yamls := []string{
+		"item:\n  - kind: folder\n    name: a\nitems:\n  - kind: folder\n    name: b\n",
+	}
+	result, dropped, err := composeItems(yamls, []string{"itemRef \"x\""})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []DroppedItemKey{{Source: "itemRef \"x\"", Key: "item"}}
+	if fmt.Sprint(dropped) != fmt.Sprint(want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
+	if strings.Contains(result, "name: a") || !strings.Contains(result, "name: b") {
+		t.Errorf("expected only item b to be kept, got:\n%s", result)
+	}
+}
+
+func TestComposeItems_ReportsDeclaredManifestKeys(t *testing.T) {
+	yamls := []string{
+		"removeStrategy:\n  items: delete\nroot: x\nretain:\n  - y\nitems:\n  - kind: folder\n    name: b\n",
+	}
+	_, dropped, err := composeItems(yamls, []string{"git input[0] (r)"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []DroppedItemKey{
+		{Source: "git input[0] (r)", Key: "removeStrategy"},
+		{Source: "git input[0] (r)", Key: "root"},
+		{Source: "git input[0] (r)", Key: "retain"},
+	}
+	if fmt.Sprint(dropped) != fmt.Sprint(want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
+}
+
+func TestComposeItems_ItemsOnlyReportsNothing(t *testing.T) {
+	yamls := []string{"items:\n- kind: folder\n  name: a\n"}
+	_, dropped, err := composeItems(yamls, []string{"s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dropped) != 0 {
+		t.Errorf("expected no dropped keys, got %v", dropped)
+	}
+}
+
+func TestComposeItems_QuotedMergeKeyIsReported(t *testing.T) {
+	yamls := []string{"\"<<\":\n  - kind: folder\n    name: a\nitems:\n  - kind: folder\n    name: b\n"}
+	_, dropped, err := composeItems(yamls, []string{"s"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dropped) != 1 || dropped[0].Key != "<<" {
+		t.Errorf("a quoted << key is an ordinary key and must be reported, got %v", dropped)
+	}
+}
+
+func TestComposer_DroppedItemKeyWarningNamesItemRef(t *testing.T) {
+	clean := "items:\n- kind: folder\n  name: b\n"
+	typo := "item:\n- kind: folder\n  name: a\n" + clean
+	build := func(content string) *Composer {
+		f := &fakeItemLookup{items: map[string]*v1alpha1.CatalogItem{
+			"ns/x": {Spec: v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem}, Status: v1alpha1.CatalogItemStatus{Content: content, ContentHash: "h", Valid: true}},
+		}}
+		return NewComposer(f, nil, "", "")
+	}
+	spec := &v1alpha1.ComposedBundleSpec{Inputs: []v1alpha1.ComposedInput{itemRef("x")}}
+
+	res, err := build(typo).Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	var found bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, `itemRef "x"`) && strings.Contains(w, `"item"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a dropped-key warning naming itemRef x and item, got %v", res.Warnings)
+	}
+	if len(res.Materialized.DroppedItemKeys) != 1 {
+		t.Errorf("DroppedItemKeys = %v, want one entry", res.Materialized.DroppedItemKeys)
+	}
+
+	clresult, err := build(clean).Compose(context.Background(), "ns", spec, nil, nil)
+	if err != nil {
+		t.Fatalf("Compose error: %v", err)
+	}
+	if res.ResolvedHash != clresult.ResolvedHash {
+		t.Errorf("a dropped key changed ResolvedHash")
+	}
+	if res.Materialized.ItemsYAML != clresult.Materialized.ItemsYAML {
+		t.Errorf("a dropped key changed ItemsYAML:\n%s\nvs\n%s", res.Materialized.ItemsYAML, clresult.Materialized.ItemsYAML)
+	}
+}
+
+func TestDroppedItemKeys_RoundTrip(t *testing.T) {
+	keys := []DroppedItemKey{{Source: "itemRef \"a\"", Key: "item"}, {Source: "git input[1] (r)", Key: "root"}}
+	got, err := ParseDroppedItemKeys(MarshalDroppedItemKeys(keys))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(keys) {
+		t.Errorf("round trip = %v, want %v", got, keys)
+	}
+	if MarshalDroppedItemKeys(nil) != "" {
+		t.Error("expected empty marshal for no keys")
+	}
+	if got, err := ParseDroppedItemKeys("  "); got != nil || err != nil {
+		t.Errorf("blank parse = %v, %v; want nil, nil", got, err)
 	}
 }

@@ -169,6 +169,21 @@ func TestMCPDeleteCatalogSource_ScopedDeveloper(t *testing.T) {
 	requireAccessDenied(t, parseToolResult(t, otherNs.Result))
 }
 
+func TestMCPDeleteCatalogSource_ReservedNameRejected(t *testing.T) {
+	handler := NewHandler(scopedDeveloperDeps())
+	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
+		"name": "delete_catalog_source",
+		"arguments": map[string]interface{}{
+			"namespace": "team-a",
+			"name":      v1alpha1.UpdateCenterCatalogSourceName,
+		},
+	}, mcpScopedDevClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "reconciled by the operator") {
+		t.Fatalf("deleting the reserved source must be rejected, got: %v", tr.Content)
+	}
+}
+
 func TestMCPSyncCatalogSource_ScopedDeveloper(t *testing.T) {
 	deps := scopedDeveloperDeps()
 	deps.ConfigBrood = &syncRecordingConfigBrood{}
@@ -263,7 +278,8 @@ func catalogSourceDeps(t *testing.T) *api.Dependencies {
 			ObservedRevision: "v1.0.0",
 		},
 	})
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{
+		Authorizer: adminTestAuthorizer(), Client: &stubClient{}, Store: store}
 }
 
 // listCatalogSourcesResult calls list_catalog_sources and returns the decoded
@@ -818,7 +834,7 @@ func TestMCPUpdateCatalogSource_ReservedNameRejected(t *testing.T) {
 		},
 	}, mcpScopedDevClaims)
 	tr := parseToolResult(t, resp.Result)
-	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "cannot be edited") {
+	if !tr.IsError || !strings.Contains(fmt.Sprint(tr.Content), "reconciled by the operator") {
 		t.Fatalf("editing the reserved source must be rejected, got: %v", tr.Content)
 	}
 }
@@ -846,4 +862,111 @@ func TestMCPCreateCatalogSource_OCIRefDropsRevision(t *testing.T) {
 	if got.Spec.Revision != "" {
 		t.Errorf("revision must not ride along with an OCI source on create: %+v", got.Spec)
 	}
+}
+
+// scopedConfigDeps builds dependencies for the dev-user caller. Its developer
+// binding is scoped to team-a and grants the given rules. The operator
+// namespace is varroa-system.
+func scopedConfigDeps(rules []v1alpha1.APIRule) *api.Dependencies {
+	roles := []*v1alpha1.VarroaRole{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "developer"},
+			Spec:       v1alpha1.VarroaRoleSpec{APIRules: rules},
+		},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns-scoped-developer"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "dev-user"}},
+				RoleRef:  "developer",
+				Scope:    &v1alpha1.VarroaRoleBindingScope{Namespaces: []string{"team-a"}},
+			},
+		},
+	}
+	return &api.Dependencies{
+		Client:            &stubClient{},
+		Authorizer:        api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		Store:             crdstore.NewFake(),
+		OperatorNamespace: "varroa-system",
+	}
+}
+
+// seedConfig seeds objects into the fake store that scopedConfigDeps built.
+func seedConfig(t *testing.T, deps *api.Dependencies, objs ...any) {
+	t.Helper()
+	crdstore.MustSeed(deps.Store.(*crdstore.Fake), objs...)
+}
+
+// callToolAs invokes one tool as claims and returns the decoded result.
+func callToolAs(t *testing.T, deps *api.Dependencies, claims *auth.Claims, tool string, args map[string]interface{}) toolResult {
+	t.Helper()
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      tool,
+		"arguments": args,
+	}, claims)
+	return parseToolResult(t, resp.Result)
+}
+
+// listedNamespaces returns the namespace of each object in a list result. The
+// structured content is either a bare array or an object with an items array.
+func listedNamespaces(t *testing.T, tr toolResult) []string {
+	t.Helper()
+	if tr.IsError {
+		t.Fatalf("list returned error: %v", tr.Content)
+	}
+	var payload any
+	if err := json.Unmarshal(tr.StructuredContent, &payload); err != nil {
+		t.Fatalf("decode structuredContent: %v", err)
+	}
+	items, _ := payload.([]any)
+	if m, ok := payload.(map[string]any); ok {
+		items, _ = m["items"].([]any)
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			ns, _ := m["namespace"].(string)
+			out = append(out, ns)
+		}
+	}
+	return out
+}
+
+// requireNamespaces asserts that a list result holds exactly the want
+// namespaces, in any order.
+func requireNamespaces(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("namespaces = %v, want %v", got, want)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("namespaces = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMCPListCatalogSources_ScopedDeveloperFiltered(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"catalogsources"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps,
+		&v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "team-a"}, Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/a.git"}},
+		&v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "team-b"}, Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/b.git"}},
+		&v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "platform", Namespace: "varroa-system"}, Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/p.git"}},
+	)
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "list_catalog_sources", map[string]interface{}{})
+	requireNamespaces(t, listedNamespaces(t, tr), "team-a", "varroa-system")
+}
+
+func TestMCPGetCatalogSource_ScopedDeveloperOtherNamespaceDenied(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"catalogsources"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps, &v1alpha1.CatalogSource{ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "team-b"}, Spec: v1alpha1.CatalogSourceSpec{RepoURL: "https://example.com/b.git"}})
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "get_catalog_source", map[string]interface{}{"namespace": "team-b", "name": "src"})
+	requireAccessDenied(t, tr)
 }

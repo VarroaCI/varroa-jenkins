@@ -80,7 +80,7 @@ describe("CommandPalette", () => {
   });
 
   it("displays sections and groups of search results", async () => {
-    mockBffFetch.mockResolvedValue({items: [
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
       { type: "group", name: "dev-team", namespace: "default", link: "/groups/default/dev-team" },
     ]});
@@ -98,8 +98,45 @@ describe("CommandPalette", () => {
     expect(screen.getByText("dev-team")).toBeInTheDocument();
   });
 
+  it("renders the job, run, and activity kinds with their own groups", async () => {
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
+      { type: "job", name: "team-a/service", cluster: "core", namespace: "team-a", link: "/pipelines/team-a/service" },
+      { type: "run", name: "team-a/service", cluster: "core", namespace: "team-a", description: "#12 · main", link: "/pipelines/team-a/service/r-1" },
+      { type: "activity", name: "controller created", cluster: "core", namespace: "team-a", description: "controller.created", link: "/activity?namespace=team-a" },
+    ]});
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+
+    const input = screen.getByPlaceholderText("Search controllers, groups, templates...");
+    await userEvent.type(input, "service");
+
+    expect(await screen.findByText("jobs")).toBeInTheDocument();
+    expect(screen.getByText("runs")).toBeInTheDocument();
+    expect(screen.getByText("activity")).toBeInTheDocument();
+    expect(screen.getAllByText("team-a/service")).toHaveLength(2);
+    expect(screen.getByText("controller created")).toBeInTheDocument();
+  });
+
+  it("navigates to a job result's link", async () => {
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
+      { type: "job", name: "team-a/service", cluster: "core", namespace: "team-a", link: "/pipelines/team-a/service" },
+    ]});
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+
+    const input = screen.getByPlaceholderText("Search controllers, groups, templates...");
+    await userEvent.type(input, "service");
+    await screen.findByText("team-a/service");
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(mockNavigate).toHaveBeenCalledWith("/pipelines/team-a/service");
+  });
+
   it("shows empty state when no results match the query", async () => {
-    mockBffFetch.mockResolvedValue({items: []});
+    mockBffFetch.mockResolvedValue({clusters: [], items: []});
 
     renderPalette();
     await userEvent.keyboard("{Meta>}k{/Meta}");
@@ -115,17 +152,17 @@ describe("CommandPalette", () => {
     mockBffFetch.mockImplementation((url: string) => {
       const q = new URL(url, "http://localhost").searchParams.get("q") ?? "";
       if (q === "jenkins-main") {
-        return Promise.resolve({items: [
+        return Promise.resolve({clusters: [], items: [
           { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
         ]});
       }
       if (q === "jenkins") {
-        return Promise.resolve({items: [
+        return Promise.resolve({clusters: [], items: [
           { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
           { type: "controller", name: "jenkins-dev", namespace: "default", link: "/controllers/default/jenkins-dev" },
         ]});
       }
-      return Promise.resolve({items: []});
+      return Promise.resolve({clusters: [], items: []});
     });
 
     renderPalette();
@@ -138,7 +175,7 @@ describe("CommandPalette", () => {
   });
 
   it("arrow keys navigate through filtered results and Enter selects highlighted item", async () => {
-    mockBffFetch.mockResolvedValue({items: [
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
       { type: "controller", name: "jenkins-dev", namespace: "default", link: "/controllers/default/jenkins-dev" },
     ]});
@@ -158,7 +195,7 @@ describe("CommandPalette", () => {
   });
 
   it("pressing Enter on first item (default selected) navigates to it", async () => {
-    mockBffFetch.mockResolvedValue({items: [
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
     ]});
 
@@ -175,7 +212,7 @@ describe("CommandPalette", () => {
   });
 
   it("closes the palette after navigating to a result", async () => {
-    mockBffFetch.mockResolvedValue({items: [
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
     ]});
 
@@ -195,7 +232,7 @@ describe("CommandPalette", () => {
   });
 
   it("navigates when clicking a result item", async () => {
-    mockBffFetch.mockResolvedValue({items: [
+    mockBffFetch.mockResolvedValue({clusters: [], items: [
       { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
     ]});
 
@@ -224,5 +261,41 @@ describe("CommandPalette", () => {
     expect(
       screen.queryByPlaceholderText("Search controllers, groups, templates..."),
     ).not.toBeInTheDocument();
+  });
+
+  it("names a member cluster whose search results are incomplete", async () => {
+    mockBffFetch.mockResolvedValue({
+      clusters: [
+        { name: "core", ok: true },
+        { name: "member-b", ok: false, error: "cluster unreachable" },
+      ],
+      items: [
+        { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
+      ],
+    });
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+    await userEvent.type(screen.getByPlaceholderText("Search controllers, groups, templates..."), "jenkins");
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("member-b");
+    expect(notice).toHaveTextContent("cluster unreachable");
+  });
+
+  it("renders no cluster notice when every cluster answered", async () => {
+    mockBffFetch.mockResolvedValue({
+      clusters: [{ name: "core", ok: true }],
+      items: [
+        { type: "controller", name: "jenkins-main", namespace: "default", link: "/controllers/default/jenkins-main" },
+      ],
+    });
+
+    renderPalette();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+    await userEvent.type(screen.getByPlaceholderText("Search controllers, groups, templates..."), "jenkins");
+
+    expect(await screen.findByText("jenkins-main")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

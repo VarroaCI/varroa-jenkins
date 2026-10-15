@@ -24,6 +24,8 @@ message RegisterRequest {
   string namespace = 2;
   string bootstrap_token = 3;
   bytes public_key = 4;
+  // cell_instance is the calling pod's UID, read from VARROA_POD_UID.
+  string cell_instance = 5;
 }
 
 message RegisterResponse {
@@ -73,6 +75,117 @@ message StateSnapshot {
   string defer_reason = 10;
   string live_config_hash = 11;
   bool live_drift = 12;
+  JobScheduleSet job_schedules = 13;
+  JobBranchSet job_branches = 15;
+  // pending_signatures carries the script signatures the sandbox refused
+  // in this cell. Unset means the plugin was not asked this tick.
+  PendingSignatureSet pending_signatures = 14;
+}
+
+// PendingSignatureRequester names one tenant job that hit a refused script
+// signature.
+message PendingSignatureRequester {
+  string tenant = 1;
+  string job_path = 2;
+  int64 build_number = 3;
+  string run_id = 4;
+}
+
+// PendingSignature is one script signature the sandbox refused and no
+// operator has approved.
+message PendingSignature {
+  string signature = 1;
+  bool dangerous = 2;
+  repeated PendingSignatureRequester requesters = 3;
+}
+
+// PendingSignatureSet wraps the pending signatures with presence, as
+// JobScheduleSet does.
+message PendingSignatureSet {
+  repeated PendingSignature items = 1;
+  int32 total = 2;
+  bool truncated = 3;
+}
+
+// JobSchedule is one job/trigger row of the live job-schedule inventory.
+// The mite polls the plugin's schedules endpoint and carries the set on
+// StateSnapshot; it never contributes to any state hash.
+message JobSchedule {
+  string job_path = 1;
+  string trigger_type = 2;
+  string spec = 3;
+  string timezone = 4;
+  bool disabled = 5;
+  repeated string next_fire_times = 6;   // RFC3339, UTC
+  string upstream_tenant = 7;
+  string upstream_job = 8;
+  string upstream_result = 9;
+}
+
+// JobScheduleSet wraps the job-schedule rows with presence: an unset field
+// on StateSnapshot means "not carried this tick"; a set field with no rows
+// means "this cell has no jobs".
+message JobScheduleSet {
+  string hash = 1;
+  repeated JobSchedule items = 2;
+  bool truncated = 3;
+  int32 total = 4;
+}
+
+// JobBranchHead is one discovered head of a multibranch job: a branch,
+// a change request, or a tag. The mite exports the set on StateSnapshot;
+// it never contributes to any state hash.
+message JobBranchHead {
+  string name = 1;
+  string job_path = 2;
+  string kind = 3;          // branch | changeRequest | tag
+  bool orphaned = 4;
+  string revision = 5;
+  ChangeRequestInfo change_request = 6;
+}
+
+// BranchScanHead is one head a branch scan adds, changes, or orphans.
+// The job path names the head, because a deleted head is no longer in
+// the inventory that the name would be looked up in.
+message BranchScanHead {
+  string name = 1;
+  string job_path = 2;
+}
+
+// BranchScanResult records one requested branch scan of a multibranch
+// job. The scan path fills it; the inventory export only carries it.
+message BranchScanResult {
+  reserved 7, 8, 9;
+  reserved "new_heads", "changed_heads", "orphaned_heads";
+  string scan_id = 1;
+  string state = 2;         // running | completed | failed | timeout | refused
+  string actor = 3;
+  string requested_at = 4;  // RFC3339, UTC
+  string ended_at = 5;      // RFC3339, UTC
+  string result = 6;
+  string message = 10;
+  repeated BranchScanHead new_head_refs = 11;
+  repeated BranchScanHead changed_head_refs = 12;
+  repeated BranchScanHead orphaned_head_refs = 13;
+}
+
+// JobBranchProject is one multibranch job of the cell with its heads.
+message JobBranchProject {
+  string job_path = 1;
+  string indexed_at = 2;    // RFC3339, UTC; empty when never indexed
+  string index_result = 3;
+  repeated JobBranchHead heads = 4;
+  bool heads_truncated = 5;
+  BranchScanResult last_scan = 6;
+}
+
+// JobBranchSet wraps the branch inventory with presence: an unset field
+// on StateSnapshot means "not carried this tick".
+message JobBranchSet {
+  string hash = 1;
+  repeated JobBranchProject items = 2;
+  bool truncated = 3;
+  int32 total = 4;
 }
 
 message DesiredStateCommand {
@@ -94,9 +207,58 @@ message DesiredStateCommand {
   int64 max_defer_sec = 14;
   int64 drain_timeout_sec = 15;
   int64 live_fingerprint_interval_sec = 16;
+  // rehydration carries the build-record rehydration bundle for every
+  // tenant on this cell whose seed is not yet applied. It stays out of the
+  // composite desired-state hash: the record set changes after every
+  // build, so hashing it would force a push after every build.
+  RehydrationBundle rehydration = 17;
+  // tenant_homes carries each hosted tenant's slot, role, and job home
+  // map. It is inside the composite desired-state hash: it changes only
+  // when a slot changes or a job's home changes, so hashing it costs at
+  // most one push for each such change.
+  repeated TenantHomes tenant_homes = 18;
+  // cell is true when the controller runs as a cell. A cell with no
+  // tenant sends no tenant_homes entry, so the mite needs this flag to
+  // tell such a cell from a controller that is not a cell. It stays out
+  // of the composite desired-state hash: the role of a controller does
+  // not change the content the mite applies.
+  bool cell = 19;
 }
 
+// TenantHomes names one hosted tenant's slot on this cell and that
+// tenant's job home map. The plugin computes no home. It reads what the
+// operator delivers.
+message TenantHomes {
+  // @required
+  string tenant = 1;
+  // slot is the slot this cell holds for the tenant. A standby carries
+  // no meaningful slot, and role says so.
+  int32 slot = 2;
+  // role is "active" or "standby".
+  string role = 3;
+  // job_homes maps a job path to its home slot index.
+  map<string, int32> job_homes = 4;
+}
 
+// RehydrationBundle carries the build-record rehydration files for one
+// desired-state command.
+message RehydrationBundle {
+  string bundle_id = 1;
+  string content_hash = 2;
+  repeated RehydrationFile files = 3;
+  repeated string reload_items = 4;
+  bool truncated = 5;
+  int32 record_count = 6;
+  int32 job_count = 7;
+}
+
+// RehydrationFile is one file the mite writes under JENKINS_HOME to seed a
+// job's build history.
+message RehydrationFile {
+  string path = 1;
+  bytes gzip_content = 2;
+  int64 raw_size = 3;
+}
 
 message DesiredStateResult {
   // @required
@@ -115,6 +277,16 @@ message DesiredStateResult {
   reserved 10, 11, 13;
   reserved "restart_required", "plugin_results", "restart_requested";
   repeated DeferredDeletion deferred_item_deletions = 12;
+  // rehydration_success is true once the rehydration section applied with
+  // no error. Unset when the command carried no rehydration field.
+  bool rehydration_success = 14;
+  // rehydration_error is the whole-bundle rehydration failure, or empty.
+  string rehydration_error = 15;
+  // rehydration_deferred_jobs lists every job path the mite could not
+  // seed, because the job did not exist yet. A repeated job path, never a
+  // count: one command covers every tenant on a cell, so a count cannot
+  // attribute a deferral to one tenant.
+  repeated string rehydration_deferred_jobs = 16;
 }
 
 message DeferredDeletion {
@@ -132,11 +304,23 @@ message CommandResult {
   string error = 3;
   bool deferred = 4;
   string defer_reason = 5;
-  // http_status carries the upstream HTTP status code for commands that make an
-  // HTTP call on the mite's behalf (currently REPLAY_WEBHOOK). Zero for commands
-  // that make no HTTP call. Lets the operator's webhook-replay consumer apply its
-  // ack/nak/term decision table on the real status code.
+  // http_status carries the upstream HTTP status code of every command that makes
+  // an HTTP call on the mite's behalf. Zero for a command that makes no HTTP call,
+  // and for a call that reached no server. The operator's webhook-replay consumer
+  // applies its ack/nak/term decision table on it. The gateway maps a failed
+  // TRIGGER_BUILD status onto a record-store reason code.
   int32 http_status = 6;
+  // command_type, job_path, and run_id name the imperative command this
+  // result answers. The mite copies them from the command, so the operator
+  // can count and record an outcome without a second lookup. A desired-state
+  // result leaves all three empty.
+  CommandType command_type = 7;
+  string job_path = 8;
+  string run_id = 9;
+  // actor names the sender of a run command: a trigger's actor, a cancel's
+  // actor, or the acting user of an input answer or a replay. Tag 10 is the
+  // desired_state oneof member, so actor takes tag 11.
+  string actor = 11;
   oneof result {
     DesiredStateResult desired_state = 10;
   }
@@ -200,7 +384,11 @@ message ObservabilityReport {
 }
 
 message JenkinsActivityEvent {
-  string type         = 1;   // taxonomy: build.started|build.completed|job.created|job.updated|job.deleted
+  // The Jenkins plugin sets the type. The values are build.started,
+  // build.completed, item.created, item.updated, item.deleted, item.moved,
+  // config.changed, pipeline.marker.rejected, controller.breakglass.session,
+  // and controller.breakglass.script.
+  string type         = 1;
   string actor        = 2;   // Jenkins user id/email that triggered the event ("" if system/anonymous)
   string message      = 3;   // human-readable summary
   string item_path    = 4;   // full job/folder path, e.g. "team-a/folder/job"
@@ -208,6 +396,432 @@ message JenkinsActivityEvent {
   string result       = 6;   // SUCCESS|FAILURE|UNSTABLE|ABORTED|NOT_BUILT; "" unless build.completed
   string url          = 7;   // Jenkins job/build URL (may be relative to the controller root)
   string timestamp    = 8;   // RFC3339; "" => mite fills time.Now()
+}
+
+message BuildChange {
+  string commit_id = 1;
+  string author_id = 2;
+  string author_display_name = 3;
+  string message = 4;
+  int64 timestamp_millis = 5;
+  int32 affected_path_count = 6;
+}
+
+message BuildLibrary {
+  // @required
+  string name = 1;
+  string version = 2;
+  string revision = 3;
+  // Repository URL of the library source. Carries no credentials. Empty when unknown.
+  string repository_url = 4;
+  // Forge of repository_url: github, gitlab, or gitea. Empty when unknown.
+  string repository_forge = 5;
+}
+
+message BuildPodTemplate {
+  // @required
+  string name = 1;
+  string label = 2;
+  string image = 3;
+}
+
+message BuildTestReport {
+  string blob_key = 1;
+  int64 size_bytes = 2;
+  int32 case_count = 3;
+}
+
+message BuildTestCase {
+  // @required
+  string suite = 1;
+  // @required
+  string class_name = 2;
+  // @required
+  string name = 3;
+  // @required
+  string status = 4;
+  int64 duration_ms = 5;
+  string error_details = 6;
+}
+
+// BuildTestSuite is the counter row of one test suite of a run.
+message BuildTestSuite {
+  // @required
+  string name = 1;
+  // @required
+  int32 total = 2;
+  // @required
+  int32 failed = 3;
+  // @required
+  int32 skipped = 4;
+  int64 duration_ms = 5;
+}
+
+message BuildInputParameter {
+  // @required
+  string name = 1;
+  string type = 2;
+  string description = 3;
+  string default_value = 4;
+  repeated string choices = 5;
+}
+
+message BuildInput {
+  // @required
+  string id = 1;
+  string message = 2;
+  string ok = 3;
+  string submitter = 4;
+  string submitter_parameter = 5;
+  repeated BuildInputParameter parameters = 6;
+}
+
+message BuildStage {
+  // @required
+  string stage_id = 1;
+  string parent_id = 2;
+  repeated string parent_ids = 3;
+  string enclosing_id = 4;
+  string name = 5;
+  // @required
+  string node_type = 6;
+  string parallel_branch_name = 7;
+  // @required
+  string status = 8;
+  int64 started_at_millis = 9;
+  int64 ended_at_millis = 10;
+  int64 duration_millis = 11;
+  int64 pause_duration_millis = 12;
+  string node_name = 13;
+  string agent_label = 14;
+  string error = 15;
+}
+
+message BuildArtifact {
+  // @required
+  string path = 1;
+  string display_path = 2;
+  int64 size_bytes = 3;
+  // @required
+  string storage = 4;
+  // @required
+  string blob_key = 5;
+}
+
+message LogSummary {
+  // @required
+  int64 chunk_count = 1;
+  int64 dropped_bytes = 2;
+  // @required
+  bool incomplete = 3;
+  string incomplete_reason = 4;
+  // @required
+  bool finalized = 5;
+  int64 writer_heartbeat_unix_ms = 6;
+}
+
+// ChangeRequestInfo names the change request (pull request) a
+// multibranch run builds. Empty for a run with no change request.
+message ChangeRequestInfo {
+  string id = 1;
+  string title = 2;
+  string source_branch = 3;
+  string target_branch = 4;
+  string url = 5;
+}
+
+message BuildEvent {
+  // @required
+  string phase = 1;
+  // @required
+  int64 seq = 2;
+  // @required
+  int64 emitted_at_millis = 3;
+  string run_id = 4;
+  string intent_key = 5;
+  // @required
+  string job_path = 6;
+  string job_display_name = 7;
+  // @required
+  int64 build_number = 8;
+  string build_display_name = 9;
+  string url = 10;
+  string result = 11;
+  string actor = 12;
+  repeated string cause_types = 13;
+  string cause_description = 14;
+  string upstream_job_path = 15;
+  int64 upstream_build_number = 16;
+  int64 queued_at_millis = 17;
+  int64 started_at_millis = 18;
+  int64 completed_at_millis = 19;
+  int64 duration_millis = 20;
+  int64 queue_wait_millis = 21;
+  int64 estimated_duration_millis = 22;
+  map<string, string> parameters = 23;
+  repeated string masked_parameter_names = 24;
+  string scm_url = 25;
+  string scm_head = 26;
+  string scm_revision = 27;
+  repeated BuildChange changes = 28;
+  int32 change_count = 29;
+  int32 test_total = 30;
+  int32 test_passed = 31;
+  int32 test_failed = 32;
+  int32 test_skipped = 33;
+  repeated BuildStage stages = 34;
+  string branch = 35;
+  repeated BuildArtifact artifacts = 36;
+  LogSummary log_summary = 37;
+  string template_name = 38;
+  string template_version = 39;
+  string marker_path = 40;
+  string marker_revision = 41;
+  string delivery_id = 42;
+  repeated BuildLibrary libraries = 43;
+  string definition_path = 44;
+  repeated BuildPodTemplate pod_templates = 45;
+  string summary = 46;
+  repeated BuildInput inputs = 47;
+  BuildTestReport test_report = 48;
+  repeated BuildTestCase test_cases = 49;
+  string replay_of = 50;
+  // The grant the run applied, on STARTED alone. Zero names no grant.
+  int64 granted_build_number = 51;
+  // The source run of a restart. Set on STARTED alone.
+  string restart_of = 52;
+  // The stage a restart reruns from. Set on STARTED alone.
+  string restart_stage = 53;
+  // The stages a completed declarative run can restart from. Set on COMPLETED alone.
+  repeated string restart_stages = 54;
+  // Why a completed run cannot restart. Set on COMPLETED alone.
+  string restart_refusal = 55;
+  // The change request the run builds, on STARTED alone. Empty for a branch run.
+  ChangeRequestInfo change_request = 56;
+  // rejected_signature is the script signature the sandbox refused in a
+  // failed build. Empty when the build did not fail on a signature.
+  string rejected_signature = 57;
+  // The forge that hosts scm_url: github, gitlab, or gitea. Empty when unknown.
+  string scm_forge = 58;
+  // test_suites holds one counter row per test suite, at most 500, the most failed suites first. Only COMPLETED carries it.
+  repeated BuildTestSuite test_suites = 59;
+}
+
+message ClaimRequest {
+  // @required
+  string request_id = 1;
+  // @required
+  string origin = 2;
+  // @required
+  string intent_key = 3;
+  // @required
+  string run_id = 4;
+  // @required
+  string job_path = 5;
+  string job_display_name = 6;
+  string branch = 7;
+  string actor = 8;
+  string cause = 9;
+  string params_digest = 10;
+  int32 attempt = 11;
+  int64 requested_at_millis = 12;
+  string cell_instance = 13;
+  int64 jenkins_next_build_number = 14;
+  // A granted number the cell could not apply, because its counter already
+  // passed it. Zero names no conflict.
+  int64 number_conflict = 15;
+  // True marks the start of a granted build. The ledger stores the mark,
+  // and the plugin keeps the queue item queued until the mark answers.
+  bool start_mark = 16;
+}
+
+message ClaimResponse {
+  // @required
+  string request_id = 1;
+  string decision = 2;
+  string run_id = 3;
+  int64 build_number = 4;
+  string reason_code = 5;
+  string message = 6;
+  string error = 7;
+  string code = 8;
+  // home_slot names the job's home slot on a NOT_HOME veto alone. The
+  // claimer forwards the build to that slot.
+  optional int32 home_slot = 9;
+}
+
+message EventAck {
+  // @required
+  string run_id = 1;
+  // @required
+  int64 event_seq = 2;
+  // @required
+  string status = 3;
+  string reason = 4;
+}
+
+message LogChunk {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  // @required
+  int64 build_number = 3;
+  // @required
+  int64 seq = 4;
+  string node_id = 5;
+  string stage_id = 6;
+  bytes data = 7;
+  int64 first_line_unix_ms = 8;
+  int64 dropped_bytes = 9;
+  // @required
+  bool final = 10;
+  // @required
+  string cell_instance = 11;
+}
+
+message TailControl {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  // @required
+  int64 build_number = 3;
+  // @required
+  string action = 4;
+  int32 lease_seconds = 5;
+  // @required
+  string control_id = 6;
+}
+
+message TailAck {
+  // @required
+  string run_id = 1;
+  // @required
+  string control_id = 2;
+  // @required
+  bool active = 3;
+  string error = 4;
+}
+
+message LogAck {
+  // @required
+  string run_id = 1;
+  // @required
+  int64 ack_seq = 2;
+  // @required
+  string status = 3;
+  string reason = 4;
+  int32 pause_ms = 5;
+}
+
+message CrossTenantRequest {
+  uint64 request_id = 1;
+  string kind = 2;
+  string payload_json = 3;
+}
+
+message CrossTenantResponse {
+  uint64 request_id = 1;
+  string kind = 2;
+  string payload_json = 3;
+}
+
+message RunStateChunk {
+  // @required
+  string run_id = 1;
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string relpath = 4;
+  int64 state_gen = 5;
+  int64 seq = 6;
+  int64 total = 7;
+  bytes gzip_content = 8;
+  int64 raw_size = 9;
+  string cell_instance = 10;
+  int64 object_size = 11;
+  int64 pusher_epoch = 12;
+  // A restart copy is a one-time, final copy of a finalized run. Its key carries no epoch or generation.
+  bool restart_source = 13;
+  // The file count of the whole restart copy. Set only when restart_source is true.
+  int64 copy_files = 14;
+  // The byte count of the whole restart copy. Set only when restart_source is true.
+  int64 copy_bytes = 15;
+}
+
+message RunStateRequest {
+  uint64 request_id = 1;
+  // @required
+  string run_id = 2;
+  // @required
+  string relpath = 3;
+  // pusher_epoch names the Jenkins process whose object the fetch wants.
+  // The run-state key carries the epoch, so a run and a path alone name
+  // no object.
+  // @required
+  int64 pusher_epoch = 4;
+  // state_gen names the push generation whose object the fetch wants.
+  // The run-state key carries the generation as well as the epoch, so
+  // two pushes of one process name two objects.
+  // @required
+  int64 state_gen = 5;
+  // Set when the fetch wants a restart-copy object. The key then carries
+  // no epoch or generation, so pusher_epoch and state_gen are not read.
+  bool restart_source = 6;
+}
+
+message RunStateResponse {
+  uint64 request_id = 1;
+  string relpath = 2;
+  int64 seq = 3;
+  int64 total = 4;
+  bytes gzip_content = 5;
+  int64 raw_size = 6;
+  string error = 7;
+}
+
+message RunStateAck {
+  // @required
+  string run_id = 1;
+  string relpath = 2;
+  int64 state_gen = 3;
+  // @required
+  string status = 4;
+  string reason = 5;
+  int32 pause_ms = 6;
+  // Set when the ack answers a restart-copy chunk. A mesh ack never carries it.
+  bool restart_source = 7;
+}
+
+// ResumeStateFile is one stored file a resume must materialize: the path
+// under JENKINS_HOME, and the epoch and generation of the object that
+// holds it.
+message ResumeStateFile {
+  // @required
+  string relpath = 1;
+  // @required
+  int64 pusher_epoch = 2;
+  // @required
+  int64 state_gen = 3;
+}
+
+message ResumeBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  reserved 4;
+  reserved "files";
+  // @required
+  string instance = 5;
+  int64 deadline_unix = 6;
+  repeated ResumeStateFile state_files = 7;
+  // log_next_seq is the next console log sequence that the gateway
+  // accepts for the run. The target holds no copy of the log, so the
+  // build continues its log at this value. 0 means no value.
+  int64 log_next_seq = 8;
 }
 
 message MiteMessage {
@@ -221,6 +835,13 @@ message MiteMessage {
     ContentResponse content_response = 23;
     JenkinsActivityEvent jenkins_activity = 24;
     PluginInventory plugin_inventory = 25;
+    BuildEvent build_event = 26;
+    ClaimRequest claim_request = 27;
+    LogChunk log_chunk = 28;
+    TailAck tail_ack = 29;
+    CrossTenantRequest cross_tenant_request = 30;
+    RunStateChunk run_state_chunk = 31;
+    RunStateRequest run_state_request = 32;
   }
 }
 
@@ -230,6 +851,13 @@ message OperatorMessage {
     ImperativeCommand   imperative     = 11;
     TokenGrant          token_grant    = 12;
     ContentRequest      content_request = 13;
+    ClaimResponse       claim_response  = 14;
+    TailControl         tail_control    = 15;
+    LogAck              log_ack         = 16;
+    CrossTenantResponse cross_tenant_response = 17;
+    EventAck            event_ack       = 18;
+    RunStateResponse    run_state_response = 19;
+    RunStateAck         run_state_ack   = 20;
   }
 }
 
@@ -239,6 +867,14 @@ enum CommandType {
   DELETE_ITEM = 2;
   REPLAY_WEBHOOK = 3;
   COLLECT_PLUGIN_INVENTORY = 4;
+  TRIGGER_BUILD = 5;
+  CANCEL_BUILD = 6;
+  COMMAND_TYPE_RESUME_BUILD = 7;
+  PROCEED_INPUT = 8;
+  ABORT_INPUT = 9;
+  REPLAY_BUILD = 10;
+  RESTART_BUILD = 11;
+  SCAN_MULTIBRANCH = 12;
 }
 
 message ImperativeCommand {
@@ -250,6 +886,14 @@ message ImperativeCommand {
   int64       deadline_sec = 4;
   int64       drain_timeout_sec = 5;
   ReplayWebhookPayload replay_webhook = 6;
+  TriggerBuildPayload trigger_build = 7;
+  CancelBuildPayload cancel_build = 8;
+  ResumeBuildPayload resume_build = 9;
+  ProceedInputPayload proceed_input = 10;
+  AbortInputPayload abort_input = 11;
+  ReplayBuildPayload replay_build = 12;
+  RestartBuildPayload restart_build = 13;
+  ScanMultibranchPayload scan_multibranch = 14;
 }
 
 message ReplayWebhookPayload {
@@ -258,6 +902,111 @@ message ReplayWebhookPayload {
   map<string, string> headers = 3;
   bytes body = 4;
   string delivery_id = 5;
+}
+
+message TriggerBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  map<string, string> parameters = 4;
+  string actor = 5;
+}
+
+message ActingUser {
+  // @required
+  string name = 1;
+  string email = 2;
+  repeated string groups = 3;
+}
+
+message ProceedInputPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string input_id = 4;
+  map<string, string> parameters = 5;
+  ActingUser acting_user = 6;
+}
+
+message AbortInputPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  // @required
+  string input_id = 4;
+  ActingUser acting_user = 5;
+}
+
+message ScanMultibranchPayload {
+  // @required
+  string scan_id = 1;
+  // @required
+  string job_path = 2;
+  ActingUser acting_user = 3;
+}
+
+message ReplayBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  // @required
+  string source_run_id = 4;
+  // @required
+  string script = 5;
+  ActingUser acting_user = 6;
+  map<string, string> parameters = 7;
+}
+
+message RestartBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string intent_key = 2;
+  // @required
+  string job_path = 3;
+  // @required
+  string source_run_id = 4;
+  // @required
+  int64 source_build_number = 5;
+  // @required
+  string stage = 6;
+  ActingUser acting_user = 7;
+  // source_files lists the files of the source build's restart copy. The
+  // mite restores them when the cell no longer holds the source build.
+  // Empty when no complete copy exists.
+  repeated RestartSourceFile source_files = 8;
+}
+
+// RestartSourceFile names one file of a run's restart copy: its path
+// relative to JENKINS_HOME and its size in bytes.
+message RestartSourceFile {
+  // @required
+  string relpath = 1;
+  // @required
+  int64 bytes = 2;
+}
+
+message CancelBuildPayload {
+  // @required
+  string run_id = 1;
+  // @required
+  string job_path = 2;
+  int64 build_number = 3;
+  // actor names the person or service that sent the cancel: the caller's
+  // name for a BFF cancel, "varroa-recorder" for a ledger cancel. The mite copies
+  // it onto the CommandResult.
+  string actor = 4;
 }
 
 message PluginInventory {

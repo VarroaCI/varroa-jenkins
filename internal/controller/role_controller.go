@@ -208,25 +208,36 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"catalogsources"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"catalogitems"}, Verbs: []string{"read"}},
 				{Resources: []string{"composedbundles"}, Verbs: []string{"read", "create", "update", "delete"}},
+				{Resources: []string{"runners"}, Verbs: []string{"read", "create", "update", "delete"}},
+				// A cell pool is read and scale only. Create and delete stay
+				// with kubectl and GitOps, so the role carries neither verb.
+				{Resources: []string{"cellpools"}, Verbs: []string{"read", "update"}},
+				// A fleet lock read, and the force release of a releasing
+				// lock no live pod holds. The recorder refuses every other
+				// release, so the role gains no other write.
+				{Resources: []string{"fleetlocks"}, Verbs: []string{"read", "release"}},
 				{Resources: []string{"version-profiles"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"updatecenter"}, Verbs: []string{"upload"}},
+				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write", "admin"}},
 			},
 			operatorPermissions(),
 			"varroa-operator"),
 		buildRole("developer",
 			[]v1alpha1.APIRule{
 				{Resources: []string{"controllers"}, Verbs: []string{"read", "approve-restart"}},
-				{Resources: []string{"templates", "provisioningdefaults", "roles", "rolebindings", "jenkinsroles", "jenkinsrolebindings"}, Verbs: []string{"read"}},
+				{Resources: []string{"templates", "provisioningdefaults", "roles", "rolebindings", "jenkinsroles", "jenkinsrolebindings", "runners"}, Verbs: []string{"read"}},
 				{Resources: []string{"catalogsources"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"catalogitems"}, Verbs: []string{"read"}},
 				{Resources: []string{"composedbundles"}, Verbs: []string{"read", "create", "update"}},
+				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write"}},
 			},
 			developerPermissions(),
 			"varroa-developer"),
 		buildRole("viewer",
 			[]v1alpha1.APIRule{
-				{Resources: []string{"controllers", "templates", "provisioningdefaults", "roles", "rolebindings", "jenkinsroles", "jenkinsrolebindings"}, Verbs: []string{"read"}},
+				{Resources: []string{"controllers", "templates", "provisioningdefaults", "roles", "rolebindings", "jenkinsroles", "jenkinsrolebindings", "runners"}, Verbs: []string{"read"}},
 				{Resources: []string{"catalogsources", "catalogitems", "composedbundles"}, Verbs: []string{"read"}},
+				{Resources: []string{"pipelines"}, Verbs: []string{"read"}},
 			},
 			viewerPermissions(),
 			"varroa-viewer"),

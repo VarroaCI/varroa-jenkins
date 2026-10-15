@@ -3,16 +3,13 @@ package mcp
 
 import (
 	"context"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // =============================================================================
@@ -44,10 +41,9 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 			}
 		}
 		// Read through deps.Backfill — the same source the REST /activity
-		// handler uses. In stream mode that is the JetStream backfill; with
-		// retention off it is the ring wrapper. deps.ActivityStore must NOT be
-		// read here: the ring is only fed in retention-off mode, so reading it
-		// directly returns an eternally empty feed on any stream-mode brood.
+		// handler uses. Backfill is nil when the record store is absent, and
+		// this tool returns an empty list rather than reading any other
+		// dependency directly.
 		if deps.Backfill == nil {
 			return resultJSON([]activity.Event{})
 		}
@@ -59,6 +55,7 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 			return mcp.NewToolResultError("authentication required"), nil
 		}
 		query := activity.Query{Controller: controller, Limit: limit}
+		query.Scope = activity.ScopeFromPermissions(deps.Authorizer.EffectivePermissions(claims), deps.Authorizer.CanReadGlobalActivity(claims))
 		query.Authorize = func(e activity.Event) bool {
 			return deps.Authorizer.CanReadActivityEvent(claims, e)
 		}
@@ -70,25 +67,29 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 	})
 
 	searchTool := mcp.NewTool("search",
-		mcp.WithDescription("Search Jenkins controllers across the brood by case-insensitive "+
-			"substring match on name and namespace. Returns the same compact summaries as "+
-			"list_controllers, capped at 50 hits."),
+		mcp.WithDescription("Search every resource kind the caller may read: controller, "+
+			"namespace, group, catalogitem, job, run, and activity. The four live kinds match "+
+			"by case-insensitive substring; job, run, and activity match by Postgres full text "+
+			"when the record store is wired. Capped at five results per kind, seven kinds total. "+
+			"The result also carries clusters, one read status for each cluster the search read. "+
+			"A cluster with ok false returned incomplete results."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query string")),
-		mcp.WithString("namespace", mcp.Description("Optional namespace filter")),
-		withListOutput(controllerListOutputSchema),
+		mcp.WithString("namespace", mcp.Description("Optional namespace filter, applied to every kind that carries a namespace")),
+		withListOutput(searchListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, searchTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		query, _ := getArgs(req)["query"].(string)
+		args := getArgs(req)
+		query, _ := args["query"].(string)
 		if query == "" {
 			return mcp.NewToolResultError("query parameter is required"), nil
 		}
-		needle := strings.ToLower(query)
-		ns := namespaceOrDefault(getArgs(req))
-		const maxHits = 50
+		namespace, _ := args["namespace"].(string)
 
 		// When an Authorizer is wired, claims are mandatory — treating a
-		// missing identity as "no filter" would let an unauthenticated caller
-		// enumerate controller names across the brood.
+		// missing identity as "no filter" would let an unauthenticated
+		// caller enumerate every kind across the brood. Without an
+		// Authorizer, api.Server.Search itself denies by default (an empty
+		// result, not an error), so there is nothing left to gate here.
 		var claims *auth.Claims
 		if deps.Authorizer != nil {
 			var err error
@@ -98,50 +99,14 @@ func registerActivitySearchMetaTools(mcpServer *server.MCPServer, deps *api.Depe
 			}
 		}
 
-		matches := func(cluster string, cr *v1alpha1.Controller) *controllerSummary {
-			if deps.Authorizer != nil &&
-				!deps.Authorizer.CanReadController(claims, cr.Namespace, cr.Name) {
-				return nil
-			}
-			if !strings.Contains(strings.ToLower(cr.Name), needle) &&
-				!strings.Contains(strings.ToLower(cr.Namespace), needle) {
-				return nil
-			}
-			s := summarizeController(cluster, cr)
-			return &s
-		}
-
-		hits := make([]controllerSummary, 0, 16)
-		if deps.Brood != nil {
-			cc, _, err := deps.Brood.ListAll(ctx, ns, "")
-			if err != nil {
-				return mcp.NewToolResultError("search failed: " + err.Error()), nil
-			}
-			for _, c := range cc {
-				if s := matches(c.Cluster, c.CR); s != nil {
-					hits = append(hits, *s)
-					if len(hits) == maxHits {
-						break
-					}
-				}
-			}
-			return resultJSON(hits)
-		}
-		controllers, err := crdstore.List[v1alpha1.Controller](ctx, deps.Store, ns, "")
+		// api.Server.Search applies namespace before its per-kind response
+		// cap, so a match in the requested namespace cannot be pushed out
+		// by higher-ranked rows from another namespace.
+		resp, err := api.NewServer(deps).Search(ctx, claims, query, namespace)
 		if err != nil {
 			return mcp.NewToolResultError("search failed: " + err.Error()), nil
 		}
-		for _, cr := range controllers {
-			// Cluster is left empty: without a brood there is no authoritative
-			// cluster name to report (same rule as list_controllers).
-			if s := matches("", cr); s != nil {
-				hits = append(hits, *s)
-				if len(hits) == maxHits {
-					break
-				}
-			}
-		}
-		return resultJSON(hits)
+		return resultJSON(map[string]any{"items": resp.Items, "count": len(resp.Items), "clusters": resp.Clusters})
 	})
 
 	meTool := mcp.NewTool("get_me",
@@ -202,3 +167,14 @@ var activityListOutputSchema = listOutputSchema("Activity event.", []schemaField
 	{Name: "result", Type: "string", Desc: "Build result, if any."},
 	{Name: "url", Type: "string", Desc: "Link to the build, if any."},
 })
+
+// searchListOutputSchema describes the result of search: api.SearchResult
+// serializes directly, so there is no separate summary struct.
+var searchListOutputSchema = withClustersProperty(listOutputSchema("Search result.", []schemaField{
+	{Name: "type", Type: "string", Desc: "Kind: controller, namespace, group, catalogitem, job, run, or activity."},
+	{Name: "cluster", Type: "string", Desc: "Cluster the result belongs to, if any."},
+	{Name: "namespace", Type: "string", Desc: "Namespace the result belongs to, if any."},
+	{Name: "name", Type: "string", Desc: "Display name."},
+	{Name: "description", Type: "string", Desc: "Short supporting detail, if any."},
+	{Name: "link", Type: "string", Desc: "Frontend route for this result."},
+}))

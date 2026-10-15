@@ -1,0 +1,28 @@
+items:
+  - kind: pipeline
+    name: pipeline-triggers
+    displayName: "Pipeline with Triggers"
+    description: "Pipeline job with a cron, a cross-tenant upstream, and an SCM poll trigger"
+    definition:
+      script: |
+        pipeline {
+          agent any
+          stages {
+            stage('Build') {
+              steps {
+                echo 'build'
+              }
+            }
+          }
+        }
+    triggers:
+      - cron:
+          spec: "H 2 * * *"
+      - varroaUpstream:
+          tenant: alpha
+          job: release
+    properties:
+      - pipelineTriggers:
+          triggers:
+            - pollSCM:
+                scmpoll_spec: "H/15 * * * *"

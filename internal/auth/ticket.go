@@ -27,17 +27,18 @@ const ticketPrefix = "vst_"
 
 // ticketClaims is the payload of a stream ticket JWT.
 type ticketClaims struct {
-	Iss               string   `json:"iss"`
-	Aud               string   `json:"aud"`
-	Sub               string   `json:"sub"`
-	Email             string   `json:"email,omitempty"`
-	Name              string   `json:"name,omitempty"`
-	PreferredUsername string   `json:"preferred_username,omitempty"`
-	Groups            []string `json:"groups,omitempty"`
-	Scope             string   `json:"scope"`
-	Iat               int64    `json:"iat"`
-	Exp               int64    `json:"exp"`
-	JTI               string   `json:"jti"`
+	Iss               string            `json:"iss"`
+	Aud               string            `json:"aud"`
+	Sub               string            `json:"sub"`
+	Email             string            `json:"email,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	PreferredUsername string            `json:"preferred_username,omitempty"`
+	Groups            []string          `json:"groups,omitempty"`
+	Extra             map[string]string `json:"ext,omitempty"`
+	Scope             string            `json:"scope"`
+	Iat               int64             `json:"iat"`
+	Exp               int64             `json:"exp"`
+	JTI               string            `json:"jti"`
 }
 
 // TicketIssuer mints short-lived, single-purpose SSE stream tickets.
@@ -74,6 +75,7 @@ func (i *TicketIssuer) Mint(c *Claims, scope string) (string, int, error) {
 		Name:              c.Name,
 		PreferredUsername: c.PreferredUsername,
 		Groups:            c.Groups,
+		Extra:             c.Extra,
 		Scope:             scope,
 		Iat:               now.Unix(),
 		Exp:               now.Add(i.ttl).Unix(),
@@ -153,6 +155,7 @@ func (v *TicketVerifier) Verify(_ context.Context, wire, requiredScope string) (
 		Name:              tc.Name,
 		PreferredUsername: tc.PreferredUsername,
 		Groups:            tc.Groups,
+		Extra:             tc.Extra,
 	}, nil
 }
 

@@ -395,19 +395,29 @@ func TestUpload_UnresolvedDependencies(t *testing.T) {
 	}
 }
 
-// TestUpload_StoredPackWithNoDependencyAnnotationIsAuthoritative guards against
-// a FALSE closure-unverifiable. The dev.varroa.plugin.dependencies annotation is
-// omitted when a plugin has no dependencies, so its absence alone must not be
-// read as "unknown" for a pack that carries a kind.
-//
-// The genuine closure-unverifiable path — a stored pack whose dependency list
-// cannot be determined — is not reachable through this handler in the current
-// codebase: oci.ReadPluginPack hard-rejects a pack config with no kind, and
-// oci.LayoutStore.Push refuses a manifest with no config descriptor, so a
-// pre-contract pack is invisible to listPackInfos rather than merely opaque. The
-// planner keeps the branch and TestPlanClosure_UnverifiableLegacyPack covers it
-// against the storeLookup contract, which does admit a non-authoritative answer.
-func TestUpload_StoredPackWithNoDependencyAnnotationIsAuthoritative(t *testing.T) {
+// seedUnreadablePack stores name@version as a post-contract addon pack whose
+// plugin layer is not a readable HPI. The layer carries no dependency
+// annotation, so the planner must read the stored bytes or ask upstream.
+func seedUnreadablePack(t *testing.T, store oci.BlobStore, ref, name, version string) {
+	t.Helper()
+	body := []byte("not-a-zip")
+	p := oci.ResolvedPlugin{Name: name, Version: version, SHA256: digestOf(body), Content: bytes.NewReader(body)}
+	cfg := oci.PackConfig{
+		Kind:        oci.PackKindAddon,
+		PluginCount: 1,
+		LockHash:    oci.LockHash([]oci.ResolvedPlugin{p}),
+		CreatedAt:   "2026-01-01T00:00:00Z",
+	}
+	if err := oci.BuildPluginPack(context.Background(), store, ref, cfg, []oci.ResolvedPlugin{p}); err != nil {
+		t.Fatalf("seed unreadable pack %s: %v", ref, err)
+	}
+}
+
+// TestUpload_StoredPackWithNoDependencyAnnotationReadsManifest guards against a
+// FALSE closure-unverifiable. The annotation is written for every plugin with a
+// known list, so a stored leaf with a readable manifest and no annotation must
+// have its list read from that manifest, not treated as unknown.
+func TestUpload_StoredPackWithNoDependencyAnnotationReadsManifest(t *testing.T) {
 	store := newTestStore(t)
 	ts := newTestServer(t, store, uploadOpts(t)...)
 	depBody := buildHPI(t, hpiSpec{shortName: "leaf", version: "1.0"})
@@ -421,6 +431,94 @@ func TestUpload_StoredPackWithNoDependencyAnnotationIsAuthoritative(t *testing.T
 	res := decodeResult(t, resp)
 	if len(res.Closure) != 1 || res.Closure[0].Status != StatusSatisfiedStore {
 		t.Fatalf("closure = %+v, want satisfied-store", res.Closure)
+	}
+}
+
+// TestUpload_UnreadableStoredDependencyFallsBackToUpstream: the stored bytes of
+// leaf are not a plugin and carry no annotation. The planner asks upstream,
+// which lists leaf with a nested dependency, and descends into it.
+func TestUpload_UnreadableStoredDependencyFallsBackToUpstream(t *testing.T) {
+	leafBody := buildHPI(t, hpiSpec{shortName: "leaf", version: "1.0"})
+	nestedBody := buildHPI(t, hpiSpec{shortName: "nested", version: "1.0"})
+	up := upstreamServer(t,
+		map[string][]byte{"leaf": leafBody, "nested": nestedBody},
+		map[string]string{"leaf": "1.0", "nested": "1.0"},
+		map[string][]map[string]any{
+			"leaf": {{"name": "nested", "optional": false, "version": "1.0"}},
+		},
+	)
+	store := newTestStore(t)
+	opts := append(uploadOpts(t), pullThroughWithResolver(up.URL)...)
+	ts := newTestServer(t, store, opts...)
+	seedUnreadablePack(t, store, "leaf-pack", "leaf", "1.0")
+
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "leaf:1.0"})
+	resp := ts.postUpload(t, body, "", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (%+v)", resp.StatusCode, decodeRejection(t, resp))
+	}
+	res := decodeResult(t, resp)
+	var sawNested bool
+	for _, c := range res.Closure {
+		if c.Name == "nested" {
+			sawNested = true
+		}
+	}
+	if !sawNested {
+		t.Fatalf("closure = %+v, want the upstream nested dependency descended", res.Closure)
+	}
+}
+
+// TestUpload_UnreadableStoredDependencyWithoutPullThroughIsUnverifiable: with
+// no upstream to ask, an unknown stored list is a permanent rejection.
+func TestUpload_UnreadableStoredDependencyWithoutPullThroughIsUnverifiable(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, uploadOpts(t)...)
+	seedUnreadablePack(t, store, "leaf-pack", "leaf", "1.0")
+
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "leaf:1.0"})
+	resp := ts.postUpload(t, body, "", nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	if got := decodeRejection(t, resp).Error; got != ErrClosureUnverifiable {
+		t.Fatalf("error = %q, want %q", got, ErrClosureUnverifiable)
+	}
+}
+
+// TestUpload_StoredPackWithEmptyAnnotationIsKnownEmpty: an annotation of [] is a
+// known empty list. The planner must not read the stored blob.
+func TestUpload_StoredPackWithEmptyAnnotationIsKnownEmpty(t *testing.T) {
+	inner := newTestStore(t)
+	counting := newFetchCountingStore(inner)
+	ts := newTestServer(t, counting, uploadOpts(t)...)
+	depBody := buildHPI(t, hpiSpec{shortName: "leaf", version: "1.0"})
+	p := oci.ResolvedPlugin{Name: "leaf", Version: "1.0", SHA256: digestOf(depBody),
+		Content: bytes.NewReader(depBody), DependenciesKnown: true}
+	cfg := oci.PackConfig{Kind: oci.PackKindAddon, PluginCount: 1,
+		LockHash: oci.LockHash([]oci.ResolvedPlugin{p}), CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := oci.BuildPluginPack(context.Background(), inner, "leaf-pack", cfg, []oci.ResolvedPlugin{p}); err != nil {
+		t.Fatalf("seed known-empty pack: %v", err)
+	}
+	seeded, _, err := ts.server.listPackInfos(context.Background())
+	if err != nil || len(seeded) != 1 || len(seeded[0].Plugins) != 1 {
+		t.Fatalf("seeded packs = %d, err %v", len(seeded), err)
+	}
+	layerDigest := seeded[0].Plugins[0].LayerDigest
+
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "leaf:1.0"})
+	resp := ts.postUpload(t, body, "", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (%+v)", resp.StatusCode, decodeRejection(t, resp))
+	}
+	res := decodeResult(t, resp)
+	if len(res.Closure) != 1 || res.Closure[0].Status != StatusSatisfiedStore {
+		t.Fatalf("closure = %+v, want satisfied-store", res.Closure)
+	}
+	// Config blobs are read when the pack is listed, so only the plugin layer is
+	// asserted here.
+	if n := counting.fetchesOf(layerDigest); n != 0 {
+		t.Fatalf("plugin layer fetched %d times, want 0 for a known-empty annotation", n)
 	}
 }
 
@@ -720,5 +818,40 @@ func TestUpload_LockTooOldIsAWarning(t *testing.T) {
 	res := decodeResult(t, resp)
 	if len(res.Warnings) != 1 || res.Warnings[0].Code != StatusLockTooOld {
 		t.Fatalf("warnings = %+v, want lock-too-old", res.Warnings)
+	}
+}
+
+// TestUpload_LatestDeclaredDependencyIsNotLockTooOld: a dependency declared only
+// at latest is checked against the newest upstream version, and never fetched.
+func TestUpload_LatestDeclaredDependencyIsNotLockTooOld(t *testing.T) {
+	depBody := buildHPI(t, hpiSpec{shortName: "mailer", version: "472"})
+	up := upstreamServer(t,
+		map[string][]byte{"mailer": depBody},
+		map[string]string{"mailer": "472"},
+		nil,
+	)
+	store := newTestStore(t)
+	opts := append(uploadOpts(t, "mailer@latest"), pullThroughWithResolver(up.URL)...)
+	ts := newTestServer(t, store, opts...)
+
+	body := buildHPI(t, hpiSpec{shortName: "acme", version: "1.0", deps: "mailer:470"})
+	resp := ts.postUpload(t, body, "", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (%+v)", resp.StatusCode, decodeRejection(t, resp))
+	}
+	res := decodeResult(t, resp)
+	if len(res.Closure) != 1 || res.Closure[0].Status != StatusDeclaredNotYetStored {
+		t.Fatalf("closure = %+v, want declared-not-yet-stored", res.Closure)
+	}
+	if res.Closure[0].ResolvedVersion != "472" {
+		t.Fatalf("resolvedVersion = %q, want 472", res.Closure[0].ResolvedVersion)
+	}
+	for _, w := range res.Warnings {
+		if w.Code == StatusLockTooOld {
+			t.Fatalf("warnings = %+v, want no lock-too-old", res.Warnings)
+		}
+	}
+	if d, _ := ts.server.findPluginDigests(context.Background(), "mailer", "472"); len(d) != 0 {
+		t.Fatalf("mailer was fetched (%v) — a declared plugin must never be fetched by an upload", d)
 	}
 }

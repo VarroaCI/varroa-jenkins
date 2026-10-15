@@ -91,6 +91,6 @@ kubectl get controller demo -n jenkins-demo -w
 
 Reloadable JCasC and item changes apply through the mite. Plugin, image, and other restart-class changes can roll the Jenkins pod according to its reconciliation policy.
 
-Verify that the controller returns to `Connected`, the system message names `demo`, and the `hello` pipeline runs. Item removal follows the bundle's item removal strategy. See [Managed items](../config/items.md).
+Verify that the controller returns to `Connected`, the system message names `demo`, and the `hello` pipeline runs. A non-cell controller keeps an item that the bundle no longer declares. See [Control removal](../config/items.md#control-removal).
 
 Continue with [Composed bundles](../config/composed-bundles.md), [Catalog items](../config/casc-catalog.md), or [Plugin pinning](../config/plugin-pinning.md).

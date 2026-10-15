@@ -12,20 +12,18 @@ describe("EXCLUDED_FROM_TIER1", () => {
       "reconciliationPolicy",
       "podOverrides",
       "resourceOverlay",
-      "ingressSpec",
-      "miteSpec",
       "endpoint",
     ]);
   });
 
   it("does not contain Tier 1 typed fields", () => {
-    const tier1Fields = ["rbacSpec", "pluginSpec", "backupSpec", "resources", "persistence", "className"];
+    const tier1Fields = ["rbacSpec", "pluginSpec", "backupSpec", "resources", "persistence", "className", "ingressSpec", "miteSpec"];
     for (const f of tier1Fields) {
       expect(EXCLUDED_FROM_TIER1).not.toContain(f);
     }
   });
 
-  it("has exactly 11 entries", () => {
-    expect(EXCLUDED_FROM_TIER1).toHaveLength(11);
+  it("has exactly 9 entries", () => {
+    expect(EXCLUDED_FROM_TIER1).toHaveLength(9);
   });
 });

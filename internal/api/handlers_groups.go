@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -44,7 +43,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	groups, err := crdstore.List[v1alpha1.Group](ctx, s.deps.Store, "", "")
 	if err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list groups")
@@ -128,8 +127,8 @@ type createGroupRequest struct {
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available with local accounts")
 		return
 	}
 
@@ -160,7 +159,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Apply[v1alpha1.Group](ctx, s.deps.Store, group); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create group")
 		return
@@ -188,8 +187,8 @@ func (s *Server) HandleGroupDispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name string) {
-	if s.deps.IdentityConfig.Mode != string(auth.AuthModeLocal) {
-		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available in local auth mode")
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available with local accounts")
 		return
 	}
 
@@ -199,7 +198,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if err := crdstore.Delete[v1alpha1.Group](ctx, s.deps.Store, name, ""); err != nil {
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to delete group")
 		return

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -41,8 +43,9 @@ func startNATS(t *testing.T) *server.Server {
 }
 
 // startGatewayWithCA starts a gRPC gateway server with BusHandler.
-// It returns the CA so tests can issue client certs.
-func startGatewayWithCA(t *testing.T, natsURL string) (*bus.Conn, net.Listener, *ca.CA) {
+// It returns the CA so tests can issue client certs. Each opt edits the
+// BusHandler before the server serves.
+func startGatewayWithCA(t *testing.T, natsURL string, opts ...func(*BusHandler)) (*bus.Conn, net.Listener, *ca.CA) {
 	t.Helper()
 
 	certAuth, err := ca.NewCA()
@@ -65,13 +68,13 @@ func startGatewayWithCA(t *testing.T, natsURL string) (*bus.Conn, net.Listener, 
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 	srv := NewServer(certAuth, tokenSigner, "localhost")
 	srv.ServerEndpoint = "127.0.0.1:0"
-	srv.SetStreamHandler(NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil))
+	handler := mustNewBusHandler(t, busConn, snapshotKV, presenceKV)
+	for _, opt := range opts {
+		opt(handler)
+	}
+	srv.SetStreamHandler(handler)
 	srv.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -93,7 +96,7 @@ func dialWithMiteCert(t *testing.T, addr string, certAuth *ca.CA, name, ns strin
 		t.Fatalf("generate key: %v", err)
 	}
 
-	cert, err := certAuth.IssueMiteCert(name, ns, pub)
+	cert, err := certAuth.IssueMiteCert(name, ns, pub, "")
 	if err != nil {
 		t.Fatalf("issue cert: %v", err)
 	}
@@ -222,7 +225,7 @@ func TestGatewayIntegration_BusBridge(t *testing.T) {
 		t.Fatal("expected snapshot in KV after state snapshot")
 	}
 
-	// --- Test 3: Operator desired state forwarded from KV watch to mite ---
+	// --- Test 3: Operator desired-state request forwarded to the mite ---
 	opMsg := &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_DesiredState{
 			DesiredState: &mitev1.DesiredStateCommand{
@@ -232,13 +235,11 @@ func TestGatewayIntegration_BusBridge(t *testing.T) {
 		},
 	}
 	opData, _ := json.Marshal(opMsg)
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
-	if err := desiredKV.Put(bus.DesiredKey(bus.DefaultCluster, ns, name), opData); err != nil {
-		t.Fatalf("put desired state: %v", err)
-	}
+	replyCh := make(chan error, 1)
+	go func() {
+		_, err := busConn.Request(bus.MiteDesiredSubject(bus.DefaultCluster, ns, name), opData, 3*time.Second)
+		replyCh <- err
+	}()
 
 	recvMsg, err := stream.Recv()
 	if err != nil {
@@ -247,6 +248,9 @@ func TestGatewayIntegration_BusBridge(t *testing.T) {
 	ds, ok := recvMsg.Message.(*mitev1.OperatorMessage_DesiredState)
 	if !ok || ds.DesiredState.CommandId != "cmd-1" {
 		t.Fatalf("unexpected desired state: %+v", recvMsg.Message)
+	}
+	if err := <-replyCh; err != nil {
+		t.Fatalf("desired-state request got no confirm: %v", err)
 	}
 
 	// --- Test 4: Disconnect clears KV ---
@@ -264,52 +268,81 @@ func TestGatewayIntegration_BusBridge(t *testing.T) {
 	}
 }
 
-// TestGatewayIntegration_DesiredStateLastValue proves that a mite connecting
-// after two desired-state Puts receives only the latest value (last-value
-// semantics), and that a Put while connected is delivered via the watch.
-func TestGatewayIntegration_DesiredStateLastValue(t *testing.T) {
+// TestGatewayIntegration_DesiredStateIsRequestOnly proves the desired-state
+// path stores nothing: a request sent before the mite connects has no
+// responder and is never replayed, and no bucket or stream holds the
+// command. It also proves the connect order the operator depends on: the
+// gateway writes presence before it publishes the connected event, and a
+// request on that event finds a responder at once.
+func TestGatewayIntegration_DesiredStateIsRequestOnly(t *testing.T) {
 	natsSrv := startNATS(t)
 	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
 
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("desired kv: %v", err)
-	}
-
 	ns, name := "ns", "c1"
-
-	put := func(hash string) {
+	subject := bus.MiteDesiredSubject(bus.DefaultCluster, ns, name)
+	request := func(hash string) error {
 		op := &mitev1.OperatorMessage{Message: &mitev1.OperatorMessage_DesiredState{
 			DesiredState: &mitev1.DesiredStateCommand{DesiredStateHash: hash}}}
 		b, _ := json.Marshal(op)
-		if err := desiredKV.Put(bus.DesiredKey(bus.DefaultCluster, ns, name), b); err != nil {
-			t.Fatal(err)
-		}
+		_, err := busConn.Request(subject, b, 3*time.Second)
+		return err
 	}
 
-	// Two Puts BEFORE the mite connects — only the second must be delivered.
-	put("stale")
-	put("latest")
+	// A request BEFORE the mite connects has no responder.
+	if err := request("stale"); !errors.Is(err, nats.ErrNoResponders) {
+		t.Fatalf("request before connect: err=%v, want ErrNoResponders", err)
+	}
 
-	// Connect a fake mite.
+	// One wildcard subscription sees the gateway's publishes in the order
+	// the gateway sent them. That order must be: presence first, then the
+	// connected event. On the connected event a request must also find a
+	// responder at once.
+	obs, err := busConn.NATSConn().SubscribeSync(">")
+	if err != nil {
+		t.Fatalf("subscribe all: %v", err)
+	}
+	t.Cleanup(func() { _ = obs.Unsubscribe() })
+	if err := busConn.NATSConn().Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	type onConnected struct {
+		presenceFirst bool
+		err           error
+	}
+	connectedCh := make(chan onConnected, 1)
+	go func() {
+		presenceSubject := "$KV." + bus.KVPresenceBucket + "." + bus.PresenceKey(bus.DefaultCluster, ns, name)
+		sawPresence := false
+		for {
+			m, err := obs.NextMsg(5 * time.Second)
+			if err != nil {
+				return
+			}
+			if m.Subject == presenceSubject {
+				sawPresence = true
+				continue
+			}
+			if m.Subject != bus.BroodSubject(bus.DefaultCluster) {
+				continue
+			}
+			var ev struct {
+				Event string `json:"event"`
+				Name  string `json:"name"`
+			}
+			if json.Unmarshal(m.Data, &ev) != nil || ev.Event != "connected" || ev.Name != name {
+				continue
+			}
+			connectedCh <- onConnected{presenceFirst: sawPresence, err: request("on-connect")}
+			return
+		}
+	}()
+
 	gconn := dialWithMiteCert(t, lis.Addr().String(), certAuth, name, ns)
 	miteClient := mitev1.NewMiteClient(gconn)
-
 	stream, err := miteClient.CommandStream(context.Background())
 	if err != nil {
 		t.Fatalf("command stream: %v", err)
 	}
-
-	// Send Hello to trigger OnConnect.
-	if err := stream.Send(&mitev1.MiteMessage{
-		Message: &mitev1.MiteMessage_Hello{
-			Hello: &mitev1.Hello{ControllerName: name, Namespace: ns, Version: "test-v1"},
-		},
-	}); err != nil {
-		t.Fatalf("send hello: %v", err)
-	}
-
-	// The first OperatorMessage received must have hash "latest", not "stale".
 	recvCh := make(chan *mitev1.OperatorMessage, 4)
 	go func() {
 		for {
@@ -322,28 +355,44 @@ func TestGatewayIntegration_DesiredStateLastValue(t *testing.T) {
 			}
 		}
 	}()
-
-	select {
-	case msg := <-recvCh:
-		ds := msg.Message.(*mitev1.OperatorMessage_DesiredState)
-		if got := ds.DesiredState.DesiredStateHash; got != "latest" {
-			t.Fatalf("first delivery: want \"latest\", got %q", got)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for initial desired state delivery")
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_Hello{
+			Hello: &mitev1.Hello{ControllerName: name, Namespace: ns, Version: "test-v1"},
+		},
+	}); err != nil {
+		t.Fatalf("send hello: %v", err)
 	}
 
-	// Put a new value while connected — it must be delivered via the watch.
-	put("newer")
+	select {
+	case oc := <-connectedCh:
+		if !oc.presenceFirst {
+			t.Fatal("the gateway published the connected event before it wrote presence")
+		}
+		if oc.err != nil {
+			t.Fatalf("a request on the connected event found no responder: %v", oc.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the connected event")
+	}
 
 	select {
 	case msg := <-recvCh:
-		ds := msg.Message.(*mitev1.OperatorMessage_DesiredState)
-		if got := ds.DesiredState.DesiredStateHash; got != "newer" {
-			t.Fatalf("watch update: want \"newer\", got %q", got)
+		if got := msg.GetDesiredState().DesiredStateHash; got != "on-connect" {
+			t.Fatalf("first delivery: want \"on-connect\", got %q (a request before connect was replayed)", got)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for watch update delivery")
+		t.Fatal("timed out waiting for the desired-state delivery")
+	}
+
+	js, err := busConn.NATSConn().JetStream()
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
+	}
+	if _, err := js.KeyValue("mite_desired"); !errors.Is(err, nats.ErrBucketNotFound) {
+		t.Fatalf("mite_desired bucket lookup: err=%v, want ErrBucketNotFound", err)
+	}
+	if stream, err := js.StreamNameBySubject(subject); err == nil {
+		t.Fatalf("stream %q captures the desired-state subject", stream)
 	}
 }
 
@@ -510,13 +559,8 @@ func TestGatewayIntegration_FullTokenRefreshGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 	_ = snapshotKV
 	_ = presenceKV
-	_ = desiredKV
 
 	mintSeq := 0
 	mintTokenFunc := func() (string, int64) {

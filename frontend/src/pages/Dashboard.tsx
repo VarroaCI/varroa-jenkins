@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { useControllers } from "../hooks/useControllers";
+import { useControllers, useControllerFanoutFailures } from "../hooks/useControllers";
 import { useClusters, coreOf } from "../hooks/useClusters";
-import { age } from "../components/activityTimeline.util";
+import { ClusterFanoutNotice } from "../components/ClusterFanoutNotice";
+import { age, activityTypeMeta } from "../components/activityTimeline.util";
 import { bffFetch } from "../hooks/useApi";
 import { getUpdateCenterStatus } from "../api/client";
-import type { UpdateCenterStatus } from "../types";
+import type { ActivityEvent, UpdateCenterStatus } from "../types";
 import { MetricCard } from "../components/MetricCard";
 import { Card } from "../components/Card";
 import { Pulse } from "../components/Pulse";
@@ -16,12 +17,48 @@ import type { ControllerListItem } from "../hooks/useControllers";
 import type { ClusterEntry } from "../types";
 import styles from "./Dashboard.module.css";
 
+// HEALTH_LIST_LIMIT caps the brood health card. The card shows a phase bar
+// for the whole brood and this many controller rows.
+const HEALTH_LIST_LIMIT = 8;
+const PHASE_BUCKETS = ["Connected", "Running", "Provisioning", "Hibernated", "Failed"] as const;
+
+// phaseCounts counts controllers per phase bucket. Phases outside the buckets
+// count as "Other". Zero buckets are dropped.
+function phaseCounts(cs: ControllerListItem[]): { phase: string; count: number }[] {
+  const byPhase = new Map<string, number>();
+  for (const c of cs) {
+    const bucket = (PHASE_BUCKETS as readonly string[]).includes(c.phase) ? c.phase : "Other";
+    byPhase.set(bucket, (byPhase.get(bucket) ?? 0) + 1);
+  }
+  return [...PHASE_BUCKETS, "Other"]
+    .map((phase) => ({ phase, count: byPhase.get(phase) ?? 0 }))
+    .filter((x) => x.count > 0);
+}
+
+// lookRank orders controllers that need a look first. Attention comes first,
+// then a controller with no live mite that is not hibernated.
+function lookRank(c: ControllerListItem): number {
+  if (c.attention) return 0;
+  if (!c.miteConnected && c.phase !== "Hibernated") return 1;
+  return 2;
+}
+
+function needsLookFirst(a: ControllerListItem, b: ControllerListItem): number {
+  return lookRank(a) - lookRank(b) || a.name.localeCompare(b.name);
+}
+
 export default function Dashboard() {
   const { data, isLoading, error } = useControllers();
   const { data: clustersData, isLoading: clustersLoading, error: clustersError } = useClusters();
 
   const controllers = data ?? [];
   const total = controllers.length;
+  const shortlist = useMemo(
+    () => [...(data ?? [])].sort(needsLookFirst).slice(0, HEALTH_LIST_LIMIT),
+    [data],
+  );
+  const phases = useMemo(() => phaseCounts(data ?? []), [data]);
+  const rest = total - shortlist.length;
   const connected = controllers.filter((c) => c.miteConnected).length;
   const provisioning = controllers.filter((c) => c.phase === "Provisioning").length;
   const attention = controllers.filter((c) => c.attention);
@@ -83,6 +120,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <ClusterFanoutNotice />
       <ClusterStrip clusters={clustersData} isLoading={clustersLoading} error={!!clustersError} />
 
       <div className={`${styles.grid} ${styles.metrics}`}>
@@ -119,16 +157,26 @@ export default function Dashboard() {
         />
       </div>
 
-      <UpdateCenterGapsChip />
+      <UpdateCenterUnservableChip />
 
       <div className={styles.twoCol}>
         <Card title="⬡ Brood health" headerRight={<span className={styles.muted}>{controllers.length} controller{controllers.length === 1 ? "" : "s"}</span>}>
           <div className={styles.healthGrid}>
-            {controllers.map((c) => (
-              <HealthBar key={`${c.namespace}/${c.name}`} controller={c} />
-            ))}
-            {controllers.length === 0 && (
+            {total === 0 ? (
               <div className={styles.empty}>No controllers deployed yet.</div>
+            ) : (
+              <>
+                <PhaseBar counts={phases} />
+                {shortlist.map((c) => (
+                  <HealthBar key={`${c.cluster}/${c.namespace}/${c.name}`} controller={c} />
+                ))}
+                {rest > 0 && (
+                  <div className={styles.healthMore}>
+                    and {rest} more ·{" "}
+                    <Link to="/controllers" className={styles.healthLink}>View all controllers</Link>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </Card>
@@ -140,21 +188,49 @@ export default function Dashboard() {
 }
 
 function ClusterStrip({ clusters, isLoading, error }: { clusters: ClusterEntry[] | undefined; isLoading: boolean; error: boolean }) {
+  const failedNames = new Set((useControllerFanoutFailures().data ?? []).map((f) => f.name));
   if (isLoading || error || (clusters?.length ?? 0) < 2) return null;
   const cls = [...(clusters ?? [])].sort((a, b) => (a.core ? -1 : b.core ? 1 : a.name.localeCompare(b.name)));
   return (
     <div className={styles.clusterStrip}>
-      {cls.map((c) => (
+      {cls.map((c) => {
+        const listFailed = failedNames.has(c.name);
+        return (
         <Link key={c.name} to={`/controllers?cluster=${encodeURIComponent(c.name)}`} className={styles.clusterCard}>
           <div className={styles.clusterCardHead}>
-            <span className={styles.clusterDot} data-health={c.healthy ? "ok" : "bad"} />
+            <span className={styles.clusterDot} data-health={c.healthy && !listFailed ? "ok" : "bad"} />
             <span className={styles.clusterName}>{c.name}</span>
             {c.core && <span className={styles.coreTag}>core</span>}
           </div>
-          <div className={styles.clusterCardStat}>{c.connectedCount}/{c.controllerCount} controllers</div>
+          <div className={styles.clusterCardStat}>
+            {listFailed ? "list unavailable" : `${c.connectedCount}/${c.controllerCount} controllers`}
+          </div>
           <div className={styles.clusterCardAge}>{age(c.lastHeartbeat, { variant: "heartbeat" })}</div>
         </Link>
-      ))}
+        );
+      })}
+    </div>
+  );
+}
+
+// PhaseBar draws the phase distribution of the whole brood as one stacked bar,
+// with a legend of counts per phase.
+function PhaseBar({ counts }: { counts: { phase: string; count: number }[] }) {
+  const label = "Phase distribution: " + counts.map((x) => `${x.count} ${x.phase}`).join(", ");
+  return (
+    <div>
+      <div className={styles.phaseBar} role="img" aria-label={label}>
+        {counts.map((x) => (
+          <span key={x.phase} className={styles.phaseSeg} data-phase={x.phase} style={{ flexGrow: x.count }} />
+        ))}
+      </div>
+      <ul className={styles.phaseLegend}>
+        {counts.map((x) => (
+          <li key={x.phase}>
+            <span className={styles.phaseDot} data-phase={x.phase} /> {x.phase} <b>{x.count}</b>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -178,22 +254,6 @@ function HealthBar({ controller }: { controller: ControllerListItem }) {
   );
 }
 
-interface ActivityEvent {
-  timestamp: string;
-  type: string;
-  controller: string;
-  namespace: string;
-  cluster?: string;
-  message: string;
-}
-
-const ACTIVITY_TYPES: Record<string, { icon: string; style: string }> = {
-  connected: { icon: "⇡", style: "softInfo" },
-  disconnected: { icon: "⇣", style: "softBad" },
-  phase: { icon: "◴", style: "softWarn" },
-  reconciled: { icon: "✓", style: "softOk" },
-};
-
 function ActivityFeed() {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
@@ -202,8 +262,6 @@ function ActivityFeed() {
     queryFn: () => bffFetch<{items: ActivityEvent[]}>("/activity").then(r => r.items),
     refetchInterval: 10_000,
   });
-
-  const icons = (t: string) => ACTIVITY_TYPES[t] ?? { icon: "·", style: "" };
 
   return (
     <Card
@@ -216,7 +274,7 @@ function ActivityFeed() {
     >
       <div className={styles.activityList}>
         {events.slice(0, 5).map((e, i) => {
-          const { icon, style } = icons(e.type);
+          const { icon, style } = activityTypeMeta(e);
           return (
             <div key={i} className={styles.activityItem}>
               <div className={styles.activityIcon} data-style={style}>
@@ -243,7 +301,7 @@ function ActivityFeed() {
   );
 }
 
-function UpdateCenterGapsChip() {
+function UpdateCenterUnservableChip() {
   const [data, setData] = useState<UpdateCenterStatus | null>(null);
   useEffect(() => {
     getUpdateCenterStatus()
@@ -252,7 +310,7 @@ function UpdateCenterGapsChip() {
         // Swallow — failed fetch must not surface a dashboard error.
       });
   }, []);
-  if (!data?.enabled || !data.gaps || data.gaps.length === 0) return null;
+  if (!data?.enabled || !data.unservableCount) return null;
   return (
     <Link
       to="/administration/update-center"
@@ -270,7 +328,7 @@ function UpdateCenterGapsChip() {
         textDecoration: "none",
       }}
     >
-      ⚠ {data.gaps.length} plugin{data.gaps.length > 1 ? "s" : ""} missing from Update Center
+      ⚠ {data.unservableCount} plugin{data.unservableCount > 1 ? "s" : ""} the Update Center cannot serve
     </Link>
   );
 }

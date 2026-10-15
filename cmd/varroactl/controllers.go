@@ -149,6 +149,16 @@ func listControllers(cmd *cobra.Command, c *client.ClientWithResponses, format s
 		return fmt.Errorf("unexpected response: no data")
 	}
 
+	for _, st := range resp.JSON200.Clusters {
+		if !st.Ok {
+			msg := "no answer"
+			if st.Error != nil && *st.Error != "" {
+				msg = *st.Error
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cluster %s: %s; its controllers are not listed\n", st.Name, msg)
+		}
+	}
+
 	items := resp.JSON200.Items
 
 	switch format {

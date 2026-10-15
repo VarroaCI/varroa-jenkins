@@ -133,9 +133,9 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 }
 
 // sseScope returns the canonical stream scope for an SSE route, or "" if the path is
-// not a server-sent-events route. Scopes: "brood", "activity", or
-// "controller:{ns}/{name}". A stream ticket is bound to one scope, so a ticket minted
-// for one stream cannot open another.
+// not a server-sent-events route. Scopes: "brood", "activity", "controller:{ns}/{name}",
+// "broodop:{ns}/{name}", "run:{run_id}", or "pipelines:{team}". A stream ticket is bound
+// to one scope, so a ticket minted for one stream cannot open another.
 func sseScope(path string) string {
 	p := strings.TrimPrefix(path, "/api/v1")
 	switch p {
@@ -172,6 +172,19 @@ func sseScope(path string) string {
 		segs := strings.Split(strings.TrimPrefix(p, "/brood-operations/"), "/")
 		if len(segs) == 3 && segs[2] == "stream" && segs[0] != "" && segs[1] != "" {
 			return "broodop:" + segs[0] + "/" + segs[1]
+		}
+	}
+	if strings.HasPrefix(p, "/runs/") {
+		segs := strings.Split(strings.TrimPrefix(p, "/runs/"), "/")
+		if len(segs) == 2 && segs[1] == "log" && segs[0] != "" {
+			return "run:" + segs[0]
+		}
+	}
+	if strings.HasPrefix(p, "/pipelines/") {
+		segs := strings.Split(strings.TrimPrefix(p, "/pipelines/"), "/")
+		// /pipelines/{team}/stream. A team name holds no "/".
+		if len(segs) == 2 && segs[1] == "stream" && segs[0] != "" {
+			return "pipelines:" + segs[0]
 		}
 	}
 	return ""

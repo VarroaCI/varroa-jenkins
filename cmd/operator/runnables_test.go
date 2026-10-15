@@ -29,7 +29,7 @@ func TestTickerRunnable_ImmediateTick(t *testing.T) {
 	var counter atomic.Int32
 	tr := &tickerRunnable{
 		name:      "test-immediate",
-		interval:  10 * time.Millisecond,
+		interval:  time.Hour,
 		immediate: true,
 		tick:      func(ctx context.Context) { counter.Add(1) },
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -49,19 +49,55 @@ func TestTickerRunnable_NoImmediateTick(t *testing.T) {
 	var counter atomic.Int32
 	tr := &tickerRunnable{
 		name:      "test-no-immediate",
-		interval:  10 * time.Millisecond,
+		interval:  time.Hour,
 		immediate: false,
 		tick:      func(ctx context.Context) { counter.Add(1) },
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
 	_ = tr.Start(ctx)
 
 	if n := counter.Load(); n != 0 {
 		t.Errorf("immediate=false should not tick before interval, got %d", n)
+	}
+}
+
+// TestTickerRunnable_IntervalTickRepeats asserts that the loop resets the
+// timer after each interval tick. The test waits on tick signals, not on a
+// short deadline, so a slow scheduler cannot fail it.
+func TestTickerRunnable_IntervalTickRepeats(t *testing.T) {
+	ticks := make(chan struct{}, 2)
+	tr := &tickerRunnable{
+		name:     "test-interval-repeats",
+		interval: time.Millisecond,
+		tick: func(ctx context.Context) {
+			select {
+			case ticks <- struct{}{}:
+			default:
+			}
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- tr.Start(ctx) }()
+
+	deadline := time.After(10 * time.Second)
+	for i := range 2 {
+		select {
+		case <-ticks:
+		case <-deadline:
+			cancel()
+			t.Fatalf("interval tick %d did not fire within 10s", i+1)
+		}
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Start should return nil on ctx cancel, got: %v", err)
 	}
 }
 
@@ -142,7 +178,7 @@ func TestTickerRunnable_SetupBeforeImmediateTick(t *testing.T) {
 	var tickRan bool
 	tr := &tickerRunnable{
 		name:      "test-setup-order",
-		interval:  10 * time.Millisecond,
+		interval:  time.Hour,
 		immediate: true,
 		setup: func(ctx context.Context) error {
 			setupRan = true

@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/util/retry"
 )
 
 // Backend is the unstructured-level storage seam. Implemented by
@@ -42,6 +43,14 @@ type Backend interface {
 	// DeleteObject deletes an object. A missing object is not an error.
 	DeleteObject(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) error
 
+	// DeleteObjectIfUnchanged deletes an object only while it still carries
+	// uid and resourceVersion. Any write since that read makes the apiserver
+	// answer Conflict instead of deleting, so a caller that decided from an
+	// earlier read cannot act on a stale view. A missing object is not an
+	// error. An empty uid or resourceVersion drops that half of the
+	// precondition.
+	DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, uid, resourceVersion string) error
+
 	// PatchObjectStatus merge-patches the /status subresource with
 	// {"status": status}. The status value is marshalled to JSON as part of
 	// the patch body.
@@ -50,6 +59,12 @@ type Backend interface {
 	// PatchObjectMeta merge-patches {"metadata": meta} on the main resource
 	// (no subresource). meta is the raw map for the metadata field.
 	PatchObjectMeta(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, meta map[string]any) error
+
+	// PatchObjectMetaAt merge-patches {"metadata": meta} on the main
+	// resource only while the object still carries resourceVersion. Any
+	// write since that version surfaces as apierrors.IsConflict. It returns
+	// the resourceVersion after the patch.
+	PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, meta map[string]any) (string, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +185,41 @@ func UpdateStatus[T any](ctx context.Context, b Backend, obj *T) error {
 	return nil
 }
 
+// MutateStatus is a compare-and-swap on the /status subresource. It reads
+// the live object, calls mutate on it, and writes the status back with the
+// read resourceVersion. A concurrent write since the read makes the write
+// conflict, and MutateStatus then reads again and calls mutate again, up to
+// retry.DefaultRetry attempts. So mutate must derive every change from the
+// object it receives and must have no side effects. When mutate reports no
+// change, MutateStatus writes nothing and returns false.
+//
+// The write sends the whole status from the fresh read, so it keeps every
+// field that mutate does not touch. A blind merge patch from an earlier read
+// would put back stale values of those fields.
+func MutateStatus[T any](ctx context.Context, b Backend, name, namespace string, mutate func(obj *T) (bool, error)) (bool, error) {
+	var changed bool
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		changed = false
+		obj, err := Get[T](ctx, b, name, namespace)
+		if err != nil {
+			return err
+		}
+		c, err := mutate(obj)
+		if err != nil || !c {
+			return err
+		}
+		if err := UpdateStatus(ctx, b, obj); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 // ErrNotOwned is returned by ApplyOwned when the live object exists and the
 // caller's ownership predicate rejects it.
 var ErrNotOwned = errors.New("crdstore: object is owned by another writer")
@@ -288,6 +338,21 @@ func Delete[T any](ctx context.Context, b Backend, name, namespace string) error
 	return nil
 }
 
+// DeleteIfUnchanged deletes a typed CRD only while it still carries uid and
+// resourceVersion. A write since that read answers Conflict, which the caller
+// treats as "the object changed, decide again" rather than as a failure. The
+// error is wrapped with %w, so apierrors.IsConflict still reads it.
+func DeleteIfUnchanged[T any](ctx context.Context, b Backend, name, namespace, uid, resourceVersion string) error {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return err
+	}
+	if err := b.DeleteObjectIfUnchanged(ctx, info.gvr, namespace, name, uid, resourceVersion); err != nil {
+		return fmt.Errorf("delete %s: %w", info.gvr.Resource, err)
+	}
+	return nil
+}
+
 // PatchStatus merge-patches the /status subresource.
 func PatchStatus[T any](ctx context.Context, b Backend, name, namespace string, status any) error {
 	info, err := gvrInfo[T]()
@@ -342,6 +407,24 @@ func PatchLabels[T any](ctx context.Context, b Backend, name, namespace string, 
 		return fmt.Errorf("patch %s labels: %w", info.gvr.Resource, err)
 	}
 	return nil
+}
+
+// PatchMetaAt merge-patches metadata only while the object still carries
+// resourceVersion, and returns the resourceVersion after the patch. A nil
+// value in meta deletes its key. A write since that version makes the patch
+// fail with a conflict, which apierrors.IsConflict reads through the %w wrap.
+// A caller that chains its writes from one read moves its own
+// resourceVersion forward with the result.
+func PatchMetaAt[T any](ctx context.Context, b Backend, name, namespace, resourceVersion string, meta map[string]any) (string, error) {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return "", err
+	}
+	rv, err := b.PatchObjectMetaAt(ctx, info.gvr, namespace, name, resourceVersion, meta)
+	if err != nil {
+		return "", fmt.Errorf("patch %s metadata: %w", info.gvr.Resource, err)
+	}
+	return rv, nil
 }
 
 // PatchFinalizers patches metadata.finalizers.

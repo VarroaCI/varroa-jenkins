@@ -340,86 +340,101 @@ func TestValidateContent_DuplicateVarInMultipleSections(t *testing.T) {
 	}
 }
 
-func TestValidateCatalogItem_PipelineTemplate_ValidPipelineKind(t *testing.T) {
+// validPipelineTemplateDoc is a well-formed PipelineTemplate document with
+// an empty parameter schema, reused by the tests below.
+const validPipelineTemplateDoc = `
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: go-service
+spec:
+  version: 1.0.0
+  parameters:
+    type: object
+    additionalProperties: false
+  jenkinsfile: "pipeline { stages { stage('build') { steps { echo 'hi' } } } } "
+`
+
+func TestValidateCatalogItem_PipelineTemplate_ValidDocument(t *testing.T) {
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), nil, "")
+	if !valid {
+		t.Errorf("expected valid, got message: %s", msg)
+	}
+	if msg != "" {
+		t.Errorf("expected no warnings, got: %s", msg)
+	}
+}
+
+func TestValidateCatalogItem_PipelineTemplate_ItemYAMLContentRejected(t *testing.T) {
+	// The MODIFIED "pipeline-template is a valid CatalogItemType" requirement's
+	// "item-YAML content is now rejected" scenario: the old items:-list format
+	// no longer validates.
 	content := []byte(`
 items:
   - kind: pipeline
     name: my-pipeline
     definition:
-      cpsScmFlowDefinition:
-        scm:
-          gitSCM:
-            userRemoteConfigs:
-              - userRemoteConfig:
-                  url: https://github.com/example/repo.git
-        scriptPath: Jenkinsfile
+      script: "pipeline {}"
 `)
-	valid, msg := ValidateCatalogItem("pipeline-template", content, nil)
-	if !valid {
-		t.Errorf("expected valid, got message: %s", msg)
+	valid, msg := ValidateCatalogItem("pipeline-template", content, nil, "")
+	if valid {
+		t.Error("expected invalid for item-YAML content")
+	}
+	if !strings.Contains(msg, "PipelineTemplate document") {
+		t.Errorf("expected message to state that content must be a PipelineTemplate document, got: %s", msg)
 	}
 }
 
-func TestValidateCatalogItem_PipelineTemplate_FolderKindRejected(t *testing.T) {
+func TestValidateCatalogItem_PipelineTemplate_NoBodyRejected(t *testing.T) {
+	// The ADDED "pipeline-template content validates as a template document"
+	// requirement's "a document with no body is rejected" scenario.
 	content := []byte(`
-items:
-  - kind: folder
-    name: my-folder
+apiVersion: varroa.dev/v1
+kind: PipelineTemplate
+metadata:
+  name: go-service
+spec:
+  version: 1.0.0
+  parameters:
+    type: object
+    additionalProperties: false
 `)
-	valid, msg := ValidateCatalogItem("pipeline-template", content, nil)
+	valid, msg := ValidateCatalogItem("pipeline-template", content, nil, "")
 	if valid {
-		t.Error("expected invalid for kind=folder")
+		t.Error("expected invalid for a document with neither jenkinsfile nor scmDefinition")
 	}
-	if !strings.Contains(msg, "kind=pipeline or kind=multibranch") {
-		t.Errorf("expected message to name the kind restriction, got: %s", msg)
-	}
-	if !strings.Contains(msg, "folder") {
-		t.Errorf("expected message to identify the offending kind, got: %s", msg)
-	}
-}
-
-func TestValidateCatalogItem_PipelineTemplate_MultibranchEmptySourcesListRejected(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: multibranch
-    name: my-multibranch
-`)
-	valid, msg := ValidateCatalogItem("pipeline-template", content, nil)
-	if valid {
-		t.Error("expected invalid for multibranch with empty sourcesList")
-	}
-	if !strings.Contains(msg, "sourcesList") {
-		t.Errorf("expected message about sourcesList, got: %s", msg)
+	if !strings.Contains(msg, "jenkinsfile") || !strings.Contains(msg, "scmDefinition") {
+		t.Errorf("expected message to name both keys, got: %s", msg)
 	}
 }
 
 func TestValidateCatalogItem_PipelineTemplate_PreExistingUntypedVariableRemainsValid(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: pipeline
-    name: my-pipeline
-    definition:
-      script: "pipeline {}"
-`)
 	// A pre-existing CatalogVarDecl with no Type set — the shape every
 	// CatalogVariable in the repo/cluster had before this change.
 	vars := []CatalogVarDecl{{Name: "x"}}
-	valid, msg := ValidateCatalogItem("pipeline-template", content, vars)
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
 	if !valid {
 		t.Errorf("expected untyped variable to remain valid, got message: %s", msg)
+	}
+	if !strings.Contains(msg, "x") {
+		t.Errorf("expected a warning naming the variable, got: %s", msg)
+	}
+}
+
+func TestValidateCatalogItem_PipelineTemplate_VariableWarnsItDoesNotReachTheBody(t *testing.T) {
+	vars := []CatalogVarDecl{{Name: "goVersion"}}
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
+	if !valid {
+		t.Errorf("expected a declared variable to warn, not invalidate, got message: %s", msg)
+	}
+	if !strings.Contains(msg, "goVersion") {
+		t.Errorf("expected the warning to name the variable, got: %s", msg)
 	}
 }
 
 func TestValidateCatalogItem_PipelineTemplate_AllowedValuesOnBooleanRejected(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: pipeline
-    name: my-pipeline
-    definition:
-      script: "pipeline {}"
-`)
 	vars := []CatalogVarDecl{{Name: "flag", Type: "boolean", AllowedValues: []string{"a", "b"}}}
-	valid, msg := ValidateCatalogItem("pipeline-template", content, vars)
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
 	if valid {
 		t.Error("expected invalid for allowedValues on a boolean variable")
 	}
@@ -429,15 +444,8 @@ items:
 }
 
 func TestValidateCatalogItem_PipelineTemplate_AllowedValuesOnCredentialsRejected(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: pipeline
-    name: my-pipeline
-    definition:
-      script: "pipeline {}"
-`)
 	vars := []CatalogVarDecl{{Name: "cred", Type: "credentials", AllowedValues: []string{"a", "b"}}}
-	valid, msg := ValidateCatalogItem("pipeline-template", content, vars)
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
 	if valid {
 		t.Error("expected invalid for allowedValues on a credentials variable")
 	}
@@ -447,35 +455,43 @@ items:
 }
 
 func TestValidateCatalogItem_PipelineTemplate_AllowedValuesOnStringAccepted(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: pipeline
-    name: my-pipeline
-    definition:
-      script: "pipeline {}"
-`)
 	vars := []CatalogVarDecl{{Name: "env", Type: "string", AllowedValues: []string{"dev", "prod"}}}
-	valid, msg := ValidateCatalogItem("pipeline-template", content, vars)
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
 	if !valid {
 		t.Errorf("expected allowedValues on a string variable to be valid, got message: %s", msg)
 	}
 }
 
 func TestValidateCatalogItem_PipelineTemplate_UnknownTypeRejected(t *testing.T) {
-	content := []byte(`
-items:
-  - kind: pipeline
-    name: my-pipeline
-    definition:
-      script: "pipeline {}"
-`)
 	vars := []CatalogVarDecl{{Name: "weird", Type: "enum"}}
-	valid, msg := ValidateCatalogItem("pipeline-template", content, vars)
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), vars, "")
 	if valid {
 		t.Error("expected invalid for unknown variable type")
 	}
 	if !strings.Contains(msg, "weird") || !strings.Contains(msg, "enum") {
 		t.Errorf("expected message to identify the variable and unknown type, got: %s", msg)
+	}
+}
+
+func TestValidateCatalogItem_PipelineTemplate_VersionMismatchWarns(t *testing.T) {
+	// The catalog-item-resolution delta's "A version mismatch warns" scenario:
+	// the document's spec.version (1.0.0 here) wins, and both values are named.
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), nil, "2.0.0")
+	if !valid {
+		t.Errorf("expected a version mismatch to warn, not invalidate, got message: %s", msg)
+	}
+	if !strings.Contains(msg, "2.0.0") || !strings.Contains(msg, "1.0.0") {
+		t.Errorf("expected the warning to name both versions, got: %s", msg)
+	}
+}
+
+func TestValidateCatalogItem_PipelineTemplate_MatchingIndexVersionWarnsNothing(t *testing.T) {
+	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), nil, "1.0.0")
+	if !valid {
+		t.Errorf("expected valid, got message: %s", msg)
+	}
+	if msg != "" {
+		t.Errorf("expected no warning when the index version matches the document, got: %s", msg)
 	}
 }
 
@@ -501,5 +517,40 @@ func TestIsVarroaVar(t *testing.T) {
 				t.Errorf("isVarroaVar(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateContent_LatestVariantsWarn(t *testing.T) {
+	for _, v := range []string{"LATEST", " latest "} {
+		pluginsYAML := "plugins:\n- artifactId: git\n  version: \"" + v + "\"\n"
+		result := ValidateContent("jenkins:\n  systemMessage: hi", pluginsYAML, "", "", nil)
+		if !result.Valid {
+			t.Errorf("version %q: expected valid (warning only), got errors: %v", v, result.Errors)
+		}
+		warned := false
+		for _, w := range result.Warnings {
+			if strings.Contains(w, "non-deterministic") {
+				warned = true
+			}
+		}
+		if !warned {
+			t.Errorf("version %q: expected a non-deterministic warning, got %v", v, result.Warnings)
+		}
+	}
+}
+
+func TestValidateContent_BlankVersionIsError(t *testing.T) {
+	result := ValidateContent("jenkins:\n  systemMessage: hi", "plugins:\n- artifactId: git\n  version: \"  \"\n", "", "", nil)
+	if result.Valid {
+		t.Fatal("a whitespace-only version must not validate")
+	}
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "version is required") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a version-required error, got %v", result.Errors)
 	}
 }

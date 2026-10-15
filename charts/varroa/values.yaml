@@ -3,7 +3,11 @@
 # =============================================================================
 
 global:
-  imagePullSecrets: []
+  image:
+    # -- Names of the image pull Secrets for every pod of the release. Each
+    # Secret must exist in the release namespace. The NATS subchart reads
+    # this same key, so the NATS and nats-box pods get the same list.
+    pullSecretNames: []
   # -- Ingress hostname suffix for all services (e.g. example.com → dex.example.com)
   domain: ""
 
@@ -43,6 +47,69 @@ bus:
 # ---------------------------------------------------------------------------
 cluster:
   name: core
+
+# ---------------------------------------------------------------------------
+# Cells — multi-tenant Jenkins controllers that host more than one team.
+# ---------------------------------------------------------------------------
+# Each value below is the default of a CellPool the operator creates. It
+# configures no live pool. To change a live pool, edit the CellPool object
+# with kubectl, with varroactl scale, or through the dashboard. A Helm
+# upgrade never rewrites the spec of a pool that already exists.
+cells:
+  # Cells the operator keeps ready for placement, so a new Team does not
+  # wait on a StatefulSet to boot.
+  warmPool:
+    # -- Create a CellPool for each profile a pipelines Team requests. Off by
+    # default: no pool and no cell exist until an operator turns this on or
+    # applies a CellPool by hand.
+    enabled: false
+    # -- Seeds CellPool.spec.warm: the number of ready, empty cells a new
+    # pool keeps. Must be a whole number from 1 to 2147483647: the operator
+    # floors a lower value at one so placement keeps the last free cell.
+    # cells-guard.yaml fails the render first.
+    perProfile: 1
+  # -- Seeds CellPool.spec.maxTenantsPerCell: the capacity a pool cell uses
+  # when its own spec.cell.maxTenants is zero. It is also the fallback for a
+  # cell that belongs to no pool. Must be a whole number from 1 to
+  # 2147483647: the CellPool CRD refuses a lower value, and cells-guard.yaml
+  # fails the render first.
+  maxTenantsPerCell: 10
+  # -- Seeds CellPool.spec.unreadyGracePeriod: how long a pool cell may stay
+  # unready before the operator rolls its pod. It is also the fallback for a
+  # cell that belongs to no pool. Go duration string.
+  unreadyGracePeriod: 5m
+  # -- Seeds CellPool.spec.cellTemplate: the shape of each cell a new pool
+  # creates. resources and podOverrides go to the Jenkins container and the
+  # pod; miteResources goes to the mite sidecar. The default gives each cell
+  # a fair CPU share with no CPU limit, a bounded memory, a heap of half the
+  # memory limit, and a preferred spread across nodes. A pool that exists
+  # keeps its own template: edit the CellPool to change it. Set this value to
+  # null to create pools with no template.
+  cellTemplate:
+    resources:
+      requests:
+        cpu: "1"
+        memory: 3Gi
+      limits:
+        memory: 6Gi
+    miteResources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    podOverrides:
+      jvmOpts: "-XX:MaxRAMPercentage=50"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: varroa.dev/cell-pool
+                      operator: Exists
 
 # ---------------------------------------------------------------------------
 # Telemetry — OpenTelemetry observability pipeline
@@ -93,6 +160,14 @@ telemetry:
         enabled: true
       logs:
         enabled: true
+    recorder:
+      traces:
+        enabled: true
+        samplerRatio: 1.0
+      metrics:
+        enabled: true
+      logs:
+        enabled: true
     mite:
       traces:
         enabled: false
@@ -126,13 +201,15 @@ networkPolicy:
     kubernetes.io/metadata.name: ingress-nginx
   # Namespace selector for tenant/controller namespaces allowed to reach the
   # gateway (mite gRPC :9090 + apikey verify :9092). {} = all namespaces.
+  # With a local issuer (auth.bffUrl set, and auth.mode local or ldap or
+  # auth.localAccounts), controller pods here also reach the BFF for its JWKS.
   tenantNamespaceSelector: {}
   # kube-apiserver egress for operator/gateway/bff/dex.
   # Empty cidrs = 0.0.0.0/0 on the listed ports; pin to your apiserver endpoint IPs.
   apiServerEgress:
     cidrs: []
     ports: [443, 6443]
-  # Dex connector egress (GitHub/OIDC :443; add 636 for LDAP).
+  # Dex connector egress (GitHub/Gitea/OIDC :443; add 636 for LDAP).
   dexConnectorEgress:
     enabled: true
     ports: [443]
@@ -188,6 +265,41 @@ networkPolicy:
   # still work). This is the chart's scrape path for an externally-managed
   # Prometheus — the chart ships no monitoring stack.
   metricsIngress: []
+  # Record-store Postgres egress (recorder/bff/gateway reach the database).
+  # An empty cidrs list selects the in-cluster CNPG pods in cnpg mode. Pin
+  # cidrs to the database endpoint when recordStore.postgres.mode=external.
+  recordStorePostgresEgress:
+    enabled: true
+    cidrs: []
+    ports: [5432]
+  # The namespace that runs the CloudNativePG operator. Its pods reach the
+  # record-store Postgres instance manager on port 8000 in cnpg mode.
+  recordStoreCNPGOperatorNamespaceSelector:
+    kubernetes.io/metadata.name: cnpg-system
+  # Record-store blob egress (recorder/bff/gateway reach S3-compatible blob
+  # storage). Renders nothing when recordStore.blobs.mode is postgres. Pin
+  # cidrs to your storage provider's address range.
+  recordStoreBlobEgress:
+    enabled: true
+    cidrs: ["0.0.0.0/0"]
+    ports: [443]
+  # Completion webhook egress: the recorder posts a tenant's signed run
+  # payload to the receiver URL. Off by default. Enable it when a tenant
+  # declares spec.pipelines.notifications.webhook. Empty cidrs open
+  # 0.0.0.0/0. Pin cidrs to the receiver's address range.
+  recorderWebhookEgress:
+    enabled: false
+    cidrs: []
+    ports: [443]
+  # Per-cell NetworkPolicy, one per Controller with spec.cell.enabled.
+  # Opt-in: honoured only when networkPolicy.enabled is also true.
+  cellIsolation:
+    # -- Enable the per-cell NetworkPolicy.
+    enabled: false
+    # -- Raw NetworkPolicyIngressRule entries, appended to the cell policy.
+    extraIngress: []
+    # -- Raw NetworkPolicyEgressRule entries, appended to the cell policy.
+    extraEgress: []
 
 # ---------------------------------------------------------------------------
 # Dex — OIDC federation broker (optional).
@@ -240,9 +352,9 @@ dex:
     staticClients: []
     connectors: []
     # ── Connector Configuration ──────────────────────────────────────────
-    # Each connector needs a "claims" mapping so Dex copies upstream group
-    # data into its own ID token. Without this, groups=[] and Jenkins RBAC
-    # group-based permissions will not apply.
+    # Dex copies the upstream groups into its ID token when the client
+    # requests the "groups" scope. The BFF requests it by default. The OIDC
+    # connector also needs insecureEnableGroups: true to forward groups.
     #
     # Example — GitHub (OAuth):
     # connectors:
@@ -255,8 +367,22 @@ dex:
     #       orgs:
     #         - name: your-github-org
     #       loadAllGroups: true
-    #       claims:
-    #         groups: ["groups"]
+    #
+    # Example — Forgejo or Gitea (gitea connector):
+    # Groups arrive as "<org>" and "<org>:<team>", for example "acme:Owners".
+    # A user on no team of an org gets no group for that org.
+    # useLoginAsID makes the forge login the identity.
+    # connectors:
+    #   - type: gitea
+    #     id: forgejo
+    #     name: Forgejo
+    #     config:
+    #       baseURL: https://forge.example.com
+    #       clientID: <forge-oauth-client-id>
+    #       clientSecret: <forge-oauth-client-secret>
+    #       redirectURI: https://dex.example.com/callback
+    #       loadAllGroups: true
+    #       useLoginAsID: true
     #
     # Example — Generic OIDC (Okta, Keycloak, Azure AD, etc.):
     # connectors:
@@ -267,8 +393,7 @@ dex:
     #       issuer: https://idp.example.com
     #       clientID: <oidc-client-id>
     #       clientSecret: <oidc-client-secret>
-    #       claims:
-    #         groups: ["groups"]
+    #       insecureEnableGroups: true
     #
     # Example — LDAP:
     # connectors:
@@ -291,8 +416,6 @@ dex:
     #         userAttr: DN
     #         groupAttr: member
     #         nameAttr: cn
-    #       claims:
-    #         groups: ["groups"]
 
 # ---------------------------------------------------------------------------
 # Authentication — global auth mode shared by the operator and BFF.
@@ -310,8 +433,13 @@ dex:
 auth:
   # -- Auth mode: "oidc", "ldap", or "local".
   mode: oidc
-  # -- BFF URL, required when mode=local (the issuer URL for local JWT validation).
+  # -- BFF URL, required when mode=local, mode=ldap, or localAccounts.enabled
+  # (the issuer URL for local JWT validation).
   bffUrl: ""
+  # -- Declared local accounts beside OIDC. Needs mode=oidc and bffUrl.
+  # Each local account is a User with spec.purpose "service" or "break-glass".
+  localAccounts:
+    enabled: false
   # -- Cookie domain for the varroa_token cookie (e.g. .example.com).
   # Required for shared auth across subdomains (dashboard → Jenkins controllers).
   # Replaces the deprecated bff.oidcCookieDomain field.
@@ -338,9 +466,12 @@ auth:
     redirectUrl: ""
     # -- Comma-separated OIDC scopes. Default: openid,profile,email,groups.
     scopes: ""
-    # -- Comma-separated JWT claims for kind:User bindings. Default: preferred_username,sub.
+    # -- Comma-separated top-level JWT claims for kind:User bindings. Each claim is a string.
+    # Keep preferred_username or sub in the list. Default: preferred_username,sub.
     userClaim: ""
-    # -- Comma-separated JWT claims for kind:Group bindings. Default: groups.
+    # -- Comma-separated top-level JWT claims for kind:Group bindings. Each claim is an
+    # array of strings or one string; a string is not split. Nested claims are not read.
+    # Default: groups.
     groupClaim: ""
     # -- OIDC shared state signing secret (32+ bytes, base64). Auto-generated on
     # first install; preserved across upgrades via Helm lookup. Must be identical
@@ -509,19 +640,6 @@ bff:
     readOnlyRootFilesystem: true
 
 # ---------------------------------------------------------------------------
-# Activity feed persistence — JetStream-backed, retention dial
-# ---------------------------------------------------------------------------
-activity:
-  # retention controls how long activity events are kept.
-  # Valid values: off | 7d | 30d | 90d  (default 7d)
-  # "off" = ephemeral in-memory (current behavior, no persistence).
-  retention: "7d"
-  # maxMsgs is the hard cap on the number of stored messages (DiscardOld).
-  maxMsgs: 100000
-  # maxBytes is the hard cap on storage bytes (1 GiB). DiscardOld when hit.
-  maxBytes: 1073741824
-
-# ---------------------------------------------------------------------------
 # JetStream replica count for every stream (activity, webhook replay, imperative
 # command) and KV bucket (snapshots, presence, desired state, clusters, consumed
 # tokens) that Varroa creates. Rendered into the operator/BFF/gateway as
@@ -545,7 +663,7 @@ activity:
 # can no longer drift silently.
 #
 # NOTE ON UPGRADES: EnsureStream falls back to UpdateStream, so existing durable
-# streams scale R1->R3 in place on the next reconcile (NATS 2.11). Existing KV
+# streams scale R1->R3 in place on the next reconcile. Existing KV
 # buckets do NOT update their replica count in place — CreateKeyValue only sets
 # replicas on first creation. To adopt R3 for a pre-existing soft-state bucket,
 # delete and recreate it; the soft state repopulates within ~30-90s (acceptable).
@@ -562,14 +680,10 @@ jetStreamReplicas: null  # null = derive from nats.config.cluster.{enabled,repli
 # ---------------------------------------------------------------------------
 nats:
   enabled: true
-  image:
-    repository: nats
-    tag: 2.11-alpine
-    pullPolicy: IfNotPresent
-  service:
-    type: ClusterIP
-    port: 4222
-    monitorPort: 8222
+  # The NATS subchart reads the server image, the JetStream volume
+  # (config.jetstream.fileStore.pvc.size/storageClassName), and the Service
+  # from its own keys. The retired keys nats.image, nats.persistence, and
+  # nats.service.port/monitorPort/type fail the render (mode-guard.yaml).
   # NOTE: top-level nats.resources is ineffective for the NATS subchart.
   # Resources are set via nats.container.merge.resources below.
   config:
@@ -587,6 +701,15 @@ nats:
       fileStore:
         enabled: true
         dir: /data
+      # Encryption at rest. The server encrypts each stream, consumer, and
+      # raft log with this key. On the first start with a key, the server
+      # converts a plain-text store in place. The key comes from the
+      # JS_KEY env var below. The << >> form renders $JS_KEY unquoted, so
+      # NATS reads it as a variable. Do not add prev_encryption_key: a
+      # restart with it loses every durable consumer.
+      merge:
+        cipher: chachapoly
+        key: << $JS_KEY >>
     nats:
       port: 4222
       tls:
@@ -617,6 +740,19 @@ nats:
         secret:
           secretName: varroa-nats-auth-config
   container:
+    # The NATS server version. A change is a server upgrade: test it live
+    # against the existing JetStream store first.
+    image:
+      repository: nats
+      tag: 2.14.7-alpine
+    # The JetStream encryption key. Only the NATS container reads it. The
+    # varroa chart mints the Secret (see encryption.createSecret).
+    env:
+      JS_KEY:
+        valueFrom:
+          secretKeyRef:
+            name: varroa-nats-js-key
+            key: key
     merge:
       resources:
         requests:
@@ -631,10 +767,15 @@ nats:
         name: nats-auth-config
         mountPath: /etc/nats-auth
         readOnly: true
-  persistence:
-    enabled: true
-    size: 10Gi
-    storageClass: ""
+  # The JetStream encryption key Secret (varroa-nats-js-key). The key
+  # must stay the same for the life of the NATS volumes: a lost or changed
+  # key loses all JetStream state.
+  encryption:
+    # -- Mint the key Secret once and keep it across upgrades. A renderer
+    # that cannot read the cluster (helm template, ArgoCD, Flux) mints a new
+    # key on each sync. Set false for such a renderer and create the Secret
+    # yourself, with the key in data key "key".
+    createSecret: true
   # External NATS exposure — opt-in, full-mode only.
   external:
     enabled: false
@@ -758,6 +899,10 @@ updateCenter:
     # which is the right call when egress cannot reach it — aged pins then report as gaps
     # instead of stalling on a blocked lookup.
     archiveURL: "https://repo.jenkins-ci.org/releases"
+    # -- Fetch every declared plugin that pull-through can serve, before any
+    # controller requests it. The operator fetches at most 20 plugins each 30 s pass.
+    # Requires pullThrough.enabled.
+    prefetch: false
   # -- Seed plugin references imported on first reconciliation.
   seed:
     # -- List of OCI refs to seed (e.g. ["registry.example.org/plugins/pack:v1"]).
@@ -782,6 +927,161 @@ updateCenter:
   resources: {}
   # -- Node selector for the update center pod.
   nodeSelector: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  # -- Extra environment variables (list of {name, value}).
+  env: []
+  # -- Extra volume mounts (list of corev1.VolumeMount).
+  extraVolumeMounts: []
+  # -- Extra volumes (list of corev1.Volume).
+  extraVolumes: []
+
+# ---------------------------------------------------------------------------
+# Build-record store — durable build/run records for Jenkins cells.
+# Off by default. The recorder component and its Postgres/blob storage
+# render only when recordStore.enabled is true.
+# ---------------------------------------------------------------------------
+recordStore:
+  # -- Enable the build-record store: the recorder component, its Postgres
+  # database, and the DSN/blob wiring on the recorder, BFF, and gateway.
+  enabled: false
+  postgres:
+    # -- Postgres provisioning mode: "cnpg" (chart-managed CloudNativePG
+    # Cluster) or "external" (bring your own Postgres, via existingSecret).
+    mode: cnpg
+    # -- Used when postgres.mode is "external".
+    external:
+      # -- Name of an existing Secret holding the connection string.
+      existingSecret: ""
+      # -- Key in existingSecret holding the DSN.
+      dsnKey: dsn
+    # -- Core only, cnpg mode: a Service that exposes the record-store
+    # primary to member clusters. A member gateway needs it only in
+    # postgres blob mode. A hive release ignores this block.
+    memberEndpoint:
+      enabled: false
+      # -- LoadBalancer or NodePort.
+      serviceType: LoadBalancer
+      # -- Fixed nodePort when serviceType is NodePort (0 = auto).
+      nodePort: 0
+      # -- REQUIRED when enabled: the address members dial. It replaces
+      # the host in the DSN a member receives.
+      host: ""
+      annotations: {}
+      # -- With networkPolicy.enabled, REQUIRED: the source CIDRs the
+      # database admits on 5432. A NodePort or load-balancer path can
+      # rewrite the source address; set 0.0.0.0/0 to admit every source.
+      allowedCIDRs: []
+    # -- Used when postgres.mode is "cnpg". Requires the CloudNativePG
+    # operator to be installed in the cluster; this chart does not install it.
+    cnpg:
+      # -- Number of Postgres instances (1 = no replica).
+      instances: 1
+      storage:
+        # -- Persistent volume size for each instance.
+        size: 20Gi
+        # -- Storage class name (empty = cluster default).
+        storageClassName: ""
+  blobs:
+    # -- Blob storage mode: "postgres" (store blobs in the same database,
+    # no extra egress) or "s3" (an S3-compatible object store).
+    mode: postgres
+    # -- Used when blobs.mode is "s3".
+    s3:
+      # -- Full blob store URL, including bucket and query parameters
+      # (e.g. region, endpoint) the s3blob opener needs.
+      url: ""
+      # -- Name of an existing Secret with access-key-id/secret-access-key
+      # and an optional session-token. Empty means ambient credentials
+      # (IRSA, Workload Identity).
+      existingSecret: ""
+      # -- Base name of the static artifact credential Secret. The
+      # operator reads "<artifactSecret>-<controller>" in the release
+      # namespace first, then "<artifactSecret>-<pool>" for a cell of a
+      # pool. Each Secret holds access-key-id and secret-access-key, scoped
+      # to that cell's or that pool's artifact prefix. Jenkins ignores a
+      # session-token key in this Secret. Empty means Varroa keeps build
+      # artifacts on the cell's local disk, unless artifactSTS is enabled.
+      # Exclusive with artifactSTS.enabled.
+      artifactSecret: ""
+      # -- Operator-issued artifact credentials. The operator calls STS
+      # AssumeRole for each cell with a session policy that limits the
+      # credential to the cell's own prefix, and renews it in place.
+      # Exclusive with artifactSecret.
+      artifactSTS:
+        # -- Enable STS mode.
+        enabled: false
+        # -- Name of a Secret in the release namespace with
+        # access-key-id and secret-access-key of the issuing identity.
+        # Never the recorder's existingSecret.
+        issuerSecret: ""
+        # -- The role the issuing identity assumes. Required. MinIO
+        # accepts any ARN-shaped value, for example
+        # arn:minio:iam:::role/varroa-artifacts. Ceph RGW needs a real role.
+        roleArn: ""
+        # -- STS endpoint URL. Empty uses the endpoint of blobs.s3.url, or
+        # the AWS regional endpoint when the URL names no endpoint.
+        endpoint: ""
+        # -- Lifetime of each credential, in whole minutes or hours (for
+        # example 90m or 2h), from 15m to 12h. The operator
+        # renews it when half of the lifetime has passed. On AWS, raise
+        # the role's MaxSessionDuration to match a value above 1h.
+        duration: 1h
+  # -- Retention windows, each a whole day count with a "d" suffix
+  # (e.g. "365d"), from 1d to 3650d.
+  retention:
+    # -- How long a completed run's record is kept.
+    runs: 365d
+    # -- How long a run's stored log chunks are kept.
+    logs: 90d
+    # -- How long a run's stored artifacts are kept.
+    artifacts: 30d
+    # -- How long an activity event is kept.
+    activity: 30d
+    # -- How long a run's restart copy is kept. It cannot be longer than runs.
+    restartSource: 7d
+  # -- Cell-loss detection. The operator confirms a lost cell with its own
+  # pod read; these settings control what the recorder then does.
+  cellLoss:
+    # -- How long a pod-read confirmation waits before the recorder counts
+    # the cell instance gone. A Go duration string. The operator can clear
+    # its stored cell instance on the same tick a replacement pod appears,
+    # and a zero grace would then interrupt a run the new pod is about to
+    # adopt. An empty, unparsable, or non-positive value falls back to 30s.
+    confirmedGoneGrace: 30s
+
+# ---------------------------------------------------------------------------
+# Varroa Recorder — the only writer of the build-record store.
+# Deployed only when recordStore.enabled is true.
+# ---------------------------------------------------------------------------
+recorder:
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # -- Node selector for the recorder pod.
+  nodeSelector: {}
+  # -- Tolerations for the recorder pod.
+  tolerations: []
+  # -- Affinity rules for the recorder pod.
+  affinity: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000

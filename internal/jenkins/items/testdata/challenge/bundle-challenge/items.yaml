@@ -52,11 +52,6 @@ items:
           name: freestyle-params-triggers
           displayName: FreeStyle Parameters and Triggers
           description: FreeStyle job with build parameters and SCM trigger
-          triggers:
-            - pollSCM:
-                scmpoll_spec: H/5 * * * *
-            - cron:
-                spec: 0 2 * * *
           parameters:
             - string:
                 name: BRANCH
@@ -73,6 +68,41 @@ items:
             - booleanParam:
                 name: DRY_RUN
                 description: Dry run only
+          triggers:
+            - pollSCM:
+                scmpoll_spec: H/5 * * * *
+            - cron:
+                spec: 0 2 * * *
+    - kind: folder
+      name: challenge-freestyle-varroa-upstream-trigger
+      items:
+        - kind: freeStyle
+          name: freestyle-varroa-upstream-trigger
+          displayName: FreeStyle Cross-Tenant Upstream Trigger
+          description: FreeStyle job that subscribes to another tenant's job
+          triggers:
+            - varroaUpstream:
+                tenant: alpha
+                job: release
+                result: SUCCESS
+    - kind: folder
+      name: challenge-trigger-generic
+      items:
+        - kind: freeStyle
+          name: trigger-generic
+          displayName: FreeStyle Generic Webhook Trigger
+          description: FreeStyle job that a generic webhook call starts
+          triggers:
+            - genericTrigger:
+                token: payments:gl
+                regexpFilterText: $ref
+                regexpFilterExpression: ^refs/heads/main$
+                genericVariables:
+                    - key: ref
+                      value: $.ref
+                    - key: sha
+                      value: $.after
+                      defaultValue: none
     - kind: folder
       name: challenge-pipeline-scm-flow
       items:
@@ -143,6 +173,51 @@ items:
           resumeBlocked: true
           quietPeriod: 5
     - kind: folder
+      name: challenge-pipeline-varroa-template
+      items:
+        - kind: pipeline
+          name: pipeline-varroa-template
+          displayName: Pipeline From Template
+          description: Pipeline job bound to a catalog-delivered template
+          definition:
+            varroaTemplate:
+                template: golang-service
+                templateVersion: 2.1.0
+                values:
+                    goVersion: "1.22"
+                    replicas: 3
+                    runTests: true
+    - kind: folder
+      name: challenge-pipeline-triggers
+      items:
+        - kind: pipeline
+          name: pipeline-triggers
+          displayName: Pipeline with Triggers
+          description: Pipeline job with a cron, a cross-tenant upstream, and an SCM poll trigger
+          properties:
+            - pipelineTriggers:
+                triggers:
+                    - pollSCM:
+                        scmpoll_spec: H/15 * * * *
+          triggers:
+            - cron:
+                spec: H 2 * * *
+            - varroaUpstream:
+                tenant: alpha
+                job: release
+          definition:
+            script: |
+                pipeline {
+                  agent any
+                  stages {
+                    stage('Build') {
+                      steps {
+                        echo 'build'
+                      }
+                    }
+                  }
+                }
+    - kind: folder
       name: challenge-multibranch-git-source
       items:
         - kind: multibranch
@@ -195,6 +270,45 @@ items:
             multiBranchProjectFactory:
                 scriptPath: Jenkinsfile
     - kind: folder
+      name: challenge-multibranch-varroa-marker
+      items:
+        - kind: multibranch
+          name: multibranch-varroa-marker
+          displayName: Multibranch Marker Factory
+          description: Multibranch pipeline whose branches resolve a template through the marker file
+          sourcesList:
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/multibranch-marker.git
+                        credentialsId: git-cred
+          projectFactory:
+            varroaMarkerProjectFactory: {}
+    - kind: folder
+      name: challenge-multibranch-gitea-source
+      items:
+        - kind: multibranch
+          name: multibranch-gitea-source
+          displayName: Multibranch Gitea Source
+          description: Multibranch pipeline with a Gitea source
+          sourcesList:
+            - branchSource:
+                source:
+                    gitea:
+                        serverUrl: https://git.fake-forge.example
+                        repoOwner: fake-org
+                        repository: fake-repo
+                        credentialsId: gitea-cred
+                        traits:
+                            - giteaBranchDiscovery:
+                                strategyId: 3
+                            - giteaForkDiscovery:
+                                strategyId: 1
+                                trust: nobody
+          projectFactory:
+            workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
       name: challenge-orgfolder-github-navigator
       items:
         - kind: organizationFolder
@@ -209,6 +323,21 @@ items:
             - multiBranchProjectFactory:
                 scriptPath: Jenkinsfile
     - kind: folder
+      name: challenge-orgfolder-gitea-navigator
+      items:
+        - kind: organizationFolder
+          name: orgfolder-gitea-navigator
+          displayName: Gitea Org Folder
+          description: Organization folder with Gitea SCM navigator
+          navigators:
+            - giteaNavigator:
+                serverUrl: https://git.fake-forge.example
+                repoOwner: fake-org
+                credentialsId: gitea-cred
+          projectFactories:
+            - multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
       name: challenge-orgfolder-git-navigator
       items:
         - kind: organizationFolder
@@ -219,6 +348,20 @@ items:
             - gitNavigator:
                 remote: https://github.com/fake-org
                 credentialsId: git-cred
+          projectFactories:
+            - multiBranchProjectFactory:
+                scriptPath: Jenkinsfile
+    - kind: folder
+      name: challenge-orgfolder-buildstrategies
+      items:
+        - kind: organizationFolder
+          name: orgfolder-buildstrategies
+          displayName: Org Folder Build Strategies
+          description: Organization folder asserting the unconditional skip-initial-build strategy
+          navigators:
+            - githubNavigator:
+                repoOwner: fake-org
+                credentialsId: github-cred
           projectFactories:
             - multiBranchProjectFactory:
                 scriptPath: Jenkinsfile
@@ -288,6 +431,118 @@ items:
                     - charlie
               roles:
                 - name: viewer
+    - kind: folder
+      name: challenge-folder-kubernetes-clouds
+      items:
+        - kind: folder
+          name: folder-kubernetes-clouds
+          displayName: Folder with Permitted Kubernetes Clouds
+          description: Folder restricted to one kubernetes cloud
+          properties:
+            - kubernetes:
+                permittedClouds:
+                    - team-a
+    - kind: folder
+      name: challenge-credential-type-sshprivatekey
+      items:
+        - kind: folder
+          name: credential-type-sshprivatekey
+          displayName: Folder with an SSH Credential
+          description: Folder with a basicSSHUserPrivateKey credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - basicSSHUserPrivateKey:
+                            id: deploy-key
+                            scope: GLOBAL
+                            description: GitHub deploy key
+                            username: git
+                            passphrase: fixture-passphrase
+                            privateKeySource:
+                                directEntry:
+                                    privateKey: |
+                                        -----BEGIN FIXTURE KEY-----
+                                        RklYVFVSRS1PTkxZLU5PVC1BLVJFQUwtS0VZ
+                                        -----END FIXTURE KEY-----
+    - kind: folder
+      name: challenge-credential-type-file
+      items:
+        - kind: folder
+          name: credential-type-file
+          displayName: Folder with a file credential
+          description: Folder with a file credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - file:
+                            id: kubeconfig
+                            scope: GLOBAL
+                            description: Cluster kubeconfig
+                            fileName: kubeconfig
+                            secretBytes: RklYVFVSRS1GSUxF
+    - kind: folder
+      name: challenge-credential-type-certificate
+      items:
+        - kind: folder
+          name: credential-type-certificate
+          displayName: Folder with a certificate credential
+          description: Folder with a certificate credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - certificate:
+                            id: signing-cert
+                            scope: GLOBAL
+                            description: Signing certificate
+                            password: fixture-password
+                            keyStoreSource:
+                                uploaded:
+                                    uploadedKeystore: MIIBAv8=
+    - kind: folder
+      name: challenge-credential-type-githubapp
+      items:
+        - kind: folder
+          name: credential-type-githubapp
+          displayName: Folder with a GitHub App credential
+          description: Folder with a GitHub App credential
+          properties:
+            - folderCredentialsProperty:
+                folderCredentials:
+                    - credentials:
+                        - gitHubApp:
+                            id: github-app
+                            scope: GLOBAL
+                            description: GitHub App for checks
+                            appID: "123456"
+                            privateKey: |
+                                -----BEGIN PRIVATE KEY-----
+                                FAKEFIXTUREKEYNOTREAL0000000000000000000000000000000000
+                                -----END PRIVATE KEY-----
+                            owner: example-org
+                            apiUri: https://api.github.example.com
+    - kind: folder
+      name: challenge-folder-libraries-git-source
+      items:
+        - kind: folder
+          name: apps
+          displayName: Apps
+          description: Folder with a private git shared library
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        allowVersionOverride: true
+                        retriever:
+                            modernSCM:
+                                scm:
+                                    git:
+                                        remote: https://gitlab.example.com/platform/jenkins-lib.git
+                                        credentialsId: gitlab-lib
+                        name: platform-lib
+                        defaultVersion: v1.0.0
     - kind: folder
       name: challenge-deep-nested-folders
       items:
@@ -449,3 +704,50 @@ items:
                             scope: GLOBAL
                             description: API token
                             secret: super-secret-token
+    - kind: folder
+      name: challenge-folder-libraries
+      items:
+        - kind: folder
+          name: folder-libraries
+          displayName: Folder with Libraries
+          description: Folder with folderLibraries property and a modern-SCM GitHub retriever
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        allowVersionOverride: true
+                        retriever:
+                            modernSCM:
+                                scm:
+                                    github:
+                                        repoOwner: fake-org
+                                        repository: shared-library
+                                        credentialsId: github-lib
+                                        traits:
+                                            - gitHubBranchDiscovery:
+                                                strategyId: 3
+                        name: my-shared-lib
+    - kind: folder
+      name: challenge-library-retriever-legacy
+      items:
+        - kind: folder
+          name: library-retriever-legacy
+          displayName: Folder with Legacy Library Retriever
+          description: Folder with a folderLibraries entry that uses the legacy SCM retriever over git
+          properties:
+            - folderLibraries:
+                libraries:
+                    - libraryConfiguration:
+                        retriever:
+                            legacySCM:
+                                scm:
+                                    gitSCM:
+                                        userRemoteConfigs:
+                                            - userRemoteConfig:
+                                                url: https://git.example.com/platform/legacy-lib.git
+                                                credentialsId: git-lib
+                                        branches:
+                                            - branchSpec:
+                                                name: main
+                        name: legacy-lib
+                        defaultVersion: main

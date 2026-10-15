@@ -2,6 +2,10 @@
 # Render-assertion test for scoped Secret RBAC (#230 / change scope-operator-bff-secret-rbac).
 # Verifies the internet-facing BFF never holds cluster-wide Secret write, and that
 # managedNamespaces switches the operator + BFF from cluster-wide to per-namespace Roles.
+#
+# It also guards the BFF's cluster-wide ConfigMap posture in scoped mode.
+# test-bff-configmap-rbac.sh covers the default mode only, and this script
+# already renders the scoped mode.
 set -euo pipefail
 
 CHART_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,6 +41,15 @@ if echo "$scoped_render" | yq eval-all '
   select(.kind=="ClusterRole") | .rules[] | select(.resources[]=="secrets")' - \
   | grep -q .; then
   fail "scoped: no ClusterRole may grant secrets when managedNamespaces is set"
+fi
+# The BFF ClusterRole may carry no configmaps rule in scoped mode either. Its
+# only ConfigMap reads are the release-namespace Role and the name-scoped grant
+# the operator materializes per composed bundle.
+if echo "$scoped_render" | yq eval-all '
+  select(.kind=="ClusterRole" and (.metadata.name|test("bff")))
+  | .rules[] | select(.resources[]=="configmaps")' - \
+  | grep -q .; then
+  fail "scoped: the BFF ClusterRole must NOT grant cluster-wide configmap access"
 fi
 # Operator Secret Role must exist in each managed namespace + release namespace.
 for ns in default team-a team-b; do

@@ -19,10 +19,7 @@ spec:
         app.kubernetes.io/component: frontend
         {{- include "varroa.selectorLabels" . | nindent 8 }}
     spec:
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "frontend") }}
       automountServiceAccountToken: false
       {{- with .Values.frontend.podSecurityContext }}

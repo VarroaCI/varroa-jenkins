@@ -80,7 +80,9 @@ describe("MoreSheet", () => {
     expect(screen.getByText("Manage")).toBeInTheDocument();
     expect(screen.getByText("Account")).toBeInTheDocument();
 
-    // Operate items
+    // Operate items — Pipelines, Cells, then Plugins, sidebar order
+    expect(screen.getByRole("link", { name: "Pipelines" })).toHaveAttribute("href", "/pipelines");
+    expect(screen.getByRole("link", { name: "Cells" })).toHaveAttribute("href", "/cells");
     expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("href", "/plugins");
 
     // Brood items
@@ -127,12 +129,96 @@ describe("MoreSheet", () => {
     expect(screen.queryByText("Manage")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Catalog" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Admin & access" })).not.toBeInTheDocument();
-    // Operate group also hidden when controllers:read not held
+    // Operate group also hidden when neither controllers:read nor the pipelines gate is held
     expect(screen.queryByText("Operate")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Pipelines" })).not.toBeInTheDocument();
     // Brood and Account still there
     expect(screen.getByText("Brood")).toBeInTheDocument();
     expect(screen.getByText("Account")).toBeInTheDocument();
+  });
+
+  describe("pipelines gate", () => {
+    function mockPermissions(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
+      vi.mocked(usePermissions).mockReturnValue({
+        data,
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+        status: "success" as const,
+        isPending: false,
+        dataUpdatedAt: 0,
+        errorUpdatedAt: 0,
+        failureCount: 0,
+        failureReason: null,
+        errorUpdateCount: 0,
+        isFetched: true,
+        isFetchedAfterMount: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPaused: false,
+        isRefetching: false,
+        isStale: false,
+        isInitialLoading: false,
+        isLoadingError: false,
+        isRefetchError: false,
+        fetchStatus: "idle" as const,
+        promise: Promise.resolve(undefined),
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof usePermissions>);
+    }
+
+    // The gate reads grants only, never the pipelines API's own state, so an
+    // admitted caller sees the row whether that API answers 200 or 503.
+    it("lists Pipelines under Operate for a caller the gate admits, with no Plugins grant held", () => {
+      mockPermissions({
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      renderMoreSheet("/");
+      expect(screen.getByText("Operate")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Pipelines" })).toHaveAttribute("href", "/pipelines");
+      expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+    });
+
+    it("omits Pipelines for a caller the gate refuses, even with Plugins visible", () => {
+      mockPermissions({ global: { controllers: { read: true } }, scopes: [], tenants: [] });
+      renderMoreSheet("/");
+      expect(screen.getByRole("link", { name: "Plugins" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Pipelines" })).not.toBeInTheDocument();
+    });
+
+    // The Operate group visibility is the union of its rows gates, so a
+    // caller who holds the cell-pool grant alone still opens the group.
+    it("renders the Operate group for a cell-pool caller alone", () => {
+      mockPermissions({ global: { cellpools: { read: true } }, scopes: [], tenants: [] });
+      renderMoreSheet("/");
+      expect(screen.getByText("Operate")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Cells" })).toHaveAttribute("href", "/cells");
+      expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Pipelines" })).not.toBeInTheDocument();
+    });
+
+    it("omits the Cells row for a namespace-scoped grant", () => {
+      mockPermissions({
+        global: { controllers: { read: true } },
+        scopes: [{ namespaces: ["ns-a"], capabilities: { cellpools: { read: true } } }],
+        tenants: [],
+      });
+      renderMoreSheet("/");
+      expect(screen.queryByRole("link", { name: "Cells" })).not.toBeInTheDocument();
+    });
+
+    it("keeps five tab-bar entries and makes Cells no tab", () => {
+      mockPermissions({ global: { "*": { "*": true } }, scopes: [], tenants: [] });
+      renderMoreSheet("/");
+      // The sheet carries the overflow; the bar itself is a sibling
+      // component, so the sheet must not present Cells as a tab.
+      expect(screen.getByRole("dialog")).toContainElement(
+        screen.getByRole("link", { name: "Cells" }),
+      );
+    });
   });
 
   it("shows only Catalog in Manage when only catalogitems:read is held (namespace-scoped)", () => {
@@ -195,7 +281,7 @@ describe("MoreSheet", () => {
   describe("focus and dismissal", () => {
     it("focuses the first link on mount", () => {
       renderMoreSheet("/");
-      const firstLink = screen.getByRole("link", { name: "Plugins" });
+      const firstLink = screen.getByRole("link", { name: "Pipelines" });
       expect(document.activeElement).toBe(firstLink);
     });
 

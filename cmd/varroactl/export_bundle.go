@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 )
@@ -95,7 +96,7 @@ func runExportBundle(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	resolver := bundle.NewResolver(tmpDir)
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), tmpDir)
 
 	if _, err := resolver.Materialize(cmd.Context(), repo, bundlePath, revision, filepath.Join(tmpDir, "bundle"), nil); err != nil {
 		return fmt.Errorf("materialize bundle: %w", err)

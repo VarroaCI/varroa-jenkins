@@ -24,17 +24,90 @@ stating what it is/is not responsible for:
   reconciler for `Controller` CRDs; drives the `Pending→Provisioning→Running→
   Connected→Failed` phase state machine over NATS and serves the per-controller
   hibernation wake interstitial on `VARROA_WAKE_PORT` (default `8082`) from every
-  replica. No gRPC/OIDC.
+  replica. No gRPC/OIDC. Every replica serves `operator.<cluster>.approverestart`
+  (`approve_restart.go`) and `operator.<cluster>.approvedeletion`
+  (`approve_deletion.go`) with no queue group; only the replica that owns the
+  controller's shard replies. `ApproveRestart` and `ApproveDeletion` return
+  `ErrNotShardOwner` on any other replica, and the handler then sends no reply.
+  `approveRestartRefusal` replies `code: conflict` for `ErrNoPendingRestart` and for
+  `PendingRestartChangedError`, which also carries `changes`; the BFF maps both to 409.
+  With no owner during a handoff, the BFF request times out. Each handler gives
+  the approve a 55-second deadline (`approveRequestTimeout`), under the BFF's
+  60-second request timeout. The deadline also limits how long an approve holds
+  the controller lock that the reconcile tick takes. Both runners serve through
+  `ServeRequestsConcurrently` with `approveConcurrency` (16) slots for each subject,
+  so an approve that waits for one controller's lock does not hold an approve for
+  another controller while a slot is free. When all 16 slots are in use, the next
+  approve waits for a free slot. The controller lock still serializes approves for one
+  controller. The leader alone serves the command subjects of
+  `commandResponders` (`main.go`) in the `operator-workers` queue group, so
+  the group has one member. A serial subject therefore holds each request for
+  the whole cluster until the request before it ends. Each row carries a
+  `limit`: `serialResponder` (1) uses `ServeRequests`, and a higher limit uses
+  `ServeRequestsConcurrently`. Only `bundles.preview` uses
+  `composeConcurrency` (4 slots), because a compose can clone git or pull
+  OCI content. The BFF sends its validate route's compose on that same
+  subject; there is no `bundles.validate` subject. Move a row to a higher limit only after its handler is safe for
+  concurrent calls. A compose context ends at `composeRequestTimeout` (55
+  seconds, `internal/controller/config_crud.go`), under the BFF's 60-second
+  timeout. A git process (`GitCloner.Clone`, `CloneCache.fetchBare`) does not
+  observe that context, so it can run past the deadline.
+  `controllerIssuer` (`main.go`) is the only choice of
+  the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
+  else the OIDC issuer. The operator exits in those two modes without
+  `--bff-url`. One leader replica queue-subscribes
+  `varroa.ledger.actions.<own cluster>` in the `operator-workers` group
+  (`subscribeLedgerActions` in `ledger_action.go`). Never subscribe the
+  `varroa.ledger.actions.>` wildcard: every cluster's operator shares the
+  core NATS and the group name, so a wildcard puts all of them in one queue
+  group and NATS gives a share of one cluster's actions to the others.
+  `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run`/`resume_run`
+  to the matching mite imperative command and `wake_cell` to a direct
+  hibernation wake. `cancel_run` and `retry_run` copy the action's `actor`
+  onto the command, so the operator's outcome row names the recorder. The one core recorder publishes the actions of every
+  cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
+  (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)
+  rather than acting on it. `main` reads `otel.GetMeterProvider()` once,
+  after `telemetry.InitTelemetry`, and passes it to `NewReconciler`,
+  `newLedgerActionMetrics`, `newClusterHeartbeatCounter`,
+  `sharding.NewShardManager`, `bundle.NewResolver`, `bundle.NewCloneCache`,
+  and the bus metrics. No operator test replaces the global provider. `trigger_run` wakes a hibernated target through the same hibernation
+  call before it sends the command; a connected target is not woken.
+  Every replica also subscribes to `events.brood.<cluster>`
+  (`brood_watch.go`): a `disconnected` event enqueues an on-demand
+  reconcile for the named Controller, which performs the pod read, and
+  wakes the `team` ticker through its buffered, size-one `wake` channel.
+  A `connected` event calls `TriggerOwnedReconcile`, which enqueues only on
+  the replica that owns the Controller and routes no wake patch, because
+  every replica receives the broadcast. That reconcile reads the new epoch
+  and pushes the desired state, which NATS does not keep.
+  **The event decides nothing** — it only removes latency, so a foreign
+  cluster, any other event value, and a missed message all cost one tick
+  and no more, and the wake send never blocks.
+  A `connected` event does not wake the `team` ticker. The Controller
+  informer wakes it on every replica when `controller.CellSeedStateChanged`
+  reports a change of a cell's per-tenant seed answer. Only the leader runs
+  the ticker. `BusTransport.OnCommandResult` is set to
+  `Reconciler.NotifyCommandResult`, so an applied rehydration result wakes
+  its owned Controller at once.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
-  (`mite.<cluster>.<ns>.<name>.{in,out,content}`). Loads the shared CA from the `varroa-ca`
+  (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`
   Secret. Also serves an apikey-verify HTTP endpoint (default `:9092`). Does
-  not reconcile controllers.
+  not reconcile controllers. `main` reads `otel.GetMeterProvider()` once,
+  after `telemetry.InitTelemetry`, and passes it to `mite.NewBusHandler` and
+  the bus metrics.
 - **`bff/`** (`bin/varroa-bff`) — Backend-For-Frontend; REST API + SSE on
   `:8080`. Stateless — mite telemetry comes from the NATS bus, OIDC JWT needs
   no server-side session. Multiple replicas run behind a load balancer
   (leader election only for the parts that must be singleton). Wires
   `Deps.FleetPluginInventory` via `api.NewFleetInventoryReader(miteTransport)`.
+  Reads `VARROA_CELLS_MAX_TENANTS` into `Deps.CellMaxTenants`, unconditionally
+  and not inside the record-store block: it is the chart tier of the cell
+  usage reads' tenant cap, and one chart value renders it into this binary and
+  into the operator, so the two agree. `main` reads `otel.GetMeterProvider()`
+  once, after `telemetry.InitTelemetry`, and passes it to `sse.NewRunFanout`,
+  the bus metrics, and the `varroa.clusters.known` gauge.
 - **`updatecenter/`** (`bin/varroa-updatecenter`) — opt-in in-cluster Jenkins
   update center on `:8080` (`VARROA_UC_LISTEN`); thin main over
   `internal/updatecenter`, configured entirely via `VARROA_UC_*` env vars
@@ -47,19 +120,56 @@ stating what it is/is not responsible for:
   `update-center.actual.json` + plugin `.hpi` blobs from an `internal/oci`
   BlobStore; local storage mode is single-replica (PVC), oci mode is stateless.
   Built by `make build` into the same product image as the other backends.
+- **`recorder/`** (`bin/varroa-recorder`) — the build-record store
+  recorder; HTTP on `:8080` with only `/healthz`, `/readyz`, `/metrics`.
+  The only writer of `internal/recordstore`'s Postgres tables, the only
+  owner of its migrations, and the only creator of the `varroa_builds`
+  and `varroa_activity` JetStream streams. Nine goroutines: the build
+  ingest pull consumer, the activity ingest pull consumer, the
+  `varroa.ledger.claim` responder, the owner responder, the tenant purge
+  responder, the tenant sync responder, the `varroa.ledger.crosstenant`
+  responder (dispatches eight request kinds: `build`, `status`,
+  `last_successful`, `artifact_list`, `artifact_url`, `lock_acquire`,
+  `lock_renew`, `lock_release`; an unknown kind is rejected before any
+  database read), the hourly retention/maintenance ticker, and the
+  once-a-minute backstop scheduler (D9's interrupted sweep and D11's
+  cron backstop, one leader-elected round under a third advisory-lock
+  key, plus the claim-expiry sweep and the unstarted-intent re-fire) (`runWorkers` in `run.go` takes
+  a variadic `namedWorker` list, so a worker's name travels with its
+  function). `confirmedGoneGraceFromEnv` reads
+  `VARROA_RECORDSTORE_CONFIRMED_GONE_GRACE` as a **Go duration string**
+  and feeds it to the tenant-sync responder, the backstop round, and the
+  retention liveness seam; it does not reuse `envDurationMillis`, whose
+  millisecond integer reads badly in a chart value.
+  One `recordstore.NewRunNotifier` value serves the whole process: the
+  ingest path takes it through `SetRunNotifier`, the cross-tenant and
+  tenant-sync responders take it as their own argument, and
+  `MaintenanceConfig.LockNotifier` carries it into the hourly round, and
+  `BackstopConfig.RunNotifier` carries it into the claim-expiry sweep, so
+  every lock write publishes on one coalescing counter and one clock.
+  Needs no Kubernetes API access. `run(ctx, cfg)` in `run.go` holds the
+  whole wiring and shutdown sequence, so a test drives it without
+  `main`'s flag parsing. Does not serve any REST or MCP surface — that is
+  `bff/`, through `internal/recordstore.Reader`.
 - **`mite/`** (`bin/varroa-mite`) — sidecar injected into every Jenkins pod;
   own contract in `cmd/mite/AGENTS.md`. Reports health, state, observability,
   and full plugin inventories; applies desired-state and imperative commands.
+  Also runs a `127.0.0.1:9095` HTTP loopback listener for the co-located
+  Jenkins plugin's build-event and claim traffic.
 - **`varroactl/`** (`bin/varroactl`) — CLI + MCP surface; own contract in
   `cmd/varroactl/AGENTS.md`.
 - **`fakemite/`** — synthetic load generator: opens N real mTLS
   `CommandStream`s against a gateway (embedded self-contained NATS+gateway by
   default, or `--gateway ADDR` against a real one) to profile CPU/etcd QPS/
   mTLS handshake storms/shard rebalancing. Never shipped in the product image.
+  It starts no telemetry and passes `noop.NewMeterProvider()` to
+  `mite.NewBusHandler`.
 - **`protogen/`** — codegen helper that parses `.proto` files
   (`github.com/emicklei/proto`) and renders Go types via the templates in
   `protogen/templates/` for `internal/mite/proto/mitev1/`. Invoked by
-  `make generate-proto`, not run standalone.
+  `make generate-proto`, not run standalone. An `optional` scalar field
+  generates a pointer (`optional int32` gives `*int`), because `omitempty`
+  drops a zero value and a zero can be a real answer.
 - **`bootstrapdeps/`** — repo-maintenance tool (never in the runtime image,
   deliberately not a `varroactl` subcommand) that asserts and records
   `varroa-mite-auth`'s mandatory dependency closure against a resolved plugin
@@ -69,17 +179,20 @@ stating what it is/is not responsible for:
   the committed block in `pr.yaml`. Presence-only — it records declared
   minimums verbatim and never compares versions.
 
-`operator`, `gateway`, `bff`, `mite` are all compiled from the single
-repo-root `Dockerfile` into one image; `varroactl` ships as a separate
-standalone binary (not baked into that image). `protogen` and `bootstrapdeps`
-are repo tooling: `go run` only, no Makefile build target, no image stage.
+`operator`, `gateway`, `bff`, `mite`, `updatecenter`, `recorder` are all
+compiled from the single repo-root `Dockerfile` into one image; `varroactl`
+ships as a separate standalone binary (not baked into that image). `protogen`
+and `bootstrapdeps` are repo tooling: `go run` only, no Makefile build target,
+no image stage.
 
-**Bus credentials and health, shared by `operator`/`gateway`/`bff`:** each takes
+**Bus credentials and health, shared by `operator`/`gateway`/`bff`/`recorder`:** each takes
 `-bus-pass-file`, which `internal/bus` re-reads on every reconnect so a rotated
 NATS Secret is followed without a restart. The chart always passes it; the
 `BUS_PASSWORD` env is the no-file fallback for local runs. Each passes its
 logger in `bus.Config` (never assigned after `Connect`) and registers the
-`varroa.bus.connected` gauge. Operator
+`varroa.bus.connected` gauge. Every long-lived subscription goes through
+`bus.Conn.ServeRequests` or `bus.Conn.Listen`, which subscribe again after
+NATS denies the subscription at start or on an authorization reload. Operator
 readiness (`/readyz`) fails while the bus is down; operator liveness
 (`/healthz`) does not, so a bus outage never becomes a restart loop. Gateway and
 BFF `/healthz` report a `bus` field but always return 200, because the BFF still
@@ -96,7 +209,7 @@ serves the dashboard and the gateway's replicas share one credential.
 ## Verification
 
 ```bash
-make build       # compiles bin/varroa-operator, bin/varroa-gateway, bin/varroa-bff, bin/varroa-mite
+make build       # compiles bin/varroa-operator, bin/varroa-gateway, bin/varroa-bff, bin/varroa-mite, bin/varroa-updatecenter, bin/varroa-recorder
 make build-cli    # compiles bin/varroactl (separate target, not part of `make build`)
 make test         # all Go tests, race detector, repo-wide
 make lint         # golangci-lint, repo-wide

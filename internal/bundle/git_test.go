@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -316,7 +317,7 @@ func TestCloneRejectsFileProtocol(t *testing.T) {
 
 	cloner := NewGitCloner()
 	cloneDir := filepath.Join(fixtureDir, "clone-target")
-	err := cloner.Clone("file://"+bareRepo, "0000000000000000000000000000000000000000", cloneDir, nil)
+	err := cloner.Clone(context.Background(), "file://"+bareRepo, "0000000000000000000000000000000000000000", cloneDir, nil)
 	if err == nil {
 		t.Fatal("Clone with file:// protocol should be rejected, got nil error")
 	}
@@ -362,7 +363,7 @@ func TestValidateRepoURL(t *testing.T) {
 func TestRemoteSHA_ReturnsPinnedSHA(t *testing.T) {
 	cloner := NewGitCloner()
 	pinned := "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
-	sha, err := cloner.RemoteSHA("https://example.com/repo.git", pinned, nil)
+	sha, err := cloner.RemoteSHA(context.Background(), "https://example.com/repo.git", pinned, nil)
 	if err != nil {
 		t.Fatalf("RemoteSHA with pinned SHA: %v", err)
 	}
@@ -373,7 +374,7 @@ func TestRemoteSHA_ReturnsPinnedSHA(t *testing.T) {
 
 func TestRemoteSHA_EmptyRevision(t *testing.T) {
 	cloner := NewGitCloner()
-	_, err := cloner.RemoteSHA("https://example.com/repo.git", "", nil)
+	_, err := cloner.RemoteSHA(context.Background(), "https://example.com/repo.git", "", nil)
 	if err == nil {
 		t.Error("expected error for empty revision")
 	}

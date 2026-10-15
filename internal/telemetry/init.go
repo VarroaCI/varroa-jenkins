@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -28,6 +29,13 @@ var logProvider *sdklog.LoggerProvider
 // InitTelemetry initializes OpenTelemetry tracing, metrics, and logging providers.
 // It returns a shutdown function that should be deferred.
 func InitTelemetry(ctx context.Context) func(context.Context) error {
+	return initTelemetry(ctx, func(mp metric.MeterProvider) { otel.SetMeterProvider(mp) })
+}
+
+// initTelemetry is InitTelemetry with the step that installs the meter
+// provider as a parameter. A test passes a setter that records the provider,
+// so the test never replaces the global provider.
+func initTelemetry(ctx context.Context, setMeterProvider func(metric.MeterProvider)) func(context.Context) error {
 	if Disabled() {
 		return func(context.Context) error { return nil }
 	}
@@ -61,31 +69,9 @@ func InitTelemetry(ctx context.Context) func(context.Context) error {
 		}
 	}
 
-	if MetricsEnabled() {
-		if ServesPrometheusMetrics() {
-			reg := promclient.DefaultRegisterer
-			exp, err := prometheus.New(prometheus.WithRegisterer(reg))
-			if err == nil {
-				mp = sdkmetric.NewMeterProvider(
-					sdkmetric.WithReader(exp),
-					sdkmetric.WithResource(res),
-				)
-				otel.SetMeterProvider(mp)
-			}
-		} else if endpoint != "" {
-			exp, err := otlpmetricgrpc.New(ctx,
-				otlpmetricgrpc.WithEndpoint(endpoint),
-				otlpmetricgrpc.WithInsecure(),
-			)
-			if err == nil {
-				reader := sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(30*time.Second))
-				mp = sdkmetric.NewMeterProvider(
-					sdkmetric.WithReader(reader),
-					sdkmetric.WithResource(res),
-				)
-				otel.SetMeterProvider(mp)
-			}
-		}
+	if p, err := NewMeterProvider(ctx, res); err == nil && p != nil {
+		mp = p
+		setMeterProvider(mp)
 	}
 
 	if LogsEnabled() && endpoint != "" {
@@ -121,6 +107,43 @@ func InitTelemetry(ctx context.Context) func(context.Context) error {
 		}
 		return errors.Join(errs...)
 	}
+}
+
+// NewMeterProvider builds the meter provider that InitTelemetry installs as
+// the global provider, and does not install it. It returns a nil provider
+// when metrics are off, or when the process serves no /metrics and has no
+// OTLP endpoint. With /metrics on, the Prometheus exporter registers on the
+// default Prometheus registerer. The caller shuts the provider down.
+func NewMeterProvider(ctx context.Context, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+	if !MetricsEnabled() {
+		return nil, nil
+	}
+	if ServesPrometheusMetrics() {
+		exp, err := prometheus.New(prometheus.WithRegisterer(promclient.DefaultRegisterer))
+		if err != nil {
+			return nil, err
+		}
+		return sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(exp),
+			sdkmetric.WithResource(res),
+		), nil
+	}
+	endpoint := OTLPEndpoint()
+	if endpoint == "" {
+		return nil, nil
+	}
+	exp, err := otlpmetricgrpc.New(ctx,
+		otlpmetricgrpc.WithEndpoint(endpoint),
+		otlpmetricgrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	reader := sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(30*time.Second))
+	return sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(reader),
+		sdkmetric.WithResource(res),
+	), nil
 }
 
 // LogHandler wraps a slog.Logger with an OpenTelemetry bridge, teeing output to both.

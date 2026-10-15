@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,16 @@ const DefaultArchiveBaseURL = "https://repo.jenkins-ci.org/releases"
 // a released version never change, so the TTL exists only to retry transient failures
 // and to bound memory, not for freshness.
 const archiveTTL = 6 * time.Hour
+
+// archiveTransientTTL bounds how long a transient sidecar failure (network error,
+// HTTP 5xx, unreadable body) is remembered. A short window keeps a flaky repository
+// from degrading servability for hours, while still sparing it a retry per request.
+const archiveTransientTTL = time.Minute
+
+// errArchiveNotFound marks a provable negative: the repository answered that no
+// sidecar exists for the version (HTTP 404 or 410), or the sidecar is not a SHA-256
+// digest. Retrying cannot change that answer.
+var errArchiveNotFound = errors.New("ucmeta: archive has no checksum for this version")
 
 // archiveResolver recovers a checksum for a version no metadata source lists.
 //
@@ -51,6 +62,15 @@ type archiveEntry struct {
 	sha256B64 string // empty when the lookup failed
 	err       error
 	at        time.Time
+}
+
+// ttl returns how long the entry stays valid. Hits and provable misses keep the full
+// archiveTTL; transient failures expire after archiveTransientTTL.
+func (e archiveEntry) ttl() time.Duration {
+	if e.err != nil && !errors.Is(e.err, errArchiveNotFound) {
+		return archiveTransientTTL
+	}
+	return archiveTTL
 }
 
 func newArchiveResolver(baseURL string, client *http.Client) *archiveResolver {
@@ -90,7 +110,7 @@ func (a *archiveResolver) resolve(ctx context.Context, gav, name, version string
 	key := verKey{name: name, version: version}
 
 	a.mu.Lock()
-	if e, ok := a.cache[key]; ok && time.Since(e.at) < archiveTTL {
+	if e, ok := a.cache[key]; ok && time.Since(e.at) < e.ttl() {
 		a.mu.Unlock()
 		return e.sha256B64, e.err
 	}
@@ -122,6 +142,9 @@ func (a *archiveResolver) fetch(ctx context.Context, gav, name, version string) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return "", fmt.Errorf("%w: %s@%s: HTTP %d", errArchiveNotFound, name, version, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("ucmeta: archive checksum for %s@%s: HTTP %d", name, version, resp.StatusCode)
 	}
@@ -140,10 +163,10 @@ func (a *archiveResolver) fetch(ctx context.Context, gav, name, version string) 
 	}
 	raw, err := hex.DecodeString(field)
 	if err != nil {
-		return "", fmt.Errorf("ucmeta: archive checksum for %s@%s is not hex: %w", name, version, err)
+		return "", fmt.Errorf("%w: sidecar for %s@%s is not hex: %v", errArchiveNotFound, name, version, err)
 	}
 	if len(raw) != 32 {
-		return "", fmt.Errorf("ucmeta: archive checksum for %s@%s is %d bytes, want 32", name, version, len(raw))
+		return "", fmt.Errorf("%w: sidecar for %s@%s is %d bytes, want 32", errArchiveNotFound, name, version, len(raw))
 	}
 	return base64.StdEncoding.EncodeToString(raw), nil
 }

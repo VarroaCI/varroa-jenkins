@@ -200,6 +200,8 @@ spec:
                 description: |-
                   PluginUpdateCenterDownloadURL is the Jenkins update-center binary download URL
                   (maps to JENKINS_UC_DOWNLOAD_URL). When non-empty, plugins-init uses this mirror.
+                  jenkins-plugin-cli appends <name>/<version>/<name>.hpi to it, so the value must be
+                  <mirror>/download/plugins, for example https://updates.jenkins.io/download/plugins.
                 type: string
               pluginUpdateCenterURL:
                 description: |-

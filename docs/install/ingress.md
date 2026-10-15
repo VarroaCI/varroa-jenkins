@@ -9,7 +9,7 @@ Helm creates the dashboard Ingress. The operator creates one Ingress for each co
 | `subdomain` | `https://<controller>.<root-domain>/` | Wildcard DNS and certificates are available. |
 | `path` | `https://<dashboard-host>/jenkins/<namespace>/<controller>/` | One hostname and shared ingress are preferred. |
 
-`subdomain` is the default. `spec.ingressSpec.mode` is immutable after controller creation.
+`subdomain` is the default. `spec.ingressSpec.mode` is immutable after controller creation. The dashboard Spec Editor shows the mode as read-only. A missing `ingressSpec` block or a missing `mode` counts as `subdomain`. A patch cannot remove the block or add it with another mode. The API server refuses it with `ingressSpec.mode is immutable`.
 
 Path mode uses the dashboard host and its TLS configuration. Do not set `tlsSecretName` on a path-mode controller. Varroa configures the Jenkins URL prefix automatically.
 
@@ -74,7 +74,7 @@ spec:
       nginx.ingress.kubernetes.io/proxy-body-size: 512m
 ```
 
-Controller annotations merge over `ProvisioningDefaults.spec.ingressAnnotations`. Controller values win on conflicts.
+Controller annotations merge over `ProvisioningDefaults.spec.ingressAnnotations`. Controller values win on conflicts. You can also edit host, class, TLS secret, and annotations in the Spec Editor Form tab.
 
 For path routing:
 
@@ -87,6 +87,8 @@ spec:
 
 If no host can be resolved, Varroa creates no controller Ingress and sets the informational `NoExternalURL` condition. The in-cluster Service and port forwarding remain available.
 
+A [headless](../security/headless-controllers.md) controller receives no Ingress at all, whatever host would resolve. Use `spec.headless: true` for a one-tenant controller. A cell is always headless.
+
 ## Verify
 
 ```bash
@@ -94,6 +96,8 @@ kubectl get ingress -A
 kubectl get controller build -n jenkins-platform \
   -o jsonpath='{.status.endpoint}{"\n"}'
 ```
+
+The operator writes the external URL to `status.endpoint`. The value is empty for a headless controller and when no host resolves. For a controller on a member cluster, the dashboard shows the URL that the member's operator wrote. The core's `rootDomain` does not apply to it.
 
 Ingress host, class, annotations, and TLS changes converge without restarting Jenkins.
 

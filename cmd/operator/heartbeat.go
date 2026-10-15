@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -14,18 +14,15 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// clusterHeartbeats is the counter for successfully written member-cluster
-// heartbeats. Registered once at package init.
-var clusterHeartbeats metric.Int64Counter
-
-func init() {
-	meter := otel.Meter("varroa-operator")
-	var err error
-	clusterHeartbeats, err = meter.Int64Counter("varroa.cluster.heartbeats",
+// newClusterHeartbeatCounter creates the counter of member-cluster
+// heartbeats that the runner writes, on the "varroa-operator" meter of mp.
+func newClusterHeartbeatCounter(mp metric.MeterProvider) (metric.Int64Counter, error) {
+	counter, err := mp.Meter("varroa-operator").Int64Counter("varroa.cluster.heartbeats",
 		metric.WithDescription("Cluster membership heartbeats successfully written"))
 	if err != nil {
-		panic("failed to register varroa.cluster.heartbeats counter: " + err.Error())
+		return nil, fmt.Errorf("create varroa.cluster.heartbeats counter: %w", err)
 	}
+	return counter, nil
 }
 
 // clusterHeartbeatRunner publishes this cluster's membership heartbeat into
@@ -34,12 +31,16 @@ func init() {
 type clusterHeartbeatRunner struct {
 	clusterName string // from VARROA_CLUSTER_NAME (C4), default "core"
 	version     string // main.version ldflag value
-	clustersKV  *bus.KV
-	client      *controller.ClientsetClient
-	store       crdstore.Backend
-	lifecycle   *controller.LifecycleStore
-	beatNow     chan struct{} // buffered size 1; non-blocking send
-	logger      *slog.Logger
+	// operatorNamespace is the namespace this operator runs in. Its
+	// heartbeat tells the BFF which namespace the cluster's config reads use.
+	operatorNamespace string
+	clustersKV        *bus.KV
+	client            *controller.ClientsetClient
+	store             crdstore.Backend
+	lifecycle         *controller.LifecycleStore
+	beatNow           chan struct{} // buffered size 1; non-blocking send
+	logger            *slog.Logger
+	heartbeats        metric.Int64Counter // from newClusterHeartbeatCounter
 }
 
 func (r *clusterHeartbeatRunner) NeedLeaderElection() bool { return true }
@@ -102,18 +103,18 @@ func (r *clusterHeartbeatRunner) beat(ctx context.Context) {
 		lifecycleState = r.lifecycle.State()
 	}
 
-	info := buildClusterInfo(r.clusterName, r.version, k8sVersion, ctrls, time.Now().UTC(), lifecycleState)
+	info := buildClusterInfo(r.clusterName, r.version, k8sVersion, r.operatorNamespace, ctrls, time.Now().UTC(), lifecycleState)
 
 	if err := bus.PutClusterHeartbeat(r.clustersKV, info); err != nil {
 		r.logger.Warn("cluster heartbeat: put failed", "error", err)
 		return
 	}
-	clusterHeartbeats.Add(ctx, 1)
+	r.heartbeats.Add(ctx, 1)
 }
 
 // buildClusterInfo assembles a ClusterInfo struct from the heartbeat components.
 // Extracted for testability; ctrls may be nil/empty.
-func buildClusterInfo(name, version, k8sVersion string, ctrls []*v1alpha1.Controller, now time.Time, st controller.LifecycleState) bus.ClusterInfo {
+func buildClusterInfo(name, version, k8sVersion, operatorNamespace string, ctrls []*v1alpha1.Controller, now time.Time, st controller.LifecycleState) bus.ClusterInfo {
 	connected := 0
 	for _, c := range ctrls {
 		if c.Status.Phase == v1alpha1.ControllerPhaseConnected {
@@ -125,13 +126,14 @@ func buildClusterInfo(name, version, k8sVersion string, ctrls []*v1alpha1.Contro
 		state = bus.ClusterStateActive
 	}
 	return bus.ClusterInfo{
-		Name:            name,
-		OperatorVersion: version,
-		K8sVersion:      k8sVersion,
-		ControllerCount: len(ctrls),
-		ConnectedCount:  connected,
-		LastHeartbeat:   now,
-		State:           state,
-		DrainStartedAt:  st.DrainStartedAt,
+		Name:              name,
+		OperatorVersion:   version,
+		K8sVersion:        k8sVersion,
+		OperatorNamespace: operatorNamespace,
+		ControllerCount:   len(ctrls),
+		ConnectedCount:    connected,
+		LastHeartbeat:     now,
+		State:             state,
+		DrainStartedAt:    st.DrainStartedAt,
 	}
 }

@@ -1,0 +1,94 @@
+# CEL cases for charts/varroa/crds/varroa.dev_runners.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: Runner
+  metadata:
+    name: runner-a
+  spec:
+    team: team-a
+    launcher: inbound
+    remoteFS: /work
+cases:
+  - name: team changed
+    rule: |-
+      self.team == oldSelf.team
+    field: spec
+    old: {}
+    new: {spec: {team: team-b}}
+    want: reject
+  - name: numExecutors changed with team unchanged
+    rule: |-
+      self.team == oldSelf.team
+    field: spec
+    old: {}
+    new: {spec: {numExecutors: 2}}
+    want: accept
+
+  # The ssh launcher carries host and credentialRef, so this change breaks
+  # only the launcher-transition rule.
+  - name: launcher changed
+    rule: |-
+      self.launcher == oldSelf.launcher
+    field: spec
+    old: {}
+    new: {spec: {launcher: ssh, host: h.example.com, credentialRef: cred-a}}
+    want: reject
+  - name: launcher unchanged
+    rule: |-
+      self.launcher == oldSelf.launcher
+    field: spec
+    old: {}
+    new: {spec: {numExecutors: 2}}
+    want: accept
+
+  - name: remoteFS with a template marker refused
+    rule: |-
+      !self.remoteFS.contains('${') && (!has(self.host) || !self.host.contains('${')) && (!has(self.javaPath) || !self.javaPath.contains('${'))
+    field: spec
+    new: {spec: {remoteFS: "/work/${HOME}"}}
+    want: reject
+  - name: plain paths accepted
+    rule: |-
+      !self.remoteFS.contains('${') && (!has(self.host) || !self.host.contains('${')) && (!has(self.javaPath) || !self.javaPath.contains('${'))
+    field: spec
+    new: {spec: {remoteFS: /work/home}}
+    want: accept
+
+  - name: ssh launcher without a host refused
+    rule: |-
+      self.launcher != 'ssh' || (has(self.host) && has(self.credentialRef))
+    field: spec
+    new: {spec: {launcher: ssh}}
+    want: reject
+  - name: ssh launcher with host and credential accepted
+    rule: |-
+      self.launcher != 'ssh' || (has(self.host) && has(self.credentialRef))
+    field: spec
+    new: {spec: {launcher: ssh, host: h.example.com, credentialRef: cred-a}}
+    want: accept
+
+  - name: inbound launcher with a host refused
+    rule: |-
+      self.launcher != 'inbound' || !(has(self.host) || has(self.port) || has(self.credentialRef) || has(self.javaPath))
+    field: spec
+    new: {spec: {host: h.example.com}}
+    want: reject
+  - name: inbound launcher without connection fields accepted
+    rule: |-
+      self.launcher != 'inbound' || !(has(self.host) || has(self.port) || has(self.credentialRef) || has(self.javaPath))
+    field: spec
+    new: {spec: {numExecutors: 2}}
+    want: accept
+
+  - name: label with a space refused
+    rule: |-
+      !has(self.labels) || self.labels.all(l, l.matches(r'^[A-Za-z0-9_.-]+$'))
+    field: spec
+    new: {spec: {labels: ["bad label!"]}}
+    want: reject
+  - name: label of plain tokens accepted
+    rule: |-
+      !has(self.labels) || self.labels.all(l, l.matches(r'^[A-Za-z0-9_.-]+$'))
+    field: spec
+    new: {spec: {labels: ["team-a.v1_x"]}}
+    want: accept

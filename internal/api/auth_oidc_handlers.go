@@ -312,12 +312,17 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token validation failed", http.StatusInternalServerError)
 		return
 	}
+	if err := auth.RefuseLocalPrefix(claims); err != nil {
+		s.deps.Logger.Warn("identity provider token refused", "error", err, "subject", claims.Subject)
+		http.Error(w, "token validation failed", http.StatusForbidden)
+		return
+	}
 
-	if len(claims.Groups) == 0 {
+	if !hasGroups(claims) {
 		s.deps.Logger.Warn("user has zero groups in ID token, RBAC group-based permissions will not apply",
 			"email", claims.Email,
 			"subject", claims.Subject,
-			"hint", "Add a 'claims' mapping to your Dex connector config. See: https://dexidp.io/docs/connectors/#claims")
+			"hint", "Request the groups scope (auth.oidc.scopes) and set auth.oidc.groupClaim to the claim that carries groups. With Dex, set loadAllGroups on github or gitea connectors and insecureEnableGroups on oidc connectors. With direct OIDC, configure the provider to send a groups claim.")
 	} else {
 		s.deps.Logger.Info("user authenticated",
 			"email", claims.Email,
@@ -326,14 +331,12 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit login event.
-	if s.deps.ActivityStore != nil {
-		s.deps.ActivityStore.Notify(activity.Event{
-			Type:    "login",
-			Source:  "user",
-			Actor:   ActorFrom(claims),
-			Message: ActorFrom(claims) + " logged in",
-		})
-	}
+	s.notifyActivity(activity.Event{
+		Type:    "login",
+		Source:  "user",
+		Actor:   ActorFrom(claims),
+		Message: ActorFrom(claims) + " logged in",
+	})
 
 	// Record the user in the directory.
 	if s.deps.Store != nil && s.deps.OperatorNamespace != "" {
@@ -374,10 +377,15 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validator returns the OIDCProvider from the auth provider.
+// validator returns the OIDCProvider from the auth provider. Beside local
+// accounts, the provider is a MultiProvider and the OIDC provider is its
+// primary.
 func (s *Server) validator() (auth.OIDCProvider, bool) {
 	if s.deps.Auth == nil || s.deps.Auth.Mode() != auth.AuthModeOIDC {
 		return nil, false
+	}
+	if m, ok := s.deps.Auth.(*auth.MultiProvider); ok {
+		return m.OIDC(), m.OIDC() != nil
 	}
 	v, ok := s.deps.Auth.(auth.OIDCProvider)
 	return v, ok
@@ -401,4 +409,9 @@ func (s *Server) deleteCookie(w http.ResponseWriter, name, path string) {
 		Path:   path,
 		MaxAge: -1,
 	})
+}
+
+// hasGroups reports whether the resolved group set of the token is not empty.
+func hasGroups(claims *auth.Claims) bool {
+	return len(claims.Groups) > 0
 }

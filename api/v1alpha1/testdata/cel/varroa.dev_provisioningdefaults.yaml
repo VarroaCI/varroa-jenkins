@@ -1,0 +1,21 @@
+# CEL cases for charts/varroa/crds/varroa.dev_provisioningdefaults.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: ProvisioningDefaults
+  metadata:
+    name: varroa-defaults
+  spec:
+    defaultNamespace: ns-a
+cases:
+  - name: reconciliation interval of five seconds refused
+    rule: |-
+      !has(self.interval) || duration(self.interval) >= duration('10s')
+    field: spec.defaultReconciliationPolicy
+    new: {spec: {defaultReconciliationPolicy: {interval: 5s}}}
+    want: reject
+  - name: reconciliation interval of thirty seconds accepted
+    rule: |-
+      !has(self.interval) || duration(self.interval) >= duration('10s')
+    field: spec.defaultReconciliationPolicy
+    new: {spec: {defaultReconciliationPolicy: {interval: 30s}}}
+    want: accept

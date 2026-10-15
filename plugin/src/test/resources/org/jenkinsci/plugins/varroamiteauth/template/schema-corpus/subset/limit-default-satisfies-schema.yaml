@@ -1,0 +1,9 @@
+type: object
+additionalProperties: false
+properties:
+  goVersion:
+    type: string
+    enum:
+    - a
+    - b
+    default: c

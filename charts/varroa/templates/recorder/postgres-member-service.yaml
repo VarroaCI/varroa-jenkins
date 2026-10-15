@@ -1,0 +1,30 @@
+{{- /*
+Exposes the record-store primary to member clusters. Core only, cnpg mode
+only: a member gateway in postgres blob mode dials this endpoint.
+*/}}
+{{- $me := .Values.recordStore.postgres.memberEndpoint | default dict -}}
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) (eq .Values.recordStore.postgres.mode "cnpg") $me.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-recordstore-member
+  labels:
+    app.kubernetes.io/component: varroa-recordstore
+    {{- include "varroa.labels" . | nindent 4 }}
+  {{- with $me.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $me.serviceType | default "LoadBalancer" }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      {{- if and (eq ($me.serviceType | default "LoadBalancer") "NodePort") (gt ($me.nodePort | int) 0) }}
+      nodePort: {{ $me.nodePort }}
+      {{- end }}
+  selector:
+    cnpg.io/cluster: varroa-recordstore
+    cnpg.io/instanceRole: primary
+{{- end }}

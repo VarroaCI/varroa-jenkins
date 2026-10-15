@@ -487,6 +487,9 @@ func TestClassify_OptionalDependency(t *testing.T) {
 	if opt.Class != ClassOptionalDependency {
 		t.Errorf("class = %q, want %q", opt.Class, ClassOptionalDependency)
 	}
+	if opt.OptionalEdge != "parent" {
+		t.Errorf("OptionalEdge = %q, want %q", opt.OptionalEdge, "parent")
+	}
 }
 
 func TestClassify_Unmanaged(t *testing.T) {
@@ -555,6 +558,9 @@ func TestClassify_OptionalBehindMandatoryIntermediate(t *testing.T) {
 	}
 	if leaf.Class != ClassOptionalDependency {
 		t.Errorf("leaf class = %q, want %q (must be optional-dependency, not unmanaged)", leaf.Class, ClassOptionalDependency)
+	}
+	if leaf.OptionalEdge != "intermediate" {
+		t.Errorf("leaf OptionalEdge = %q, want %q", leaf.OptionalEdge, "intermediate")
 	}
 }
 
@@ -1104,6 +1110,103 @@ func TestClassify_AdvisoriesDeterministicOrder(t *testing.T) {
 				t.Fatalf("run %d: advisory[%d] = %+v, want %+v (order is not deterministic)",
 					i, j, got[j], first[j])
 			}
+		}
+	}
+}
+
+// classifiedByName returns the classification of the named plugin, or fails the test.
+func classifiedByName(t *testing.T, c Classification, name string) *ClassifiedPlugin {
+	t.Helper()
+	for i := range c.Plugins {
+		if c.Plugins[i].Name == name {
+			return &c.Plugins[i]
+		}
+	}
+	t.Fatalf("plugin %q not found", name)
+	return nil
+}
+
+func TestClassify_OptionalEdgeFirstNamesDeclaringPlugin(t *testing.T) {
+	// root --optional--> a --mandatory--> b: both a and b are reached through
+	// the optional edge that root declares.
+	in := Inputs{
+		Inventory: Inventory{Records: []Record{
+			{Name: "root", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "a", Min: "1.0", Optional: true}},
+			},
+			{Name: "a", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "b", Min: "1.0", Optional: false}},
+			},
+			{Name: "b", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse},
+		}},
+		Declared: []DeclaredPlugin{
+			{Name: "root", Version: "1.0", Tier: DeclaredByCore},
+		},
+	}
+	c := Classify(in)
+	a := classifiedByName(t, c, "a")
+	b := classifiedByName(t, c, "b")
+	if a.Class != ClassOptionalDependency {
+		t.Errorf("a class = %q, want %q", a.Class, ClassOptionalDependency)
+	}
+	if b.Class != ClassOptionalDependency {
+		t.Errorf("b class = %q, want %q", b.Class, ClassOptionalDependency)
+	}
+	if a.OptionalEdge != "root" {
+		t.Errorf("a.OptionalEdge = %q, want %q", a.OptionalEdge, "root")
+	}
+	if b.OptionalEdge != "root" {
+		t.Errorf("b.OptionalEdge = %q, want %q (the plugin that declares the optional edge, not the immediate parent)", b.OptionalEdge, "root")
+	}
+}
+
+func TestClassify_OptionalEdgeKeepsFirstOptionalHop(t *testing.T) {
+	// root --optional--> a --optional--> b: the path becomes optional at the
+	// first hop, so b names root.
+	in := Inputs{
+		Inventory: Inventory{Records: []Record{
+			{Name: "root", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "a", Min: "1.0", Optional: true}},
+			},
+			{Name: "a", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "b", Min: "1.0", Optional: true}},
+			},
+			{Name: "b", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse},
+		}},
+		Declared: []DeclaredPlugin{
+			{Name: "root", Version: "1.0", Tier: DeclaredByCore},
+		},
+	}
+	c := Classify(in)
+	b := classifiedByName(t, c, "b")
+	if b.OptionalEdge != "root" {
+		t.Errorf("b.OptionalEdge = %q, want %q (the first optional edge on the path)", b.OptionalEdge, "root")
+	}
+}
+
+func TestClassify_OptionalEdgeDeterministic(t *testing.T) {
+	// Two declared roots reach x through optional edges at the same depth.
+	// The published OptionalEdge must not depend on map iteration order.
+	in := Inputs{
+		Inventory: Inventory{Records: []Record{
+			{Name: "r1", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "x", Min: "1.0", Optional: true}},
+			},
+			{Name: "r2", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse,
+				Deps: []Dep{{Name: "x", Min: "1.0", Optional: true}},
+			},
+			{Name: "x", Version: "1.0", Enabled: TriTrue, Detached: TriFalse, Bundled: TriFalse},
+		}},
+		Declared: []DeclaredPlugin{
+			{Name: "r1", Version: "1.0", Tier: DeclaredByCore},
+			{Name: "r2", Version: "1.0", Tier: DeclaredByCore},
+		},
+	}
+	for i := 0; i < 50; i++ {
+		c := Classify(in)
+		x := classifiedByName(t, c, "x")
+		if x.OptionalEdge != "r1" {
+			t.Fatalf("iteration %d: x.OptionalEdge = %q, want %q", i, x.OptionalEdge, "r1")
 		}
 	}
 }

@@ -2,17 +2,13 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { parse as parseYAML, stringify as stringifyYAML } from "yaml";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "../Card";
-import { Tabs } from "../Tabs";
+import { Tabs, tabPanelProps } from "../Tabs";
 import { Button } from "../Button";
 import { DiffView, OVERLAY_RESOURCES } from "../OverlayEditor";
 import { useToast } from "../Toast";
 import ConflictDialog from "../ConflictDialog";
-import {
-  useOpenAPISchema,
-  getPodOverridesSchema,
-  getIngressSpecSchema,
-  getMiteSpecSchema,
-} from "../../api/openapiSchema";
+import { ApiError } from "../../hooks/useApi";
+import { useOpenAPISchema, getPodOverridesSchema } from "../../api/openapiSchema";
 import {
   updateController,
   ControllerConflictError,
@@ -25,8 +21,6 @@ import type {
   PreviewResponse,
   PodOverrides,
   ResourceOverlay,
-  IngressSpec,
-  MiteSpec,
   ControllerSpec,
 } from "../../types";
 import type { RJSFValidationError } from "@rjsf/utils";
@@ -41,8 +35,6 @@ const SPEC_TABS = [
   { id: "form", label: <>Form</> },
   { id: "podOverrides", label: <>Pod overrides</> },
   { id: "resourceOverlay", label: <>Resource overlay</> },
-  { id: "ingressSpec", label: <>Ingress</> },
-  { id: "miteSpec", label: <>Mite sidecar</> },
 ];
 
 const OVERLAY_TABS = OVERLAY_RESOURCES.map((r) => ({
@@ -59,8 +51,6 @@ const OVERLAY_KEYS = ["statefulSet", "service", "ingress"] as const;
 const DRAFT_TIERS = [
   "form",
   "podOverrides",
-  "ingressSpec",
-  "miteSpec",
   "statefulSet",
   "service",
   "ingress",
@@ -72,8 +62,6 @@ type DraftTier = (typeof DRAFT_TIERS)[number];
 // resource kind. Tiers absent from this map have no YAML editor.
 const YAML_VALIDITY_KEY: Partial<Record<DraftTier, string>> = {
   podOverrides: "podOverrides",
-  ingressSpec: "ingressSpec",
-  miteSpec: "miteSpec",
   statefulSet: "resourceOverlay.statefulSet",
   service: "resourceOverlay.service",
   ingress: "resourceOverlay.ingress",
@@ -82,8 +70,6 @@ const YAML_VALIDITY_KEY: Partial<Record<DraftTier, string>> = {
 const ZERO_VERSIONS: Record<DraftTier, number> = {
   form: 0,
   podOverrides: 0,
-  ingressSpec: 0,
-  miteSpec: 0,
   statefulSet: 0,
   service: 0,
   ingress: 0,
@@ -274,8 +260,15 @@ function applyPatchToObject(
   return out;
 }
 
+// The text shown for a failed save. A server rejection carries the reason in
+// its body, so that text wins over the fixed status copy in `message`.
+function saveFailureMessage(e: unknown): string {
+  if (e instanceof ApiError) return e.serverMessage || e.message;
+  return e instanceof Error ? e.message : "unknown error";
+}
+
 // The curated tier's draft is the spec minus fields owned by dedicated cards or
-// YAML tiers. It must NOT include them: diffing the full spec would let a field
+// YAML tiers (podOverrides, resourceOverlay). It must NOT include them: diffing the full spec would let a field
 // RJSF happens not to render (or an excluded one) fall out of the draft and be
 // emitted as a spurious removal.
 function stripExcluded(spec: Record<string, unknown>): Record<string, unknown> {
@@ -316,10 +309,6 @@ function tierDraftValue(tier: DraftTier, base: Record<string, unknown>): unknown
       return stripExcluded(base);
     case "podOverrides":
       return yamlOf(base.podOverrides);
-    case "ingressSpec":
-      return yamlOf(base.ingressSpec);
-    case "miteSpec":
-      return yamlOf(base.miteSpec);
     case "statefulSet":
       return (ro?.statefulSet as string | undefined) ?? "";
     case "service":
@@ -340,10 +329,6 @@ function tierBaseValue(tier: DraftTier, base: Record<string, unknown>): unknown 
       return stripExcluded(base);
     case "podOverrides":
       return base.podOverrides;
-    case "ingressSpec":
-      return base.ingressSpec;
-    case "miteSpec":
-      return base.miteSpec;
     case "statefulSet":
       return typeof ro?.statefulSet === "string" ? (ro.statefulSet as string).trim() : undefined;
     case "service":
@@ -361,8 +346,6 @@ interface SpecEditorCardProps {
   spec?: ControllerSpec;
   initialOverlay?: ResourceOverlay;
   initialPodOverrides?: PodOverrides;
-  initialIngressSpec?: IngressSpec;
-  initialMiteSpec?: MiteSpec;
   canUpdate?: boolean;
 }
 
@@ -373,8 +356,6 @@ export default function SpecEditorCard({
   spec,
   initialOverlay,
   initialPodOverrides,
-  initialIngressSpec,
-  initialMiteSpec,
   canUpdate,
 }: SpecEditorCardProps) {
   const { toast } = useToast();
@@ -404,17 +385,9 @@ export default function SpecEditorCard({
     initialPodOverrides ? stringifyYAML(initialPodOverrides) : "",
   );
 
-  // ── Tier 2: ingressSpec / miteSpec YAML text ──
-  // Both fields mix free-form key/value maps (ingressSpec.annotations,
-  // miteSpec.resources.requests/limits) with the RJSF-generated form, which
-  // rendered them unusably (issue #429). YAML is the honest editor here,
-  // same as podOverrides.
-  const [ingressSpecText, setIngressSpecText] = useState(() =>
-    initialIngressSpec ? stringifyYAML(initialIngressSpec) : "",
-  );
-  const [miteSpecText, setMiteSpecText] = useState(() =>
-    initialMiteSpec ? stringifyYAML(initialMiteSpec) : "",
-  );
+  // The last non-conflict save failure. It shows the server's own message and
+  // clears on the next save attempt, identity change, or Reload.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // ── Tier 3: resource overlay texts ──
   const [statefulSet, setStatefulSet] = useState(() => initialOverlay?.statefulSet ?? "");
@@ -507,8 +480,6 @@ export default function SpecEditorCard({
 
   // ── PodOverrides schema for Tier 2 validation ──
   const podOverridesSchema = openapiRoot ? getPodOverridesSchema(openapiRoot) : undefined;
-  const ingressSpecSchema = openapiRoot ? getIngressSpecSchema(openapiRoot) : undefined;
-  const miteSpecSchema = openapiRoot ? getMiteSpecSchema(openapiRoot) : undefined;
 
   // ── Hydration & rebase ─────────────────────────────────────────────────────
   // Hydrate a single tier's draft from a baseline, mark it pristine, and
@@ -537,12 +508,6 @@ export default function SpecEditorCard({
         break;
       case "podOverrides":
         setPodOverridesText(rebasedYamlText(podOverridesText, base.podOverrides));
-        break;
-      case "ingressSpec":
-        setIngressSpecText(rebasedYamlText(ingressSpecText, base.ingressSpec));
-        break;
-      case "miteSpec":
-        setMiteSpecText(rebasedYamlText(miteSpecText, base.miteSpec));
         break;
       case "statefulSet":
         setStatefulSet(value as string);
@@ -586,6 +551,7 @@ export default function SpecEditorCard({
     prevIdentity.current = identity;
     prevSpec.current = spec;
     if (!specChanged && !idChanged) return;
+    if (idChanged) setSaveError(null);
 
     // Conflict Reload forced a full reset regardless of dirtiness.
     if (forceHydrateRef.current) {
@@ -728,6 +694,7 @@ export default function SpecEditorCard({
     force: boolean,
   ) => {
     setSaving(true);
+    setSaveError(null);
     try {
       pendingPatch.current = patch;
       pendingVersions.current = savedVersions;
@@ -762,8 +729,9 @@ export default function SpecEditorCard({
         setConflicts(e.conflicts);
         setShowConflict(true);
       } else {
-        // Non-conflict failure: baseline and every draft stay unchanged.
-        toast(`Failed: ${e instanceof Error ? e.message : "unknown"}`);
+        // Non-conflict failure: baseline and every draft stay unchanged. The
+        // banner names the server's reason; the drafts stay in the form.
+        setSaveError(saveFailureMessage(e));
       }
     } finally {
       setSaving(false);
@@ -779,8 +747,6 @@ export default function SpecEditorCard({
     const parsedTiers: Record<string, unknown> = {};
     for (const tier of [
       { key: "podOverrides", text: podOverridesText, label: "Pod overrides" },
-      { key: "ingressSpec", text: ingressSpecText, label: "Ingress" },
-      { key: "miteSpec", text: miteSpecText, label: "Mite" },
     ]) {
       if (!tier.text.trim()) continue;
       try {
@@ -818,11 +784,7 @@ export default function SpecEditorCard({
       return;
     }
 
-    for (const tier of [
-      { key: "podOverrides" as DraftTier },
-      { key: "ingressSpec" as DraftTier },
-      { key: "miteSpec" as DraftTier },
-    ]) {
+    for (const tier of [{ key: "podOverrides" as DraftTier }]) {
       const tierPatch = diffValues(
         snapshotFor(tier.key),
         parsedTiers[tier.key],
@@ -852,6 +814,7 @@ export default function SpecEditorCard({
   };
 
   const handleSave = () => {
+    setSaveError(null);
     void doSave(false);
   };
 
@@ -873,6 +836,7 @@ export default function SpecEditorCard({
   const handleReload = () => {
     setShowConflict(false);
     setConflicts([]);
+    setSaveError(null);
     const fresh = qc.getQueryData<{ spec?: ControllerSpec }>([
       "controller",
       cluster,
@@ -898,9 +862,15 @@ export default function SpecEditorCard({
         title="Spec Editor"
         headerRight={<span className={styles.cardNote}>Saving rolls the pod</span>}
       >
-        <Tabs tabs={SPEC_TABS} activeTab={activeTab} onSelect={setActiveTab} />
+        <Tabs
+          tabs={SPEC_TABS}
+          activeTab={activeTab}
+          onSelect={setActiveTab}
+          idBase="spec-editor"
+          ariaLabel="Spec editor tiers"
+        />
 
-        <div className={styles.tabContent}>
+        <div className={styles.tabContent} {...tabPanelProps("spec-editor", activeTab)}>
           {/* Tier 1: Generated form */}
           {activeTab === "form" && (
             <KeyEditContext.Provider value={reportFormKeyEditing}>
@@ -938,50 +908,6 @@ export default function SpecEditorCard({
             </div>
           )}
 
-          {/* Tier 2: ingressSpec YAML editor — annotations is a free-form
-              key/value map the generated form rendered unusably (#429) */}
-          {activeTab === "ingressSpec" && (
-            <div className={styles.yamlTier}>
-              <div className={styles.tierLabel}>Ingress (YAML)</div>
-              <YamlTierEditor
-                value={ingressSpecText}
-                onChange={(v) => {
-                  setIngressSpecText(v);
-                  setDraftVersion((p) => ({ ...p, ingressSpec: p.ingressSpec + 1 }));
-                }}
-                jsonSchema={ingressSpecSchema}
-                onValidityChange={(v) => setYamlValidity("ingressSpec", v)}
-              />
-              {ingressSpecSchema && (
-                <div className={styles.schemaNote}>
-                  Validated against IngressSpec schema
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tier 2: miteSpec YAML editor — resources.requests/limits are
-              free-form maps the generated form rendered unusably (#429) */}
-          {activeTab === "miteSpec" && (
-            <div className={styles.yamlTier}>
-              <div className={styles.tierLabel}>Mite sidecar (YAML)</div>
-              <YamlTierEditor
-                value={miteSpecText}
-                onChange={(v) => {
-                  setMiteSpecText(v);
-                  setDraftVersion((p) => ({ ...p, miteSpec: p.miteSpec + 1 }));
-                }}
-                jsonSchema={miteSpecSchema}
-                onValidityChange={(v) => setYamlValidity("miteSpec", v)}
-              />
-              {miteSpecSchema && (
-                <div className={styles.schemaNote}>
-                  Validated against MiteSpec schema
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Tier 3: Resource overlay YAML editors */}
           {activeTab === "resourceOverlay" && (
             <div className={styles.yamlTier}>
@@ -989,8 +915,10 @@ export default function SpecEditorCard({
                 tabs={OVERLAY_TABS}
                 activeTab={overlaySubTab}
                 onSelect={setOverlaySubTab}
+                idBase="spec-overlay"
+                ariaLabel="Overlay resource"
               />
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 12 }} {...tabPanelProps("spec-overlay", overlaySubTab)}>
                 <YamlTierEditor
                   // One editor serves all three overlay kinds. It builds its
                   // document and its change listener once, at mount, so
@@ -1051,6 +979,11 @@ export default function SpecEditorCard({
         {/* Save button */}
         {canUpdate && (
           <div style={{ marginTop: 12 }}>
+            {saveError && (
+              <div className={styles.errorBanner} role="alert">
+                Save failed: {saveError} Your edits are kept.
+              </div>
+            )}
             {invalidYamlTiers.length > 0 && (
               <div className={styles.errorBanner}>
                 Cannot save: invalid YAML in {invalidYamlTiers.join(", ")}. Fix

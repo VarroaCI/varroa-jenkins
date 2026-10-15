@@ -35,12 +35,30 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		withListOutput(composedBundleListOutputSchema),
 	)
 	addTool(mcpServer, kindRead, listCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.CanReadComposedBundles(claims) {
+			return mcp.NewToolResultError("access denied: missing composedbundles:read permission"), nil
+		}
 		args := getArgs(req)
 		ns := namespaceOrDefault(args)
 		bundles, err := crdstore.List[v1alpha1.ComposedBundle](ctx, deps.Store, ns, "")
 		if err != nil {
 			return mcp.NewToolResultError("failed to list composed bundles: " + err.Error()), nil
 		}
+		keep := deps.Authorizer.ConfigReadFilter(claims, "composedbundles", deps.OperatorNamespace)
+		visible := bundles[:0]
+		for _, b := range bundles {
+			if keep(b.Namespace) {
+				visible = append(visible, b)
+			}
+		}
+		bundles = visible
 		if verbose, _ := args["verbose"].(bool); verbose {
 			return resultJSON(bundles)
 		}
@@ -57,8 +75,18 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithString("name", mcp.Required(), mcp.Description("Bundle name")),
 	)
 	addTool(mcpServer, kindRead, getCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
 		ns, _ := getArgs(req)["namespace"].(string)
 		name, _ := getArgs(req)["name"].(string)
+		if !deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, deps.OperatorNamespace) {
+			return mcp.NewToolResultError("access denied: missing composedbundles:read permission in namespace " + ns), nil
+		}
 		bundle, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns)
 		if err != nil {
 			return mcp.NewToolResultError("composed bundle not found: " + err.Error()), nil
@@ -86,8 +114,8 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		args := getArgs(req)
 		ns := strArg(args, "namespace")
-		if !deps.Authorizer.CanWriteComposedBundles(claims, "create") {
-			return mcp.NewToolResultError("access denied: missing composedbundles:create permission"), nil
+		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "create", ns) {
+			return mcp.NewToolResultError("access denied: missing composedbundles:create permission in namespace " + ns), nil
 		}
 		bundle := &v1alpha1.ComposedBundle{
 			ObjectMeta: objMeta(args),
@@ -144,8 +172,8 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		if !deps.Authorizer.CanWriteComposedBundles(claims, "update") {
-			return mcp.NewToolResultError("access denied: missing composedbundles:update permission"), nil
+		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "update", ns) {
+			return mcp.NewToolResultError("access denied: missing composedbundles:update permission in namespace " + ns), nil
 		}
 		existing, err := crdstore.Get[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns)
 		if err != nil {
@@ -214,8 +242,8 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		if !deps.Authorizer.CanWriteComposedBundles(claims, "delete") {
-			return mcp.NewToolResultError("access denied: missing composedbundles:delete permission"), nil
+		if !deps.Authorizer.CanWriteComposedBundlesInNamespace(claims, "delete", ns) {
+			return mcp.NewToolResultError("access denied: missing composedbundles:delete permission in namespace " + ns), nil
 		}
 		if err := crdstore.Delete[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError("failed to delete composed bundle: " + err.Error()), nil

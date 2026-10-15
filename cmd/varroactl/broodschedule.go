@@ -146,6 +146,15 @@ func doBroodScheduleList(cmd *cobra.Command, cl *client.ClientWithResponses) err
 	if resp.JSON200 == nil {
 		return errFromResponse(resp.Body, resp.StatusCode())
 	}
+	for _, st := range resp.JSON200.Clusters {
+		if !st.Ok {
+			msg := "no answer"
+			if st.Error != nil && *st.Error != "" {
+				msg = *st.Error
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: cluster %s: %s; its brood schedules are not listed\n", st.Cluster, msg)
+		}
+	}
 	o, _ := cmd.Flags().GetString("output")
 	nh, _ := cmd.Flags().GetBool("no-headers")
 	switch o {

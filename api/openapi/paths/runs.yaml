@@ -1,0 +1,569 @@
+# runs - run detail, log stream, artifacts, tests, changes, cancel, rerun.
+/api/v1/runs/{run}:
+  get:
+    operationId: getRun
+    tags: [Pipelines]
+    summary: Returns one run's record and stage list.
+    description: >
+      Authorizes with the run read check on the record's own tenant and
+      job path, so a run whose cell was deleted still resolves for a
+      permitted caller.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run record.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunDetail'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/log:
+  get:
+    operationId: streamRunLog
+    tags: [Pipelines]
+    summary: Streams a run's console log, history then the live tail.
+    description: >
+      Plays the stored log as Server-Sent Events, then attaches the live
+      tail while the run is not terminal. raw=true returns the plain
+      console text instead of an event stream, with no new path.
+    x-sse: true
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - {name: from, in: query, description: 'Byte offset of the first unread byte.', schema: {type: integer, format: int64, default: 0}}
+      - {name: fromLine, in: query, description: '1-based line number starting at from.', schema: {type: integer}}
+      - {name: raw, in: query, description: 'true returns text/plain with no SSE.', schema: {type: boolean, default: false}}
+    responses:
+      "200":
+        description: >
+          The event stream (event kinds meta, stage, line, gap, live, end)
+          or, with raw=true, the plain console text.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+          text/plain:
+            schema:
+              type: string
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/artifacts:
+  get:
+    operationId: listRunArtifacts
+    tags: [Pipelines]
+    summary: Lists one run's archived artifacts.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's artifacts.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunArtifactListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/artifacts/{path}:
+  get:
+    operationId: downloadRunArtifact
+    tags: [Pipelines]
+    summary: Streams one artifact's bytes.
+    description: >
+      path is a multi-segment artifact path, exactly as run_artifacts.path
+      stored it. The handler opens the recorded blob_key with the blob
+      store's native-object read — an artifact is one object, never a
+      chunk sequence — and never derives a key from run or path.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - $ref: '../components/parameters.yaml#/artifactPath'
+      - {name: Range, in: header, description: 'Byte range within the artifact.', schema: {type: string}}
+    responses:
+      "200":
+        description: The complete artifact.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "206":
+        description: The requested byte range.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run or the artifact does not exist, or the caller may not read the run.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "409":
+        description: >
+          The artifact row carries an empty blob key (Jenkins stored it
+          locally). The message names the recordStore.blobs.mode chart
+          value that selects the blob mode.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/tests:
+  get:
+    operationId: listRunTests
+    tags: [Pipelines]
+    summary: Lists one run's test suites, totals, stored test cases, and test report.
+    description: >
+      items holds one row per suite, at most 500, the most failed suites
+      first, then by suite name. items is empty when the run reported no
+      suite. totals holds the run's aggregate counters, and it is absent
+      when the run reported no test result. cases holds the run's stored
+      failed and skipped cases, at most 500, failed cases first. report describes the archived report file, which holds
+      every case. Download that file through the run's artifact path.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's test suite totals, test cases, and test report.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunTestListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/changes:
+  get:
+    operationId: listRunChanges
+    tags: [Pipelines]
+    summary: Lists one run's SCM changes.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's SCM changes.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunChangeListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/downstream:
+  get:
+    operationId: listRunDownstream
+    tags: [Pipelines]
+    summary: Lists one page of the runs that one run started, newest first.
+    description: >
+      Each item passes the run read check on its own. An item the caller may
+      not read carries its tenant alone.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      - {name: cursor, in: query, schema: {type: string}}
+    responses:
+      "200":
+        description: A page of the runs the run started.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunLinkPage'
+      "400":
+        description: The limit is out of range, or the cursor is malformed.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/cancel:
+  post:
+    operationId: cancelRun
+    tags: [Pipelines]
+    summary: Requests that a queued or running build stop. Fire and forget.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "202":
+        description: The cancel was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CancelRunResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/rerun:
+  post:
+    operationId: rerunRun
+    tags: [Pipelines]
+    summary: Requests a retry of a finished run. One retry per source run, fleet-wide.
+    description: >
+      Reads the ledger by the retry intent key first: when a retry
+      already exists, its run id is returned and no command is
+      published.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "202":
+        description: The retry was requested, or an existing retry's identifier was returned.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunActionResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/script:
+  get:
+    operationId: getRunScript
+    tags: [Pipelines]
+    summary: Reads one run's own Groovy script and whether the run replays.
+    description: >
+      The BFF reads the build record the run retains in the blob tier.
+      A run that does not replay answers replayable false, the reason,
+      an empty script, and an empty loadedScripts object.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's script, its loaded scripts, and its replay eligibility.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunScript'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/replay:
+  post:
+    operationId: replayRun
+    tags: [Pipelines]
+    summary: Starts a new build of the run's job with an edited script. Fire and forget.
+    description: >
+      The BFF applies the eligibility rules of the script read, mints a
+      new run identifier, and publishes one REPLAY_BUILD command to the
+      job's home member. It does not wait for Jenkins. Each call starts
+      its own build with its own build number.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [script]
+            additionalProperties: false
+            properties:
+              script:
+                type: string
+                description: >
+                  The edited main script, at most 262144 UTF-8 bytes. A
+                  larger script answers 413. The library scripts load again
+                  from their library, so the body holds no library script.
+    responses:
+      "202":
+        description: The replay was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunActionResponse'
+      "400":
+        description: The request body does not decode, or the script is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "409":
+        description: >
+          The run does not replay. The message names the reason, one of
+          the reason values of the script read.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "413":
+        description: The script is larger than 256 KiB.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/restart:
+  get:
+    operationId: getRunRestart
+    tags: [Pipelines]
+    summary: Reads whether one run restarts from a stage, and the stages it can restart from.
+    description: >
+      The BFF reads the restart answer the plugin recorded when the run
+      completed. It never calls Jenkins. A run that does not restart
+      answers restartable false and the reason, and an empty stages list.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The run's restart answer.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunRestart'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+  post:
+    operationId: restartRun
+    tags: [Pipelines]
+    summary: Starts a new build of the run's job from one stage. Fire and forget.
+    description: >
+      The BFF applies the eligibility rules of the restart read, mints a
+      new run identifier, and publishes one RESTART_BUILD command to the
+      job's home member. The plugin checks that the source build still
+      sits on that cell before it schedules the restart. The new run
+      copies the parameter values of the source build. It does not wait
+      for Jenkins.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/RestartRunRequest'
+    responses:
+      "202":
+        description: The restart was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunActionResponse'
+      "400":
+        description: The request body does not decode, or the stage is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "409":
+        description: >
+          The run does not restart, or the stage is not restartable. The
+          message names the reason: not-terminal, template-defined,
+          not-recorded, not-declarative, disabled, unavailable,
+          no-restartable-stage, or home-moved. The job moved and no restart
+          copy is kept. An unlisted stage answers "stage <name> is not
+          restartable".
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "413":
+        description: The request body is larger than 4 KiB.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/inputs/{input}/proceed:
+  post:
+    operationId: proceedRunInput
+    tags: [Pipelines]
+    summary: Answers one pending input step as the calling user. Fire and forget.
+    description: >
+      The BFF publishes one PROCEED_INPUT command and does not wait for
+      Jenkins. The plugin applies the step's own declared defaults for
+      every parameter the request omits.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - $ref: '../components/parameters.yaml#/input'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              parameters:
+                type: object
+                description: >
+                  Input parameter values, as a map of name to string
+                  value. A name the step does not declare is dropped.
+                additionalProperties:
+                  type: string
+    responses:
+      "202":
+        description: The proceed was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CancelRunResponse'
+      "400":
+        description: The input identifier is empty, or the request body does not decode.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/runs/{run}/inputs/{input}/abort:
+  post:
+    operationId: abortRunInput
+    tags: [Pipelines]
+    summary: Rejects one pending input step as the calling user. Fire and forget.
+    description: >
+      The BFF publishes one ABORT_INPUT command and does not wait for
+      Jenkins. The abort path takes no body.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+      - $ref: '../components/parameters.yaml#/input'
+    responses:
+      "202":
+        description: The abort was requested.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CancelRunResponse'
+      "400":
+        description: The input identifier is empty.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        description: The run does not exist, or the caller may not read it.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

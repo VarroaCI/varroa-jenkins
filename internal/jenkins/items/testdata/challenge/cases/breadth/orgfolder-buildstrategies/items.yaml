@@ -1,0 +1,12 @@
+items:
+  - kind: organizationFolder
+    name: orgfolder-buildstrategies
+    displayName: "Org Folder Build Strategies"
+    description: "Organization folder asserting the unconditional skip-initial-build strategy"
+    navigators:
+      - githubNavigator:
+          repoOwner: fake-org
+          credentialsId: github-cred
+    projectFactories:
+      - multiBranchProjectFactory:
+          scriptPath: Jenkinsfile

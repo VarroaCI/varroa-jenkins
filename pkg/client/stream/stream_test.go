@@ -461,3 +461,87 @@ func TestStream_Non200Retryable(t *testing.T) {
 		t.Errorf("expected at least 2 requests (retry), got %d", count.Load())
 	}
 }
+
+// resumeQueries runs Stream against a server that closes the first
+// connection after one frame and sends "done" on the second. It answers
+// the raw query of each request and the number of ResumeURL calls.
+func resumeQueries(t *testing.T, path string, resume func(base string) string) ([]string, int32) {
+	t.Helper()
+	var (
+		requestCount atomic.Int32
+		queries      = make(chan string, 4)
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries <- r.URL.RawQuery
+		count := requestCount.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		if count == 1 {
+			fmt.Fprintf(w, "data: first\n\n")
+			flusher.Flush()
+			return
+		}
+		fmt.Fprintf(w, "data: done\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var resumeCalls atomic.Int32
+	base := srv.URL + path
+	err := Stream(ctx, Config{
+		URL:     base,
+		Client:  srv.Client(),
+		Backoff: BackoffConfig{Initial: 5 * time.Millisecond, Max: 50 * time.Millisecond, Factor: 2},
+		ResumeURL: func() string {
+			resumeCalls.Add(1)
+			return resume(srv.URL + path)
+		},
+	}, func(e Event) error {
+		if string(e.Data) == "done" {
+			cancel()
+		}
+		return nil
+	})
+	srv.Close()
+	if err != nil {
+		t.Fatalf("Stream returned error: %v", err)
+	}
+	close(queries)
+	var got []string
+	for q := range queries {
+		got = append(got, q)
+	}
+	return got, resumeCalls.Load()
+}
+
+func TestStream_ResumeURLUsedOnReconnectOnly(t *testing.T) {
+	queries, calls := resumeQueries(t, "/log", func(base string) string { return base + "?from=7&fromLine=2" })
+	if len(queries) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(queries), queries)
+	}
+	if queries[0] != "" {
+		t.Errorf("first request must use URL, got query %q", queries[0])
+	}
+	if queries[1] != "from=7&fromLine=2" {
+		t.Errorf("reconnect must use ResumeURL, got query %q", queries[1])
+	}
+	if calls != 1 {
+		t.Errorf("expected ResumeURL called once, got %d", calls)
+	}
+}
+
+func TestStream_EmptyResumeURLFallsBackToURL(t *testing.T) {
+	queries, _ := resumeQueries(t, "/log?a=1", func(string) string { return "" })
+	if len(queries) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(queries), queries)
+	}
+	for i, q := range queries {
+		if q != "a=1" {
+			t.Errorf("request %d: expected URL query a=1, got %q", i, q)
+		}
+	}
+}

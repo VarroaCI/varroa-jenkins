@@ -1634,3 +1634,180 @@ func sha256HexOf(t *testing.T, b []byte) string {
 	}
 	return strings.TrimPrefix(digest, "sha256:")
 }
+
+// ---------------------------------------------------------------------------
+// latest pins resolve to a concrete version before download
+// ---------------------------------------------------------------------------
+
+// proxyHandler forwards every request to upstream, so a recording server can
+// observe the paths a real update-center fixture serves.
+func proxyHandler(upstream string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := http.Get(upstream + r.URL.Path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}
+}
+
+// latestFooFixture returns one plugin fixture named foo at 1.2.3.
+func latestFooFixture(t *testing.T) pluginFixture {
+	t.Helper()
+	data := []byte("fake-hpi-content-for-latest-pin")
+	digest, _, err := computeSha256Digest(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pluginFixture{name: "foo", version: "1.2.3", sha256B64: hexToB64(strings.TrimPrefix(digest, "sha256:")), data: data}
+}
+
+func TestExport_LatestPinPacksConcreteVersion(t *testing.T) {
+	testSetup(t)
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+
+	upstream := ucAndPluginServer(t, map[string]pluginFixture{"foo": latestFooFixture(t)})
+	defer upstream.Close()
+	rs := newRecordingServer(proxyHandler(upstream.URL))
+	defer rs.Close()
+
+	pfPath := filepath.Join(tmpDir, "plugins.yaml")
+	if err := os.WriteFile(pfPath, []byte("plugins:\n  - artifactId: foo\n    version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "plugins", "--profile", "test", "--plugins-file", pfPath, "--to", "dir://" + outDir, "--download-url-base", rs.URL})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+
+	store, cleanup, err := openOCISrc("dir", outDir, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cleanup() }()
+	_, rps, err := readPackHelper(t, store, outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rps) != 1 || rps[0].Version != "1.2.3" {
+		t.Fatalf("packed plugins = %+v, want foo at 1.2.3", rps)
+	}
+	for _, p := range rs.recordedPaths() {
+		if strings.Contains(p, "/latest/") {
+			t.Errorf("export requested a latest path: %s", p)
+		}
+	}
+}
+
+func TestExport_EmptyVersionInPluginsFileResolvesAsLatest(t *testing.T) {
+	testSetup(t)
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+
+	upstream := ucAndPluginServer(t, map[string]pluginFixture{"foo": latestFooFixture(t)})
+	defer upstream.Close()
+
+	pfPath := filepath.Join(tmpDir, "plugins.yaml")
+	if err := os.WriteFile(pfPath, []byte("plugins:\n  - artifactId: foo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "plugins", "--profile", "test", "--plugins-file", pfPath, "--to", "dir://" + outDir, "--download-url-base", upstream.URL})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+
+	store, cleanup, err := openOCISrc("dir", outDir, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cleanup() }()
+	_, rps, err := readPackHelper(t, store, outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rps) != 1 || rps[0].Version != "1.2.3" {
+		t.Fatalf("packed plugins = %+v, want foo at 1.2.3", rps)
+	}
+}
+
+func TestExport_LatestPinUnlistedFailsClosed(t *testing.T) {
+	testSetup(t)
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+
+	// The metadata lists only bar, so foo at latest has no source to resolve from.
+	bar := pluginFixture{name: "bar", version: "9.9.9", sha256B64: hexToB64(strings.Repeat("ab", 32))}
+	upstream := ucAndPluginServer(t, map[string]pluginFixture{"bar": bar})
+	defer upstream.Close()
+
+	pfPath := filepath.Join(tmpDir, "plugins.yaml")
+	if err := os.WriteFile(pfPath, []byte("plugins:\n  - artifactId: foo\n    version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "plugins", "--profile", "test", "--plugins-file", pfPath, "--to", "dir://" + outDir, "--download-url-base", upstream.URL})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("export of an unlisted latest pin must fail")
+	}
+	if !strings.Contains(err.Error(), "foo@latest") || !strings.Contains(err.Error(), "pin an exact version") {
+		t.Errorf("error = %v, want it to name foo@latest and tell the user to pin an exact version", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outDir, "index.json")); statErr == nil {
+		t.Error("a failed export must not write index.json")
+	}
+}
+
+func TestResolveLatestPins_FiltersByProfileCore(t *testing.T) {
+	// The weekly document lists foo 3.0 for a newer core; the dynamic-stable
+	// document for the profile's core lists foo 2.0. The profile's core must win.
+	// Upstream metadata entries without a sha256 are skipped, so each one carries a digest.
+	const digest = `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`
+	weekly := `{"plugins":{"foo":{"version":"3.0","sha256":` + digest + `,"requiredCore":"2.600"}}}`
+	stable := `{"plugins":{"foo":{"version":"2.0","sha256":` + digest + `,"requiredCore":"2.555.1"}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/update-center.actual.json":
+			_, _ = io.WriteString(w, weekly)
+		case "/dynamic-stable-2.555.3/update-center.actual.json":
+			_, _ = io.WriteString(w, stable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	entries := []resolvedEntry{{Name: "foo", Version: "latest", ResolveVersion: "2.555.3"}}
+	resolver := newExportResolver(srv.URL, entries)
+	out, err := resolveLatestPins(context.Background(), resolver, "", entries)
+	if err != nil {
+		t.Fatalf("resolveLatestPins: %v", err)
+	}
+	if out[0].Version != "2.0" {
+		t.Errorf("resolved version = %q, want 2.0", out[0].Version)
+	}
+}
+
+func TestResolveLatestPins_LeavesExactPinsUnchanged(t *testing.T) {
+	// The resolver points at an unreachable host. An exact pin must never reach it.
+	entries := []resolvedEntry{{Name: "foo", Version: "1.0"}, {Name: "bar", Version: "2.1", ResolveVersion: "2.555.3"}}
+	resolver := newExportResolver("http://127.0.0.1:1", entries)
+	out, err := resolveLatestPins(context.Background(), resolver, "2.555.3", entries)
+	if err != nil {
+		t.Fatalf("resolveLatestPins: %v", err)
+	}
+	for i := range entries {
+		if out[i] != entries[i] {
+			t.Errorf("entry %d changed: got %+v, want %+v", i, out[i], entries[i])
+		}
+	}
+}

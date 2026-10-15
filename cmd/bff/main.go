@@ -35,7 +35,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/nats-io/nats.go"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -51,7 +51,6 @@ import (
 	ldappkg "github.com/varroaci/varroa-jenkins/internal/auth/ldap"
 	localpkg "github.com/varroaci/varroa-jenkins/internal/auth/local"
 	"github.com/varroaci/varroa-jenkins/internal/auth/schedule"
-	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -59,6 +58,8 @@ import (
 	mcp "github.com/varroaci/varroa-jenkins/internal/mcp"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
 	rbac "github.com/varroaci/varroa-jenkins/internal/rbac"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/signing"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
@@ -95,7 +96,8 @@ func main() {
 	ldapCACertFile := flag.String("ldap-ca-cert-file", envDefault("VARROA_LDAP_CA_CERT_FILE", ""), "Path to a PEM CA bundle used to verify the LDAP server certificate")
 	kubeconfigPath := flag.String("kubeconfig", "", "Explicit kubeconfig path")
 	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc, local, or ldap")
-	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap)")
+	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap, or with --local-accounts)")
+	localAccounts := flag.Bool("local-accounts", envDefault("VARROA_LOCAL_ACCOUNTS", "") == "true", "Accept declared local accounts beside OIDC (auth-mode=oidc only)")
 	dashboardURL := flag.String("dashboard-url", envDefault("VARROA_DASHBOARD_URL", ""), "External dashboard URL (required in OIDC mode; absolute HTTPS origin)")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
@@ -145,6 +147,10 @@ func main() {
 		}
 	} else if *authMode == "oidc" {
 		logger.Error("--dashboard-url is required in OIDC auth mode")
+		os.Exit(1)
+	}
+	if *localAccounts && *authMode != "oidc" {
+		logger.Error("--local-accounts is only valid with auth-mode=oidc", "authMode", *authMode)
 		os.Exit(1)
 	}
 
@@ -214,8 +220,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-bff"), "bff"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+	meterProvider := otel.GetMeterProvider()
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-bff"), "bff"); err != nil {
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for streams and KV buckets (from the NATS cluster
 	// size, clamped 1..3 by the chart). Even hive-mode BFFs read the core's
@@ -283,10 +290,22 @@ func main() {
 		}
 	}()
 
+	// --- Live run notification fanout (one key per cluster and tenant) ---
+	runFanout, err := sse.NewRunFanout(busConn, meterProvider)
+	if err != nil {
+		logger.Error("failed to create run fanout", "error", err)
+		os.Exit(1)
+	}
+	runFanout.Logger = logger
+	go func() {
+		if err := runFanout.Start(ctx); err != nil {
+			logger.Error("run fanout error", "error", err)
+		}
+	}()
+
 	// --- Cluster membership gauge (15s ticker) ---
 	go func() {
-		meter := otel.Meter("varroa-bff")
-		gauge, _ := meter.Int64Gauge("varroa.clusters.known",
+		gauge, _ := meterProvider.Meter("varroa-bff").Int64Gauge("varroa.clusters.known",
 			metric.WithDescription("Member clusters currently present in varroa_clusters"))
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
@@ -303,81 +322,28 @@ func main() {
 	}()
 
 	// --- Activity stream lifecycle + persistence ---
-	// Read retention config from environment.
-	retentionStr := envDefault("VARROA_ACTIVITY_RETENTION", "7d")
-	maxMsgsStr := envDefault("VARROA_ACTIVITY_MAX_MSGS", "100000")
-	maxBytesStr := envDefault("VARROA_ACTIVITY_MAX_BYTES", "1073741824")
-
-	maxAge, off, fallback := activity.ParseRetention(retentionStr)
-	if fallback {
-		logger.Warn("unrecognized VARROA_ACTIVITY_RETENTION value, falling back to 7d",
-			"value", retentionStr)
+	// The recorder owns the varroa_activity stream's create/update
+	// lifecycle; the BFF creates and updates no JetStream stream for
+	// activity. History reads go through deps.Backfill, wired below from
+	// the record store when one is configured; the live feed stays on
+	// BusFanout's own activity.> subscription (started above), the BFF's
+	// only subscription to that subject.
+	if err := busConn.EnsureStream(bus.WebhookStreamConfig(
+		bus.WebhookStreamName, busConn.Replicas(),
+	)); err != nil {
+		logger.Error("failed to ensure webhook stream", "error", err)
+		os.Exit(1)
 	}
 
-	var maxMsgs, maxBytes int64
-	if _, err := fmt.Sscanf(maxMsgsStr, "%d", &maxMsgs); err != nil {
-		logger.Warn("invalid VARROA_ACTIVITY_MAX_MSGS, using default 100000", "value", maxMsgsStr)
-		maxMsgs = 100000
-	}
-	if _, err := fmt.Sscanf(maxBytesStr, "%d", &maxBytes); err != nil {
-		logger.Warn("invalid VARROA_ACTIVITY_MAX_BYTES, using default 1073741824", "value", maxBytesStr)
-		maxBytes = 1073741824
-	}
-
-	actStore := activity.New(200)
-	actStore.Logger = logger
-
-	var backfill activity.Backfill
-	if off {
-		logger.Info("activity retention is off; using in-memory ring with activity.> subscriber")
-
-		// Single ring-writer: subscribe to activity.> and append to the ring.
-		// This is the ONLY writer to the ring; user-action Notify sites route
-		// through the Publisher (above) and the bus echoes back here.
-		go func() {
-			sub, err := busConn.Subscribe(bus.ActivityWildcard, func(msg *nats.Msg) {
-				var e activity.Event
-				if err := json.Unmarshal(msg.Data, &e); err != nil {
-					return
-				}
-				actStore.Append(e)
-			})
-			if err != nil {
-				logger.Error("subscribe activity.> failed", "error", err)
-				return
-			}
-			defer func() { _ = sub.Unsubscribe() }()
-			<-ctx.Done()
-		}()
-
-		backfill = activity.NewRingBackfill(actStore)
-	} else {
-		logger.Info("ensuring activity JetStream stream",
-			"maxAge", maxAge, "maxMsgs", maxMsgs, "maxBytes", maxBytes)
-		if err := busConn.EnsureStream(bus.ActivityStreamConfig(
-			bus.ActivityStreamName, maxAge, maxMsgs, maxBytes, busConn.Replicas(),
-		)); err != nil {
-			logger.Error("failed to ensure activity stream", "error", err)
-			os.Exit(1)
-		}
-		// Ensure the webhook replay stream (idempotent).
-		if err := busConn.EnsureStream(bus.WebhookStreamConfig(
-			bus.WebhookStreamName, busConn.Replicas(),
-		)); err != nil {
-			logger.Error("failed to ensure webhook stream", "error", err)
-			os.Exit(1)
-		}
-		backfill = activity.NewJetStreamBackfill(cluster, busConn, bus.ActivityStreamName, 5000, int(maxAge.Hours()/24))
-	}
-
-	// Construct the activity Publisher (always present; publishes to bus regardless of mode).
+	// Construct the activity Publisher (always present; publishes to bus
+	// regardless of whether the record store is configured).
 	actPub := activity.NewPublisher(cluster, busConn)
 	actPub.Logger = logger
 	// Jenkins-source events are published by the gateway to the per-controller
 	// activity.<ns>.<controller> subjects (see internal/mite/bus_handler.go), so
-	// they are ingested by the activity.> ring subscriber (off mode) and the
-	// JetStream stream (retention mode) like every other activity event — no
-	// dedicated events.activity subscriber is needed here.
+	// they reach the recorder's activity consumer and BusFanout's live feed
+	// like every other activity event — no dedicated events.activity
+	// subscriber is needed here.
 
 	// --- RBAC informers and authorizer ---
 	dynamicClient := clientsetClient.DynamicClient()
@@ -509,27 +475,92 @@ func main() {
 		},
 		&unstructured.Unstructured{},
 		0,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	)
+	if err := controllerInformer.SetTransform(api.ControllerCacheTransform); err != nil {
+		logger.Error("failed to set transform on controller informer", "error", err)
+		os.Exit(1)
+	}
+	controllerLister := api.NewIndexerControllerLister(controllerInformer.GetIndexer())
+
+	// Team informer, built like the five above. It feeds the Team-membership
+	// path of tenant capability resolution (internal/rbac EffectiveTenantCapabilities).
+	teamGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
+	teamInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(teamGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(teamGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
 		cache.Indexers{},
 	)
-	if err := controllerInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+	if err := teamInformer.SetTransform(func(obj interface{}) (interface{}, error) {
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
 			return obj, nil
 		}
-		ctrl := &v1alpha1.Controller{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, ctrl); err != nil {
+		team := &v1alpha1.Team{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, team); err != nil {
 			return nil, err
 		}
-		return ctrl, nil
+		return team, nil
 	}); err != nil {
-		logger.Error("failed to set transform on controller informer", "error", err)
+		logger.Error("failed to set transform on team informer", "error", err)
 		os.Exit(1)
 	}
 
-	userClaims := strings.Split(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), ",")
-	groupClaims := strings.Split(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), ",")
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, *defaultRead,
-		userClaims, groupClaims)
+	// Runner informer feeds the agent WebSocket door's token index (design
+	// D7): every add or update event re-indexes the object's current
+	// status.token, and every delete event drops it.
+	runnerTokenIndex := api.NewRunnerTokenIndex()
+	runnerGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "runners"}
+	runnerInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(runnerGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(runnerGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := runnerInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		runner := &v1alpha1.Runner{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, runner); err != nil {
+			return nil, err
+		}
+		return runner, nil
+	}); err != nil {
+		logger.Error("failed to set transform on runner informer", "error", err)
+		os.Exit(1)
+	}
+	if _, err := runnerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) { indexRunnerToken(runnerTokenIndex, obj) },
+		UpdateFunc: func(_, newObj interface{}) {
+			indexRunnerToken(runnerTokenIndex, newObj)
+		},
+		DeleteFunc: func(obj interface{}) { unindexRunnerToken(runnerTokenIndex, obj) },
+	}); err != nil {
+		logger.Error("failed to add event handler on runner informer", "error", err)
+		os.Exit(1)
+	}
+
+	userClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"))
+	groupClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"))
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer, *defaultRead,
+		userClaims)
 	authorizer := api.NewAuthorizer(rbacResolver, *defaultRead)
 	configBrood := api.NewBusConfigBrood(cluster, busConn, client, clientsetClient, logger)
 	rbacFederation := api.NewRBACFederationReconciler(
@@ -537,6 +568,7 @@ func main() {
 		roleBindingInformer.GetStore(),
 		jenkinsRoleInformer.GetStore(),
 		configBrood,
+		clientsetClient,
 		clustersKV,
 		cluster,
 		logger,
@@ -549,12 +581,16 @@ func main() {
 	go controllerInformer.Run(ctx.Done())
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
+	go teamInformer.Run(ctx.Done())
+	go runnerInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
 		roleInformer.HasSynced,
 		roleBindingInformer.HasSynced,
 		controllerInformer.HasSynced,
 		jenkinsRoleInformer.HasSynced,
 		jenkinsRoleBindingInformer.HasSynced,
+		teamInformer.HasSynced,
+		runnerInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
 		os.Exit(1)
@@ -565,12 +601,6 @@ func main() {
 	reconcilerProxy := controller.NewNATSReconcilerProxy(busConn)
 	reconcilerProxy.SetLogger(logger)
 
-	// Build a bundle resolver for controller reconcile operations.
-	bundleResolver := bundle.NewResolver("/tmp/varroa-bundles")
-	bundleResolver.Logger = logger
-	if *oidcIssuer != "" {
-		bundleResolver.SetOIDCConfig(*oidcIssuer, *oidcClientID, *oidcClientSecret)
-	}
 	// Derive dashboard host for path-mode host-equality check.
 	dashboardHost := ""
 	if (*authMode == "local" || *authMode == "ldap") && *bffURL != "" {
@@ -594,11 +624,11 @@ func main() {
 		Authorizer:        authorizer,
 		Client:            client,
 		Store:             clientsetClient, // *ClientsetClient implements crdstore.Backend
+		Controllers:       controllerLister,
 		MiteRegistry:      miteTransport,
 		Broadcaster:       fanout, // bus-backed fanout replaces the in-process Broadcaster
-		ActivityStore:     actStore,
+		RunFanout:         runFanout,
 		ActivityPublisher: actPub,
-		Backfill:          backfill,
 		OperatorNamespace: operatorNamespace,
 		ManagedNamespaces: managedNamespaces,
 		Logger:            logger,
@@ -606,11 +636,12 @@ func main() {
 		DashboardHost:     dashboardHost,
 		DashboardURL:      *dashboardURL,
 		SecureCookies:     secureCookies,
-		Brood:             api.NewBusBrood(cluster, busConn, clusterDir, client, clientsetClient, logger),
+		Brood:             api.NewBusBrood(cluster, busConn, clusterDir, client, clientsetClient, controllerLister, logger),
 		BusConn:           busConn,
 		BroodOps:          api.NewBusBroodOps(cluster, busConn, clusterDir, client, clientsetClient, logger),
 		BroodSchedules:    api.NewBusBroodSchedules(cluster, busConn, clusterDir, logger),
 		ConfigBrood:       configBrood,
+		RunnerTokenIndex:  runnerTokenIndex,
 	}
 	// Fleet plugin inventory reader: the classified accessor T2.1 publishes
 	// through the transport. Always wired when the transport exists.
@@ -628,6 +659,78 @@ func main() {
 			logger.Warn("VARROA_UPDATE_CENTER_IMPORT_TOKEN not set — plugin uploads will return update-center-unreachable")
 		}
 	}
+	// The chart renders cells.maxTenantsPerCell into the operator and into
+	// the BFF from one value. The BFF uses it as the second tier of the
+	// effective tenant cap on the cell usage reads.
+	if raw := os.Getenv("VARROA_CELLS_MAX_TENANTS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		switch {
+		case err != nil:
+			logger.Warn("VARROA_CELLS_MAX_TENANTS is not a whole tenant count; the cell usage reads fall back to the compiled default", "value", raw, "error", err)
+		case n <= 0:
+			logger.Warn("VARROA_CELLS_MAX_TENANTS must be at least 1; the cell usage reads fall back to the compiled default", "value", raw)
+		default:
+			apiDeps.CellMaxTenants = n
+		}
+	}
+	if dsn := os.Getenv("VARROA_RECORDSTORE_DSN"); dsn != "" {
+		rsPool, err := pgxpool.New(context.Background(), dsn)
+		if err != nil {
+			logger.Error("failed to open record store pool", "error", err)
+		} else {
+			activityRetentionDays := 0
+			if raw := os.Getenv("VARROA_ACTIVITY_RETENTION_DAYS"); raw != "" {
+				if n, err := strconv.Atoi(raw); err == nil {
+					activityRetentionDays = n
+				} else {
+					logger.Warn("VARROA_ACTIVITY_RETENTION_DAYS is not a whole day count; activity cursors will never expire", "value", raw, "error", err)
+				}
+			}
+			reader := recordstore.NewReader(rsPool, activityRetentionDays)
+			if _, err := reader.SchemaVersion(context.Background()); err != nil {
+				logger.Warn("record store schema is older than this BFF requires; record-store reads will return an error", "error", err)
+			}
+			apiDeps.RecordStore = reader
+			apiDeps.Backfill = recordstore.NewActivityBackfill(reader)
+			// The force release goes to the recorder, which owns every
+			// write to varroa.fleet_locks. It needs the bus for that.
+			if busConn != nil {
+				apiDeps.FleetLockReleaser = api.NewBusFleetLockReleaser(busConn)
+			}
+
+			apiDeps.RecordStoreRunRetention = 365 * 24 * time.Hour
+			if raw := os.Getenv("VARROA_RETENTION_RUNS"); raw != "" {
+				if d, err := recordstore.ParseRetention(raw); err == nil {
+					apiDeps.RecordStoreRunRetention = d
+				} else {
+					logger.Warn("VARROA_RETENTION_RUNS is invalid; using the 365d default", "value", raw, "error", err)
+				}
+			}
+
+			if blobURL := os.Getenv("VARROA_BLOBSTORE_URL"); blobURL != "" {
+				store, err := blob.Open(context.Background(), blobURL, rsPool)
+				if err != nil {
+					logger.Error("failed to open blob store", "error", err)
+				} else {
+					apiDeps.BlobStore = store
+				}
+			} else {
+				logger.Warn("VARROA_BLOBSTORE_URL not set; the pipelines log and artifact paths will return 503")
+			}
+		}
+	} else {
+		logger.Warn("VARROA_RECORDSTORE_DSN not set; activity history reads are unavailable (deps.Backfill is nil)")
+	}
+	// The pipelines tenant resolver maps a {team} URL segment onto tenants
+	// through Team CRDs and the brood router. The record store adds the
+	// placement rows of Teams that a member cluster holds; a nil store
+	// leaves that step off.
+	var placements api.TenantPlacementReader
+	if apiDeps.RecordStore != nil {
+		placements = apiDeps.RecordStore
+	}
+	apiDeps.TenantResolver = api.NewTeamTenantResolver(apiDeps.Store, apiDeps.Brood, apiDeps.Authorizer,
+		api.WithMemberPlacements(placements))
 	apiDeps.JenkinsTokenSigner = tokenSigner
 
 	// Create a controller-runtime client for read-only CRD operations
@@ -701,6 +804,10 @@ func main() {
 	// Hibernation wake surface at the host root (unauthenticated, token-guarded;
 	// AuthMiddleware passes through non-/api/ paths).
 	mux.HandleFunc("/hibernation/", apiServer.HandleHibernationDispatch)
+	// Agent WebSocket door (design D7/D8) at the host root, beside the
+	// hibernation surface above: unauthenticated, token-guarded by the URL
+	// itself.
+	mux.HandleFunc("/runners/", apiServer.HandleRunnerDoor)
 
 	// --- Auth provider construction ---
 	var provider auth.Provider
@@ -822,9 +929,41 @@ func main() {
 				os.Exit(1)
 			}
 			validator.SetCookieDomain(*oidcCookieDomain)
+			validator.SetClaimNames(userClaims, groupClaims)
 			provider = validator
 
 			logger.Info("OIDC auth enabled", "issuer", *oidcIssuer, "endSessionSupported", validator.EndSessionEndpoint() != "")
+
+			if *localAccounts {
+				if *bffURL == "" {
+					logger.Error("--bff-url is required with --local-accounts")
+					os.Exit(1)
+				}
+				if signer == nil {
+					logger.Error("signing key not available for local accounts; ensure the operator Secret exists")
+					os.Exit(1)
+				}
+				lp := localpkg.New(signer, bffUserStore{clientsetClient, client}, operatorNamespace, *bffURL, *oidcClientID, 8*time.Hour, *oidcCookieDomain)
+				lp.SetBesideOIDC(true)
+				apiDeps.Local = lp
+				provider = auth.NewMultiProvider(validator, lp, *bffURL)
+				logger.Info("local accounts enabled beside OIDC", "localIssuer", *bffURL, "kid", signer.KID())
+
+				// Controllers fetch the local issuer keys from these endpoints.
+				if cfg, jwks, ok2 := lp.Discovery(); ok2 {
+					mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Write(cfg)
+					})
+					mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Write(jwks)
+					})
+				}
+			}
+		} else if *localAccounts {
+			logger.Error("--local-accounts needs an OIDC issuer")
+			os.Exit(1)
 		}
 	}
 
@@ -832,12 +971,13 @@ func main() {
 
 	// Populate identity configuration for the identity-settings endpoint.
 	apiDeps.IdentityConfig = api.IdentityConfig{
-		Mode:         *authMode,
-		Issuer:       *oidcIssuer,
-		ClientID:     *oidcClientID,
-		Scopes:       parseScopes(*oidcScopes),
-		CookieDomain: *oidcCookieDomain,
-		DefaultRead:  *defaultRead,
+		Mode:          *authMode,
+		Issuer:        *oidcIssuer,
+		ClientID:      *oidcClientID,
+		Scopes:        parseScopes(*oidcScopes),
+		CookieDomain:  *oidcCookieDomain,
+		DefaultRead:   *defaultRead,
+		LocalAccounts: *localAccounts,
 	}
 
 	// Stream-ticket issuer/verifier for header-less SSE auth. Requires the local RS256
@@ -923,6 +1063,31 @@ func jetStreamReplicasFromEnv() int {
 		return 1
 	}
 	return n
+}
+
+// indexRunnerToken re-indexes a Runner informer object's current
+// status.token under its name (design D7). A non-Runner object, or one
+// with no minted token, is a no-op.
+func indexRunnerToken(idx *api.RunnerTokenIndex, obj interface{}) {
+	runner, ok := obj.(*v1alpha1.Runner)
+	if !ok {
+		return
+	}
+	idx.Put(runner.Name, runner.Status.Token)
+}
+
+// unindexRunnerToken drops a deleted Runner's index entry. It also
+// unwraps cache.DeletedFinalStateUnknown, the tombstone the informer
+// delivers when a delete event is missed and only later reconciled.
+func unindexRunnerToken(idx *api.RunnerTokenIndex, obj interface{}) {
+	if tomb, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tomb.Obj
+	}
+	runner, ok := obj.(*v1alpha1.Runner)
+	if !ok {
+		return
+	}
+	idx.Remove(runner.Name)
 }
 
 func registerRBACFederationHandlers(roleInformer, bindingInformer cache.SharedIndexInformer, reconciler *api.RBACFederationReconciler, logger *slog.Logger) {

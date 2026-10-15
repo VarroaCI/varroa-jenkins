@@ -10,12 +10,18 @@
           <remote>https://github.com/fake-org/repo-a.git</remote>
           <credentialsId>git-cred</credentialsId>
         </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
       </jenkins.branch.BranchSource>
       <jenkins.branch.BranchSource>
         <source class="jenkins.plugins.git.GitSCMSource" plugin="git">
           <remote>https://github.com/fake-org/repo-b.git</remote>
           <credentialsId>git-cred</credentialsId>
         </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
       </jenkins.branch.BranchSource>
     </data>
   </sources>

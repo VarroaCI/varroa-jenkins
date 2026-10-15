@@ -1,0 +1,16 @@
+type: object
+additionalProperties: false
+properties:
+  name:
+    type: string
+    pattern: ^[a-z][a-z0-9-]*$
+  env:
+    type: string
+    enum:
+    - dev
+    - prod
+  publishImage:
+    type: boolean
+    default: false
+required:
+- name

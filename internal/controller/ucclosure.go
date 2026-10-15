@@ -7,6 +7,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // Provenance values recorded on a closure entry.
@@ -111,6 +112,33 @@ func (inv *ucInventory) poisoned(name, version string) bool {
 	return len(inv.entries[invKey(name, version)]) > 1
 }
 
+// depsKnown reports whether the dependency list of name@version is known. A
+// pair with conflicting entries is poisoned and reports known here, because
+// the poisoned pair is rejected on its own terms.
+func (inv *ucInventory) depsKnown(name, version string) bool {
+	e, ok := inv.entry(name, version)
+	if !ok {
+		return true
+	}
+	return e.DependenciesKnown
+}
+
+// unknownDepsOf lists, as sorted name@version strings, the root and every
+// selected member whose dependency list the update center cannot read.
+func unknownDepsOf(root inventoryEntry, cl *ucClosure, inv *ucInventory) []string {
+	var out []string
+	if !root.DependenciesKnown {
+		out = append(out, root.Name+"@"+root.Version)
+	}
+	for name, sel := range cl.Selected {
+		if !inv.depsKnown(name, sel.Version) {
+			out = append(out, name+"@"+sel.Version)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // entry returns the single canonical entry for a non-poisoned pair.
 func (inv *ucInventory) entry(name, version string) (inventoryEntry, bool) {
 	group := inv.entries[invKey(name, version)]
@@ -206,6 +234,9 @@ type ucClosure struct {
 	// Direct marks members the root itself declared, as opposed to members
 	// pulled in transitively.
 	Direct map[string]bool
+	// UnknownDeps lists, sorted, every root or member whose dependency list the
+	// update center cannot read. The closure may be incomplete for them.
+	UnknownDeps []string
 }
 
 // resolveClosure computes the full mandatory dependency closure of root,
@@ -293,6 +324,7 @@ func resolveClosure(root inventoryEntry, inv *ucInventory, profiles []ucProfile)
 				sel.Shortfall = m != "" && !pluginver.AtLeast(sel.Version, m)
 				cl.Selected[name] = sel
 			}
+			cl.UnknownDeps = unknownDepsOf(root, cl, inv)
 			return cl, nil
 		}
 	}
@@ -319,12 +351,18 @@ func resolveOne(name, m string, inv *ucInventory, profiles []ucProfile) (ucSelec
 		// mentions the plugin agrees on one non-poisoned version.
 		var pin string
 		var sources []string
+		sawLatest := false
 		for _, p := range profiles {
 			if !p.Eligible {
 				continue
 			}
 			v, ok := p.Lock[name]
-			if !ok || v == "" {
+			if !ok {
+				continue
+			}
+			if ucmeta.IsLatest(v) {
+				// A latest lock pin names no version. It yields to a concrete lock.
+				sawLatest = true
 				continue
 			}
 			if pin == "" {
@@ -350,6 +388,10 @@ func resolveOne(name, m string, inv *ucInventory, profiles []ucProfile) (ucSelec
 			return ucSelection{}, fmt.Errorf(
 				"dependency %q is absent from the update-center store and its unanimous profile-lock pin %s "+
 					"has conflicting store entries", name, pin)
+		}
+		if sawLatest {
+			return ucSelection{}, fmt.Errorf(
+				"dependency %q is absent from the update-center store and every profile lock that names it pins latest, which names no version", name)
 		}
 		if m != "" {
 			return ucSelection{}, fmt.Errorf(

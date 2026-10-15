@@ -15,21 +15,16 @@ stringData:
           password: "{{ htpasswd "ignored" (include "varroa.nats.operatorPassword" .) | trimPrefix "ignored:" }}"
           permissions: {
             publish: [
-              "$KV.mite_desired.>"
+              // Desired-state request to the gateway that holds the
+              // mite stream. Core NATS only: the command carries credential
+              // values, and no stream or bucket may store it.
+              "mite.*.*.*.desired"
               "mite.*.*.*.out"
               "events.brood.*"
               "activity.>"
               "mite.*.*.*.content"
               "$JS.API.INFO"
               "_INBOX_bff.>"
-              "$JS.API.STREAM.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
-              "$JS.API.DIRECT.GET.KV_mite_desired"
-              "$JS.API.DIRECT.GET.KV_mite_desired.>"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
-              "$JS.API.CONSUMER.*.KV_mite_desired.>"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -67,16 +62,34 @@ stringData:
               "$JS.API.CONSUMER.INFO.varroa_webhooks.>"
               "$JS.API.CONSUMER.MSG.NEXT.varroa_webhooks.>"
               "$JS.ACK.varroa_webhooks.>"
+{{- if .Values.recordStore.enabled }}
+              // Build-record ledger: request a tenant's job_schedules
+              // purge after the placement pass moves or removes it.
+              "varroa.recordstore.tenant.purge"
+              // Build-record ledger: announce a tenant's placement, and
+              // ask for a tenant's build records to seed a cell.
+              "varroa.recordstore.tenant.sync"
+{{- end }}
             ]
             subscribe: [
               "mite.*.*.*.in"
               "operator.>"
               "$KV.mite_snapshots.>"
               "$KV.mite_presence.>"
+              // Own reply inbox: the tenant purge and tenant sync
+              // replies.
               "_INBOX_operator.>"
               // Hibernation: wake commands and replay results for this cluster.
               "wake.>"
               "whreply.>"
+              // Cell-loss detection: the gateway's disconnected brood
+              // event, which makes the operator read the cell pod at
+              // once. The event decides nothing on its own.
+              "events.brood.>"
+{{- if .Values.recordStore.enabled }}
+              // Build-record ledger: the recorder's admission/duplicate decisions.
+              "varroa.ledger.actions.>"
+{{- end }}
             ]
           }
         }
@@ -99,16 +112,6 @@ stringData:
               "$JS.API.CONSUMER.*.varroa.>"
               "$JS.API.CONSUMER.MSG.NEXT.varroa.>"
               "$JS.ACK.varroa.>"
-              "$JS.API.STREAM.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired"
-              "$JS.API.STREAM.MSG.*.KV_mite_desired.>"
-              "$JS.API.DIRECT.GET.KV_mite_desired"
-              "$JS.API.DIRECT.GET.KV_mite_desired.>"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired"
-              "$JS.API.CONSUMER.CREATE.KV_mite_desired.>"
-              "$JS.API.CONSUMER.*.KV_mite_desired.>"
-              # JetStream flow-control replies for KV watchers (ordered push consumers) — see #339
-              "$JS.FC.KV_mite_desired.>"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -136,11 +139,34 @@ stringData:
               // Hibernation: publish REPLAY_WEBHOOK results to the dedicated
               // whreply subject (kept off the mite inbound subject).
               "whreply.>"
+{{- if .Values.recordStore.enabled }}
+              // Build-record ledger: publish build events and ask the
+              // recorder for an admission decision.
+              "builds.>"
+              "varroa.ledger.claim"
+              // Build-log externalization: ask the recorder who owns a
+              // run before writing one of its console-log chunks.
+              "varroa.ledger.owner"
+              // Live tail: relay stored console-log chunks to the BFF
+              // while a tail lease is live.
+              "logs.>"
+              // Cross-tenant pipeline calls: relay a mite's build/status/
+              // artifact/lock request to the recorder for the grant
+              // decision and the routed reply.
+              "varroa.ledger.crosstenant"
+{{- end }}
             ]
             subscribe: [
-              "$KV.mite_desired.>"
+              // Desired-state requests from the operator. The gateway
+              // answers in the operator's inbox after the send succeeds.
+              "mite.*.*.*.desired"
               "mite.*.*.*.content"
               "_INBOX_gateway.>"
+{{- if .Values.recordStore.enabled }}
+              // Live tail: accept the BFF's start/stop requests for a
+              // connected cell's console log.
+              "varroa.tail.>"
+{{- end }}
             ]
           }
         }
@@ -153,16 +179,6 @@ stringData:
               "mite.*.*.*.content"
               "operator.>"
               "$JS.API.INFO"
-              "$JS.API.STREAM.CREATE.varroa_activity"
-              "$JS.API.STREAM.UPDATE.varroa_activity"
-              "$JS.API.STREAM.INFO.varroa_activity"
-              "$JS.API.CONSUMER.CREATE.varroa_activity"
-              "$JS.API.CONSUMER.CREATE.varroa_activity.>"
-              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>"
-              "$JS.API.CONSUMER.INFO.varroa_activity.>"
-              "$JS.API.CONSUMER.DELETE.varroa_activity.>"
-              "$JS.API.CONSUMER.MSG.NEXT.varroa_activity.>"
-              "$JS.ACK.varroa_activity.>"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -196,6 +212,18 @@ stringData:
               "$JS.API.STREAM.CREATE.varroa_webhooks"
               "$JS.API.STREAM.UPDATE.varroa_webhooks"
               "$JS.API.STREAM.INFO.varroa_webhooks"
+{{- if .Values.recordStore.enabled }}
+              // Live tail: ask the gateway to start or stop a tail lease on
+              // a connected cell's console log.
+              "varroa.tail.>"
+              // Pipeline trigger and cancel: send an imperative command to a
+              // cell's mite, the same subject the operator publishes safe
+              // restarts on.
+              "mite.*.*.*.out"
+              // Fleet lock force release: ask the recorder to delete a
+              // releasing lock that no live pod holds.
+              "varroa.recordstore.fleetlock.release"
+{{- end }}
             ]
             subscribe: [
               "activity.>"
@@ -204,9 +232,77 @@ stringData:
               "$KV.mite_presence.>"
               "$KV.varroa_clusters.>"
               "_INBOX_bff.>"
+{{- if .Values.recordStore.enabled }}
+              // Live tail: receive console-log chunks the gateway relays
+              // while a tail lease is active.
+              "logs.>"
+              // Live run notifications: the recorder's per-run changes,
+              // which the team run stream forwards to a reader.
+              "runs.>"
+{{- end }}
             ]
           }
         }
+{{- if .Values.recordStore.enabled }}
+        {
+          user: "recorder"
+          password: "{{ htpasswd "ignored" (include "varroa.nats.recorderPassword" .) | trimPrefix "ignored:" }}"
+          permissions: {
+            publish: [
+              // One recorder serves every cluster, and a member cluster runs
+              // no recorder. It publishes each action on the target's cluster.
+              "varroa.ledger.actions.>"
+              // The claim reply: the gateway owns the request inbox.
+              "_INBOX_gateway.>"
+              // The tenant purge reply and the tenant sync reply: the
+              // operator owns the request inbox.
+              "_INBOX_operator.>"
+              // The fleet lock release reply: the BFF owns the request
+              // inbox.
+              "_INBOX_bff.>"
+              // Live run notifications: tell the BFF that a run changed,
+              // so a reader refetches the record without a reload.
+              "runs.>"
+              "$JS.API.STREAM.CREATE.varroa_builds"
+              "$JS.API.STREAM.UPDATE.varroa_builds"
+              "$JS.API.STREAM.INFO.varroa_builds"
+              "$JS.API.CONSUMER.CREATE.varroa_builds.>"
+              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_builds.>"
+              "$JS.API.CONSUMER.INFO.varroa_builds.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa_builds.>"
+              "$JS.ACK.varroa_builds.>"
+              // Activity buffer: own the varroa_activity stream and its
+              // durable pull consumer, and ack consumed messages.
+              "$JS.API.STREAM.CREATE.varroa_activity"
+              "$JS.API.STREAM.UPDATE.varroa_activity"
+              "$JS.API.STREAM.INFO.varroa_activity"
+              "$JS.API.CONSUMER.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.INFO.varroa_activity.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa_activity.>"
+              "$JS.ACK.varroa_activity.>"
+            ]
+            subscribe: [
+              "varroa.ledger.claim"
+              // Build-log externalization: answer the gateway's run-owner
+              // lookup before it writes a console-log chunk.
+              "varroa.ledger.owner"
+              // Cross-tenant pipeline calls: answer the gateway's build/
+              // status/artifact/lock request with the grant decision.
+              "varroa.ledger.crosstenant"
+              // Placement's schedule purge: delete a tenant's
+              // job_schedules rows after it leaves a cell.
+              "varroa.recordstore.tenant.purge"
+              // Placement's tenant sync: announce a tenant's placement,
+              // and answer a request for a tenant's build records.
+              "varroa.recordstore.tenant.sync"
+              // Fleet lock force release: answer the BFF's request.
+              "varroa.recordstore.fleetlock.release"
+              "_INBOX_recorder.>"
+            ]
+          }
+        }
+{{- end }}
       ]
     }
 

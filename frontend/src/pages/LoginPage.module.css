@@ -209,6 +209,29 @@ html[data-theme="dark"] .comb { opacity: .38; }
 
 .button:disabled { opacity: .6; cursor: not-allowed; }
 
+/* A quieter action under the primary button: the local account path
+   beside single sign-on, and the way back from it. */
+.secondaryButton {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  border-color: var(--text-2);
+  color: var(--text);
+}
+
+.secondaryButton:disabled { opacity: .6; cursor: not-allowed; }
+
 .spinner {
   width: 14px;
   height: 14px;

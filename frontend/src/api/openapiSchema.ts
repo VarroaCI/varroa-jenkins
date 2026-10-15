@@ -115,23 +115,3 @@ export function getPodOverridesSchema(
 ): Record<string, unknown> | undefined {
   return getNamedSchema(root, "PodOverrides");
 }
-
-/**
- * Resolves IngressSpec schema (for the ingressSpec YAML tier) from the
- * bundled OpenAPI spec.
- */
-export function getIngressSpecSchema(
-  root: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  return getNamedSchema(root, "IngressSpec");
-}
-
-/**
- * Resolves MiteSpec schema (for the miteSpec YAML tier) from the bundled
- * OpenAPI spec.
- */
-export function getMiteSpecSchema(
-  root: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  return getNamedSchema(root, "MiteSpec");
-}

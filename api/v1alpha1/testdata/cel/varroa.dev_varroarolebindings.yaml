@@ -1,0 +1,106 @@
+# CEL cases for charts/varroa/crds/varroa.dev_varroarolebindings.yaml.
+# A scope names either namespaces or tenants, never both. The base scope
+# names namespaces; each tenant case clears them with a null patch.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: VarroaRoleBinding
+  metadata:
+    name: binding-a
+  spec:
+    roleRef: developer
+    subjects:
+      - kind: Group
+        name: team-a
+    scope:
+      namespaces: [team-a]
+cases:
+  - name: tenants with a controller selector refused
+    rule: |-
+      !has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a}], controllerSelector: {matchLabels: {app: a}}}}}
+    want: reject
+  - name: namespaces alone accepted
+    rule: |-
+      !has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: [team-a]}}}
+    want: accept
+
+  - name: empty tenants list refused
+    rule: |-
+      !has(self.tenants) || size(self.tenants) > 0
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: []}}}
+    want: reject
+  - name: one tenant accepted
+    rule: |-
+      !has(self.tenants) || size(self.tenants) > 0
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a}]}}}
+    want: accept
+
+  - name: tenant with an empty name refused
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, size(t.name) > 0)
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: ""}]}}}
+    want: reject
+  - name: tenant with a name accepted
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, size(t.name) > 0)
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a}]}}}
+    want: accept
+
+  - name: tenant name with a slash refused
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !t.name.contains('/'))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a/core}]}}}
+    want: reject
+  - name: tenant name without a slash accepted
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !t.name.contains('/'))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a}]}}}
+    want: accept
+
+  - name: tenant with an empty jobs list refused
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || size(t.jobs) > 0)
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: []}]}}}
+    want: reject
+  - name: tenant with a jobs list accepted
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || size(t.jobs) > 0)
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: ["builds/*"]}]}}}
+    want: accept
+
+  - name: tenant job with an empty entry refused
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, size(j) > 0))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: [""]}]}}}
+    want: reject
+  - name: tenant job glob accepted
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, size(j) > 0))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: ["builds/*"]}]}}}
+    want: accept
+
+  - name: tenant job starting with a slash refused
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, !j.startsWith('/')))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: ["/builds"]}]}}}
+    want: reject
+  - name: tenant job glob without a leading slash accepted
+    rule: |-
+      !has(self.tenants) || self.tenants.all(t, !has(t.jobs) || t.jobs.all(j, !j.startsWith('/')))
+    field: spec.scope
+    new: {spec: {scope: {namespaces: null, tenants: [{name: team-a, jobs: ["builds/*"]}]}}}
+    want: accept

@@ -3,7 +3,7 @@ package bus
 import "encoding/json"
 
 // OperatorBundlesSubject returns operator.<cluster>.bundles.<verb>.
-// verb ∈ list|get|create|update|delete|preview|validate|pause|resume.
+// verb ∈ list|get|create|update|delete|preview|pause|resume|teamcontent.
 // Request/response types per verb are defined below in this file.
 func OperatorBundlesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".bundles." + verb
@@ -41,27 +41,74 @@ func OperatorVersionProfilesSubject(cluster, verb string) string {
 	return "operator." + cluster + ".versionprofiles." + verb
 }
 
+// OperatorCellPoolsSubject returns operator.<cluster>.cellpools.<verb>.
+// verb ∈ list|get|scale. list takes ConfigListRequest and answers
+// ConfigListResponse. get takes ConfigGetRequest and answers
+// ConfigGetResponse. scale takes CellPoolScaleRequest and answers
+// ConfigGetResponse with the stored pool after the write.
+func OperatorCellPoolsSubject(cluster, verb string) string {
+	return "operator." + cluster + ".cellpools." + verb
+}
+
+// TeamBundleContentRequest is the payload for bundles.teamcontent. Team
+// names a Team that the member cluster holds.
+type TeamBundleContentRequest struct {
+	Team string `json:"team"`
+}
+
+// TeamBundleContentResponse is the reply for bundles.teamcontent. An empty
+// Bundle means the Team has no pipelines bundle ref, or the ref names no
+// ComposedBundle. A nil Content means the bundle has no contentRef, or its
+// ConfigMap is absent. Code CodeNotFound means the member holds no such Team.
+// Content holds only the keys a pipeline read needs. Held is true when the
+// Team's slot-0 cell records an ItemsHeld warning for the Team.
+type TeamBundleContentResponse struct {
+	Bundle  json.RawMessage   `json:"bundle,omitempty"`
+	Content map[string]string `json:"content,omitempty"`
+	Held    bool              `json:"held,omitempty"`
+	Code    string            `json:"code,omitempty"`
+	Error   string            `json:"error,omitempty"`
+}
+
+// CellPoolScaleRequest is the payload for cellpools.scale. It carries the
+// pool name and the scale dials only, so a structural edit cannot reach the
+// operator. A nil dial keeps its stored value.
+type CellPoolScaleRequest struct {
+	Name               string  `json:"name"`
+	Warm               *int32  `json:"warm,omitempty"`
+	MaxCells           *int32  `json:"maxCells,omitempty"`
+	MaxTenantsPerCell  *int32  `json:"maxTenantsPerCell,omitempty"`
+	UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+}
+
 // ---------------------------------------------------------------------------
 // Generic request/response types (DP1). The same types serve every config kind;
 // the subject encodes the kind.
 // ---------------------------------------------------------------------------
 
+// ListPageBudget bounds one list reply below the NATS 1 MiB max_payload.
+// The operator pages a controllers, config, brood-operation, or brood-schedule list
+// to fit this budget.
+const ListPageBudget = 900 * 1024
+
 // ConfigListRequest is the payload for *list subjects (bundles.list,
-// catalog.itemlist, catalog.sourcelist, rbac.rolelist, rbac.bindinglist).
-// Namespace is ignored for cluster-scoped kinds (JenkinsRole, JenkinsRoleBinding).
+// catalog.itemlist, catalog.sourcelist, rbac.rolelist, rbac.bindinglist,
+// versionprofiles.list, versionprofiles.view, cellpools.list).
+// Namespace is ignored for cluster-scoped kinds (JenkinsRole, JenkinsRoleBinding,
+// JenkinsVersionProfile, CellPool).
+// After is the Next key of the previous page. Empty requests the first page.
 type ConfigListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	After     string `json:"after,omitempty"`
 }
 
 // ConfigListResponse is the reply for *list subjects.
-// OperatorNamespace is populated only for catalog.itemlist — the BFF echoes it
-// in the catalog-items HTTP response as operatorNamespace.
-// Empty for other kinds.
+// Next is the After key of the following page. Empty on the last page.
 type ConfigListResponse struct {
-	Items             []json.RawMessage `json:"items,omitempty"`
-	OperatorNamespace string            `json:"operatorNamespace,omitempty"`
-	Code              string            `json:"code,omitempty"`
-	Error             string            `json:"error,omitempty"`
+	Items []json.RawMessage `json:"items,omitempty"`
+	Next  string            `json:"next,omitempty"`
+	Code  string            `json:"code,omitempty"`
+	Error string            `json:"error,omitempty"`
 }
 
 // CatalogItemSummary is the per-item shape returned by catalog.itemlist.
@@ -166,10 +213,13 @@ type VersionProfileView struct {
 }
 
 // VersionProfileViewResponse is the reply for versionprofiles.view subjects.
+// Each element of Profiles is one marshalled VersionProfileView. Next is the
+// After key of the following page. Empty on the last page.
 type VersionProfileViewResponse struct {
-	Profiles []VersionProfileView `json:"profiles,omitempty"`
-	Code     string               `json:"code,omitempty"`
-	Error    string               `json:"error,omitempty"`
+	Profiles []json.RawMessage `json:"profiles,omitempty"`
+	Next     string            `json:"next,omitempty"`
+	Code     string            `json:"code,omitempty"`
+	Error    string            `json:"error,omitempty"`
 }
 
 // BundlePauseRequest is the payload for bundles.pause and bundles.resume.
@@ -186,13 +236,13 @@ type BundlePauseResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// BundleComposeRequest is the payload for bundles.preview and bundles.validate.
+// BundleComposeRequest is the payload for bundles.preview.
 type BundleComposeRequest struct {
 	Namespace string          `json:"namespace"`
 	Spec      json.RawMessage `json:"spec"`
 }
 
-// BundleComposeResponse is the reply for bundles.preview and bundles.validate.
+// BundleComposeResponse is the reply for bundles.preview.
 type BundleComposeResponse struct {
 	Preview *BundleComposePreview `json:"preview,omitempty"`
 	Code    string                `json:"code,omitempty"`
@@ -203,17 +253,31 @@ type BundleComposeResponse struct {
 // All YAML fields are rendered strings; Missing, Drifted, Warnings,
 // UnresolvedVariables, and Errors are informational lists.
 type BundleComposePreview struct {
-	BundleYAML          string             `json:"bundleYaml"`
-	JenkinsYAML         string             `json:"jenkinsYaml"`
-	PluginsYAML         string             `json:"pluginsYaml"`
-	ItemsYAML           string             `json:"itemsYaml"`
-	RbacYAML            string             `json:"rbacYaml"`
-	Missing             []string           `json:"missing"`
-	Drifted             []string           `json:"drifted"`
-	Warnings            []string           `json:"warnings"`
-	UnresolvedVariables []string           `json:"unresolvedVariables"`
-	Errors              []string           `json:"errors,omitempty"`
-	PinPreflight        PinPreflightReport `json:"pinPreflight"`
+	BundleYAML            string                    `json:"bundleYaml"`
+	JenkinsYAML           string                    `json:"jenkinsYaml"`
+	PluginsYAML           string                    `json:"pluginsYaml"`
+	ItemsYAML             string                    `json:"itemsYaml"`
+	RbacYAML              string                    `json:"rbacYaml"`
+	PipelineTemplatesYAML string                    `json:"pipelineTemplatesYaml"`
+	Missing               []string                  `json:"missing"`
+	Drifted               []string                  `json:"drifted"`
+	Warnings              []string                  `json:"warnings"`
+	UnresolvedVariables   []string                  `json:"unresolvedVariables"`
+	Errors                []string                  `json:"errors,omitempty"`
+	PinPreflight          PinPreflightReport        `json:"pinPreflight"`
+	PipelineTemplates     []PipelineTemplateSummary `json:"pipelineTemplates"`
+}
+
+// PipelineTemplateSummary is one pipeline-template a composition
+// delivered, in the preview and validate responses' pipelineTemplates
+// array (design bundle-composition-surface delta). DisplayName and
+// Description mirror the delivered document's metadata and are empty
+// when the document sets none.
+type PipelineTemplateSummary struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // PinConflict is a bundle-pinned plugin whose version differs from the

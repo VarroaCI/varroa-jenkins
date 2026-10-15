@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +35,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
 )
@@ -84,25 +88,114 @@ const resourcesSourceAnnotation = "varroa.dev/resources-source"
 // stale copy forever.
 const cascContentHashAnnotation = "varroa.dev/casc-content-hash"
 
+// artifactSecretHashAnnotation stamps a content hash of the projected
+// per-cell artifact Secret on the pod template, mirroring
+// cascContentHashAnnotation: SecretSourceResolver reads the mounted file
+// only at JCasC configuration load time, so a rotation needs a roll to
+// reach a running Jenkins.
+const artifactSecretHashAnnotation = "varroa.dev/artifact-secret-hash"
+
 // pluginsInitScript runs jenkins-plugin-cli with a bounded retry.
 //
-// jenkins-plugin-cli aborts the entire run on the first plugin it cannot download, and
-// exits non-zero, which fails the init container and restarts the pod. Any plugin the
-// in-cluster update center cannot serve is fetched from the public internet instead, so
-// a single transient upstream failure — a truncated response, a mirror hiccup — discards
-// every plugin already downloaded in that run and costs a full pod restart.
+// jenkins-plugin-cli downloads every plugin in parallel into a temporary directory and
+// moves the files into the plugin directory only when every download succeeds. One failed
+// plugin aborts the run and keeps nothing, so each retry downloads the full set again. Only
+// plugins that an earlier successful run installed are skipped. The retry absorbs a single
+// transient upstream failure, and the backoff keeps an unreachable upstream from spinning.
+// A real failure still exits non-zero after the last attempt.
 //
-// Retrying in place absorbs that. The tool is idempotent (plugins already present in the
-// download directory are not refetched), so each attempt resumes rather than restarting
-// the work, and the backoff keeps a genuinely unreachable upstream from spinning. A real
-// failure still exits non-zero after the last attempt, so a broken plugin set surfaces
-// as a failed init container exactly as before, just later.
+// jenkins-plugin-cli falls back to https://archives.jenkins.io/ after each failed download,
+// and no flag disables that. The script therefore reports on the termination log, which
+// Kubernetes keeps for a successful container too:
+//   - When JENKINS_UC_DOWNLOAD_URL is set, a pre-flight fetch of one byte of the first
+//     pinned plugin runs first. A 404 or 410 writes a varroa:download-url-not-found line
+//     and exits 42 with no retry, because a retry cannot fix a wrong base URL.
+//   - Each attempt counts the archive fallback lines. A non-zero count writes a
+//     varroa:archive-fallback line that names the first failed request.
+//
+// pluginInitUCReport parses these lines, so their format is a contract. When the
+// termination log cannot be written, the line goes to stderr. VARROA_PLUGINS_FILE,
+// VARROA_PLUGIN_DIR, and VARROA_TERMINATION_LOG exist for tests; the pod sets none of them.
+// The script empties the termination log with printf, not with ':'. A failed redirection
+// on a special builtin such as ':' exits a POSIX shell.
+//
+// The script also seeds a pool cell's confidential store. A Secret volume
+// presents each key as a symlink into a ..data directory, so the copy needs
+// cp -L. DefaultConfidentialStore chmods the directory only when it creates
+// it, and never chmods a key file, so this container owns both modes. The
+// guard keeps the script correct for a pod that carries no such mount.
+//
+// The shell runs as PID 1 of the container, and the kernel drops a signal to
+// PID 1 that has no handler. Without the TERM trap, a pod delete waits the
+// full pod grace. Each long command runs in the background under wait, so
+// the trap runs at once. The trap ignores TERM for the shell itself and
+// sends TERM to the whole process group, which also reaches every stage of
+// a pipeline and the JVM that jenkins-plugin-cli starts. The tool run and
+// its tee pipeline therefore run in one background subshell, which exits
+// with the status of jenkins-plugin-cli.
 const pluginsInitScript = `set -e
+trap 'trap "" TERM; kill -TERM 0 2>/dev/null; exit 143' TERM
+if [ -d /run/secrets/varroa-cell-secrets ]; then
+  mkdir -p /var/jenkins_home/secrets
+  chmod 700 /var/jenkins_home/secrets
+  cp -L /run/secrets/varroa-cell-secrets/* /var/jenkins_home/secrets/
+  chmod 600 /var/jenkins_home/secrets/*
+fi
+set +e
+plugins_file="${VARROA_PLUGINS_FILE:-/var/run/varroa/plugins/plugins.txt}"
+plugin_dir="${VARROA_PLUGIN_DIR:-/var/jenkins_home/plugins}"
+term_log="${VARROA_TERMINATION_LOG:-/dev/termination-log}"
+cli_log="${TMPDIR:-/tmp}/plugins-init.log"
+status_file="${TMPDIR:-/tmp}/plugins-init.status"
+archive="https://archives.jenkins.io/"
+report() {
+  { printf '%s\n' "$1" > "$term_log"; } 2>/dev/null || printf '%s\n' "$1" >&2
+}
+{ printf "" > "$term_log"; } 2>/dev/null
+if [ -n "$JENKINS_UC_DOWNLOAD_URL" ] && command -v curl >/dev/null 2>&1; then
+  pin=$(grep -oE '^[A-Za-z0-9._-]+:[^[:space:]]+' "$plugins_file" 2>/dev/null | head -n 1)
+  if [ -n "$pin" ]; then
+    name="${pin%%:*}"
+    version="${pin#*:}"
+    url="${JENKINS_UC_DOWNLOAD_URL%/}/$name/$version/$name.hpi"
+    curl -s -o /dev/null -w '%{http_code}' -r 0-0 -L --max-time 10 "$url" > "$status_file" 2>/dev/null &
+    wait $!
+    status=$(cat "$status_file" 2>/dev/null)
+    case "$status" in
+      404|410)
+        echo "plugins-init: $url answered $status; the download URL must be <mirror>/download/plugins" >&2
+        report "varroa:download-url-not-found url=$url plugin=$name:$version status=$status"
+        exit 42
+        ;;
+      2??) ;;
+      *) echo "plugins-init: pre-flight fetch of $url answered ${status:-nothing}; continuing" >&2 ;;
+    esac
+  fi
+fi
 attempt=1
 max_attempts=5
 while true; do
-  if jenkins-plugin-cli --plugin-file /var/run/varroa/plugins/plugins.txt \
-      --plugin-download-directory /var/jenkins_home/plugins --latest false --verbose; then
+  (
+    exec 3>&1
+    rc=$( { { jenkins-plugin-cli --plugin-file "$plugins_file" \
+        --plugin-download-directory "$plugin_dir" --latest false --verbose 2>&1; echo "$?" >&4; } \
+        | tee "$cli_log" >&3; } 4>&1 )
+    exit "${rc:-1}"
+  ) &
+  wait $!
+  rc=$?
+  fallbacks=$(grep -c "falling back to $archive" "$cli_log" 2>/dev/null)
+  if [ "${fallbacks:-0}" -gt 0 ]; then
+    first=$(sed -n 's/.*Unable to resolve plugin URL \([^,]*\), or download plugin \([^ ]*\) to file.*/\2 \1/p' "$cli_log" \
+      | grep -vF " $archive" | head -n 1)
+    fb_name="${first%% *}"
+    fb_url="${first#* }"
+    echo "plugins-init: $fallbacks plugin downloads fell back to $archive" >&2
+    report "varroa:archive-fallback count=$fallbacks plugin=${fb_name:-unknown} url=${fb_url:-unknown}"
+  else
+    { printf "" > "$term_log"; } 2>/dev/null
+  fi
+  if [ "$rc" = 0 ]; then
     exit 0
   fi
   if [ "$attempt" -ge "$max_attempts" ]; then
@@ -112,7 +205,8 @@ while true; do
   delay=$((attempt * 10))
   echo "plugins-init: attempt $attempt failed, retrying in ${delay}s" >&2
   attempt=$((attempt + 1))
-  sleep "$delay"
+  sleep "$delay" &
+  wait $!
 done`
 
 type probeKind int
@@ -321,11 +415,14 @@ func (c *ClientsetClient) IsStatefulSetReady(ctx context.Context, name, namespac
 	return sts.Status.ReadyReplicas >= 1, nil
 }
 
-// ScaleStatefulSet sets a StatefulSet's replica count via a merge patch.
-// It is idempotent: a no-op when the count already matches, and not an error
-// when the StatefulSet does not exist (e.g. a controller stopped before it was
-// ever provisioned).
-func (c *ClientsetClient) ScaleStatefulSet(ctx context.Context, name, namespace string, replicas int32) error {
+// ScaleStatefulSetToZero scales a StatefulSet to 0 for a power-off or
+// hibernation tick. It reads the StatefulSet and returns nil when the
+// StatefulSet is missing or already at 0, without calling fence. Otherwise it
+// calls fence and then sends a merge patch that carries the StatefulSet
+// resourceVersion it read. A write that changed the StatefulSet after the read
+// makes the patch conflict. A fence error or a conflict is returned unchanged.
+// A StatefulSet that does not exist when the patch lands counts as scaled.
+func (c *ClientsetClient) ScaleStatefulSetToZero(ctx context.Context, name, namespace string, fence func(context.Context) error) error {
 	sts, err := c.clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -333,10 +430,20 @@ func (c *ClientsetClient) ScaleStatefulSet(ctx context.Context, name, namespace 
 		}
 		return err
 	}
-	if sts.Spec.Replicas != nil && *sts.Spec.Replicas == replicas {
+	// A nil Replicas means 1 (the API default), so it still needs the scale.
+	if sts.Spec.Replicas != nil && *sts.Spec.Replicas == 0 {
 		return nil
 	}
-	patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas))
+	if err := fence(ctx); err != nil {
+		return err
+	}
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{"resourceVersion": sts.ResourceVersion},
+		"spec":     map[string]any{"replicas": 0},
+	})
+	if err != nil {
+		return err
+	}
 	_, err = c.clientset.AppsV1().StatefulSets(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -358,6 +465,24 @@ func (c *ClientsetClient) GetStatefulSetPluginsChecksum(ctx context.Context, nam
 		return sts.Spec.Template.Annotations["varroa.dev/plugins-checksum"], nil
 	}
 	return "", nil
+}
+
+// GetStatefulSetRollout returns the update revision and rollout strategy
+// of the named StatefulSet. A missing StatefulSet returns the zero value.
+func (c *ClientsetClient) GetStatefulSetRollout(ctx context.Context, name, namespace string) (StatefulSetRollout, error) {
+	sts, err := c.clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return StatefulSetRollout{}, nil
+		}
+		return StatefulSetRollout{}, err
+	}
+	strategy := sts.Spec.UpdateStrategy
+	rolling := strategy.Type == "" || strategy.Type == appsv1.RollingUpdateStatefulSetStrategyType
+	if rolling && strategy.RollingUpdate != nil && strategy.RollingUpdate.Partition != nil && *strategy.RollingUpdate.Partition > 0 {
+		rolling = false
+	}
+	return StatefulSetRollout{UpdateRevision: sts.Status.UpdateRevision, RollingUpdate: rolling}, nil
 }
 
 // GetStatefulSetImages returns the varroa.dev/computed-images stamp (nil when
@@ -411,6 +536,70 @@ func (c *ClientsetClient) GetStatefulSetContainerSpecs(ctx context.Context, name
 	mitePullPolicy = stsPullPoliciesByName(sts)[overlay.MiteContainerName]
 	resourcesSource = parseResourcesSourceAnnotation(sts)
 	return computedMiteImage, liveMiteImage, miteResources, jenkinsResources, mitePullPolicy, resourcesSource, true, nil
+}
+
+// GetStatefulSetContainerEnv returns the named container's env as a map.
+// found is false when the StatefulSet or the container is absent.
+func (c *ClientsetClient) GetStatefulSetContainerEnv(ctx context.Context, name, namespace, container string) (map[string]string, bool, error) {
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+	sts, err := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	env, found := stsContainerEnvByName(sts, container)
+	return env, found, nil
+}
+
+// GetStatefulSetArtifactSecretHash returns the varroa.dev/artifact-secret-hash
+// pod-template annotation of the named StatefulSet. found is false when the
+// StatefulSet does not exist; an absent annotation answers found=true with
+// an empty hash, which a rotation check reads as "no Secret mounted".
+func (c *ClientsetClient) GetStatefulSetArtifactSecretHash(ctx context.Context, name, namespace string) (string, bool, error) {
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+	sts, err := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	anns, _, _ := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "annotations")
+	return anns[artifactSecretHashAnnotation], true, nil
+}
+
+// stsContainerEnvByName walks spec.template.spec.containers for the named
+// container and returns its env array as a map. found is false when no
+// container by that name exists. An env entry with no string "value" (for
+// example a valueFrom field reference) is skipped.
+func stsContainerEnvByName(sts *unstructured.Unstructured, containerName string) (map[string]string, bool) {
+	list, _, _ := unstructured.NestedSlice(sts.Object, "spec", "template", "spec", "containers")
+	for _, c := range list {
+		cm, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, _ := cm["name"].(string); name != containerName {
+			continue
+		}
+		out := map[string]string{}
+		envList, _, _ := unstructured.NestedSlice(cm, "env")
+		for _, e := range envList {
+			em, ok := e.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			envName, _ := em["name"].(string)
+			envValue, hasValue := em["value"].(string)
+			if envName != "" && hasValue {
+				out[envName] = envValue
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 // CreatePVC creates a PersistentVolumeClaim.
@@ -532,15 +721,69 @@ func (c *ClientsetClient) CreateService(ctx context.Context, name, namespace str
 	return nil
 }
 
-// CreateServiceAccount creates a ServiceAccount.
+// CreateOrUpdateTenantService creates or converges a pipelines tenant's
+// agent Service. The Service carries the same two ports as a cell's own
+// Service, and the selector names the pod label of the slot holder.
+// CreateService cannot serve this call: it derives the selector by trimming
+// a "-svc" suffix off the name, and an agent Service name carries no such
+// suffix. The write is skipped when the live object already matches, so a
+// Team tick never bumps resourceVersion on a converged Service.
+func (c *ClientsetClient) CreateOrUpdateTenantService(ctx context.Context, name, namespace, selectorApp string) error {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP,
+			Ports: []corev1.ServicePort{{
+				Name:       "http",
+				Port:       8080,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(8080),
+			}, {
+				Name:       "agent",
+				Port:       50000,
+				Protocol:   corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt(50000),
+			}},
+			Selector: map[string]string{"app": selectorApp},
+		},
+	}
+
+	services := c.clientset.CoreV1().Services(namespace)
+	_, err := services.Create(ctx, svc, metav1.CreateOptions{})
+	if !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	existing, getErr := services.Get(ctx, name, metav1.GetOptions{})
+	if getErr != nil {
+		return fmt.Errorf("get existing tenant service for update: %w", getErr)
+	}
+	if existing.Spec.Type == svc.Spec.Type &&
+		reflect.DeepEqual(existing.Spec.Ports, svc.Spec.Ports) &&
+		reflect.DeepEqual(existing.Spec.Selector, svc.Spec.Selector) {
+		return nil
+	}
+	desired := svc.Spec
+	desired.ClusterIP = existing.Spec.ClusterIP
+	desired.ClusterIPs = existing.Spec.ClusterIPs
+	desired.IPFamilies = existing.Spec.IPFamilies
+	desired.IPFamilyPolicy = existing.Spec.IPFamilyPolicy
+	existing.Spec = desired
+	if _, err := services.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update tenant service: %w", err)
+	}
+	return nil
+}
+
+// CreateServiceAccount creates a ServiceAccount. An existing ServiceAccount
+// is the steady state of every reconcile tick, so AlreadyExists returns nil
+// and logs nothing. The object carries no field the operator owns, so an
+// existing one always matches.
 func (c *ClientsetClient) CreateServiceAccount(ctx context.Context, name, namespace string) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 	}
 	_, err := c.clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		slog.Warn("resource already exists during create, treating as idempotent retry",
-			"kind", "ServiceAccount", "name", name, "namespace", namespace)
 		return nil
 	}
 	return err
@@ -571,6 +814,237 @@ func (c *ClientsetClient) CreateAgentRBAC(ctx context.Context, name, namespace s
 		return fmt.Errorf("create rolebinding %s: %w", name, err)
 	}
 	return nil
+}
+
+// CreateOrUpdateContentReadGrant creates or updates the Role and RoleBinding
+// that let one ServiceAccount read exactly one ConfigMap by name.
+//
+// The update path replaces the whole Rules slice and the whole Subjects slice,
+// so a rule an administrator widened by hand converges back to the name-scoped
+// rule. roleRef is immutable in Kubernetes, so a binding whose live roleRef
+// differs is deleted under a UID precondition and created again.
+func (c *ClientsetClient) CreateOrUpdateContentReadGrant(ctx context.Context, g ContentReadGrant) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            g.Name,
+			Namespace:       g.Namespace,
+			OwnerReferences: []metav1.OwnerReference{g.Owner},
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups:     []string{""},
+			Resources:     []string{"configmaps"},
+			ResourceNames: []string{g.ConfigMapName},
+			Verbs:         []string{"get"},
+		}},
+	}
+	if err := c.applyRole(ctx, role); err != nil {
+		return fmt.Errorf("apply content read role %s/%s: %w", g.Namespace, g.Name, err)
+	}
+
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            g.Name,
+			Namespace:       g.Namespace,
+			OwnerReferences: []metav1.OwnerReference{g.Owner},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     g.Name,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      g.SubjectName,
+			Namespace: g.SubjectNamespace,
+		}},
+	}
+	if err := c.applyRoleBinding(ctx, rb); err != nil {
+		return fmt.Errorf("apply content read rolebinding %s/%s: %w", g.Namespace, g.Name, err)
+	}
+	return nil
+}
+
+// applyRole creates a Role, or updates an existing one when a field the
+// operator owns has drifted.
+//
+// It owns Rules and OwnerReferences, and nothing else. An unchanged Role costs
+// one Get and no write, so a steady bundle adds no write load to the ticker. An
+// update keeps the live ObjectMeta, so a label or annotation another actor
+// added survives.
+func (c *ClientsetClient) applyRole(ctx context.Context, role *rbacv1.Role) error {
+	roles := c.clientset.RbacV1().Roles(role.Namespace)
+	existing, err := roles.Get(ctx, role.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		_, createErr := roles.Create(ctx, role, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// Another writer created the object between the read and the create.
+		// Read the winner and converge it in this call. Returning here would
+		// leave the BFF bound to whatever that writer granted until the next
+		// tick. One bounded retry, never a loop.
+		existing, err = roles.Get(ctx, role.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get role after lost create: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("get role: %w", err)
+	}
+	if equality.Semantic.DeepEqual(existing.Rules, role.Rules) &&
+		equality.Semantic.DeepEqual(existing.OwnerReferences, role.OwnerReferences) {
+		return nil
+	}
+	updated := existing.DeepCopy()
+	updated.Rules = role.Rules
+	updated.OwnerReferences = role.OwnerReferences
+	_, err = roles.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
+// applyRoleBinding creates a RoleBinding, or updates an existing one when a
+// field the operator owns has drifted.
+//
+// It owns RoleRef, Subjects, and OwnerReferences. RoleRef is immutable in
+// Kubernetes, so a difference there is repaired by a delete and a create
+// rather than an update. A lost create race, or a hand edit, can otherwise
+// leave a binding this method could never converge.
+func (c *ClientsetClient) applyRoleBinding(ctx context.Context, rb *rbacv1.RoleBinding) error {
+	bindings := c.clientset.RbacV1().RoleBindings(rb.Namespace)
+	existing, err := bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		_, createErr := bindings.Create(ctx, rb, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// Another writer won the create. Converge its object now, for the same
+		// reason as the Role above.
+		existing, err = bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("get rolebinding after lost create: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("get rolebinding: %w", err)
+	}
+	if !equality.Semantic.DeepEqual(existing.RoleRef, rb.RoleRef) {
+		// roleRef is immutable, so an Update can never converge this object.
+		// Without a recreate the wrong binding survives every tick, which
+		// leaves the BFF bound to a Role the operator does not control.
+		//
+		// The precondition on the observed UID stops the delete from removing
+		// a replacement that another writer created after the read above.
+		err = bindings.Delete(ctx, rb.Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &existing.UID},
+		})
+		switch {
+		case apierrors.IsNotFound(err):
+			// Already gone. The create below takes the name.
+		case apierrors.IsConflict(err):
+			// The UID precondition failed, so another writer replaced the
+			// object after the read. That replacement is not the one this call
+			// observed, and deleting it blindly is what the precondition
+			// prevents. The next tick reads the new object and converges it.
+			return nil
+		case err != nil:
+			return fmt.Errorf("delete rolebinding with a different roleRef: %w", err)
+		default:
+			// The delete was accepted, which does not prove the object is
+			// gone. A finalizer holds it in a terminating state, where every
+			// create fails with AlreadyExists. Without this check the operator
+			// repeats delete and create on every tick and records nothing.
+			stale, getErr := bindings.Get(ctx, rb.Name, metav1.GetOptions{})
+			if getErr == nil && stale.DeletionTimestamp != nil {
+				return fmt.Errorf(
+					"rolebinding %s/%s is terminating and still holds a different roleRef; remove its finalizers",
+					rb.Namespace, rb.Name)
+			}
+		}
+		// The replacement keeps the labels and annotations the deleted object
+		// carried, for the same reason the update path preserves them. An
+		// admission policy that requires one would otherwise reject this
+		// create, and the BFF would stay unbound.
+		replacement := rb.DeepCopy()
+		replacement.Labels = existing.Labels
+		replacement.Annotations = existing.Annotations
+		_, err = bindings.Create(ctx, replacement, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			// Another writer replaced it again. The next tick converges it.
+			return nil
+		}
+		return err
+	}
+	if equality.Semantic.DeepEqual(existing.Subjects, rb.Subjects) &&
+		equality.Semantic.DeepEqual(existing.OwnerReferences, rb.OwnerReferences) {
+		return nil
+	}
+	updated := existing.DeepCopy()
+	updated.Subjects = rb.Subjects
+	updated.OwnerReferences = rb.OwnerReferences
+	_, err = bindings.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
+// CreateServiceAccountTokenSecret creates a long-lived
+// kubernetes.io/service-account-token Secret bound to serviceAccount
+// through the kubernetes.io/service-account.name annotation. Kubernetes'
+// token controller populates the Secret's token key after creation.
+//
+// The method reads the Secret first, so the steady state costs one Get and
+// no write. An existing token Secret for serviceAccount returns nil and logs
+// nothing. A Secret under the name that is not a token for serviceAccount
+// logs a warning, because agents that mount it do not get the expected
+// identity. The method does not replace that Secret.
+func (c *ClientsetClient) CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error {
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	existing, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		warnForeignTokenSecret(existing, serviceAccount)
+		return nil
+	case !apierrors.IsNotFound(err):
+		return fmt.Errorf("get service account token secret %s/%s: %w", namespace, name, err)
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				corev1.ServiceAccountNameKey: serviceAccount,
+			},
+		},
+		Type: corev1.SecretTypeServiceAccountToken,
+	}
+	_, err = secrets.Create(ctx, secret, metav1.CreateOptions{})
+	if !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	// Another writer created the Secret after the Get. Read it and check the
+	// binding now, so a foreign Secret logs its warning in this call.
+	existing, err = secrets.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get service account token secret %s/%s after lost create: %w", namespace, name, err)
+	}
+	warnForeignTokenSecret(existing, serviceAccount)
+	return nil
+}
+
+// warnForeignTokenSecret logs a warning when secret is not a
+// service-account-token Secret bound to serviceAccount.
+func warnForeignTokenSecret(secret *corev1.Secret, serviceAccount string) {
+	bound := secret.Annotations[corev1.ServiceAccountNameKey]
+	if secret.Type == corev1.SecretTypeServiceAccountToken && bound == serviceAccount {
+		return
+	}
+	slog.Warn("secret exists but is not a token for the service account",
+		"name", secret.Name, "namespace", secret.Namespace, "serviceAccount", serviceAccount,
+		"type", secret.Type, "boundServiceAccount", bound)
 }
 
 // CreateJenkinsCR creates a Jenkins custom resource via the dynamic client.
@@ -785,6 +1259,88 @@ func (c *ClientsetClient) CreateOrUpdateSecret(ctx context.Context, name, namesp
 	return err
 }
 
+// CreateOrUpdateSecretWithOwner creates a Secret carrying owner, or updates
+// it when the live Data differs from data — an unchanged source Secret
+// therefore never bumps resourceVersion on a projection tick, so a
+// desired-state hash derived from the data only changes on an actual
+// rotation.
+func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
+	existing, getErr := c.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(getErr) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            name,
+				Namespace:       namespace,
+				OwnerReferences: []metav1.OwnerReference{owner},
+			},
+			Data: data,
+		}
+		_, err := c.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			// Someone created it between the Get and the Create; fall through
+			// to the update path on the next call rather than erroring.
+			return nil
+		}
+		return err
+	}
+	if getErr != nil {
+		return fmt.Errorf("get existing secret for owned update: %w", getErr)
+	}
+	if reflect.DeepEqual(existing.Data, data) {
+		return nil // byte-identical: no write, no resourceVersion bump.
+	}
+	updated := existing.DeepCopy()
+	updated.Data = data
+	updated.OwnerReferences = []metav1.OwnerReference{owner}
+	_, err := c.clientset.CoreV1().Secrets(namespace).Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
+// CreateOrUpdateSecretWithLabels creates a Secret carrying labels and data,
+// or merges both onto the live Secret. Each key of data is added or
+// replaced, and every other key of the live Secret stays. A converged Secret
+// gets no write, so a pool tick never bumps resourceVersion on its own.
+func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(getErr) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+			Data:       data,
+		}
+		_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+		return err
+	}
+	if getErr != nil {
+		return fmt.Errorf("get existing secret for labelled update: %w", getErr)
+	}
+	updated := existing.DeepCopy()
+	if updated.Data == nil {
+		updated.Data = map[string][]byte{}
+	}
+	if updated.Labels == nil {
+		updated.Labels = map[string]string{}
+	}
+	changed := false
+	for k, v := range data {
+		if !bytes.Equal(updated.Data[k], v) {
+			updated.Data[k] = v
+			changed = true
+		}
+	}
+	for k, v := range labels {
+		if updated.Labels[k] != v {
+			updated.Labels[k] = v
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	_, err := secrets.Update(ctx, updated, metav1.UpdateOptions{})
+	return err
+}
+
 // CreateSecretExclusive creates an opaque Secret with the given labels and,
 // unlike CreateSecret, surfaces an AlreadyExists error instead of treating it
 // as an idempotent no-op. API-key generation relies on this to detect prefix
@@ -864,6 +1420,41 @@ func (c *ClientsetClient) DeleteSecret(ctx context.Context, name, namespace stri
 	return err
 }
 
+// DeleteCellNetworkPolicy deletes a cell's NetworkPolicy by name. A missing
+// policy is not an error: cell isolation may never have been enabled.
+func (c *ClientsetClient) DeleteCellNetworkPolicy(ctx context.Context, name, namespace string) error {
+	err := c.clientset.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// CreateCellNetworkPolicy creates or updates a cell's NetworkPolicy (design
+// D2). This runs on every Running/Connected tick fleet-wide, so a write
+// that would not change the live spec is skipped.
+func (c *ClientsetClient) CreateCellNetworkPolicy(ctx context.Context, spec CellPolicySpec) error {
+	np := buildCellNetworkPolicy(spec)
+	policies := c.clientset.NetworkingV1().NetworkPolicies(np.Namespace)
+	existing, err := policies.Get(ctx, np.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = policies.Create(ctx, np, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			return nil // create/read race — next tick converges via Get-then-compare
+		}
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if reflect.DeepEqual(existing.Spec, np.Spec) {
+		return nil
+	}
+	existing.Spec = np.Spec
+	_, err = policies.Update(ctx, existing, metav1.UpdateOptions{})
+	return err
+}
+
 // buildStatefulSet constructs the desired StatefulSet object for a spec.
 // Split from CreateStatefulSet so tests can assert the rendered pod template
 // (container env, prefixes) without a live API roundtrip.
@@ -871,6 +1462,30 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 	replicas := int32(1)
 	if spec.Replicas != nil {
 		replicas = *spec.Replicas
+	}
+
+	// Claim-gate and claim-timeout stamping (design D6, D12). claimGate
+	// always stamps: an empty spec value reads as "0", the disabled state.
+	claimGate := spec.ClaimGate
+	if claimGate == "" {
+		claimGate = "0"
+	}
+	// jenkinsClaimTimeoutMS and miteClaimTimeoutMS are 0 when the operator's
+	// VARROA_CLAIM_TIMEOUT_MS is unset, or when it is set below the 5000 ms
+	// floor — either way the builder stamps neither timeout variable and
+	// both containers fall back to their own built-in defaults (5000 ms
+	// Jenkins, 4500 ms mite). A value below the floor is logged and dropped
+	// here, because a smaller value would push the mite budget to or below
+	// the gateway's 4000 ms default and break the shrink-inward rule.
+	var jenkinsClaimTimeoutMS, miteClaimTimeoutMS int
+	if spec.ClaimTimeoutMS != 0 {
+		if spec.ClaimTimeoutMS < 5000 {
+			slog.Warn("VARROA_CLAIM_TIMEOUT_MS below the 5000ms floor, stamping neither timeout variable",
+				"value", spec.ClaimTimeoutMS)
+		} else {
+			jenkinsClaimTimeoutMS = spec.ClaimTimeoutMS
+			miteClaimTimeoutMS = spec.ClaimTimeoutMS - 500
+		}
 	}
 	sts := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -926,10 +1541,18 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									"allowPrivilegeEscalation": false,
 									"capabilities":             map[string]interface{}{"drop": []interface{}{"ALL"}},
 								},
-								"volumeMounts": []map[string]interface{}{
-									{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
-									{"name": "plugins", "mountPath": "/var/run/varroa/plugins"},
-								},
+								"volumeMounts": func() []map[string]interface{} {
+									mounts := []map[string]interface{}{
+										{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
+										{"name": "plugins", "mountPath": "/var/run/varroa/plugins"},
+									}
+									if spec.CellSecretsName != "" {
+										mounts = append(mounts, map[string]interface{}{
+											"name": cellSecretsVolumeName, "mountPath": cellSecretsMountPath, "readOnly": true,
+										})
+									}
+									return mounts
+								}(),
 							}
 							if spec.PluginUpdateCenterURL != "" || spec.PluginUpdateCenterDownloadURL != "" {
 								var env []map[string]interface{}
@@ -988,13 +1611,22 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 										{"name": "http", "containerPort": 8080},
 										{"name": "agent", "containerPort": 50000},
 									},
-									"volumeMounts": []map[string]interface{}{
-										{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
-										{"name": "init-scripts", "mountPath": "/var/run/varroa/init"},
-										{"name": "bootstrap", "mountPath": "/var/run/varroa/bootstrap"},
-										{"name": "casc-bundle", "mountPath": "/var/jenkins_home/casc"},
-										{"name": "varroa-run", "mountPath": "/var/run/varroa/run"},
-									},
+									"volumeMounts": func() []map[string]interface{} {
+										mounts := []map[string]interface{}{
+											{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
+											{"name": "init-scripts", "mountPath": "/var/run/varroa/init"},
+											{"name": "bootstrap", "mountPath": "/var/run/varroa/bootstrap"},
+											{"name": "casc-bundle", "mountPath": "/var/jenkins_home/casc"},
+											{"name": "varroa-run", "mountPath": "/var/run/varroa/run"},
+											{"name": "varroa-loopback", "mountPath": "/var/run/varroa"},
+										}
+										if spec.ArtifactSecretName != "" {
+											mounts = append(mounts, map[string]interface{}{
+												"name": "varroa-artifacts", "mountPath": artifactSecretMountPath, "readOnly": true,
+											})
+										}
+										return mounts
+									}(),
 									"lifecycle": map[string]interface{}{
 										"preStop": map[string]interface{}{
 											"exec": map[string]interface{}{
@@ -1007,6 +1639,19 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									},
 									"env": func() []map[string]interface{} {
 										javaOptsValue := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true"
+										if spec.Cell {
+											// UseItemPermission scopes a folder credential to its own
+											// folder. A cell needs this: without it, a tenant's
+											// item-scoped Credentials permission can read every other
+											// tenant's folder credentials, not only its own.
+											javaOptsValue += " -Dcom.cloudbees.plugins.credentials.UseItemPermission=true"
+										}
+										if spec.ArtifactSharedCredentials {
+											// STS mode: the AWS SDK default chain reads the
+											// projected credentials file, which the operator
+											// renews in place.
+											javaOptsValue += " " + artifactSharedCredentialsProperty
+										}
 										if spec.PodOverrides != nil && spec.PodOverrides.JvmOpts != "" {
 											javaOptsValue += " " + spec.PodOverrides.JvmOpts
 										}
@@ -1016,6 +1661,7 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 											// mite's drift-baseline /configuration-as-code/export 403s.
 											{"name": "JAVA_OPTS", "value": javaOptsValue},
 											{"name": "VARROA_OIDC_ISSUER", "value": spec.OIDCIssuer},
+											{"name": "VARROA_LOCAL_ISSUER", "value": spec.LocalIssuer},
 											{"name": "VARROA_LOGIN_URL", "value": spec.VarroaLoginURL},
 											{"name": "VARROA_OIDC_USER_CLAIM", "value": spec.OIDCUserClaim},
 											{"name": "VARROA_OIDC_GROUP_CLAIM", "value": spec.OIDCGroupClaim},
@@ -1044,6 +1690,61 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 												"name": "VARROA_HIBERNATION_IGNORE_REGEX", "value": spec.HibernationIgnoreRegex,
 											})
 										}
+										if spec.Headless {
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_HEADLESS", "value": "true",
+											})
+											if spec.InClusterEndpoint != "" {
+												jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+													"name": "KUBERNETES_JENKINS_URL", "value": spec.InClusterEndpoint + "/",
+												})
+											}
+										}
+										// The plugin blocks the jobDsl step at run time only when
+										// this is set. A cell must carry it. A plain controller
+										// must not.
+										if spec.Cell {
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_CELL", "value": "true",
+											})
+										}
+										jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+											"name": "VARROA_CLAIM_GATE", "value": claimGate,
+										})
+										if jenkinsClaimTimeoutMS != 0 {
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_CLAIM_TIMEOUT_MS", "value": strconv.Itoa(jenkinsClaimTimeoutMS),
+											})
+										}
+										// VarroaLogStorageFactory.forBuild returns null (Jenkins keeps
+										// its own FileLogStorage) unless this is set, so it is set
+										// only when the record store is enabled (design D1).
+										//
+										// RunStatePusher reads its own gate the same way, and the
+										// pipeline mesh needs the record store for the same reason
+										// the log path does. Both variables therefore take one
+										// gate: without the run-state URL every build replicates
+										// nothing and a lost cell loses its running builds.
+										if claimGate == "1" {
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_MITE_LOG_URL", "value": "http://127.0.0.1:9095/v1/log",
+											})
+											// This one carries the loopback BASE url, not a
+											// route: RunStatePusher appends its own path. A
+											// value carrying the path makes every push target
+											// that path twice and store nothing.
+											jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+												"name": "VARROA_MITE_RUN_STATE_URL", "value": "http://127.0.0.1:9095",
+											})
+										}
+										jenkinsEnv = append(jenkinsEnv, map[string]interface{}{
+											"name": "VARROA_CELL_INSTANCE",
+											"valueFrom": map[string]interface{}{
+												"fieldRef": map[string]interface{}{
+													"fieldPath": "metadata.uid",
+												},
+											},
+										})
 										return jenkinsEnv
 									}(),
 									"resources": resourceRequirementsMap(spec.Resources),
@@ -1070,18 +1771,47 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 								"imagePullPolicy": spec.MiteImagePullPolicy,
 								"resources":       resourceRequirementsMap(spec.MiteResources),
 								"command":         []string{"/app/varroa-mite"},
-								"env": []map[string]interface{}{
-									{"name": "VARROA_ENDPOINT", "value": spec.VarroaEndpoint},
-									{"name": "JENKINS_URL", "value": "http://localhost:8080" + spec.PathPrefix},
-									{"name": "CONTROLLER_NAME", "value": spec.ControllerName},
-									{"name": "NAMESPACE", "value": spec.Namespace},
-									{"name": "VARROA_CA_PEM", "value": spec.CAPEM},
-								},
+								"env": func() []map[string]interface{} {
+									miteEnv := []map[string]interface{}{
+										{"name": "VARROA_ENDPOINT", "value": spec.VarroaEndpoint},
+										{"name": "JENKINS_URL", "value": "http://localhost:8080" + spec.PathPrefix},
+										{"name": "CONTROLLER_NAME", "value": spec.ControllerName},
+										{"name": "NAMESPACE", "value": spec.Namespace},
+										{"name": "VARROA_CA_PEM", "value": spec.CAPEM},
+										{
+											"name": "VARROA_POD_UID",
+											"valueFrom": map[string]interface{}{
+												"fieldRef": map[string]interface{}{
+													"fieldPath": "metadata.uid",
+												},
+											},
+										},
+										{
+											// The mite stamps LogChunk.cell_instance from this (design
+											// D4). A distinct env var from VARROA_POD_UID above, though
+											// both read the same downward-API field, because the two
+											// serve different consumers.
+											"name": "VARROA_CELL_INSTANCE",
+											"valueFrom": map[string]interface{}{
+												"fieldRef": map[string]interface{}{
+													"fieldPath": "metadata.uid",
+												},
+											},
+										},
+									}
+									if miteClaimTimeoutMS != 0 {
+										miteEnv = append(miteEnv, map[string]interface{}{
+											"name": "MITE_CLAIM_TIMEOUT_MS", "value": strconv.Itoa(miteClaimTimeoutMS),
+										})
+									}
+									return miteEnv
+								}(),
 								"volumeMounts": []map[string]interface{}{
 									{"name": "bootstrap", "mountPath": "/var/run/varroa/bootstrap"},
 									{"name": "jenkins-home", "mountPath": "/var/jenkins_home"},
 									{"name": "casc-bundle", "mountPath": "/var/jenkins_home/casc"},
 									{"name": "varroa-run", "mountPath": "/var/run/varroa/run"},
+									{"name": "varroa-loopback", "mountPath": "/var/run/varroa"},
 								},
 							},
 						},
@@ -1113,6 +1843,10 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									"name":     "varroa-run",
 									"emptyDir": map[string]interface{}{},
 								},
+								{
+									"name":     "varroa-loopback",
+									"emptyDir": map[string]interface{}{},
+								},
 							}
 							if spec.CascConfigMap != "" {
 								vols = append(vols, map[string]interface{}{
@@ -1120,6 +1854,31 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									"configMap": map[string]interface{}{
 										"name": spec.CascConfigMap,
 									},
+								})
+							}
+							if spec.ArtifactSecretName != "" {
+								vols = append(vols, map[string]interface{}{
+									"name": "varroa-artifacts",
+									"secret": map[string]interface{}{
+										"secretName": spec.ArtifactSecretName,
+									},
+								})
+							}
+							if spec.CellSecretsName != "" {
+								vols = append(vols, map[string]interface{}{
+									"name": cellSecretsVolumeName,
+									"secret": map[string]interface{}{
+										"secretName": spec.CellSecretsName,
+									},
+								})
+							}
+							if spec.Cell {
+								// A cell has no volumeClaimTemplates (see below), so
+								// jenkins-home must come from an explicit emptyDir volume
+								// instead of the StatefulSet's implicit claim binding.
+								vols = append(vols, map[string]interface{}{
+									"name":     "jenkins-home",
+									"emptyDir": map[string]interface{}{},
 								})
 							}
 							return vols
@@ -1144,7 +1903,12 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 			},
 		},
 	}
-	if spec.StorageClass != "" {
+	if spec.Cell {
+		// A cell has no durable storage: the claim template is dropped
+		// entirely, not just left empty, so the StatefulSet never provisions
+		// a PVC for it.
+		delete(sts.Object["spec"].(map[string]interface{}), "volumeClaimTemplates")
+	} else if spec.StorageClass != "" {
 		templates := sts.Object["spec"].(map[string]interface{})["volumeClaimTemplates"].([]map[string]interface{})
 		templates[0]["spec"].(map[string]interface{})["storageClassName"] = spec.StorageClass
 	}
@@ -1352,14 +2116,24 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 	return m
 }
 
-// CreateStatefulSet creates a StatefulSet via the dynamic client.
+// CreateStatefulSet creates a StatefulSet via the dynamic client, or updates
+// it when it exists.
+//
+// The read of the live StatefulSet comes first. A missing StatefulSet runs
+// fence and then Create. An existing StatefulSet whose replica count is 0 runs
+// fence before an update that sets a count above 0; a StatefulSet already at
+// a count above 0 gets no fence. The update carries the resourceVersion that
+// was read before the fence, so a write since that read makes it conflict. A
+// fence error or a conflict is returned unchanged. A Create that answers
+// AlreadyExists adopts the peer's StatefulSet: it re-reads that object and
+// takes the update path, so the fence runs only for a scale-up from 0.
 //
 // Ordering:
 //  1. Build the base StatefulSet via buildStatefulSet (includes mite sidecar,
 //     OIDC env, init containers, volumes).
 //  2. Apply compiled PodOverrides patch (typed struct → strategic-merge YAML).
 //  3. Apply raw ResourceOverlay.StatefulSet YAML (overlay overrides podOverrides).
-//  4. Existing Create / AlreadyExists path with ownership-stamped image updates
+//  4. Read, then Create (missing) or update (existing), with ownership-stamped image updates
 //     (varroa.dev/computed-images): a live image is preserved only when it
 //     differs from the previous stamp (an out-of-band edit was made directly on
 //     the StatefulSet) AND the operator's own newly-computed value for that
@@ -1390,7 +2164,7 @@ func parseResourcesSourceAnnotation(sts *unstructured.Unstructured) map[string]s
 // UpdateStatefulSetOIDCEnv re-asserts VARROA_OIDC_* env vars LATER on the live
 // object, so a user overlay editing OIDC env is warned and then silently
 // overwritten — consistent with warn-but-allow.
-func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec) error {
+func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error {
 	sts := buildStatefulSet(spec)
 
 	// Apply compiled PodOverrides (typed → strategic-merge patch).
@@ -1476,13 +2250,59 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		}
 	}
 
-	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
-	_, err = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Create(ctx, sts, metav1.CreateOptions{})
-	if err == nil {
-		return nil
+	// Stamp the artifact Secret's content hash on the pod template, same
+	// reasoning as the CASC content hash above: a rotation changes no
+	// StatefulSet field the kubelet's volume sync doesn't already carry, but
+	// Jenkins only reads the mounted file at JCasC configuration load time
+	// (task 5.1a), so the pod must roll for a rotation to take effect.
+	if spec.ArtifactSecretHash != "" {
+		podAnns, _, _ := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "annotations")
+		if podAnns == nil {
+			podAnns = map[string]string{}
+		}
+		podAnns[artifactSecretHashAnnotation] = spec.ArtifactSecretHash
+		if err := unstructured.SetNestedStringMap(sts.Object, podAnns, "spec", "template", "metadata", "annotations"); err != nil {
+			return fmt.Errorf("set artifact-secret-hash annotation: %w", err)
+		}
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return err
+
+	// Stamp the pool label on the pod template after every overlay merge,
+	// so the operator value replaces a podLabels or overlay value for the
+	// same key. The selector stays unchanged, because it is immutable.
+	if spec.CellPool != "" {
+		podLabels, _, err := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "labels")
+		if err != nil {
+			return fmt.Errorf("read pod labels: %w", err)
+		}
+		if podLabels == nil {
+			podLabels = map[string]string{}
+		}
+		podLabels[cells.LabelCellPool] = spec.CellPool
+		if err := unstructured.SetNestedStringMap(sts.Object, podLabels, "spec", "template", "metadata", "labels"); err != nil {
+			return fmt.Errorf("set cell-pool pod label: %w", err)
+		}
+	}
+
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+	existing, getErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(getErr) {
+		if err := fence(ctx); err != nil {
+			return err
+		}
+		_, createErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Create(ctx, sts, metav1.CreateOptions{})
+		if createErr == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// A peer tick created the StatefulSet after our read. Adopt it: the
+		// re-read below takes the update path, so a healthy Controller keeps
+		// its status.
+		existing, getErr = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
+	}
+	if getErr != nil {
+		return fmt.Errorf("get existing statefulset for update: %w", getErr)
 	}
 	// Update existing StatefulSet with ownership-stamped image updates
 	// (varroa.dev/computed-images): a live container image + pull policy is
@@ -1513,10 +2333,6 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 	// — reconcileContainerSpecRoll/reconcileVersionRoll use it only for the
 	// informational "preserved (out-of-band override)" note, not to decide
 	// whether to roll.
-	existing, getErr := c.dynamic.Resource(gvr).Namespace(spec.Namespace).Get(ctx, spec.Name, metav1.GetOptions{})
-	if getErr != nil {
-		return fmt.Errorf("get existing statefulset for update: %w", getErr)
-	}
 	stampOld := parseComputedImagesAnnotation(existing) // nil => adopt
 	liveImages := stsImagesByName(existing)
 	livePullPolicies := stsPullPoliciesByName(existing)
@@ -1590,16 +2406,85 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		}
 	}
 
+	// A scale-up from 0 runs the fence. The update then carries the
+	// resourceVersion read above, so a write since that read conflicts.
+	if stsReplicaCount(existing) == 0 && stsReplicaCount(sts) > 0 {
+		if err := fence(ctx); err != nil {
+			return err
+		}
+	}
 	sts.SetResourceVersion(existing.GetResourceVersion())
 	_, err = c.dynamic.Resource(gvr).Namespace(spec.Namespace).Update(ctx, sts, metav1.UpdateOptions{})
 	return err
 }
 
-// UpdateStatefulSetOIDCEnv patches the VARROA_OIDC_ISSUER and VARROA_LOGIN_URL
-// env vars on an existing StatefulSet's Jenkins container without rebuilding
-// the full StatefulSet spec. Note: changing env vars updates the pod template,
-// so the StatefulSet controller will perform a rolling update to apply them.
-func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error {
+// stsReplicaCount returns spec.replicas of obj. A missing or unreadable field
+// counts as 1, the API default. JSON decoding yields float64 numbers, so the
+// numeric kinds are all handled.
+func stsReplicaCount(obj *unstructured.Unstructured) int64 {
+	raw, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "replicas")
+	if !found {
+		return 1
+	}
+	switch v := raw.(type) {
+	case int64:
+		return v
+	case int32:
+		return int64(v)
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	}
+	return 1
+}
+
+// JenkinsAuthEnv holds the auth env vars the operator keeps in sync on the
+// Jenkins container of a running StatefulSet.
+type JenkinsAuthEnv struct {
+	OIDCIssuer string
+	// LocalIssuer is the issuer of local account sessions beside OIDC, or
+	// "" when local accounts are off. The env var is always present so the
+	// realm's JCasC reference resolves.
+	LocalIssuer     string
+	LoginURL        string
+	OIDCUserClaim   string
+	OIDCGroupClaim  string
+	PubKeyPEM       string
+	PubKeyKID       string
+	Aud             string
+	ApikeyVerifyURL string
+	CAPEM           string
+}
+
+// entries returns the env vars in a fixed order. always marks a variable
+// that is added even when its value is empty.
+func (e JenkinsAuthEnv) entries() []struct {
+	name, value string
+	always      bool
+} {
+	return []struct {
+		name, value string
+		always      bool
+	}{
+		{"VARROA_OIDC_ISSUER", e.OIDCIssuer, true},
+		{"VARROA_LOCAL_ISSUER", e.LocalIssuer, true},
+		{"VARROA_LOGIN_URL", e.LoginURL, true},
+		{"VARROA_OIDC_USER_CLAIM", e.OIDCUserClaim, false},
+		{"VARROA_OIDC_GROUP_CLAIM", e.OIDCGroupClaim, false},
+		{"VARROA_MITE_PUBKEY_PEM", e.PubKeyPEM, false},
+		{"VARROA_MITE_PUBKEY_KID", e.PubKeyKID, false},
+		{"VARROA_MITE_AUD", e.Aud, false},
+		{"VARROA_APIKEY_VERIFY_URL", e.ApikeyVerifyURL, false},
+		{"VARROA_CA_PEM", e.CAPEM, false},
+	}
+}
+
+// UpdateStatefulSetOIDCEnv patches the auth env vars on an existing
+// StatefulSet's Jenkins container without rebuilding the full StatefulSet
+// spec. Note: changing env vars updates the pod template, so the StatefulSet
+// controller will perform a rolling update to apply them.
+func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv JenkinsAuthEnv) error {
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 	sts, err := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -1624,112 +2509,8 @@ func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, na
 		return fmt.Errorf("jenkins container not found in statefulset")
 	}
 
-	needUpdate := false
-	envs, found, _ := unstructured.NestedSlice(jenkins, "env")
-	if !found {
-		envs = make([]interface{}, 0)
-	}
-
-	// Upsert OIDC env vars.
-	issuerFound, loginFound, userClaimFound, groupClaimFound, pubKeyFound, kidFound, audFound := false, false, false, false, false, false, false
-	apikeyURLFound, caPEMFound := false, false
-	for i, e := range envs {
-		env, _ := e.(map[string]interface{})
-		name, _, _ := unstructured.NestedString(env, "name")
-		switch name {
-		case "VARROA_OIDC_ISSUER":
-			issuerFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcIssuer {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcIssuer, "value")
-				needUpdate = true
-			}
-		case "VARROA_LOGIN_URL":
-			loginFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != loginURL {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), loginURL, "value")
-				needUpdate = true
-			}
-		case "VARROA_OIDC_USER_CLAIM":
-			userClaimFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcUserClaim {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcUserClaim, "value")
-				needUpdate = true
-			}
-		case "VARROA_OIDC_GROUP_CLAIM":
-			groupClaimFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != oidcGroupClaim {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), oidcGroupClaim, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_PUBKEY_PEM":
-			pubKeyFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != pubKeyPEM {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), pubKeyPEM, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_PUBKEY_KID":
-			kidFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != pubKeyKID {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), pubKeyKID, "value")
-				needUpdate = true
-			}
-		case "VARROA_MITE_AUD":
-			audFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != aud {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), aud, "value")
-				needUpdate = true
-			}
-		case "VARROA_APIKEY_VERIFY_URL":
-			apikeyURLFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != apikeyVerifyURL {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), apikeyVerifyURL, "value")
-				needUpdate = true
-			}
-		case "VARROA_CA_PEM":
-			caPEMFound = true
-			if old, _, _ := unstructured.NestedString(env, "value"); old != caPEM {
-				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), caPEM, "value")
-				needUpdate = true
-			}
-		}
-	}
-	if !issuerFound {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_ISSUER", "value": oidcIssuer})
-		needUpdate = true
-	}
-	if !loginFound {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_LOGIN_URL", "value": loginURL})
-		needUpdate = true
-	}
-	if !userClaimFound && oidcUserClaim != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_USER_CLAIM", "value": oidcUserClaim})
-		needUpdate = true
-	}
-	if !groupClaimFound && oidcGroupClaim != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_OIDC_GROUP_CLAIM", "value": oidcGroupClaim})
-		needUpdate = true
-	}
-	if !pubKeyFound && pubKeyPEM != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_PUBKEY_PEM", "value": pubKeyPEM})
-		needUpdate = true
-	}
-	if !kidFound && pubKeyKID != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_PUBKEY_KID", "value": pubKeyKID})
-		needUpdate = true
-	}
-	if !audFound && aud != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_MITE_AUD", "value": aud})
-		needUpdate = true
-	}
-	if !apikeyURLFound && apikeyVerifyURL != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_APIKEY_VERIFY_URL", "value": apikeyVerifyURL})
-		needUpdate = true
-	}
-	if !caPEMFound && caPEM != "" {
-		envs = append(envs, map[string]interface{}{"name": "VARROA_CA_PEM", "value": caPEM})
-		needUpdate = true
-	}
-
+	envs, _, _ := unstructured.NestedSlice(jenkins, "env")
+	envs, needUpdate := upsertAuthEnv(envs, authEnv)
 	if !needUpdate {
 		return nil
 	}
@@ -1739,6 +2520,32 @@ func (c *ClientsetClient) UpdateStatefulSetOIDCEnv(ctx context.Context, name, na
 
 	_, err = c.dynamic.Resource(gvr).Namespace(namespace).Update(ctx, sts, metav1.UpdateOptions{})
 	return err
+}
+
+// upsertAuthEnv sets each auth env var in envs. It reports whether envs
+// changed.
+func upsertAuthEnv(envs []interface{}, authEnv JenkinsAuthEnv) ([]interface{}, bool) {
+	changed := false
+	for _, want := range authEnv.entries() {
+		found := false
+		for i, e := range envs {
+			env, _ := e.(map[string]interface{})
+			if n, _, _ := unstructured.NestedString(env, "name"); n != want.name {
+				continue
+			}
+			found = true
+			if old, _, _ := unstructured.NestedString(env, "value"); old != want.value {
+				_ = unstructured.SetNestedField(envs[i].(map[string]interface{}), want.value, "value")
+				changed = true
+			}
+			break
+		}
+		if !found && (want.always || want.value != "") {
+			envs = append(envs, map[string]interface{}{"name": want.name, "value": want.value})
+			changed = true
+		}
+	}
+	return envs, changed
 }
 
 // EnsureStatefulSetPodLabel adds a pod-template label to an existing StatefulSet.
@@ -2519,11 +3326,41 @@ func isFieldManagerConflict(err error) bool {
 	return false
 }
 
-// PatchControllerStatus patches the status subresource of a Controller CRD.
-func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
+// PatchControllerStatus merge-patches the status subresource of a Controller
+// only while the object still carries resourceVersion. It returns the
+// resourceVersion after the patch. The apiserver treats a resourceVersion in
+// a patch as a precondition: a write by anyone since that version answers
+// Conflict, so a status that a replica computed from an older read cannot
+// overwrite a newer write.
+func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error) {
 	if status == nil {
-		return fmt.Errorf("status must not be nil")
+		return "", fmt.Errorf("status must not be nil")
 	}
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("patch controller %s/%s status: resourceVersion is required", namespace, name)
+	}
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{"resourceVersion": resourceVersion},
+		"status":   controllerStatusPatch(status),
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return "", fmt.Errorf("marshal status patch: %w", err)
+	}
+	out, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
+	)
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
+}
+
+// controllerStatusPatch builds the status body of the PatchControllerStatus
+// merge patch. The test client applies the same body to its store, so the
+// two must not diverge.
+func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interface{} {
 	conditions := status.Conditions
 	if conditions == nil {
 		conditions = []v1alpha1.ControllerCondition{}
@@ -2536,7 +3373,8 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	// end-of-reconcile status write is blind, and a JSON merge patch retains
 	// omitted keys — a false value could never clear the flag, and a stale
 	// true read before a concurrent wake would re-assert it and un-wake the
-	// controller. They are written only by SetHibernated, the status CAS.
+	// controller. They are written only by SetHibernated, the status CAS,
+	// and by SetHibernatedAt, the conditional write of the tick.
 	// Force overlayWarnings so that an empty slice clears prior warnings
 	// (omitempty would prevent the merge patch from clearing them).
 	overlayWarnings := status.OverlayWarnings
@@ -2556,6 +3394,11 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	if status.DesiredStateHash != "" {
 		statusPatch["desiredStateHash"] = status.DesiredStateHash
 	}
+	// desiredContentHash pairs with desiredStateHash, so it follows the
+	// same non-empty rule: a patch never clears one hash of the pair.
+	if status.DesiredContentHash != "" {
+		statusPatch["desiredContentHash"] = status.DesiredContentHash
+	}
 	if status.FirstConnectedAt != nil {
 		statusPatch["firstConnectedAt"] = status.FirstConnectedAt
 	}
@@ -2571,9 +3414,13 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	statusPatch["pendingRestart"] = status.PendingRestart
 	statusPatch["pendingPluginRoll"] = status.PendingPluginRoll
 	statusPatch["approvedPluginRollChecksum"] = status.ApprovedPluginRollChecksum
-	if status.PendingItemDeletions != nil {
-		statusPatch["pendingItemDeletions"] = status.PendingItemDeletions
+	// pendingItemDeletions is always sent: a merge patch keeps an omitted
+	// key, so a nil list must go out as an empty list to clear stale entries.
+	pendingItemDeletions := status.PendingItemDeletions
+	if pendingItemDeletions == nil {
+		pendingItemDeletions = []v1alpha1.PendingDeletion{}
 	}
+	statusPatch["pendingItemDeletions"] = pendingItemDeletions
 	statusPatch["restartDrain"] = status.RestartDrain
 	statusPatch["liveDrift"] = status.LiveDrift
 	if status.LastDesiredPushAt != nil {
@@ -2584,6 +3431,9 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	}
 	statusPatch["rollout"] = status.Rollout
 	statusPatch["lastReconcileError"] = status.LastReconcileError
+	// endpoint is always sent: a merge patch keeps an omitted key, so an
+	// empty value must go out to clear a stale URL.
+	statusPatch["endpoint"] = status.Endpoint
 	statusPatch["lastReconcileErrorAt"] = status.LastReconcileErrorAt
 	if status.LastApplyResult != nil {
 		statusPatch["lastApplyResult"] = status.LastApplyResult
@@ -2594,12 +3444,65 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	// PluginInventory is always written whole to avoid the merge-patch
 	// omitempty trap — an omitted key is retained, not cleared.
 	statusPatch["pluginInventory"] = status.PluginInventory
+	// cell carries only the controller reconciler's half of status.cell
+	// (task 5.3a, design D4): warm, appliedTenants, evacuate, unreadySince,
+	// rolledAt, and tenantWarnings. It never carries tenants — that field
+	// is the placement pass's own half, written through the narrower
+	// PatchControllerCellStatus route. This blind end-of-reconcile patch
+	// would otherwise send the stale in-memory tenants list and clobber a
+	// placement change RFC 7386 would leave untouched.
+	if status.Cell != nil {
+		statusPatch["cell"] = map[string]interface{}{
+			"warm":           status.Cell.Warm,
+			"appliedTenants": status.Cell.AppliedTenants,
+			"evacuate":       status.Cell.Evacuate,
+			"unreadySince":   status.Cell.UnreadySince,
+			"rolledAt":       status.Cell.RolledAt,
+			"tenantWarnings": status.Cell.TenantWarnings,
+			// instance, previousInstance, previousInstanceLastSeen, and
+			// rehydration are the controller reconciler's own half of
+			// status.cell too (design D13, task 6.0/6.1): the running
+			// pod's UID, the replaced pod's UID and last-seen heartbeat,
+			// and the per-tenant rehydration entries. Written
+			// unconditionally, like the fields above, so a cleared value
+			// (no pod, an emptied entry list) actually clears instead of
+			// being retained by the merge patch.
+			"instance":                 status.Cell.Instance,
+			"previousInstance":         status.Cell.PreviousInstance,
+			"previousInstanceLastSeen": status.Cell.PreviousInstanceLastSeen,
+			"rehydration":              status.Cell.Rehydration,
+			// pendingSignatures is written unconditionally so an empty
+			// set clears the list instead of being retained.
+			"pendingSignatures":      status.Cell.PendingSignatures,
+			"pendingSignaturesTotal": status.Cell.PendingSignaturesTotal,
+		}
+	}
+	return statusPatch
+}
+
+// PatchControllerCellStatus merge-patches exactly
+// {"status":{"cell":{"tenants":[...]}}}. It never calls
+// crdstore.PatchStatus[Controller]: that helper marshals its argument as the
+// whole status body, which would send every Controller status key and
+// destroy whatever the controller reconciler wrote since the placement pass
+// last read this object. A nil cell.Tenants still sends "tenants":[] rather
+// than omitting the key, so clearing the list actually clears it (RFC 7386
+// replaces, never merges, a non-object value).
+func (c *ClientsetClient) PatchControllerCellStatus(ctx context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
+	tenants := []string{}
+	if cell != nil && cell.Tenants != nil {
+		tenants = cell.Tenants
+	}
 	patch := map[string]interface{}{
-		"status": statusPatch,
+		"status": map[string]interface{}{
+			"cell": map[string]interface{}{
+				"tenants": tenants,
+			},
+		},
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return fmt.Errorf("marshal status patch: %w", err)
+		return fmt.Errorf("marshal cell status patch: %w", err)
 	}
 	_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
 		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
@@ -2607,10 +3510,12 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 	return err
 }
 
-// SetHibernated is the single writer for status.hibernated and
-// status.hibernatedAt. It reads the live object and returns (false, nil) when
-// the flag already matches want. Otherwise it sets the two hibernation fields
-// on the freshly read object and Updates the STATUS SUBRESOURCE, carrying the
+// SetHibernated writes status.hibernated and status.hibernatedAt for the
+// callers outside the reconcile tick: the wake and hibernate actions, the
+// power write, and the brood verbs. The tick uses SetHibernatedAt. It reads
+// the live object and returns (false, nil) when the flag already matches
+// want. Otherwise it sets the two hibernation fields on the freshly read
+// object and Updates the STATUS SUBRESOURCE, carrying the
 // fetched resourceVersion so a concurrent write conflicts rather than being
 // clobbered.
 //
@@ -2620,8 +3525,7 @@ func (c *ClientsetClient) PatchControllerStatus(ctx context.Context, name, names
 // bounded number of times on conflict: the clear (wake) callers are one-shot
 // and would otherwise drop the wake, and the set direction is reached by
 // HibernateController — also a one-shot request-reply action — which would
-// surface a conflict as a spurious 500. Auto-hibernate additionally requeues
-// naturally inside the reconcile.
+// surface a conflict as a spurious 500.
 func (c *ClientsetClient) SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error) {
 	var changed bool
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -2663,6 +3567,44 @@ func (c *ClientsetClient) setHibernatedOnce(ctx context.Context, name, namespace
 		return false, err
 	}
 	return true, nil
+}
+
+// SetHibernatedAt sets status.hibernated to want only while the Controller
+// still carries resourceVersion, and returns the resourceVersion after the
+// write. It sends one JSON merge patch on the status subresource with the
+// resourceVersion in the body, which the apiserver treats as a precondition.
+// It does not read the Controller and does not retry: the caller decided from
+// its own read, so a write since that read must surface as Conflict. A set
+// stamps status.hibernatedAt, and a clear removes it.
+func (c *ClientsetClient) SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error) {
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("set controller %s/%s hibernation: resourceVersion is required", namespace, name)
+	}
+	patchBytes, err := json.Marshal(map[string]interface{}{
+		"metadata": map[string]interface{}{"resourceVersion": resourceVersion},
+		"status":   hibernationStatusPatch(want, metav1.Now()),
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal hibernation patch: %w", err)
+	}
+	out, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
+	)
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
+}
+
+// hibernationStatusPatch is the status body of a SetHibernatedAt merge patch.
+// A clear sends a null hibernatedAt, which deletes the key.
+func hibernationStatusPatch(want bool, now metav1.Time) map[string]interface{} {
+	var at interface{}
+	if want {
+		at = now.UTC().Format(time.RFC3339)
+	}
+	return map[string]interface{}{"hibernated": want, "hibernatedAt": at}
 }
 
 // PatchControllerAnnotations merge-patches metadata.annotations on a Controller.
@@ -2721,6 +3663,12 @@ func kindToGVR(kind string) (schema.GroupVersionResource, bool) {
 		return schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}, true
 	case "PersistentVolumeClaim":
 		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}, true
+	case "ServiceAccount":
+		return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"}, true
+	case "Role":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}, true
+	case "RoleBinding":
+		return schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}, true
 	default:
 		return schema.GroupVersionResource{}, false
 	}
@@ -3947,6 +4895,11 @@ func (c *ClientsetClient) PatchUpdateCenterStatus(ctx context.Context, name stri
 			"phase":                   status.Phase,
 			"conditions":              status.Conditions,
 			"gaps":                    status.Gaps,
+			"gapCount":                status.GapCount,
+			"unservable":              status.Unservable,
+			"unservableCount":         status.UnservableCount,
+			"unknownDependencies":     status.UnknownDependencies,
+			"unknownDependencyCount":  status.UnknownDependencyCount,
 			"pluginCount":             status.PluginCount,
 			"storeBytes":              status.StoreBytes,
 			"seedImportedDigests":     status.SeedImportedDigests,
@@ -4254,6 +5207,44 @@ func (c *ClientsetClient) DeleteControllerPod(ctx context.Context, namespace, na
 	return nil
 }
 
+// DeleteControllerPodGrace deletes one pod with graceSeconds as the delete
+// grace and a UID precondition. NotFound and Conflict answer nil: in both
+// cases the observed pod is gone.
+func (c *ClientsetClient) DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
+	if graceSeconds <= 0 {
+		return fmt.Errorf("delete pod %s/%s: grace must be above 0, got %d", namespace, podName, graceSeconds)
+	}
+	err := c.clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{
+		GracePeriodSeconds: &graceSeconds,
+		Preconditions:      &metav1.Preconditions{UID: &uid},
+	})
+	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+		return err
+	}
+	return nil
+}
+
+// ListTenantAgentPods lists the pods in namespace that carry the kubernetes
+// plugin's default agent pod label. A tenant cloud sets no podLabels, so
+// every agent pod it launches carries that label.
+func (c *ClientsetClient) ListTenantAgentPods(ctx context.Context, namespace string) ([]corev1.Pod, error) {
+	list, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: agentPodDefaultLabelKey + "=" + agentPodDefaultLabelValue,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// DeletePodWithUID deletes one pod only while its UID equals uid. A pod
+// that was created again under the same name answers Conflict and stays.
+func (c *ClientsetClient) DeletePodWithUID(ctx context.Context, namespace, name string, uid types.UID) error {
+	return c.clientset.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	})
+}
+
 // GetControllerPod returns the Jenkins pod for a controller, or nil when it
 // does not exist.
 func (c *ClientsetClient) GetControllerPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
@@ -4270,6 +5261,21 @@ func (c *ClientsetClient) GetControllerPod(ctx context.Context, namespace, name 
 		return nil, err
 	}
 	return pod, nil
+}
+
+// ListPodPhases answers the phase of every pod in namespace, keyed by the
+// pod's UID. The caller reads an absent UID as a gone pod, so the list
+// applies no label selector.
+func (c *ClientsetClient) ListPodPhases(ctx context.Context, namespace string) (map[types.UID]corev1.PodPhase, error) {
+	pods, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[types.UID]corev1.PodPhase, len(pods.Items))
+	for i := range pods.Items {
+		out[pods.Items[i].UID] = pods.Items[i].Status.Phase
+	}
+	return out, nil
 }
 
 // StreamPodLogs streams stdout+stderr from a container in the named pod.

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +28,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 const (
@@ -44,18 +49,44 @@ const (
 	updateCenterImportTokenKey = "token"
 
 	// Condition types (exact per spec).
-	condTypeStorageReady     = "StorageReady"
-	condTypeSeedImported     = "SeedImported"
-	condTypeCoverageComplete = "CoverageComplete"
-	condTypeReady            = "Ready"
+	condTypeStorageReady      = "StorageReady"
+	condTypeSeedImported      = "SeedImported"
+	condTypeCoverageComplete  = "CoverageComplete"
+	condTypePluginsServable   = "PluginsServable"
+	condTypePluginsPrefetched = "PluginsPrefetched"
+	condTypeReady             = "Ready"
 
 	// Reason strings (exact per spec).
 	reasonStorageUnavailable   = "StorageUnavailable"
 	reasonInventoryUnavailable = "InventoryUnavailable"
 	reasonGapAnalysisComplete  = "GapAnalysisComplete"
+	reasonAllPluginsServable   = "AllPluginsServable"
+	reasonPluginsUnservable    = "PluginsUnservable"
+	reasonResolutionDegraded   = "ResolutionDegraded"
+	reasonTokenUnavailable     = "TokenUnavailable"
 
-	// Max gaps to surface.
+	// Reason strings of the PluginsPrefetched condition.
+	reasonPrefetchComplete       = "PrefetchComplete"
+	reasonPrefetchInProgress     = "PrefetchInProgress"
+	reasonPrefetchFailed         = "PrefetchFailed"
+	reasonPrefetchUnsupported    = "PrefetchUnsupported"
+	reasonTokenRejected          = "TokenRejected"
+	reasonServabilityUnavailable = "ServabilityUnavailable"
+
+	// Per-plugin unservable reasons. They match the update center's servability
+	// reason codes, mapped to CRD-facing names.
+	unservableNotListed           = "NotListed"
+	unservableArchiveDisabled     = "ArchiveDisabled"
+	unservablePullThroughDisabled = "PullThroughDisabled"
+
+	// Max gaps and max unservable entries to surface.
 	maxGaps = 50
+
+	// prefetchPerTick bounds how many declared plugins one reconcile asks the
+	// update center to fetch.
+	prefetchPerTick = 20
+	// prefetchRetryAfter keeps a plugin that failed out of the batch for this long.
+	prefetchRetryAfter = 10 * time.Minute
 )
 
 // UpdateCenterReconciler reconciles the singleton UpdateCenter CRD.
@@ -76,6 +107,13 @@ type UpdateCenterReconciler struct {
 	httpDoer interface {
 		Do(*http.Request) (*http.Response, error)
 	}
+
+	// prefetchMu guards prefetchFailedAt. prefetchFailedAt maps name@version to the
+	// time the update center last failed to fetch it.
+	prefetchMu       sync.Mutex
+	prefetchFailedAt map[string]time.Time
+	// now returns the current time. Tests replace it to pass the retry window.
+	now func() time.Time
 }
 
 // NewUpdateCenterReconciler creates a new UpdateCenterReconciler.
@@ -89,7 +127,9 @@ func NewUpdateCenterReconciler(client ResourceClient, store crdstore.Backend, op
 		newRegistryStore: func(ref string, opts oci.RegistryOptions) (oci.BlobStore, error) {
 			return oci.NewRegistryStore(ref, opts)
 		},
-		httpDoer: http.DefaultClient,
+		httpDoer:         http.DefaultClient,
+		prefetchFailedAt: make(map[string]time.Time),
+		now:              time.Now,
 	}
 }
 
@@ -149,14 +189,17 @@ func (r *UpdateCenterReconciler) Reconcile(ctx context.Context, req reconcile.Re
 	r.reconcileSeedImport(ctx, uc, status, logger)
 
 	// §3.4 — gap computation
-	r.computeGaps(ctx, status, logger)
+	servable, decided := r.computeGaps(ctx, status, logger)
 
 	// LTS-line metadata sources for pull-through resolution (add-lts-checksum-resolution).
 	// Runs only after the storage-readiness gate above.
 	r.reconcileMetadataSources(ctx, uc, status, logger)
 
+	// Optional prefetch of servable gaps. It never gates Ready.
+	r.reconcilePrefetch(ctx, uc, status, servable, decided, logger)
+
 	// §3.5 — phase derivation + patch
-	r.derivePhase(status, uc.Spec.PullThrough.Enabled)
+	r.derivePhase(status)
 	status.LastSyncTime = metav1.Now()
 
 	if err := crdstore.PatchStatus[v1alpha1.UpdateCenter](ctx, r.store, uc.Name, "", status); err != nil {
@@ -278,7 +321,7 @@ func (r *UpdateCenterReconciler) reconcileSeedImport(ctx context.Context, uc *v1
 		r.setCondition(status, v1alpha1.UpdateCenterCondition{
 			Type:    condTypeSeedImported,
 			Status:  metav1.ConditionFalse,
-			Reason:  "TokenUnavailable",
+			Reason:  reasonTokenUnavailable,
 			Message: fmt.Sprintf("import token not available: %v", err),
 		})
 		return
@@ -483,6 +526,8 @@ type inventoryEntry struct {
 	Tags         []string    `json:"tags,omitempty"`
 	RequiredCore string      `json:"requiredCore,omitempty"`
 	Dependencies []pluginDep `json:"dependencies,omitempty"`
+	// DependenciesKnown is false when the update center cannot read the list.
+	DependenciesKnown bool `json:"dependenciesKnown"`
 }
 
 // pluginDep is one declared dependency, in the frozen wire shape of
@@ -499,24 +544,27 @@ type declaredPlugin struct {
 	Name       string
 	Version    string
 	RequiredBy string
+	// Core is the lowest core that requests this plugin; empty when no controller requests it.
+	Core string
 }
 
-// computeGaps fetches the UC inventory, builds the declared set from profiles
-// and bundles, and computes gaps = declared − inventory.
-func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alpha1.UpdateCenterStatus, logger *slog.Logger) {
+// computeGaps fetches the UC inventory, builds the declared set from profiles and
+// bundles, and computes the gaps (declared minus stored). It then asks the update
+// center which declared plugins it cannot serve at all, from the store or by
+// pull-through. CoverageComplete answers the first question; PluginsServable answers
+// the second, and only PluginsServable gates Ready.
+//
+// It returns the declared plugins that pull-through can serve and the store lacks,
+// and whether that answer is complete (decided). A false decided means the
+// servability answer is unknown, so the caller must not act on the list.
+func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alpha1.UpdateCenterStatus, logger *slog.Logger) ([]declaredPlugin, bool) {
 	// §3.4a — fetch inventory.
-	inventoryURL := r.ucBaseURL + "/api/v1/inventory"
-	inventory, skipped, err := r.fetchInventory(ctx, inventoryURL)
+	inventory, skipped, err := getUCInventory(ctx, r.httpDoer, r.ucBaseURL)
 	if err != nil {
 		logger.Warn("inventory fetch failed", "error", err)
-		r.setCondition(status, v1alpha1.UpdateCenterCondition{
-			Type:    condTypeCoverageComplete,
-			Status:  metav1.ConditionFalse,
-			Reason:  reasonInventoryUnavailable,
-			Message: fmt.Sprintf("inventory unavailable: %v", err),
-		})
-		// Leave status.Gaps unchanged — do NOT overwrite.
-		return
+		r.setInventoryUnavailable(status, fmt.Sprintf("inventory unavailable: %v", err))
+		// Leave status.Gaps and status.Unservable unchanged — do NOT overwrite.
+		return nil, false
 	}
 
 	// A non-empty skipped means "inventory" is a lower bound, not a complete
@@ -543,6 +591,7 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 	for _, e := range inventory {
 		invSet[fmt.Sprintf("%s@%s", e.Name, e.Version)] = true
 	}
+	byName := inventoryByName(inventory)
 
 	// Set PluginCount and StoreBytes from the inventory response.
 	status.PluginCount = len(inventory)
@@ -551,48 +600,50 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 		totalBytes += e.SizeBytes
 	}
 	status.StoreBytes = totalBytes
+	r.applyUnknownDependencies(status, inventory)
 
 	// §3.4b — build declared set from JenkinsVersionProfiles and ComposedBundles.
 	declared, err := r.buildDeclaredSet(ctx, logger)
 	if err != nil {
 		logger.Warn("failed to build declared plugin set", "error", err)
-		// Treat this like inventory failure: CoverageComplete=False, leave gaps.
-		r.setCondition(status, v1alpha1.UpdateCenterCondition{
-			Type:    condTypeCoverageComplete,
-			Status:  metav1.ConditionFalse,
-			Reason:  reasonInventoryUnavailable,
-			Message: fmt.Sprintf("declared set unavailable: %v", err),
-		})
-		return
+		r.setInventoryUnavailable(status, fmt.Sprintf("declared set unavailable: %v", err))
+		return nil, false
 	}
 
-	// Compute gaps: declared − inventory.
-	var gaps []v1alpha1.UpdateCenterGap
-	for _, dp := range declared {
-		key := fmt.Sprintf("%s@%s", dp.Name, dp.Version)
-		if !invSet[key] {
-			gaps = append(gaps, v1alpha1.UpdateCenterGap{
-				Plugin:     dp.Name,
-				Version:    dp.Version,
-				RequiredBy: dp.RequiredBy,
-			})
+	// Compute gaps: distinct declared − inventory.
+	var unstored []declaredPlugin
+	for _, dp := range uniqueDeclared(declared) {
+		// Served metadata advertises one stored version per plugin. A latest pin is
+		// stored when a stored version runs on the lowest core that requests it.
+		if ucmeta.IsLatest(dp.Version) {
+			if !storedForCore(byName, dp.Name, dp.Core) {
+				unstored = append(unstored, dp)
+			}
+			continue
+		}
+		if !invSet[fmt.Sprintf("%s@%s", dp.Name, dp.Version)] {
+			unstored = append(unstored, dp)
 		}
 	}
 
-	// Truncate to maxGaps.
-	truncated := len(gaps) > maxGaps
-	if truncated {
-		gaps = gaps[:maxGaps]
+	status.GapCount = len(unstored)
+	status.Gaps = nil
+	for i := 0; i < len(unstored) && i < maxGaps; i++ {
+		dp := unstored[i]
+		status.Gaps = append(status.Gaps, v1alpha1.UpdateCenterGap{
+			Plugin:     dp.Name,
+			Version:    dp.Version,
+			RequiredBy: dp.RequiredBy,
+			Core:       coreForLatest(dp),
+		})
 	}
 
-	status.Gaps = gaps
-
-	coverageComplete := len(gaps) == 0
+	coverageComplete := len(unstored) == 0
 	msg := "coverage complete"
 	if !coverageComplete {
-		msg = fmt.Sprintf("%d plugins missing from store", len(gaps))
-		if truncated {
-			msg += fmt.Sprintf(" (%d more gaps not shown)", len(declared)-maxGaps)
+		msg = fmt.Sprintf("%d declared plugins are not in the store", len(unstored))
+		if len(unstored) > maxGaps {
+			msg += fmt.Sprintf(" (status.gaps shows the first %d)", maxGaps)
 		}
 	}
 	msg += skippedNote
@@ -603,33 +654,175 @@ func (r *UpdateCenterReconciler) computeGaps(ctx context.Context, status *v1alph
 		Reason:  reasonGapAnalysisComplete,
 		Message: msg,
 	})
+
+	return r.computeServability(ctx, status, unstored, logger)
 }
 
-// fetchInventory GETs the /api/v1/inventory endpoint and parses its response.
-// The second result names every plugin-pack manifest the update center could
-// not read (see ucInventoryResponse); it is empty on a fully complete scan.
-func (r *UpdateCenterReconciler) fetchInventory(ctx context.Context, url string) ([]inventoryEntry, []ucSkippedPack, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// setInventoryUnavailable records that coverage and servability cannot be computed.
+func (r *UpdateCenterReconciler) setInventoryUnavailable(status *v1alpha1.UpdateCenterStatus, msg string) {
+	r.setCondition(status, v1alpha1.UpdateCenterCondition{
+		Type:    condTypeCoverageComplete,
+		Status:  metav1.ConditionFalse,
+		Reason:  reasonInventoryUnavailable,
+		Message: msg,
+	})
+	r.setCondition(status, v1alpha1.UpdateCenterCondition{
+		Type:    condTypePluginsServable,
+		Status:  metav1.ConditionFalse,
+		Reason:  reasonInventoryUnavailable,
+		Message: msg,
+	})
+}
+
+// computeServability sets PluginsServable and status.unservable from the declared
+// plugins the store does not hold. It asks the update center's servability endpoint,
+// which runs the same resolution pull-through uses.
+//
+// It returns the unstored plugins the update center can serve, with a latest pin
+// replaced by its resolved version, and whether the answer is complete.
+func (r *UpdateCenterReconciler) computeServability(ctx context.Context, status *v1alpha1.UpdateCenterStatus, unstored []declaredPlugin, logger *slog.Logger) ([]declaredPlugin, bool) {
+	if len(unstored) == 0 {
+		status.Unservable = nil
+		status.UnservableCount = 0
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionTrue,
+			Reason:  reasonAllPluginsServable,
+			Message: "every declared plugin is in the store",
+		})
+		return nil, true
+	}
+
+	results, err := r.fetchServability(ctx, unstored)
+	if errors.Is(err, errServabilityUnsupported) {
+		// The update center answers without the endpoint: a version skew, not an
+		// upstream outage. This is an unhealthy UC HTTP API, so it blocks Ready.
+		logger.Warn("update center does not serve the servability endpoint", "error", err)
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionFalse,
+			Reason:  reasonInventoryUnavailable,
+			Message: fmt.Sprintf("servability unavailable: %v", err),
+		})
+		return nil, false
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("create request: %w", err)
+		logger.Warn("servability check failed", "error", err)
+		// Leave status.Unservable and status.UnservableCount unchanged.
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionUnknown,
+			Reason:  reasonResolutionDegraded,
+			Message: fmt.Sprintf("servability could not be checked: %v", err),
+		})
+		return nil, false
 	}
 
-	resp, err := r.httpDoer.Do(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GET inventory: %w", err)
+	var (
+		unservable []v1alpha1.UpdateCenterGap
+		undecided  int
+		servable   []declaredPlugin
+	)
+	for i, res := range results {
+		if res.Servable {
+			dp := unstored[i]
+			if res.ResolvedVersion != "" {
+				dp.Version = res.ResolvedVersion
+				dp.Core = ""
+			}
+			servable = append(servable, dp)
+			continue
+		}
+		reason, isUndecided := classifyServability(res)
+		if isUndecided {
+			// sources-degraded: the negative is unprovable, so it is not listed.
+			undecided++
+			continue
+		}
+		unservable = append(unservable, v1alpha1.UpdateCenterGap{
+			Plugin:     unstored[i].Name,
+			Version:    unstored[i].Version,
+			RequiredBy: unstored[i].RequiredBy,
+			Core:       coreForLatest(unstored[i]),
+			Reason:     reason,
+		})
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, nil, fmt.Errorf("inventory HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	status.UnservableCount = len(unservable)
+	status.Unservable = nil
+	if len(unservable) > maxGaps {
+		status.Unservable = unservable[:maxGaps]
+	} else if len(unservable) > 0 {
+		status.Unservable = unservable
 	}
 
-	var payload ucInventoryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, nil, fmt.Errorf("parse inventory JSON: %w", err)
+	switch {
+	case len(unservable) > 0:
+		msg := fmt.Sprintf("%d declared plugins cannot be served", len(unservable))
+		if undecided > 0 {
+			msg = fmt.Sprintf("%d declared plugins cannot be served (%d undecided: upstream metadata degraded)",
+				len(unservable), undecided)
+		}
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionFalse,
+			Reason:  reasonPluginsUnservable,
+			Message: msg,
+		})
+	case undecided > 0:
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionUnknown,
+			Reason:  reasonResolutionDegraded,
+			Message: fmt.Sprintf("%d declared plugins could not be checked: upstream metadata degraded", undecided),
+		})
+	default:
+		r.setCondition(status, v1alpha1.UpdateCenterCondition{
+			Type:    condTypePluginsServable,
+			Status:  metav1.ConditionTrue,
+			Reason:  reasonAllPluginsServable,
+			Message: "every declared plugin is servable",
+		})
 	}
-	return payload.Plugins, payload.SkippedPacks, nil
+	return servable, undecided == 0
+}
+
+// uniqueDeclared returns the distinct name@version entries, keeping the first
+// RequiredBy seen for each, sorted by plugin name and then version.
+//
+// A duplicate latest entry merges its Core with minCore, so the posted core is the
+// lowest core any source requests for that plugin.
+func uniqueDeclared(declared []declaredPlugin) []declaredPlugin {
+	index := make(map[string]int, len(declared))
+	out := make([]declaredPlugin, 0, len(declared))
+	for _, dp := range declared {
+		key := dp.Name + "@" + dp.Version
+		if i, dup := index[key]; dup {
+			if ucmeta.IsLatest(dp.Version) {
+				out[i].Core = minCore(out[i].Core, dp.Core)
+			}
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, dp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Version < out[j].Version
+	})
+	return out
+}
+
+// fetchServability posts the declared plugins to the update center's
+// servability endpoint through postServability.
+func (r *UpdateCenterReconciler) fetchServability(ctx context.Context, plugins []declaredPlugin) ([]ucServabilityResult, error) {
+	req := make([]ucServabilityPlugin, 0, len(plugins))
+	for _, dp := range plugins {
+		req = append(req, ucServabilityPlugin{Name: dp.Name, Version: dp.Version, Core: coreForLatest(dp)})
+	}
+	return postServability(ctx, r.httpDoer, r.ucBaseURL, req)
 }
 
 // metadataConfigMapName is the operator-managed ConfigMap that carries the derived
@@ -710,7 +903,9 @@ func (r *UpdateCenterReconciler) reconcileMetadataSources(ctx context.Context, u
 }
 
 // buildDeclaredPluginsValue renders the declared plugin set as the sorted,
-// newline-delimited "name@version" body of the declared-plugins key. It returns nil
+// newline-delimited "name@version" body of the declared-plugins key. Every entry
+// carries a version: buildDeclaredSet writes a version-less entry as "latest".
+// It returns nil
 // when the set could not be built, which the writer reads as "leave the key alone" —
 // the same leave-unchanged-on-failure invariant computeGaps applies to status.Gaps.
 //
@@ -727,7 +922,7 @@ func (r *UpdateCenterReconciler) buildDeclaredPluginsValue(ctx context.Context, 
 	seen := make(map[string]struct{}, len(declared))
 	lines := make([]string, 0, len(declared))
 	for _, dp := range declared {
-		if dp.Name == "" || dp.Version == "" {
+		if dp.Name == "" {
 			continue
 		}
 		line := dp.Name + "@" + dp.Version
@@ -820,6 +1015,76 @@ func boundSources(sources []string) []string {
 	return out
 }
 
+// canonicalVersion maps every latest spelling (the empty string, or latest in any
+// case) to "latest". The declared set holds one spelling for a latest pin, so a
+// version-less entry and a latest entry collapse into one row.
+func canonicalVersion(v string) string {
+	if ucmeta.IsLatest(v) {
+		return "latest"
+	}
+	return v
+}
+
+// coreForLatest returns the requesting core of a latest entry, and "" for a pinned
+// version. A pinned version does not depend on the core.
+func coreForLatest(dp declaredPlugin) string {
+	if ucmeta.IsLatest(dp.Version) {
+		return dp.Core
+	}
+	return ""
+}
+
+// requestingCore returns the core that the deployed jenkins/jenkins image runs, without
+// a build suffix. A two-segment tag is a fixed weekly release on every channel, so it
+// names an exact core. The profile resolveVersion wins through deployedCore. It returns
+// "" when the deployed version does not parse. An empty core accepts any stored version.
+func requestingCore(version string, profile *v1alpha1.JenkinsVersionProfile) string {
+	segs, ok := jenkinsver.Core(deployedCore(version, profile))
+	if !ok {
+		return ""
+	}
+	if len(segs) == 2 {
+		return fmt.Sprintf("%d.%d", segs[0], segs[1])
+	}
+	if len(segs) != 3 {
+		return ""
+	}
+	return fmt.Sprintf("%d.%d.%d", segs[0], segs[1], segs[2])
+}
+
+// minCore returns the lower of two cores. An empty core requests nothing, so it
+// loses to a non-empty core.
+func minCore(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	case pluginver.Compare(a, b) <= 0:
+		return a
+	default:
+		return b
+	}
+}
+
+// bundleMinCores maps each bundle key "namespace/name" to the lowest deployed core of
+// the Controllers that use that bundle. A bundle that no Controller uses has no entry.
+// Controllers in member clusters are not visible here, so their cores are not counted.
+func (r *UpdateCenterReconciler) bundleMinCores(ctx context.Context, profiles []*v1alpha1.JenkinsVersionProfile) (map[string]string, error) {
+	controllers, err := crdstore.List[v1alpha1.Controller](ctx, r.store, "", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string)
+	for _, cr := range controllers {
+		name, ns := v1alpha1.EffectiveBundleRef(cr, r.operatorNamespace)
+		prof, _ := ResolveProfile(cr.Spec.Version, profiles)
+		key := ns + "/" + name
+		out[key] = minCore(out[key], requestingCore(cr.Spec.Version, prof))
+	}
+	return out, nil
+}
+
 // buildDeclaredSet reads all JenkinsVersionProfiles' materialized plugin sets,
 // all ComposedBundles' plugin lines, and every open ProfileCandidate's
 // resolved closure to build the declared plugin union.
@@ -848,8 +1113,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactID,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("profile:%s", p.Name),
+				Core:       requestingCore(p.Spec.Version, p),
 			})
 		}
 	}
@@ -858,6 +1124,10 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 	bundles, err := crdstore.List[v1alpha1.ComposedBundle](ctx, r.store, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("list ComposedBundles: %w", err)
+	}
+	bundleCores, err := r.bundleMinCores(ctx, profiles)
+	if err != nil {
+		return nil, fmt.Errorf("list Controllers: %w", err)
 	}
 	for _, cb := range bundles {
 		if cb.Status.ContentRef == "" {
@@ -880,8 +1150,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactId,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("bundle:%s/%s", cb.Namespace, cb.Name),
+				Core:       bundleCores[cb.Namespace+"/"+cb.Name],
 			})
 		}
 	}
@@ -914,8 +1185,9 @@ func (r *UpdateCenterReconciler) buildDeclaredSet(ctx context.Context, logger *s
 		for _, e := range entries {
 			declared = append(declared, declaredPlugin{
 				Name:       e.ArtifactID,
-				Version:    e.Version,
+				Version:    canonicalVersion(e.Version),
 				RequiredBy: fmt.Sprintf("candidate:%s", c.Name),
+				Core:       c.Spec.ResolveVersion,
 			})
 		}
 	}
@@ -941,77 +1213,62 @@ func parseProfilePluginEntries(yamlStr string) []pluginlock.PluginEntry {
 
 // derivePhase sets status.Phase and the top-level Ready condition.
 //
-// Readiness = StorageReady ∧ (CoverageComplete ∨ pull-through-covers-gaps). In
-// pull-through mode the store serves misses on demand (fetching from upstream,
-// with jenkins-plugin-cli falling back to upstream directly for anything the
-// store can't resolve), so genuine coverage gaps are an informational quality
-// signal, not a serving prerequisite — a cold-cache pull-through UC is still
-// usable and must report Ready so controllers route to it (otherwise the store
-// never warms: the native path only engages when Ready, but the store only
-// fills when the native path is used). Only an air-gapped UC (pull-through
-// disabled) with gaps is genuinely Degraded: it cannot serve a plugin it does
-// not hold.
+// Ready = StorageReady ∧ PluginsServable ≠ False. PluginsServable answers whether the
+// update center can serve every declared plugin, from the store or by pull-through.
+// CoverageComplete is informational: a plugin that is not stored yet is fetched on
+// demand when pull-through is on. Phase is Ready only when PluginsServable is True.
 //
-// Pull-through does NOT mask a failure to *compute* coverage (inventory endpoint
-// down, declared-set unbuildable → CoverageComplete=False with reason
-// InventoryUnavailable): that signals an unhealthy UC HTTP API, so it stays out
-// of Ready regardless of pull-through. Only genuine gaps (reason
-// GapAnalysisComplete) are waived.
-//
-// The Ready condition's Reason surfaces specific context (e.g.
-// InventoryUnavailable rather than a generic "NotReady").
-func (r *UpdateCenterReconciler) derivePhase(status *v1alpha1.UpdateCenterStatus, pullThroughEnabled bool) {
+// Storage failure gives phase Error. A plugin that cannot be served gives Ready=False
+// and phase Degraded. A servability question that upstream could not answer keeps
+// Ready=True with reason ResolutionDegraded, so an unhealthy upstream does not take
+// the update center out of service.
+func (r *UpdateCenterReconciler) derivePhase(status *v1alpha1.UpdateCenterStatus) {
 	storageReady := conditionStatus(status.Conditions, condTypeStorageReady) == metav1.ConditionTrue
-	coverageComplete := conditionStatus(status.Conditions, condTypeCoverageComplete) == metav1.ConditionTrue
+	servable := conditionStatus(status.Conditions, condTypePluginsServable)
 
-	// Pull-through waives genuine gaps (reason GapAnalysisComplete) but not a
-	// coverage-computation failure.
-	gapsOnly := false
-	if cc := conditionPtr(status.Conditions, condTypeCoverageComplete); cc != nil {
-		gapsOnly = cc.Reason == reasonGapAnalysisComplete
-	}
-	pullThroughCoversGaps := pullThroughEnabled && gapsOnly
-	usable := coverageComplete || pullThroughCoversGaps
-
-	// Derive phase.
 	switch {
 	case !storageReady:
 		status.Phase = v1alpha1.UpdateCenterPhase("Error")
-	case usable:
+	case servable == metav1.ConditionTrue:
 		status.Phase = v1alpha1.UpdateCenterPhase("Ready")
 	default:
-		// Storage ready, coverage incomplete and not waivable: degraded.
 		status.Phase = v1alpha1.UpdateCenterPhase("Degraded")
 	}
 
 	// Top-level Ready condition. Every switch arm below assigns reason+message.
-	readyStatus := metav1.ConditionFalse
+	var readyStatus metav1.ConditionStatus
 	var readyReason, readyMsg string
 
+	ps := conditionPtr(status.Conditions, condTypePluginsServable)
 	switch {
-	case storageReady && coverageComplete:
-		readyStatus = metav1.ConditionTrue
-		readyReason = "AllConditionsPassed"
-		readyMsg = "update center is ready"
-	case storageReady && pullThroughCoversGaps:
-		// Coverage incomplete but pull-through serves misses on demand.
-		readyStatus = metav1.ConditionTrue
-		readyReason = "PullThroughServing"
-		readyMsg = "update center is serving via pull-through; missing plugins are fetched on demand"
 	case !storageReady:
+		readyStatus = metav1.ConditionFalse
 		if sr := conditionPtr(status.Conditions, condTypeStorageReady); sr != nil {
 			readyReason = sr.Reason
 		} else {
 			readyReason = reasonStorageUnavailable
 		}
 		readyMsg = "storage is unavailable"
-	default: // storage ready, coverage incomplete, not waived
-		if cc := conditionPtr(status.Conditions, condTypeCoverageComplete); cc != nil {
-			readyReason = cc.Reason
+	case servable == metav1.ConditionTrue:
+		readyStatus = metav1.ConditionTrue
+		readyReason = reasonAllPluginsServable
+		readyMsg = "update center is ready"
+	case servable == metav1.ConditionUnknown:
+		readyStatus = metav1.ConditionTrue
+		readyReason = reasonResolutionDegraded
+		readyMsg = "serving; servability of some plugins is undecided"
+	default: // PluginsServable=False, or not computed
+		readyStatus = metav1.ConditionFalse
+		if ps != nil {
+			readyReason = ps.Reason
 		} else {
-			readyReason = "CoverageIncomplete"
+			readyReason = "ServabilityNotComputed"
 		}
-		readyMsg = "coverage is incomplete"
+		if readyReason == reasonPluginsUnservable {
+			readyMsg = fmt.Sprintf("%d declared plugins cannot be served", status.UnservableCount)
+		} else {
+			readyMsg = "coverage could not be computed"
+		}
 	}
 
 	r.setCondition(status, v1alpha1.UpdateCenterCondition{
@@ -1032,9 +1289,9 @@ func conditionPtr(conditions []v1alpha1.UpdateCenterCondition, condType string) 
 	return nil
 }
 
-// setAllConditionsFalse sets all four conditions to False with the given reason.
+// setAllConditionsFalse sets every condition to False with the given reason.
 func (r *UpdateCenterReconciler) setAllConditionsFalse(status *v1alpha1.UpdateCenterStatus, reason, message string) {
-	for _, ct := range []string{condTypeStorageReady, condTypeSeedImported, condTypeCoverageComplete, condTypeReady} {
+	for _, ct := range []string{condTypeStorageReady, condTypeSeedImported, condTypeCoverageComplete, condTypePluginsServable, condTypeReady} {
 		r.setCondition(status, v1alpha1.UpdateCenterCondition{
 			Type:    ct,
 			Status:  metav1.ConditionFalse,
@@ -1205,3 +1462,152 @@ func tarGzDirectory(dir string, w io.Writer) error {
 
 // Ensure UpdateCenterReconciler implements reconcile.Reconciler.
 var _ reconcile.Reconciler = (*UpdateCenterReconciler)(nil)
+
+// ---------------------------------------------------------------------------
+// Prefetch of servable declared gaps (opt-in, spec.pullThrough.prefetch)
+// ---------------------------------------------------------------------------
+
+// reconcilePrefetch asks the update center to fetch servable declared plugins that
+// the store lacks, at most prefetchPerTick per reconcile. It runs only when
+// spec.pullThrough.prefetch is set. PluginsPrefetched is informational: it never
+// gates Ready or the phase.
+func (r *UpdateCenterReconciler) reconcilePrefetch(ctx context.Context, uc *v1alpha1.UpdateCenter, status *v1alpha1.UpdateCenterStatus, servable []declaredPlugin, decided bool, logger *slog.Logger) {
+	if !uc.Spec.PullThrough.Enabled || !uc.Spec.PullThrough.Prefetch {
+		removeUCCondition(status, condTypePluginsPrefetched)
+		return
+	}
+	if !decided {
+		r.setPrefetchCondition(status, metav1.ConditionUnknown, reasonServabilityUnavailable, "servability is unknown, so prefetch waits")
+		return
+	}
+	if len(servable) == 0 {
+		r.setPrefetchCondition(status, metav1.ConditionTrue, reasonPrefetchComplete, "no servable declared plugin is missing from the store")
+		return
+	}
+
+	token, err := r.getImportToken(ctx)
+	if err != nil {
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonTokenUnavailable, fmt.Sprintf("import token not available: %v", err))
+		return
+	}
+
+	now := r.currentTime()
+	batch, backoff := r.prefetchBatch(servable, now)
+	if len(batch) == 0 {
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonPrefetchFailed, fmt.Sprintf("%d plugins wait for a retry", backoff))
+		return
+	}
+
+	plugins := make([]ucServabilityPlugin, len(batch))
+	for i, dp := range batch {
+		plugins[i] = ucServabilityPlugin{Name: dp.Name, Version: dp.Version}
+	}
+	results, err := postPrefetch(ctx, r.httpDoer, r.ucBaseURL, token, plugins)
+	switch {
+	case errors.Is(err, errPrefetchUnauthorized):
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonTokenRejected, err.Error())
+		return
+	case errors.Is(err, errPrefetchUnsupported):
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonPrefetchUnsupported, err.Error())
+		return
+	case errors.Is(err, errPrefetchPullThroughOff):
+		r.setPrefetchCondition(status, metav1.ConditionFalse, unservablePullThroughDisabled, err.Error())
+		return
+	case err != nil:
+		logger.Warn("prefetch request failed", "error", err)
+		r.setPrefetchCondition(status, metav1.ConditionUnknown, reasonPrefetchFailed, err.Error())
+		return
+	}
+
+	var fetched, stored int
+	var failed []string
+	r.prefetchMu.Lock()
+	for i, res := range results {
+		key := batch[i].Name + "@" + batch[i].Version
+		switch res.Outcome {
+		case "fetched":
+			fetched++
+			delete(r.prefetchFailedAt, key)
+		case "stored":
+			stored++
+			delete(r.prefetchFailedAt, key)
+		default:
+			r.prefetchFailedAt[key] = now
+			failed = append(failed, fmt.Sprintf("%s (%s)", key, res.Reason))
+		}
+	}
+	r.prefetchMu.Unlock()
+
+	remaining := len(servable) - fetched - stored
+	logger.Info("prefetch pass", "batch", len(batch), "fetched", fetched, "stored", stored,
+		"failed", len(failed), "remaining", remaining)
+
+	switch {
+	case len(failed) > 0:
+		shown := failed
+		if len(shown) > 5 {
+			shown = shown[:5]
+		}
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonPrefetchFailed,
+			fmt.Sprintf("%d plugins failed: %s", len(failed), strings.Join(shown, ", ")))
+	case remaining > 0:
+		r.setPrefetchCondition(status, metav1.ConditionFalse, reasonPrefetchInProgress,
+			fmt.Sprintf("fetched %d plugins; %d servable plugins remain", fetched, remaining))
+	default:
+		r.setPrefetchCondition(status, metav1.ConditionTrue, reasonPrefetchComplete,
+			fmt.Sprintf("fetched %d plugins; every servable declared plugin is stored", fetched))
+	}
+}
+
+// prefetchBatch returns up to prefetchPerTick plugins to fetch, in order. It skips a
+// plugin that failed less than prefetchRetryAfter before now, and counts the skips.
+func (r *UpdateCenterReconciler) prefetchBatch(servable []declaredPlugin, now time.Time) ([]declaredPlugin, int) {
+	r.prefetchMu.Lock()
+	defer r.prefetchMu.Unlock()
+	if r.prefetchFailedAt == nil {
+		r.prefetchFailedAt = make(map[string]time.Time)
+	}
+	var batch []declaredPlugin
+	var backoff int
+	for _, dp := range servable {
+		if len(batch) >= prefetchPerTick {
+			break
+		}
+		key := dp.Name + "@" + dp.Version
+		if at, ok := r.prefetchFailedAt[key]; ok && now.Sub(at) < prefetchRetryAfter {
+			backoff++
+			continue
+		}
+		batch = append(batch, dp)
+	}
+	return batch, backoff
+}
+
+// setPrefetchCondition sets the PluginsPrefetched condition.
+func (r *UpdateCenterReconciler) setPrefetchCondition(status *v1alpha1.UpdateCenterStatus, st metav1.ConditionStatus, reason, msg string) {
+	r.setCondition(status, v1alpha1.UpdateCenterCondition{
+		Type:    condTypePluginsPrefetched,
+		Status:  st,
+		Reason:  reason,
+		Message: msg,
+	})
+}
+
+// currentTime returns the reconciler clock. A zero clock falls back to time.Now.
+func (r *UpdateCenterReconciler) currentTime() time.Time {
+	if r.now == nil {
+		return time.Now()
+	}
+	return r.now()
+}
+
+// removeUCCondition drops the condition with the given type from the status.
+func removeUCCondition(status *v1alpha1.UpdateCenterStatus, condType string) {
+	kept := status.Conditions[:0]
+	for _, c := range status.Conditions {
+		if c.Type != condType {
+			kept = append(kept, c)
+		}
+	}
+	status.Conditions = kept
+}

@@ -43,6 +43,22 @@ func TestBuildAttentionJSON(t *testing.T) {
 			Phase:           v1alpha1.ControllerPhaseConnected,
 			LastApplyResult: &v1alpha1.ApplyResult{Succeeded: false, Timestamp: at, Sections: []v1alpha1.ApplySectionResult{{Name: "plugins", OK: true}, {Name: "casc", OK: false, Error: "unknown key"}}},
 		}}, &AttentionJSON{Kind: "applyFailed", Reason: "ApplyFailed", Message: "casc: unknown key", Since: strPtr("2026-09-01T10:00:00Z")}},
+		{"mite unreachable", v1alpha1.Controller{Status: v1alpha1.ControllerStatus{
+			Phase: v1alpha1.ControllerPhaseRunning,
+			Conditions: []v1alpha1.ControllerCondition{{
+				Type: v1alpha1.ConditionMiteConnected, Status: metav1.ConditionFalse, Reason: v1alpha1.ReasonStreamLost,
+				Message: "mite ns/ctl command stream lost", LastTransitionTime: at,
+			}},
+		}}, &AttentionJSON{Kind: "miteUnreachable", Reason: "StreamLost", Message: "mite ns/ctl command stream lost", Since: strPtr("2026-09-01T10:00:00Z")}},
+		{"apply failed outranks mite unreachable", v1alpha1.Controller{Status: v1alpha1.ControllerStatus{
+			Phase:           v1alpha1.ControllerPhaseRunning,
+			LastApplyResult: &v1alpha1.ApplyResult{Succeeded: false, Timestamp: at, Sections: []v1alpha1.ApplySectionResult{{Name: "casc", OK: false, Error: "unknown key"}}},
+			Conditions:      []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionMiteConnected, Status: metav1.ConditionFalse, Reason: v1alpha1.ReasonStreamLost}},
+		}}, &AttentionJSON{Kind: "applyFailed", Reason: "ApplyFailed", Message: "casc: unknown key", Since: strPtr("2026-09-01T10:00:00Z")}},
+		{"restored stream reports nothing", v1alpha1.Controller{Status: v1alpha1.ControllerStatus{
+			Phase:      v1alpha1.ControllerPhaseConnected,
+			Conditions: []v1alpha1.ControllerCondition{cond(v1alpha1.ConditionMiteConnected, v1alpha1.ReasonStreamRestored, "")},
+		}}, nil},
 		{"false conditions are ignored", v1alpha1.Controller{Status: v1alpha1.ControllerStatus{
 			Conditions: []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionJenkinsBootFailed, Status: metav1.ConditionFalse, Reason: "BootPending"}},
 		}}, nil},

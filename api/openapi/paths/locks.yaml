@@ -1,0 +1,80 @@
+# locks: the fleet-wide read over the record store's varroa.fleet_locks
+# table, and the operator force release of a releasing lock. Both routes are
+# cluster-wide, like /cellpools: they name no team and no namespace segment.
+/api/v1/locks:
+  get:
+    operationId: listAllFleetLocks
+    tags: [Pipelines]
+    summary: >-
+      Lists every fleet lock of every cluster, across every tenant.
+      Requires the fleetlocks:read verb on a cluster-wide binding.
+    description: >
+      Reads every cluster in one list, ordered by name, then waitingSince,
+      then runId. A holder and its waiters can run on different clusters.
+      Each row carries its own cluster, tenant, and jobPath. A
+      row carries runLink only when the caller's own grant can read that
+      row's own run. A waiting row reports its own waitingSince. A held or
+      a releasing row reports its own acquiredAt. It carries no queue
+      position and no derived holder.
+    responses:
+      "200":
+        description: Every fleet lock of every cluster (items envelope).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockListResponse'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/locks/release:
+  post:
+    operationId: releaseFleetLock
+    tags: [Pipelines]
+    summary: >-
+      Force-releases one releasing fleet lock that no live pod holds.
+      Requires the fleetlocks:release verb on a cluster-wide binding.
+    description: >
+      Deletes the releasing row that name and runId identify. The recorder
+      refuses a row in another state, and a row whose cell instance the
+      stored placement still names as a member, because that pod can still
+      run the holder's build. That refusal names the holder cell in
+      holderCell. Restart that cell when its Jenkins does not run, and the
+      lock then releases with no force release. A release publishes one
+      lock notification and writes one fleetlock.force_released activity
+      row that names the actor and the reason. Confirm first that the
+      holder's build runs on no cell.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/FleetLockReleaseRequest'
+    responses:
+      "200":
+        description: The lock was released.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockReleaseResponse'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: >-
+          The lock is not releasing, or a live pod still runs its holder.
+          The second refusal carries holderCell.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/FleetLockReleaseConflict'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

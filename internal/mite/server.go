@@ -181,7 +181,7 @@ func (s *Server) Register(ctx context.Context, req *mitev1.RegisterRequest) (*mi
 	}
 
 	pubkey := ed25519.PublicKey(req.PublicKey)
-	cert, err := s.ca.IssueMiteCert(req.ControllerName, req.Namespace, pubkey)
+	cert, err := s.ca.IssueMiteCert(req.ControllerName, req.Namespace, pubkey, req.CellInstance)
 	if err != nil {
 		if s.Logger != nil {
 			s.Logger.Error("issue mite cert failed", "controller", req.ControllerName, "namespace", req.Namespace, "error", err)
@@ -190,6 +190,19 @@ func (s *Server) Register(ctx context.Context, req *mitev1.RegisterRequest) (*mi
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+
+	// Warm the same-replica cache with the mite's pod unique identifier.
+	// The certificate just issued carries the same value in its URI SAN
+	// (IssueMiteCert above), which is the authoritative source every
+	// gateway replica reads at CommandStream open — this registration and
+	// that later stream need not land on the same replica. This cache only
+	// helps a stream that opens on this replica before it presents that
+	// certificate.
+	if req.CellInstance != "" {
+		if rec, ok := s.streamHandler.(cellInstanceRecorder); ok {
+			rec.RecordCellInstance(req.ControllerName, req.Namespace, req.CellInstance)
+		}
+	}
 
 	endpoint := s.ServerEndpoint
 	if endpoint == "" {
@@ -258,6 +271,18 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 		rh := NewRegistryHandler(s.reg, s.broadcaster)
 		rh.Logger = s.Logger
 		handler = rh
+	}
+
+	// The mite's cell instance travels on the verified leaf's URI SAN
+	// (IssueMiteCert stamps it there), not only in the same-replica cache
+	// Register warms — the mite can register on one gateway replica and
+	// open this stream on another, which never saw that Register call.
+	// Read it from the cert every time a stream opens, before any build
+	// event on this stream gets mapped to an ingest envelope.
+	if ci := ca.CellInstanceFromCert(leaf); ci != "" {
+		if rec, ok := handler.(cellInstanceRecorder); ok {
+			rec.RecordCellInstance(controllerName, namespace, ci)
+		}
 	}
 
 	// Create a sender function bound to this stream, protected by a mutex
@@ -373,6 +398,47 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 		case *mitev1.MiteMessage_PluginInventory:
 			if pi := m.PluginInventory; pi != nil {
 				handler.OnPluginInventory(controllerName, namespace, pi)
+			}
+
+		case *mitev1.MiteMessage_BuildEvent:
+			if be := m.BuildEvent; be != nil {
+				if err := handler.OnBuildEvent(controllerName, namespace, connToken, be); err != nil {
+					if s.Logger != nil {
+						s.Logger.Warn("build event handling failed, closing stream",
+							"controller", controllerName, "namespace", namespace, "error", err)
+					}
+					return status.Errorf(codes.ResourceExhausted, "build event: %v", err)
+				}
+			}
+
+		case *mitev1.MiteMessage_ClaimRequest:
+			if cr := m.ClaimRequest; cr != nil {
+				handler.OnClaimRequest(controllerName, namespace, connToken, cr, send)
+			}
+
+		case *mitev1.MiteMessage_LogChunk:
+			if lc := m.LogChunk; lc != nil {
+				handler.OnLogChunk(controllerName, namespace, lc)
+			}
+
+		case *mitev1.MiteMessage_TailAck:
+			if ta := m.TailAck; ta != nil {
+				handler.OnTailAck(controllerName, namespace, ta)
+			}
+
+		case *mitev1.MiteMessage_CrossTenantRequest:
+			if ctr := m.CrossTenantRequest; ctr != nil {
+				handler.OnCrossTenantRequest(controllerName, namespace, connToken, ctr, send)
+			}
+
+		case *mitev1.MiteMessage_RunStateChunk:
+			if rsc := m.RunStateChunk; rsc != nil {
+				handler.OnRunStateChunk(controllerName, namespace, rsc)
+			}
+
+		case *mitev1.MiteMessage_RunStateRequest:
+			if rsr := m.RunStateRequest; rsr != nil {
+				handler.OnRunStateRequest(controllerName, namespace, rsr, send)
 			}
 		}
 	}

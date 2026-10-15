@@ -97,7 +97,11 @@ type ResolvedPlugin struct {
 	Tags         []string
 	RequiredCore string
 	Dependencies []hpi.Dependency
-	Content      io.Reader // already-verified .hpi bytes; nil when returned by ReadPluginPack
+	// DependenciesKnown is true when Dependencies came from a parsed manifest
+	// or from a present dependencies annotation. False means the list is
+	// unknown, and the layer then carries no dependencies annotation.
+	DependenciesKnown bool
+	Content           io.Reader // already-verified .hpi bytes; nil when returned by ReadPluginPack
 }
 
 // packDependency is the frozen wire shape of dev.varroa.plugin.dependencies.
@@ -129,6 +133,7 @@ func ApplyHPIMetadata(p *ResolvedPlugin, hpiBytes []byte) error {
 	p.DisplayName = mf.LongName
 	p.RequiredCore = mf.RequiredCore
 	p.Dependencies = mf.Dependencies
+	p.DependenciesKnown = true
 	return nil
 }
 
@@ -165,8 +170,10 @@ func validatePack(cfg PackConfig, plugins []ResolvedPlugin) error {
 }
 
 // layerAnnotations builds the annotation map for one plugin layer. Empty
-// strings and nil slices are OMITTED rather than written empty, so a pack never
-// carries misleading empty metadata.
+// strings and nil slices are OMITTED rather than written empty, with one
+// exception: the dependencies annotation is written as "[]" when the list is
+// known to be empty. A missing dependencies annotation means the list is
+// unknown, so a known-empty list and an unknown one never read the same.
 func layerAnnotations(p ResolvedPlugin, digest string) (map[string]string, error) {
 	ann := map[string]string{
 		AnnPluginName:    p.Name,
@@ -190,7 +197,7 @@ func layerAnnotations(p ResolvedPlugin, digest string) (map[string]string, error
 		}
 		ann[AnnPluginTags] = string(b)
 	}
-	if len(p.Dependencies) > 0 {
+	if p.DependenciesKnown || len(p.Dependencies) > 0 {
 		deps := make([]packDependency, len(p.Dependencies))
 		for i, d := range p.Dependencies {
 			deps[i] = packDependency{Name: d.Name, Min: d.Min, Optional: d.Optional}
@@ -335,6 +342,7 @@ func ReadPluginPack(ctx context.Context, store BlobStore, ref string) (PackConfi
 			for i, d := range deps {
 				p.Dependencies[i] = hpi.Dependency{Name: d.Name, Min: d.Min, Optional: d.Optional}
 			}
+			p.DependenciesKnown = true
 		}
 		plugins = append(plugins, p)
 	}

@@ -66,6 +66,30 @@ func TestHibernatedReconcileEnsuresWakeSlice(t *testing.T) {
 	}
 }
 
+// TestHibernatedHeadlessSkipsWakeSliceAndDeletesExisting asserts task 10.3:
+// a headless controller's hibernated reconcile publishes no wake
+// EndpointSlice, and deletes one an earlier reconcile left behind.
+func TestHibernatedHeadlessSkipsWakeSliceAndDeletesExisting(t *testing.T) {
+	t.Setenv("POD_IP", "")
+	client := newTestClient()
+	client.wakePodIPs = []string{"10.0.0.2"}
+	rec := newTestReconciler(client)
+	rec.SetWakeServerPort(8082, true)
+	cr := testController("test", "ns", v1alpha1.ControllerPhaseRunning)
+	cr.Spec.Headless = true
+	cr.Status.Hibernated = true
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcile hibernated headless controller: %v", err)
+	}
+	if len(client.wakeEnsureCalls) != 0 {
+		t.Fatalf("EnsureWakeEndpointSlice calls = %d, want 0 for a headless controller", len(client.wakeEnsureCalls))
+	}
+	if len(client.wakeDeleteCalls) != 1 {
+		t.Fatalf("DeleteWakeEndpointSlice calls = %d, want 1 for a headless controller", len(client.wakeDeleteCalls))
+	}
+}
+
 func TestHibernatedWakeSliceSkipsWhenDisabledOrNoIPs(t *testing.T) {
 	t.Setenv("POD_IP", "")
 	for _, enabled := range []bool{false, true} {

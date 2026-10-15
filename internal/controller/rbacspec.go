@@ -84,11 +84,10 @@ func (r *Reconciler) syncRBACBindings(ctx context.Context, cr *v1alpha1.Controll
 		cr.Labels[v1alpha1.LabelControllerName] = cr.Name
 		// Labels-only merge patch, not a full-spec Apply: the operator must
 		// claim no spec ownership, and a whole-object write would transfer
-		// ownership of every spec field present in the object. PatchLabels
+		// ownership of every spec field present in the object. patchTickMeta
 		// issues {"metadata":{"labels":{...}}} under the operator's own field
 		// manager, never "varroa-ui".
-		label := v1alpha1.LabelControllerName
-		if err := crdstore.PatchLabels[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace, map[string]*string{label: &cr.Name}); err != nil {
+		if err := r.patchTickMeta(ctx, cr, map[string]any{"labels": map[string]any{v1alpha1.LabelControllerName: cr.Name}}); err != nil {
 			return fmt.Errorf("set controller label: %w", err)
 		}
 	}

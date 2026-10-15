@@ -13,7 +13,9 @@ package rbac
 // StatefulSet, see internal/controller/clientset_client.go). Without it the
 // permission is disabled and this grant is inert, 403ing the export.
 //   - Read        -> Overall/Read (info endpoints)
-//   - Item.*      -> item CRUD the mite performs on behalf of the bundle
+//   - Item.*      -> item CRUD the mite performs on behalf of the bundle,
+//     and Item.Cancel for the cancel_run ledger action, which aborts a
+//     build through the plugin's /varroa-run/cancel route
 //   - View.*      -> view CRUD
 //
 // Plugin install (/pluginManager/installNecessaryPlugins) and safeRestart remain
@@ -29,6 +31,7 @@ func MiteMinimalPermissions() []string {
 		"hudson.model.Item.Configure",
 		"hudson.model.Item.Create",
 		"hudson.model.Item.Delete",
+		"hudson.model.Item.Cancel",
 		"hudson.model.View.Read",
 		"hudson.model.View.Configure",
 		"hudson.model.View.Create",

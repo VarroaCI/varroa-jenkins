@@ -7,13 +7,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -299,13 +302,19 @@ func (f *fakeResourceClient) ApplyControllerSpecSSAIfExists(_ context.Context, n
 func (f *fakeResourceClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }
+func (f *fakeResourceClient) SetHibernatedAt(_ context.Context, _, _, rv string, _ bool) (string, error) {
+	return rv, nil
+}
 func (f *fakeResourceClient) DeleteControllerCRD(_ context.Context, name, ns string) error {
 	return nil
 }
 func (f *fakeResourceClient) PatchControllerFinalizers(_ context.Context, name, ns string, fin []string) error {
 	return nil
 }
-func (f *fakeResourceClient) PatchControllerStatus(_ context.Context, name, ns string, st *v1alpha1.ControllerStatus) error {
+func (f *fakeResourceClient) PatchControllerStatus(_ context.Context, _, _, rv string, _ *v1alpha1.ControllerStatus) (string, error) {
+	return rv, nil
+}
+func (f *fakeResourceClient) PatchControllerCellStatus(_ context.Context, name, ns string, cell *v1alpha1.CellStatus) error {
 	return nil
 }
 func (f *fakeResourceClient) PatchControllerAnnotations(_ context.Context, name, namespace string, ann map[string]*string) error {
@@ -421,10 +430,16 @@ func (f *fakeResourceClient) CreateService(_ context.Context, n, ns string, p in
 }
 func (f *fakeResourceClient) CreateServiceAccount(_ context.Context, n, ns string) error { return nil }
 func (f *fakeResourceClient) CreateAgentRBAC(_ context.Context, n, ns string) error      { return nil }
-func (f *fakeResourceClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec) error {
+func (f *fakeResourceClient) CreateOrUpdateContentReadGrant(_ context.Context, _ controller.ContentReadGrant) error {
 	return nil
 }
-func (f *fakeResourceClient) UpdateStatefulSetOIDCEnv(_ context.Context, _, _, _, _, _, _, _, _, _, _, _ string) error {
+func (f *fakeResourceClient) CreateServiceAccountTokenSecret(_ context.Context, n, ns, sa string) error {
+	return nil
+}
+func (f *fakeResourceClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec, _ func(context.Context) error) error {
+	return nil
+}
+func (f *fakeResourceClient) UpdateStatefulSetOIDCEnv(_ context.Context, _, _ string, _ controller.JenkinsAuthEnv) error {
 	return nil
 }
 func (f *fakeResourceClient) EnsureStatefulSetPodLabel(_ context.Context, _, _, _, _ string) (bool, error) {
@@ -480,6 +495,12 @@ func (f *fakeResourceClient) CopyImagePullSecret(_ context.Context, _, _, _ stri
 }
 func (f *fakeResourceClient) DeleteResource(_ context.Context, _, _, _ string) error { return nil }
 func (f *fakeResourceClient) DeleteSecret(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeResourceClient) DeleteCellNetworkPolicy(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeResourceClient) CreateCellNetworkPolicy(_ context.Context, _ controller.CellPolicySpec) error {
+	return nil
+}
 func (f *fakeResourceClient) EnsureWakeEndpointSlice(_ context.Context, _, _ string, _ []string, _ int32) error {
 	return nil
 }
@@ -489,13 +510,16 @@ func (f *fakeResourceClient) DeleteWakeEndpointSlice(_ context.Context, _, _ str
 func (f *fakeResourceClient) ListOperatorPodIPs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeResourceClient) ScaleStatefulSet(_ context.Context, _, _ string, _ int32) error {
+func (f *fakeResourceClient) ScaleStatefulSetToZero(_ context.Context, _, _ string, _ func(context.Context) error) error {
 	return nil
 }
 func (f *fakeResourceClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
 	return nil, nil
 }
 func (f *fakeResourceClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
+func (f *fakeResourceClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
+	return nil
+}
 func (f *fakeResourceClient) ListResourceQuotas(_ context.Context, _ string) ([]corev1.ResourceQuota, error) {
 	return nil, nil
 }
@@ -505,12 +529,22 @@ func (f *fakeResourceClient) ListIngressHosts(_ context.Context) (map[string][]s
 func (f *fakeResourceClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
+func (f *fakeResourceClient) GetStatefulSetRollout(_ context.Context, _, _ string) (controller.StatefulSetRollout, error) {
+	return controller.StatefulSetRollout{}, nil
+}
 func (f *fakeResourceClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
+}
+func (f *fakeResourceClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ string) (map[string]string, bool, error) {
+	return nil, false, nil
 }
 func (f *fakeResourceClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
 }
+func (f *fakeResourceClient) ListPodPhases(_ context.Context, _ string) (map[types.UID]corev1.PodPhase, error) {
+	return nil, nil
+}
+
 func (f *fakeResourceClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
 	return nil, nil
 }
@@ -829,7 +863,8 @@ func TestHandleMePermissions_AuthenticatedScopedCaller(t *testing.T) {
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
 		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
-		false, []string{"sub"}, []string{"groups"},
+		nil,
+		false, []string{"sub"},
 	)
 
 	client := newFakeResourceClient()
@@ -894,6 +929,104 @@ func TestHandleMePermissions_AuthenticatedScopedCaller(t *testing.T) {
 	}
 	if _, ok := global["controllers"]; ok {
 		t.Error("scoped-only caller must NOT have controllers in global")
+	}
+}
+
+// TestHandleMePermissions_TenantsFieldIsArray proves the HTTP response
+// carries a non-null "tenants" array, and that each entry's "jobs" is a
+// JSON array, for a caller holding a tenant-scoped pipelines grant.
+func TestHandleMePermissions_TenantsFieldIsArray(t *testing.T) {
+	roles := []*v1alpha1.VarroaRole{
+		{ObjectMeta: metav1.ObjectMeta{Name: "reader"}, Spec: v1alpha1.VarroaRoleSpec{
+			APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}},
+		}},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "tenant-binding"}, Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "tenant-user"}},
+			RoleRef:  "reader",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"release/*"}}},
+			},
+		}},
+	}
+	teams := []*v1alpha1.Team{
+		{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}, Spec: v1alpha1.TeamSpec{Namespaces: []string{"team-a"}}},
+	}
+
+	roleIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, r := range roles {
+		_ = roleIdx.Add(r)
+	}
+	bindingIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{rbac.BySubjectIndex: rbac.SubjectIndexFunc})
+	for _, b := range bindings {
+		_ = bindingIdx.Add(b)
+	}
+	teamIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	for _, tm := range teams {
+		_ = teamIdx.Add(tm)
+	}
+	resolver := rbac.NewResolver(
+		&fakeInformer{indexer: roleIdx},
+		&fakeInformer{indexer: bindingIdx},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+		&fakeInformer{indexer: teamIdx},
+		false, []string{"sub"},
+	)
+
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Authorizer:        NewAuthorizer(resolver, false),
+	}
+	srv := NewServer(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/me/permissions", nil)
+	claims := &auth.Claims{Subject: "tenant-user"}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+	w := httptest.NewRecorder()
+	srv.handleMePermissions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	tenantsRaw, ok := body["tenants"]
+	if !ok {
+		t.Fatal("response missing 'tenants' key")
+	}
+	tenants, ok := tenantsRaw.([]interface{})
+	if !ok {
+		t.Fatalf("'tenants' is not a JSON array, got %T", tenantsRaw)
+	}
+	if len(tenants) == 0 {
+		t.Fatal("expected at least one tenants entry for the tenant-scoped grant")
+	}
+	entry, ok := tenants[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("tenants entry is not an object")
+	}
+	jobsRaw, ok := entry["jobs"]
+	if !ok {
+		t.Fatal("tenants entry missing 'jobs'")
+	}
+	jobs, ok := jobsRaw.([]interface{})
+	if !ok {
+		t.Fatalf("'jobs' is not a JSON array, got %T", jobsRaw)
+	}
+	if len(jobs) != 1 || jobs[0] != "release/*" {
+		t.Errorf("expected jobs [release/*], got %v", jobs)
 	}
 }
 
@@ -989,4 +1122,68 @@ func (f *fakeResourceClient) GetUpdateCenter(_ context.Context, _ string) (*v1al
 
 func (f *fakeResourceClient) GetPVC(_ context.Context, _, _ string) (*corev1.PersistentVolumeClaim, error) {
 	return nil, nil
+}
+
+func TestHandleMe_SignedInAtFromClaims(t *testing.T) {
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Auth:              &stubProvider{mode: auth.AuthModeLocal},
+	}
+	srv := NewServer(deps)
+
+	issued := time.Date(2026, 10, 10, 8, 15, 0, 0, time.FixedZone("CEST", 2*3600))
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	claims := &auth.Claims{Subject: "local:admin", IssuedAt: issued}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+
+	w := httptest.NewRecorder()
+	srv.HandleMe(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp meResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.SignedInAt == nil {
+		t.Fatal("expected signedInAt to be populated")
+	}
+	if want := issued.UTC(); !resp.SignedInAt.Equal(want) {
+		t.Errorf("signedInAt = %v, want %v", resp.SignedInAt, want)
+	}
+	if resp.SignedInAt.Location() != time.UTC {
+		t.Errorf("signedInAt location = %v, want UTC", resp.SignedInAt.Location())
+	}
+}
+
+func TestHandleMe_NoSignedInAtWithoutIssuedAt(t *testing.T) {
+	client := newFakeResourceClient()
+	deps := &Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		IdentityConfig:    IdentityConfig{Mode: "local"},
+		Auth:              &stubProvider{mode: auth.AuthModeLocal},
+	}
+	srv := NewServer(deps)
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	claims := &auth.Claims{Subject: "local:admin"}
+	req = req.WithContext(contextWithClaims(req.Context(), claims))
+
+	w := httptest.NewRecorder()
+	srv.HandleMe(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"signedInAt"`) {
+		t.Errorf("expected no signedInAt key, got %s", w.Body.String())
+	}
 }

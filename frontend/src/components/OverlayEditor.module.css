@@ -14,6 +14,7 @@
   min-height: 110px;
   resize: vertical;
   background: var(--code-bg);
+  color-scheme: dark;
   color: var(--code-text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -45,6 +46,7 @@
 
 .overlayDiff {
   background: var(--code-bg);
+  color-scheme: dark;
   border-radius: var(--radius-sm);
   padding: 14px 16px;
   font-family: var(--mono);

@@ -31,8 +31,8 @@ type CommandCRUDClient interface {
 	// against the applied object's unstructured spec.
 	ApplyControllerSpecSSA(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
-	// SetHibernated is the single writer for status.hibernated and
-	// status.hibernatedAt. HandleUpdate calls it to clear the flag when the
+	// SetHibernated writes status.hibernated and status.hibernatedAt from a
+	// fresh read. HandleUpdate calls it to clear the flag when the
 	// submitted patch writes spec.powerState.
 	SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error)
 }
@@ -83,6 +83,10 @@ type CommandCRUD struct {
 	// (typically cmd/operator/main.go wraps preflight.Run to break the
 	// import cycle). If nil, preflight is skipped.
 	PreflightCheck PreflightFunc
+
+	// Controllers reads Controller list pages for HandleList. The operator
+	// passes its informer cache, so a page sends no apiserver list request.
+	Controllers ListSource
 }
 
 // --- Shared helpers ---
@@ -142,42 +146,48 @@ func (c *CommandCRUD) preflightDeps() PreflightDepsInterface {
 // --- Handle* methods ---
 
 // HandleList handles operator.<cluster>.controllers.list.
+//
+// Rows sort by "namespace/name". A reply holds whole rows up to
+// bus.ListPageBudget. pageList in list_page.go builds the page. Next names the
+// last row of a full page, and the caller passes it back as After to read the
+// following rows. Rows come from the operator's informer cache, not an
+// apiserver list.
 func (c *CommandCRUD) HandleList(data []byte) []byte {
 	var req bus.ControllersListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return c.crudReply(bus.ControllersListResponse{Error: "invalid request", Code: bus.CodeInvalid})
 	}
+	if c.Controllers == nil {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "controller list source not set"})
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	items, err := crdstore.List[v1alpha1.Controller](ctx, c.Store, req.Namespace, "")
+	items, err := c.Controllers.ListControllers(ctx, req.Namespace)
 	if err != nil {
 		c.Logger.Error("list controllers failed", "namespace", req.Namespace, "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: err.Error(), Code: bus.CodeInternal})
 	}
-
-	// Strip managedFields and marshal each CR to raw JSON.
-	rawItems := make([]json.RawMessage, 0, len(items))
-	for _, cr := range items {
+	rows, next, err := pageList(items, req.After, bus.ListPageBudget, func(cr *v1alpha1.Controller) (json.RawMessage, error) {
 		stripManagedFields(cr)
 		raw, err := json.Marshal(cr)
 		if err != nil {
 			c.Logger.Error("marshal controller failed", "name", cr.Name, "namespace", cr.Namespace, "error", err)
-			return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: listPageErr(err)})
 	}
 
-	// Marshal once: the same bytes serve both the size-budget check and the
-	// reply (the list is the hottest fan-out path).
-	reply, err := json.Marshal(bus.ControllersListResponse{Items: rawItems})
+	reply, err := json.Marshal(bus.ControllersListResponse{Items: rows, Next: next})
 	if err != nil {
 		c.Logger.Error("crud reply marshal failed", "error", err)
 		return c.crudReply(bus.ControllersListResponse{Error: "marshal error", Code: bus.CodeInternal})
 	}
-	if len(reply) > 900*1024 {
-		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "list too large"})
+	if len(reply) > bus.ListPageBudget {
+		return c.crudReply(bus.ControllersListResponse{Code: bus.CodeInternal, Error: "list page too large"})
 	}
 	return reply
 }
@@ -546,7 +556,14 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "json unmarshal failed", Code: bus.CodeInternal})
 	}
 
-	// Validate ingress mode immutability.
+	// Validate cell role immutability. A cell has an emptyDir home and
+	// a different StatefulSet shape, so the role never changes in place.
+	if v1alpha1.IsCell(existing) != v1alpha1.IsCell(&updated) {
+		return c.crudReply(bus.ControllersUpdateResponse{Error: "cell.enabled is immutable", Code: bus.CodeInvalid})
+	}
+
+	// Validate ingress mode immutability. A missing block counts as subdomain,
+	// the same as the CRD rule on ControllerSpec.
 	if existing.Spec.IngressSpec.RoutingMode() != updated.Spec.IngressSpec.RoutingMode() {
 		return c.crudReply(bus.ControllersUpdateResponse{Error: "ingressSpec.mode is immutable", Code: bus.CodeInvalid})
 	}

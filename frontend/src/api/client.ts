@@ -44,10 +44,41 @@ import type {
   UpdateCenterUploadResult,
   FleetPluginsRollup,
   FleetPluginDrilldown,
+  PipelineListResponse,
+  PipelineJobDetail,
+  JobBranchList,
+  ScanRequestedResponse,
+  RunListResponse,
+  CreateRunRequest,
+  RunActionResponse,
+  CancelRunResponse,
+  RunDetail,
+  RunArtifactListResponse,
+  RunTestListResponse,
+  RunRestart,
+  RunScript,
+  TestCaseHistoryResponse,
+  RunChangeListResponse,
+  RunLinkPage,
+  TeamPipelines,
+  TeamPlacement,
+  TeamRehydration,
+  RunnerEntry,
+  CellUsage,
+  CellUsageListResponse,
+  TeamCell,
+  CellPool,
+  CellPoolListResponse,
+  CellPoolScaleRequest,
+  CellGrants,
+  FleetLockListResponse,
+  FleetLockReleaseRequest,
+  FleetLockReleaseResponse,
+  PipelineTeamList,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type { Permissions } from "../types/auth";
-import { ApiError, bffFetch, bffFetchText, bffUpload } from "../hooks/useApi";
+import { ApiError, bffFetch, bffFetchText, bffUpload, getToken } from "../hooks/useApi";
 
 export const BFF_BASE = import.meta.env.VITE_VARROA_BFF_URL || "/api/v1";
 
@@ -217,17 +248,32 @@ export function updateController(
   });
 }
 
-// Approve restart
+// Approve restart. expectedContentHash is the contentHash of the pending
+// change that the user reviewed; the BFF refuses with 409 when the pending
+// change has another hash.
 export function approveRestart(
   cluster: string,
   ns: string,
   name: string,
   action: "reload" | "restart",
+  expectedContentHash?: string,
 ): Promise<{ status: string; action: string }> {
   return bffFetch<{ status: string; action: string }>(
     `${ctrlBase(cluster, ns, name)}/approve`,
-    { method: "POST", body: JSON.stringify({ action }) }
+    { method: "POST", body: JSON.stringify(expectedContentHash ? { action, expectedContentHash } : { action }) }
   );
+}
+
+/**
+ * pendingChangeChanged answers the sections of the new pending change when
+ * an approval failed because the pending change changed, and null for any
+ * other error.
+ */
+export function pendingChangeChanged(e: unknown): string[] | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const body = e.body;
+  if (!body || typeof body !== "object" || !("changes" in body) || !Array.isArray(body.changes)) return null;
+  return body.changes.filter((c): c is string => typeof c === "string");
 }
 
 // Approve item deletion
@@ -648,7 +694,12 @@ export interface UserEntry {
   groups: string[];
   lastLogin?: string;
   managedBy: string;
+  /** Purpose of a local account beside OIDC. */
+  purpose?: AccountPurpose;
 }
+
+/** The purpose a local account beside OIDC carries. */
+export type AccountPurpose = "service" | "break-glass";
 
 export function listUsers(): Promise<UserEntry[]> {
   return bffFetch<{items: UserEntry[]}>("/users").then(r => r.items);
@@ -660,6 +711,8 @@ export interface CreateUserBody {
   displayName?: string;
   password: string;
   groups?: string[];
+  /** Required when local accounts run beside OIDC. */
+  purpose?: AccountPurpose;
 }
 
 export function createUser(body: CreateUserBody): Promise<{ name: string }> {
@@ -676,6 +729,8 @@ export function deleteUser(name: string): Promise<void> {
 export interface UpdateUserBody {
   email?: string;
   displayName?: string;
+  /** Required when local accounts run beside OIDC. */
+  purpose?: AccountPurpose;
 }
 
 export function updateUser(name: string, body: UpdateUserBody): Promise<{ name: string }> {
@@ -758,6 +813,20 @@ export function getBuiltinRoles(): Promise<BuiltinRole[]> {
 
 // ---- Configuration Pipeline ----
 
+/** The Varroa page that a Jenkins item path under a headless controller names. */
+export interface JenkinsLink {
+  link: string;
+}
+
+/**
+ * Resolves a Jenkins item path (the part after the headless door prefix) to
+ * its Varroa page. The path is encoded once here, so a %252F stays %252F on
+ * the wire.
+ */
+export function getControllerJenkinsLink(cluster: string, ns: string, name: string, path: string): Promise<JenkinsLink> {
+  return bffFetch<JenkinsLink>(`${ctrlBase(cluster, ns, name)}/jenkins-link?path=${encodeURIComponent(path)}`);
+}
+
 export function getControllerDiff(cluster: string, ns: string, name: string): Promise<ControllerDiff> {
   return bffFetch<ControllerDiff>(
     `${ctrlBase(cluster, ns, name)}/diff`
@@ -823,6 +892,9 @@ export interface TeamEntry {
   bindingRef?: string;
   namespaceStates?: TeamNamespaceState[];
   conditions?: TeamCondition[];
+  pipelines?: TeamPipelines;
+  placement?: TeamPlacement;
+  rehydration?: TeamRehydration;
 }
 
 export interface CreateTeamBody {
@@ -833,6 +905,7 @@ export interface CreateTeamBody {
   namespaces: string[];
   roleRef?: string;
   provisionNamespaces?: boolean;
+  pipelines?: TeamPipelines;
 }
 
 export function listTeams(): Promise<TeamEntry[]> {
@@ -859,6 +932,18 @@ export function updateTeam(name: string, body: CreateTeamBody): Promise<{ name: 
 
 export function deleteTeam(name: string): Promise<void> {
   return bffFetch(`/teams/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+// --- Runners (external agents; design D1, D12) ---
+
+/**
+ * Lists Runner objects, narrowed to one team when given. status.token is
+ * present only for a caller holding runners:create; the dashboard never
+ * reads it.
+ */
+export function listRunners(team?: string): Promise<RunnerEntry[]> {
+  const qs = team ? `?team=${enc(team)}` : "";
+  return bffFetch<{ items: RunnerEntry[] }>(`/runners${qs}`).then((r) => r.items);
 }
 
 // ---- Brood operations (cross-cluster logical-run DTOs) ----
@@ -911,6 +996,13 @@ export function previewBroodOperation(body: CreateBroodRequest): Promise<BroodPr
 
 export function broodStreamUrl(name: string, namespace: string): string {
   return `${BFF_BASE}/brood-operations/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`;
+}
+
+/** teamRunStreamUrl builds the team run stream URL on BFF_BASE, so the
+ * browser reaches the API and not the SPA. useEventStream appends the
+ * stream ticket as a query parameter; this URL holds none. */
+export function teamRunStreamUrl(team: string): string {
+  return `${BFF_BASE}/pipelines/${encodeURIComponent(team)}/stream`;
 }
 
 // ---- Brood Schedules ----
@@ -999,4 +1091,363 @@ export function listFleetPlugins(params?: FleetPluginsParams): Promise<FleetPlug
 
 export function getFleetPlugin(name: string, params?: FleetPluginsParams): Promise<FleetPluginDrilldown> {
   return bffFetch<FleetPluginDrilldown>(`/fleet/plugins/${encodeURIComponent(name)}${fleetPluginsQS(params)}`);
+}
+
+// ---- Pipelines ----
+//
+// The BFF answers a run request, a cancel, and a rerun with 202 and a JSON
+// body the caller needs (runId, intentKey, state) — unlike this file's other
+// 202 actions, whose body carries nothing the caller reads. bffFetch treats
+// every 202 as empty, so these three calls go through bffFetchText and parse
+// the body themselves instead.
+async function bffFetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
+  const text = await bffFetchText(path, options);
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+/**
+ * Fetches a binary response with the bearer token attached, mirroring
+ * useApi's request() but returning a Blob instead of decoding JSON. Kept
+ * local to the client: it is the pipelines client's one binary download.
+ */
+async function bffFetchBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_BASE}${path}`, { headers });
+  } catch {
+    throw new ApiError(0, "Varroa could not reach the server.");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, "Varroa could not download this file.");
+  }
+  return res.blob();
+}
+
+const pipelinesBase = (team: string) => `/pipelines/${enc(team)}`;
+// {job} is one path segment holding the percent-encoded job path (D2): a job
+// path payments/checkout-api/main becomes payments%2Fcheckout-api%2Fmain.
+const jobBase = (team: string, jobPath: string) => `${pipelinesBase(team)}/jobs/${enc(jobPath)}`;
+const runBase = (runId: string) => `/runs/${enc(runId)}`;
+
+/**
+ * Lists every pipelines Team the caller may read, on this cluster and on
+ * each member cluster. The pipelines landing page reads this route.
+ */
+export function listPipelineTeams(): Promise<PipelineTeamList> {
+  return bffFetch<PipelineTeamList>("/pipelines");
+}
+
+export function listPipelines(team: string): Promise<PipelineListResponse> {
+  return bffFetch<PipelineListResponse>(pipelinesBase(team));
+}
+
+export function getPipelineJob(team: string, jobPath: string): Promise<PipelineJobDetail> {
+  return bffFetch<PipelineJobDetail>(jobBase(team, jobPath));
+}
+
+/** listJobBranches reads the branch and change-request inventory of one
+ * multibranch job. The inventory can be up to ten minutes stale. */
+export function listJobBranches(team: string, jobPath: string): Promise<JobBranchList> {
+  return bffFetch<JobBranchList>(`${jobBase(team, jobPath)}/branches`);
+}
+
+/** scanMultibranch requests a scan of a multibranch job's branches and pull
+ * requests. The 202 answer carries the scan identifier; the inventory's
+ * lastScan.scanId repeats it once the scan reports. */
+export function scanMultibranch(team: string, jobPath: string, cluster?: string): Promise<ScanRequestedResponse> {
+  return bffFetchJSON<ScanRequestedResponse>(`${jobBase(team, jobPath)}/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cluster ? { cluster } : {}),
+  });
+}
+
+/**
+ * Reads the team's own view of the cell that hosts its pipelines tenant.
+ * A team that waits for its first cell answers state "unplaced" rather
+ * than a 404.
+ */
+export function getTeamCell(team: string): Promise<TeamCell> {
+  return bffFetch<TeamCell>(`${pipelinesBase(team)}/cell`);
+}
+
+/**
+ * Lists the fleet locks a team's own tenants own or wait on. A team that
+ * spans two tenants answers both tenants' rows in one list.
+ */
+export function listFleetLocks(team: string): Promise<FleetLockListResponse> {
+  return bffFetch<FleetLockListResponse>(`${pipelinesBase(team)}/locks`);
+}
+
+/**
+ * Lists every tenant's fleet locks. The operator page reads this route,
+ * and the read covers every cluster.
+ */
+export function listAllFleetLocks(): Promise<FleetLockListResponse> {
+  return bffFetch<FleetLockListResponse>("/locks");
+}
+
+/**
+ * Force-releases one releasing fleet lock. The caller needs the
+ * cluster-wide fleetlocks:release verb. The server answers 409 for a lock
+ * that is not releasing or whose holder pod still runs, and 404 for an
+ * unknown lock. The second 409 carries holderCell in its body (a
+ * FleetLockReleaseConflict), which the ApiError body holds.
+ */
+export function releaseFleetLock(body: FleetLockReleaseRequest): Promise<FleetLockReleaseResponse> {
+  return bffFetch<FleetLockReleaseResponse>("/locks/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Lists the load of every cell the caller may read in one cluster. The
+ * cluster defaults to the local cluster; namespace narrows the list.
+ */
+export function listCellUsage(params?: { cluster?: string; namespace?: string }): Promise<CellUsageListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.cluster) qs.set("cluster", params.cluster);
+  if (params?.namespace) qs.set("namespace", params.namespace);
+  const s = qs.toString();
+  return bffFetch<CellUsageListResponse>(`/cells/usage${s ? `?${s}` : ""}`);
+}
+
+/**
+ * Reads one cell's load, tenant by tenant. An unknown controller, a
+ * controller that is not a cell, and a refused caller all answer 404.
+ */
+export function getCellUsage(namespace: string, name: string, cluster?: string): Promise<CellUsage> {
+  const qs = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  return bffFetch<CellUsage>(`/cells/${enc(namespace)}/${enc(name)}/usage${qs}`);
+}
+
+export interface ListRunsParams {
+  branch?: string;
+  result?: string;
+  actor?: string;
+  cause?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+function listRunsQS(params?: ListRunsParams): string {
+  if (!params) return "";
+  const qs = new URLSearchParams();
+  if (params.branch) qs.set("branch", params.branch);
+  if (params.result) qs.set("result", params.result);
+  if (params.actor) qs.set("actor", params.actor);
+  if (params.cause) qs.set("cause", params.cause);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.cursor) qs.set("cursor", params.cursor);
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
+
+export function listRuns(team: string, jobPath: string, params?: ListRunsParams): Promise<RunListResponse> {
+  return bffFetch<RunListResponse>(`${jobBase(team, jobPath)}/runs${listRunsQS(params)}`);
+}
+
+/**
+ * Requests a new build. Fire and forget: the BFF does not claim the build
+ * number, so the 202 body's runId is the caller's only handle on the run
+ * before it polls getRun.
+ */
+export function createRun(team: string, jobPath: string, body?: CreateRunRequest): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${jobBase(team, jobPath)}/runs`, {
+    method: "POST",
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+export function getRun(runId: string): Promise<RunDetail> {
+  return bffFetch<RunDetail>(runBase(runId));
+}
+
+export interface RunLogUrlParams {
+  /** Byte offset of the first unread byte. */
+  from?: number;
+  /** 1-based line number starting at from. */
+  fromLine?: number;
+  /** true returns text/plain with no SSE. */
+  raw?: boolean;
+}
+
+/**
+ * Builds the run log stream URL. Pass it as the baseUrl to useEventStream
+ * for the SSE mode (scope `run:<runId>`, event names "meta", "stage",
+ * "line", "gap", "live", "end"), or with raw:true for the plain-text link
+ * that opens in a new tab.
+ */
+export function runLogUrl(runId: string, params?: RunLogUrlParams): string {
+  const qs = new URLSearchParams();
+  if (params?.from != null) qs.set("from", String(params.from));
+  if (params?.fromLine != null) qs.set("fromLine", String(params.fromLine));
+  if (params?.raw) qs.set("raw", "true");
+  const s = qs.toString();
+  return `${BFF_BASE}${runBase(runId)}/log${s ? `?${s}` : ""}`;
+}
+
+export function listRunArtifacts(runId: string): Promise<RunArtifactListResponse> {
+  return bffFetch<RunArtifactListResponse>(`${runBase(runId)}/artifacts`);
+}
+
+/**
+ * Downloads one artifact's bytes. path is the multi-segment artifact path
+ * exactly as run_artifacts.path stored it; each segment is percent-encoded
+ * on its own so the slashes that separate segments survive.
+ */
+export function downloadRunArtifact(runId: string, path: string): Promise<Blob> {
+  const encodedPath = path.split("/").map(enc).join("/");
+  return bffFetchBlob(`${runBase(runId)}/artifacts/${encodedPath}`);
+}
+
+export function listRunTests(runId: string): Promise<RunTestListResponse> {
+  return bffFetch<RunTestListResponse>(`${runBase(runId)}/tests`);
+}
+
+/**
+ * Reads the recent outcomes of one test case of one job, newest first.
+ * caseKey is the opaque key the tests read returned. The key can hold a
+ * "/" and a "%2F", so it is encoded once more as one path segment. The
+ * client never parses the key.
+ */
+export function getTestCaseHistory(
+  team: string,
+  jobPath: string,
+  caseKey: string,
+  limit?: number,
+): Promise<TestCaseHistoryResponse> {
+  const qs = limit != null ? `?limit=${limit}` : "";
+  return bffFetch<TestCaseHistoryResponse>(`${jobBase(team, jobPath)}/tests/${enc(caseKey)}${qs}`);
+}
+
+export function listRunChanges(runId: string): Promise<RunChangeListResponse> {
+  return bffFetch<RunChangeListResponse>(`${runBase(runId)}/changes`);
+}
+
+/** One page of the runs a run started. Pass the previous page's nextCursor
+ * to read the next page. */
+export function listRunDownstream(runId: string, cursor?: string): Promise<RunLinkPage> {
+  const qs = cursor ? `?cursor=${enc(cursor)}` : "";
+  return bffFetch<RunLinkPage>(`${runBase(runId)}/downstream${qs}`);
+}
+
+/** Requests that a queued or running build stop. Fire and forget. */
+export function cancelRun(runId: string): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/cancel`, { method: "POST" });
+}
+
+/**
+ * Requests a retry of a finished run. One retry per source run, fleet-wide:
+ * a second rerun still answers 202, reusing the first retry's identifier.
+ */
+export function rerunRun(runId: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/rerun`, { method: "POST" });
+}
+
+/** Reads the script a finished run ran, and whether the run replays. */
+export function getRunScript(runId: string): Promise<RunScript> {
+  return bffFetch<RunScript>(`${runBase(runId)}/script`);
+}
+
+/**
+ * Requests a fresh build of the run's job with an edited script. Each call
+ * mints a new run identifier, so each call starts its own build.
+ */
+export function replayRun(runId: string, script: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/replay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script }),
+  });
+}
+
+/** Reads whether a finished run restarts from a stage, and the stages it can restart from. */
+export function getRunRestart(runId: string): Promise<RunRestart> {
+  return bffFetch<RunRestart>(`${runBase(runId)}/restart`);
+}
+
+/**
+ * Requests a fresh build of the run's job from one stage. Each call mints a
+ * new run identifier, so each call starts its own build.
+ */
+export function restartRun(runId: string, stage: string): Promise<RunActionResponse> {
+  return bffFetchJSON<RunActionResponse>(`${runBase(runId)}/restart`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stage }),
+  });
+}
+
+/** Answers a paused input step with parameter values. Sends
+ * { "parameters": { name: value } }. Fire and forget: the response
+ * carries no outcome. */
+export function proceedRunInput(
+  runId: string,
+  inputId: string,
+  parameters: Record<string, string>,
+): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/inputs/${enc(inputId)}/proceed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parameters }),
+  });
+}
+
+/** Stops a paused input step. Takes no body and reports no outcome. */
+export function abortRunInput(runId: string, inputId: string): Promise<CancelRunResponse> {
+  return bffFetchJSON<CancelRunResponse>(`${runBase(runId)}/inputs/${enc(inputId)}/abort`, {
+    method: "POST",
+  });
+}
+
+/** clusterQuery builds the optional cluster query string. */
+function clusterQuery(cluster?: string): string {
+  return cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+}
+
+/**
+ * Lists the cell pools of every cluster, or of one cluster. The surface
+ * needs the cellpools:read verb on a cluster-wide binding, because
+ * CellPool is cluster scoped.
+ */
+export function getCellPools(cluster?: string): Promise<CellPoolListResponse> {
+  return bffFetch<CellPoolListResponse>(`/cellpools${clusterQuery(cluster)}`);
+}
+
+/**
+ * Reads one cell pool's spec and status. With no cluster, the BFF reads
+ * its own cluster.
+ */
+export function getCellPool(name: string, cluster?: string): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}${clusterQuery(cluster)}`);
+}
+
+/**
+ * Scales one cell pool. The body carries the four scale dials only: a
+ * structural edit goes to kubectl or GitOps. The handler retries an
+ * internal conflict three times and then answers 409.
+ */
+export function patchCellPool(name: string, cluster: string, body: CellPoolScaleRequest): Promise<CellPool> {
+  return bffFetch<CellPool>(`/cellpools/${enc(name)}${clusterQuery(cluster)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Reads which subjects may build on each tenant of a cell. The read
+ * answers 404 for an unknown controller, a controller that is not a cell,
+ * and a refused controller read. It answers 403 for a caller who holds no
+ * cluster-wide rolebindings:read.
+ */
+export function getCellGrants(namespace: string, name: string, cluster?: string): Promise<CellGrants> {
+  const qs = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
+  return bffFetch<CellGrants>(`/cells/${enc(namespace)}/${enc(name)}/grants${qs}`);
 }

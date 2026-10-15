@@ -1,0 +1,7 @@
+type: object
+additionalProperties: false
+propertyNames:
+  pattern: ^[a-z]+$
+properties:
+  name:
+    type: string

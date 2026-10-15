@@ -46,7 +46,7 @@ func TestRunReconnectsOnStreamFailure(t *testing.T) {
 		Namespace:      "ns",
 		BootstrapFile:  tokenFile,
 	}
-	agent := NewAgent(cfg)
+	agent := mustNewAgent(t, cfg)
 	agent.Logger = slog.Default()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
@@ -87,7 +87,7 @@ func (s *concurrentSendStream) RecvMsg(m interface{}) error  { return nil }
 // TestHeartbeatReprobesJenkinsHealth verifies that sendHeartbeats re-probes
 // Jenkins health on every tick instead of caching stale values from startup.
 func TestHeartbeatReprobesJenkinsHealth(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -127,13 +127,13 @@ func TestConcurrentSendDoesNotRace(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -159,7 +159,7 @@ func TestConcurrentSendDoesNotRace(t *testing.T) {
 // --- Token grant cache tests ---
 
 func TestTokenGrantUpdatesCache(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -192,7 +192,7 @@ func TestTokenGrantUpdatesCache(t *testing.T) {
 }
 
 func TestTokenGrantOlderExpDoesNotOverwrite(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -284,7 +284,7 @@ func TestAllComponentsSucceeded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := (&Agent{}).allComponentsSucceeded(tt.result, tt.cmd)
+			got := (&Agent{metrics: noopMiteMetrics()}).allComponentsSucceeded(tt.result, tt.cmd)
 			if got != tt.want {
 				t.Errorf("allComponentsSucceeded = %v, want %v", got, tt.want)
 			}
@@ -297,7 +297,7 @@ func TestAllComponentsSucceeded(t *testing.T) {
 // the heartbeat goroutine read lastHealth while the health-probe goroutine
 // wrote it without synchronization. Run with -race.
 func TestHealthCacheConcurrentAccess(t *testing.T) {
-	agent := NewAgent(Config{})
+	agent := mustNewAgent(t, Config{})
 	agent.Logger = slog.Default()
 
 	var wg sync.WaitGroup
@@ -328,7 +328,7 @@ func TestHealthCacheConcurrentAccess(t *testing.T) {
 // the convergence/first-boot logic can be exercised hermetically.
 func newTestAgent(t *testing.T) *Agent {
 	t.Helper()
-	a := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	a := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	a.Logger = slog.Default()
 	a.miteDir = t.TempDir()
 	return a
@@ -338,7 +338,7 @@ func newTestAgent(t *testing.T) *Agent {
 // points at the given stub server URL.
 func newTestAgentWithJenkins(t *testing.T, jenkinsURL string) *Agent {
 	t.Helper()
-	a := NewAgent(Config{ControllerName: "test", Namespace: "ns", JenkinsURL: jenkinsURL})
+	a := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: jenkinsURL})
 	a.Logger = slog.Default()
 	a.miteDir = t.TempDir()
 	return a
@@ -401,7 +401,7 @@ func fakeJenkins(t *testing.T, session string) (*httptest.Server, *fakeJenkinsHi
 			hits.Applies.Add(1)
 		case r.URL.Path == "/configuration-as-code/reload":
 			hits.Reloads.Add(1)
-			w.WriteHeader(http.StatusOK)
+			http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
 		case r.URL.Path == "/safeRestart":
 			hits.SafeRestart.Add(1)
 			w.WriteHeader(http.StatusOK)
@@ -682,12 +682,12 @@ func TestFailedApplyLeavesMarkerStale(t *testing.T) {
 // mite process restart (a new Agent pointed at the same dir sees the marker).
 func TestMarkerSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
-	a1 := NewAgent(Config{})
+	a1 := mustNewAgent(t, Config{})
 	a1.Logger = slog.Default()
 	a1.miteDir = dir
 	a1.writeMarker(appliedMarker{composite: "persisted-hash", session: "sess-1"})
 
-	a2 := NewAgent(Config{})
+	a2 := mustNewAgent(t, Config{})
 	a2.Logger = slog.Default()
 	a2.miteDir = dir
 	m := a2.readMarker()
@@ -720,7 +720,7 @@ func TestComponentCachesWithoutMarkerIsFirstBoot(t *testing.T) {
 // refresh callers share one qualifying TokenGrant without orphaning earlier
 // waiters.
 func TestConcurrentRefreshWaitersShareGrant(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -771,7 +771,7 @@ func TestConcurrentRefreshWaitersShareGrant(t *testing.T) {
 // unblock a waiter whose baseline is fresher than both the cached and
 // grant tokens.
 func TestStaleGrantDoesNotCompleteExpiredTokenWaiter(t *testing.T) {
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
@@ -850,14 +850,14 @@ func TestDesiredStateCoalescingDoesNotEndSession(t *testing.T) {
 	}
 
 	srv, _ := fakeJenkins(t, "sess-1")
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
 	})
 	agent.Logger = slog.Default()
 	agent.miteDir = t.TempDir()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -902,14 +902,14 @@ func TestSerializedCommandExecution(t *testing.T) {
 	_ = stream
 
 	srv, _ := fakeJenkins(t, "sess-1")
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
 	})
 	agent.Logger = slog.Default()
 	agent.miteDir = t.TempDir()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -1047,7 +1047,7 @@ func TestCommandMailboxImperativeFIFO(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: fmt.Sprintf("%d", i)}}
-		if !mb.putImperative(w) {
+		if ok, _ := mb.putImperative(w); !ok {
 			t.Fatalf("putImperative %d should succeed", i)
 		}
 	}
@@ -1074,14 +1074,39 @@ func TestCommandMailboxImperativeCap(t *testing.T) {
 
 	for i := 0; i < imperativeQueueCap; i++ {
 		w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: fmt.Sprintf("%d", i)}}
-		if !mb.putImperative(w) {
+		if ok, _ := mb.putImperative(w); !ok {
 			t.Fatalf("putImperative %d at cap should succeed", i)
 		}
 	}
 
 	w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: "overflow"}}
-	if mb.putImperative(w) {
+	if ok, _ := mb.putImperative(w); ok {
 		t.Error("putImperative should return false at capacity")
+	}
+}
+
+// TestCommandMailboxDropsActiveRedelivery verifies a redelivery of a queued
+// or running command queues nothing, and a finished command runs again.
+func TestCommandMailboxDropsActiveRedelivery(t *testing.T) {
+	mb := newCommandMailbox()
+	w := commandWork{imperativeCmd: &mitev1.ImperativeCommand{CommandId: "trigger-1"}}
+
+	if ok, dup := mb.putImperative(w); !ok || dup {
+		t.Fatalf("first put = %v %v, want queued", ok, dup)
+	}
+	if ok, dup := mb.putImperative(w); !ok || !dup {
+		t.Fatalf("queued redelivery = %v %v, want a dropped duplicate", ok, dup)
+	}
+	taken, _ := mb.take()
+	if ok, dup := mb.putImperative(w); !ok || !dup {
+		t.Fatalf("running redelivery = %v %v, want a dropped duplicate", ok, dup)
+	}
+	if _, more := mb.take(); more {
+		t.Fatal("the mailbox holds a second copy of the command")
+	}
+	mb.finish(taken)
+	if ok, dup := mb.putImperative(w); !ok || dup {
+		t.Fatalf("delivery after finish = %v %v, want queued", ok, dup)
 	}
 }
 
@@ -1142,6 +1167,11 @@ func cascReloadServer(t *testing.T, reloadFn func(int) (int, string)) *httptest.
 		case r.URL.Path == "/configuration-as-code/reload":
 			reloadCall++
 			code, body := reloadFn(reloadCall)
+			if code == http.StatusOK {
+				// JCasC redirects to its index on success.
+				http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
+				return
+			}
 			w.WriteHeader(code)
 			if body != "" {
 				fmt.Fprint(w, body)
@@ -1175,7 +1205,7 @@ func TestApplyConfigViaReloadHappyPath(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"hello from casc\"\n",
@@ -1238,7 +1268,7 @@ func TestApplyConfigViaReloadRollbackRestored(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
@@ -1283,7 +1313,7 @@ func TestApplyConfigViaReloadRollbackAlsoFailed(t *testing.T) {
 		return http.StatusInternalServerError, "reload exploded"
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"risky\"\n",
@@ -1308,7 +1338,7 @@ func TestApplyConfigViaReloadNoLastGood(t *testing.T) {
 		return http.StatusInternalServerError, "reload exploded"
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"first ever\"\n",
@@ -1345,7 +1375,7 @@ func TestApplyConfigViaReloadWritesRbacYaml(t *testing.T) {
 		return http.StatusOK, ""
 	})
 	client := jenkins.NewClient(srv.URL, "varroa-mite", "test-token")
-	agent := &Agent{Logger: slog.Default()}
+	agent := &Agent{metrics: noopMiteMetrics(), Logger: slog.Default()}
 
 	cmd := &mitev1.DesiredStateCommand{
 		JcascYaml: "jenkins:\n  systemMessage: \"hello\"\n",
@@ -1438,43 +1468,52 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	agent.Logger = slog.Default()
 	agent.keypair = priv
 	agent.miteDir = t.TempDir() // keep cert writes off the real shared path
 
-	newResp := func() *mitev1.RegisterResponse {
-		cert, err := certAuth.IssueMiteCert("test", "ns", pub)
+	// Issue every certificate before the goroutines start. Issuance is not
+	// under test, and t.Fatalf must run on the test goroutine.
+	const renewals = 50
+	resps := make([]*mitev1.RegisterResponse, renewals+1)
+	for i := range resps {
+		cert, err := certAuth.IssueMiteCert("test", "ns", pub, "")
 		if err != nil {
 			t.Fatalf("issue cert: %v", err)
 		}
 		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-		return &mitev1.RegisterResponse{CertificatePem: string(certPEM), CaPem: string(certAuth.CAPEM())}
+		resps[i] = &mitev1.RegisterResponse{CertificatePem: string(certPEM), CaPem: string(certAuth.CAPEM())}
 	}
 
-	if err := agent.storeCertFromResponse(newResp()); err != nil {
+	if err := agent.storeCertFromResponse(resps[0]); err != nil {
 		t.Fatalf("initial storeCertFromResponse: %v", err)
 	}
 
+	// The test has no deadline of its own. The race detector is the
+	// assertion, and go test -timeout catches a hang with every stack.
 	var wg sync.WaitGroup
+	writerDone := make(chan struct{})
 
 	// Writer: mirrors the renewal loop calling storeCertFromResponse.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			if err := agent.storeCertFromResponse(newResp()); err != nil {
+		defer close(writerDone)
+		for _, resp := range resps[1:] {
+			if err := agent.storeCertFromResponse(resp); err != nil {
 				t.Errorf("storeCertFromResponse: %v", err)
 				return
 			}
 		}
 	}()
 
-	// Reader: mirrors connect()'s certMu-guarded read of a.cert.
+	// Reader: mirrors connect()'s certMu-guarded read of a.cert. It reads
+	// until the writer stops, so every write overlaps a read.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 200; i++ {
+		for {
 			agent.certMu.Lock()
 			cert := agent.cert
 			agent.certMu.Unlock()
@@ -1482,17 +1521,32 @@ func TestCertRenewalConcurrentAccess(t *testing.T) {
 				t.Error("cert unexpectedly nil")
 				return
 			}
+			select {
+			case <-writerDone:
+				return
+			default:
+			}
 		}
 	}()
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for concurrent cert access")
+	wg.Wait()
+}
+
+// TestComputeStateHash_FramesEachSection pins that a section hash in
+// another position answers another state hash. A missing section must not
+// let the next section take its place.
+func TestComputeStateHash_FramesEachSection(t *testing.T) {
+	const x = "abc"
+	seen := map[string]string{}
+	for name, got := range map[string]string{
+		"config":  computeStateHash(x, "", "", ""),
+		"plugins": computeStateHash("", x, "", ""),
+		"rbac":    computeStateHash("", "", x, ""),
+		"items":   computeStateHash("", "", "", x),
+	} {
+		if other, ok := seen[got]; ok {
+			t.Fatalf("the same hash in %s and %s answers the same state hash", name, other)
+		}
+		seen[got] = name
 	}
 }

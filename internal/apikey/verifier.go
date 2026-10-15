@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -63,12 +64,13 @@ func (v *Verifier) Generate(ctx context.Context, claims *auth.Claims, expiresIn 
 			return "", "", "", fmt.Errorf("generate token: %w", err)
 		}
 
+		owner := claims.PreferredUsername
+		if owner == "" {
+			owner = claims.Subject
+		}
 		labels := map[string]string{
 			"varroa.dev/apikey":      "true",
-			"varroa.dev/apikey-user": claims.PreferredUsername,
-		}
-		if labels["varroa.dev/apikey-user"] == "" {
-			labels["varroa.dev/apikey-user"] = claims.Subject
+			"varroa.dev/apikey-user": ownerLabel(owner),
 		}
 
 		data := map[string][]byte{
@@ -190,14 +192,44 @@ func (v *Verifier) verifyUncached(ctx context.Context, prefix, secret string) (*
 	return claims, storedHash, nil
 }
 
-// ListByUser returns metadata for all API keys owned by the given user.
+// maxLabelValue is the Kubernetes limit on a label value.
+const maxLabelValue = 63
+
+// ownerLabel returns the varroa.dev/apikey-user label value for a key
+// owner. A label value cannot hold ":", so a local account beside OIDC
+// ("local:<name>") is labeled "local.<name>". A value longer than 63
+// characters is cut and ends with a short hash of the owner. ListByUser
+// compares the stored owner, so two owners that share a label stay apart.
+func ownerLabel(owner string) string {
+	label := owner
+	if name, ok := strings.CutPrefix(owner, auth.LocalSubjectPrefix); ok {
+		label = "local." + name
+	}
+	if len(label) <= maxLabelValue {
+		return label
+	}
+	sum := sha256.Sum256([]byte(owner))
+	return label[:maxLabelValue-9] + "." + hex.EncodeToString(sum[:4])
+}
+
+// ListByUser returns metadata for all API keys owned by the given user. The
+// label only narrows the list: a key counts only when its stored owner
+// equals user, so two owners that share a label value never see each
+// other's keys.
 func (v *Verifier) ListByUser(ctx context.Context, user string) ([]KeyMeta, error) {
-	all, err := v.store.ListSecrets(ctx, v.ns, "varroa.dev/apikey-user="+user)
+	all, err := v.store.ListSecrets(ctx, v.ns, "varroa.dev/apikey-user="+ownerLabel(user))
 	if err != nil {
 		return nil, err
 	}
 	var out []KeyMeta
 	for _, data := range all {
+		owner := string(data["preferredUsername"])
+		if owner == "" {
+			owner = string(data["subject"])
+		}
+		if owner != user {
+			continue
+		}
 		out = append(out, keyMetaFromData(data))
 	}
 	return out, nil
@@ -318,7 +350,9 @@ func resolveGroups(ctx context.Context, store keyStore, ns string, data map[stri
 	if managedBy == v1alpha1.ManagedByLocal {
 		// Scan Group CRD members for preferredUsername-or-subject (the same
 		// identity the login path matches on — see auth/local resolveGroups).
-		memberName := resolveFor
+		// A local account beside OIDC carries "local:<name>"; group members
+		// name the bare username.
+		memberName := strings.TrimPrefix(resolveFor, auth.LocalSubjectPrefix)
 		all, err := store.ListGroupCRDs(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%w: list groups: %v", ErrUnavailable, err)

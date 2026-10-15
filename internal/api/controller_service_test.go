@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -32,6 +33,7 @@ func TestControllerService_ValidateIngress(t *testing.T) {
 		forCreate  bool
 		cluster    string
 		dashboard  string
+		headless   bool
 		wantStatus int // 0 = accepted
 	}{
 		{name: "nil spec accepted"},
@@ -55,12 +57,22 @@ func TestControllerService_ValidateIngress(t *testing.T) {
 			name: "path mode not gated on update",
 			spec: &v1alpha1.IngressSpec{Mode: "path", Host: "anything.example.org"}, forCreate: false, cluster: "member", dashboard: "dash.example.org",
 		},
+		{
+			name: "headless skips the shared-host check",
+			spec: &v1alpha1.IngressSpec{Mode: "path", Host: "other.example.org"}, forCreate: true, cluster: "core", dashboard: "dash.example.org",
+			headless: true,
+		},
+		{
+			name: "headless still rejects a bad mode",
+			spec: &v1alpha1.IngressSpec{Mode: "wildcard"}, headless: true,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := testSvc(crdstore.NewFake())
 			svc.DashboardHost = tt.dashboard
-			serr := svc.ValidateIngress(tt.spec, tt.forCreate, tt.cluster, "ctl")
+			serr := svc.ValidateIngress(tt.spec, tt.forCreate, tt.cluster, "ctl", tt.headless)
 			if tt.wantStatus == 0 && serr != nil {
 				t.Fatalf("unexpected rejection: %v", serr)
 			}
@@ -200,11 +212,135 @@ func TestControllerDetail_CarriesAttention(t *testing.T) {
 			}},
 		},
 	}
-	resp := s.controllerDetail(cr, "core")
+	resp := s.controllerDetail(context.Background(), cr, "core")
 	if resp.Attention == nil {
 		t.Fatal("detail response carries no attention")
 	}
 	if resp.Attention.Kind != AttentionReconcileBlocked {
 		t.Fatalf("Attention.Kind = %q, want %q", resp.Attention.Kind, AttentionReconcileBlocked)
+	}
+}
+
+func TestControllerDetail_CellProjection(t *testing.T) {
+	s := &Server{deps: &Dependencies{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Store:  crdstore.NewFake(),
+	}}
+	unready := metav1.NewTime(time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC))
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{
+			Cell: &v1alpha1.CellStatus{
+				Tenants:                  []string{"payments", "search"},
+				AppliedTenants:           []string{"payments"},
+				Warm:                     true,
+				Evacuate:                 true,
+				UnreadySince:             &unready,
+				RolledAt:                 &unready,
+				Instance:                 "uid-new",
+				PreviousInstance:         "uid-old",
+				PreviousInstanceLastSeen: &unready,
+				TenantWarnings: []v1alpha1.TenantWarning{{
+					Tenant: "search", Reason: "ItemsSkipped", Message: "bundle unreadable",
+				}},
+				Rehydration: []v1alpha1.CellRehydrationEntry{{Tenant: "payments"}},
+			},
+		},
+	}
+	resp := s.controllerDetail(context.Background(), cr, "core")
+	if resp.Kind != "cell" {
+		t.Fatalf("Kind = %q, want cell", resp.Kind)
+	}
+	if resp.Cell == nil {
+		t.Fatal("detail response carries no cell projection")
+	}
+	if len(resp.Cell.Tenants) != 2 || resp.Cell.AppliedTenants[0] != "payments" {
+		t.Errorf("tenants = %v, appliedTenants = %v", resp.Cell.Tenants, resp.Cell.AppliedTenants)
+	}
+	if !resp.Cell.Warm || !resp.Cell.Evacuate {
+		t.Error("warm and evacuate did not survive the projection")
+	}
+	if resp.Cell.Instance != "uid-new" || resp.Cell.PreviousInstance != "uid-old" {
+		t.Errorf("instances = %q, %q", resp.Cell.Instance, resp.Cell.PreviousInstance)
+	}
+	if resp.Cell.UnreadySince != "2026-02-03T04:05:06Z" {
+		t.Errorf("unreadySince = %q", resp.Cell.UnreadySince)
+	}
+	if len(resp.Cell.TenantWarnings) != 1 || resp.Cell.TenantWarnings[0].Reason != "ItemsSkipped" {
+		t.Errorf("tenantWarnings = %v", resp.Cell.TenantWarnings)
+	}
+
+	// The projection declares ten keys and no rehydration key.
+	raw, err := json.Marshal(resp.Cell)
+	if err != nil {
+		t.Fatalf("marshal cell: %v", err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatalf("decode cell: %v", err)
+	}
+	if _, ok := keys["rehydration"]; ok {
+		t.Error("the cell projection carries a rehydration key")
+	}
+	want := []string{
+		"tenants", "warm", "evacuate", "unreadySince", "rolledAt",
+		"appliedTenants", "tenantWarnings", "instance", "previousInstance",
+		"previousInstanceLastSeen",
+	}
+	for _, k := range want {
+		if _, ok := keys[k]; !ok {
+			t.Errorf("the cell projection carries no %q key", k)
+		}
+	}
+	if len(keys) != len(want) {
+		t.Errorf("the cell projection carries %d keys, want %d", len(keys), len(want))
+	}
+}
+
+func TestControllerDetail_StatefulCarriesNoCell(t *testing.T) {
+	s := &Server{deps: &Dependencies{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Store:  crdstore.NewFake(),
+	}}
+	cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "plain", Namespace: "ns1"}}
+	resp := s.controllerDetail(context.Background(), cr, "core")
+	if resp.Kind != "stateful" {
+		t.Fatalf("Kind = %q, want stateful", resp.Kind)
+	}
+	if resp.Cell != nil {
+		t.Error("a controller with no cell role carries a cell projection")
+	}
+}
+
+// TestBuildCellStatusJSON_PendingSignatures proves the detail projection
+// carries the pending signatures and their requesters.
+func TestBuildCellStatusJSON_PendingSignatures(t *testing.T) {
+	cr := &v1alpha1.Controller{
+		Spec: v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{
+			PendingSignatures: []v1alpha1.CellPendingSignature{{
+				Signature: "method a b",
+				Dangerous: true,
+				Requesters: []v1alpha1.CellSignatureRequester{
+					{Tenant: "team-a", JobPath: "team-a/build", BuildNumber: 3, RunID: "r9"},
+				},
+			}},
+			PendingSignaturesTotal: 4,
+		}},
+	}
+	out := buildCellStatusJSON(cr)
+	if out == nil || len(out.PendingSignatures) != 1 {
+		t.Fatalf("pending signatures not projected: %+v", out)
+	}
+	sig := out.PendingSignatures[0]
+	if sig.Signature != "method a b" || !sig.Dangerous {
+		t.Fatalf("signature = %+v", sig)
+	}
+	if len(sig.Requesters) != 1 || sig.Requesters[0].JobPath != "team-a/build" || sig.Requesters[0].RunID != "r9" {
+		t.Fatalf("requesters = %+v", sig.Requesters)
+	}
+	if out.PendingSignaturesTotal != 4 {
+		t.Fatalf("total = %d, want 4", out.PendingSignaturesTotal)
 	}
 }

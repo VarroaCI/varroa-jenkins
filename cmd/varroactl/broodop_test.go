@@ -3,11 +3,45 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
+
+// TestBroodopListWarnsOnFailedCluster verifies that a member whose brood
+// operations did not arrive is named on stderr.
+func TestBroodopListWarnsOnFailedCluster(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"items": []interface{}{},
+			"clusters": []map[string]interface{}{
+				{"cluster": "core", "ok": true},
+				{"cluster": "member-b", "ok": false, "error": "cluster unreachable"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	oldErr := os.Stderr
+	pr, pw, _ := os.Pipe()
+	os.Stderr = pw
+	code := run([]string{"broodop", "get", "--server", srv.URL})
+	pw.Close()
+	os.Stderr = oldErr
+	out, _ := io.ReadAll(pr)
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	want := "warning: cluster member-b: cluster unreachable; its brood operations are not listed"
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("expected stderr to contain %q, got %q", want, string(out))
+	}
+}
 
 // fakeBroodHandler returns test data for brood operation endpoints.
 type fakeBroodHandler struct{}

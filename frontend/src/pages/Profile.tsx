@@ -11,6 +11,11 @@ import type { MeResponse } from "../types/auth";
 import { changePassword } from "../api/client";
 import styles from "./Profile.module.css";
 
+/** Names the session source the profile page shows after the group chip. */
+function sourceLabel(mode?: string): string {
+  return mode === "local" ? "local account" : mode === "ldap" ? "LDAP" : "OIDC";
+}
+
 const ACCENTS = [
   { id: "honey" as const, color: "#C2611C", label: "Honey" },
   { id: "rust" as const, color: "#A23B1E", label: "Carapace" },
@@ -126,7 +131,7 @@ export default function Profile() {
               <div className={styles.muted}>{me?.email}</div>
               <div className={styles.roleTag}>
                 <span className={styles.rolePill}>⚿ {me?.groups?.[0] || "user"}</span>
-                <span className={styles.muted}> via OIDC</span>
+                <span className={styles.muted}>{" via " + sourceLabel(me?.authMode)}</span>
               </div>
             </div>
           </div>
@@ -134,7 +139,10 @@ export default function Profile() {
             items={[
               { key: "Display name", value: me?.displayName || me?.name || "—" },
               { key: "Username", value: me?.preferredUsername || "—" },
-              { key: "OIDC subject", value: me?.subject || "—" },
+              {
+                key: me?.authMode === "local" || me?.authMode === "ldap" ? "Subject" : "OIDC subject",
+                value: me?.subject || "—",
+              },
               { key: "Email", value: me?.email || "—" },
               { key: "Last login", value: me?.lastLogin ? new Date(me.lastLogin).toLocaleString() : "Never" },
               { key: "Default landing", value: "Dashboard" },
@@ -180,10 +188,12 @@ export default function Profile() {
 
           <Card title="⏻ Session">
             <div className={styles.sessionInfo}>
-              <div className={styles.statLine}>
-                <span className={styles.sk}>Signed in</span>
-                <span className={styles.tick}>—</span>
-              </div>
+              {me?.signedInAt && (
+                <div className={styles.statLine}>
+                  <span className={styles.sk}>Signed in</span>
+                  <span className={styles.tick}>{new Date(me.signedInAt).toLocaleString()}</span>
+                </div>
+              )}
               <div className={styles.statLine}>
                 <span className={styles.sk}>Session cookie</span>
                 <span className={styles.mono}>varroa_token · httpOnly</span>

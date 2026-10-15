@@ -8,15 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/time/rate"
 )
@@ -25,9 +28,22 @@ import (
 // Retry-After response header, to bound server-requested delays.
 const retryAfterCap = 30 * time.Second
 
-// ErrItemNotFound is returned by DeleteItem when the item does not exist (404).
+// ErrItemNotFound is returned by DeleteItem and ReloadItem when the item does
+// not exist (404).
 // Callers can use errors.Is to distinguish not-found from other errors.
 var ErrItemNotFound = errors.New("jenkins: item not found")
+
+// ErrRestartSourceMissing reports that the plugin refused a restart because
+// the source build is no longer on the cell. A restart copy can restore it.
+var ErrRestartSourceMissing = errors.New("jenkins: restart source build is missing")
+
+// restartRefusalHeader names the plugin's machine-readable reason for a
+// restart refusal. Its value sourceMissingRefusal marks the case a restart
+// copy can answer.
+const (
+	restartRefusalHeader = "X-Varroa-Restart-Refusal"
+	sourceMissingRefusal = "source-missing"
+)
 
 // Client is an HTTP client for the Jenkins API with basic auth and CSRF crumb support.
 // It applies rate limiting (5 req/s, burst 10) and retries transient failures
@@ -136,7 +152,7 @@ func (c *Client) ApplyConfig(ctx context.Context, jcascYAML string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("apply config: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("apply config: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -157,9 +173,60 @@ func (c *Client) Reload(ctx context.Context) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("reload config: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("reload config: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
+	}
+	// JCasC answers a failed reload with HTTP 200 and its error page at the
+	// reload path itself, and a successful one with a redirect to the
+	// plugin's index. After the client follows that redirect, the final
+	// request path is the only signal that separates the two.
+	if resp.Request != nil && resp.Request.URL != nil && strings.HasSuffix(resp.Request.URL.Path, "/configuration-as-code/reload") {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+		return fmt.Errorf("reload config: Jenkins answered its error page: %s", cascErrorSummary(body))
 	}
 	return nil
+}
+
+// cascErrorSummary reduces the JCasC error page to the text that follows
+// its "Error loading configuration" heading, with tags stripped and
+// whitespace collapsed, capped at 400 characters.
+func cascErrorSummary(page []byte) string {
+	text := strings.Join(strings.Fields(htmlTagPattern.ReplaceAllString(string(page), " ")), " ")
+	text = strings.NewReplacer("&quot;", "\"", "&#39;", "'", "&lt;", "<", "&gt;", ">", "&amp;", "&").Replace(text)
+	const marker = "Error loading configuration"
+	if i := strings.Index(text, marker); i >= 0 {
+		text = text[i:]
+	}
+	if len(text) > 400 {
+		text = text[:400]
+	}
+	return text
+}
+
+var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
+
+// refusalTextMaxRunes caps the body text one error carries. Every log line
+// and activity row that quotes a refused request carries this text.
+const refusalTextMaxRunes = 300
+
+var htmlTitlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+// refusalText answers the short text of an error response body. Jenkins
+// renders a refusal as a full HTML page that holds the message only in its
+// <title>, as "<message> - Jenkins". The function takes that title,
+// unescapes it, and strips the suffix. A body with no title answers its own
+// trimmed text. The result holds at most refusalTextMaxRunes runes.
+func refusalText(body []byte) string {
+	text := string(body)
+	if m := htmlTitlePattern.FindStringSubmatch(text); m != nil {
+		text = html.UnescapeString(m[1])
+		text = strings.Join(strings.Fields(text), " ")
+		text = strings.TrimSuffix(text, " - Jenkins")
+	}
+	text = strings.TrimSpace(text)
+	if utf8.RuneCountInString(text) > refusalTextMaxRunes {
+		text = string([]rune(text)[:refusalTextMaxRunes])
+	}
+	return text
 }
 
 // CheckConfig validates a JCasC document against the live Jenkins instance
@@ -458,7 +525,7 @@ func (c *Client) ScriptConsoleOnce(ctx context.Context, script string) (string, 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("script console once: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return "", fmt.Errorf("script console once: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 
 	b, err := io.ReadAll(resp.Body)
@@ -557,7 +624,7 @@ func (c *Client) SetRBAC(ctx context.Context, yaml string) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("set rbac: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("set rbac: HTTP %d: %s", resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -928,7 +995,7 @@ func (c *Client) CreateItem(ctx context.Context, itemPath, class, configXML stri
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("create item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("create item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -947,7 +1014,7 @@ func (c *Client) GetItemConfig(ctx context.Context, itemPath string) (string, bo
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", false, fmt.Errorf("get item config %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return "", false, fmt.Errorf("get item config %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -966,7 +1033,26 @@ func (c *Client) UpdateItemConfig(ctx context.Context, itemPath, configXML strin
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("update item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("update item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
+	}
+	return nil
+}
+
+// ReloadItem reloads one item's config.xml from disk through the per-item
+// reload route. That route needs only Item.CONFIGURE, unlike the global
+// /reload route, which needs Jenkins.ADMINISTER.
+func (c *Client) ReloadItem(ctx context.Context, itemPath string) error {
+	resp, err := c.do(ctx, http.MethodPost, "/"+jobPath(itemPath)+"/reload", nil, "")
+	if err != nil {
+		return fmt.Errorf("reload item %s: %w", itemPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("reload item %s: %w", itemPath, ErrItemNotFound)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("reload item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
 }
@@ -983,9 +1069,260 @@ func (c *Client) DeleteItem(ctx context.Context, itemPath string) error {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("delete item %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return fmt.Errorf("delete item %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 	return nil
+}
+
+// TriggerBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/trigger route.
+type TriggerBuildRequest struct {
+	RunID      string            `json:"runId"`
+	IntentKey  string            `json:"intentKey"`
+	JobPath    string            `json:"jobPath"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	Actor      string            `json:"actor,omitempty"`
+}
+
+// TriggerBuild schedules a build on the local Jenkins through the Varroa
+// plugin's /varroa-run/trigger route. The plugin stamps the run identity
+// onto the queue item before it schedules, so the claim gate sees the
+// caller's key rather than a locally minted one.
+//
+// It returns the Jenkins HTTP status beside the error. The status is 0 when
+// the call reached no Jenkins, because no response exists then. The gateway
+// maps that status onto a reason code.
+func (c *Client) TriggerBuild(ctx context.Context, req TriggerBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("trigger build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/trigger", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("trigger build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("trigger build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// CancelBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/cancel route.
+type CancelBuildRequest struct {
+	RunID       string `json:"runId"`
+	JobPath     string `json:"jobPath"`
+	BuildNumber int64  `json:"buildNumber"`
+}
+
+// CancelBuild stops a running build or cancels a queued item on the local
+// Jenkins through the Varroa plugin's /varroa-run/cancel route. The plugin
+// resolves the target by run identifier, never by job path alone. Cancel is
+// best-effort: a run that already ended answers 404, which is not a
+// condition the caller needs to retry. It returns the Jenkins HTTP status
+// beside the error, and 0 for a call that reached no server.
+func (c *Client) CancelBuild(ctx context.Context, req CancelBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("cancel build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/cancel", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("cancel build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("cancel build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// ActingUser is the person a mite-delivered command acts as. The plugin
+// builds a Jenkins authentication from the value and runs the call
+// inside that authentication's scope.
+type ActingUser struct {
+	Name   string   `json:"name"`
+	Email  string   `json:"email,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
+// ProceedInputRequest is the body posted to the Varroa plugin's
+// /varroa-run/proceed-input route.
+type ProceedInputRequest struct {
+	RunID       string            `json:"runId"`
+	JobPath     string            `json:"jobPath"`
+	BuildNumber int64             `json:"buildNumber"`
+	InputID     string            `json:"inputId"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  ActingUser        `json:"actingUser"`
+}
+
+// AbortInputRequest is the body posted to the Varroa plugin's
+// /varroa-run/abort-input route.
+type AbortInputRequest struct {
+	RunID       string     `json:"runId"`
+	JobPath     string     `json:"jobPath"`
+	BuildNumber int64      `json:"buildNumber"`
+	InputID     string     `json:"inputId"`
+	ActingUser  ActingUser `json:"actingUser"`
+}
+
+// ProceedInput answers one pending input step of a run through the
+// Varroa plugin's /varroa-run/proceed-input route. The plugin evaluates
+// the step's submitter check against the acting user's own name and
+// groups, so a refused proceed answers a 403 status.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// TriggerBuild does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ProceedInput(ctx context.Context, req ProceedInputRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("proceed input %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/proceed-input", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("proceed input %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("proceed input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// AbortInput rejects one pending input step of a run through the
+// Varroa plugin's /varroa-run/abort-input route. The plugin evaluates
+// the caller inside the acting user's own authentication, so a caller
+// who holds neither the cancel permission nor the submitter identity
+// answers a 403 status.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// ProceedInput does.
+func (c *Client) AbortInput(ctx context.Context, req AbortInputRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("abort input %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/abort-input", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("abort input %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("abort input %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// ReplayBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/replay route.
+type ReplayBuildRequest struct {
+	RunID       string            `json:"runId"`
+	IntentKey   string            `json:"intentKey"`
+	JobPath     string            `json:"jobPath"`
+	SourceRunID string            `json:"sourceRunId"`
+	Script      string            `json:"script"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  *ActingUser       `json:"actingUser,omitempty"`
+}
+
+// ReplayBuild schedules a build of the job that runs the given Groovy
+// script, through the Varroa plugin's /varroa-run/replay route. The plugin
+// stamps the run identity onto the queue item before it schedules, so the
+// claim gate sees the caller's key.
+//
+// It returns the Jenkins HTTP status beside the error, the way
+// TriggerBuild does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ReplayBuild(ctx context.Context, req ReplayBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("replay build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/replay", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("replay build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("replay build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// ScanMultibranchRequest is the body posted to the Varroa plugin's
+// /varroa-run/scan route.
+type ScanMultibranchRequest struct {
+	ScanID     string      `json:"scanId"`
+	JobPath    string      `json:"jobPath"`
+	ActingUser *ActingUser `json:"actingUser,omitempty"`
+}
+
+// ScanMultibranch starts a scan of the multibranch job through the Varroa
+// plugin's /varroa-run/scan route. The plugin records the heads of the job
+// before the scan, so a later inventory row carries the result.
+//
+// It returns the Jenkins HTTP status beside the error, the way ReplayBuild
+// does. The status is 0 when the call reached no Jenkins.
+func (c *Client) ScanMultibranch(ctx context.Context, req ScanMultibranchRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("scan multibranch %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/scan", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("scan multibranch %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, fmt.Errorf("scan multibranch %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
+}
+
+// RestartBuildRequest is the body posted to the Varroa plugin's
+// /varroa-run/restart route.
+type RestartBuildRequest struct {
+	RunID             string      `json:"runId"`
+	IntentKey         string      `json:"intentKey"`
+	JobPath           string      `json:"jobPath"`
+	SourceRunID       string      `json:"sourceRunId"`
+	SourceBuildNumber int64       `json:"sourceBuildNumber"`
+	Stage             string      `json:"stage"`
+	ActingUser        *ActingUser `json:"actingUser,omitempty"`
+}
+
+// RestartBuild reruns a completed declarative build from one stage, through
+// the Varroa plugin's /varroa-run/restart route. The plugin checks that the
+// source build is still on this cell before it schedules the restart.
+//
+// It returns the Jenkins HTTP status beside the error. The status is 0 when
+// the call reached no Jenkins.
+func (c *Client) RestartBuild(ctx context.Context, req RestartBuildRequest) (int, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("restart build %s: marshal request: %w", req.JobPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/restart", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return 0, fmt.Errorf("restart build %s: %w", req.JobPath, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode == http.StatusConflict && resp.Header.Get(restartRefusalHeader) == sourceMissingRefusal {
+			return resp.StatusCode, fmt.Errorf("restart build %s: %w: HTTP %d: %s",
+				req.JobPath, ErrRestartSourceMissing, resp.StatusCode, refusalText(errBody))
+		}
+		return resp.StatusCode, fmt.Errorf("restart build %s: HTTP %d: %s", req.JobPath, resp.StatusCode, refusalText(errBody))
+	}
+	return resp.StatusCode, nil
 }
 
 // AssignItemRoles assigns RBAC roles on an item path via the role-strategy
@@ -1015,7 +1352,7 @@ func (c *Client) IsItemBuilding(ctx context.Context, itemPath string) (bool, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return true, fmt.Errorf("is item building %s: HTTP %d: %s", itemPath, resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return true, fmt.Errorf("is item building %s: HTTP %d: %s", itemPath, resp.StatusCode, refusalText(errBody))
 	}
 
 	type jobNode struct {

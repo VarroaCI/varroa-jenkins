@@ -112,6 +112,13 @@ The default profiles described above are ship-time content: the operator seeds t
 
 A `ProfileCandidate` is different. It's discovered at runtime, from a profile already present in the cluster (default or hand-authored), when Varroa notices upstream has published a newer patch on that profile's line. It never appears until an operator promotes it. See [Jenkins upgrades](../operations/jenkins-upgrades.md) for how candidates are discovered, checked, and promoted, and how the `upgradePolicy` dial controls whether a promoted version actually rolls out.
 
+## Build artifact storage
+
+Both shipped default profiles pin `artifact-manager-s3`. A controller reports `ArtifactStorage`
+`PluginMissing` only when it resolves to a custom profile that omits this plugin. Pin it in any
+custom `plugins.yaml` to keep artifact storage available on that profile's controllers. See
+[Build logs and artifacts](../operations/build-logs-and-artifacts.md).
+
 ## Troubleshoot
 
 | Symptom | Check |

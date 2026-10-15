@@ -11,6 +11,7 @@ The OpenAPI document is the authoritative reference for every path, request and 
 | Configure authentication and identity providers | [Authentication](security/authentication.md) |
 | Use command-line workflows | [varroactl](varroactl.md) |
 | Authorize callers | [Varroa RBAC](security/varroa-rbac.md) |
+| Read the cell paths, their gates, and their response codes | [Cell views](operations/cell-views.md) |
 
 ## Authentication
 

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { NavLink } from "react-router-dom";
-import { Boxes, CircleUserRound, Clock3, PlugZap, Shield, Workflow } from "lucide-react";
+import { Boxes, CircleUserRound, Clock3, Hexagon, PlugZap, Shield, Waypoints, Workflow } from "lucide-react";
 import { NavIcon } from "./NavIcon";
-import { usePermissions } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea } from "../lib/navPermissions";
+import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
+import { canCatalogArea, canAdminArea, canCellsRow } from "../lib/navPermissions";
 import { canDoAnywhere } from "../hooks/usePermissions";
 import styles from "./MoreSheet.module.css";
 
@@ -13,7 +13,12 @@ interface MoreSheetProps {
 
 export function MoreSheet({ onClose }: MoreSheetProps) {
   const { data: permissions } = usePermissions();
-  const showOperate = canDoAnywhere(permissions, "controllers", "read");
+  const showPlugins = canDoAnywhere(permissions, "controllers", "read");
+  const showPipelines = canSeePipelines(permissions);
+  const showCells = canCellsRow(permissions);
+  // The group visibility is the union of its rows gates, or the Cells row
+  // stays hidden for a caller who holds that grant alone.
+  const showOperate = showPlugins || showPipelines || showCells;
   const showCatalog = canCatalogArea(permissions);
   const showAdmin = canAdminArea(permissions);
   const showManage = showCatalog || showAdmin;
@@ -73,14 +78,28 @@ export function MoreSheet({ onClose }: MoreSheetProps) {
     <>
       <div className={styles.scrim} onClick={onClose} />
       <div className={styles.sheet} role="dialog" aria-modal="true" aria-label="More navigation" ref={sheetRef}>
-        {/* Operate — hidden entirely when gate fails */}
+        {/* Operate — hidden entirely when neither row's own gate passes */}
         {showOperate && (
           <>
             <div className={styles.groupLabel}>Operate</div>
-            <NavLink to="/plugins" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Plugins" onClick={handleNav}>
-              <span className={styles.rowIcon}><NavIcon icon={PlugZap} /></span>
-              <span className={styles.rowText}>Plugins</span>
-            </NavLink>
+            {showPipelines && (
+              <NavLink to="/pipelines" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Pipelines" onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={Waypoints} /></span>
+                <span className={styles.rowText}>Pipelines</span>
+              </NavLink>
+            )}
+            {showCells && (
+              <NavLink to="/cells" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Cells" onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={Hexagon} /></span>
+                <span className={styles.rowText}>Cells</span>
+              </NavLink>
+            )}
+            {showPlugins && (
+              <NavLink to="/plugins" className={({ isActive }) => `${styles.row} ${isActive ? styles.active : ""}`} aria-label="Plugins" onClick={handleNav}>
+                <span className={styles.rowIcon}><NavIcon icon={PlugZap} /></span>
+                <span className={styles.rowText}>Plugins</span>
+              </NavLink>
+            )}
           </>
         )}
 

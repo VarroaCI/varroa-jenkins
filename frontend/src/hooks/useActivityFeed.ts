@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { bffFetch } from "./useApi";
 import { useEventStream, type SSEEvent } from "./useEventStream";
 import { BFF_BASE } from "../api/client";
-import { mergeEvents, passesScope, MAX_BUFFER } from "../components/activityTimeline.util";
+import {
+  mergeEvents,
+  passesScope,
+  isActivityEvent,
+  MAX_BUFFER,
+} from "../components/activityTimeline.util";
 import type { ActivityEvent, ActivityFilters, ActivityPage } from "../types";
 
 interface UseActivityFeedResult {
@@ -121,7 +126,10 @@ export function useActivityFeed(
       // consumed, so it is never re-ingested into the fresh buffer.
       if (consumedRef.current === lastEvent) return;
       consumedRef.current = lastEvent;
-      const incoming = lastEvent.data as ActivityEvent;
+      // The stream names every frame "activity", but brood telemetry can share
+      // the name. Drop any frame that lacks the ActivityEvent shape.
+      if (!isActivityEvent(lastEvent.data)) return;
+      const incoming = lastEvent.data;
       // Apply defensive scope filter
       if (scope && !passesScope(incoming, scope)) return;
 

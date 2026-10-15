@@ -45,6 +45,19 @@ with what this package generates.
     (`resolver.go:539`) for a given `*v1alpha1.Controller` — the generator
     input. `collectFromJenkinsRoleBindings`/`collectFromVarroaRoleBindings`
     dedupe/merge into an `accKey`-keyed map via `upsertAssignment`.
+  - `TenantGrantSources` / `TenantGrantSourcesTruncated`
+    (`tenant_grants.go`) walk the same three tenant paths
+    `EffectiveTenantCapabilities` walks, with the subject filter removed:
+    they answer **which grants reach a tenant**, so they take no claims and
+    decide nothing. The order is `teamMembership`, `tenantScopedBinding`,
+    `clusterWideBinding`, then binding name, and the list is capped at
+    `MaxTenantGrants` (50). The exported `TenantGrantSources` returns the
+    capped list; a caller that must tell a full list from a cut list calls
+    the `Truncated` sibling, because a list of exactly 50 is not proof of a
+    cut. `TenantItemRoleName` / `TenantItemRolePattern` are the single
+    source of the generated per-tenant Jenkins item role name and its folder
+    pattern; `JenkinsRoleAssignments` calls them, so the BFF's cell grants
+    read never opens a `JenkinsRole` object.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
     `scopeSuffix`) implements namespace/controller-name/label scoping shared
     by both binding kinds.
@@ -73,13 +86,37 @@ with what this package generates.
   `View.Read`, `View.Configure`, `View.Create`. Deliberately excludes
   `Administer` — mite never calls admin-only endpoints (see project memory
   "Mite minimal permissions").
-- **Federation** (`federation.go`) — projects a core-cluster
-  `VarroaRoleBinding` for the `system-mite` `VarroaRole` onto a non-core
-  (hive) cluster as a generated `JenkinsRole`/`JenkinsRoleBinding` pair
-  (`fedBindingName`, content hash via `sha256`/hex for change detection) so
-  multi-cluster mites get consistent Jenkins RBAC without hand-authored
-  per-cluster CRs. Federation silently accepts an existing labeled builtin
-  JenkinsRole only when its name and spec match the canonical builtin.
+- **Federation** (`federation.go`) — `DesiredFederatedCRs` projects every
+  core-cluster `VarroaRoleBinding` whose `VarroaRole` has a Jenkins
+  projection (a Global `jenkinsRoleRef` or legacy `jenkinsPermissions`) onto
+  each non-core (hive) cluster as a generated `JenkinsRole` plus a
+  `varroa-fed-<role>-<hash>` `JenkinsRoleBinding` (`fedBindingName`, a
+  `sha256` of the scope and subjects). It skips these bindings: a binding
+  whose scope carries `tenants` (with a warning), a projection onto the
+  reserved `system-mite` or `system-operator` role (with a warning), and a
+  binding with no subjects (silent, because a Team with no members is a
+  normal state). The empty-subjects skip comes first, before every check that
+  warns and before the role is recorded, so a role that only empty bindings
+  reference is not federated. A
+  projected binding always carries a non-nil `subjects` list (`copySubjects`),
+  because the CRD rejects a `null` list. Federation silently accepts an
+  existing labeled builtin JenkinsRole only when its name and spec match the
+  canonical builtin. The fourth return value, `outcomes`, maps each named
+  source binding to a `BindingOutcome`: a `Skip*` reason code and message, or
+  the desired `JenkinsRole` and `JenkinsRoleBinding` names. Every skip branch
+  sets a reason, including the silent ones (`NoSubjects`, `RoleNotFound`,
+  `NoJenkinsProjection`). Bindings that hash to one child name share one
+  projected child. Each projected `JenkinsRoleBinding` carries the annotation
+  `varroa.dev/federated-bindings` (`AnnotationFederatedBindings`): the sorted,
+  comma-separated names of its source bindings. It is an annotation because
+  one child has several owners and a label value holds 63 characters. The BFF
+  reads it to report a failed delete of a stale child. Each projected
+  `JenkinsRole` carries the annotation `varroa.dev/federated-roles`
+  (`AnnotationFederatedRoles`): the sorted, comma-separated names of every
+  `VarroaRole` with at least one projected binding onto it. The label names
+  only the first of them. The BFF reads it to report a failed delete of a
+  stale role copy on each owner `VarroaRole`. The BFF status write reads these outcomes, so a new skip
+  branch needs a new reason code.
 - **`Backend` interface** (`resolver.go:79`) — abstraction over YAML
   rendering; `RoleStrategyBackend` is the only implementation today. Swap
   points here if a second Jenkins authorization plugin is ever supported.

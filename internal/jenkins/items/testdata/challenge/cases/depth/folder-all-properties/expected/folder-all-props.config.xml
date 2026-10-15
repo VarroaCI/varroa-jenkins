@@ -20,7 +20,7 @@
         </EnvInjectJobProperty>
       </properties>
     </org.jenkinsci.plugins.envinject.EnvInjectFolderProperty>
-    <com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty>
+    <com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProvider_-FolderCredentialsProperty>
       <domainCredentialsMap>
         <entry>
           <com.cloudbees.plugins.credentials.domains.Domain>
@@ -37,7 +37,7 @@
           </java.util.concurrent.CopyOnWriteArrayList>
         </entry>
       </domainCredentialsMap>
-    </com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty>
+    </com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProvider_-FolderCredentialsProperty>
     <com.cloudbees.hudson.plugins.folder.properties.RestrictedProjectsProperty>
       <allowedTypes>
         <string>org.jenkinsci.plugins.workflow.job.WorkflowJob</string>

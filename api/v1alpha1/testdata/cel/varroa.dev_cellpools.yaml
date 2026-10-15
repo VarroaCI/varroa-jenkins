@@ -1,0 +1,86 @@
+# CEL cases for charts/varroa/crds/varroa.dev_cellpools.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: CellPool
+  metadata:
+    name: pool-a
+  spec:
+    profileRef: lts-2-555
+    warm: 1
+cases:
+  - name: profileRef changed
+    rule: |-
+      self.profileRef == oldSelf.profileRef
+    field: spec
+    old: {}
+    new: {spec: {profileRef: lts-2-500}}
+    want: reject
+  - name: warm changed with profileRef unchanged
+    rule: |-
+      self.profileRef == oldSelf.profileRef
+    field: spec
+    old: {spec: {warm: 1}}
+    new: {spec: {warm: 4}}
+    want: accept
+
+  - name: cap below warm refused
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 2}}
+    want: reject
+  - name: cap equal to warm accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 3}}
+    want: accept
+  - name: unlimited cap accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3, maxCells: 0}}
+    want: accept
+  - name: absent cap accepted
+    rule: |-
+      !has(self.maxCells) || !has(self.warm) || self.maxCells == 0 || self.maxCells >= self.warm
+    field: spec
+    new: {spec: {warm: 3}}
+    want: accept
+
+  - name: https library without credentialRef accepted
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "https://example.com/lib.git", defaultVersion: main}]}}
+    want: accept
+  - name: ssh library without credentialRef refused
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "ssh://git@example.com/lib.git", defaultVersion: main}]}}
+    want: reject
+  - name: ssh library with credentialRef accepted
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "ssh://git@example.com/lib.git", defaultVersion: main, credentialRef: lib-key}]}}
+    want: accept
+  - name: scp-style library without credentialRef refused
+    rule: |-
+      self.remote.startsWith('https://') || has(self.credentialRef)
+    field: spec.libraries[0]
+    new: {spec: {libraries: [{name: platform-lib, remote: "git@example.com:org/lib.git", defaultVersion: main}]}}
+    want: reject
+  - name: signature with a variable token refused
+    rule: |-
+      self.all(s, !s.contains('${'))
+    field: spec.approvedSignatures
+    new: {spec: {approvedSignatures: ["method hudson.Util ${token}"]}}
+    want: reject
+  - name: plain signature accepted
+    rule: |-
+      self.all(s, !s.contains('${'))
+    field: spec.approvedSignatures
+    new: {spec: {approvedSignatures: ["method hudson.Util getHost"]}}
+    want: accept

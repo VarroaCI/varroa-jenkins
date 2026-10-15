@@ -150,6 +150,7 @@ func TestNormalizeIncludesSummaryCapabilitiesAndPayload(t *testing.T) {
 type stubTransport struct {
 	report    *mitev1.ObservabilityReport
 	connected bool
+	content   *mitev1.ContentResponse
 }
 
 func (s *stubTransport) Send(_ context.Context, _, _ string, _ *mitev1.OperatorMessage) error {
@@ -165,14 +166,16 @@ func (s *stubTransport) Connected(_, _ string) bool                       { retu
 func (s *stubTransport) Info(_, _ string) (string, time.Time, time.Time, bool) {
 	return "", time.Time{}, time.Time{}, false
 }
-func (s *stubTransport) ConnEpoch(_, _ string) (int64, bool)               { return 0, false }
-func (s *stubTransport) StreamDegraded(_, _ string) (string, bool)         { return "", false }
-func (s *stubTransport) ClearDesired(_ context.Context, _, _ string) error { return nil }
+func (s *stubTransport) ConnEpoch(_, _ string) (int64, bool)       { return 0, false }
+func (s *stubTransport) StreamDegraded(_, _ string) (string, bool) { return "", false }
 func (s *stubTransport) IdleGauges(_, _ string) (*mitev1.IdleGauges, time.Time, bool) {
 	return nil, time.Time{}, false
 }
 func (s *stubTransport) ObservabilityReport(_, _ string) *mitev1.ObservabilityReport { return s.report }
 func (s *stubTransport) FetchLastApplied(_ context.Context, _, _ string) (*mitev1.ContentResponse, error) {
+	if s.content != nil {
+		return s.content, nil
+	}
 	return nil, transport.ErrContentUnavailable
 }
 
@@ -187,6 +190,10 @@ func (s *stubTransport) PluginClassification(_, _ string) (*transport.Classified
 func (s *stubTransport) PutPluginClassification(_ context.Context, _, _ string, _ *transport.ClassifiedInventory) error {
 	return nil
 }
+
+func (s *stubTransport) Forget(_, _ string) {}
+
+func (s *stubTransport) ForgetMatching(func(ns, name string) bool) {}
 
 func containsString(values []string, want string) bool {
 	for _, value := range values {

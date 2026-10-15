@@ -1,0 +1,18 @@
+items:
+  - kind: folder
+    name: apps
+    displayName: "Apps"
+    description: "Folder with a private git shared library"
+    properties:
+      - folderLibraries:
+          libraries:
+            - libraryConfiguration:
+                name: platform-lib
+                defaultVersion: v1.0.0
+                allowVersionOverride: true
+                retriever:
+                  modernSCM:
+                    scm:
+                      git:
+                        remote: https://gitlab.example.com/platform/jenkins-lib.git
+                        credentialsId: gitlab-lib

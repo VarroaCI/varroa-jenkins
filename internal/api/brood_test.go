@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -56,8 +60,18 @@ func (f *fakeBroodClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _
 func (f *fakeBroodClient) SetHibernated(_ context.Context, _, _ string, _ bool) (bool, error) {
 	return false, nil
 }
+func (f *fakeBroodClient) SetHibernatedAt(_ context.Context, _, _, rv string, _ bool) (string, error) {
+	return rv, nil
+}
 func (f *fakeBroodClient) DeleteControllerCRD(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteControllerPod(_ context.Context, _, _ string) error { return nil }
+func (f *fakeBroodClient) DeleteControllerPodGrace(_ context.Context, _, _ string, _ types.UID, _ int64) error {
+	return nil
+}
+func (f *fakeBroodClient) ListPodPhases(_ context.Context, _ string) (map[types.UID]corev1.PodPhase, error) {
+	return nil, nil
+}
+
 func (f *fakeBroodClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.Pod, error) {
 	return nil, nil
 }
@@ -224,10 +238,16 @@ func (f *fakeBroodClient) CreateService(_ context.Context, _, _ string, _ int32,
 }
 func (f *fakeBroodClient) CreateServiceAccount(_ context.Context, _, _ string) error { return nil }
 func (f *fakeBroodClient) CreateAgentRBAC(_ context.Context, _, _ string) error      { return nil }
-func (f *fakeBroodClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec) error {
+func (f *fakeBroodClient) CreateOrUpdateContentReadGrant(_ context.Context, _ controller.ContentReadGrant) error {
 	return nil
 }
-func (f *fakeBroodClient) UpdateStatefulSetOIDCEnv(_ context.Context, _, _, _, _, _, _, _, _, _, _, _ string) error {
+func (f *fakeBroodClient) CreateServiceAccountTokenSecret(_ context.Context, _, _, _ string) error {
+	return nil
+}
+func (f *fakeBroodClient) CreateStatefulSet(_ context.Context, _ controller.StatefulSetSpec, _ func(context.Context) error) error {
+	return nil
+}
+func (f *fakeBroodClient) UpdateStatefulSetOIDCEnv(_ context.Context, _, _ string, _ controller.JenkinsAuthEnv) error {
 	return nil
 }
 func (f *fakeBroodClient) EnsureStatefulSetPodLabel(_ context.Context, _, _, _, _ string) (bool, error) {
@@ -239,13 +259,21 @@ func (f *fakeBroodClient) IsStatefulSetReady(_ context.Context, _, _ string) (bo
 func (f *fakeBroodClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
+func (f *fakeBroodClient) GetStatefulSetRollout(_ context.Context, _, _ string) (controller.StatefulSetRollout, error) {
+	return controller.StatefulSetRollout{}, nil
+}
 func (f *fakeBroodClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return nil, nil, nil
+}
+func (f *fakeBroodClient) GetStatefulSetContainerEnv(_ context.Context, _, _, _ string) (map[string]string, bool, error) {
+	return nil, false, nil
 }
 func (f *fakeBroodClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (string, string, *corev1.ResourceRequirements, *corev1.ResourceRequirements, string, map[string]string, bool, error) {
 	return "", "", nil, nil, "", nil, false, nil
 }
-func (f *fakeBroodClient) ScaleStatefulSet(_ context.Context, _, _ string, _ int32) error { return nil }
+func (f *fakeBroodClient) ScaleStatefulSetToZero(_ context.Context, _, _ string, _ func(context.Context) error) error {
+	return nil
+}
 func (f *fakeBroodClient) CreateSecret(_ context.Context, _, _ string, _ map[string]string, _ map[string][]byte) error {
 	return nil
 }
@@ -287,6 +315,12 @@ func (f *fakeBroodClient) UpdateConfigMapData(_ context.Context, _, _ string, _ 
 }
 func (f *fakeBroodClient) DeleteResource(_ context.Context, _, _, _ string) error { return nil }
 func (f *fakeBroodClient) DeleteSecret(_ context.Context, _, _ string) error      { return nil }
+func (f *fakeBroodClient) DeleteCellNetworkPolicy(_ context.Context, _, _ string) error {
+	return nil
+}
+func (f *fakeBroodClient) CreateCellNetworkPolicy(_ context.Context, _ controller.CellPolicySpec) error {
+	return nil
+}
 func (f *fakeBroodClient) EnsureWakeEndpointSlice(_ context.Context, _, _ string, _ []string, _ int32) error {
 	return nil
 }
@@ -310,7 +344,10 @@ func (f *fakeBroodClient) DynamicClient() dynamic.Interface { return nil }
 func (f *fakeBroodClient) PatchControllerFinalizers(_ context.Context, _, _ string, _ []string) error {
 	return nil
 }
-func (f *fakeBroodClient) PatchControllerStatus(_ context.Context, _, _ string, _ *v1alpha1.ControllerStatus) error {
+func (f *fakeBroodClient) PatchControllerStatus(_ context.Context, _, _, rv string, _ *v1alpha1.ControllerStatus) (string, error) {
+	return rv, nil
+}
+func (f *fakeBroodClient) PatchControllerCellStatus(_ context.Context, _, _ string, _ *v1alpha1.CellStatus) error {
 	return nil
 }
 func (f *fakeBroodClient) PatchControllerAnnotations(_ context.Context, _, _ string, _ map[string]*string) error {
@@ -806,5 +843,481 @@ func TestBusBrood_DiscoverNamespaces_LocalCluster(t *testing.T) {
 	_, err := bf.DiscoverNamespaces(context.Background(), "core")
 	if err == nil {
 		t.Fatal("expected error for local cluster call")
+	}
+}
+
+// The local list reads from the controller lister when one is set, so the
+// store must not be consulted.
+func TestBusBroodListLocalUsesLister(t *testing.T) {
+	lister := NewIndexerControllerLister(newTestControllerIndexer(t,
+		testController("team-a", "alpha"),
+		testController("team-b", "beta"),
+	))
+	bf := &busBrood{localCluster: "core", store: crdstore.NewFake(), controllers: lister, logger: slog.Default()}
+
+	rows, statuses, err := bf.ListAll(context.Background(), "", "core")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	for _, row := range rows {
+		if row.Cluster != "core" {
+			t.Errorf("row %s labelled %q, want core", row.CR.Name, row.Cluster)
+		}
+	}
+	if len(statuses) != 1 || !statuses[0].OK {
+		t.Errorf("statuses = %+v, want one OK local status", statuses)
+	}
+}
+
+// seedPaddedRemoteControllers seeds n Controllers of about 9.5 KB each into a
+// fake store that a remote CommandCRUD reads.
+func seedPaddedRemoteControllers(store *crdstore.Fake, n int) {
+	pad := strings.Repeat("x", 9500)
+	for i := 0; i < n; i++ {
+		crdstore.MustSeed(store, &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("ctrl-%03d", i),
+				Namespace:   "team-a",
+				Annotations: map[string]string{"pad": pad},
+			},
+		})
+	}
+}
+
+func TestBusBrood_ListRemotePagesAboveOldCap(t *testing.T) {
+	remote := crdstore.NewFake()
+	seedPaddedRemoteControllers(remote, 150)
+	crud := &controller.CommandCRUD{
+		Store:       remote,
+		Controllers: controller.NewStoreControllerListSource(remote),
+		Logger:      slog.Default(),
+	}
+
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		return crud.HandleList(data), nil
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	remoteRows := 0
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			remoteRows++
+		}
+	}
+	if remoteRows != 150 {
+		t.Fatalf("expected 150 dev-cluster rows, got %d", remoteRows)
+	}
+	if calls < 2 {
+		t.Fatalf("expected at least 2 list calls, got %d", calls)
+	}
+	for _, st := range cs {
+		if st.Name == "dev-cluster" && !st.OK {
+			t.Fatalf("dev-cluster status not ok: %+v", st)
+		}
+	}
+}
+
+func TestBusBrood_ListRemotePageFailureDropsCluster(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			raw, _ := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "team-a"}})
+			return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{raw}, Next: "team-a/a"})
+		}
+		return nil, errors.New("timeout")
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows after a page failure, got %s", c.CR.Name)
+		}
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "cluster unreachable" {
+		t.Fatalf("expected dev-cluster failed with cluster unreachable, got %+v", st)
+	}
+}
+
+// listPageRaw marshals one Controller row for a fake list reply.
+func listPageRaw(t *testing.T, name string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}})
+	if err != nil {
+		t.Fatalf("marshal row: %v", err)
+	}
+	return raw
+}
+
+func TestBusBrood_ListRemoteMalformedRowFailsMember(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{
+			listPageRaw(t, "a"),
+			json.RawMessage(`{"metadata":"oops"}`),
+		}})
+	}
+
+	cc, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	for _, c := range cc {
+		if c.Cluster == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows for a malformed page, got %s", c.CR.Name)
+		}
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "invalid controller row" {
+		t.Fatalf("expected dev-cluster failed with invalid controller row, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListRemoteCancelStopsPaging(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	secondStarted := make(chan struct{})
+	var calls atomic.Int32
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{listPageRaw(t, "a")}, Next: "team-a/a"})
+		}
+		close(secondStarted)
+		<-release
+		return nil, errors.New("late reply")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan []ClusterFanoutStatus, 1)
+	go func() {
+		_, cs, _ := bf.ListAll(ctx, "", "")
+		done <- cs
+	}()
+	<-secondStarted
+	cancel()
+
+	var cs []ClusterFanoutStatus
+	select {
+	case cs = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListAll did not return after the request context was cancelled")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("list calls = %d, want 2", got)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "list cancelled" {
+		t.Fatalf("expected dev-cluster list cancelled, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListAllKeepsRemoteStatusReason(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return nil, errors.New("nats: timeout")
+	}
+
+	_, cs, _ := bf.ListAll(context.Background(), "", "")
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "cluster unreachable" {
+		t.Fatalf("expected fan-out row cluster unreachable, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListRemoteCursorMustAdvance(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Next: "team-a/a"})
+	}
+
+	_, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || !strings.Contains(st.Error, "did not advance") {
+		t.Fatalf("expected cursor failure, got %+v", st)
+	}
+}
+
+func TestBusBrood_ListRemotePageCap(t *testing.T) {
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	calls := 0
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		calls++
+		return json.Marshal(bus.ControllersListResponse{Next: fmt.Sprintf("team-a/%06d", calls)})
+	}
+
+	_, cs, err := bf.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	var st *ClusterFanoutStatus
+	for i := range cs {
+		if cs[i].Name == "dev-cluster" {
+			st = &cs[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "list exceeds 128 pages" {
+		t.Fatalf("expected page cap failure, got %+v", st)
+	}
+	if calls != 128 {
+		t.Fatalf("expected 128 list calls, got %d", calls)
+	}
+}
+
+// brokerItemRaw returns a marshalled Controller for a brood reply.
+func brokerItemRaw(t *testing.T) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "ns"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// requestCancelCase runs call with a plain request seam that blocks until the
+// test ends. It cancels the context once the first request starts, and
+// returns the error call produced. It fails when call does not return within
+// two seconds.
+func requestCancelCase(t *testing.T, call func(ctx context.Context, bf *busBrood) error) error {
+	t.Helper()
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var once atomic.Bool
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		if once.CompareAndSwap(false, true) {
+			close(started)
+		}
+		<-release
+		return nil, errors.New("late reply")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- call(ctx, bf) }()
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("read did not return after the request context was cancelled")
+		return nil
+	}
+}
+
+func TestBusBrood_GetCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.Get(ctx, "dev-cluster", "ns", "c1")
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected *BroodError, got %T: %v", err, err)
+	}
+	if be.Msg != "request cancelled" || be.Code != bus.CodeInternal {
+		t.Fatalf("got code=%q msg=%q, want %q %q", be.Code, be.Msg, bus.CodeInternal, "request cancelled")
+	}
+	var unreachable *ErrClusterUnreachable
+	if errors.As(err, &unreachable) {
+		t.Fatalf("cancelled read must not report an unreachable cluster: %v", err)
+	}
+}
+
+func TestBusBrood_DiscoverNamespacesCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.DiscoverNamespaces(ctx, "dev-cluster")
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) || be.Msg != "request cancelled" {
+		t.Fatalf("expected request cancelled BroodError, got %T: %v", err, err)
+	}
+}
+
+func TestBusBrood_PreflightCancelEndsRead(t *testing.T) {
+	err := requestCancelCase(t, func(ctx context.Context, bf *busBrood) error {
+		_, err := bf.Preflight(ctx, "dev-cluster", ControllersCreateArgs{Namespace: "ns"})
+		return err
+	})
+	var be *BroodError
+	if !errors.As(err, &be) || be.Msg != "request cancelled" {
+		t.Fatalf("expected request cancelled BroodError, got %T: %v", err, err)
+	}
+}
+
+func TestBusBrood_PreflightSubjectIsCreate(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	var got string
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		got = subject
+		return json.Marshal(bus.ControllersCreateResponse{})
+	}
+	if _, err := bf.Preflight(context.Background(), "dev-cluster", ControllersCreateArgs{Namespace: "ns"}); err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if !strings.HasSuffix(got, ".create") {
+		t.Fatalf("subject = %q, want suffix .create", got)
+	}
+}
+
+func TestBusBrood_GetUsesContextSeam(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	var sawCtx bool
+	bf.requestWithCtx = func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		sawCtx = ctx != nil
+		return json.Marshal(bus.ControllersGetResponse{Item: brokerItemRaw(t)})
+	}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		t.Fatal("Get must use the context seam, not the plain request seam")
+		return nil, nil
+	}
+	cr, err := bf.Get(context.Background(), "dev-cluster", "ns", "c1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if cr.Name != "c1" || !sawCtx {
+		t.Fatalf("name=%q sawCtx=%v", cr.Name, sawCtx)
+	}
+}
+
+func TestBusBrood_WritesStayOnPlainSeam(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	bf.requestWithCtx = func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		t.Fatalf("write %s must not use the context seam", subject)
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		seen[subject] = true
+		switch {
+		case strings.HasSuffix(subject, ".drain") || strings.HasSuffix(subject, ".draincancel"):
+			return json.Marshal(bus.ClusterDrainResponse{State: "active"})
+		case strings.HasSuffix(subject, ".create"):
+			return json.Marshal(bus.ControllersCreateResponse{Item: brokerItemRaw(t)})
+		case strings.HasSuffix(subject, ".update"):
+			return json.Marshal(bus.ControllersUpdateResponse{Item: brokerItemRaw(t)})
+		default:
+			return json.Marshal(bus.ControllersDeleteResponse{})
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := bf.Drain(ctx, "dev-cluster", "tester"); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if _, err := bf.DrainCancel(ctx, "dev-cluster", "tester"); err != nil {
+		t.Fatalf("draincancel: %v", err)
+	}
+	if _, _, err := bf.Create(ctx, "dev-cluster", ControllersCreateArgs{Namespace: "ns"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, _, err := bf.Update(ctx, "dev-cluster", "ns", "c1", json.RawMessage(`{}`), "", false); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if err := bf.Delete(ctx, "dev-cluster", "ns", "c1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := bf.DeletePod(ctx, "dev-cluster", "ns", "c1"); err != nil {
+		t.Fatalf("deletepod: %v", err)
+	}
+	for _, verb := range []string{".drain", ".draincancel", ".create", ".update", ".delete", ".deletepod"} {
+		found := false
+		for s := range seen {
+			if strings.HasSuffix(s, verb) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no request sent for %s", verb)
+		}
+	}
+}
+
+func TestBusBrood_GetDeadlineIsUnreachable(t *testing.T) {
+	bf := &busBrood{localCluster: "core", client: newFakeBroodClient(), logger: slog.Default()}
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		<-release
+		return nil, errors.New("late reply")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	_, err := bf.Get(ctx, "dev-cluster", "ns", "c1")
+	var unreachable *ErrClusterUnreachable
+	if !errors.As(err, &unreachable) {
+		t.Fatalf("expected ErrClusterUnreachable for a deadline, got %T: %v", err, err)
+	}
+	if unreachable.Cluster != "dev-cluster" {
+		t.Errorf("cluster = %q, want dev-cluster", unreachable.Cluster)
 	}
 }

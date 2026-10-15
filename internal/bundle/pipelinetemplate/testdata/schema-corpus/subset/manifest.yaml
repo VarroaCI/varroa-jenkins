@@ -1,0 +1,428 @@
+cases:
+- id: allowed-type-object
+  file: allowed-type-object.yaml
+  verdict: accept
+- id: allowed-title
+  file: allowed-title.yaml
+  verdict: accept
+- id: allowed-description
+  file: allowed-description.yaml
+  verdict: accept
+- id: allowed-properties
+  file: allowed-properties.yaml
+  verdict: accept
+- id: allowed-required
+  file: allowed-required.yaml
+  verdict: accept
+- id: allowed-additional-properties-false
+  file: allowed-additional-properties-false.yaml
+  verdict: accept
+- id: allowed-schema-dialect
+  file: allowed-schema-dialect.yaml
+  verdict: accept
+- id: allowed-default-string
+  file: allowed-default-string.yaml
+  verdict: accept
+- id: allowed-enum-string
+  file: allowed-enum-string.yaml
+  verdict: accept
+- id: allowed-min-length
+  file: allowed-min-length.yaml
+  verdict: accept
+- id: allowed-max-length
+  file: allowed-max-length.yaml
+  verdict: accept
+- id: allowed-pattern
+  file: allowed-pattern.yaml
+  verdict: accept
+- id: allowed-minimum
+  file: allowed-minimum.yaml
+  verdict: accept
+- id: allowed-maximum
+  file: allowed-maximum.yaml
+  verdict: accept
+- id: allowed-exclusive-minimum
+  file: allowed-exclusive-minimum.yaml
+  verdict: accept
+- id: allowed-exclusive-maximum
+  file: allowed-exclusive-maximum.yaml
+  verdict: accept
+- id: allowed-default-boolean
+  file: allowed-default-boolean.yaml
+  verdict: accept
+- id: allowed-items
+  file: allowed-items.yaml
+  verdict: accept
+- id: allowed-min-items
+  file: allowed-min-items.yaml
+  verdict: accept
+- id: allowed-max-items
+  file: allowed-max-items.yaml
+  verdict: accept
+- id: allowed-unique-items
+  file: allowed-unique-items.yaml
+  verdict: accept
+- id: rejected-ref
+  file: rejected-ref.yaml
+  verdict: reject
+  contains: $ref
+  message: "name: keyword \"$ref\" is not in the allowed subset"
+- id: rejected-defs
+  file: rejected-defs.yaml
+  verdict: reject
+  contains: $defs
+  message: "keyword \"$defs\" is not in the allowed subset"
+- id: rejected-definitions
+  file: rejected-definitions.yaml
+  verdict: reject
+  contains: definitions
+  message: "keyword \"definitions\" is not in the allowed subset"
+- id: rejected-id
+  file: rejected-id.yaml
+  verdict: reject
+  contains: $id
+  message: "keyword \"$id\" is not in the allowed subset"
+- id: rejected-comment
+  file: rejected-comment.yaml
+  verdict: reject
+  contains: $comment
+  message: "keyword \"$comment\" is not in the allowed subset"
+- id: rejected-const
+  file: rejected-const.yaml
+  verdict: reject
+  contains: const
+  message: "name: keyword \"const\" is not in the allowed subset"
+- id: rejected-oneof
+  file: rejected-oneof.yaml
+  verdict: reject
+  contains: oneOf
+  message: "name: keyword \"oneOf\" is not in the allowed subset"
+- id: rejected-anyof
+  file: rejected-anyof.yaml
+  verdict: reject
+  contains: anyOf
+  message: "name: keyword \"anyOf\" is not in the allowed subset"
+- id: rejected-allof
+  file: rejected-allof.yaml
+  verdict: reject
+  contains: allOf
+  message: "name: keyword \"allOf\" is not in the allowed subset"
+- id: rejected-not
+  file: rejected-not.yaml
+  verdict: reject
+  contains: not
+  message: "name: keyword \"not\" is not in the allowed subset"
+- id: rejected-if
+  file: rejected-if.yaml
+  verdict: reject
+  contains: if
+  message: "keyword \"if\" is not in the allowed subset"
+- id: rejected-then
+  file: rejected-then.yaml
+  verdict: reject
+  contains: then
+  message: "keyword \"then\" is not in the allowed subset"
+- id: rejected-else
+  file: rejected-else.yaml
+  verdict: reject
+  contains: else
+  message: "keyword \"else\" is not in the allowed subset"
+- id: rejected-prefix-items
+  file: rejected-prefix-items.yaml
+  verdict: reject
+  contains: prefixItems
+  message: "tags: keyword \"prefixItems\" is not in the allowed subset"
+- id: rejected-contains
+  file: rejected-contains.yaml
+  verdict: reject
+  contains: contains
+  message: "tags: keyword \"contains\" is not in the allowed subset"
+- id: rejected-pattern-properties
+  file: rejected-pattern-properties.yaml
+  verdict: reject
+  contains: patternProperties
+  message: "keyword \"patternProperties\" is not in the allowed subset"
+- id: rejected-property-names
+  file: rejected-property-names.yaml
+  verdict: reject
+  contains: propertyNames
+  message: "keyword \"propertyNames\" is not in the allowed subset"
+- id: rejected-dependent-required
+  file: rejected-dependent-required.yaml
+  verdict: reject
+  contains: dependentRequired
+  message: "keyword \"dependentRequired\" is not in the allowed subset"
+- id: rejected-dependent-schemas
+  file: rejected-dependent-schemas.yaml
+  verdict: reject
+  contains: dependentSchemas
+  message: "keyword \"dependentSchemas\" is not in the allowed subset"
+- id: rejected-unevaluated-properties
+  file: rejected-unevaluated-properties.yaml
+  verdict: reject
+  contains: unevaluatedProperties
+  message: "keyword \"unevaluatedProperties\" is not in the allowed subset"
+- id: rejected-unevaluated-items
+  file: rejected-unevaluated-items.yaml
+  verdict: reject
+  contains: unevaluatedItems
+  message: "tags: keyword \"unevaluatedItems\" is not in the allowed subset"
+- id: rejected-format
+  file: rejected-format.yaml
+  verdict: reject
+  contains: format
+  message: "name: keyword \"format\" is rejected because Ajv ignores an unregistered format while Go and the plugin would reject it"
+- id: rejected-multiple-of
+  file: rejected-multiple-of.yaml
+  verdict: reject
+  contains: multipleOf
+  message: "count: keyword \"multipleOf\" is rejected because Ajv applies multipleOfPrecision, which the other validators do not"
+- id: rejected-read-only
+  file: rejected-read-only.yaml
+  verdict: reject
+  contains: readOnly
+  message: "name: keyword \"readOnly\" is not in the allowed subset"
+- id: rejected-write-only
+  file: rejected-write-only.yaml
+  verdict: reject
+  contains: writeOnly
+  message: "name: keyword \"writeOnly\" is not in the allowed subset"
+- id: rejected-deprecated
+  file: rejected-deprecated.yaml
+  verdict: reject
+  contains: deprecated
+  message: "name: keyword \"deprecated\" is not in the allowed subset"
+- id: rejected-examples
+  file: rejected-examples.yaml
+  verdict: reject
+  contains: examples
+  message: "name: keyword \"examples\" is not in the allowed subset"
+- id: rejected-nullable
+  file: rejected-nullable.yaml
+  verdict: reject
+  contains: nullable
+  message: "name: keyword \"nullable\" is not in the allowed subset"
+- id: rejected-type-null
+  file: rejected-type-null.yaml
+  verdict: reject
+  contains: 'null'
+  message: "name: type \"null\" is rejected"
+- id: rejected-type-array
+  file: rejected-type-array.yaml
+  verdict: reject
+  contains: array
+  message: "name: type written as an array is rejected"
+- id: limit-property-name
+  file: limit-property-name.yaml
+  verdict: reject
+  contains: property name
+  message: "nvidia.com/gpu: property name \"nvidia.com/gpu\" must match ^[a-zA-Z][a-zA-Z0-9_]{0,62}$"
+- id: limit-depth
+  file: limit-depth.yaml
+  verdict: reject
+  contains: depth
+  message: "l2.l3.l4: nesting depth exceeds the limit of 3"
+- id: limit-property-count
+  file: limit-property-count.yaml
+  verdict: reject
+  contains: properties
+  message: "schema declares more than 100 properties in total"
+- id: limit-enum-count
+  file: limit-enum-count.yaml
+  verdict: reject
+  contains: enum
+  message: "choice: enum holds more than 100 entries"
+- id: limit-schema-size
+  file: limit-schema-size.yaml
+  verdict: reject
+  contains: bytes
+  message: "schema text exceeds 65536 bytes"
+- id: limit-default-satisfies-schema
+  file: limit-default-satisfies-schema.yaml
+  verdict: reject
+  contains: default
+  message: 'goVersion: default does not satisfy its own schema: value must be one of [a, b]'
+- id: pattern-allowed-literal
+  file: pattern-allowed-literal.yaml
+  verdict: accept
+- id: pattern-allowed-digit-class
+  file: pattern-allowed-digit-class.yaml
+  verdict: accept
+- id: pattern-allowed-non-digit-class
+  file: pattern-allowed-non-digit-class.yaml
+  verdict: accept
+- id: pattern-allowed-word-class
+  file: pattern-allowed-word-class.yaml
+  verdict: accept
+- id: pattern-allowed-non-word-class
+  file: pattern-allowed-non-word-class.yaml
+  verdict: accept
+- id: pattern-allowed-escaped-punctuation
+  file: pattern-allowed-escaped-punctuation.yaml
+  verdict: accept
+- id: pattern-allowed-character-class-range
+  file: pattern-allowed-character-class-range.yaml
+  verdict: accept
+- id: pattern-allowed-negated-class
+  file: pattern-allowed-negated-class.yaml
+  verdict: accept
+- id: pattern-allowed-dash-inside-class
+  file: pattern-allowed-dash-inside-class.yaml
+  verdict: accept
+- id: pattern-allowed-star
+  file: pattern-allowed-star.yaml
+  verdict: accept
+- id: pattern-allowed-plus
+  file: pattern-allowed-plus.yaml
+  verdict: accept
+- id: pattern-allowed-question
+  file: pattern-allowed-question.yaml
+  verdict: accept
+- id: pattern-allowed-exact-repeat
+  file: pattern-allowed-exact-repeat.yaml
+  verdict: accept
+- id: pattern-allowed-open-repeat
+  file: pattern-allowed-open-repeat.yaml
+  verdict: accept
+- id: pattern-allowed-range-repeat
+  file: pattern-allowed-range-repeat.yaml
+  verdict: accept
+- id: pattern-allowed-alternation
+  file: pattern-allowed-alternation.yaml
+  verdict: accept
+- id: pattern-allowed-capturing-group
+  file: pattern-allowed-capturing-group.yaml
+  verdict: accept
+- id: pattern-allowed-non-capturing-group
+  file: pattern-allowed-non-capturing-group.yaml
+  verdict: accept
+- id: pattern-rejected-whitespace-s
+  file: pattern-rejected-whitespace-s.yaml
+  verdict: reject
+  contains: \s
+  message: "value: pattern: escape \\s is rejected because RE2, java.util.regex, and ECMA-262 disagree on it"
+- id: pattern-rejected-whitespace-S
+  file: pattern-rejected-whitespace-S.yaml
+  verdict: reject
+  contains: \S
+  message: "value: pattern: escape \\S is rejected because RE2, java.util.regex, and ECMA-262 disagree on it"
+- id: pattern-rejected-word-boundary
+  file: pattern-rejected-word-boundary.yaml
+  verdict: reject
+  contains: \b
+  message: "value: pattern: escape \\b is not in the allowed set"
+- id: pattern-rejected-unlisted-escape
+  file: pattern-rejected-unlisted-escape.yaml
+  verdict: reject
+  contains: escape
+  message: "value: pattern: escape \\_ is not in the allowed set"
+- id: pattern-rejected-dash-outside-class
+  file: pattern-rejected-dash-outside-class.yaml
+  verdict: reject
+  contains: character class
+  message: "value: pattern: escape \\- is allowed only inside a character class"
+- id: pattern-rejected-oversized-repeat
+  file: pattern-rejected-oversized-repeat.yaml
+  verdict: reject
+  contains: '1000'
+  message: "value: pattern: repetition exceeds the 1000 limit"
+- id: pattern-rejected-quantified-group
+  file: pattern-rejected-quantified-group.yaml
+  verdict: reject
+  contains: quantifier
+  message: "value: pattern: a quantifier may not follow a closing parenthesis"
+- id: pattern-rejected-quantified-alternation-group
+  file: pattern-rejected-quantified-alternation-group.yaml
+  verdict: reject
+  contains: quantifier
+  message: "value: pattern: a quantifier may not follow a closing parenthesis"
+- id: pattern-rejected-lookahead
+  file: pattern-rejected-lookahead.yaml
+  verdict: reject
+  contains: lookahead
+  message: "value: pattern: lookahead is not in the allowed set"
+- id: pattern-rejected-negative-lookahead
+  file: pattern-rejected-negative-lookahead.yaml
+  verdict: reject
+  contains: lookahead
+  message: "value: pattern: lookahead is not in the allowed set"
+- id: pattern-rejected-lookbehind
+  file: pattern-rejected-lookbehind.yaml
+  verdict: reject
+  contains: lookbehind
+  message: "value: pattern: lookbehind or a named group is not in the allowed set"
+- id: pattern-rejected-named-group
+  file: pattern-rejected-named-group.yaml
+  verdict: reject
+  contains: named group
+  message: "value: pattern: lookbehind or a named group is not in the allowed set"
+- id: pattern-rejected-backreference
+  file: pattern-rejected-backreference.yaml
+  verdict: reject
+  contains: escape
+  message: "value: pattern: escape \\1 is not in the allowed set"
+- id: pattern-rejected-inline-flags
+  file: pattern-rejected-inline-flags.yaml
+  verdict: reject
+  contains: non-capturing
+  message: "value: pattern: only a non-capturing group \"(?:...)\" may start with \"?\""
+- id: pattern-rejected-possessive-quantifier
+  file: pattern-rejected-possessive-quantifier.yaml
+  verdict: reject
+  contains: quantifier
+  message: "value: pattern: a quantifier may not follow another quantifier"
+- id: pattern-rejected-length-cap
+  file: pattern-rejected-length-cap.yaml
+  verdict: reject
+  contains: '200'
+  message: "value: pattern: pattern exceeds the 200 character limit"
+- id: rejected-min-length-type
+  file: rejected-min-length-type.yaml
+  verdict: reject
+  contains: minLength must be a non-negative integer
+  message: "name: minLength must be a non-negative integer"
+- id: rejected-min-length-null
+  file: rejected-min-length-null.yaml
+  verdict: reject
+  contains: minLength must be a non-negative integer
+  message: "name: minLength must be a non-negative integer"
+- id: rejected-max-length-type
+  file: rejected-max-length-type.yaml
+  verdict: reject
+  contains: maxLength must be a non-negative integer
+  message: "name: maxLength must be a non-negative integer"
+- id: rejected-min-items-type
+  file: rejected-min-items-type.yaml
+  verdict: reject
+  contains: minItems must be a non-negative integer
+  message: "tags: minItems must be a non-negative integer"
+- id: rejected-max-items-type
+  file: rejected-max-items-type.yaml
+  verdict: reject
+  contains: maxItems must be a non-negative integer
+  message: "tags: maxItems must be a non-negative integer"
+- id: rejected-minimum-type
+  file: rejected-minimum-type.yaml
+  verdict: reject
+  contains: minimum must be a number
+  message: "count: minimum must be a number"
+- id: rejected-minimum-null
+  file: rejected-minimum-null.yaml
+  verdict: reject
+  contains: minimum must be a number
+  message: "count: minimum must be a number"
+- id: rejected-maximum-type
+  file: rejected-maximum-type.yaml
+  verdict: reject
+  contains: maximum must be a number
+  message: "count: maximum must be a number"
+- id: rejected-unique-items-type
+  file: rejected-unique-items-type.yaml
+  verdict: reject
+  contains: uniqueItems must be a boolean
+  message: "tags: uniqueItems must be a boolean"
+- id: rejected-unique-items-null
+  file: rejected-unique-items-null.yaml
+  verdict: reject
+  contains: uniqueItems must be a boolean
+  message: "tags: uniqueItems must be a boolean"

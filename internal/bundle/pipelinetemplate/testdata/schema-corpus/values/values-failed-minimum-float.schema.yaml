@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  count:
+    type: number
+    minimum: 3.0
+required:
+- count

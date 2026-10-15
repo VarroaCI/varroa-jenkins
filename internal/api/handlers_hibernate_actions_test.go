@@ -25,15 +25,19 @@ import (
 type fakeActionReconciler struct {
 	hibernateErr error
 	wakeErr      error
+	approveErr   error
 	hibernate    int
 	wake         int
+	// expected records the reviewed content hash of the last approve.
+	expected string
 }
 
 func (f *fakeActionReconciler) TriggerReconcile(_, _, _ string) {}
 func (f *fakeActionReconciler) WakeController(_, _, _ string)   {}
 func (f *fakeActionReconciler) Reprovision(_, _, _ string)      {}
-func (f *fakeActionReconciler) ApproveRestart(_ context.Context, _, _, _, _ string) error {
-	return nil
+func (f *fakeActionReconciler) ApproveRestart(_ context.Context, _, _, _, _, expectedContentHash string) error {
+	f.expected = expectedContentHash
+	return f.approveErr
 }
 func (f *fakeActionReconciler) ApproveDeletion(_ context.Context, _, _, _, _ string) error {
 	return nil

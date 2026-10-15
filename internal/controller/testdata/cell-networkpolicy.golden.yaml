@@ -1,0 +1,101 @@
+metadata:
+  name: ci-00000000-cell
+  namespace: team-a
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  - ports:
+    - port: 9090
+      protocol: TCP
+    - port: 9092
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: varroa-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/component: varroa-gateway
+  - ports:
+    - port: 8080
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: varroa-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/component: varroa-updatecenter
+  - ports:
+    - port: 443
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 10.0.0.0/16
+  - ports:
+    - port: 8080
+      protocol: TCP
+    - port: 50000
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agents-a
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agents-b
+  - to:
+    - ipBlock:
+        cidr: 203.0.113.0/24
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: varroa-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/component: varroa-bff
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: varroa-system
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/component: varroa-operator
+    ports:
+    - port: 8080
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agents-a
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agents-b
+    ports:
+    - port: 8080
+      protocol: TCP
+    - port: 50000
+      protocol: TCP
+  - from:
+    - podSelector:
+        matchLabels:
+          app: monitoring-agent
+    ports:
+    - port: 9100
+  podSelector:
+    matchLabels:
+      app: ci-00000000
+  policyTypes:
+  - Ingress
+  - Egress

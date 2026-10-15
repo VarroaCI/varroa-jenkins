@@ -437,7 +437,9 @@ func (s *Server) commitUpload(ctx context.Context, parsed parsedUpload, plan Pla
 		DisplayName:  parsed.manifest.LongName,
 		RequiredCore: parsed.manifest.RequiredCore,
 		Dependencies: parsed.manifest.Dependencies,
-		Content:      strings.NewReader(string(body)),
+		// The uploaded manifest parsed, so its dependency list is known.
+		DependenciesKnown: true,
+		Content:           strings.NewReader(string(body)),
 	}
 	ref := packRefFor("upload-", plugin.Name, plugin.Version)
 	cfg := oci.PackConfig{
@@ -535,25 +537,24 @@ func (l *packStoreLookup) Versions(ctx context.Context, name string) []string {
 	return out
 }
 
+// Dependencies resolves name@version from the stored packs. An annotation on
+// any layer of the version answers first. Otherwise the stored manifests are
+// read. A false result means the list is unknown, and the planner then asks
+// upstream metadata.
 func (l *packStoreLookup) Dependencies(ctx context.Context, name, version string) ([]hpi.Dependency, bool) {
 	packs, _, err := l.srv.listPackInfos(ctx)
 	if err != nil {
 		return nil, false
 	}
+	var layers []pluginLayerInfo
 	for _, pack := range packs {
 		for _, p := range pack.Plugins {
-			if p.Name != name || p.Version != version {
-				continue
+			if p.Name == name && p.Version == version {
+				layers = append(layers, p)
 			}
-			// A pack config with no kind predates the annotation contract, so its
-			// silence about dependencies proves nothing.
-			if pack.Config.Kind == "" {
-				continue
-			}
-			return p.Dependencies, true
 		}
 	}
-	return nil, false
+	return l.srv.storedDependencies(ctx, layers)
 }
 
 // uploadResolver returns the metadata resolver, or nil when pull-through is off.
@@ -574,6 +575,9 @@ func (nilResolver) ResolveExact(context.Context, string, string) ucmeta.Resoluti
 }
 func (nilResolver) ResolveSatisfying(context.Context, string, string) ucmeta.Resolution {
 	return ucmeta.Resolution{Outcome: ucmeta.NotListed}
+}
+func (nilResolver) ResolveAvailable(context.Context, string, string) ucmeta.Availability {
+	return ucmeta.Availability{Outcome: ucmeta.NotListed}
 }
 
 // rejectUpload writes a rejection envelope with no per-dependency diff.

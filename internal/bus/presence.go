@@ -24,7 +24,7 @@ type Presence struct {
 	InstalledPluginsHash string `json:"installedPluginsHash,omitempty"`
 
 	// StreamDegraded reports that the gateway's bus→gRPC bridge for this mite
-	// is broken: a KV watch or JetStream subscription could not be established
+	// is broken: a subscription or JetStream consumer could not be established
 	// (or died) and is being retried. The mite still holds a healthy gRPC
 	// stream, so it looks connected — but operator-published desired state is
 	// not reaching it. StreamDegradedReason carries the underlying error.

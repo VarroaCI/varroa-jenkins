@@ -22,7 +22,7 @@ import (
 // Task 4.1: the /catalogitems envelope carries the configured operator namespace.
 func TestListCatalogItems_OperatorNamespaceEnvelope(t *testing.T) {
 	client := newBundleTestClient()
-	fakeBrood := &scopeTestConfigBrood{operatorNs: "varroa-system"}
+	fakeBrood := &scopeTestConfigBrood{}
 	srv := NewServer(&Dependencies{
 		Client:            client,
 		Store:             storeFromBundleClient(client),
@@ -82,26 +82,17 @@ func TestListCatalogItems_LocalRemoteSummaryParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return json.Marshal(bus.ConfigListResponse{
-				Items:             []json.RawMessage{raw},
-				OperatorNamespace: "varroa-system",
-			})
+			return json.Marshal(bus.ConfigListResponse{Items: []json.RawMessage{raw}})
 		},
 	}
 
-	localItems, localOperatorNs, err := brood.ListCatalogItems(context.Background(), "core", "team-a", CatalogItemFilter{})
+	localItems, err := brood.ListCatalogItems(context.Background(), "core", "team-a", CatalogItemFilter{})
 	if err != nil {
 		t.Fatalf("local list: %v", err)
 	}
-	remoteItems, remoteOperatorNs, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{})
+	remoteItems, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{})
 	if err != nil {
 		t.Fatalf("remote list: %v", err)
-	}
-	if localOperatorNs != "" {
-		t.Fatalf("local operatorNamespace = %q, want empty", localOperatorNs)
-	}
-	if remoteOperatorNs != "varroa-system" {
-		t.Fatalf("remote operatorNamespace = %q, want varroa-system", remoteOperatorNs)
 	}
 	if len(localItems) != 1 || len(remoteItems) != 1 {
 		t.Fatalf("items len local=%d remote=%d", len(localItems), len(remoteItems))
@@ -149,7 +140,7 @@ func TestListCatalogItems_Filter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := brood.ListCatalogItems(context.Background(), "member", "team-a", tt.filter)
+			got, err := brood.ListCatalogItems(context.Background(), "member", "team-a", tt.filter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,10 +153,10 @@ func TestListCatalogItems_Filter(t *testing.T) {
 	brood.request = func(string, []byte, time.Duration) ([]byte, error) {
 		return []byte(`{"items":[{"name":"groovy-one","type":"groovy"},[]]}`), nil
 	}
-	if _, _, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{Q: "x"}); err == nil {
+	if _, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{Q: "x"}); err == nil {
 		t.Fatal("filtered malformed summary should fail")
 	}
-	got, _, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{})
+	got, err := brood.ListCatalogItems(context.Background(), "member", "team-a", CatalogItemFilter{})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("unfiltered malformed response got %d items, err %v", len(got), err)
 	}

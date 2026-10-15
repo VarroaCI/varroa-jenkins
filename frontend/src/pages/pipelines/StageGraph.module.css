@@ -1,0 +1,118 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
+.empty {
+  color: var(--text-2);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+.svg {
+  display: block;
+  max-width: none;
+}
+
+.connOk {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2;
+}
+
+.connPlain {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.nodeLink {
+  cursor: pointer;
+}
+
+.nodeLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tone_ok { fill: var(--ok); }
+.tone_bad { fill: var(--bad); }
+.tone_warn { fill: var(--warn); }
+.tone_idle { fill: var(--idle); }
+
+.ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.label {
+  font-size: 11px;
+  fill: var(--text-2);
+  font-family: var(--sans);
+}
+
+.expandTrunk {
+  font-size: 12px;
+  fill: var(--text-2);
+  cursor: pointer;
+}
+
+.expandTrunk {
+  fill: var(--accent-strong);
+  text-decoration: underline;
+}
+
+.nestedGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nestedHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nestedHead:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.nestedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nestedItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.nestedTone_ok { color: var(--ok-text); }
+.nestedTone_bad { color: var(--bad-text); }
+.nestedTone_warn { color: var(--warn-text); }
+.nestedTone_idle { color: var(--idle-text); }

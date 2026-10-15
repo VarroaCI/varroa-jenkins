@@ -4,11 +4,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockBffFetch = vi.fn();
 const mockBffFetchText = vi.fn();
 
+const mockGetToken = vi.fn<() => string | null>(() => null);
+
 vi.mock("../hooks/useApi", async () => {
   const mod = await vi.importActual<typeof import("../hooks/useApi")>("../hooks/useApi");
   return {
     bffFetch: (...args: unknown[]) => mockBffFetch(...args),
     bffFetchText: (...args: unknown[]) => mockBffFetchText(...args),
+    getToken: () => mockGetToken(),
     ApiError: mod.ApiError,
   };
 });
@@ -87,10 +90,32 @@ import {
   previewBroodOperation,
   broodStreamUrl,
   listClusters,
+  listPipelines,
+  getPipelineJob,
+  listRuns,
+  createRun,
+  getRun,
+  runLogUrl,
+  listRunArtifacts,
+  downloadRunArtifact,
+  listRunTests,
+  getTestCaseHistory,
+  listRunChanges,
+  cancelRun,
+  rerunRun,
+  listTeams,
+  getTeam,
+  createTeam,
+  updateTeam,
+  deleteTeam,
+  listRunners,
 } from "./client";
 
 beforeEach(() => {
   mockBffFetch.mockReset();
+  mockBffFetchText.mockReset();
+  mockGetToken.mockReset();
+  mockGetToken.mockReturnValue(null);
 });
 
 // ---- Controllers ----
@@ -926,5 +951,377 @@ describe("Brood operations (restored)", () => {
     await suspendBroodOperation("broodop-stop-xyz", "team-a", false);
     const [, opts] = mockBffFetch.mock.calls[0];
     expect(JSON.parse(opts.body)).toEqual({ suspend: false });
+  });
+});
+
+// ---- Pipelines ----
+
+describe("Pipelines API", () => {
+  it("listPipelines GETs /pipelines/{team}", async () => {
+    mockBffFetch.mockResolvedValue({ items: [], runningNow: [], truncated: false });
+    await listPipelines("payments");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments");
+  });
+
+  it("getPipelineJob percent-encodes a job path containing a slash as one segment (D2)", async () => {
+    mockBffFetch.mockResolvedValue({ jobPath: "payments/checkout-api/main", health: "unknown" });
+    await getPipelineJob("payments", "payments/checkout-api/main");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/payments%2Fcheckout-api%2Fmain");
+  });
+
+  it("listRuns builds the run-list query parameters", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRuns("payments", "checkout-api/main", {
+      branch: "main",
+      result: "FAILURE",
+      actor: "nathan",
+      cause: "push",
+      limit: 25,
+      cursor: "abc123",
+    });
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe(
+      "/pipelines/payments/jobs/checkout-api%2Fmain/runs" +
+        "?branch=main&result=FAILURE&actor=nathan&cause=push&limit=25&cursor=abc123",
+    );
+  });
+
+  it("listRuns omits the query string when no params are given", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRuns("payments", "checkout-api/main");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/checkout-api%2Fmain/runs");
+  });
+
+  it("createRun POSTs to the runs collection and reads the 202 JSON body via bffFetchText", async () => {
+    mockBffFetchText.mockResolvedValue(
+      JSON.stringify({ runId: "01912a3b-0000-7000-8000-000000000000", intentKey: "manual:01912a3b-0000-7000-8000-000000000000", state: "requested" }),
+    );
+    const result = await createRun("payments", "checkout-api/main", { clientToken: "01912a3b-0000-7000-8000-000000000000" });
+    const [url, opts] = mockBffFetchText.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/checkout-api%2Fmain/runs");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual({ clientToken: "01912a3b-0000-7000-8000-000000000000" });
+    expect(result).toEqual({
+      runId: "01912a3b-0000-7000-8000-000000000000",
+      intentKey: "manual:01912a3b-0000-7000-8000-000000000000",
+      state: "requested",
+    });
+  });
+
+  it("createRun sends no body when none is given", async () => {
+    mockBffFetchText.mockResolvedValue(JSON.stringify({ runId: "r1", intentKey: "manual:r1", state: "requested" }));
+    await createRun("payments", "checkout-api/main");
+    const [, opts] = mockBffFetchText.mock.calls[0];
+    expect(opts.body).toBeUndefined();
+  });
+
+  it("getRun GETs /runs/{run}", async () => {
+    mockBffFetch.mockResolvedValue({ runId: "r1", jobPath: "checkout-api/main", status: "SUCCESS" });
+    await getRun("r1");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runs/r1");
+  });
+
+  it("runLogUrl builds the SSE stream URL with from/fromLine", () => {
+    const url = runLogUrl("r1", { from: 8192, fromLine: 461 });
+    expect(url).toBe("/api/v1/runs/r1/log?from=8192&fromLine=461");
+  });
+
+  it("runLogUrl builds the raw plain-text URL", () => {
+    const url = runLogUrl("r1", { raw: true });
+    expect(url).toBe("/api/v1/runs/r1/log?raw=true");
+  });
+
+  it("runLogUrl with no params carries no query string", () => {
+    const url = runLogUrl("r1");
+    expect(url).toBe("/api/v1/runs/r1/log");
+  });
+
+  it("listRunArtifacts GETs /runs/{run}/artifacts", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRunArtifacts("r1");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runs/r1/artifacts");
+  });
+
+  it("downloadRunArtifact percent-encodes each segment of a multi-segment path", async () => {
+    // A string body keeps the test out of the jsdom-versus-Node Blob realm
+    // split: Response.blob() returns Node's Blob, so an instanceof check
+    // against the jsdom global fails on some Node versions.
+    const fetchMock = vi.fn().mockResolvedValue(new Response("bytes", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    mockGetToken.mockReturnValue("test-token");
+
+    const result = await downloadRunArtifact("r1", "target/site with spaces/report.html");
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/runs/r1/artifacts/target/site%20with%20spaces/report.html");
+    expect(opts.headers.Authorization).toBe("Bearer test-token");
+    expect(Object.prototype.toString.call(result)).toBe("[object Blob]");
+    expect(result.size).toBe(5);
+    vi.unstubAllGlobals();
+  });
+
+  it("downloadRunArtifact throws ApiError on a non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 409 })));
+    await expect(downloadRunArtifact("r1", "report.html")).rejects.toMatchObject({ status: 409 });
+    vi.unstubAllGlobals();
+  });
+
+  it("listRunTests GETs /runs/{run}/tests", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRunTests("r1");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runs/r1/tests");
+  });
+
+  it("getTestCaseHistory encodes the job path and the case key as one segment each", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await getTestCaseHistory("payments", "checkout-api/main", "a%2Fb/c");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/checkout-api%2Fmain/tests/a%252Fb%2Fc");
+  });
+
+  it("getTestCaseHistory sends the limit when one is given", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await getTestCaseHistory("payments", "main", "Foo/bar", 20);
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/pipelines/payments/jobs/main/tests/Foo%2Fbar?limit=20");
+  });
+
+  it("listRunChanges GETs /runs/{run}/changes", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRunChanges("r1");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runs/r1/changes");
+  });
+
+  it("cancelRun POSTs /runs/{run}/cancel and reads the 202 JSON body", async () => {
+    mockBffFetchText.mockResolvedValue(JSON.stringify({ state: "requested" }));
+    const result = await cancelRun("r1");
+    const [url, opts] = mockBffFetchText.mock.calls[0];
+    expect(url).toBe("/runs/r1/cancel");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual({ state: "requested" });
+  });
+
+  it("rerunRun POSTs /runs/{run}/rerun and reads the 202 JSON body", async () => {
+    mockBffFetchText.mockResolvedValue(JSON.stringify({ runId: "r2", intentKey: "retry:r1", state: "requested" }));
+    const result = await rerunRun("r1");
+    const [url, opts] = mockBffFetchText.mock.calls[0];
+    expect(url).toBe("/runs/r1/rerun");
+    expect(opts.method).toBe("POST");
+    expect(result).toEqual({ runId: "r2", intentKey: "retry:r1", state: "requested" });
+  });
+});
+
+// ---- Teams ----
+
+describe("Teams API", () => {
+  it("listTeams GETs /teams and unwraps items", async () => {
+    mockBffFetch.mockResolvedValue({ items: [{ name: "payments", namespaces: ["ns1"] }] });
+    const result = await listTeams();
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/teams");
+    expect(result).toEqual([{ name: "payments", namespaces: ["ns1"] }]);
+  });
+
+  it("getTeam GETs /teams/{name} and reports the seven pipelines ledger settings and status.rehydration", async () => {
+    mockBffFetch.mockResolvedValue({
+      name: "payments",
+      namespaces: ["ns1"],
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
+        rehydrateBuilds: 5,
+        rehydrateDeadline: "45m0s",
+        interruptedRetry: "automatic",
+        concurrency: "cancelInProgress",
+        cronBackstop: false,
+        cronCatchUp: "none",
+        cronGrace: "10m0s",
+      },
+      rehydration: {
+        generation: 3,
+        cellInstance: "pod-uid-1",
+        records: 12,
+        truncated: true,
+        unseededJobs: 2,
+        deferred: ["payments/api/main"],
+        attempts: 4,
+        lastAttempt: "2026-09-10T12:00:00Z",
+      },
+    });
+    const result = await getTeam("payments");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/teams/payments");
+    expect(result.pipelines).toEqual({
+      profile: "lts",
+      agentNamespace: "ns1",
+      rehydrateBuilds: 5,
+      rehydrateDeadline: "45m0s",
+      interruptedRetry: "automatic",
+      concurrency: "cancelInProgress",
+      cronBackstop: false,
+      cronCatchUp: "none",
+      cronGrace: "10m0s",
+    });
+    expect(result.rehydration).toEqual({
+      generation: 3,
+      cellInstance: "pod-uid-1",
+      records: 12,
+      truncated: true,
+      unseededJobs: 2,
+      deferred: ["payments/api/main"],
+      attempts: 4,
+      lastAttempt: "2026-09-10T12:00:00Z",
+    });
+  });
+
+  it("createTeam POSTs the seven pipelines ledger settings in the request body", async () => {
+    mockBffFetch.mockResolvedValue({ name: "payments" });
+    await createTeam({
+      name: "payments",
+      namespaces: ["ns1"],
+      members: ["alice"],
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
+        rehydrateBuilds: 20,
+        rehydrateDeadline: "1h0m0s",
+        interruptedRetry: "automatic",
+        concurrency: "cancelInProgress",
+        cronBackstop: false,
+        cronCatchUp: "none",
+        cronGrace: "15m0s",
+      },
+    });
+    const [url, opts] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/teams");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body).pipelines).toEqual({
+      profile: "lts",
+      agentNamespace: "ns1",
+      rehydrateBuilds: 20,
+      rehydrateDeadline: "1h0m0s",
+      interruptedRetry: "automatic",
+      concurrency: "cancelInProgress",
+      cronBackstop: false,
+      cronCatchUp: "none",
+      cronGrace: "15m0s",
+    });
+  });
+
+  it("updateTeam PUTs to /teams/{name} with a JSON body", async () => {
+    mockBffFetch.mockResolvedValue({ name: "payments" });
+    await updateTeam("payments", {
+      name: "payments",
+      namespaces: ["ns1"],
+      members: ["alice"],
+      pipelines: { profile: "lts", agentNamespace: "ns1", concurrency: "allow" },
+    });
+    const [url, opts] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/teams/payments");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body).pipelines).toEqual({
+      profile: "lts",
+      agentNamespace: "ns1",
+      concurrency: "allow",
+    });
+  });
+
+  it("deleteTeam DELETEs /teams/{name}", async () => {
+    mockBffFetch.mockResolvedValue(undefined);
+    await deleteTeam("payments");
+    const [url, opts] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/teams/payments");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("getTeam reports pipelines.exports with both a job grant and a locks grant", async () => {
+    mockBffFetch.mockResolvedValue({
+      name: "payments",
+      namespaces: ["ns1"],
+      pipelines: {
+        profile: "lts",
+        exports: [
+          { job: "release/*", callers: ["payments", "search"] },
+          { locks: ["deploy-prod", "staging/*"], callers: ["payments"] },
+        ],
+      },
+    });
+    const result = await getTeam("payments");
+    expect(result.pipelines?.exports).toEqual([
+      { job: "release/*", callers: ["payments", "search"] },
+      { locks: ["deploy-prod", "staging/*"], callers: ["payments"] },
+    ]);
+  });
+
+  it("updateTeam PUTs pipelines.exports in the request body unchanged", async () => {
+    mockBffFetch.mockResolvedValue({ name: "payments" });
+    await updateTeam("payments", {
+      name: "payments",
+      namespaces: ["ns1"],
+      members: ["alice"],
+      pipelines: {
+        profile: "lts",
+        agentNamespace: "ns1",
+        exports: [{ job: "release/*", callers: ["search"] }],
+      },
+    });
+    const [, opts] = mockBffFetch.mock.calls[0];
+    expect(JSON.parse(opts.body).pipelines.exports).toEqual([
+      { job: "release/*", callers: ["search"] },
+    ]);
+  });
+});
+
+// ---- Runners ----
+
+describe("Runners API", () => {
+  it("listRunners GETs /runners and unwraps items", async () => {
+    mockBffFetch.mockResolvedValue({
+      items: [
+        {
+          name: "win-1",
+          spec: { team: "payments", launcher: "ssh", remoteFS: "C:\\J" },
+          status: { connected: true },
+        },
+      ],
+    });
+    const result = await listRunners();
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runners");
+    expect(result).toEqual([
+      {
+        name: "win-1",
+        spec: { team: "payments", launcher: "ssh", remoteFS: "C:\\J" },
+        status: { connected: true },
+      },
+    ]);
+  });
+
+  it("listRunners GETs /runners?team=<name> when given a team", async () => {
+    mockBffFetch.mockResolvedValue({ items: [] });
+    await listRunners("payments");
+    const [url] = mockBffFetch.mock.calls[0];
+    expect(url).toBe("/runners?team=payments");
+  });
+
+  it("listRunners never reads status.token off the result it returns to a caller", async () => {
+    mockBffFetch.mockResolvedValue({
+      items: [
+        {
+          name: "agent-1",
+          spec: { team: "payments", launcher: "inbound", remoteFS: "/home/jenkins" },
+          status: { connected: false },
+        },
+      ],
+    });
+    const result = await listRunners("payments");
+    expect(result[0].status.token).toBeUndefined();
   });
 });

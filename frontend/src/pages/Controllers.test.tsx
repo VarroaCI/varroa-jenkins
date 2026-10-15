@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
+import { stubVirtualViewport } from "../test/virtualViewport";
 import Controllers from "./Controllers";
 
 const mockNavigate = vi.fn();
@@ -22,8 +23,10 @@ vi.mock("../api/client", () => ({
 }));
 
 const mockUseControllers = vi.fn();
+const mockFanoutFailures = vi.fn((): { name: string; ok: boolean; error?: string }[] => []);
 vi.mock("../hooks/useControllers", () => ({
   useControllers: () => mockUseControllers(),
+  useControllerFanoutFailures: () => ({ data: mockFanoutFailures() }),
 }));
 
 vi.mock("../context/AuthContext", () => ({
@@ -53,9 +56,20 @@ function renderPage() {
 }
 
 describe("Controllers", () => {
+  stubVirtualViewport();
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() });
+    mockFanoutFailures.mockReturnValue([]);
+  });
+
+  it("names a member cluster whose controllers did not arrive", () => {
+    mockFanoutFailures.mockReturnValue([{ name: "member-b", ok: false, error: "list too large" }]);
+    renderPage();
+    expect(
+      screen.getByRole("status"),
+    ).toBeInTheDocument();
   });
 
   it("renders the page heading and description", () => {

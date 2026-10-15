@@ -2,20 +2,26 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/bundles"
@@ -23,6 +29,8 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
+	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -36,45 +44,82 @@ var testKey = []byte("test-key-32-bytes-long-xxxxx")
 
 // testClient is a fake ResourceClient for testing.
 type testClient struct {
-	listProfilesErr      error // when set, ListJenkinsVersionProfileCRDs returns it
-	services             []string
-	serviceAccounts      []string
-	statefulSets         []string
-	secrets              []string
-	ingress              []string
-	configMaps           []string
-	existingConfigMaps   map[string]bool
-	configMapData        map[string]map[string]string       // name -> data
-	configMapOwners      map[string][]metav1.OwnerReference // name -> owner refs
-	configMapLabels      map[string]map[string]string       // name -> labels
-	deleted              []struct{ kind, name string }
-	deletedSecrets       []string
-	statuses             map[string]string
-	oidcUpdateCalls      []struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }
-	fleetPodLabel        string
-	fleetPodLabelPatches int
-	secretWrites         int
-	cmWrites             int
-	existingSecrets      map[string]map[string][]byte
-	secretAnnotations    map[string]map[string]string // name -> annotations, for host-scoping tests
-	secretAnnotationsErr error                        // injected GetSecretAnnotations failure (fail-closed tests)
-	getSecretCalls       map[string]int               // name -> GetSecret call count
+	listProfilesErr error // when set, ListJenkinsVersionProfileCRDs returns it
+	// statusToStore makes PatchControllerStatus also merge-patch the store
+	// with the production patch body, so a test sees what the tick writes.
+	statusToStore bool
+	services      []string
+	// tenantServices records every CreateOrUpdateTenantService call, and
+	// tenantServiceErr refuses the write when set.
+	tenantServices             []tenantServiceCall
+	tenantServiceErr           error
+	deletedWithNamespace       []deletedResource
+	serviceAccounts            []string
+	statefulSets               []string
+	secrets                    []string
+	ingress                    []string
+	configMaps                 []string
+	existingConfigMaps         map[string]bool
+	configMapData              map[string]map[string]string       // name -> data
+	configMapOwners            map[string][]metav1.OwnerReference // name -> owner refs
+	configMapLabels            map[string]map[string]string       // name -> labels
+	deleted                    []struct{ kind, name string }
+	deleteResourceErr          error  // injected DeleteResource failure (non-NotFound)
+	deleteResourceErrKind      string // limits deleteResourceErr to one kind; empty means every kind
+	deletedSecrets             []string
+	deletedCellNetworkPolicies []string
+	createdCellNetworkPolicies []CellPolicySpec
+	statuses                   map[string]string
+	oidcUpdateCalls            []struct{ name, namespace, oidcIssuer, localIssuer, loginURL, apikeyVerifyURL, caPEM string }
+	fleetPodLabel              string
+	fleetPodLabelPatches       int
+	secretWrites               int
+	cmWrites                   int
+	existingSecrets            map[string]map[string][]byte
+	secretAnnotations          map[string]map[string]string // name -> annotations, for host-scoping tests
+	secretAnnotationsErr       error                        // injected GetSecretAnnotations failure (fail-closed tests)
+	getSecretCalls             map[string]int               // name -> GetSecret call count
+	getSecretErrs              map[string]error             // name -> error GetSecret returns instead of a lookup
 
-	// hibernation CAS tracking (SetHibernated).
+	// hibernation CAS tracking (SetHibernated). With statusToStore,
+	// SetHibernated also reads the store fresh and updates its status, the
+	// way ClientsetClient does.
 	hibernatedWrites []struct {
 		name, namespace string
 		want            bool
 	}
-	hibernatedChanged bool
-	hibernatedErr     error
+	// tickHibernatedWrites records SetHibernatedAt, the conditional write
+	// of the tick. With statusToStore, it also patches the store under the
+	// resourceVersion precondition.
+	tickHibernatedWrites []tickHibernatedWrite
+	hibernatedChanged    bool
+	hibernatedErr        error
 
 	// Users/Group tracking for local auth tests.
-	users          map[string]*v1alpha1.User
-	passwordClears []string
-	createdSecrets map[string]map[string][]byte
-	// scaleCalls records ScaleStatefulSet(name -> last requested replica count).
-	scaleCalls      map[string]int32
-	composedBundles map[string]*v1alpha1.ComposedBundle
+	users                            map[string]*v1alpha1.User
+	passwordClears                   []string
+	createdSecrets                   map[string]map[string][]byte
+	secretOwners                     map[string]metav1.OwnerReference
+	createOrUpdateSecretWithOwnerErr error // injected CreateOrUpdateSecretWithOwner failure
+	// scaleCalls records ScaleStatefulSetToZero(name -> last requested replica count).
+	scaleCalls map[string]int32
+	// stsReplicas and stsRV model the live StatefulSets by name: the replica
+	// count and the resourceVersion. CreateStatefulSet sets and bumps them.
+	stsReplicas map[string]int32
+	stsRV       map[string]int
+	// scaleFenceCalls counts the fence calls of ScaleStatefulSetToZero.
+	scaleFenceCalls int
+	// afterScaleFence runs after a successful fence, before the precondition
+	// check. It may call into the test client. The client holds no lock.
+	afterScaleFence func()
+	// createFenceCalls counts the fence calls of CreateStatefulSet. The fence
+	// runs only on a create or a scale-up from 0.
+	createFenceCalls int
+	// afterCreateFence runs after a successful CreateStatefulSet fence, before
+	// the precondition check. It may call into the test client. The client
+	// holds no lock.
+	afterCreateFence func()
+	composedBundles  map[string]*v1alpha1.ComposedBundle
 
 	// profiles stores JenkinsVersionProfiles by name.
 	profiles map[string]*v1alpha1.JenkinsVersionProfile
@@ -87,12 +132,23 @@ type testClient struct {
 	controllers []*v1alpha1.Controller
 	// deleteControllerPodCalls records each call to DeleteControllerPod.
 	deleteControllerPodCalls int
-	controllerPod            *corev1.Pod
-	controllerPodErr         error // injected error for GetControllerPod
+	// podGraceDeletes records each call to DeleteControllerPodGrace.
+	podGraceDeletes  []podGraceDelete
+	controllerPod    *corev1.Pod
+	controllerPodErr error // injected error for GetControllerPod
 	// getControllerPodCalls counts GetControllerPod calls, so tests can assert
 	// a hot path does NOT fetch the pod.
 	getControllerPodCalls int
-	statefulSetReady      *bool
+	// podPhases answers ListPodPhases per namespace, and
+	// podPhasesErr fails it. listPodPhasesCalls counts the calls.
+	podPhases          map[string]map[types.UID]corev1.PodPhase
+	podPhasesErr       error
+	listPodPhasesCalls int
+	statefulSetReady   *bool
+	// statefulSetRollout and statefulSetRolloutErr are returned by
+	// GetStatefulSetRollout.
+	statefulSetRollout    StatefulSetRollout
+	statefulSetRolloutErr error
 	// provisioningDefaults is used by seedClientCRDs to seed the crdstore.
 	provisioningDefaults *v1alpha1.ProvisioningDefaults
 	// controllerClass is used by seedClientCRDs to seed the crdstore.
@@ -102,11 +158,22 @@ type testClient struct {
 	// patchCount counts PatchControllerStatus calls, so tests can assert a
 	// single patch happened (guarding against a double-patch in one pass).
 	patchCount int
+	// cellStatusPatches records every PatchControllerCellStatus call.
+	cellStatusPatches []cellStatusPatch
 	// stsComputedImages and stsLiveImages back GetStatefulSetImages, and
 	// (via their "mite" entry) the image half of GetStatefulSetContainerSpecs.
 	stsComputedImages map[string]string
 	stsLiveImages     map[string]string
 	stsImagesErr      error
+	// stsContainerEnv (keyed by container name) and stsContainerEnvErr back
+	// GetStatefulSetContainerEnv. An absent container key answers found=false.
+	stsContainerEnv    map[string]map[string]string
+	stsContainerEnvErr error
+	// stsArtifactSecretHash, stsArtifactSecretHashFound, and
+	// stsArtifactSecretHashErr back GetStatefulSetArtifactSecretHash.
+	stsArtifactSecretHash      string
+	stsArtifactSecretHashFound bool
+	stsArtifactSecretHashErr   error
 	// stsMite* back the resources/pullPolicy/found/err half of
 	// GetStatefulSetContainerSpecs; tests set images and mite fields together.
 	// stsMiteFound defaults to false (no StatefulSet yet); set it true to
@@ -149,6 +216,30 @@ type testClient struct {
 	imagePullSecretCopies []imagePullSecretCopy
 	// imagePullSecretCopyErr, when non-nil, is returned by CopyImagePullSecret.
 	imagePullSecretCopyErr error
+
+	// saTokenSecrets records every CreateServiceAccountTokenSecret call.
+	saTokenSecrets []struct{ name, namespace, serviceAccount string }
+	// agentRBACCalls records every CreateAgentRBAC call.
+	agentRBACCalls []struct{ name, namespace string }
+	// contentGrants records every CreateOrUpdateContentReadGrant call.
+	contentGrants []ContentReadGrant
+	// contentGrantErr, when set, fails every content read grant write.
+	contentGrantErr error
+
+	// labeledSecrets backs ListSecrets: a fixture list of Secrets with their
+	// namespace and labels, filtered by namespace and label selector. Data
+	// and annotations for a returned name are read separately through
+	// existingSecrets/createdSecrets and secretAnnotations, matching how the
+	// real ClientsetClient separates List (data only) from GetSecretAnnotations.
+	labeledSecrets []labeledSecretFixture
+	listSecretsErr error
+}
+
+// labeledSecretFixture is one Secret ListSecrets' fake filters against.
+type labeledSecretFixture struct {
+	name      string
+	namespace string
+	labels    map[string]string
 }
 
 type imagePullSecretCopy struct {
@@ -290,9 +381,17 @@ func (t *testClient) storeRoleBindings() []*v1alpha1.VarroaRoleBinding {
 }
 
 func newTestReconciler(client *testClient) *Reconciler {
+	return newTestReconcilerWithMeterProvider(noop.NewMeterProvider(), client)
+}
+
+// newTestReconcilerWithMeterProvider builds the reconciler of
+// newTestReconciler on mp. A test that reads a metric passes the provider
+// from newTestMeterProvider.
+func newTestReconcilerWithMeterProvider(mp metric.MeterProvider, client *testClient) *Reconciler {
 	seedClientCRDs(client)
 	rec := NewReconciler(
-		bundle.NewResolver("/tmp/test"),
+		mp,
+		bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"),
 		client,
 		client.store,
 		transport.NewLocalRegistry(mite.NewRegistry()),
@@ -301,6 +400,9 @@ func newTestReconciler(client *testClient) *Reconciler {
 		nil, // composer not used in tests
 	)
 	rec.Logger = slog.Default()
+	rec.downloadProbe = func(context.Context, string, string, string) downloadProbeResult {
+		return downloadProbeResult{}
+	}
 	return rec
 }
 
@@ -337,20 +439,79 @@ func (t *testClient) CreateService(_ context.Context, name, namespace string, po
 	t.services = append(t.services, name)
 	return nil
 }
+
+// tenantServiceCall records one agent Service write.
+type tenantServiceCall struct {
+	name      string
+	namespace string
+	selector  string
+}
+
+func (t *testClient) CreateOrUpdateTenantService(_ context.Context, name, namespace, selectorApp string) error {
+	if t.tenantServiceErr != nil {
+		return t.tenantServiceErr
+	}
+	t.tenantServices = append(t.tenantServices, tenantServiceCall{name: name, namespace: namespace, selector: selectorApp})
+	return nil
+}
+
 func (t *testClient) CreateServiceAccount(_ context.Context, name, namespace string) error {
 	t.serviceAccounts = append(t.serviceAccounts, name)
 	return nil
 }
 func (t *testClient) CreateAgentRBAC(_ context.Context, name, namespace string) error {
+	t.agentRBACCalls = append(t.agentRBACCalls, struct{ name, namespace string }{name, namespace})
 	return nil
 }
-func (t *testClient) CreateStatefulSet(_ context.Context, spec StatefulSetSpec) error {
+func (t *testClient) CreateOrUpdateContentReadGrant(_ context.Context, g ContentReadGrant) error {
+	if t.contentGrantErr != nil {
+		return t.contentGrantErr
+	}
+	t.contentGrants = append(t.contentGrants, g)
+	return nil
+}
+func (t *testClient) CreateServiceAccountTokenSecret(_ context.Context, name, namespace, serviceAccount string) error {
+	t.saTokenSecrets = append(t.saTokenSecrets, struct{ name, namespace, serviceAccount string }{name, namespace, serviceAccount})
+	return nil
+}
+
+// CreateStatefulSet models the ClientsetClient contract on the test
+// StatefulSets. A create, or a scale-up from 0, runs the fence first and then
+// checks the StatefulSet resourceVersion. Like ScaleStatefulSetToZero, it takes
+// no mutex: a mutex held across afterCreateFence would deadlock.
+func (t *testClient) CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error {
 	t.statefulSets = append(t.statefulSets, spec.Name)
 	t.stsSpecs = append(t.stsSpecs, spec)
+	if t.stsReplicas == nil {
+		t.stsReplicas = make(map[string]int32)
+	}
+	if t.stsRV == nil {
+		t.stsRV = make(map[string]int)
+	}
+	replicas := int32(1)
+	if spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	live, exists := t.stsReplicas[spec.Name]
+	if !exists || (live == 0 && replicas > 0) {
+		rv := t.stsRV[spec.Name]
+		t.createFenceCalls++
+		if err := fence(ctx); err != nil {
+			return err
+		}
+		if t.afterCreateFence != nil {
+			t.afterCreateFence()
+		}
+		if t.stsRV[spec.Name] != rv {
+			return apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, spec.Name, fmt.Errorf("resourceVersion changed"))
+		}
+	}
+	t.stsReplicas[spec.Name] = replicas
+	t.stsRV[spec.Name]++
 	return nil
 }
-func (t *testClient) UpdateStatefulSetOIDCEnv(_ context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error {
-	t.oidcUpdateCalls = append(t.oidcUpdateCalls, struct{ name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM string }{name, namespace, oidcIssuer, loginURL, apikeyVerifyURL, caPEM})
+func (t *testClient) UpdateStatefulSetOIDCEnv(_ context.Context, name, namespace string, authEnv JenkinsAuthEnv) error {
+	t.oidcUpdateCalls = append(t.oidcUpdateCalls, struct{ name, namespace, oidcIssuer, localIssuer, loginURL, apikeyVerifyURL, caPEM string }{name, namespace, authEnv.OIDCIssuer, authEnv.LocalIssuer, authEnv.LoginURL, authEnv.ApikeyVerifyURL, authEnv.CAPEM})
 	return nil
 }
 func (t *testClient) EnsureStatefulSetPodLabel(_ context.Context, _, _, key, value string) (bool, error) {
@@ -420,6 +581,22 @@ func (t *testClient) CreateOrUpdateSecret(_ context.Context, name, namespace str
 	t.createdSecrets[name] = data
 	return nil
 }
+func (t *testClient) CreateOrUpdateSecretWithOwner(_ context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
+	if t.createOrUpdateSecretWithOwnerErr != nil {
+		return t.createOrUpdateSecretWithOwnerErr
+	}
+	t.secrets = append(t.secrets, name)
+	t.secretWrites++
+	if t.createdSecrets == nil {
+		t.createdSecrets = map[string]map[string][]byte{}
+	}
+	t.createdSecrets[name] = data
+	if t.secretOwners == nil {
+		t.secretOwners = map[string]metav1.OwnerReference{}
+	}
+	t.secretOwners[name] = owner
+	return nil
+}
 func (t *testClient) PatchSecretData(_ context.Context, name, namespace string, data map[string][]byte) error {
 	t.secretWrites++
 	if t.createdSecrets[name] == nil {
@@ -435,6 +612,9 @@ func (t *testClient) GetSecret(_ context.Context, name, namespace string) (map[s
 		t.getSecretCalls = map[string]int{}
 	}
 	t.getSecretCalls[name]++
+	if err, ok := t.getSecretErrs[name]; ok {
+		return nil, err
+	}
 	if data, ok := t.existingSecrets[name]; ok {
 		return data, nil
 	}
@@ -453,7 +633,33 @@ func (t *testClient) GetSecretAnnotations(_ context.Context, name, namespace str
 	return nil, nil
 }
 func (t *testClient) ListSecrets(_ context.Context, namespace, labelSelector string) ([]map[string][]byte, error) {
-	return nil, nil
+	if t.listSecretsErr != nil {
+		return nil, t.listSecretsErr
+	}
+	sel, err := labels.Parse(labelSelector)
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string][]byte
+	for _, fx := range t.labeledSecrets {
+		if fx.namespace != namespace || !sel.Matches(labels.Set(fx.labels)) {
+			continue
+		}
+		data := map[string][]byte{}
+		if d, ok := t.existingSecrets[fx.name]; ok {
+			for k, v := range d {
+				data[k] = v
+			}
+		}
+		if d, ok := t.createdSecrets[fx.name]; ok {
+			for k, v := range d {
+				data[k] = v
+			}
+		}
+		data["_name"] = []byte(fx.name)
+		out = append(out, data)
+	}
+	return out, nil
 }
 func (t *testClient) CopyImagePullSecret(_ context.Context, srcNamespace, dstNamespace, name string) error {
 	t.imagePullSecretCopies = append(t.imagePullSecretCopies, imagePullSecretCopy{src: srcNamespace, dst: dstNamespace, name: name})
@@ -463,11 +669,32 @@ func (t *testClient) CopyImagePullSecret(_ context.Context, srcNamespace, dstNam
 	return nil
 }
 func (t *testClient) DeleteResource(_ context.Context, kind, name, namespace string) error {
+	if t.deleteResourceErr != nil && (t.deleteResourceErrKind == "" || t.deleteResourceErrKind == kind) {
+		return t.deleteResourceErr
+	}
 	t.deleted = append(t.deleted, struct{ kind, name string }{kind, name})
+	t.deletedWithNamespace = append(t.deletedWithNamespace, deletedResource{kind: kind, name: name, namespace: namespace})
 	return nil
 }
+
+// deletedResource records one DeleteResource call with its namespace, which
+// the anonymous struct of the deleted field cannot carry.
+type deletedResource struct {
+	kind      string
+	name      string
+	namespace string
+}
+
 func (t *testClient) DeleteSecret(_ context.Context, name, namespace string) error {
 	t.deletedSecrets = append(t.deletedSecrets, name)
+	return nil
+}
+func (t *testClient) DeleteCellNetworkPolicy(_ context.Context, name, namespace string) error {
+	t.deletedCellNetworkPolicies = append(t.deletedCellNetworkPolicies, name)
+	return nil
+}
+func (t *testClient) CreateCellNetworkPolicy(_ context.Context, spec CellPolicySpec) error {
+	t.createdCellNetworkPolicies = append(t.createdCellNetworkPolicies, spec)
 	return nil
 }
 func (t *testClient) EnsureWakeEndpointSlice(_ context.Context, namespace, serviceName string, podIPs []string, port int32) error {
@@ -491,7 +718,7 @@ func (t *testClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ ma
 func (t *testClient) ApplyControllerSpecSSAIfExists(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, nil
 }
-func (t *testClient) SetHibernated(_ context.Context, name, namespace string, want bool) (bool, error) {
+func (t *testClient) SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error) {
 	t.hibernatedWrites = append(t.hibernatedWrites, struct {
 		name, namespace string
 		want            bool
@@ -499,14 +726,92 @@ func (t *testClient) SetHibernated(_ context.Context, name, namespace string, wa
 	if t.hibernatedErr != nil {
 		return false, t.hibernatedErr
 	}
+	if t.statusToStore {
+		return t.setHibernatedInStore(ctx, name, namespace, want)
+	}
 	return t.hibernatedChanged, nil
 }
-func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error {
+
+// setHibernatedInStore models ClientsetClient.SetHibernated on the store: a
+// fresh read, a compare, and a status update under the read's version.
+func (t *testClient) setHibernatedInStore(ctx context.Context, name, namespace string, want bool) (bool, error) {
+	gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+	if err != nil {
+		return false, err
+	}
+	u, err := t.store.GetObject(ctx, gvr, namespace, name)
+	if err != nil {
+		return false, err
+	}
+	cur, _, _ := unstructured.NestedBool(u.Object, "status", "hibernated")
+	if cur == want {
+		return false, nil
+	}
+	if err := unstructured.SetNestedField(u.Object, want, "status", "hibernated"); err != nil {
+		return false, err
+	}
+	if want {
+		if err := unstructured.SetNestedField(u.Object, metav1.Now().UTC().Format(time.RFC3339), "status", "hibernatedAt"); err != nil {
+			return false, err
+		}
+	} else {
+		unstructured.RemoveNestedField(u.Object, "status", "hibernatedAt")
+	}
+	if _, err := t.store.UpdateObjectStatus(ctx, gvr, namespace, u); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// tickHibernatedWrite is one recorded SetHibernatedAt call.
+type tickHibernatedWrite struct {
+	name, namespace, resourceVersion string
+	want                             bool
+}
+
+func (t *testClient) SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error) {
+	t.tickHibernatedWrites = append(t.tickHibernatedWrites, tickHibernatedWrite{name, namespace, resourceVersion, want})
+	if t.hibernatedErr != nil {
+		return "", t.hibernatedErr
+	}
+	if !t.statusToStore {
+		return resourceVersion, nil
+	}
+	gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+	if err != nil {
+		return "", err
+	}
+	return t.store.PatchObjectStatusAt(ctx, gvr, namespace, name, resourceVersion, hibernationStatusPatch(want, metav1.Now()))
+}
+func (t *testClient) PatchControllerStatus(_ context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error) {
+	next := resourceVersion
+	if t.statusToStore {
+		gvr, err := crdstore.GVRFor[v1alpha1.Controller]()
+		if err != nil {
+			return "", err
+		}
+		next, err = t.store.PatchObjectStatusAt(context.Background(), gvr, namespace, name, resourceVersion, controllerStatusPatch(status))
+		if err != nil {
+			return "", err
+		}
+	}
 	t.statuses[name] = string(status.Phase)
 	cp := &v1alpha1.ControllerStatus{}
 	status.DeepCopyInto(cp)
 	t.lastPatchedStatus = cp
 	t.patchCount++
+	return next, nil
+}
+
+// cellStatusPatch records one PatchControllerCellStatus call.
+type cellStatusPatch struct {
+	name, namespace string
+	cell            *v1alpha1.CellStatus
+}
+
+func (t *testClient) PatchControllerCellStatus(_ context.Context, name, namespace string, cell *v1alpha1.CellStatus) error {
+	cp := cell.DeepCopy()
+	t.cellStatusPatches = append(t.cellStatusPatches, cellStatusPatch{name: name, namespace: namespace, cell: cp})
 	return nil
 }
 
@@ -522,11 +827,47 @@ func (t *testClient) DeleteControllerPod(_ context.Context, _, _ string) error {
 	t.deleteControllerPodCalls++
 	return nil
 }
-func (t *testClient) ScaleStatefulSet(_ context.Context, name, _ string, replicas int32) error {
+
+// podGraceDelete is one recorded DeleteControllerPodGrace call.
+type podGraceDelete struct {
+	namespace, pod string
+	uid            types.UID
+	graceSeconds   int64
+}
+
+func (t *testClient) DeleteControllerPodGrace(_ context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error {
+	t.podGraceDeletes = append(t.podGraceDeletes, podGraceDelete{namespace: namespace, pod: podName, uid: uid, graceSeconds: graceSeconds})
+	return nil
+}
+
+// ScaleStatefulSetToZero models the ClientsetClient contract on the test
+// StatefulSets. It takes no mutex: a mutex held across afterScaleFence would
+// deadlock when that hook calls CreateStatefulSet.
+func (t *testClient) ScaleStatefulSetToZero(ctx context.Context, name, _ string, fence func(context.Context) error) error {
+	replicas, found := t.stsReplicas[name]
+	if !found || replicas == 0 {
+		return nil
+	}
+	if t.stsRV == nil {
+		t.stsRV = make(map[string]int)
+	}
+	rv := t.stsRV[name]
+	t.scaleFenceCalls++
+	if err := fence(ctx); err != nil {
+		return err
+	}
+	if t.afterScaleFence != nil {
+		t.afterScaleFence()
+	}
+	if t.stsRV[name] != rv {
+		return apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, name, fmt.Errorf("resourceVersion changed"))
+	}
 	if t.scaleCalls == nil {
 		t.scaleCalls = make(map[string]int32)
 	}
-	t.scaleCalls[name] = replicas
+	t.stsReplicas[name] = 0
+	t.stsRV[name]++
+	t.scaleCalls[name] = 0
 	return nil
 }
 func (t *testClient) StreamPodLogs(_ context.Context, _, _, _ string, _ int64, _ bool) (io.ReadCloser, error) {
@@ -542,8 +883,24 @@ func (t *testClient) ListIngressHosts(_ context.Context) (map[string][]string, e
 func (t *testClient) GetStatefulSetPluginsChecksum(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
+func (t *testClient) GetStatefulSetRollout(_ context.Context, _, _ string) (StatefulSetRollout, error) {
+	if t.statefulSetRolloutErr != nil {
+		return StatefulSetRollout{}, t.statefulSetRolloutErr
+	}
+	return t.statefulSetRollout, nil
+}
 func (t *testClient) GetStatefulSetImages(_ context.Context, _, _ string) (map[string]string, map[string]string, error) {
 	return t.stsComputedImages, t.stsLiveImages, t.stsImagesErr
+}
+func (t *testClient) GetStatefulSetContainerEnv(_ context.Context, _, _, container string) (map[string]string, bool, error) {
+	if t.stsContainerEnvErr != nil {
+		return nil, false, t.stsContainerEnvErr
+	}
+	env, ok := t.stsContainerEnv[container]
+	return env, ok, nil
+}
+func (t *testClient) GetStatefulSetArtifactSecretHash(_ context.Context, _, _ string) (string, bool, error) {
+	return t.stsArtifactSecretHash, t.stsArtifactSecretHashFound, t.stsArtifactSecretHashErr
 }
 func (t *testClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (computedMiteImage, liveMiteImage string, miteResources, jenkinsResources *corev1.ResourceRequirements, mitePullPolicy string, resourcesSource map[string]string, found bool, err error) {
 	if t.stsImagesErr != nil {
@@ -560,6 +917,14 @@ func (t *testClient) GetControllerPod(_ context.Context, _, _ string) (*corev1.P
 		return nil, t.controllerPodErr
 	}
 	return t.controllerPod, nil
+}
+
+func (t *testClient) ListPodPhases(_ context.Context, namespace string) (map[types.UID]corev1.PodPhase, error) {
+	t.listPodPhasesCalls++
+	if t.podPhasesErr != nil {
+		return nil, t.podPhasesErr
+	}
+	return t.podPhases[namespace], nil
 }
 
 func (t *testClient) GetLiveResource(_ context.Context, _ schema.GroupVersionResource, _, _ string) (*unstructured.Unstructured, error) {
@@ -703,6 +1068,28 @@ func TestProvisioningBlocksUntilBundleMaterializes(t *testing.T) {
 	}
 	if resolved == nil || resolved.Status != metav1.ConditionFalse {
 		t.Errorf("BundleResolved condition should be False while waiting, got %+v", resolved)
+	}
+}
+
+// TestProvisioningCellConfigGateCreatesNoStatefulSet is task 5.2's
+// handleProvisioning-level acceptance: a cell whose configuration gate
+// fails (design D6, task 5.1) must never reach the StatefulSet build,
+// unlike evaluateCellReadiness-level tests, which only assert the
+// CellReady condition and the roll rule.
+func TestProvisioningCellConfigGateCreatesNoStatefulSet(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	// claimGate defaults to "" (not "1"), so cellConfigGateReason returns
+	// RecordStoreUnsupported before any StatefulSet work runs.
+
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+
+	if err := rec.handleProvisioning(context.Background(), cr); err != nil {
+		t.Fatalf("handleProvisioning: %v", err)
+	}
+	if len(client.statefulSets) != 0 {
+		t.Errorf("a configuration-gated cell must create no StatefulSet, got %v", client.statefulSets)
 	}
 }
 
@@ -992,8 +1379,9 @@ func TestFinalize(t *testing.T) {
 
 	cr := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test",
-			UID:  testUID,
+			Name:      "test",
+			Namespace: "ns1",
+			UID:       testUID,
 		},
 		Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
 	}
@@ -1001,6 +1389,91 @@ func TestFinalize(t *testing.T) {
 	err := rec.Finalize(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
+	}
+
+	pre := controllerPrefix(cr)
+	// Every ConfigMap the operator writes for a controller must go away with it.
+	// The literal suffixes are intentional: a rename of cascConfigMapName must
+	// not silently move the expectation with it.
+	for _, want := range []string{pre + "-init", pre + "-plugins", pre + "-casc"} {
+		found := false
+		for _, d := range client.deleted {
+			if d.kind == "ConfigMap" && d.name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Finalize did not delete ConfigMap %q; deleted = %+v", want, client.deleted)
+		}
+	}
+
+	// The agent ServiceAccount, Role, and RoleBinding must go away with the
+	// controller. Provisioning creates all three under the same name. The
+	// test client holds none of the three, so Finalize must still request
+	// their deletion and still succeed, the same way it already tolerates a
+	// missing PVC or bootstrap Secret.
+	agentName := pre + "-agent"
+	for _, wantKind := range []string{"ServiceAccount", "Role", "RoleBinding"} {
+		found := false
+		for _, d := range client.deleted {
+			if d.kind == wantKind && d.name == agentName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Finalize did not delete %s %q; deleted = %+v", wantKind, agentName, client.deleted)
+		}
+	}
+}
+
+// Finalize returns the error of a failed agent RBAC delete so the finalizer
+// stays and the next pass retries.
+func TestFinalizeReturnsAgentRBACDeleteError(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.deleteResourceErr = fmt.Errorf("boom")
+	client.deleteResourceErrKind = "RoleBinding"
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns1", UID: testUID},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
+	}
+	if err := rec.Finalize(context.Background(), cr); err == nil {
+		t.Fatal("Finalize returned nil with a failing delete")
+	}
+}
+
+// Finalize deletes the cell NetworkPolicy by name and succeeds for a cell
+// that never had a PVC (design D1).
+func TestFinalizeCellDeletesNetworkPolicyAndToleratesMissingPVC(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "ns1",
+			UID:       testUID,
+		},
+		Spec:   v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+		Status: v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseRunning},
+	}
+
+	if err := rec.Finalize(context.Background(), cr); err != nil {
+		t.Fatalf("Finalize on a cell with no PVC must succeed: %v", err)
+	}
+
+	pre := controllerPrefix(cr)
+	found := false
+	for _, name := range client.deletedCellNetworkPolicies {
+		if name == pre+"-cell" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Finalize did not delete the cell NetworkPolicy %q; deleted = %v", pre+"-cell", client.deletedCellNetworkPolicies)
 	}
 }
 
@@ -1220,7 +1693,7 @@ func TestConditionsDoNotGrowUnbounded(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -1274,6 +1747,7 @@ func TestPowerOffScalesStatefulSetToZero(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
+	client.stsReplicas = map[string]int32{controllerPrefix(cr): 1}
 	if err := rec.reconcileController(context.Background(), cr); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -1281,12 +1755,37 @@ func TestPowerOffScalesStatefulSetToZero(t *testing.T) {
 		t.Errorf("phase = %q, want Stopped", cr.Status.Phase)
 	}
 	if len(client.scaleCalls) == 0 {
-		t.Fatal("power off must scale the StatefulSet, but ScaleStatefulSet was never called")
+		t.Fatal("power off must scale the StatefulSet, but ScaleStatefulSetToZero never scaled it")
 	}
 	for name, replicas := range client.scaleCalls {
 		if replicas != 0 {
 			t.Errorf("scale call for %s = %d, want 0", name, replicas)
 		}
+	}
+	if client.scaleFenceCalls != 1 {
+		t.Errorf("scale fence calls = %d, want 1", client.scaleFenceCalls)
+	}
+}
+
+// TestPowerOffSteadyTickSendsNoFenceWrite pins the write cost of a Stopped
+// tick whose StatefulSet is already at 0: no fence write and no scale.
+func TestPowerOffSteadyTickSendsNoFenceWrite(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID, CreationTimestamp: metav1.NewTime(time.Now())},
+		Spec:       v1alpha1.ControllerSpec{PowerState: "Stopped"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseStopped},
+	}
+	client.stsReplicas = map[string]int32{controllerPrefix(cr): 0}
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if client.scaleFenceCalls != 0 {
+		t.Errorf("scale fence calls = %d, want 0", client.scaleFenceCalls)
+	}
+	if len(client.scaleCalls) != 0 {
+		t.Errorf("scale calls = %v, want none", client.scaleCalls)
 	}
 }
 
@@ -1355,7 +1854,7 @@ func TestReprovisionFlagSetAndConsumed(t *testing.T) {
 	client := newTestClientWithBundle()
 	reg := transport.NewLocalRegistry(mite.NewRegistry())
 	signer := mite.NewTokenSigner(testKey)
-	rec := NewReconciler(bundle.NewResolver("/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
 	rec.Logger = slog.Default()
 
 	recent := metav1.NewTime(time.Now())
@@ -1463,6 +1962,18 @@ func TestCreateOrUpdateConfigMapUpdatesOnSecondReconcile(t *testing.T) {
 	}
 }
 
+// mustBuildDesiredStateCommand calls buildDesiredStateCommand with an empty
+// runner contribution, for a test that does not exercise the cell runner
+// paths of design D3/D5, and fails the test on an unexpected error.
+func mustBuildDesiredStateCommand(t *testing.T, rec *Reconciler, cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle) *mitev1.DesiredStateCommand {
+	t.Helper()
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, runners.RunnerContribution{})
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	return cmd
+}
+
 // --- Task 7: buildDesiredStateCommand tests ---
 
 func TestBuildDesiredStateCommandIncludesJcascYaml(t *testing.T) {
@@ -1480,7 +1991,7 @@ func TestBuildDesiredStateCommandIncludesJcascYaml(t *testing.T) {
 		},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, resolved)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 
 	// stripAuthorizationStrategy parses and re-marshals; Varroa also injects
 	// projectNamingStrategy. Compare semantic content rather than raw bytes.
@@ -1524,7 +2035,7 @@ func TestBuildDesiredStateCommandNilBundleYieldsEmptyJcascYaml(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if cmd.JcascYaml != "" {
 		t.Errorf("expected empty JcascYaml when no bundle, got %q", cmd.JcascYaml)
@@ -1543,7 +2054,7 @@ func TestBuildDesiredStateCommandAlwaysSetsReload(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if !cmd.Reload {
 		t.Error("buildDesiredStateCommand must always set Reload=true (config push goes through reload, not admin apply)")
@@ -1563,7 +2074,7 @@ func TestBuildDesiredStateCommandIncludesItemsYaml(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, resolved)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 
 	if cmd.ItemsYaml != resolved.ItemsYAML {
 		t.Errorf("expected ItemsYaml %q, got %q", resolved.ItemsYAML, cmd.ItemsYaml)
@@ -1583,11 +2094,11 @@ func TestBuildDesiredStateCommandHashIncludesItems(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 	}
 
-	cmd1 := rec.buildDesiredStateCommand(cr, resolved)
+	cmd1 := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 	hash1 := cmd1.DesiredStateHash
 
 	resolved.ItemsYAML = "items:\n  - kind: folder\n    name: b"
-	cmd2 := rec.buildDesiredStateCommand(cr, resolved)
+	cmd2 := mustBuildDesiredStateCommand(t, rec, cr, resolved)
 	hash2 := cmd2.DesiredStateHash
 
 	if hash1 == hash2 {
@@ -1606,10 +2117,180 @@ func TestBuildDesiredStateCommandDeadlineDefault(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
-	cmd := rec.buildDesiredStateCommand(cr, nil)
+	cmd := mustBuildDesiredStateCommand(t, rec, cr, nil)
 
 	if cmd.CommandDeadlineSec != 0 {
 		t.Errorf("expected CommandDeadlineSec=0, got %d", cmd.CommandDeadlineSec)
+	}
+}
+
+// --- Task 4.4/5.3/5.4: runner node and credential injection tests ---
+
+func cellController() *v1alpha1.Controller {
+	return &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Cell: &v1alpha1.CellSpec{Enabled: true}},
+	}
+}
+
+func fakeRunnerNode(name string) any {
+	return map[string]any{
+		"permanent": map[string]any{
+			"name":   name,
+			"labels": "varroa-tenant-payments payments-runner",
+		},
+	}
+}
+
+func fakeRunnerCredential(id, privateKey string) any {
+	return map[string]any{
+		"basicSSHUserPrivateKey": map[string]any{
+			"scope":    "SYSTEM",
+			"id":       id,
+			"username": "jenkins",
+			"privateKeySource": map[string]any{
+				"directEntry": map[string]any{"privateKey": privateKey},
+			},
+		},
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerNodesInjectedForCellOnly is task 4.4's
+// acceptance: the pushed JcascYaml carries the nodes, and the resolved
+// bundle's own JenkinsYAML — the string the ConfigMap write uses — does
+// not.
+func TestBuildDesiredStateCommand_RunnerNodesInjectedForCellOnly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	originalYAML := resolved.JenkinsYAML
+
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if !strings.Contains(cmd.JcascYaml, "payments-win-1") {
+		t.Errorf("JcascYaml does not carry the runner node: %s", cmd.JcascYaml)
+	}
+	if resolved.JenkinsYAML != originalYAML {
+		t.Errorf("resolved.JenkinsYAML (the ConfigMap content) was mutated: %s", resolved.JenkinsYAML)
+	}
+	if strings.Contains(resolved.JenkinsYAML, "payments-win-1") {
+		t.Error("resolved.JenkinsYAML (the ConfigMap content) must not carry a runner node")
+	}
+}
+
+// TestBuildDesiredStateCommand_NonCellIgnoresRunnerContribution proves a
+// non-cell controller never injects a runner node even when contrib
+// carries one.
+func TestBuildDesiredStateCommand_NonCellIgnoresRunnerContribution(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"}}
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if strings.Contains(cmd.JcascYaml, "payments-win-1") {
+		t.Error("a non-cell controller must not receive a runner node")
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerNodeCollisionFailsAssembly is task
+// 4.4's collision acceptance.
+func TestBuildDesiredStateCommand_RunnerNodeCollisionFailsAssembly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{
+		JenkinsYAML: "jenkins:\n  nodes:\n    - permanent:\n        name: \"payments-win-1\"\n",
+	}
+	contrib := runners.RunnerContribution{Nodes: []any{fakeRunnerNode("payments-win-1")}}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err == nil {
+		t.Fatalf("expected a collision error, got a command: %+v", cmd)
+	}
+	if !strings.Contains(err.Error(), "payments-win-1") {
+		t.Errorf("error %q does not name the colliding node", err.Error())
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerCredentialInjectedForCellOnly is task
+// 5.3's acceptance: the private key appears in JcascYaml and in no
+// ConfigMap the reconciler writes (resolved.JenkinsYAML).
+func TestBuildDesiredStateCommand_RunnerCredentialInjectedForCellOnly(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	resolved := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	contrib := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "PEM-SECRET-VALUE")},
+	}
+
+	cmd, err := rec.buildDesiredStateCommand(cr, resolved, contrib)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand: %v", err)
+	}
+	if !strings.Contains(cmd.JcascYaml, "PEM-SECRET-VALUE") {
+		t.Error("JcascYaml does not carry the runner private key")
+	}
+	if strings.Contains(resolved.JenkinsYAML, "PEM-SECRET-VALUE") {
+		t.Error("resolved.JenkinsYAML (the ConfigMap content) must not carry a runner private key")
+	}
+}
+
+// TestBuildDesiredStateCommand_RunnerCredentialRotationChangesHashNotStatefulSet
+// is task 5.4's rotation-contract acceptance: a Secret value change changes
+// the desired-state hash, and cr — the sole input the StatefulSet builder
+// reads — is left untouched by either build.
+func TestBuildDesiredStateCommand_RunnerCredentialRotationChangesHashNotStatefulSet(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+
+	cr := cellController()
+	crBefore := cr.DeepCopy()
+
+	contrib1 := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "OLD-KEY")},
+	}
+	resolved1 := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	cmd1, err := rec.buildDesiredStateCommand(cr, resolved1, contrib1)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand (first): %v", err)
+	}
+
+	contrib2 := runners.RunnerContribution{
+		Credentials: []any{fakeRunnerCredential("varroa-runner-win-1", "ROTATED-KEY")},
+	}
+	resolved2 := &bundle.MaterializedBundle{JenkinsYAML: "jenkins:\n  systemMessage: hello"}
+	cmd2, err := rec.buildDesiredStateCommand(cr, resolved2, contrib2)
+	if err != nil {
+		t.Fatalf("buildDesiredStateCommand (second): %v", err)
+	}
+
+	if cmd1.DesiredStateHash == cmd2.DesiredStateHash {
+		t.Error("rotating the runner credential did not change the desired-state hash")
+	}
+	// buildDesiredStateCommand also sets a RBAC-lockout status condition on
+	// every call (unrelated to runner credentials), so compare only
+	// cr.Spec/cr.ObjectMeta — the fields the StatefulSet builder actually
+	// reads — rather than the whole object.
+	if !reflect.DeepEqual(cr.Spec, crBefore.Spec) {
+		t.Error("cr.Spec — a StatefulSet input — was mutated by credential injection")
+	}
+	if !reflect.DeepEqual(cr.ObjectMeta, crBefore.ObjectMeta) {
+		t.Error("cr.ObjectMeta — a StatefulSet input — was mutated by credential injection")
 	}
 }
 
@@ -1797,6 +2478,118 @@ func TestHandleConnectedOIDCEnvSync(t *testing.T) {
 	if call.caPEM != "" {
 		t.Errorf("caPEM: got %q, want empty (no CA PEM set)", call.caPEM)
 	}
+	if call.localIssuer != "" {
+		t.Errorf("localIssuer: got %q, want empty (local accounts off)", call.localIssuer)
+	}
+}
+
+// TestHandleConnected_SyncsLocalIssuer checks that the local account issuer
+// beside OIDC reaches the StatefulSet env sync.
+func TestHandleConnected_SyncsLocalIssuer(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	rec.Resolver.SetOIDCConfig("https://dex.example.com", "varroa", "secret")
+	rec.Resolver.SetLocalIssuer("https://varroa.example.com")
+
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "testctl", Namespace: "testns", UID: testUID, CreationTimestamp: metav1Now()},
+		Spec:       v1alpha1.ControllerSpec{Version: "latest"},
+		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
+	}
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(client.oidcUpdateCalls) == 0 {
+		t.Fatal("expected UpdateStatefulSetOIDCEnv to be called")
+	}
+	if got := client.oidcUpdateCalls[0].localIssuer; got != "https://varroa.example.com" {
+		t.Errorf("localIssuer: got %q, want https://varroa.example.com", got)
+	}
+}
+
+func TestGenerateRealmDocument_LocalIssuer(t *testing.T) {
+	doc := generateRealmDocument()
+	if !strings.Contains(doc, `localIssuer: "${VARROA_LOCAL_ISSUER:-}"`) {
+		t.Errorf("realm document has no localIssuer reference:\n%s", doc)
+	}
+}
+
+func TestUpsertAuthEnv_LocalIssuerAlwaysPresent(t *testing.T) {
+	envs, changed := upsertAuthEnv(nil, JenkinsAuthEnv{OIDCIssuer: "https://dex"})
+	if !changed {
+		t.Fatal("expected a change on an empty env list")
+	}
+	names := map[string]string{}
+	for _, e := range envs {
+		m := e.(map[string]interface{})
+		names[m["name"].(string)] = m["value"].(string)
+	}
+	if v, ok := names["VARROA_LOCAL_ISSUER"]; !ok || v != "" {
+		t.Errorf("VARROA_LOCAL_ISSUER = %q (present %v), want present and empty", v, ok)
+	}
+	if _, ok := names["VARROA_CA_PEM"]; ok {
+		t.Error("VARROA_CA_PEM must not be added when empty")
+	}
+	envs, changed = upsertAuthEnv(envs, JenkinsAuthEnv{OIDCIssuer: "https://dex", LocalIssuer: "https://bff"})
+	if !changed {
+		t.Fatal("expected a change when the local issuer is set")
+	}
+	if _, changed = upsertAuthEnv(envs, JenkinsAuthEnv{OIDCIssuer: "https://dex", LocalIssuer: "https://bff"}); changed {
+		t.Error("expected no change on a second identical upsert")
+	}
+}
+
+// TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood covers a
+// follow-on review fix: a Secret read fault in the Connected phase must not
+// report BundleFailed, because the bundle content itself resolved fine —
+// only the artifact-storage step's Secret read failed. It reports the
+// read-failed ArtifactStorage condition instead, and pushes no desired
+// state that tick: a push attempt that reached the Send call would have
+// failed against this test's unconnected stream and set
+// ReconcileBlocked/DesiredStatePushFailed, so its absence proves the push
+// never ran. It also asserts a stale BundleFailed=True from an earlier
+// tick is retired: this branch never reaches the success-path
+// clearBundleFailed call, so it must call that helper itself.
+func TestHandleConnected_ArtifactSecretReadFaultKeepsLastGood(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.getSecretErrs = map[string]error{"abase-cell-big-0": errors.New("etcd unavailable")}
+	reg := transport.NewLocalRegistry(mite.NewRegistry())
+	signer := mite.NewTokenSigner(testKey)
+	rec := NewReconciler(noop.NewMeterProvider(), bundle.NewResolver(noop.NewMeterProvider(), "/tmp/test"), client, client.store, reg, signer, rbac.NewGenerator(rbac.NewTestResolver()), nil)
+	rec.Logger = slog.Default()
+	rec.SetArtifactSecretBase("abase")
+	rec.SetBlobstoreURL("s3://my-bucket?region=us-east-1")
+
+	cr := artifactCellController("cell-big-0", "big")
+	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{
+		{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"},
+		{Type: v1alpha1.ConditionBundleFailed, Status: metav1.ConditionTrue, Reason: "BundleResolutionFailed", Message: "a prior tick's unrelated bundle fault"},
+	}
+
+	// Register a connected mite so handleConnected doesn't transition out
+	// before it ever reaches bundle resolution.
+	reg.Registry().Register(cr.Name, cr.Namespace, nil, nil, "v1.0.0", time.Now().Add(24*time.Hour))
+	reg.Registry().UpdateHeartbeat(cr.Name, cr.Namespace, "v1.0.0", &mitev1.StateSnapshot{JenkinsHealth: "healthy"}, nil, "")
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("handleConnected: %v", err)
+	}
+
+	if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+		t.Fatalf("expected the stale BundleFailed condition cleared, got %+v", bf)
+	}
+	artifactCond := findCondition(cr.Status.Conditions, ConditionArtifactStorage)
+	if artifactCond == nil || artifactCond.Status != metav1.ConditionFalse || artifactCond.Reason != "LocalOnly" {
+		t.Fatalf("ArtifactStorage condition = %+v, want False/LocalOnly", artifactCond)
+	}
+	wantMsg := `artifact secret "abase-cell-big-0" read failed: etcd unavailable`
+	if artifactCond.Message != wantMsg {
+		t.Errorf("ArtifactStorage message = %q, want %q", artifactCond.Message, wantMsg)
+	}
+	if blocked := findCondition(cr.Status.Conditions, v1alpha1.ConditionReconcileBlocked); blocked != nil && blocked.Status == metav1.ConditionTrue {
+		t.Fatalf("expected no ReconcileBlocked (a push attempt would have set it), got %+v", blocked)
+	}
 }
 
 func TestFleetPodLabelReconciliationInRunningAndConnected(t *testing.T) {
@@ -1809,7 +2602,7 @@ func TestFleetPodLabelReconciliationInRunningAndConnected(t *testing.T) {
 			name:  "connected",
 			phase: v1alpha1.ControllerPhaseConnected,
 			reconcile: func(r *Reconciler, ctx context.Context, cr *v1alpha1.Controller) error {
-				return r.handleConnected(ctx, cr)
+				return r.handleConnected(ctx, cr, runners.RunnerContribution{})
 			},
 		},
 		{
@@ -1872,7 +2665,7 @@ func TestResolveBundleForController_ReadsConfigMap(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -1903,7 +2696,7 @@ func TestResolveBundleForController_EndpointUsesUIDService(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("resolveBundleForController: %v", err)
 	}
@@ -1934,7 +2727,7 @@ func TestResolveBundleForController_FrontendURL(t *testing.T) {
 		rec.SetVarroaRedirectURL("https://varroa.example.com/callback")
 		cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-		mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 		if err != nil {
 			t.Fatalf("resolveBundleForController: %v", err)
 		}
@@ -1947,7 +2740,7 @@ func TestResolveBundleForController_FrontendURL(t *testing.T) {
 		rec := newTestReconciler(client)
 		cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-		mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+		mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 		if err != nil {
 			t.Fatalf("resolveBundleForController: %v", err)
 		}
@@ -1972,7 +2765,7 @@ func TestResolveBundleForController_WaitsOnPending(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error waiting on Pending bundle")
 	}
@@ -1999,7 +2792,7 @@ func TestResolveBundleForController_CompletenessCheck(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected completeness check error")
 	}
@@ -2027,7 +2820,7 @@ func TestResolveBundleForController_EscapedVarAllowed(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("expected no completeness error for ^${} escape, got: %v", err)
 	}
@@ -2058,12 +2851,100 @@ func TestResolveBundleForController_JCascSecretSourceAllowed(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	mat, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("expected no completeness error for ${readFile:...} secret source, got: %v", err)
 	}
 	if !strings.Contains(mat.JenkinsYAML, "${readFile:/run/secrets/ssh-privatekey}") {
 		t.Errorf("expected readFile secret source to be preserved verbatim, got: %q", mat.JenkinsYAML)
+	}
+}
+
+// pipelineTemplatesFixtureYAML is one pipeline-templates.yaml body, in the
+// shape composePipelineTemplates writes: a "go-service" template whose body
+// holds ${env.BRANCH_NAME}, which is a Groovy expression, not a catalog
+// variable.
+const pipelineTemplatesFixtureYAML = `templates:
+  - apiVersion: varroa.dev/v1
+    kind: PipelineTemplate
+    metadata:
+      name: go-service
+    spec:
+      version: 1.0.0
+      parameters:
+        type: object
+        additionalProperties: false
+      jenkinsfile: "pipeline { stages { stage('build') { steps { echo '${env.BRANCH_NAME}' } } } }"
+`
+
+// TestResolveBundleForController_PipelineTemplateBodySurvivesInjection is
+// design D15's first injection-order test: for a single-tenant controller, a
+// template body holding ${env.BRANCH_NAME} survives resolveBundleForController
+// and lands in the rendered jenkins.yaml (design D7).
+func TestResolveBundleForController_PipelineTemplateBodySurvivesInjection(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["pipeline-templates.yaml"] = pipelineTemplatesFixtureYAML
+
+	rec := newTestReconciler(client)
+	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController: %v", err)
+	}
+	if !strings.Contains(mat.JenkinsYAML, "${env.BRANCH_NAME}") {
+		t.Errorf("expected the template body to survive injection, got: %s", mat.JenkinsYAML)
+	}
+
+	doc := unmarshalYAMLMap(t, mat.JenkinsYAML)
+	unclassified, _ := doc["unclassified"].(map[string]any)
+	store, _ := unclassified["varroaPipelineTemplates"].(map[string]any)
+	templates, _ := store["templates"].([]any)
+	if len(templates) != 1 {
+		t.Fatalf("expected exactly one delivered template, got %+v", templates)
+	}
+	entry, _ := templates[0].(map[string]any)
+	if entry["name"] != "go-service" {
+		t.Errorf("template name = %v, want go-service", entry["name"])
+	}
+	if entry["folder"] != "" {
+		t.Errorf("expected folder \"\" for a single-tenant controller, got %v", entry["folder"])
+	}
+}
+
+// TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVar
+// is C8's owed acceptance test (design D7). bundle.RemainingVarRefs must not
+// report the ${env.BRANCH_NAME} Groovy text in
+// pipelineTemplatesFixtureYAML's jenkinsfile body. That text is not an
+// unresolved catalog variable. resolveBundleForController runs the
+// unresolved-variable check before InjectPipelineTemplates. The check never
+// sees a template body. bundle.RemainingVarRefs does not recognize and skip
+// template text on its own.
+//
+// A success (err == nil) proves the check passed. The template's
+// ${env.BRANCH_NAME} text was not visible to the check yet at that point.
+// The second half proves the text reaches the final jenkins.yaml under
+// the JCasC literal escape, which the scan skips by design.
+func TestResolveBundleForController_PipelineTemplateBodyNotFlaggedAsUnresolvedVar(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.configMapData["test-bundle-content"]["pipeline-templates.yaml"] = pipelineTemplatesFixtureYAML
+
+	rec := newTestReconciler(client)
+	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
+
+	mat, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	if err != nil {
+		t.Fatalf("resolveBundleForController reported an unresolved variable from a pipeline template body: %v", err)
+	}
+
+	// The final jenkins.yaml carries the body's ${env.BRANCH_NAME} under
+	// the JCasC literal escape (ruling (mm)), so the scan skips it and
+	// Jenkins receives the plain "${env.BRANCH_NAME}" back.
+	if !strings.Contains(mat.JenkinsYAML, "^${env.BRANCH_NAME}") {
+		t.Fatalf("final jenkins.yaml lacks the escaped template variable:\n%s", mat.JenkinsYAML)
+	}
+	if got := bundle.RemainingVarRefs(true, mat.JenkinsYAML); len(got) != 0 {
+		t.Fatalf("bundle.RemainingVarRefs on the final jenkins.yaml = %v, want none (the escape hides the body)", got)
 	}
 }
 
@@ -2081,7 +2962,7 @@ func TestResolveBundleForController_KeepsLastGood(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for Invalid bundle")
 	}
@@ -2101,7 +2982,7 @@ func TestResolveBundleForController_MissingBundle(t *testing.T) {
 		Status:     v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected},
 	}
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing ComposedBundle")
 	}
@@ -2119,7 +3000,7 @@ func TestResolveBundleForController_NoContentRef(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing contentRef")
 	}
@@ -2140,7 +3021,7 @@ func TestResolveBundleForController_MissingConfigMap(t *testing.T) {
 	rec := newTestReconciler(client)
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected error for missing ConfigMap")
 	}
@@ -2170,7 +3051,7 @@ func TestResolveBundleForController_OIDCClientSecretUnresolved(t *testing.T) {
 	rec.Resolver.SetOIDCConfig("https://dex.example.com", "varroa", "s3cret")
 	cr := testController("testctl", "testns", v1alpha1.ControllerPhaseConnected)
 
-	_, _, _, err := rec.resolveBundleForController(context.Background(), cr)
+	_, _, _, _, err := rec.resolveBundleForController(context.Background(), cr)
 	if err == nil {
 		t.Fatal("expected unresolved variables error for varroa_oidc_client_secret")
 	}
@@ -2301,37 +3182,6 @@ func TestHandlePending_RejectsMissingBundle(t *testing.T) {
 	}
 	if cr.Status.Phase != v1alpha1.ControllerPhaseFailed {
 		t.Errorf("expected phase Failed, got %s", cr.Status.Phase)
-	}
-}
-
-func TestFindUnresolvedVars(t *testing.T) {
-	vars := findUnresolvedVars(true,
-		"jenkins:\n  url: ${MY_URL}\n  name: ${MY_NAME}\n",
-		"",
-		"items:\n- name: ${MY_ITEM}\n",
-		"",
-	)
-	if len(vars) != 3 {
-		t.Errorf("expected 3 unresolved vars, got %d: %v", len(vars), vars)
-	}
-	for _, want := range []string{"MY_URL", "MY_NAME", "MY_ITEM"} {
-		found := false
-		for _, v := range vars {
-			if v == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected %q in unresolved vars", want)
-		}
-	}
-}
-
-func TestFindUnresolvedVars_None(t *testing.T) {
-	vars := findUnresolvedVars(true, "jenkins:\n  key: value\n", "", "", "")
-	if len(vars) != 0 {
-		t.Errorf("expected 0 unresolved vars, got %d: %v", len(vars), vars)
 	}
 }
 
@@ -2523,6 +3373,242 @@ func TestDesiredStateHashConsistentWhenPluginsSuppressed(t *testing.T) {
 	}
 }
 
+// scriptedSendTransport wraps a Transport. Send answers sendErr, counts
+// each call, and keeps the last command; epoch, when non-zero, is the connection epoch ConnEpoch
+// reports. Every other method goes to the wrapped transport.
+type scriptedSendTransport struct {
+	transport.Transport
+	sendErr error
+	sends   int
+	epoch   int64
+	last    *mitev1.DesiredStateCommand
+	// results, when set, is what the next DrainResults call answers.
+	results []*mitev1.CommandResult
+}
+
+func (s *scriptedSendTransport) DrainResults(ns, name string) []*mitev1.CommandResult {
+	if s.results != nil {
+		out := s.results
+		s.results = nil
+		return out
+	}
+	return s.Transport.DrainResults(ns, name)
+}
+
+func (s *scriptedSendTransport) Send(_ context.Context, _, _ string, msg *mitev1.OperatorMessage) error {
+	s.sends++
+	s.last = msg.GetDesiredState()
+	return s.sendErr
+}
+
+func (s *scriptedSendTransport) ConnEpoch(ns, name string) (int64, bool) {
+	if s.epoch != 0 {
+		return s.epoch, true
+	}
+	return s.Transport.ConnEpoch(ns, name)
+}
+
+// TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock pins the
+// Connected-phase rule for a push that no gateway forwarded. NATS keeps no
+// copy of the command, so the push must not stamp DesiredStateHash or
+// LastDesiredPushAt, must not raise ReconcileBlocked, and must re-arm the
+// reconnect push so the next tick sends again.
+func TestConnectedPush_UnreachableMiteDoesNotStampHashOrBlock(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, sendErr: transport.ErrMiteUnreachable, epoch: 7}
+	rec.miteTransport = tr
+
+	cr := newGateCtrl("ctl-unreach", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err != nil {
+		t.Fatalf("handleConnected returned %v; an unreachable mite is not a reconcile error", err)
+	}
+	if tr.sends != 1 {
+		t.Fatalf("sends = %d, want 1", tr.sends)
+	}
+	if cr.Status.DesiredStateHash != "" {
+		t.Fatalf("DesiredStateHash = %q after an undelivered push, want empty", cr.Status.DesiredStateHash)
+	}
+	if cr.Status.LastDesiredPushAt != nil {
+		t.Fatal("LastDesiredPushAt was stamped after an undelivered push")
+	}
+	for _, c := range cr.Status.Conditions {
+		if c.Type == v1alpha1.ConditionReconcileBlocked && c.Status == metav1.ConditionTrue {
+			t.Fatalf("ReconcileBlocked raised for an unreachable mite: %s", c.Reason)
+		}
+	}
+
+	// The same epoch on the next tick still forces the push.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("sends = %d after the second tick, want 2", tr.sends)
+	}
+
+	// A delivered push stamps both fields.
+	tr.sendErr = nil
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if cr.Status.DesiredStateHash == "" || cr.Status.LastDesiredPushAt == nil {
+		t.Fatal("a delivered push did not stamp DesiredStateHash and LastDesiredPushAt")
+	}
+}
+
+// TestConnectedPush_ReconnectRedeliversPastManualGate pins the replay rule
+// that replaces the removed KV bucket. A reconnected mite gets the state it
+// already had again, even in manual mode, and the epoch is recorded only
+// after that delivery.
+func TestConnectedPush_ReconnectRedeliversPastManualGate(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	tr := &scriptedSendTransport{Transport: rec.miteTransport, epoch: 1}
+	rec.miteTransport = tr
+
+	cr := newGateCtrl("ctl-redeliver", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	// Tick 1, automatic mode: the first push is delivered.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 || cr.Status.DesiredStateHash == "" {
+		t.Fatalf("first push: sends=%d hash=%q, want one delivered push", tr.sends, cr.Status.DesiredStateHash)
+	}
+
+	// Tick 2, manual mode, same connection: the manual gate holds.
+	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 1 {
+		t.Fatalf("same connection in manual mode: sends=%d, want 1", tr.sends)
+	}
+
+	// The mite reconnects. The same state goes out again past the gate.
+	tr.epoch = 2
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("reconnect in manual mode: sends=%d, want 2", tr.sends)
+	}
+	if cr.Status.PendingRestart != nil {
+		t.Fatal("a redelivery of the delivered state set PendingRestart")
+	}
+	if tr.last == nil || tr.last.ApplyWhen != "idle" {
+		t.Fatal("a manual-mode redelivery lost the idle gating of its approval")
+	}
+
+	// The delivered push recorded the epoch, so the next tick holds again.
+	_ = rec.handleConnected(context.Background(), cr, runners.RunnerContribution{})
+	if tr.sends != 2 {
+		t.Fatalf("after the redelivery: sends=%d, want 2", tr.sends)
+	}
+}
+
+// TestConnectedPush_SendFailureBlocksWithoutStamp pins the other failure
+// path: an error that is not ErrMiteUnreachable raises ReconcileBlocked
+// and stamps nothing.
+func TestConnectedPush_SendFailureBlocksWithoutStamp(t *testing.T) {
+	client := newTestClientWithGateBundle()
+	client.composedBundles["gate-bundle"].Status.ResolvedHash = "hash-xyz"
+	rec, registry := newTestReconcilerForGate(client)
+	rec.miteTransport = &scriptedSendTransport{Transport: rec.miteTransport, sendErr: errors.New("marshal failed")}
+
+	cr := newGateCtrl("ctl-fail", 0, "", nil)
+	registry.Register(cr.Name, cr.Namespace, nil, nil, "v1.0", time.Now().Add(24*time.Hour))
+
+	if err := rec.handleConnected(context.Background(), cr, runners.RunnerContribution{}); err == nil {
+		t.Fatal("handleConnected returned nil for a failed push")
+	}
+	if cr.Status.DesiredStateHash != "" || cr.Status.LastDesiredPushAt != nil {
+		t.Fatal("a failed push stamped DesiredStateHash or LastDesiredPushAt")
+	}
+	blocked := false
+	for _, c := range cr.Status.Conditions {
+		if c.Type == v1alpha1.ConditionReconcileBlocked && c.Reason == v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatal("a failed push did not raise ReconcileBlocked/DesiredStatePushFailed")
+	}
+}
+
+// TestTriggerOwnedReconcile_SkipsForeignShard pins that the owner-only
+// trigger enqueues for an owned Controller and does nothing, not even a
+// routing patch, for one this replica does not own.
+func TestTriggerOwnedReconcile_SkipsForeignShard(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/owned"))
+
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.SetShardOwnership(ring, held)
+	foreign := "foreign-0"
+	for i := 0; held.Held(ring.ShardFor("ns/" + foreign)); i++ {
+		foreign = fmt.Sprintf("foreign-%d", i+1)
+	}
+
+	rec.TriggerOwnedReconcile("core", "owned", "ns")
+	if got := len(rec.reconcileEvents); got != 1 {
+		t.Fatalf("owned controller: %d enqueued, want 1", got)
+	}
+	rec.TriggerOwnedReconcile("core", foreign, "ns")
+	if got := len(rec.reconcileEvents); got != 1 {
+		t.Fatalf("foreign controller: %d enqueued, want still 1", got)
+	}
+	ctrlGVR, _ := crdstore.GVRFor[v1alpha1.Controller]()
+	if n := len(client.store.MetaPatches(ctrlGVR)); n != 0 {
+		t.Fatalf("foreign controller: %d metadata patches, want 0", n)
+	}
+}
+
+// TestNotifyCommandResult checks which desired-state results wake an owned
+// Controller. A result that applies the seed wakes it. A deferred job, a
+// failure, a result without the desired-state field, and a foreign shard
+// wake nothing.
+func TestNotifyCommandResult(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := sharding.NewShardSet()
+	held.Add(ring.ShardFor("ns/owned"))
+
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	rec.SetShardOwnership(ring, held)
+	foreign := "foreign-0"
+	for i := 0; held.Held(ring.ShardFor("ns/" + foreign)); i++ {
+		foreign = fmt.Sprintf("foreign-%d", i+1)
+	}
+
+	desired := func(ds *mitev1.DesiredStateResult) *mitev1.CommandResult {
+		return &mitev1.CommandResult{Result: &mitev1.CommandResult_DesiredState{DesiredState: ds}}
+	}
+	cases := []struct {
+		name string
+		key  string
+		res  *mitev1.CommandResult
+		want int
+	}{
+		{"owned applied seed", "owned", desired(&mitev1.DesiredStateResult{RehydrationSuccess: true}), 1},
+		{"owned deferred jobs", "owned", desired(&mitev1.DesiredStateResult{
+			RehydrationSuccess: true, RehydrationDeferredJobs: []string{"team/job"}}), 0},
+		{"owned rehydration error", "owned", desired(&mitev1.DesiredStateResult{
+			RehydrationError: "boom"}), 0},
+		{"owned seed not applied", "owned", desired(&mitev1.DesiredStateResult{}), 0},
+		{"owned no desired state", "owned", &mitev1.CommandResult{}, 0},
+		{"foreign applied seed", foreign, desired(&mitev1.DesiredStateResult{RehydrationSuccess: true}), 0},
+	}
+	for _, tc := range cases {
+		before := len(rec.reconcileEvents)
+		rec.NotifyCommandResult("ns", tc.key, tc.res)
+		if got := len(rec.reconcileEvents) - before; got != tc.want {
+			t.Errorf("%s: %d enqueued, want %d", tc.name, got, tc.want)
+		}
+	}
+	ctrlGVR, _ := crdstore.GVRFor[v1alpha1.Controller]()
+	if n := len(client.store.MetaPatches(ctrlGVR)); n != 0 {
+		t.Fatalf("%d metadata patches, want 0: a result never routes a wake", n)
+	}
+}
+
 // captureTransport is a minimal mite transport that captures the last pushed
 // desired state command.
 type captureTransport struct {
@@ -2531,6 +3617,12 @@ type captureTransport struct {
 	drainResults         []*mitev1.CommandResult
 	streamDegraded       bool
 	streamDegradedReason string
+	// forgotten records each ns/name that Forget or ForgetMatching dropped.
+	forgotten []string
+	// known lists the ns/name keys that ForgetMatching tests.
+	known []string
+	// imperatives records each command that SendImperative received.
+	imperatives []*mitev1.ImperativeCommand
 }
 
 func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
@@ -2571,12 +3663,11 @@ func (c *captureTransport) IdleGauges(ns, name string) (*mitev1.IdleGauges, time
 }
 
 func (c *captureTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	c.imperatives = append(c.imperatives, cmd)
 	return nil
 }
 
 func (c *captureTransport) Connected(ns, name string) bool { return true }
-
-func (c *captureTransport) ClearDesired(_ context.Context, ns, name string) error { return nil }
 
 func (c *captureTransport) ObservabilityReport(ns, name string) *mitev1.ObservabilityReport {
 	return nil
@@ -2600,6 +3691,19 @@ func (c *captureTransport) PluginClassification(_, _ string) (*transport.Classif
 
 func (c *captureTransport) PutPluginClassification(_ context.Context, _, _ string, _ *transport.ClassifiedInventory) error {
 	return nil
+}
+
+func (c *captureTransport) Forget(ns, name string) {
+	c.forgotten = append(c.forgotten, ns+"/"+name)
+}
+
+func (c *captureTransport) ForgetMatching(match func(ns, name string) bool) {
+	for _, key := range c.known {
+		ns, name, _ := strings.Cut(key, "/")
+		if match(ns, name) {
+			c.forgotten = append(c.forgotten, key)
+		}
+	}
 }
 
 //nolint:unparam
@@ -3411,6 +4515,93 @@ func TestPluginInstallRequired(t *testing.T) {
 		}
 		if c.Message != "preexisting" {
 			t.Errorf("expected message to be unchanged, got %q", c.Message)
+		}
+	})
+
+	t.Run("bundle-resolve-recovery-clears-bundle-failed", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconcilerWithTokenSigner(client)
+		rec.miteTransport = &captureTransport{}
+
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		if err := rec.reconcileController(context.Background(), cr); err != nil {
+			t.Fatalf("Provisioning reconcile: %v", err)
+		}
+		content := client.configMapData["test-bundle-content"]
+		delete(client.configMapData, "test-bundle-content")
+		cr.Status.Phase = v1alpha1.ControllerPhaseConnected
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{
+			{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: "MiteConnected"},
+		}
+		_ = rec.reconcileController(context.Background(), cr)
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf == nil || bf.Status != metav1.ConditionTrue {
+			t.Fatalf("expected BundleFailed=True while the content ConfigMap is absent, got %+v", bf)
+		}
+
+		client.configMapData["test-bundle-content"] = content
+		_ = rec.reconcileController(context.Background(), cr)
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once the bundle resolves again, got %+v", bf)
+		}
+	})
+}
+
+// TestBundleFailedClearsOnEveryResolvingPhase asserts that a stale
+// BundleFailed condition retires in every phase that fully re-resolves the
+// bundle, and only there. Each case seeds a stale True BundleFailed
+// condition, then runs the phase handler against a bundle that resolves
+// cleanly.
+func TestBundleFailedClearsOnEveryResolvingPhase(t *testing.T) {
+	staleBundleFailed := func() v1alpha1.ControllerCondition {
+		return v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionBundleFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  "BundleResolutionFailed",
+			Message: "stale failure from an earlier reconcile",
+		}
+	}
+
+	t.Run("pending", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhasePending)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handlePending(context.Background(), cr); err != nil {
+			t.Fatalf("handlePending: %v", err)
+		}
+		// Pending checks only that the bundle exists. A stale failure set by a
+		// full resolve must survive until the Provisioning resolve confirms it.
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf == nil {
+			t.Fatal("expected BundleFailed to survive the Pending existence check")
+		}
+	})
+
+	t.Run("provisioning", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handleProvisioning(context.Background(), cr); err != nil {
+			t.Fatalf("handleProvisioning: %v", err)
+		}
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once Provisioning resolves the bundle again, got %+v", bf)
+		}
+	})
+
+	t.Run("running", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		rec := newTestReconciler(client)
+		cr := testController("test", "ns1", v1alpha1.ControllerPhaseRunning)
+		cr.Status.Conditions = []v1alpha1.ControllerCondition{staleBundleFailed()}
+
+		if err := rec.handleRunning(context.Background(), cr); err != nil {
+			t.Fatalf("handleRunning: %v", err)
+		}
+		if bf := findCondition(cr.Status.Conditions, v1alpha1.ConditionBundleFailed); bf != nil {
+			t.Fatalf("expected BundleFailed to clear once Running re-resolves the bundle via checkPluginRollFailed, got %+v", bf)
 		}
 	})
 }
@@ -6521,5 +7712,108 @@ func TestPluginDriftCondition(t *testing.T) {
 				t.Errorf("reason = %q, want %q", reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+// TestEnsureBootstrapToken_PodInstance covers the one-token-per-pod rule:
+// a token minted before any pod adopts the first pod it sees without a
+// re-mint, and a replaced pod gets a fresh token.
+func TestEnsureBootstrapToken_PodInstance(t *testing.T) {
+	ctx := context.Background()
+	validToken, err := mite.NewTokenSigner(testKey).GenerateToken("test", "ns", time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	newController := func(instance string) *v1alpha1.Controller {
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns", UID: testUID}}
+		if instance != "" {
+			cr.Status.Cell = &v1alpha1.CellStatus{Instance: instance}
+		}
+		return cr
+	}
+	t.Run("no pod yet keeps the token untouched", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken)}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController(""), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		if client.secretWrites != 0 {
+			t.Fatalf("secret writes = %d, want 0", client.secretWrites)
+		}
+	})
+	t.Run("first pod adopts the existing token", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken)}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-1"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		got := client.createdSecrets[testPrefix+"-bootstrap"]
+		if string(got["token"]) != validToken || string(got["instance"]) != "pod-1" {
+			t.Fatalf("secret = %q/%q, want the same token stamped with pod-1", got["token"], got["instance"])
+		}
+	})
+	t.Run("same pod is a no-op", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken), "instance": []byte("pod-1")}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-1"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		if client.secretWrites != 0 {
+			t.Fatalf("secret writes = %d, want 0", client.secretWrites)
+		}
+	})
+	t.Run("replaced pod gets a fresh token", func(t *testing.T) {
+		client := newTestClientWithBundle()
+		client.existingSecrets[testPrefix+"-bootstrap"] = map[string][]byte{"token": []byte(validToken), "instance": []byte("pod-1")}
+		rec := newTestReconciler(client)
+		if err := rec.ensureBootstrapToken(ctx, newController("pod-2"), testPrefix); err != nil {
+			t.Fatal(err)
+		}
+		got := client.createdSecrets[testPrefix+"-bootstrap"]
+		if string(got["token"]) == validToken || string(got["token"]) == "" || string(got["instance"]) != "pod-2" {
+			t.Fatalf("secret = %q/%q, want a new token stamped with pod-2", got["token"], got["instance"])
+		}
+	})
+}
+
+// TestProvisioningSteadyTickSendsNoFenceWrite pins that a provisioning tick
+// whose StatefulSet already runs at 1 replica sends no tick fence write.
+func TestProvisioningSteadyTickSendsNoFenceWrite(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 1}
+	client.stsRV = map[string]int{prefix: 1}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if client.createFenceCalls != 0 {
+		t.Fatalf("create fence calls = %d, want 0 for a StatefulSet already at 1", client.createFenceCalls)
+	}
+}
+
+// TestProvisioningScaleUpFromZeroFencesOnce pins that a provisioning tick
+// that scales a StatefulSet up from 0 runs the tick fence exactly once.
+func TestProvisioningScaleUpFromZeroFencesOnce(t *testing.T) {
+	client := newTestClientWithBundle()
+	rec := newTestReconciler(client)
+	cr := testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning)
+	prefix := controllerPrefix(cr)
+	client.stsReplicas = map[string]int32{prefix: 0}
+	client.stsRV = map[string]int{prefix: 0}
+
+	if err := rec.reconcileController(context.Background(), cr); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if client.createFenceCalls != 1 {
+		t.Fatalf("create fence calls = %d, want 1", client.createFenceCalls)
+	}
+	if client.stsReplicas[prefix] != 1 {
+		t.Fatalf("StatefulSet replicas = %d, want 1", client.stsReplicas[prefix])
 	}
 }

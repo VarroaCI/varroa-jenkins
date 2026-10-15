@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/oci"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // Import resource limits (hardening against decompression-bomb DoS).
@@ -85,6 +86,12 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger.Error("failed to list manifests in import", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list manifests")
+		return
+	}
+
+	if err := s.rejectLatestPluginVersions(r.Context(), srcStore, srcDescs); err != nil {
+		s.logger.Warn("import rejected: plugin pack carries a latest version", "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -210,4 +217,33 @@ func (s *Server) countPluginsInLayout(ctx context.Context, store oci.BlobStore, 
 		count += len(plugins)
 	}
 	return count
+}
+
+// rejectLatestPluginVersions returns an error that names the first plugin
+// layer whose version is not concrete. The import stores nothing when it
+// returns an error.
+func (s *Server) rejectLatestPluginVersions(ctx context.Context, store oci.BlobStore, descs []oci.Descriptor) error {
+	for _, d := range descs {
+		ref := d.Annotations["org.opencontainers.image.ref.name"]
+		if ref == "" {
+			ref = d.Digest
+		}
+		manifest, err := store.Pull(ctx, ref)
+		if err != nil {
+			continue
+		}
+		if manifest.ArtifactType != oci.ArtifactTypePluginPack {
+			continue
+		}
+		for _, info := range pluginLayersFromManifest(manifest, s.logger) {
+			if ucmeta.IsLatest(info.Version) {
+				subject := info.Name
+				if subject == "" {
+					subject = "layer " + info.LayerDigest
+				}
+				return fmt.Errorf("plugin %q in pack %q has no concrete version (%q): export the pack again with a concrete version", subject, ref, info.Version)
+			}
+		}
+	}
+	return nil
 }

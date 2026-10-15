@@ -46,6 +46,12 @@ type Config struct {
 	Client    *http.Client           // HTTP client; default &http.Client{} (no timeout)
 	OnConnect func(reconnected bool) // called after each successful open
 	Backoff   BackoffConfig          // backoff parameters
+
+	// ResumeURL, when set, supplies the URL of each reconnect attempt.
+	// Stream never calls it for the first attempt. An empty result
+	// selects URL. A consumer uses it to put a resume cursor on the
+	// query, so the server does not send the history again.
+	ResumeURL func() string
 }
 
 // HTTPError is returned for terminal HTTP status codes (401, 403, 404).
@@ -67,6 +73,7 @@ func (e *HTTPError) Error() string {
 //   - OnConnect called after each successful open — false on first, true on
 //     reconnects.
 //   - Backoff resets to Initial after every successful open.
+//   - ResumeURL, when set, supplies the URL of every reconnect attempt.
 //   - Returns nil on ctx cancellation.
 func Stream(ctx context.Context, cfg Config, handle func(Event) error) error {
 	if cfg.Client == nil {
@@ -119,7 +126,13 @@ func Stream(ctx context.Context, cfg Config, handle func(Event) error) error {
 		data = nil
 
 		// --- connection attempt ---
-		req, reqErr = http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
+		url := cfg.URL
+		if reconnect && cfg.ResumeURL != nil {
+			if resumed := cfg.ResumeURL(); resumed != "" {
+				url = resumed
+			}
+		}
+		req, reqErr = http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if reqErr != nil {
 			return reqErr
 		}

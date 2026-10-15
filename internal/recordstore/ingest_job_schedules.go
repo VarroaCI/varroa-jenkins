@@ -1,0 +1,268 @@
+package recordstore
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// applyJobSchedules applies one job.schedules envelope in its own
+// transaction, per design.md D8 "The table and the write". Unlike every
+// run.* kind, it needs no run_intents row: the envelope describes a
+// cell, not a run.
+//
+// It row-locks the cell's job_schedule_cells watermark first, inserting
+// it with the sentinel observed_at "-infinity" when absent so a cell's
+// first envelope always has a row to lock. It applies the envelope only
+// when the envelope's time is newer than the stored watermark; an older
+// or equal envelope changes no row and is reported through
+// ApplyResult.ScheduleStale. Deleting every row the envelope omits is
+// skipped when the envelope reports truncation, reported through
+// ApplyResult.Truncated.
+func (g *Ingester) applyJobSchedules(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
+	var payload JobSchedulesPayload
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return ApplyResult{}, fmt.Errorf("%w: decode job.schedules payload: %v", ErrMalformedEnvelope, err)
+	}
+
+	tx, err := g.pool.Begin(ctx)
+	if err != nil {
+		return ApplyResult{}, fmt.Errorf("begin job.schedules transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	result, err := applyJobSchedulesTx(ctx, tx, env, payload)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return ApplyResult{}, fmt.Errorf("commit job.schedules transaction: %w", err)
+	}
+	return result, nil
+}
+
+// applyJobSchedulesTx runs the guard-then-write sequence for one
+// job.schedules envelope inside tx.
+func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobSchedulesPayload) (ApplyResult, error) {
+	// The sentinel is older than every envelope, so a cell's first
+	// envelope always finds a row to lock and passes the comparison
+	// below. ON CONFLICT DO NOTHING makes two concurrent first
+	// envelopes for one cell serialize on this insert.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO varroa.job_schedule_cells (cluster, namespace, cell, observed_at)
+		VALUES ($1, $2, $3, '-infinity')
+		ON CONFLICT (cluster, namespace, cell) DO NOTHING
+	`, env.Cluster, env.Namespace, env.Cell); err != nil {
+		return ApplyResult{}, fmt.Errorf("insert job schedule cell watermark: %w", err)
+	}
+
+	// The comparison runs in SQL rather than scanning observed_at into a
+	// Go time.Time: the sentinel is the Postgres value -infinity, which
+	// time.Time cannot represent.
+	var isNewer bool
+	if err := tx.QueryRow(ctx, `
+		SELECT $4::timestamptz > observed_at FROM varroa.job_schedule_cells
+		WHERE cluster = $1 AND namespace = $2 AND cell = $3
+		FOR UPDATE
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt).Scan(&isNewer); err != nil {
+		return ApplyResult{}, fmt.Errorf("lock job schedule cell watermark: %w", err)
+	}
+
+	if !isNewer {
+		// A stale or replayed envelope. The watermark rejects it, so a
+		// redelivered envelope can never restore a row a later, already
+		// applied empty set deleted.
+		return ApplyResult{ScheduleStale: true}, nil
+	}
+
+	// homeByTenant and graceByTenant cache one placement read and one
+	// policy read for each tenant the envelope names, so a cell hosting
+	// many tenants runs one read of each for each tenant.
+	homeByTenant := map[string]placementMembers{}
+	graceByTenant := map[string]time.Duration{}
+
+	for _, row := range payload.Rows {
+		home, known, err := jobScheduleHomeCell(ctx, tx, env.Cluster, row.Tenant, row.JobPath, homeByTenant)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		if known && (home.Namespace != env.Namespace || home.Cell != env.Cell) {
+			// Only a job's home slot holder owns that job's row. A
+			// standby polls SCM and fires cron, so its export would
+			// overwrite the row's cell and the backstop would then fire
+			// the job on a cell that must not run it. The test compares
+			// the namespace and the cell together, because two
+			// namespaces can hold a cell of one name. A new job with no
+			// stored home resolves to its computed home, so the gate
+			// admits the same cell the next recompute names. The
+			// envelope does not fail: its other rows can be valid.
+			continue
+		}
+		fireTimes, err := parseJobScheduleFireTimes(row.NextFireTimes)
+		if err != nil {
+			return ApplyResult{}, fmt.Errorf("%w: decode next_fire_times: %v", ErrMalformedEnvelope, err)
+		}
+		grace, cached := graceByTenant[row.Tenant]
+		if !cached {
+			policy, err := readTenantSchedulePolicy(ctx, tx, env.Cluster, row.Tenant)
+			if err != nil {
+				return ApplyResult{}, err
+			}
+			grace = policy.cronGrace
+			graceByTenant[row.Tenant] = grace
+		}
+		keepAfter := env.OccurredAt.Add(-passedOccurrenceWindow(grace))
+		rowJSON, err := json.Marshal(row)
+		if err != nil {
+			return ApplyResult{}, fmt.Errorf("marshal job schedule row: %w", err)
+		}
+		// With an unchanged spec, time zone, and disabled state,
+		// next_fire_times keeps each stored occurrence at or before the
+		// envelope time and newer than keepAfter, at most
+		// maxPassedOccurrences of them. The backstop can judge a missed
+		// occurrence only while the row still holds it, and the new
+		// export names future times only. A disabled-state change drops
+		// the kept times, so a re-enabled job never fires an occurrence
+		// Jenkins skipped while the job was disabled.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO varroa.job_schedules AS js (
+				cluster, namespace, cell, tenant, job_path, trigger_type,
+				spec, timezone, disabled, next_fire_times, observed_at,
+				placement_generation, payload,
+				upstream_tenant, upstream_job, upstream_result
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16
+			)
+			ON CONFLICT (cluster, tenant, job_path, trigger_type) DO UPDATE SET
+				namespace            = EXCLUDED.namespace,
+				cell                 = EXCLUDED.cell,
+				spec                 = EXCLUDED.spec,
+				timezone             = EXCLUDED.timezone,
+				disabled             = EXCLUDED.disabled,
+				next_fire_times      = CASE
+					WHEN js.spec = EXCLUDED.spec AND js.timezone = EXCLUDED.timezone
+						AND js.disabled = EXCLUDED.disabled THEN ARRAY(
+						SELECT DISTINCT u.t FROM (
+							SELECT p.t FROM (
+								SELECT DISTINCT s.t FROM unnest(js.next_fire_times) AS s(t)
+								WHERE s.t <= EXCLUDED.observed_at AND s.t > $17
+								ORDER BY s.t DESC
+								LIMIT $18
+							) AS p
+							UNION
+							SELECT e.t FROM unnest(EXCLUDED.next_fire_times) AS e(t)
+						) AS u
+						ORDER BY u.t
+					)
+					ELSE EXCLUDED.next_fire_times
+				END,
+				observed_at          = EXCLUDED.observed_at,
+				placement_generation = EXCLUDED.placement_generation,
+				payload              = EXCLUDED.payload,
+				upstream_tenant      = EXCLUDED.upstream_tenant,
+				upstream_job         = EXCLUDED.upstream_job,
+				upstream_result      = EXCLUDED.upstream_result
+		`,
+			env.Cluster, env.Namespace, env.Cell, row.Tenant, row.JobPath, row.TriggerType,
+			row.Spec, row.Timezone, row.Disabled, fireTimes, env.OccurredAt,
+			row.PlacementGeneration, string(rowJSON),
+			row.UpstreamTenant, row.UpstreamJob, row.UpstreamResult,
+			keepAfter, maxPassedOccurrences,
+		); err != nil {
+			return ApplyResult{}, fmt.Errorf("upsert job schedule row: %w", err)
+		}
+	}
+
+	result := ApplyResult{}
+	if payload.Truncated {
+		// A truncated set is not evidence that an omitted job lost its
+		// trigger, so nothing is deleted.
+		result.Truncated = true
+	} else if _, err := tx.Exec(ctx, `
+		DELETE FROM varroa.job_schedules
+		WHERE cluster = $1 AND namespace = $2 AND cell = $3 AND observed_at < $4
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt); err != nil {
+		return ApplyResult{}, fmt.Errorf("delete stale job schedule rows: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE varroa.job_schedule_cells SET observed_at = $4, schedules_truncated = $5
+		WHERE cluster = $1 AND namespace = $2 AND cell = $3
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt, payload.Truncated); err != nil {
+		return ApplyResult{}, fmt.Errorf("raise job schedule cell watermark: %w", err)
+	}
+
+	return result, nil
+}
+
+// maxPassedOccurrences bounds how many passed occurrences one row
+// keeps, so a dense cron cannot grow the row without limit.
+const maxPassedOccurrences = 16
+
+// passedOccurrenceSlack is the extra time a passed occurrence stays
+// beyond the backstop's own need. It covers one backstop round interval
+// and the envelope delay.
+const passedOccurrenceSlack = 2 * time.Minute
+
+// passedOccurrenceWindow answers how long a row keeps a passed
+// occurrence for a tenant with the given cron grace. The backstop
+// judges an occurrence one grace after it and can wait one more grace
+// for its spread delay, so three graces leave one grace of margin. A
+// fire then suppresses a second first fire for backstopAnswerWait at
+// least, and a lost fire must still find its occurrence in the row
+// when that suppression ends.
+func passedOccurrenceWindow(grace time.Duration) time.Duration {
+	return max(3*grace, 2*grace+backstopAnswerWait) + passedOccurrenceSlack
+}
+
+// parseJobScheduleFireTimes parses a job schedule row's RFC 3339
+// occurrence strings into UTC instants, in the order the plugin exported
+// them, for the next_fire_times timestamptz[] column.
+func parseJobScheduleFireTimes(values []string) ([]time.Time, error) {
+	out := make([]time.Time, 0, len(values))
+	for _, v := range values {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t.UTC())
+	}
+	return out, nil
+}
+
+// jobScheduleHomeCell answers the member that holds jobPath's home slot
+// for tenant, with its namespace and cell, and whether the tenant holds a placement row at all. A
+// tenant with no row is unknown, and the caller then stores every row it
+// exports, which is the behaviour before slots existed.
+//
+// The cache holds one decoded placement for each tenant of the envelope,
+// so a cell hosting many tenants runs one read for each. The read holds a
+// FOR SHARE lock until the envelope commits. A home write waits for it,
+// so the write moves the rows this envelope stores, and this envelope
+// never stores a row at a home the write already moved.
+func jobScheduleHomeCell(ctx context.Context, tx pgx.Tx, cluster, tenant, jobPath string,
+	cache map[string]placementMembers) (member, bool, error) {
+	row, cached := cache[tenant]
+	if !cached {
+		read, exists, err := readTenantPlacementMembersForShare(ctx, tx, cluster, tenant)
+		if err != nil {
+			return member{}, false, err
+		}
+		if !exists {
+			cache[tenant] = placementMembers{}
+			return member{}, false, nil
+		}
+		cache[tenant] = read
+		row = read
+	}
+	if len(row.members) == 0 {
+		return member{}, false, nil
+	}
+	return memberForJob(row, jobPath), true, nil
+}

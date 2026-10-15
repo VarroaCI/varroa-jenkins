@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trace } from "@opentelemetry/api";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -11,6 +11,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import Controllers from "./pages/Controllers";
 import ControllerDetail from "./pages/ControllerDetail";
+import { JenkinsLinkRedirect } from "./pages/JenkinsLinkRedirect";
 import ControllerWizard from "./pages/ControllerWizard";
 import Clusters from "./pages/Clusters";
 import Roles from "./pages/Roles";
@@ -39,6 +40,23 @@ import BroodOperationDetail from "./pages/BroodOperationDetail";
 import BroodSchedules from "./pages/BroodSchedules";
 import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
+import Cells from "./pages/Cells";
+import Locks from "./pages/Locks";
+import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
+import TeamHome from "./pages/pipelines/TeamHome";
+import PipelinePage from "./pages/pipelines/PipelinePage";
+import BuildPage from "./pages/pipelines/BuildPage";
+import TestCaseHistory from "./pages/pipelines/TestCaseHistory";
+
+/**
+ * Remounts BuildPage per run id. React Router reuses one element when only
+ * the params change, and the page's log rows, terminal state, and resume
+ * watermark belong to a single run.
+ */
+function BuildPageRoute() {
+  const { run } = useParams<{ run: string }>();
+  return <BuildPage key={run} />;
+}
 import CliAuth from "./pages/CliAuth";
 import { LoginPage } from "./pages/LoginPage";
 import NoAccessibleClusters from "./components/NoAccessibleClusters";
@@ -69,7 +87,7 @@ function CatalogComposerRoute() {
 
 function useRouteChangeSpan() {
   const location = useLocation();
-  const prevRoute = useRef<string>();
+  const prevRoute = useRef<string | undefined>(undefined);
   useEffect(() => {
     const tracer = trace.getTracer("varroa-frontend");
     const span = tracer.startSpan("frontend.routeChange", {
@@ -100,7 +118,26 @@ function AppRoutes() {
                   <Route path="controllers/create" element={<ControllerWizard />} />
                   <Route path="controllers/:cluster/:namespace/:name" element={<ControllerDetail />} />
                   <Route path="controllers/:cluster/:namespace/:name/jenkins" element={<ManagedJenkins />} />
+                  <Route path="headless/:cluster/:namespace/:controller/*" element={<JenkinsLinkRedirect />} />
+                  <Route
+                    path="cells"
+                    element={
+                      <PermissionRoute resource="cellpools" verb="read" globalOnly>
+                        <Cells />
+                      </PermissionRoute>
+                    }
+                  />
                   <Route path="clusters" element={<Clusters />} />
+                  {/* The lock page carries no sidebar row: a caller reaches
+                      it by its own URL. */}
+                  <Route
+                    path="locks"
+                    element={
+                      <PermissionRoute resource="fleetlocks" verb="read" globalOnly>
+                        <Locks />
+                      </PermissionRoute>
+                    }
+                  />
 
                   {/* Settings area shell — list routes only */}
                   <Route element={<AreaShell items={SETTINGS_ITEMS} title="Admin & access" />}>
@@ -151,6 +188,12 @@ function AppRoutes() {
                   <Route path="brood-schedules" element={<BroodSchedules />} />
                   <Route path="brood-schedules/:namespace/:name" element={<BroodScheduleDetail />} />
                   <Route path="plugins" element={<PermissionRoute resource="controllers" verb="read"><FleetPlugins /></PermissionRoute>} />
+                  <Route path="pipelines" element={<PipelinesIndex />} />
+                  <Route path="pipelines/:team" element={<TeamHome />} />
+                  <Route path="pipelines/:team/:job" element={<PipelinePage />} />
+                  <Route path="pipelines/:team/:job/:run" element={<BuildPageRoute />} />
+                  {/* The case route holds five segments and the run route four, so the two never match one URL. */}
+                  <Route path="pipelines/:team/:job/tests/:case" element={<TestCaseHistory />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
               </Route>

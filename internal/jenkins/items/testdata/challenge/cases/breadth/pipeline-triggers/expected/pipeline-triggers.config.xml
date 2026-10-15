@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<flow-definition plugin="workflow-job">
+  <displayName>Pipeline with Triggers</displayName>
+  <description>Pipeline job with a cron, a cross-tenant upstream, and an SCM poll trigger</description>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>pipeline {&#xA;  agent any&#xA;  stages {&#xA;    stage(&#39;Build&#39;) {&#xA;      steps {&#xA;        echo &#39;build&#39;&#xA;      }&#xA;    }&#xA;  }&#xA;}&#xA;</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers>
+        <hudson.triggers.SCMTrigger>
+          <spec>H/15 * * * *</spec>
+          <ignorePostCommitHooks>false</ignorePostCommitHooks>
+        </hudson.triggers.SCMTrigger>
+        <hudson.triggers.TimerTrigger>
+          <spec>H 2 * * *</spec>
+        </hudson.triggers.TimerTrigger>
+        <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+          <spec></spec>
+          <tenant>alpha</tenant>
+          <job>release</job>
+          <result>SUCCESS</result>
+        </org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger>
+      </triggers>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>
+</flow-definition>

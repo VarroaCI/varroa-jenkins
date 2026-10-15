@@ -10,6 +10,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/jenkinsver"
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // The five verdicts, frozen by the proposal. There is deliberately no sixth:
@@ -186,7 +187,8 @@ func evaluateProfileCompat(cl *ucClosure, inv *ucInventory, p ucProfile) v1alpha
 	var lockShort []string
 	for _, m := range members {
 		if m.minimum != "" {
-			if pinned, ok := p.Lock[m.name]; ok && pinned != "" && !pluginver.AtLeast(pinned, m.minimum) {
+			// A latest lock pin sets no floor; dep-below-minimum covers a store that is too old.
+			if pinned, ok := p.Lock[m.name]; ok && pinned != "" && !ucmeta.IsLatest(pinned) && !pluginver.AtLeast(pinned, m.minimum) {
 				lockShort = append(lockShort, fmt.Sprintf("lock pins %s at %s, below the effective minimum %s", m.name, pinned, m.minimum))
 				continue
 			}
@@ -211,6 +213,15 @@ func evaluateProfileCompat(cl *ucClosure, inv *ucInventory, p ucProfile) v1alpha
 	if !coreParses {
 		res.Verdict = verdictUnknown
 		res.Message = fmt.Sprintf("profile core version %q cannot be compared", p.EffectiveCore)
+		return res
+	}
+
+	// A blocking verdict above wins. An unknown list only keeps a closure from
+	// being judged complete.
+	if len(cl.UnknownDeps) > 0 {
+		res.Verdict = verdictUnknown
+		res.Message = fmt.Sprintf("dependency list unknown for %s; the closure may be incomplete",
+			strings.Join(cl.UnknownDeps, ", "))
 		return res
 	}
 

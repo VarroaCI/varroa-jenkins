@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
 )
@@ -60,6 +61,12 @@ const (
 type ucGateResult struct {
 	URL, DownloadURL string
 	Outcome          ucGateOutcome
+	// DownloadURLExplicit is true when DownloadURL comes from
+	// ProvisioningDefaults. Plugin downloads then never touch the in-cluster
+	// update center, so the clear outcome must not claim
+	// UpdateCenterFallback=False for it: the download-URL check and the
+	// plugins-init report own that condition.
+	DownloadURLExplicit bool
 }
 
 // resolveUpdateCenterGate resolves the plugin update-center URLs and decides
@@ -68,6 +75,7 @@ type ucGateResult struct {
 func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alpha1.UpdateCenter, ucBaseURL string) ucGateResult {
 	url, downloadURL := resolvePluginUpdateCenterURLs(defaults, uc, ucBaseURL)
 	res := ucGateResult{URL: url, DownloadURL: downloadURL, Outcome: ucGateClear}
+	res.DownloadURLExplicit = defaults != nil && defaults.Spec.PluginUpdateCenterDownloadURL != ""
 
 	ucReady := uc != nil && ucConditionTrue(uc.Status.Conditions, "Ready") && ucBaseURL != ""
 	if ucBaseURL == "" || ucReady {
@@ -92,7 +100,7 @@ func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alph
 // ucBlockAirgapMessage builds the WaitingForUpdateCenter condition message
 // for the ucGateBlockAirgap outcome. uc is nil when the UpdateCenter CR is
 // absent. When uc is present, its top-level "Ready" condition Reason
-// distinguishes a genuine plugin-coverage shortfall (remediable by seeding,
+// distinguishes a genuine servability shortfall (remediable by seeding,
 // enabling pull-through, or an explicit ProvisioningDefaults override) from
 // every other not-Ready cause (remediable only by restoring the UpdateCenter
 // CR itself to Ready) — this only picks the wording, it never changes
@@ -102,17 +110,11 @@ func ucBlockAirgapMessage(uc *v1alpha1.UpdateCenter) string {
 	if uc == nil {
 		return base + " The UpdateCenter resource (varroa-update-center) was not found. Create it and let it reach Ready before provisioning."
 	}
-	if ready := conditionPtr(uc.Status.Conditions, condTypeReady); ready != nil && ready.Reason == reasonGapAnalysisComplete {
-		msg := fmt.Sprintf(
-			"%s The update center has %d plugin coverage gap(s). Seed the missing plugins (spec.seed.refs or `varroactl export`/`import`), enable spec.pullThrough with working egress, or set explicit pluginUpdateCenterURL and pluginUpdateCenterDownloadURL in ProvisioningDefaults to bypass the in-cluster update center.",
-			base, len(uc.Status.Gaps),
+	if ready := conditionPtr(uc.Status.Conditions, condTypeReady); ready != nil && ready.Reason == reasonPluginsUnservable {
+		return fmt.Sprintf(
+			"%s The update center cannot serve %d declared plugin(s). Seed the missing plugins (spec.seed.refs or `varroactl export`/`import`), enable spec.pullThrough with working egress, or set explicit pluginUpdateCenterURL and pluginUpdateCenterDownloadURL in ProvisioningDefaults to bypass the in-cluster update center.",
+			base, uc.Status.UnservableCount,
 		)
-		// status.Gaps itself is truncated at maxGaps by the reconciler, so at
-		// the cap the count above may understate the true gap total.
-		if len(uc.Status.Gaps) >= maxGaps {
-			msg += fmt.Sprintf(" (gap list capped at %d; additional gaps may exist)", maxGaps)
-		}
-		return msg
 	}
 	return base + " Inspect the UpdateCenter resource (varroa-update-center) and restore it to Ready."
 }
@@ -175,6 +177,22 @@ type stsBuildInputs struct {
 	PluginsConfigMap string
 	PluginsChecksum  string
 	Policy           v1alpha1.ReconciliationPolicy
+	// ArtifactSecretName is the projected per-cell artifact Secret
+	// ("<controller>-artifacts"), or "" when resolveArtifactSecret found no
+	// source Secret. CreateStatefulSet mounts it only when non-empty.
+	ArtifactSecretName string
+	// ArtifactSecretHash is a content hash of ArtifactSecretName's data,
+	// stamped as a pod-template annotation so a rotation changes the
+	// desired-state hash even though the fragment's ${readFile:...}
+	// reference never changes.
+	ArtifactSecretHash string
+	// ArtifactSharedCredentials is true in STS mode when ArtifactSecretName
+	// is set. The builder then adds the shared credentials file property.
+	ArtifactSharedCredentials bool
+	// CellSecretsName is the pool confidential store
+	// ("varroa-cell-secrets-<pool>"), or "" when the controller is not a
+	// pool cell. CreateStatefulSet mounts it only when non-empty.
+	CellSecretsName string
 }
 
 // buildStatefulSetSpec derives the desired StatefulSet from the CR and its
@@ -286,6 +304,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ImagePullSecrets:          imagePullSecrets,
 		ServiceAccountName:        in.Name + "-agent",
 		OIDCIssuer:                r.Resolver.OIDCIssuer(),
+		LocalIssuer:               r.Resolver.LocalIssuer(),
 		VarroaLoginURL:            r.Resolver.LoginURL(r.varroaRedirectURL),
 		OIDCUserClaim:             r.Resolver.OIDCUserClaim(),
 		OIDCGroupClaim:            r.Resolver.OIDCGroupClaim(),
@@ -304,7 +323,26 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		Probes:                    probes,
 		ResourceOverlay:           cr.Spec.ResourceOverlay,
 		ResourcesSource:           resourcesSource,
+		ClaimGate:                 r.claimGate,
+		ClaimTimeoutMS:            r.claimTimeoutMS,
+		ArtifactSecretName:        in.ArtifactSecretName,
+		ArtifactSecretHash:        in.ArtifactSecretHash,
+		ArtifactSharedCredentials: in.ArtifactSharedCredentials,
+		CellSecretsName:           in.CellSecretsName,
+		Cell:                      v1alpha1.IsCell(cr),
+		CellPool:                  cellPoolLabel(cr),
+		Headless:                  v1alpha1.IsHeadless(cr),
+		InClusterEndpoint:         inClusterEndpoint(cr),
 	}
+}
+
+// cellPoolLabel answers the pool label a cell pod carries: the cell's own
+// varroa.dev/cell-pool label, and empty for a controller that is not a cell.
+func cellPoolLabel(cr *v1alpha1.Controller) string {
+	if !v1alpha1.IsCell(cr) {
+		return ""
+	}
+	return cr.Labels[cells.LabelCellPool]
 }
 
 // miteObservation is everything handleConnected reads from the transport

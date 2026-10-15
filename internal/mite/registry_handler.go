@@ -150,6 +150,39 @@ func (h *RegistryHandler) IsCurrentConnection(name, ns string, token int64) bool
 	return h.reg.IsCurrentEpoch(name, ns, token)
 }
 
+// OnBuildEvent is a no-op for the registry handler; only BusHandler
+// bridges build events to the bus.
+func (h *RegistryHandler) OnBuildEvent(name, ns string, connToken int64, evt *mitev1.BuildEvent) error {
+	return nil
+}
+
+// OnClaimRequest is a no-op for the registry handler; only BusHandler
+// bridges a claim to the ledger.
+func (h *RegistryHandler) OnClaimRequest(name, ns string, connToken int64, req *mitev1.ClaimRequest, send Sender) {
+}
+
+// OnLogChunk is a no-op for the registry handler; only BusHandler writes a
+// log chunk to the blob store.
+func (h *RegistryHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {}
+
+// OnTailAck is a no-op for the registry handler; only BusHandler tracks a
+// tail lease.
+func (h *RegistryHandler) OnTailAck(name, ns string, ack *mitev1.TailAck) {}
+
+// OnCrossTenantRequest is a no-op for the registry handler; only
+// BusHandler bridges a cross-tenant request to the record store.
+func (h *RegistryHandler) OnCrossTenantRequest(name, ns string, connToken int64, req *mitev1.CrossTenantRequest, send Sender) {
+}
+
+// OnRunStateChunk is a no-op for the registry handler; only BusHandler
+// writes a run-state object to the blob store.
+func (h *RegistryHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {}
+
+// OnRunStateRequest is a no-op for the registry handler; only BusHandler
+// reads a run-state object from the blob store.
+func (h *RegistryHandler) OnRunStateRequest(name, ns string, req *mitev1.RunStateRequest, send Sender) {
+}
+
 // OnDisconnect unregisters the mite and broadcasts.
 func (h *RegistryHandler) OnDisconnect(name, ns string, token int64) {
 	// Ignore a late teardown from a stream the mite has already replaced —

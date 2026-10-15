@@ -598,7 +598,7 @@ plugins:
 		Logger:            slog.Default(),
 		OperatorNamespace: "varroa",
 		Brood:             newFakeBrood(&client.fakeResourceClient),
-		ConfigBrood:       &stubConfigBrood{client: &client.fakeResourceClient, operatorNs: "varroa"},
+		ConfigBrood:       &stubConfigBrood{client: &client.fakeResourceClient},
 	}
 	handler := NewRouter(deps) // strips /api/v1
 	srv := httptest.NewServer(handler)

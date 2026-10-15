@@ -1,0 +1,13 @@
+items:
+  - kind: pipeline
+    name: pipeline-varroa-template
+    displayName: "Pipeline From Template"
+    description: "Pipeline job bound to a catalog-delivered template"
+    definition:
+      varroaTemplate:
+        template: golang-service
+        templateVersion: "2.1.0"
+        values:
+          goVersion: "1.22"
+          replicas: 3
+          runTests: true

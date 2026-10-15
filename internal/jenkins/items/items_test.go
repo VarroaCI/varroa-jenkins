@@ -2,6 +2,7 @@ package items
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 )
@@ -38,6 +41,108 @@ func TestItemValidate(t *testing.T) {
 		{"missing name", Item{Kind: "folder", Name: ""}, true},
 		{"unknown kind", Item{Kind: "widget", Name: "x"}, true},
 		{"empty kind", Item{Name: "x"}, true},
+		{"valid varroaUpstream trigger", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "SUCCESS"}}},
+		}, false},
+		{"valid varroaUpstream trigger with default result", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release"}}},
+		}, false},
+		{"varroaUpstream trigger missing tenant", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Job: "release"}}},
+		}, true},
+		{"varroaUpstream trigger missing job", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha"}}},
+		}, true},
+		{"varroaUpstream trigger invalid result", Item{Kind: "freeStyle", Name: "my-job",
+			Triggers: []Trigger{{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "FLAKY"}}},
+		}, true},
+		{"valid item-level string parameter", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+		}, false},
+		{"parameter with no kind set", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{}},
+		}, true},
+		{"parameter with two kinds set", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "A"}, BooleanParam: &BooleanParameter{Name: "A"}}},
+		}, true},
+		{"parameter missing name", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{}}},
+		}, true},
+		{"choice parameter with no choices", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{Choice: &ChoiceParameter{Name: "ENV"}}},
+		}, true},
+		{"valid property-level parameter", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}}},
+		}, false},
+		{"property-level parameter missing name", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{}}},
+			}}},
+		}, true},
+		{"duplicate parameter name within one source", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{
+				{String: &StringParameter{Name: "BRANCH"}},
+				{String: &StringParameter{Name: "BRANCH"}},
+			},
+		}, true},
+		{"duplicate parameter name across both sources", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Parameters: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{BooleanParam: &BooleanParameter{Name: "BRANCH"}}},
+			}}},
+		}, true},
+		{"valid durability hint", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "PERFORMANCE_OPTIMIZED"}}},
+		}, false},
+		{"invalid durability hint", Item{Kind: "pipeline", Name: "my-job",
+			Definition: &PipelineDefinition{Script: "echo hi"},
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "FAST_AND_LOOSE"}}},
+		}, true},
+		{"durability hint on a folder is rejected", Item{Kind: "folder", Name: "my-folder",
+			Properties: []Property{{DurabilityHint: &DurabilityHint{Hint: "MAX_SURVIVABILITY"}}},
+		}, true},
+		{"parameters on a multibranch item is rejected", Item{Kind: "multibranch", Name: "my-branches",
+			SourcesList: []BranchSourceEntry{{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"}}},
+			Parameters:  []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+		}, true},
+		{"parameters on an organizationFolder item is rejected", Item{Kind: "organizationFolder", Name: "my-org",
+			Navigators: []SCMNavigator{{GitHub: &GitHubNavigator{RepoOwner: "org"}}},
+			Properties: []Property{{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}}},
+		}, true},
+		{"orphanedItemStrategy on a multibranch item", Item{Kind: "multibranch", Name: "my-branches",
+			SourcesList:          []BranchSourceEntry{{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"}}},
+			OrphanedItemStrategy: &OrphanedStrategy{DaysToKeep: 7, NumToKeep: 5},
+		}, false},
+		{"orphanedItemStrategy on a pipeline item is rejected", Item{Kind: "pipeline", Name: "my-pipeline",
+			Definition:           &PipelineDefinition{Script: "echo hi"},
+			OrphanedItemStrategy: &OrphanedStrategy{DaysToKeep: 7},
+		}, true},
+		{"orphanedItemStrategy on an organizationFolder item is rejected", Item{Kind: "organizationFolder", Name: "my-org",
+			Navigators:           []SCMNavigator{{GitHub: &GitHubNavigator{RepoOwner: "org"}}},
+			OrphanedItemStrategy: &OrphanedStrategy{DaysToKeep: 7},
+		}, true},
+		{"negative daysToKeep is rejected", Item{Kind: "multibranch", Name: "my-branches",
+			SourcesList:          []BranchSourceEntry{{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"}}},
+			OrphanedItemStrategy: &OrphanedStrategy{DaysToKeep: -1},
+		}, true},
+		{"negative numToKeep is rejected", Item{Kind: "multibranch", Name: "my-branches",
+			SourcesList:          []BranchSourceEntry{{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"}}},
+			OrphanedItemStrategy: &OrphanedStrategy{NumToKeep: -5},
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -297,6 +402,143 @@ func TestGenerateConfigXMLPipeline(t *testing.T) {
 	}
 }
 
+// TestGenerateConfigXMLPipelineWithParameters asserts that an item-level
+// parameters block on a pipeline item renders a
+// ParametersDefinitionProperty, so a re-fired trigger carries a non-empty
+// params_digest.
+func TestGenerateConfigXMLPipelineWithParameters(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "pipeline { agent any; stages { stage('x') { steps { echo 'ok' } } } }",
+		},
+		Parameters: []Parameter{
+			{String: &StringParameter{Name: "BRANCH", DefaultValue: "main", Trim: true}},
+			{Choice: &ChoiceParameter{Name: "ENV", Choices: []string{"dev", "prod"}}},
+			{BooleanParam: &BooleanParameter{Name: "DEBUG", DefaultValue: true}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") {
+		t.Fatalf("expected ParametersDefinitionProperty in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<parameterDefinitions>") {
+		t.Fatalf("expected a parameterDefinitions wrapper around every definition, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.StringParameterDefinition") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected string parameter BRANCH in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.ChoiceParameterDefinition") || !strings.Contains(xml, "<name>ENV</name>") {
+		t.Errorf("expected choice parameter ENV in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<string>dev</string>") || !strings.Contains(xml, "<string>prod</string>") {
+		t.Errorf("expected choice values dev/prod in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "hudson.model.BooleanParameterDefinition") || !strings.Contains(xml, "<name>DEBUG</name>") {
+		t.Errorf("expected boolean parameter DEBUG in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLPipelineWithPropertyLevelParameters asserts that a
+// parameters property nested under properties also renders a
+// ParametersDefinitionProperty, the same as the item-level spelling.
+func TestGenerateConfigXMLPipelineWithPropertyLevelParameters(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "echo hi",
+		},
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected property-level BRANCH parameter in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLPipelineMergesBothParameterSpellings asserts that a
+// pipeline item declaring parameters both ways carries every parameter
+// from both sources on one job, matching the pipelines API's own merge.
+func TestGenerateConfigXMLPipelineMergesBothParameterSpellings(t *testing.T) {
+	item := Item{
+		Kind: "pipeline",
+		Name: "my-pipeline",
+		Definition: &PipelineDefinition{
+			Script: "echo hi",
+		},
+		Parameters: []Parameter{{String: &StringParameter{Name: "VERSION"}}},
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{BooleanParam: &BooleanParameter{Name: "DRY_RUN"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<name>VERSION</name>") {
+		t.Errorf("expected item-level VERSION parameter in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<name>DRY_RUN</name>") {
+		t.Errorf("expected property-level DRY_RUN parameter in XML, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleWithParameters(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "my-job",
+		Parameters: []Parameter{
+			{String: &StringParameter{Name: "BRANCH", DefaultValue: "main"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") {
+		t.Fatalf("expected ParametersDefinitionProperty in XML, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected string parameter BRANCH in XML, got: %s", xml)
+	}
+}
+
+// TestGenerateConfigXMLFreeStyleWithPropertyLevelParameters asserts that a
+// freeStyle item's property-level parameters render too, matching the
+// pipeline renderer's merge of both spellings.
+func TestGenerateConfigXMLFreeStyleWithPropertyLevelParameters(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "my-job",
+		Properties: []Property{
+			{Parameters: &ParametersProperty{
+				ParameterDefinitions: []Parameter{{String: &StringParameter{Name: "BRANCH"}}},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "hudson.model.ParametersDefinitionProperty") || !strings.Contains(xml, "<name>BRANCH</name>") {
+		t.Errorf("expected property-level BRANCH parameter in XML, got: %s", xml)
+	}
+}
+
 func TestGenerateConfigXMLFreeStyleWithShell(t *testing.T) {
 	item := Item{
 		Kind:        "freeStyle",
@@ -336,6 +578,72 @@ func TestGenerateConfigXMLFreeStyleWithLabel(t *testing.T) {
 	}
 	if !strings.Contains(xml, "<assignedNode>agent</assignedNode>") {
 		t.Errorf("expected agent label in XML, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleWithVarroaUpstream(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "rebuild",
+		Triggers: []Trigger{
+			{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release", Result: "SUCCESS"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger") {
+		t.Errorf("expected VarroaUpstreamTrigger element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<spec></spec>") {
+		t.Errorf("expected an empty spec element on VarroaUpstreamTrigger, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<tenant>alpha</tenant>") {
+		t.Errorf("expected tenant element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<job>release</job>") {
+		t.Errorf("expected job element, got: %s", xml)
+	}
+	if !strings.Contains(xml, "<result>SUCCESS</result>") {
+		t.Errorf("expected result element, got: %s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleVarroaUpstreamDefaultsResult(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "rebuild",
+		Triggers: []Trigger{
+			{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "alpha", Job: "release"}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<result>SUCCESS</result>") {
+		t.Errorf("expected the SUCCESS default, got: %s", xml)
+	}
+}
+
+func TestParseVarroaUpstreamInvalidResultFailsComposition(t *testing.T) {
+	yaml := `items:
+  - kind: freeStyle
+    name: rebuild
+    triggers:
+      - varroaUpstream:
+          tenant: alpha
+          job: release
+          result: FLAKY`
+	_, err := Parse(yaml)
+	if err == nil {
+		t.Fatal("expected error for invalid varroaUpstream result")
+	}
+	for _, want := range []string{"SUCCESS", "UNSTABLE", "FAILURE"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name %q", err.Error(), want)
+		}
 	}
 }
 
@@ -515,5 +823,1442 @@ items:
 				}
 			}
 		})
+	}
+}
+
+func sshCredentialFolder(cred BasicSSHUserPrivateKeyCredential) Item {
+	return Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{
+					Credentials: []FolderCredential{{BasicSSHUserPrivateKey: &cred}},
+				}},
+			}},
+		},
+	}
+}
+
+func TestBasicSSHUserPrivateKey_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{BasicSSHUserPrivateKey: &BasicSSHUserPrivateKeyCredential{
+		ID:               "deploy-key",
+		Scope:            "GLOBAL",
+		Username:         "git",
+		PrivateKeySource: PrivateKeySource{DirectEntry: &DirectEntryPrivateKeySource{PrivateKey: "KEY"}},
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	ssh, _ := doc["basicSSHUserPrivateKey"].(map[string]any)
+	if ssh == nil {
+		t.Fatalf("marshalled YAML has no basicSSHUserPrivateKey key:\n%s", out)
+	}
+	if ssh["id"] != "deploy-key" || ssh["scope"] != "GLOBAL" || ssh["username"] != "git" {
+		t.Errorf("unexpected credential fields: %v", ssh)
+	}
+	source, _ := ssh["privateKeySource"].(map[string]any)
+	direct, _ := source["directEntry"].(map[string]any)
+	if direct == nil || direct["privateKey"] != "KEY" {
+		t.Errorf("privateKeySource.directEntry.privateKey is not KEY:\n%s", out)
+	}
+	if _, ok := ssh["passphrase"]; ok {
+		t.Errorf("an empty passphrase must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.BasicSSHUserPrivateKey == nil || back.BasicSSHUserPrivateKey.PrivateKeySource.DirectEntry == nil ||
+		back.BasicSSHUserPrivateKey.PrivateKeySource.DirectEntry.PrivateKey != "KEY" {
+		t.Errorf("round trip lost the key: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_BasicSSHUserPrivateKey(t *testing.T) {
+	key := "-----BEGIN FIXTURE KEY-----\nabc<def&ghi\n-----END FIXTURE KEY-----"
+	cases := []struct {
+		name       string
+		passphrase string
+		wantPass   string
+	}{
+		{"with passphrase", "s3cret", "<passphrase>s3cret</passphrase>"},
+		{"no passphrase", "", "<passphrase></passphrase>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := sshCredentialFolder(BasicSSHUserPrivateKeyCredential{
+				ID:               "deploy-key",
+				Scope:            "GLOBAL",
+				Description:      "GitHub deploy key",
+				Username:         "git",
+				Passphrase:       tc.passphrase,
+				PrivateKeySource: PrivateKeySource{DirectEntry: &DirectEntryPrivateKeySource{PrivateKey: key}},
+			})
+			got, err := GenerateConfigXML(item)
+			if err != nil {
+				t.Fatalf("GenerateConfigXML: %v", err)
+			}
+			for _, want := range []string{
+				"<com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey>",
+				`<privateKeySource class="com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey$DirectEntryPrivateKeySource">`,
+				"abc&lt;def&amp;ghi",
+				tc.wantPass,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("config.xml lacks %q:\n%s", want, got)
+				}
+			}
+			last := -1
+			for _, el := range []string{
+				"<scope>GLOBAL</scope>",
+				"<id>deploy-key</id>",
+				"<description>GitHub deploy key</description>",
+				"<username>git</username>",
+				"<privateKeySource",
+				"<passphrase>",
+			} {
+				idx := strings.Index(got, el)
+				if idx <= last {
+					t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+				}
+				last = idx
+			}
+		})
+	}
+}
+
+func TestBuildFolderProperties_BasicSSHUserPrivateKeyNoKeySource(t *testing.T) {
+	item := sshCredentialFolder(BasicSSHUserPrivateKeyCredential{ID: "deploy-key", Scope: "GLOBAL", Username: "git"})
+	_, err := GenerateConfigXML(item)
+	if err == nil {
+		t.Fatal("expected an error for a credential with no directEntry key source")
+	}
+	want := `basicSSHUserPrivateKey credential "deploy-key" has no directEntry private key source`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err, want)
+	}
+}
+
+func pipelineScriptItem(name string) Item {
+	return Item{Kind: "pipeline", Name: name, Definition: &PipelineDefinition{Script: "echo hi"}}
+}
+
+func TestGenerateConfigXMLPipelineTriggers(t *testing.T) {
+	item := pipelineScriptItem("nightly")
+	item.Triggers = []Trigger{
+		{Cron: &CronTrigger{Spec: "H 2 * * *"}},
+		{VarroaUpstream: &VarroaUpstreamTrigger{Tenant: "platform", Job: "release"}},
+		{GitHubPush: &GitHubPushTrigger{}},
+	}
+	item.Properties = []Property{{PipelineTriggers: &PipelineTriggers{Triggers: []Trigger{
+		{PollSCM: &PollSCMTrigger{ScmpollSpec: "H * * * *"}},
+	}}}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers>
+        <hudson.triggers.SCMTrigger>
+          <spec>H * * * *</spec>
+          <ignorePostCommitHooks>false</ignorePostCommitHooks>
+        </hudson.triggers.SCMTrigger>
+        <hudson.triggers.TimerTrigger>
+          <spec>H 2 * * *</spec>
+        </hudson.triggers.TimerTrigger>
+        <com.cloudbees.jenkins.GitHubPushTrigger plugin="github">
+          <spec></spec>
+        </com.cloudbees.jenkins.GitHubPushTrigger>
+        <org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger plugin="varroa-mite-auth">
+          <spec></spec>
+          <tenant>platform</tenant>
+          <job>release</job>
+          <result>SUCCESS</result>
+        </org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger>
+      </triggers>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>`
+	if !strings.Contains(xml, want) {
+		t.Errorf("pipeline triggers not rendered as PipelineTriggersJobProperty, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLPipelineNoTriggersOmitsProperty(t *testing.T) {
+	xml, err := GenerateConfigXML(pipelineScriptItem("plain"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(xml, "PipelineTriggersJobProperty") {
+		t.Errorf("a pipeline with no triggers must not render the property, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLFreeStyleTriggersRegression(t *testing.T) {
+	item := Item{Kind: "freeStyle", Name: "nightly-cleanup", Triggers: []Trigger{
+		{Cron: &CronTrigger{Spec: "H 3 * * *"}},
+		{PollSCM: &PollSCMTrigger{ScmpollSpec: "H/5 * * * *", IgnorePostCommitHooks: true}},
+		{GitHubPush: &GitHubPushTrigger{}},
+	}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		"<triggers>",
+		"<spec>H 3 * * *</spec>",
+		"<ignorePostCommitHooks>true</ignorePostCommitHooks>",
+		`<com.cloudbees.jenkins.GitHubPushTrigger plugin="github">`,
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("freeStyle XML missing %q, got:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "PipelineTriggersJobProperty") {
+		t.Errorf("freeStyle must not render PipelineTriggersJobProperty, got:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXMLPollSCMBlankSpecUsesDefault(t *testing.T) {
+	item := pipelineScriptItem("poll")
+	item.Triggers = []Trigger{{PollSCM: &PollSCMTrigger{ScmpollSpec: "  "}}}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(xml, "<spec>H * * * *</spec>") {
+		t.Errorf("blank pollSCM spec must render the default, got:\n%s", xml)
+	}
+}
+
+func TestItemValidateTriggerRules(t *testing.T) {
+	cron := func(spec string) Trigger { return Trigger{Cron: &CronTrigger{Spec: spec}} }
+	propTriggers := func(ts ...Trigger) []Property {
+		return []Property{{PipelineTriggers: &PipelineTriggers{Triggers: ts}}}
+	}
+	withTriggers := func(it Item, ts ...Trigger) Item { it.Triggers = ts; return it }
+	withProps := func(it Item, ps []Property) Item { it.Properties = ps; return it }
+
+	tests := []struct {
+		name    string
+		item    Item
+		wantErr string
+	}{
+		{"pipeline item-level cron", withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")), ""},
+		{"pipeline property cron", withProps(pipelineScriptItem("p"), propTriggers(cron("H 2 * * *"))), ""},
+		{"pipeline githubPush", withTriggers(pipelineScriptItem("p"), Trigger{GitHubPush: &GitHubPushTrigger{}}), ""},
+		{"pipeline two spellings, different types",
+			withProps(withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")),
+				propTriggers(Trigger{PollSCM: &PollSCMTrigger{ScmpollSpec: "H * * * *"}})), ""},
+		{"freeStyle item-level cron", withTriggers(Item{Kind: "freeStyle", Name: "f"}, cron("H 2 * * *")), ""},
+		{"freeStyle pipelineTriggers property",
+			withProps(Item{Kind: "freeStyle", Name: "f"}, propTriggers(cron("H 2 * * *"))),
+			"pipelineTriggers is only valid on kind=pipeline"},
+		{"folder triggers", withTriggers(Item{Kind: "folder", Name: "d"}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"folder pipelineTriggers property",
+			withProps(Item{Kind: "folder", Name: "d"}, propTriggers(cron("H 2 * * *"))),
+			"pipelineTriggers is only valid on kind=pipeline"},
+		{"multibranch triggers",
+			withTriggers(Item{Kind: "multibranch", Name: "m", SourcesList: []BranchSourceEntry{{}}}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"organizationFolder triggers",
+			withTriggers(Item{Kind: "organizationFolder", Name: "o", Navigators: []SCMNavigator{{}}}, cron("H 2 * * *")),
+			"triggers are only valid on kind=pipeline and kind=freeStyle"},
+		{"duplicate type in one spelling",
+			withTriggers(pipelineScriptItem("p"), cron("H 2 * * *"), cron("H 4 * * *")),
+			"more than one cron trigger"},
+		{"duplicate type across spellings",
+			withProps(withTriggers(pipelineScriptItem("p"), cron("H 2 * * *")), propTriggers(cron("H 4 * * *"))),
+			"more than one cron trigger"},
+		{"empty cron spec", withTriggers(pipelineScriptItem("p"), cron("  ")), "cron trigger requires spec"},
+		{"empty trigger entry", withTriggers(pipelineScriptItem("p"), Trigger{}),
+			"a trigger requires exactly one of"},
+		{"two types in one entry",
+			withTriggers(pipelineScriptItem("p"), Trigger{Cron: &CronTrigger{Spec: "H 2 * * *"}, GitHubPush: &GitHubPushTrigger{}}),
+			"a trigger requires exactly one of"},
+		{"missing kind with triggers reports kind",
+			withTriggers(Item{Name: "x"}, cron("H 2 * * *")), "kind is required"},
+		{"property varroaUpstream missing tenant",
+			withProps(pipelineScriptItem("p"), propTriggers(Trigger{VarroaUpstream: &VarroaUpstreamTrigger{Job: "release"}})),
+			"varroaUpstream trigger requires tenant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.item.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildTriggersXML_GenericTrigger(t *testing.T) {
+	item := Item{
+		Kind: "freeStyle",
+		Name: "hook",
+		Triggers: []Trigger{
+			{GenericTrigger: &GenericTrigger{
+				Token:                  "payments:gl",
+				RegexpFilterText:       "$ref",
+				RegexpFilterExpression: "^refs/heads/main$",
+				GenericVariables: []GenericVariable{
+					{Key: "ref", Value: "$.ref"},
+					{Key: "sha", Value: "$.after", DefaultValue: "none"},
+				},
+			}},
+		},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		`<org.jenkinsci.plugins.gwt.GenericTrigger plugin="generic-webhook-trigger">`,
+		"<spec></spec>",
+		"<expressionType>JSONPath</expressionType>",
+		"<key>ref</key>",
+		"<defaultValue>none</defaultValue>",
+		"<regexpFilterText>$ref</regexpFilterText>",
+		"<regexpFilterExpression>^refs/heads/main$</regexpFilterExpression>",
+		"<genericRequestVariables></genericRequestVariables>",
+		"<genericHeaderVariables></genericHeaderVariables>",
+		"<printPostContent>false</printPostContent>",
+		"<causeString>Generic Cause</causeString>",
+		"<token>payments:gl</token>",
+		"<silentResponse>false</silentResponse>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("expected %q in config.xml, got: %s", want, xml)
+		}
+	}
+}
+
+func TestItemValidateGenericVariableExpressionType(t *testing.T) {
+	gen := func(expr string) Item {
+		return Item{Kind: "freeStyle", Name: "hook", Triggers: []Trigger{{GenericTrigger: &GenericTrigger{
+			Token:            "billing:hook",
+			GenericVariables: []GenericVariable{{Key: "k", Value: "$.k", ExpressionType: expr}},
+		}}}}
+	}
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+	}{
+		{"empty defaults to JSONPath", "", false},
+		{"JSONPath", "JSONPath", false},
+		{"XPath", "XPath", false},
+		{"HeaderExpression rejected", "HeaderExpression", true},
+		{"lowercase rejected", "jsonpath", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := gen(tt.expr)
+			if err := item.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestItemValidateGenericTriggerRequiresToken(t *testing.T) {
+	item := Item{Kind: "freeStyle", Name: "hook", Triggers: []Trigger{{GenericTrigger: &GenericTrigger{}}}}
+	if err := item.Validate(); err == nil {
+		t.Fatal("expected an error for a genericTrigger with no token")
+	}
+}
+
+func TestParseGitHubPushTrigger(t *testing.T) {
+	m, err := Parse(`items:
+  - kind: pipeline
+    name: app
+    definition:
+      script: echo hi
+    triggers:
+      - githubPush: {}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(m.Items[0].Triggers) != 1 || m.Items[0].Triggers[0].GitHubPush == nil {
+		t.Fatalf("githubPush trigger not parsed: %+v", m.Items[0].Triggers)
+	}
+}
+
+// TestGenerateConfigXMLPipelineQuietPeriodAndResumeBlocked asserts that a
+// pipeline item's quietPeriod and resumeBlocked fields reach config.xml.
+func TestGenerateConfigXMLPipelineQuietPeriodAndResumeBlocked(t *testing.T) {
+	item := Item{
+		Kind:          "pipeline",
+		Name:          "quiet",
+		QuietPeriod:   7,
+		ResumeBlocked: true,
+		Definition:    &PipelineDefinition{Script: "echo hi"},
+	}
+	out, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "<quietPeriod>7</quietPeriod>") {
+		t.Errorf("expected the quiet period in XML, got: %s", out)
+	}
+	const resume = "<org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty>"
+	if strings.Count(out, resume) != 1 {
+		t.Errorf("expected one DisableResumeJobProperty in XML, got: %s", out)
+	}
+
+	// resumeBlocked and a disableResume property render one property.
+	item.Properties = []Property{{DisableResume: &DisableResume{}}}
+	out, err = GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Count(out, resume) != 1 {
+		t.Errorf("expected one DisableResumeJobProperty with both spellings, got: %s", out)
+	}
+
+	// The zero values render neither element.
+	out, err = GenerateConfigXML(Item{Kind: "pipeline", Name: "plain", Definition: &PipelineDefinition{Script: "echo hi"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(out, "quietPeriod") || strings.Contains(out, "DisableResumeJobProperty") {
+		t.Errorf("expected no quiet period and no resume property, got: %s", out)
+	}
+}
+
+// applyWithManagedCache applies yamlContent to an engine whose managed cache
+// holds managed, and returns the deleted paths and the cache it saved.
+func applyWithManagedCache(t *testing.T, managed map[string]string, yamlContent string) ([]string, map[string]string) {
+	t.Helper()
+	var deleted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/doDelete"):
+			deleted = append(deleted, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	mf := filepath.Join(t.TempDir(), "managed.json")
+	raw, err := json.Marshal(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mf, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{client: jenkins.NewClient(srv.URL, "test", "token"), managedFile: mf}
+	if _, err := engine.Apply(context.Background(), yamlContent); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	return deleted, engine.loadManaged()
+}
+
+func TestApplyIncremental_RetainKeepsUndeclaredManagedItems(t *testing.T) {
+	managed := map[string]string{
+		"held":           "h1",
+		"held/build":     "h2",
+		"gone":           "h3",
+		"active":         "h4",
+		"active/old-job": "h5",
+	}
+	deleted, saved := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+retain: [held]
+items:
+  - kind: folder
+    name: active
+`)
+	for _, d := range deleted {
+		if strings.Contains(d, "/job/held") {
+			t.Errorf("a retained path was deleted: %s", d)
+		}
+	}
+	if len(deleted) != 2 {
+		t.Errorf("expected the two undeclared paths outside the retain list deleted, got %v", deleted)
+	}
+	if saved["held"] != "h1" || saved["held/build"] != "h2" {
+		t.Errorf("expected the retained paths kept in the cache with their hashes, got %v", saved)
+	}
+	if _, ok := saved["gone"]; ok {
+		t.Errorf("expected a deleted path out of the cache, got %v", saved)
+	}
+}
+
+func TestApplyIncremental_RetainMatchesWholeSegmentOnly(t *testing.T) {
+	managed := map[string]string{"payments": "h1", "payments/build": "h2"}
+	deleted, _ := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+retain: [pay]
+items: []
+`)
+	if len(deleted) != 2 {
+		t.Errorf("expected retain [pay] to keep nothing under payments, got deleted %v", deleted)
+	}
+}
+
+func TestApplyIncremental_RetainDroppedDeletesFolder(t *testing.T) {
+	managed := map[string]string{"held": "h1", "held/build": "h2"}
+	deleted, saved := applyWithManagedCache(t, managed, `removeStrategy:
+  items: sync
+items: []
+`)
+	if len(deleted) != 2 {
+		t.Errorf("expected the folder deleted once the retain list drops it, got %v", deleted)
+	}
+	if len(saved) != 0 {
+		t.Errorf("expected an empty cache, got %v", saved)
+	}
+}
+
+func fileCertificateFolder(file *FileCredential, cert *CertificateCredential) Item {
+	creds := []FolderCredential{}
+	if file != nil {
+		creds = append(creds, FolderCredential{File: file})
+	}
+	if cert != nil {
+		creds = append(creds, FolderCredential{Certificate: cert})
+	}
+	return Item{
+		Kind: "folder",
+		Name: "tenant",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{Credentials: creds}},
+			}},
+		},
+	}
+}
+
+func TestFileCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{File: &FileCredential{
+		ID:          "kubeconfig",
+		Scope:       "GLOBAL",
+		FileName:    "kubeconfig",
+		SecretBytes: "RklMRQ==",
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	file, _ := doc["file"].(map[string]any)
+	if file == nil {
+		t.Fatalf("marshalled YAML has no file key:\n%s", out)
+	}
+	if file["id"] != "kubeconfig" || file["scope"] != "GLOBAL" || file["fileName"] != "kubeconfig" || file["secretBytes"] != "RklMRQ==" {
+		t.Errorf("unexpected file credential fields: %v", file)
+	}
+	if _, ok := file["description"]; ok {
+		t.Errorf("an empty description must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.File == nil || back.File.SecretBytes != "RklMRQ==" || back.File.FileName != "kubeconfig" {
+		t.Errorf("round trip lost the file: %+v", back)
+	}
+}
+
+func TestCertificateCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{Certificate: &CertificateCredential{
+		ID:             "signing",
+		Scope:          "GLOBAL",
+		KeyStoreSource: KeyStoreSource{Uploaded: &UploadedKeyStoreSource{UploadedKeystore: "MIIBAv8="}},
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	cert, _ := doc["certificate"].(map[string]any)
+	if cert == nil {
+		t.Fatalf("marshalled YAML has no certificate key:\n%s", out)
+	}
+	source, _ := cert["keyStoreSource"].(map[string]any)
+	uploaded, _ := source["uploaded"].(map[string]any)
+	if uploaded == nil || uploaded["uploadedKeystore"] != "MIIBAv8=" {
+		t.Errorf("keyStoreSource.uploaded.uploadedKeystore is not MIIBAv8=:\n%s", out)
+	}
+	if _, ok := cert["password"]; ok {
+		t.Errorf("an empty password must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Certificate == nil || back.Certificate.KeyStoreSource.Uploaded == nil ||
+		back.Certificate.KeyStoreSource.Uploaded.UploadedKeystore != "MIIBAv8=" {
+		t.Errorf("round trip lost the keystore: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_FileCredential(t *testing.T) {
+	item := fileCertificateFolder(&FileCredential{
+		ID:          "kubeconfig",
+		Scope:       "GLOBAL",
+		Description: "cluster <&> file",
+		FileName:    "kubeconfig",
+		SecretBytes: "RklMRQ==",
+	}, nil)
+	got, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(got, "<org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl>") {
+		t.Fatalf("config.xml lacks the FileCredentialsImpl element:\n%s", got)
+	}
+	if !strings.Contains(got, "cluster &lt;&amp;&gt; file") {
+		t.Errorf("description is not XML-escaped:\n%s", got)
+	}
+	last := -1
+	for _, el := range []string{
+		"<scope>GLOBAL</scope>",
+		"<id>kubeconfig</id>",
+		"<description>cluster",
+		"<fileName>kubeconfig</fileName>",
+		"<secretBytes>RklMRQ==</secretBytes>",
+	} {
+		idx := strings.Index(got, el)
+		if idx <= last {
+			t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+		}
+		last = idx
+	}
+}
+
+func TestBuildFolderProperties_CertificateCredential(t *testing.T) {
+	cases := []struct {
+		name     string
+		password string
+		wantPass string
+	}{
+		{"with password", "s3cret", "<password>s3cret</password>"},
+		{"no password", "", "<password></password>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := fileCertificateFolder(nil, &CertificateCredential{
+				ID:          "signing",
+				Scope:       "GLOBAL",
+				Description: "signing cert",
+				Password:    tc.password,
+				KeyStoreSource: KeyStoreSource{Uploaded: &UploadedKeyStoreSource{
+					UploadedKeystore: "MIIBAv8=",
+				}},
+			})
+			got, err := GenerateConfigXML(item)
+			if err != nil {
+				t.Fatalf("GenerateConfigXML: %v", err)
+			}
+			for _, want := range []string{
+				"<com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl>",
+				`<keyStoreSource class="com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl$UploadedKeyStoreSource">`,
+				"<uploadedKeystoreBytes>MIIBAv8=</uploadedKeystoreBytes>",
+				tc.wantPass,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("config.xml lacks %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// folderLibraryItem returns a folder item that holds one folder library.
+func folderLibraryItem(lib LibraryConfiguration) Item {
+	return Item{
+		Kind: "folder",
+		Name: "apps",
+		Properties: []Property{{
+			FolderLibraries: &FolderLibrariesProperty{
+				Libraries: []LibraryConfig{{LibraryConfiguration: lib}},
+			},
+		}},
+	}
+}
+
+func TestValidateFolderLibraries(t *testing.T) {
+	gitSCM := &ModernSCMRetriever{SCM: LibrarySCM{Git: &GitSCMSource{Remote: "https://gitlab.example.com/x.git"}}}
+	ghSCM := &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "lib"}}}
+	legacy := &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+		UserRemoteConfigs: []UserRemoteConfig{{UserRemoteConfig: RemoteConfig{URL: "https://git.example.com/l.git"}}},
+	}}}
+	tests := []struct {
+		name    string
+		item    Item
+		wantErr string
+	}{
+		{
+			name: "valid github source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: ghSCM}}),
+		},
+		{
+			name: "valid git source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", AllowVersionOverride: true, Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+		},
+		{
+			name: "valid legacy source",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{LegacySCM: legacy}}),
+		},
+		{
+			name:    "library on a pipeline",
+			item:    Item{Kind: "pipeline", Name: "p", Properties: []Property{{FolderLibraries: &FolderLibrariesProperty{}}}},
+			wantErr: `folderLibraries is only valid on kind=folder, not kind=pipeline`,
+		},
+		{
+			name:    "empty name",
+			item:    folderLibraryItem(LibraryConfiguration{DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+			wantErr: "a folder library has no name",
+		},
+		{
+			name:    "no retriever",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main"}),
+			wantErr: "retriever must set exactly one of modernSCM and legacySCM",
+		},
+		{
+			name: "both retrievers",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				ModernSCM: gitSCM, LegacySCM: legacy,
+			}}),
+			wantErr: "retriever must set exactly one of modernSCM and legacySCM",
+		},
+		{
+			name:    "modern source with no scm",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{}}}),
+			wantErr: "modernSCM.scm must set exactly one of github and git",
+		},
+		{
+			name: "modern source with both github and git",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "o", Repository: "r"}, Git: &GitSCMSource{Remote: "r"}},
+			}}}),
+			wantErr: "modernSCM.scm must set exactly one of github and git",
+		},
+		{
+			name: "github without repository",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{RepoOwner: "o"}},
+			}}}),
+			wantErr: "modernSCM.scm.github requires repoOwner and repository",
+		},
+		{
+			name: "github configured by url without repositoryUrl",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{ConfiguredByURL: true}},
+			}}}),
+			wantErr: "modernSCM.scm.github with configuredByUrl requires repositoryUrl",
+		},
+		{
+			name: "git without remote",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{Git: &GitSCMSource{}},
+			}}}),
+			wantErr: "modernSCM.scm.git requires remote",
+		},
+		{
+			name: "legacy without gitSCM",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				LegacySCM: &LegacySCMRetriever{},
+			}}),
+			wantErr: "legacySCM.scm requires gitSCM with at least one userRemoteConfig",
+		},
+		{
+			name: "legacy remote without url",
+			item: folderLibraryItem(LibraryConfiguration{Name: "a", DefaultVersion: "main", Retriever: LibraryRetriever{
+				LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{UserRemoteConfigs: []UserRemoteConfig{{}}}}},
+			}}),
+			wantErr: "legacySCM.scm.gitSCM userRemoteConfig requires url",
+		},
+		{
+			name:    "no version and no override",
+			item:    folderLibraryItem(LibraryConfiguration{Name: "a", Retriever: LibraryRetriever{ModernSCM: gitSCM}}),
+			wantErr: "sets neither defaultVersion nor allowVersionOverride, so no @Library line can load it",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.item.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate: want error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Validate: error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildFolderProperties_CertificateCredentialNoKeyStoreSource(t *testing.T) {
+	item := fileCertificateFolder(nil, &CertificateCredential{ID: "signing", Scope: "GLOBAL"})
+	_, err := GenerateConfigXML(item)
+	if err == nil || !strings.Contains(err.Error(), `certificate credential "signing"`) {
+		t.Fatalf("expected an error naming the credential id, got %v", err)
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitSource(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "platform-lib", DefaultVersion: "v1.0.0", AllowVersionOverride: true,
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{Git: &GitSCMSource{
+			Remote: "https://gitlab.example.com/platform/jenkins-lib.git", CredentialsID: "gitlab-lib",
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`<scm class="jenkins.plugins.git.GitSCMSource" plugin="git">`,
+		"<remote>https://gitlab.example.com/platform/jenkins-lib.git</remote>",
+		"<credentialsId>gitlab-lib</credentialsId>",
+		"<jenkins.plugins.git.traits.BranchDiscoveryTrait>",
+		"<jenkins.plugins.git.traits.TagDiscoveryTrait>",
+		"<defaultVersion>v1.0.0</defaultVersion>",
+		"<allowVersionOverride>true</allowVersionOverride>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryLegacySCM(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "legacy-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+			UserRemoteConfigs: []UserRemoteConfig{{UserRemoteConfig: RemoteConfig{
+				URL: "https://git.example.com/platform/legacy-lib.git", CredentialsID: "git-lib",
+			}}},
+			Branches: []BranchSpec{{BranchSpec: BranchSpecConfig{Name: "main"}}},
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`<retriever class="org.jenkinsci.plugins.workflow.libs.SCMRetriever">`,
+		`<scm class="hudson.plugins.git.GitSCM" plugin="git">`,
+		"<url>https://git.example.com/platform/legacy-lib.git</url>",
+		"<credentialsId>git-lib</credentialsId>",
+		"<name>main</name>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitHubCredentials(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "gh-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "lib", CredentialsID: "github-lib",
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<credentialsId>github-lib</credentialsId>") {
+		t.Errorf("config.xml missing GitHub library credentialsId:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_MultibranchGitHubCredentials(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", CredentialsID: "github-cred"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<credentialsId>github-cred</credentialsId>") {
+		t.Errorf("multibranch config.xml missing GitHub source credentialsId:\n%s", xml)
+	}
+}
+
+func TestLibraryConfiguration_RequiredPlugins(t *testing.T) {
+	tests := []struct {
+		name string
+		lib  LibraryConfiguration
+		want []string
+	}{
+		{
+			name: "github",
+			lib: LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{GitHub: &GitHubSCMSource{}},
+			}}},
+			want: []string{"pipeline-groovy-lib", "github-branch-source"},
+		},
+		{
+			name: "git",
+			lib: LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+				SCM: LibrarySCM{Git: &GitSCMSource{}},
+			}}},
+			want: []string{"pipeline-groovy-lib", "git"},
+		},
+		{
+			name: "legacy",
+			lib:  LibraryConfiguration{Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{}}},
+			want: []string{"pipeline-groovy-lib", "git"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.lib.RequiredPlugins()
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("RequiredPlugins() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLibraryConfiguration_CredentialRefs(t *testing.T) {
+	lib := LibraryConfiguration{Retriever: LibraryRetriever{LegacySCM: &LegacySCMRetriever{SCM: SCM{GitSCM: &GitSCM{
+		UserRemoteConfigs: []UserRemoteConfig{
+			{UserRemoteConfig: RemoteConfig{URL: "u1", CredentialsID: "legacy-a"}},
+			{UserRemoteConfig: RemoteConfig{URL: "u2"}},
+		},
+	}}}}}
+	refs := lib.CredentialRefs()
+	if len(refs) != 1 || refs[0].ID != "legacy-a" {
+		t.Fatalf("CredentialRefs() = %+v, want one ref to legacy-a", refs)
+	}
+	if strings.Join(refs[0].Kinds, ",") != "usernamePassword,sshPrivateKey,githubApp" {
+		t.Fatalf("legacy kinds = %v, want usernamePassword, sshPrivateKey and githubApp", refs[0].Kinds)
+	}
+
+	gh := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+		SCM: LibrarySCM{GitHub: &GitHubSCMSource{CredentialsID: "gh-cred"}},
+	}}}
+	ghRefs := gh.CredentialRefs()
+	if len(ghRefs) != 1 || strings.Join(ghRefs[0].Kinds, ",") != "usernamePassword,githubApp" {
+		t.Fatalf("GitHub CredentialRefs() = %+v, want usernamePassword and githubApp", ghRefs)
+	}
+
+	none := LibraryConfiguration{Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{
+		SCM: LibrarySCM{Git: &GitSCMSource{Remote: "r"}},
+	}}}
+	if refs := none.CredentialRefs(); len(refs) != 0 {
+		t.Fatalf("CredentialRefs() with no credential = %+v, want none", refs)
+	}
+}
+
+func TestGenerateConfigXML_GiteaSourceDefaultTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{ServerURL: "https://git.example.org/", RepoOwner: "acme", Repository: "app", CredentialsID: "gitea-cred"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		`class="org.jenkinsci.plugin.gitea.GiteaSCMSource"`,
+		`plugin="gitea"`,
+		"<serverUrl>https://git.example.org</serverUrl>",
+		"<repoOwner>acme</repoOwner>",
+		"<repository>app</repository>",
+		"<credentialsId>gitea-cred</credentialsId>",
+		"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait",
+		"org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait",
+		"org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$TrustContributors",
+		"org.jenkinsci.plugin.gitea.WebhookRegistrationTrait",
+		"<mode>DISABLE</mode>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("gitea source XML missing %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "TagDiscoveryTrait") {
+		t.Errorf("default traits must not include tag discovery:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GiteaSourceDeclaredTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{
+				ServerURL:  "https://git.example.org",
+				RepoOwner:  "acme",
+				Repository: "app",
+				Traits: []GiteaTrait{
+					{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 2, Trust: "nobody"}},
+					{GiteaTagDiscovery: &GiteaTagTrait{}},
+				},
+			},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "ForkPullRequestDiscoveryTrait$TrustNobody") {
+		t.Errorf("fork trust nobody not rendered:\n%s", xml)
+	}
+	if !strings.Contains(xml, "org.jenkinsci.plugin.gitea.TagDiscoveryTrait") {
+		t.Errorf("declared tag trait not rendered:\n%s", xml)
+	}
+	if strings.Contains(xml, "BranchDiscoveryTrait") {
+		t.Errorf("undeclared branch trait rendered:\n%s", xml)
+	}
+	if !strings.Contains(xml, "<mode>DISABLE</mode>") {
+		t.Errorf("webhook trait must always render DISABLE:\n%s", xml)
+	}
+	itemEveryone := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			Gitea: &GiteaSCMSource{ServerURL: "https://git.example.org", RepoOwner: "acme", Repository: "app",
+				Traits: []GiteaTrait{{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "everyone"}}}},
+		}}}},
+	}
+	xmlEveryone, err := GenerateConfigXML(itemEveryone)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xmlEveryone, "ForkPullRequestDiscoveryTrait$TrustEveryone") {
+		t.Errorf("fork trust everyone not rendered:\n%s", xmlEveryone)
+	}
+}
+
+func TestGenerateConfigXML_GiteaNavigator(t *testing.T) {
+	item := Item{
+		Kind: "organizationFolder",
+		Name: "org",
+		Navigators: []SCMNavigator{{Gitea: &GiteaNavigator{
+			ServerURL:     "https://git.example.org/",
+			RepoOwner:     "acme",
+			CredentialsID: "gitea-cred",
+		}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		"org.jenkinsci.plugin.gitea.GiteaSCMNavigator",
+		"<serverUrl>https://git.example.org</serverUrl>",
+		"<repoOwner>acme</repoOwner>",
+		"<credentialsId>gitea-cred</credentialsId>",
+		"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait",
+		"<mode>DISABLE</mode>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("gitea navigator XML missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestValidate_GiteaSourceRejects(t *testing.T) {
+	mb := func(g GiteaSCMSource) Item {
+		return Item{Kind: "multibranch", Name: "mb", SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{
+			Source: BranchSourceConfig{Gitea: &g}}}}}
+	}
+	okSource := GiteaSCMSource{ServerURL: "https://git.example.org", RepoOwner: "acme", Repository: "app"}
+	tests := []struct {
+		name string
+		item Item
+	}{
+		{"missing serverUrl", mb(GiteaSCMSource{RepoOwner: "acme", Repository: "app"})},
+		{"bad scheme", mb(GiteaSCMSource{ServerURL: "ssh://git.example.org", RepoOwner: "acme", Repository: "app"})},
+		{"strategyId 4", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{GiteaBranchDiscovery: &GiteaStrategyTrait{StrategyID: 4}}}})},
+		{"bad trust", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "anyone"}}}})},
+		{"two keys in one trait", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme", Repository: "app",
+			Traits: []GiteaTrait{{
+				GiteaBranchDiscovery:      &GiteaStrategyTrait{StrategyID: 1},
+				GiteaPullRequestDiscovery: &GiteaStrategyTrait{StrategyID: 1},
+			}}})},
+		{"missing repository", mb(GiteaSCMSource{ServerURL: okSource.ServerURL, RepoOwner: "acme"})},
+		{"navigator missing repoOwner", Item{Kind: "organizationFolder", Name: "org",
+			Navigators: []SCMNavigator{{Gitea: &GiteaNavigator{ServerURL: okSource.ServerURL}}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.item.Validate(); err == nil {
+				t.Fatal("expected a validation error")
+			}
+		})
+	}
+	valid := mb(okSource)
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid gitea source rejected: %v", err)
+	}
+}
+
+// flattenXML joins the trimmed lines of an indented config.xml so a test can
+// match one element with its children on a single line.
+func flattenXML(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		b.WriteString(strings.TrimSpace(line))
+	}
+	return b.String()
+}
+
+func TestGenerateConfigXML_GitHubSourceDeclaredTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{
+				RepoOwner:  "org",
+				Repository: "repo",
+				Traits: []GitHubTrait{
+					{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: 3}},
+					{GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 2}},
+					{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 1, Trust: GitHubTrust{GitHubTrustEveryone: &GitHubTrustEveryone{}}}},
+					{HeadWildcardFilter: &HeadWildcardFilter{Includes: "main release/*", Excludes: "wip/*"}},
+					{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh-key"}},
+					{GitHubSkipNotifications: &GitHubSkipNotifications{}},
+				},
+			},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	flat := flattenXML(xml)
+	for _, want := range []string{
+		"<traits>",
+		"<org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait><strategyId>3</strategyId></org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>",
+		"<org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait><strategyId>2</strategyId></org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait>",
+		"<org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait><strategyId>1</strategyId>",
+		`<trust class="org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustEveryone"></trust>`,
+		`<jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait plugin="scm-api"><includes>main release/*</includes><excludes>wip/*</excludes></jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait>`,
+		"<org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait><credentialsId>ssh-key</credentialsId></org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait>",
+		`<org.jenkinsci.plugins.github.notifications.GithubSkipNotifications plugin="skip-notifications-trait"></org.jenkinsci.plugins.github.notifications.GithubSkipNotifications>`,
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("config.xml missing %q:\n%s", want, xml)
+		}
+	}
+	if strings.Contains(xml, "<org.jenkinsci.plugins.github_branch_source.") {
+		t.Errorf("trait element names must escape underscores as double underscores:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubSourceNoTraits(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo"},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if strings.Contains(xml, "<traits") {
+		t.Errorf("a GitHub source with no declared traits must render no traits element:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubForkTrustDefault(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: []GitHubTrait{
+				{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 2}},
+			}},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(flattenXML(xml), `ForkPullRequestDiscoveryTrait$TrustPermission"`) {
+		t.Errorf("fork trust without gitHubTrustEveryone must render TrustPermission:\n%s", xml)
+	}
+	if strings.Contains(xml, "TrustEveryone") {
+		t.Errorf("fork trust must not render TrustEveryone by default:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_GitHubWildcardIncludesDefault(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{Source: BranchSourceConfig{
+			GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: []GitHubTrait{
+				{HeadWildcardFilter: &HeadWildcardFilter{Excludes: "wip/*"}},
+			}},
+		}}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(xml, "<includes>*</includes>") {
+		t.Errorf("a wildcard filter with no includes must render includes *:\n%s", xml)
+	}
+}
+
+func TestGenerateConfigXML_LegacyGitHubSourceFields(t *testing.T) {
+	item := Item{
+		Kind: "multibranch",
+		Name: "mb",
+		SourcesList: []BranchSourceEntry{{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "repo", RepositoryURL: "https://github.example.com/org/repo",
+			CredentialsID: "gh-cred",
+		}}},
+	}
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	for _, want := range []string{
+		"<repository>repo</repository>",
+		"<repositoryUrl>https://github.example.com/org/repo</repositoryUrl>",
+		"<credentialsId>gh-cred</credentialsId>",
+	} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("legacy github source missing %q:\n%s", want, xml)
+		}
+	}
+}
+
+func TestGenerateConfigXML_FolderLibraryGitHubTraits(t *testing.T) {
+	item := folderLibraryItem(LibraryConfiguration{
+		Name: "gh-lib", DefaultVersion: "main",
+		Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+			RepoOwner: "org", Repository: "lib", Traits: []GitHubTrait{
+				{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: 1}},
+			},
+		}}}},
+	})
+	xml, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(flattenXML(xml), "<org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait><strategyId>1</strategyId>") {
+		t.Errorf("folder library GitHub source missing declared branch trait:\n%s", xml)
+	}
+}
+
+func TestParse_GitHubTraitValidation(t *testing.T) {
+	mb := func(traits ...GitHubTrait) Item {
+		return Item{Kind: "multibranch", Name: "mb", SourcesList: []BranchSourceEntry{{BranchSource: BranchSource{
+			Source: BranchSourceConfig{GitHub: &GitHubSCMSource{RepoOwner: "org", Repository: "repo", Traits: traits}}}}}}
+	}
+	lib := func(traits ...GitHubTrait) Item {
+		return folderLibraryItem(LibraryConfiguration{
+			Name: "gh-lib", DefaultVersion: "main",
+			Retriever: LibraryRetriever{ModernSCM: &ModernSCMRetriever{SCM: LibrarySCM{GitHub: &GitHubSCMSource{
+				RepoOwner: "org", Repository: "lib", Traits: traits,
+			}}}},
+		})
+	}
+	branch := func(id int) GitHubTrait {
+		return GitHubTrait{GitHubBranchDiscovery: &GitHubBranchDiscovery{StrategyID: id}}
+	}
+	tests := []struct {
+		name string
+		item Item
+		want string
+	}{
+		{"two keys in one trait", mb(GitHubTrait{
+			GitHubBranchDiscovery:      &GitHubBranchDiscovery{StrategyID: 1},
+			GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 1},
+		}), "a github trait entry must set exactly one key"},
+		{"empty trait entry", mb(GitHubTrait{}), "a github trait entry must set exactly one key"},
+		{"duplicate kind", mb(branch(1), branch(2)), "github trait gitHubBranchDiscovery is declared more than once"},
+		{"strategyId 0", mb(branch(0)), "gitHubBranchDiscovery strategyId 0 must be 1, 2, or 3"},
+		{"strategyId 4", mb(GitHubTrait{GitHubPullRequestDiscovery: &GitHubPullRequestDiscovery{StrategyID: 4}}),
+			"gitHubPullRequestDiscovery strategyId 4 must be 1, 2, or 3"},
+		{"empty SSH credentialsId", mb(GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "  "}}),
+			"gitHubSshCheckout requires credentialsId"},
+		{"duplicate skip notifications", mb(GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}},
+			GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}}),
+			"github trait githubSkipNotifications is declared more than once"},
+		{"skip notifications with another key", mb(GitHubTrait{
+			GitHubSkipNotifications: &GitHubSkipNotifications{},
+			GitHubBranchDiscovery:   &GitHubBranchDiscovery{StrategyID: 1},
+		}), "a github trait entry must set exactly one key"},
+		{"library strategyId 4", lib(GitHubTrait{GitHubForkDiscovery: &GitHubForkDiscovery{StrategyID: 4}}),
+			`item "apps": folder library "gh-lib": modernSCM.scm.github: gitHubForkDiscovery strategyId 4`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.item.Validate()
+			if err == nil {
+				t.Fatal("expected a validation error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not contain %q", err, tt.want)
+			}
+		})
+	}
+	valid := mb(branch(3), GitHubTrait{GitHubSshCheckout: &GitHubSshCheckout{CredentialsID: "ssh"}},
+		GitHubTrait{GitHubSkipNotifications: &GitHubSkipNotifications{}})
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid GitHub traits rejected: %v", err)
+	}
+}
+
+func TestParse_GitHubSkipNotificationsTrait(t *testing.T) {
+	yaml := `items:
+  - kind: multibranch
+    name: mb
+    sourcesList:
+      - branchSource:
+          source:
+            github:
+              repoOwner: org
+              repository: repo
+              traits:
+                - githubSkipNotifications: {}`
+	m, err := Parse(yaml)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gh := m.Items[0].SourcesList[0].BranchSource.Source.GitHub
+	if gh == nil || len(gh.Traits) != 1 {
+		t.Fatalf("expected one GitHub trait, got %+v", gh)
+	}
+	if gh.Traits[0].GitHubSkipNotifications == nil {
+		t.Fatal("githubSkipNotifications trait was not parsed")
+	}
+	xml, err := GenerateConfigXML(m.Items[0])
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	want := `<org.jenkinsci.plugins.github.notifications.GithubSkipNotifications plugin="skip-notifications-trait">`
+	if !strings.Contains(flattenXML(xml), want) {
+		t.Errorf("config.xml missing %q:\n%s", want, xml)
+	}
+}
+
+func TestGitHubAppCredential_MarshalsJCasCShape(t *testing.T) {
+	cred := FolderCredential{GitHubApp: &GitHubAppCredential{
+		ID:         "github-app",
+		Scope:      "GLOBAL",
+		AppID:      "123456",
+		PrivateKey: "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+		Owner:      "example-org",
+		APIURI:     "https://api.github.example.com",
+	}}
+	out, err := yaml.Marshal(cred)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal into a map: %v", err)
+	}
+	app, _ := doc["gitHubApp"].(map[string]any)
+	if app == nil {
+		t.Fatalf("marshalled YAML has no gitHubApp key:\n%s", out)
+	}
+	if app["appID"] != "123456" || app["owner"] != "example-org" || app["apiUri"] != "https://api.github.example.com" {
+		t.Errorf("unexpected gitHubApp fields:\n%s", out)
+	}
+	if _, ok := app["description"]; ok {
+		t.Errorf("an empty description must be omitted:\n%s", out)
+	}
+
+	var back FolderCredential
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.GitHubApp == nil || back.GitHubApp.AppID != "123456" || back.GitHubApp.PrivateKey != cred.GitHubApp.PrivateKey {
+		t.Errorf("round trip lost the app credential: %+v", back)
+	}
+}
+
+func TestBuildFolderProperties_GitHubAppCredential(t *testing.T) {
+	item := Item{
+		Kind: "folder",
+		Name: "github-app-folder",
+		Properties: []Property{
+			{FolderCredentialsProperty: &FolderCredentialsProperty{
+				FolderCredentials: []FolderCredentialEntry{{
+					Credentials: []FolderCredential{{GitHubApp: &GitHubAppCredential{
+						ID:          "github-app",
+						Scope:       "GLOBAL",
+						Description: "checks <&> app",
+						AppID:       "123456",
+						PrivateKey:  "-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n",
+						Owner:       "example-org",
+						APIURI:      "https://api.github.example.com",
+					}}},
+				}},
+			}},
+		},
+	}
+	got, err := GenerateConfigXML(item)
+	if err != nil {
+		t.Fatalf("GenerateConfigXML: %v", err)
+	}
+	if !strings.Contains(got, "<org.jenkinsci.plugins.github__branch__source.GitHubAppCredentials>") {
+		t.Fatalf("config.xml lacks the GitHubAppCredentials element:\n%s", got)
+	}
+	if !strings.Contains(got, "checks &lt;&amp;&gt; app") {
+		t.Errorf("description is not XML-escaped:\n%s", got)
+	}
+	last := -1
+	for _, el := range []string{
+		"<scope>GLOBAL</scope>",
+		"<id>github-app</id>",
+		"<appID>123456</appID>",
+		"<privateKey>-----BEGIN PRIVATE KEY-----",
+		"<apiUri>https://api.github.example.com</apiUri>",
+		"<owner>example-org</owner>",
+	} {
+		idx := strings.Index(got, el)
+		if idx <= last {
+			t.Fatalf("element %q is missing or out of order in:\n%s", el, got)
+		}
+		last = idx
 	}
 }

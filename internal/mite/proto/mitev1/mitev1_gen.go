@@ -11,6 +11,239 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type AbortInputPayload struct {
+	RunId       string      `json:"run_id"`
+	JobPath     string      `json:"job_path"`
+	BuildNumber int64       `json:"build_number,omitempty"`
+	InputId     string      `json:"input_id"`
+	ActingUser  *ActingUser `json:"acting_user,omitempty"`
+}
+
+type ActingUser struct {
+	Name   string   `json:"name"`
+	Email  string   `json:"email,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
+// BranchScanHead is one head a branch scan adds, changes, or orphans.
+type BranchScanHead struct {
+	Name    string `json:"name,omitempty"`
+	JobPath string `json:"job_path,omitempty"`
+}
+
+// BranchScanResult records one requested branch scan of a multibranch
+type BranchScanResult struct {
+	ScanId           string            `json:"scan_id,omitempty"`
+	State            string            `json:"state,omitempty"`
+	Actor            string            `json:"actor,omitempty"`
+	RequestedAt      string            `json:"requested_at,omitempty"`
+	EndedAt          string            `json:"ended_at,omitempty"`
+	Result           string            `json:"result,omitempty"`
+	Message          string            `json:"message,omitempty"`
+	NewHeadRefs      []*BranchScanHead `json:"new_head_refs,omitempty"`
+	ChangedHeadRefs  []*BranchScanHead `json:"changed_head_refs,omitempty"`
+	OrphanedHeadRefs []*BranchScanHead `json:"orphaned_head_refs,omitempty"`
+}
+
+type BuildArtifact struct {
+	Path        string `json:"path"`
+	DisplayPath string `json:"display_path,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	Storage     string `json:"storage"`
+	BlobKey     string `json:"blob_key"`
+}
+
+type BuildChange struct {
+	CommitId          string `json:"commit_id,omitempty"`
+	AuthorId          string `json:"author_id,omitempty"`
+	AuthorDisplayName string `json:"author_display_name,omitempty"`
+	Message           string `json:"message,omitempty"`
+	TimestampMillis   int64  `json:"timestamp_millis,omitempty"`
+	AffectedPathCount int    `json:"affected_path_count,omitempty"`
+}
+
+type BuildEvent struct {
+	Phase                   string              `json:"phase"`
+	Seq                     int64               `json:"seq"`
+	EmittedAtMillis         int64               `json:"emitted_at_millis"`
+	RunId                   string              `json:"run_id,omitempty"`
+	IntentKey               string              `json:"intent_key,omitempty"`
+	JobPath                 string              `json:"job_path"`
+	JobDisplayName          string              `json:"job_display_name,omitempty"`
+	BuildNumber             int64               `json:"build_number"`
+	BuildDisplayName        string              `json:"build_display_name,omitempty"`
+	URL                     string              `json:"url,omitempty"`
+	Result                  string              `json:"result,omitempty"`
+	Actor                   string              `json:"actor,omitempty"`
+	CauseTypes              []string            `json:"cause_types,omitempty"`
+	CauseDescription        string              `json:"cause_description,omitempty"`
+	UpstreamJobPath         string              `json:"upstream_job_path,omitempty"`
+	UpstreamBuildNumber     int64               `json:"upstream_build_number,omitempty"`
+	QueuedAtMillis          int64               `json:"queued_at_millis,omitempty"`
+	StartedAtMillis         int64               `json:"started_at_millis,omitempty"`
+	CompletedAtMillis       int64               `json:"completed_at_millis,omitempty"`
+	DurationMillis          int64               `json:"duration_millis,omitempty"`
+	QueueWaitMillis         int64               `json:"queue_wait_millis,omitempty"`
+	EstimatedDurationMillis int64               `json:"estimated_duration_millis,omitempty"`
+	Parameters              map[string]string   `json:"parameters,omitempty"`
+	MaskedParameterNames    []string            `json:"masked_parameter_names,omitempty"`
+	ScmUrl                  string              `json:"scm_url,omitempty"`
+	ScmHead                 string              `json:"scm_head,omitempty"`
+	ScmRevision             string              `json:"scm_revision,omitempty"`
+	Changes                 []*BuildChange      `json:"changes,omitempty"`
+	ChangeCount             int                 `json:"change_count,omitempty"`
+	TestTotal               int                 `json:"test_total,omitempty"`
+	TestPassed              int                 `json:"test_passed,omitempty"`
+	TestFailed              int                 `json:"test_failed,omitempty"`
+	TestSkipped             int                 `json:"test_skipped,omitempty"`
+	Stages                  []*BuildStage       `json:"stages,omitempty"`
+	Branch                  string              `json:"branch,omitempty"`
+	Artifacts               []*BuildArtifact    `json:"artifacts,omitempty"`
+	LogSummary              *LogSummary         `json:"log_summary,omitempty"`
+	TemplateName            string              `json:"template_name,omitempty"`
+	TemplateVersion         string              `json:"template_version,omitempty"`
+	MarkerPath              string              `json:"marker_path,omitempty"`
+	MarkerRevision          string              `json:"marker_revision,omitempty"`
+	DeliveryId              string              `json:"delivery_id,omitempty"`
+	Libraries               []*BuildLibrary     `json:"libraries,omitempty"`
+	DefinitionPath          string              `json:"definition_path,omitempty"`
+	PodTemplates            []*BuildPodTemplate `json:"pod_templates,omitempty"`
+	Summary                 string              `json:"summary,omitempty"`
+	Inputs                  []*BuildInput       `json:"inputs,omitempty"`
+	TestReport              *BuildTestReport    `json:"test_report,omitempty"`
+	TestCases               []*BuildTestCase    `json:"test_cases,omitempty"`
+	ReplayOf                string              `json:"replay_of,omitempty"`
+	GrantedBuildNumber      int64               `json:"granted_build_number,omitempty"`
+	RestartOf               string              `json:"restart_of,omitempty"`
+	RestartStage            string              `json:"restart_stage,omitempty"`
+	RestartStages           []string            `json:"restart_stages,omitempty"`
+	RestartRefusal          string              `json:"restart_refusal,omitempty"`
+	ChangeRequest           *ChangeRequestInfo  `json:"change_request,omitempty"`
+	RejectedSignature       string              `json:"rejected_signature,omitempty"`
+	ScmForge                string              `json:"scm_forge,omitempty"`
+	TestSuites              []*BuildTestSuite   `json:"test_suites,omitempty"`
+}
+
+type BuildInput struct {
+	Id                 string                 `json:"id"`
+	Message            string                 `json:"message,omitempty"`
+	Ok                 string                 `json:"ok,omitempty"`
+	Submitter          string                 `json:"submitter,omitempty"`
+	SubmitterParameter string                 `json:"submitter_parameter,omitempty"`
+	Parameters         []*BuildInputParameter `json:"parameters,omitempty"`
+}
+
+type BuildInputParameter struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
+}
+
+type BuildLibrary struct {
+	Name            string `json:"name"`
+	Version         string `json:"version,omitempty"`
+	Revision        string `json:"revision,omitempty"`
+	RepositoryUrl   string `json:"repository_url,omitempty"`
+	RepositoryForge string `json:"repository_forge,omitempty"`
+}
+
+type BuildPodTemplate struct {
+	Name  string `json:"name"`
+	Label string `json:"label,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+type BuildStage struct {
+	StageId             string   `json:"stage_id"`
+	ParentId            string   `json:"parent_id,omitempty"`
+	ParentIds           []string `json:"parent_ids,omitempty"`
+	EnclosingId         string   `json:"enclosing_id,omitempty"`
+	Name                string   `json:"name,omitempty"`
+	NodeType            string   `json:"node_type"`
+	ParallelBranchName  string   `json:"parallel_branch_name,omitempty"`
+	Status              string   `json:"status"`
+	StartedAtMillis     int64    `json:"started_at_millis,omitempty"`
+	EndedAtMillis       int64    `json:"ended_at_millis,omitempty"`
+	DurationMillis      int64    `json:"duration_millis,omitempty"`
+	PauseDurationMillis int64    `json:"pause_duration_millis,omitempty"`
+	NodeName            string   `json:"node_name,omitempty"`
+	AgentLabel          string   `json:"agent_label,omitempty"`
+	Error               string   `json:"error,omitempty"`
+}
+
+type BuildTestCase struct {
+	Suite        string `json:"suite"`
+	ClassName    string `json:"class_name"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
+}
+
+type BuildTestReport struct {
+	BlobKey   string `json:"blob_key,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	CaseCount int    `json:"case_count,omitempty"`
+}
+
+// BuildTestSuite is the counter row of one test suite of a run.
+type BuildTestSuite struct {
+	Name       string `json:"name"`
+	Total      int    `json:"total"`
+	Failed     int    `json:"failed"`
+	Skipped    int    `json:"skipped"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+}
+
+type CancelBuildPayload struct {
+	RunId       string `json:"run_id"`
+	JobPath     string `json:"job_path"`
+	BuildNumber int64  `json:"build_number,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+}
+
+// ChangeRequestInfo names the change request (pull request) a
+type ChangeRequestInfo struct {
+	Id           string `json:"id,omitempty"`
+	Title        string `json:"title,omitempty"`
+	SourceBranch string `json:"source_branch,omitempty"`
+	TargetBranch string `json:"target_branch,omitempty"`
+	URL          string `json:"url,omitempty"`
+}
+
+type ClaimRequest struct {
+	RequestId              string `json:"request_id"`
+	Origin                 string `json:"origin"`
+	IntentKey              string `json:"intent_key"`
+	RunId                  string `json:"run_id"`
+	JobPath                string `json:"job_path"`
+	JobDisplayName         string `json:"job_display_name,omitempty"`
+	Branch                 string `json:"branch,omitempty"`
+	Actor                  string `json:"actor,omitempty"`
+	Cause                  string `json:"cause,omitempty"`
+	ParamsDigest           string `json:"params_digest,omitempty"`
+	Attempt                int    `json:"attempt,omitempty"`
+	RequestedAtMillis      int64  `json:"requested_at_millis,omitempty"`
+	CellInstance           string `json:"cell_instance,omitempty"`
+	JenkinsNextBuildNumber int64  `json:"jenkins_next_build_number,omitempty"`
+	NumberConflict         int64  `json:"number_conflict,omitempty"`
+	StartMark              bool   `json:"start_mark,omitempty"`
+}
+
+type ClaimResponse struct {
+	RequestId   string `json:"request_id"`
+	Decision    string `json:"decision,omitempty"`
+	RunId       string `json:"run_id,omitempty"`
+	BuildNumber int64  `json:"build_number,omitempty"`
+	ReasonCode  string `json:"reason_code,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Code        string `json:"code,omitempty"`
+	HomeSlot    *int   `json:"home_slot,omitempty"`
+}
+
 type CommandResult struct {
 	CommandId   string                 `json:"command_id"`
 	Success     bool                   `json:"success"`
@@ -18,6 +251,10 @@ type CommandResult struct {
 	Deferred    bool                   `json:"deferred,omitempty"`
 	DeferReason string                 `json:"defer_reason,omitempty"`
 	HttpStatus  int                    `json:"http_status,omitempty"`
+	CommandType CommandType            `json:"command_type,omitempty"`
+	JobPath     string                 `json:"job_path,omitempty"`
+	RunId       string                 `json:"run_id,omitempty"`
+	Actor       string                 `json:"actor,omitempty"`
 	Result      isCommandResult_result `json:"-"`
 }
 
@@ -39,6 +276,10 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 		Deferred     bool                `json:"deferred,omitempty"`
 		DeferReason  string              `json:"defer_reason,omitempty"`
 		HttpStatus   int                 `json:"http_status,omitempty"`
+		CommandType  CommandType         `json:"command_type,omitempty"`
+		JobPath      string              `json:"job_path,omitempty"`
+		RunId        string              `json:"run_id,omitempty"`
+		Actor        string              `json:"actor,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	var a alias
@@ -48,6 +289,10 @@ func (m *CommandResult) MarshalJSON() ([]byte, error) {
 	a.Deferred = m.Deferred
 	a.DeferReason = m.DeferReason
 	a.HttpStatus = m.HttpStatus
+	a.CommandType = m.CommandType
+	a.JobPath = m.JobPath
+	a.RunId = m.RunId
+	a.Actor = m.Actor
 	switch v := m.Result.(type) {
 	case *CommandResult_DesiredState:
 		a.DesiredState = v.DesiredState
@@ -63,6 +308,10 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 		Deferred     bool                `json:"deferred,omitempty"`
 		DeferReason  string              `json:"defer_reason,omitempty"`
 		HttpStatus   int                 `json:"http_status,omitempty"`
+		CommandType  CommandType         `json:"command_type,omitempty"`
+		JobPath      string              `json:"job_path,omitempty"`
+		RunId        string              `json:"run_id,omitempty"`
+		Actor        string              `json:"actor,omitempty"`
 		DesiredState *DesiredStateResult `json:"desired_state,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -74,6 +323,10 @@ func (m *CommandResult) UnmarshalJSON(data []byte) error {
 	m.Deferred = a.Deferred
 	m.DeferReason = a.DeferReason
 	m.HttpStatus = a.HttpStatus
+	m.CommandType = a.CommandType
+	m.JobPath = a.JobPath
+	m.RunId = a.RunId
+	m.Actor = a.Actor
 	switch {
 	case a.DesiredState != nil:
 		m.Result = &CommandResult_DesiredState{DesiredState: a.DesiredState}
@@ -99,38 +352,63 @@ type ContentResponse struct {
 	PluginsTxt string `json:"plugins_txt,omitempty"`
 }
 
+type CrossTenantRequest struct {
+	RequestId   *uint64 `json:"request_id,omitempty"`
+	Kind        string  `json:"kind,omitempty"`
+	PayloadJson string  `json:"payload_json,omitempty"`
+}
+
+type CrossTenantResponse struct {
+	RequestId   *uint64 `json:"request_id,omitempty"`
+	Kind        string  `json:"kind,omitempty"`
+	PayloadJson string  `json:"payload_json,omitempty"`
+}
+
 type DeferredDeletion struct {
 	Path   string `json:"path,omitempty"`
 	Reason string `json:"reason,omitempty"`
 }
 
 type DesiredStateCommand struct {
-	CommandId                  string `json:"command_id"`
-	JcascYaml                  string `json:"jcasc_yaml,omitempty"`
-	RbacYaml                   string `json:"rbac_yaml,omitempty"`
-	DesiredStateHash           string `json:"desired_state_hash,omitempty"`
-	Reload                     bool   `json:"reload,omitempty"`
-	ItemsYaml                  string `json:"items_yaml,omitempty"`
-	MiteJenkinsToken           string `json:"mite_jenkins_token,omitempty"`
-	MiteJenkinsTokenExp        int64  `json:"mite_jenkins_token_exp,omitempty"`
-	CommandDeadlineSec         int64  `json:"command_deadline_sec,omitempty"`
-	ApplyWhen                  string `json:"apply_when,omitempty"`
-	MaxDeferSec                int64  `json:"max_defer_sec,omitempty"`
-	DrainTimeoutSec            int64  `json:"drain_timeout_sec,omitempty"`
-	LiveFingerprintIntervalSec int64  `json:"live_fingerprint_interval_sec,omitempty"`
+	CommandId                  string             `json:"command_id"`
+	JcascYaml                  string             `json:"jcasc_yaml,omitempty"`
+	RbacYaml                   string             `json:"rbac_yaml,omitempty"`
+	DesiredStateHash           string             `json:"desired_state_hash,omitempty"`
+	Reload                     bool               `json:"reload,omitempty"`
+	ItemsYaml                  string             `json:"items_yaml,omitempty"`
+	MiteJenkinsToken           string             `json:"mite_jenkins_token,omitempty"`
+	MiteJenkinsTokenExp        int64              `json:"mite_jenkins_token_exp,omitempty"`
+	CommandDeadlineSec         int64              `json:"command_deadline_sec,omitempty"`
+	ApplyWhen                  string             `json:"apply_when,omitempty"`
+	MaxDeferSec                int64              `json:"max_defer_sec,omitempty"`
+	DrainTimeoutSec            int64              `json:"drain_timeout_sec,omitempty"`
+	LiveFingerprintIntervalSec int64              `json:"live_fingerprint_interval_sec,omitempty"`
+	Rehydration                *RehydrationBundle `json:"rehydration,omitempty"`
+	TenantHomes                []*TenantHomes     `json:"tenant_homes,omitempty"`
+	Cell                       bool               `json:"cell,omitempty"`
 }
 
 type DesiredStateResult struct {
-	ConfigSuccess         bool                `json:"config_success"`
-	RbacSuccess           bool                `json:"rbac_success"`
-	PluginsSuccess        bool                `json:"plugins_success"`
-	ItemsSuccess          bool                `json:"items_success"`
-	ConfigError           string              `json:"config_error,omitempty"`
-	RbacError             string              `json:"rbac_error,omitempty"`
-	PluginsError          string              `json:"plugins_error,omitempty"`
-	ItemsError            string              `json:"items_error,omitempty"`
-	AppliedHash           string              `json:"applied_hash,omitempty"`
-	DeferredItemDeletions []*DeferredDeletion `json:"deferred_item_deletions,omitempty"`
+	ConfigSuccess           bool                `json:"config_success"`
+	RbacSuccess             bool                `json:"rbac_success"`
+	PluginsSuccess          bool                `json:"plugins_success"`
+	ItemsSuccess            bool                `json:"items_success"`
+	ConfigError             string              `json:"config_error,omitempty"`
+	RbacError               string              `json:"rbac_error,omitempty"`
+	PluginsError            string              `json:"plugins_error,omitempty"`
+	ItemsError              string              `json:"items_error,omitempty"`
+	AppliedHash             string              `json:"applied_hash,omitempty"`
+	DeferredItemDeletions   []*DeferredDeletion `json:"deferred_item_deletions,omitempty"`
+	RehydrationSuccess      bool                `json:"rehydration_success,omitempty"`
+	RehydrationError        string              `json:"rehydration_error,omitempty"`
+	RehydrationDeferredJobs []string            `json:"rehydration_deferred_jobs,omitempty"`
+}
+
+type EventAck struct {
+	RunId    string `json:"run_id"`
+	EventSeq int64  `json:"event_seq"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type Heartbeat struct {
@@ -155,12 +433,20 @@ type IdleGauges struct {
 }
 
 type ImperativeCommand struct {
-	CommandId       string                `json:"command_id"`
-	Type            CommandType           `json:"type"`
-	Target          string                `json:"target,omitempty"`
-	DeadlineSec     int64                 `json:"deadline_sec,omitempty"`
-	DrainTimeoutSec int64                 `json:"drain_timeout_sec,omitempty"`
-	ReplayWebhook   *ReplayWebhookPayload `json:"replay_webhook,omitempty"`
+	CommandId       string                  `json:"command_id"`
+	Type            CommandType             `json:"type"`
+	Target          string                  `json:"target,omitempty"`
+	DeadlineSec     int64                   `json:"deadline_sec,omitempty"`
+	DrainTimeoutSec int64                   `json:"drain_timeout_sec,omitempty"`
+	ReplayWebhook   *ReplayWebhookPayload   `json:"replay_webhook,omitempty"`
+	TriggerBuild    *TriggerBuildPayload    `json:"trigger_build,omitempty"`
+	CancelBuild     *CancelBuildPayload     `json:"cancel_build,omitempty"`
+	ResumeBuild     *ResumeBuildPayload     `json:"resume_build,omitempty"`
+	ProceedInput    *ProceedInputPayload    `json:"proceed_input,omitempty"`
+	AbortInput      *AbortInputPayload      `json:"abort_input,omitempty"`
+	ReplayBuild     *ReplayBuildPayload     `json:"replay_build,omitempty"`
+	RestartBuild    *RestartBuildPayload    `json:"restart_build,omitempty"`
+	ScanMultibranch *ScanMultibranchPayload `json:"scan_multibranch,omitempty"`
 }
 
 type InstalledPlugin struct {
@@ -181,6 +467,86 @@ type JenkinsActivityEvent struct {
 	Result      string `json:"result,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Timestamp   string `json:"timestamp,omitempty"`
+}
+
+// JobBranchHead is one discovered head of a multibranch job: a branch,
+type JobBranchHead struct {
+	Name          string             `json:"name,omitempty"`
+	JobPath       string             `json:"job_path,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	Orphaned      bool               `json:"orphaned,omitempty"`
+	Revision      string             `json:"revision,omitempty"`
+	ChangeRequest *ChangeRequestInfo `json:"change_request,omitempty"`
+}
+
+// JobBranchProject is one multibranch job of the cell with its heads.
+type JobBranchProject struct {
+	JobPath        string            `json:"job_path,omitempty"`
+	IndexedAt      string            `json:"indexed_at,omitempty"`
+	IndexResult    string            `json:"index_result,omitempty"`
+	Heads          []*JobBranchHead  `json:"heads,omitempty"`
+	HeadsTruncated bool              `json:"heads_truncated,omitempty"`
+	LastScan       *BranchScanResult `json:"last_scan,omitempty"`
+}
+
+// JobBranchSet wraps the branch inventory with presence: an unset field
+type JobBranchSet struct {
+	Hash      string              `json:"hash,omitempty"`
+	Items     []*JobBranchProject `json:"items,omitempty"`
+	Truncated bool                `json:"truncated,omitempty"`
+	Total     int                 `json:"total,omitempty"`
+}
+
+// JobSchedule is one job/trigger row of the live job-schedule inventory.
+type JobSchedule struct {
+	JobPath        string   `json:"job_path,omitempty"`
+	TriggerType    string   `json:"trigger_type,omitempty"`
+	Spec           string   `json:"spec,omitempty"`
+	Timezone       string   `json:"timezone,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+	NextFireTimes  []string `json:"next_fire_times,omitempty"`
+	UpstreamTenant string   `json:"upstream_tenant,omitempty"`
+	UpstreamJob    string   `json:"upstream_job,omitempty"`
+	UpstreamResult string   `json:"upstream_result,omitempty"`
+}
+
+// JobScheduleSet wraps the job-schedule rows with presence: an unset field
+type JobScheduleSet struct {
+	Hash      string         `json:"hash,omitempty"`
+	Items     []*JobSchedule `json:"items,omitempty"`
+	Truncated bool           `json:"truncated,omitempty"`
+	Total     int            `json:"total,omitempty"`
+}
+
+type LogAck struct {
+	RunId   string `json:"run_id"`
+	AckSeq  int64  `json:"ack_seq"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	PauseMs int    `json:"pause_ms,omitempty"`
+}
+
+type LogChunk struct {
+	RunId           string `json:"run_id"`
+	JobPath         string `json:"job_path"`
+	BuildNumber     int64  `json:"build_number"`
+	Seq             int64  `json:"seq"`
+	NodeId          string `json:"node_id,omitempty"`
+	StageId         string `json:"stage_id,omitempty"`
+	Data            []byte `json:"data,omitempty"`
+	FirstLineUnixMs int64  `json:"first_line_unix_ms,omitempty"`
+	DroppedBytes    int64  `json:"dropped_bytes,omitempty"`
+	Final           bool   `json:"final"`
+	CellInstance    string `json:"cell_instance"`
+}
+
+type LogSummary struct {
+	ChunkCount            int64  `json:"chunk_count"`
+	DroppedBytes          int64  `json:"dropped_bytes,omitempty"`
+	Incomplete            bool   `json:"incomplete"`
+	IncompleteReason      string `json:"incomplete_reason,omitempty"`
+	Finalized             bool   `json:"finalized"`
+	WriterHeartbeatUnixMs int64  `json:"writer_heartbeat_unix_ms,omitempty"`
 }
 
 type MiteMessage struct {
@@ -245,6 +611,48 @@ type MiteMessage_PluginInventory struct {
 
 func (*MiteMessage_PluginInventory) isMiteMessage_message() {}
 
+type MiteMessage_BuildEvent struct {
+	BuildEvent *BuildEvent `json:"build_event,omitempty"`
+}
+
+func (*MiteMessage_BuildEvent) isMiteMessage_message() {}
+
+type MiteMessage_ClaimRequest struct {
+	ClaimRequest *ClaimRequest `json:"claim_request,omitempty"`
+}
+
+func (*MiteMessage_ClaimRequest) isMiteMessage_message() {}
+
+type MiteMessage_LogChunk struct {
+	LogChunk *LogChunk `json:"log_chunk,omitempty"`
+}
+
+func (*MiteMessage_LogChunk) isMiteMessage_message() {}
+
+type MiteMessage_TailAck struct {
+	TailAck *TailAck `json:"tail_ack,omitempty"`
+}
+
+func (*MiteMessage_TailAck) isMiteMessage_message() {}
+
+type MiteMessage_CrossTenantRequest struct {
+	CrossTenantRequest *CrossTenantRequest `json:"cross_tenant_request,omitempty"`
+}
+
+func (*MiteMessage_CrossTenantRequest) isMiteMessage_message() {}
+
+type MiteMessage_RunStateChunk struct {
+	RunStateChunk *RunStateChunk `json:"run_state_chunk,omitempty"`
+}
+
+func (*MiteMessage_RunStateChunk) isMiteMessage_message() {}
+
+type MiteMessage_RunStateRequest struct {
+	RunStateRequest *RunStateRequest `json:"run_state_request,omitempty"`
+}
+
+func (*MiteMessage_RunStateRequest) isMiteMessage_message() {}
+
 func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		Hello               *Hello                `json:"hello,omitempty"`
@@ -256,6 +664,13 @@ func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 		ContentResponse     *ContentResponse      `json:"content_response,omitempty"`
 		JenkinsActivity     *JenkinsActivityEvent `json:"jenkins_activity,omitempty"`
 		PluginInventory     *PluginInventory      `json:"plugin_inventory,omitempty"`
+		BuildEvent          *BuildEvent           `json:"build_event,omitempty"`
+		ClaimRequest        *ClaimRequest         `json:"claim_request,omitempty"`
+		LogChunk            *LogChunk             `json:"log_chunk,omitempty"`
+		TailAck             *TailAck              `json:"tail_ack,omitempty"`
+		CrossTenantRequest  *CrossTenantRequest   `json:"cross_tenant_request,omitempty"`
+		RunStateChunk       *RunStateChunk        `json:"run_state_chunk,omitempty"`
+		RunStateRequest     *RunStateRequest      `json:"run_state_request,omitempty"`
 	}
 	var a alias
 	switch v := m.Message.(type) {
@@ -277,6 +692,20 @@ func (m *MiteMessage) MarshalJSON() ([]byte, error) {
 		a.JenkinsActivity = v.JenkinsActivity
 	case *MiteMessage_PluginInventory:
 		a.PluginInventory = v.PluginInventory
+	case *MiteMessage_BuildEvent:
+		a.BuildEvent = v.BuildEvent
+	case *MiteMessage_ClaimRequest:
+		a.ClaimRequest = v.ClaimRequest
+	case *MiteMessage_LogChunk:
+		a.LogChunk = v.LogChunk
+	case *MiteMessage_TailAck:
+		a.TailAck = v.TailAck
+	case *MiteMessage_CrossTenantRequest:
+		a.CrossTenantRequest = v.CrossTenantRequest
+	case *MiteMessage_RunStateChunk:
+		a.RunStateChunk = v.RunStateChunk
+	case *MiteMessage_RunStateRequest:
+		a.RunStateRequest = v.RunStateRequest
 	}
 	return json.Marshal(a)
 }
@@ -292,6 +721,13 @@ func (m *MiteMessage) UnmarshalJSON(data []byte) error {
 		ContentResponse     *ContentResponse      `json:"content_response,omitempty"`
 		JenkinsActivity     *JenkinsActivityEvent `json:"jenkins_activity,omitempty"`
 		PluginInventory     *PluginInventory      `json:"plugin_inventory,omitempty"`
+		BuildEvent          *BuildEvent           `json:"build_event,omitempty"`
+		ClaimRequest        *ClaimRequest         `json:"claim_request,omitempty"`
+		LogChunk            *LogChunk             `json:"log_chunk,omitempty"`
+		TailAck             *TailAck              `json:"tail_ack,omitempty"`
+		CrossTenantRequest  *CrossTenantRequest   `json:"cross_tenant_request,omitempty"`
+		RunStateChunk       *RunStateChunk        `json:"run_state_chunk,omitempty"`
+		RunStateRequest     *RunStateRequest      `json:"run_state_request,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
@@ -315,6 +751,20 @@ func (m *MiteMessage) UnmarshalJSON(data []byte) error {
 		m.Message = &MiteMessage_JenkinsActivity{JenkinsActivity: a.JenkinsActivity}
 	case a.PluginInventory != nil:
 		m.Message = &MiteMessage_PluginInventory{PluginInventory: a.PluginInventory}
+	case a.BuildEvent != nil:
+		m.Message = &MiteMessage_BuildEvent{BuildEvent: a.BuildEvent}
+	case a.ClaimRequest != nil:
+		m.Message = &MiteMessage_ClaimRequest{ClaimRequest: a.ClaimRequest}
+	case a.LogChunk != nil:
+		m.Message = &MiteMessage_LogChunk{LogChunk: a.LogChunk}
+	case a.TailAck != nil:
+		m.Message = &MiteMessage_TailAck{TailAck: a.TailAck}
+	case a.CrossTenantRequest != nil:
+		m.Message = &MiteMessage_CrossTenantRequest{CrossTenantRequest: a.CrossTenantRequest}
+	case a.RunStateChunk != nil:
+		m.Message = &MiteMessage_RunStateChunk{RunStateChunk: a.RunStateChunk}
+	case a.RunStateRequest != nil:
+		m.Message = &MiteMessage_RunStateRequest{RunStateRequest: a.RunStateRequest}
 	}
 	return nil
 }
@@ -382,6 +832,55 @@ func (m *MiteMessage) GetPluginInventory() *PluginInventory {
 	return nil
 }
 
+func (m *MiteMessage) GetBuildEvent() *BuildEvent {
+	if x, ok := m.Message.(*MiteMessage_BuildEvent); ok {
+		return x.BuildEvent
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetClaimRequest() *ClaimRequest {
+	if x, ok := m.Message.(*MiteMessage_ClaimRequest); ok {
+		return x.ClaimRequest
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetLogChunk() *LogChunk {
+	if x, ok := m.Message.(*MiteMessage_LogChunk); ok {
+		return x.LogChunk
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetTailAck() *TailAck {
+	if x, ok := m.Message.(*MiteMessage_TailAck); ok {
+		return x.TailAck
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetCrossTenantRequest() *CrossTenantRequest {
+	if x, ok := m.Message.(*MiteMessage_CrossTenantRequest); ok {
+		return x.CrossTenantRequest
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetRunStateChunk() *RunStateChunk {
+	if x, ok := m.Message.(*MiteMessage_RunStateChunk); ok {
+		return x.RunStateChunk
+	}
+	return nil
+}
+
+func (m *MiteMessage) GetRunStateRequest() *RunStateRequest {
+	if x, ok := m.Message.(*MiteMessage_RunStateRequest); ok {
+		return x.RunStateRequest
+	}
+	return nil
+}
+
 type ObservabilityBuild struct {
 	JobName         string `json:"job_name"`
 	BuildNumber     int    `json:"build_number"`
@@ -444,12 +943,61 @@ type OperatorMessage_ContentRequest struct {
 
 func (*OperatorMessage_ContentRequest) isOperatorMessage_message() {}
 
+type OperatorMessage_ClaimResponse struct {
+	ClaimResponse *ClaimResponse `json:"claim_response,omitempty"`
+}
+
+func (*OperatorMessage_ClaimResponse) isOperatorMessage_message() {}
+
+type OperatorMessage_TailControl struct {
+	TailControl *TailControl `json:"tail_control,omitempty"`
+}
+
+func (*OperatorMessage_TailControl) isOperatorMessage_message() {}
+
+type OperatorMessage_LogAck struct {
+	LogAck *LogAck `json:"log_ack,omitempty"`
+}
+
+func (*OperatorMessage_LogAck) isOperatorMessage_message() {}
+
+type OperatorMessage_CrossTenantResponse struct {
+	CrossTenantResponse *CrossTenantResponse `json:"cross_tenant_response,omitempty"`
+}
+
+func (*OperatorMessage_CrossTenantResponse) isOperatorMessage_message() {}
+
+type OperatorMessage_EventAck struct {
+	EventAck *EventAck `json:"event_ack,omitempty"`
+}
+
+func (*OperatorMessage_EventAck) isOperatorMessage_message() {}
+
+type OperatorMessage_RunStateResponse struct {
+	RunStateResponse *RunStateResponse `json:"run_state_response,omitempty"`
+}
+
+func (*OperatorMessage_RunStateResponse) isOperatorMessage_message() {}
+
+type OperatorMessage_RunStateAck struct {
+	RunStateAck *RunStateAck `json:"run_state_ack,omitempty"`
+}
+
+func (*OperatorMessage_RunStateAck) isOperatorMessage_message() {}
+
 func (m *OperatorMessage) MarshalJSON() ([]byte, error) {
 	type alias struct {
-		DesiredState   *DesiredStateCommand `json:"desired_state,omitempty"`
-		Imperative     *ImperativeCommand   `json:"imperative,omitempty"`
-		TokenGrant     *TokenGrant          `json:"token_grant,omitempty"`
-		ContentRequest *ContentRequest      `json:"content_request,omitempty"`
+		DesiredState        *DesiredStateCommand `json:"desired_state,omitempty"`
+		Imperative          *ImperativeCommand   `json:"imperative,omitempty"`
+		TokenGrant          *TokenGrant          `json:"token_grant,omitempty"`
+		ContentRequest      *ContentRequest      `json:"content_request,omitempty"`
+		ClaimResponse       *ClaimResponse       `json:"claim_response,omitempty"`
+		TailControl         *TailControl         `json:"tail_control,omitempty"`
+		LogAck              *LogAck              `json:"log_ack,omitempty"`
+		CrossTenantResponse *CrossTenantResponse `json:"cross_tenant_response,omitempty"`
+		EventAck            *EventAck            `json:"event_ack,omitempty"`
+		RunStateResponse    *RunStateResponse    `json:"run_state_response,omitempty"`
+		RunStateAck         *RunStateAck         `json:"run_state_ack,omitempty"`
 	}
 	var a alias
 	switch v := m.Message.(type) {
@@ -461,16 +1009,37 @@ func (m *OperatorMessage) MarshalJSON() ([]byte, error) {
 		a.TokenGrant = v.TokenGrant
 	case *OperatorMessage_ContentRequest:
 		a.ContentRequest = v.ContentRequest
+	case *OperatorMessage_ClaimResponse:
+		a.ClaimResponse = v.ClaimResponse
+	case *OperatorMessage_TailControl:
+		a.TailControl = v.TailControl
+	case *OperatorMessage_LogAck:
+		a.LogAck = v.LogAck
+	case *OperatorMessage_CrossTenantResponse:
+		a.CrossTenantResponse = v.CrossTenantResponse
+	case *OperatorMessage_EventAck:
+		a.EventAck = v.EventAck
+	case *OperatorMessage_RunStateResponse:
+		a.RunStateResponse = v.RunStateResponse
+	case *OperatorMessage_RunStateAck:
+		a.RunStateAck = v.RunStateAck
 	}
 	return json.Marshal(a)
 }
 
 func (m *OperatorMessage) UnmarshalJSON(data []byte) error {
 	var a struct {
-		DesiredState   *DesiredStateCommand `json:"desired_state,omitempty"`
-		Imperative     *ImperativeCommand   `json:"imperative,omitempty"`
-		TokenGrant     *TokenGrant          `json:"token_grant,omitempty"`
-		ContentRequest *ContentRequest      `json:"content_request,omitempty"`
+		DesiredState        *DesiredStateCommand `json:"desired_state,omitempty"`
+		Imperative          *ImperativeCommand   `json:"imperative,omitempty"`
+		TokenGrant          *TokenGrant          `json:"token_grant,omitempty"`
+		ContentRequest      *ContentRequest      `json:"content_request,omitempty"`
+		ClaimResponse       *ClaimResponse       `json:"claim_response,omitempty"`
+		TailControl         *TailControl         `json:"tail_control,omitempty"`
+		LogAck              *LogAck              `json:"log_ack,omitempty"`
+		CrossTenantResponse *CrossTenantResponse `json:"cross_tenant_response,omitempty"`
+		EventAck            *EventAck            `json:"event_ack,omitempty"`
+		RunStateResponse    *RunStateResponse    `json:"run_state_response,omitempty"`
+		RunStateAck         *RunStateAck         `json:"run_state_ack,omitempty"`
 	}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
@@ -484,6 +1053,20 @@ func (m *OperatorMessage) UnmarshalJSON(data []byte) error {
 		m.Message = &OperatorMessage_TokenGrant{TokenGrant: a.TokenGrant}
 	case a.ContentRequest != nil:
 		m.Message = &OperatorMessage_ContentRequest{ContentRequest: a.ContentRequest}
+	case a.ClaimResponse != nil:
+		m.Message = &OperatorMessage_ClaimResponse{ClaimResponse: a.ClaimResponse}
+	case a.TailControl != nil:
+		m.Message = &OperatorMessage_TailControl{TailControl: a.TailControl}
+	case a.LogAck != nil:
+		m.Message = &OperatorMessage_LogAck{LogAck: a.LogAck}
+	case a.CrossTenantResponse != nil:
+		m.Message = &OperatorMessage_CrossTenantResponse{CrossTenantResponse: a.CrossTenantResponse}
+	case a.EventAck != nil:
+		m.Message = &OperatorMessage_EventAck{EventAck: a.EventAck}
+	case a.RunStateResponse != nil:
+		m.Message = &OperatorMessage_RunStateResponse{RunStateResponse: a.RunStateResponse}
+	case a.RunStateAck != nil:
+		m.Message = &OperatorMessage_RunStateAck{RunStateAck: a.RunStateAck}
 	}
 	return nil
 }
@@ -516,6 +1099,77 @@ func (m *OperatorMessage) GetContentRequest() *ContentRequest {
 	return nil
 }
 
+func (m *OperatorMessage) GetClaimResponse() *ClaimResponse {
+	if x, ok := m.Message.(*OperatorMessage_ClaimResponse); ok {
+		return x.ClaimResponse
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetTailControl() *TailControl {
+	if x, ok := m.Message.(*OperatorMessage_TailControl); ok {
+		return x.TailControl
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetLogAck() *LogAck {
+	if x, ok := m.Message.(*OperatorMessage_LogAck); ok {
+		return x.LogAck
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetCrossTenantResponse() *CrossTenantResponse {
+	if x, ok := m.Message.(*OperatorMessage_CrossTenantResponse); ok {
+		return x.CrossTenantResponse
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetEventAck() *EventAck {
+	if x, ok := m.Message.(*OperatorMessage_EventAck); ok {
+		return x.EventAck
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetRunStateResponse() *RunStateResponse {
+	if x, ok := m.Message.(*OperatorMessage_RunStateResponse); ok {
+		return x.RunStateResponse
+	}
+	return nil
+}
+
+func (m *OperatorMessage) GetRunStateAck() *RunStateAck {
+	if x, ok := m.Message.(*OperatorMessage_RunStateAck); ok {
+		return x.RunStateAck
+	}
+	return nil
+}
+
+// PendingSignature is one script signature the sandbox refused and no
+type PendingSignature struct {
+	Signature  string                       `json:"signature,omitempty"`
+	Dangerous  bool                         `json:"dangerous,omitempty"`
+	Requesters []*PendingSignatureRequester `json:"requesters,omitempty"`
+}
+
+// PendingSignatureRequester names one tenant job that hit a refused script
+type PendingSignatureRequester struct {
+	Tenant      string `json:"tenant,omitempty"`
+	JobPath     string `json:"job_path,omitempty"`
+	BuildNumber int64  `json:"build_number,omitempty"`
+	RunId       string `json:"run_id,omitempty"`
+}
+
+// PendingSignatureSet wraps the pending signatures with presence, as
+type PendingSignatureSet struct {
+	Items     []*PendingSignature `json:"items,omitempty"`
+	Total     int                 `json:"total,omitempty"`
+	Truncated bool                `json:"truncated,omitempty"`
+}
+
 type PluginDep struct {
 	Name     string `json:"name"`
 	Min      string `json:"min,omitempty"`
@@ -536,17 +1190,55 @@ type PluginInventory struct {
 	Warnings             []string           `json:"warnings,omitempty"`
 }
 
+type ProceedInputPayload struct {
+	RunId       string            `json:"run_id"`
+	JobPath     string            `json:"job_path"`
+	BuildNumber int64             `json:"build_number,omitempty"`
+	InputId     string            `json:"input_id"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ActingUser  *ActingUser       `json:"acting_user,omitempty"`
+}
+
 type RegisterRequest struct {
 	ControllerName string `json:"controller_name"`
 	Namespace      string `json:"namespace"`
 	BootstrapToken string `json:"bootstrap_token,omitempty"`
 	PublicKey      []byte `json:"public_key,omitempty"`
+	CellInstance   string `json:"cell_instance,omitempty"`
 }
 
 type RegisterResponse struct {
 	CertificatePem string `json:"certificate_pem"`
 	CaPem          string `json:"ca_pem"`
 	ServerEndpoint string `json:"server_endpoint"`
+}
+
+// RehydrationBundle carries the build-record rehydration files for one
+type RehydrationBundle struct {
+	BundleId    string             `json:"bundle_id,omitempty"`
+	ContentHash string             `json:"content_hash,omitempty"`
+	Files       []*RehydrationFile `json:"files,omitempty"`
+	ReloadItems []string           `json:"reload_items,omitempty"`
+	Truncated   bool               `json:"truncated,omitempty"`
+	RecordCount int                `json:"record_count,omitempty"`
+	JobCount    int                `json:"job_count,omitempty"`
+}
+
+// RehydrationFile is one file the mite writes under JENKINS_HOME to seed a
+type RehydrationFile struct {
+	Path        string `json:"path,omitempty"`
+	GzipContent []byte `json:"gzip_content,omitempty"`
+	RawSize     int64  `json:"raw_size,omitempty"`
+}
+
+type ReplayBuildPayload struct {
+	RunId       string            `json:"run_id"`
+	IntentKey   string            `json:"intent_key"`
+	JobPath     string            `json:"job_path"`
+	SourceRunId string            `json:"source_run_id"`
+	Script      string            `json:"script"`
+	ActingUser  *ActingUser       `json:"acting_user,omitempty"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
 }
 
 type ReplayWebhookPayload struct {
@@ -557,19 +1249,133 @@ type ReplayWebhookPayload struct {
 	DeliveryId string            `json:"delivery_id,omitempty"`
 }
 
+type RestartBuildPayload struct {
+	RunId             string               `json:"run_id"`
+	IntentKey         string               `json:"intent_key"`
+	JobPath           string               `json:"job_path"`
+	SourceRunId       string               `json:"source_run_id"`
+	SourceBuildNumber int64                `json:"source_build_number"`
+	Stage             string               `json:"stage"`
+	ActingUser        *ActingUser          `json:"acting_user,omitempty"`
+	SourceFiles       []*RestartSourceFile `json:"source_files,omitempty"`
+}
+
+// RestartSourceFile names one file of a run's restart copy: its path
+type RestartSourceFile struct {
+	Relpath string `json:"relpath"`
+	Bytes   int64  `json:"bytes"`
+}
+
+type ResumeBuildPayload struct {
+	RunId        string             `json:"run_id"`
+	JobPath      string             `json:"job_path"`
+	BuildNumber  int64              `json:"build_number,omitempty"`
+	Instance     string             `json:"instance"`
+	DeadlineUnix int64              `json:"deadline_unix,omitempty"`
+	StateFiles   []*ResumeStateFile `json:"state_files,omitempty"`
+	LogNextSeq   int64              `json:"log_next_seq,omitempty"`
+}
+
+// ResumeStateFile is one stored file a resume must materialize: the path
+type ResumeStateFile struct {
+	Relpath     string `json:"relpath"`
+	PusherEpoch int64  `json:"pusher_epoch"`
+	StateGen    int64  `json:"state_gen"`
+}
+
+type RunStateAck struct {
+	RunId         string `json:"run_id"`
+	Relpath       string `json:"relpath,omitempty"`
+	StateGen      int64  `json:"state_gen,omitempty"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
+	PauseMs       int    `json:"pause_ms,omitempty"`
+	RestartSource bool   `json:"restart_source,omitempty"`
+}
+
+type RunStateChunk struct {
+	RunId         string `json:"run_id"`
+	JobPath       string `json:"job_path,omitempty"`
+	BuildNumber   int64  `json:"build_number,omitempty"`
+	Relpath       string `json:"relpath"`
+	StateGen      int64  `json:"state_gen,omitempty"`
+	Seq           int64  `json:"seq,omitempty"`
+	Total         int64  `json:"total,omitempty"`
+	GzipContent   []byte `json:"gzip_content,omitempty"`
+	RawSize       int64  `json:"raw_size,omitempty"`
+	CellInstance  string `json:"cell_instance,omitempty"`
+	ObjectSize    int64  `json:"object_size,omitempty"`
+	PusherEpoch   int64  `json:"pusher_epoch,omitempty"`
+	RestartSource bool   `json:"restart_source,omitempty"`
+	CopyFiles     int64  `json:"copy_files,omitempty"`
+	CopyBytes     int64  `json:"copy_bytes,omitempty"`
+}
+
+type RunStateRequest struct {
+	RequestId     *uint64 `json:"request_id,omitempty"`
+	RunId         string  `json:"run_id"`
+	Relpath       string  `json:"relpath"`
+	PusherEpoch   int64   `json:"pusher_epoch,omitempty"`
+	StateGen      int64   `json:"state_gen,omitempty"`
+	RestartSource bool    `json:"restart_source,omitempty"`
+}
+
+type RunStateResponse struct {
+	RequestId   *uint64 `json:"request_id,omitempty"`
+	Relpath     string  `json:"relpath,omitempty"`
+	Seq         int64   `json:"seq,omitempty"`
+	Total       int64   `json:"total,omitempty"`
+	GzipContent []byte  `json:"gzip_content,omitempty"`
+	RawSize     int64   `json:"raw_size,omitempty"`
+	Error       string  `json:"error,omitempty"`
+}
+
+type ScanMultibranchPayload struct {
+	ScanId     string      `json:"scan_id"`
+	JobPath    string      `json:"job_path"`
+	ActingUser *ActingUser `json:"acting_user,omitempty"`
+}
+
 type StateSnapshot struct {
-	ActualStateHash string `json:"actual_state_hash,omitempty"`
-	ConfigHash      string `json:"config_hash,omitempty"`
-	PluginsHash     string `json:"plugins_hash,omitempty"`
-	RbacHash        string `json:"rbac_hash,omitempty"`
-	JenkinsVersion  string `json:"jenkins_version,omitempty"`
-	Status          string `json:"status,omitempty"`
-	JenkinsHealth   string `json:"jenkins_health,omitempty"`
-	ItemsHash       string `json:"items_hash,omitempty"`
-	ApplyDeferred   bool   `json:"apply_deferred,omitempty"`
-	DeferReason     string `json:"defer_reason,omitempty"`
-	LiveConfigHash  string `json:"live_config_hash,omitempty"`
-	LiveDrift       bool   `json:"live_drift,omitempty"`
+	ActualStateHash   string               `json:"actual_state_hash,omitempty"`
+	ConfigHash        string               `json:"config_hash,omitempty"`
+	PluginsHash       string               `json:"plugins_hash,omitempty"`
+	RbacHash          string               `json:"rbac_hash,omitempty"`
+	JenkinsVersion    string               `json:"jenkins_version,omitempty"`
+	Status            string               `json:"status,omitempty"`
+	JenkinsHealth     string               `json:"jenkins_health,omitempty"`
+	ItemsHash         string               `json:"items_hash,omitempty"`
+	ApplyDeferred     bool                 `json:"apply_deferred,omitempty"`
+	DeferReason       string               `json:"defer_reason,omitempty"`
+	LiveConfigHash    string               `json:"live_config_hash,omitempty"`
+	LiveDrift         bool                 `json:"live_drift,omitempty"`
+	JobSchedules      *JobScheduleSet      `json:"job_schedules,omitempty"`
+	JobBranches       *JobBranchSet        `json:"job_branches,omitempty"`
+	PendingSignatures *PendingSignatureSet `json:"pending_signatures,omitempty"`
+}
+
+type TailAck struct {
+	RunId     string `json:"run_id"`
+	ControlId string `json:"control_id"`
+	Active    bool   `json:"active"`
+	Error     string `json:"error,omitempty"`
+}
+
+type TailControl struct {
+	RunId        string `json:"run_id"`
+	JobPath      string `json:"job_path"`
+	BuildNumber  int64  `json:"build_number"`
+	Action       string `json:"action"`
+	LeaseSeconds int    `json:"lease_seconds,omitempty"`
+	ControlId    string `json:"control_id"`
+}
+
+// TenantHomes names one hosted tenant's slot on this cell and that
+type TenantHomes struct {
+	Tenant   string         `json:"tenant"`
+	Slot     int            `json:"slot,omitempty"`
+	Role     string         `json:"role,omitempty"`
+	JobHomes map[string]int `json:"job_homes,omitempty"`
 }
 
 type TokenGrant struct {
@@ -580,6 +1386,14 @@ type TokenGrant struct {
 type TokenRefreshRequest struct {
 }
 
+type TriggerBuildPayload struct {
+	RunId      string            `json:"run_id"`
+	IntentKey  string            `json:"intent_key"`
+	JobPath    string            `json:"job_path"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	Actor      string            `json:"actor,omitempty"`
+}
+
 type CommandType int32
 
 const (
@@ -588,6 +1402,14 @@ const (
 	CommandTypeDeleteItem             CommandType = 2
 	CommandTypeReplayWebhook          CommandType = 3
 	CommandTypeCollectPluginInventory CommandType = 4
+	CommandTypeTriggerBuild           CommandType = 5
+	CommandTypeCancelBuild            CommandType = 6
+	CommandTypeResumeBuild            CommandType = 7
+	CommandTypeProceedInput           CommandType = 8
+	CommandTypeAbortInput             CommandType = 9
+	CommandTypeReplayBuild            CommandType = 10
+	CommandTypeRestartBuild           CommandType = 11
+	CommandTypeScanMultibranch        CommandType = 12
 )
 
 // MiteServer is the server-side interface for the Mite service.

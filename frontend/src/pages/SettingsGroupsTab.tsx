@@ -9,8 +9,9 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import styles from "./settings.module.css";
 
 export default function SettingsGroupsTab() {
-  const { authMode } = useAuth();
-  const isLocal = authMode === "local";
+  const { authMode, localAccounts } = useAuth();
+  // Varroa groups hold local accounts, also beside OIDC.
+  const isLocal = authMode === "local" || localAccounts === true;
 
   if (!isLocal) return <OIDCGroupsView />;
   return <LocalGroupsView />;

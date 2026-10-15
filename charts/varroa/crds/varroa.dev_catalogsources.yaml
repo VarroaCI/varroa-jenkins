@@ -18,6 +18,9 @@ spec:
     - jsonPath: .spec.repoURL
       name: REPOSITORY
       type: string
+    - jsonPath: .spec.ociRef
+      name: OCI-REF
+      type: string
     - jsonPath: .status.itemCount
       name: ITEMS
       type: integer

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useController } from "../hooks/useControllers";
 import type { PluginInventoryDriftEntry, ControllerDetail } from "../hooks/useControllers";
@@ -10,14 +10,14 @@ import { ApiError, bffFetch } from "../hooks/useApi";
 import { ForbiddenPage, GenericErrorPage, NotFoundPage } from "../components/RecoveryState";
 import { useComposedBundles } from "../hooks/useCatalog";
 import { useToast } from "../components/Toast";
-import { BFF_BASE, updateController, ControllerConflictError, approveRestart, reprovisionController, restartController, setPowerState, hibernateController, wakeController, approveDeletion, getProvisioningConfig, getVersionProfiles, parsePreflightChecks } from "../api/client";
+import { BFF_BASE, updateController, ControllerConflictError, approveRestart, pendingChangeChanged, reprovisionController, restartController, setPowerState, hibernateController, wakeController, approveDeletion, getProvisioningConfig, getVersionProfiles, parsePreflightChecks } from "../api/client";
 import VersionPicker from "../components/VersionPicker";
 import { overlayJenkinsImage } from "../lib/overlay";
 import { upgradeInfo, versionsDiffer } from "../lib/versionCatalog";
 import { pluginDiff } from "../lib/pluginDiff";
 import { unappliedRemovalNotice } from "../lib/unappliedRemovals";
 import { Card } from "../components/Card";
-import { Tabs } from "../components/Tabs";
+import { Tabs, tabPanelProps } from "../components/Tabs";
 import { age } from "../components/activityTimeline.util";
 import { KVGrid } from "../components/KVGrid";
 import { Button } from "../components/Button";
@@ -41,14 +41,28 @@ import type {
 import { PROBE_DEFAULTS } from "../types";
 import ConflictDialog from "../components/ConflictDialog";
 import SpecEditorCard from "../components/specform/SpecEditorCard";
+import { CellTab } from "./CellTab";
 import styles from "./ControllerDetail.module.css";
 
 const TABS = [
   { id: "overview", label: <>▦ Overview</> },
   { id: "configuration", label: <>⚯ Configuration</> },
+  { id: "cell", label: <>⬡ Cell</> },
   { id: "diagnostics", label: <>◷ Diagnostics</> },
 ];
+// The static tab id set holds every tab id, cell included. The mount-time
+// step tests against it while the detail read is in flight, so a cold load
+// of ?tab=cell keeps its parameter.
 const VALID_TABS = new Set(TABS.map((t) => t.id));
+
+// resolveActiveTab carries the two validation steps. An unknown value falls
+// back to Overview. The value "cell" falls back too, but only once the
+// detail read has answered and reported a controller that is not a cell.
+function resolveActiveTab(param: string, cellVisible: boolean, loaded: boolean): string {
+  if (!VALID_TABS.has(param)) return "overview";
+  if (param === "cell" && loaded && !cellVisible) return "overview";
+  return param;
+}
 
 type ControllerData = NonNullable<ReturnType<typeof useController>["data"]>;
 
@@ -240,7 +254,40 @@ export default function ControllerDetail() {
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
   const isCore = core != null && cluster === core.name;
-  const [activeTab, setActiveTab] = useState("overview");
+  // The query parameter is the single source of truth for the active tab,
+  // so a browser Back navigation changes the rendered tab. A user's click
+  // pushes a history entry; a correction replaces one, so a bad link leaves
+  // no trace in the history.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") ?? "";
+  const setActiveTab = useCallback(
+    (id: string, replace = false) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", id);
+          return next;
+        },
+        { replace },
+      );
+    },
+    [setSearchParams],
+  );
+  // The Cell tab renders for a cell alone.
+  const cellTabVisible = ctrl?.kind === "cell";
+  const active = resolveActiveTab(tabParam, cellTabVisible, !!ctrl);
+  useEffect(() => {
+    // A correction replaces the history entry. The step waits for the
+    // detail read, so a cold load of ?tab=cell keeps its parameter.
+    if (tabParam === "") return;
+    if (!VALID_TABS.has(tabParam)) {
+      setActiveTab("overview", true);
+      return;
+    }
+    if (tabParam === "cell" && ctrl && !cellTabVisible) {
+      setActiveTab("overview", true);
+    }
+  }, [tabParam, ctrl, cellTabVisible, setActiveTab]);
   const { permissions } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -295,9 +342,17 @@ export default function ControllerDetail() {
   });
 
   const reloadConfig = useMutation({
-    mutationFn: () => approveRestart(cluster, namespace, name, "reload"),
+    mutationFn: () => approveRestart(cluster, namespace, name, "reload", ctrl?.pendingRestart?.contentHash),
     onSuccess: () => { toast("Reload triggered"); invalidateAll(); },
-    onError: (e) => toast(`Reload failed: ${e instanceof Error ? e.message : "unknown"}`),
+    onError: (e) => {
+      const changes = pendingChangeChanged(e);
+      if (changes) {
+        toast(pendingChangedCopy(changes));
+        invalidateAll();
+        return;
+      }
+      toast(`Reload failed: ${e instanceof Error ? e.message : "unknown"}`);
+    },
   });
 
   const [reconcilePending, setReconcilePending] = useState(false);
@@ -332,10 +387,6 @@ export default function ControllerDetail() {
   if (!ctrl) return <NotFoundPage />;
 
   const runningBuilds = ctrl.observability?.summary?.runningBuilds ?? 0;
-
-  // Stale persisted tab values ("plugins", "observability") fall back to
-  // overview instead of rendering a blank content area.
-  const active = VALID_TABS.has(activeTab) ? activeTab : "overview";
 
   const confirmBody: Record<string, string> = {
     restart: "Rolls the Jenkins pod. The controller is unreachable for roughly 40 seconds.",
@@ -427,8 +478,15 @@ export default function ControllerDetail() {
         </div>
       )}
 
-      <Tabs tabs={TABS} activeTab={active} onSelect={setActiveTab} />
+      <Tabs
+        tabs={cellTabVisible ? TABS : TABS.filter((t) => t.id !== "cell")}
+        activeTab={active}
+        onSelect={setActiveTab}
+        idBase="controller-detail"
+        ariaLabel="Controller sections"
+      />
 
+      <div {...tabPanelProps("controller-detail", active)}>
       {active === "overview" && (
         <OverviewTab
           ctrl={ctrl}
@@ -449,6 +507,15 @@ export default function ControllerDetail() {
           canUpdate={canUpdate}
         />
       )}
+      {active === "cell" && cellTabVisible && (
+        <CellTab
+          ctrl={ctrl}
+          cluster={cluster}
+          namespace={namespace}
+          name={name}
+          active={active === "cell"}
+        />
+      )}
       {active === "diagnostics" && (
         <DiagnosticsTab
           ctrl={ctrl}
@@ -460,6 +527,7 @@ export default function ControllerDetail() {
           activityReady={feed.readyState}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -602,14 +670,14 @@ function ControllerHeader({
           {power.isPending || wake.isPending ? "Waking…" : hibernated ? "Wake" : "Power On"}
         </Button>
       )}
-      {!asleep && (ctrl.endpoint ? (
+      {!asleep && !ctrl.headless && (ctrl.endpoint ? (
         <a href={ctrl.endpoint} target="_blank" rel="noreferrer">
           <Button variant="primary" size="sm">Open Jenkins</Button>
         </a>
       ) : (
         <Button size="sm" disabled>Not ready</Button>
       ))}
-      {!asleep && isCore && ctrl.routingMode === "path" && (
+      {!asleep && !ctrl.headless && isCore && ctrl.routingMode === "path" && (
         <Link to={`${controllerRoute(cluster, namespace, name)}/jenkins`}>
           <Button variant="ghost" size="sm">View embedded</Button>
         </Link>
@@ -696,7 +764,7 @@ function OverviewTab({
           <Card title="Spec">
             <KVGrid
               items={[
-                { key: "Endpoint", value: ctrl.endpoint || "—" },
+                { key: "Endpoint", value: ctrl.headless ? "Headless — no external URL" : (ctrl.endpoint || "—") },
                 { key: "Namespace", value: ctrl.namespace },
                 { key: "Reconciliation", value: `${ctrl.reconciliationPolicy?.mode || "automatic"} · every ${ctrl.reconciliationPolicy?.interval || "30s"}` },
               ]}
@@ -1534,7 +1602,7 @@ function ConfigurationTab({
         <ProbesCard ctrl={ctrl} cluster={cluster} ns={namespace} name={name} canUpdate={canUpdate} />
         {/*
           The SpecEditorCard hydrates every tier (curated form, podOverrides,
-          ingressSpec/miteSpec YAML, resource overlays) from ctrl.spec — the full
+          resource overlays) from ctrl.spec — the full
           ControllerSpec the BFF projects on the detail response. initialOverlay /
           initialPodOverrides remain as the pre-spec seed; the hydration effect
           overrides them from spec and keeps the immutable baseline for diffing.
@@ -2134,9 +2202,11 @@ export function VersionRollBanner({
 // apply-result section below, so neither gets a hint here.
 const ATTENTION_HINT: Partial<Record<ControllerAttentionKind, string>> = {
   bootFailed:
-    "Jenkins is not reaching a healthy boot. Read the Jenkins container logs (Logs tab): a JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fixing the bundle rolls the pod automatically.",
+    "Jenkins does not reach a healthy boot. Read the Jenkins container logs (Logs tab). A JCasC error such as a cloud without a name, or a plugin dependency that cannot load, fails boot. Fix the bundle. The operator then replaces the pod with the new revision. This applies to the default RollingUpdate strategy with no partition only. An OnDelete or partitioned overlay keeps the manual pod delete.",
   pluginRollFailed:
     "The plugins-init step failed. The message above names the plugin; check that its pin exists in the update center and matches the JenkinsVersionProfile lock.",
+  miteUnreachable:
+    "The mite command stream is lost. The pod stays in place and the controller stays Running. Check the gateway pods and the network path from the pod to the gateway. The controller returns to Connected when the mite reconnects.",
   failed:
     "Reconciliation gave up. Fix the cause named above, then edit the spec or trigger a reconcile to retry.",
 };
@@ -2202,6 +2272,13 @@ export function PluginConflictBanner({
   );
 }
 
+// pendingChangedCopy is the message for an approval that the BFF refused
+// because the pending change changed.
+function pendingChangedCopy(changes: string[]): string {
+  const sections = changes.length ? changes.join(", ") : "unknown";
+  return `The pending change changed (${sections}). Review it and approve again.`;
+}
+
 function PendingRestartBanner({
   pendingRestart,
   cluster,
@@ -2226,12 +2303,21 @@ function PendingRestartBanner({
   const handleApprove = async (action: "reload" | "restart") => {
     setApproving(action);
     try {
-      await approveRestart(cluster, namespace, name, action);
+      await approveRestart(cluster, namespace, name, action, pendingRestart.contentHash);
       toast(`Configuration ${action === "reload" ? "reload" : "restart"} approved`);
       queryClient.invalidateQueries({ queryKey: ["controller", cluster, namespace, name] });
       queryClient.invalidateQueries({ queryKey: ["controllers"] });
     } catch (e) {
-      toast(`Failed: ${e instanceof Error ? e.message : "unknown"}`);
+      const changes = pendingChangeChanged(e);
+      if (changes) {
+        // The pending change is not the one on screen. Read it again so
+        // the banner shows the change that the user must approve.
+        toast(pendingChangedCopy(changes));
+        queryClient.invalidateQueries({ queryKey: ["controller", cluster, namespace, name] });
+        queryClient.invalidateQueries({ queryKey: ["controllers"] });
+      } else {
+        toast(`Failed: ${e instanceof Error ? e.message : "unknown"}`);
+      }
     }
     setApproving(null);
     setShowRestartConfirm(false);

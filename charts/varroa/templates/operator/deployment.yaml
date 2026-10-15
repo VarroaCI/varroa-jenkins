@@ -19,10 +19,7 @@ spec:
         {{- include "varroa.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-operator") }}
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.operator.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -52,6 +49,14 @@ spec:
               value: {{ .Release.Namespace | quote }}
             - name: MANAGED_NAMESPACES
               value: {{ join " " .Values.managedNamespaces | quote }}
+            {{- if and (not (include "varroa.isHive" .)) .Values.bff.enabled }}
+            {{- /* The BFF reads each composed bundle's content ConfigMap outside
+                 the release namespace. The operator grants that read per bundle
+                 and binds this ServiceAccount. A deployment with no BFF leaves
+                 the variable unset, and the operator then writes no grant. */}}
+            - name: VARROA_BFF_SERVICE_ACCOUNT
+              value: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff") | quote }}
+            {{- end }}
             - name: HOME
               value: /tmp
             - name: TMPDIR
@@ -68,6 +73,8 @@ spec:
               value: {{ .Values.operator.shardCount | default 256 | quote }}
             - name: VARROA_MAX_CONCURRENT_RECONCILES
               value: {{ .Values.operator.maxConcurrentReconciles | quote }}
+            - name: VARROA_CLAIM_GATE
+              value: {{ .Values.recordStore.enabled | ternary "1" "0" | quote }}
             - name: VARROA_WAKE_PORT
               value: {{ .Values.operator.wake.port | quote }}
             - name: VARROA_WAKE_ENABLED
@@ -95,6 +102,8 @@ spec:
             - name: VARROA_BFF_URL
               value: {{ .Values.auth.bffUrl | quote }}
             {{- end }}
+            - name: VARROA_LOCAL_ACCOUNTS
+              value: {{ .Values.auth.localAccounts.enabled | quote }}
             - name: VARROA_OIDC_REDIRECT_URL
               value: {{ .Values.auth.oidc.redirectUrl | default .Values.auth.dashboardUrl | default .Values.bff.oidcRedirectUrl | default "" | quote }}
             - name: VARROA_OIDC_USER_CLAIM
@@ -129,15 +138,55 @@ spec:
               value: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
             - name: VARROA_SCHEDULE_BFF_URL
               value: {{ printf "http://%s.%s.svc:%v" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff")) .Release.Namespace .Values.bff.service.port | quote }}
+            - name: VARROA_CELLS_WARM_POOL_ENABLED
+              value: {{ .Values.cells.warmPool.enabled | quote }}
+            - name: VARROA_CELLS_WARM_POOL_PER_PROFILE
+              value: {{ include "varroa.cells.int" (dict "name" "cells.warmPool.perProfile" "value" .Values.cells.warmPool.perProfile) | quote }}
+            - name: VARROA_CELLS_MAX_TENANTS
+              value: {{ include "varroa.cells.int" (dict "name" "cells.maxTenantsPerCell" "value" .Values.cells.maxTenantsPerCell) | quote }}
+            - name: VARROA_CELLS_UNREADY_GRACE
+              value: {{ .Values.cells.unreadyGracePeriod | quote }}
+            {{- /* An empty or null value renders "{}", so the operator reads an explicit opt-out and never falls back to its built-in default. */}}
+            - name: VARROA_CELLS_CELL_TEMPLATE
+              value: {{ .Values.cells.cellTemplate | default dict | toJson | quote }}
+            - name: VARROA_NETWORKPOLICY_ENABLED
+              value: {{ .Values.networkPolicy.enabled | quote }}
+            - name: VARROA_NETWORKPOLICY_APISERVER_EGRESS
+              value: {{ .Values.networkPolicy.apiServerEgress | toJson | quote }}
+            - name: VARROA_CELL_ISOLATION
+              value: {{ .Values.networkPolicy.cellIsolation | toJson | quote }}
+{{- if .Values.recordStore.enabled }}
+            {{- if eq .Values.recordStore.blobs.mode "postgres" }}
+            - name: VARROA_BLOBSTORE_URL
+              value: "pgblob:"
+            {{- else }}
+            - name: VARROA_BLOBSTORE_URL
+              value: {{ .Values.recordStore.blobs.s3.url | quote }}
+            {{- end }}
+            {{- if .Values.recordStore.blobs.s3.artifactSecret }}
+            - name: VARROA_ARTIFACT_SECRET
+              value: {{ .Values.recordStore.blobs.s3.artifactSecret | quote }}
+            {{- end }}
+            {{- with .Values.recordStore.blobs.s3.artifactSTS }}
+            {{- if .enabled }}
+            - name: VARROA_ARTIFACT_STS_ISSUER_SECRET
+              value: {{ .issuerSecret | quote }}
+            - name: VARROA_ARTIFACT_STS_ROLE_ARN
+              value: {{ .roleArn | quote }}
+            - name: VARROA_ARTIFACT_STS_ENDPOINT
+              value: {{ .endpoint | quote }}
+            - name: VARROA_ARTIFACT_STS_DURATION
+              value: {{ .duration | quote }}
+            {{- end }}
+            {{- end }}
+{{- end }}
 {{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
             - name: VARROA_UPDATE_CENTER_URL
               value: {{ printf "http://varroa-updatecenter.%s.svc:8080" .Release.Namespace | quote }}
 {{- end }}
-{{- if .Values.global.imagePullSecrets }}
+{{- with (include "varroa.pullSecretNames" .) }}
             - name: VARROA_IMAGE_PULL_SECRETS
-{{- $pullNames := list }}
-{{- range .Values.global.imagePullSecrets }}{{ $pullNames = append $pullNames .name }}{{- end }}
-              value: {{ join "," $pullNames | quote }}
+              value: {{ . | quote }}
 {{- end }}
             {{- if .Values.operator.gitCache.enabled }}
             - name: VARROA_GIT_CACHE_DIR

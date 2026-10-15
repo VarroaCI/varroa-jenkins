@@ -42,8 +42,9 @@ spec:
             description: JenkinsRoleBindingSpec defines the desired state of JenkinsRoleBinding.
             properties:
               controllerScope:
-                description: ControllerScope restricts which controllers this binding
-                  applies to.
+                description: |-
+                  ControllerScope restricts which controllers this binding applies to.
+                  A Jenkins role binding has no tenant meaning, so tenants is rejected here.
                 properties:
                   controllerSelector:
                     description: ControllerSelector is an optional label selector
@@ -98,7 +99,33 @@ spec:
                     items:
                       type: string
                     type: array
+                  tenants:
+                    description: Tenants is an optional allow-list of pipelines tenants.
+                    items:
+                      description: TenantScope names one pipelines tenant and the
+                        jobs of it the binding covers.
+                      properties:
+                        jobs:
+                          description: Jobs is an optional list of folder-relative
+                            globs. An absent list covers every job.
+                          items:
+                            maxLength: 512
+                            type: string
+                          maxItems: 64
+                          type: array
+                        name:
+                          description: Name is a Team name.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 64
+                    type: array
                 type: object
+                x-kubernetes-validations:
+                - message: a Jenkins role binding has no tenant meaning
+                  rule: '!has(self.tenants)'
               jenkinsScope:
                 description: JenkinsScope defines the in-Jenkins scope. nil means
                   Global.

@@ -102,6 +102,11 @@ beforeEach(() => {
   mockCreateController.mockResolvedValue({});
 });
 
+// Every wizard test drives the five-step form through userEvent, so these
+// are the longest tests in the suite. A loaded CI runner crosses the 15 s
+// suite default on them. The budget below applies to this file only.
+vi.setConfig({ testTimeout: 60000 });
+
 describe("ControllerWizard", () => {
   it("renders the wizard shell with stepper after config loads", async () => {
     render(<ControllerWizard />);
@@ -482,7 +487,9 @@ describe("ControllerWizard", () => {
     }
     vi.stubGlobal("EventSource", MockEventSource);
 
-    const user = userEvent.setup();
+    // This test fills more than fifteen fields. The default per-action delay makes it
+    // too slow on a loaded CI runner, so it runs with no delay between actions.
+    const user = userEvent.setup({ delay: null });
     render(<ControllerWizard />);
     await waitFor(() => {
       expect(screen.queryByText("Loading configuration...")).not.toBeInTheDocument();

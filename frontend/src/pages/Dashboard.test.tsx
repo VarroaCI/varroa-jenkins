@@ -5,8 +5,16 @@ import { renderWithProviders } from "../test/render-utils";
 import { createControllerListItem } from "../test/factories";
 
 const mockUseControllers = vi.fn();
+const mockFanoutFailures = vi.fn((): { name: string; ok: boolean; error?: string }[] => []);
 vi.mock("../hooks/useControllers", () => ({
   useControllers: () => mockUseControllers(),
+  useControllerFanoutFailures: () => ({ data: mockFanoutFailures() }),
+}));
+
+const mockUseClusters = vi.fn(() => ({ data: undefined, isLoading: false, error: null }));
+vi.mock("../hooks/useClusters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/useClusters")>()),
+  useClusters: () => mockUseClusters(),
 }));
 
 vi.mock("../hooks/useApi", () => ({
@@ -262,6 +270,35 @@ describe("Dashboard", () => {
         ).toBeInTheDocument();
       });
     });
+
+    it("renders a mapped icon for an auth.local.login event", async () => {
+      mockUseControllers.mockReturnValue({
+        data: [],
+        isLoading: false,
+        error: null,
+      });
+      const authEvent = {
+        timestamp: new Date().toISOString(),
+        type: "auth.local.login",
+        source: "user",
+        controller: "",
+        namespace: "",
+        message: "Signed in",
+      };
+      // The feed refetches on mount, so the mocked /activity path must serve the event.
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) =>
+        Promise.resolve(path === "/activity" ? { items: [authEvent] } : { items: [] }),
+      );
+      try {
+        renderWithProviders(<Dashboard />);
+        await waitFor(() => {
+          expect(screen.getByText("→")).toBeInTheDocument();
+        });
+        expect(screen.queryByText("·")).not.toBeInTheDocument();
+      } finally {
+        vi.mocked(useApi.bffFetch).mockResolvedValue({ items: [] });
+      }
+    });
   });
 
   describe("Update Center gaps chip", () => {
@@ -269,13 +306,16 @@ describe("Dashboard", () => {
       vi.mocked(useApi.bffFetch).mockClear();
     });
 
-    it("renders chip when enabled:true and gaps.length > 0", async () => {
+    it("renders chip when enabled:true and unservableCount > 0", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
           return Promise.resolve({
             enabled: true,
             gaps: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a" }],
-            conditions: [], phase: "Ready", pluginCount: 1, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false,
+            gapCount: 1,
+            unservable: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a", reason: "ArchiveDisabled" }],
+            unservableCount: 1,
+            conditions: [], phase: "Degraded", pluginCount: 1, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false,
           });
         }
         return Promise.resolve({ items: [] });
@@ -285,16 +325,16 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.getByText(/1 plugin missing from Update Center/)).toBeInTheDocument();
+        expect(screen.getByText(/1 plugin the Update Center cannot serve/)).toBeInTheDocument();
       });
-      const link = screen.getByRole("link", { name: /1 plugin missing/ });
+      const link = screen.getByRole("link", { name: /1 plugin the Update Center/ });
       expect(link).toHaveAttribute("href", "/administration/update-center");
     });
 
     it("does not render chip when enabled:false", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
-          return Promise.resolve({ enabled: false, conditions: [], gaps: [], lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false });
+          return Promise.resolve({ enabled: false, conditions: [], gaps: [], unservable: [], gapCount: 0, unservableCount: 0, lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false });
         }
         return Promise.resolve({ items: [] });
       });
@@ -303,14 +343,19 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.queryByText(/missing from Update Center/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
       });
     });
 
-    it("does not render chip when enabled:true but gaps:[]", async () => {
+    it("does not render chip when gaps exist but nothing is unservable", async () => {
       vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
         if (path === "/updatecenter") {
-          return Promise.resolve({ enabled: true, gaps: [], conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false });
+          return Promise.resolve({
+            enabled: true,
+            gaps: [{ plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a" }],
+            gapCount: 1, unservable: [], unservableCount: 0,
+            conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: true,
+          });
         }
         return Promise.resolve({ items: [] });
       });
@@ -319,7 +364,23 @@ describe("Dashboard", () => {
       });
       renderWithProviders(<Dashboard />);
       await waitFor(() => {
-        expect(screen.queryByText(/missing from Update Center/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
+      });
+    });
+
+    it("does not render chip when enabled:true but unservableCount is 0", async () => {
+      vi.mocked(useApi.bffFetch).mockImplementation((path: string) => {
+        if (path === "/updatecenter") {
+          return Promise.resolve({ enabled: true, gaps: [], unservable: [], gapCount: 0, unservableCount: 0, conditions: [], phase: "Ready", pluginCount: 0, storeBytes: 0, lastSyncTime: null, storageType: "", pullThroughEnabled: false });
+        }
+        return Promise.resolve({ items: [] });
+      });
+      mockUseControllers.mockReturnValue({
+        data: [], isLoading: false, error: null,
+      });
+      renderWithProviders(<Dashboard />);
+      await waitFor(() => {
+        expect(screen.queryByText(/cannot serve/)).not.toBeInTheDocument();
       });
     });
 
@@ -372,5 +433,87 @@ describe("Dashboard needs-attention metric", () => {
     const card = screen.getByText("Needs attention").closest("div")!.parentElement!;
     expect(within(card).getByText("3")).toBeInTheDocument();
     expect(within(card).getByText("1 blocked \u00b7 1 boot failed \u00b7 1 failed")).toBeInTheDocument();
+  });
+});
+
+describe("Dashboard brood health rollup", () => {
+  it("lists controllers that need attention first and caps the list at eight", () => {
+    const attention = { kind: "bootFailed" as const, message: "exit 5" };
+    const ctrls = [
+      createControllerListItem({ name: "zeta-ok", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "bad-b", phase: "Failed", miteConnected: false, attention }),
+      createControllerListItem({ name: "bad-a", phase: "Failed", miteConnected: false, attention }),
+      createControllerListItem({ name: "down", phase: "Running", miteConnected: false }),
+      createControllerListItem({ name: "sleep", phase: "Hibernated", miteConnected: false }),
+    ];
+    for (let i = 0; i < 7; i++) {
+      ctrls.push(createControllerListItem({ name: `ok-${i}`, phase: "Connected", miteConnected: true }));
+    }
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    renderWithProviders(<Dashboard />);
+
+    const rows = screen.getAllByTestId("health-row");
+    expect(rows).toHaveLength(8);
+    expect(within(rows[0]).getByRole("link", { name: /bad-a/ })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole("link", { name: /bad-b/ })).toBeInTheDocument();
+    expect(within(rows[2]).getByRole("link", { name: /\/down$/ })).toBeInTheDocument();
+    expect(screen.getByText(/and 4 more/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all controllers" })).toHaveAttribute("href", "/controllers");
+  });
+
+  it("renders a phase distribution bar with per-phase counts", () => {
+    const ctrls = [
+      createControllerListItem({ name: "a", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "b", phase: "Connected", miteConnected: true }),
+      createControllerListItem({ name: "c", phase: "Provisioning", miteConnected: false }),
+      createControllerListItem({ name: "d", phase: "Failed", miteConnected: false, attention: { kind: "bootFailed", message: "exit 5" } }),
+    ];
+    mockUseControllers.mockReturnValue({ data: ctrls, isLoading: false, error: null });
+    const { container } = renderWithProviders(<Dashboard />);
+
+    const bar = screen.getByRole("img", { name: /Phase distribution/ });
+    expect(bar).toHaveAttribute("aria-label", "Phase distribution: 2 Connected, 1 Provisioning, 1 Failed");
+    expect(bar.querySelectorAll("[data-phase]")).toHaveLength(3);
+    expect(container.querySelectorAll("[data-testid='health-row']")).toHaveLength(4);
+    expect(screen.queryByText(/more ·/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Dashboard fan-out failures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseControllers.mockReturnValue({ data: [], isLoading: false, error: null });
+  });
+
+  const cluster = (name: string, core: boolean) => ({
+    name,
+    healthy: true,
+    core,
+    lastHeartbeat: new Date().toISOString(),
+    operatorVersion: "1.0.0",
+    k8sVersion: "1.30.0",
+    controllerCount: 3,
+    connectedCount: 2,
+    state: "active" as const,
+  });
+
+  it("names a cluster whose controller list did not arrive", () => {
+    mockFanoutFailures.mockReturnValue([{ name: "member-b", ok: false, error: "cluster unreachable" }]);
+    renderWithProviders(<Dashboard />);
+    expect(
+      screen.getByRole("status"),
+    ).toBeInTheDocument();
+  });
+
+  it("marks the strip card of a cluster whose list failed as list unavailable", () => {
+    mockUseClusters.mockReturnValue({
+      data: [cluster("core", true), cluster("member-b", false)],
+      isLoading: false,
+      error: null,
+    } as never);
+    mockFanoutFailures.mockReturnValue([{ name: "member-b", ok: false, error: "cluster unreachable" }]);
+    renderWithProviders(<Dashboard />);
+    expect(screen.getByText("list unavailable")).toBeInTheDocument();
+    expect(screen.getByText("2/3 controllers")).toBeInTheDocument();
   });
 });

@@ -172,11 +172,25 @@ export function buildDeliveryNodes(ctrl: ControllerDetail, now?: number): Delive
 
   /* ── Jenkins node ── */
   let jenkins: DeliveryNode;
+  // Running with MiteConnected=False/StreamLost is a live pod whose mite
+  // stream is lost. It is not a pod that starts.
   // Pending is a transient wake phase (Hibernated → Pending → Provisioning →
   // Running → Connected): the replica exists but the operator has not started
   // provisioning yet. It must render as in-flight/waking, NOT as the
   // unexpected-offline "mite disconnected" branch.
-  if (ctrl.phase === "Provisioning" || ctrl.phase === "Running" || ctrl.phase === "Pending") {
+  const streamLost = ctrl.phase === "Running" && (ctrl.conditions ?? []).some(
+    (c) => c.type === "MiteConnected" && c.status === "False" && c.reason === "StreamLost",
+  );
+  if (streamLost) {
+    jenkins = {
+      id: "jenkins",
+      name: "Jenkins",
+      what: "unreachable",
+      lamp: "bad",
+      line: "mite unreachable",
+      sub: [{ t: "last heartbeat " }, { t: rel(ctrl.lastSeen, now) }],
+    };
+  } else if (ctrl.phase === "Provisioning" || ctrl.phase === "Running" || ctrl.phase === "Pending") {
     const pending = ctrl.phase === "Pending";
     jenkins = {
       id: "jenkins",

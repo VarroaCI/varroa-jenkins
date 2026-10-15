@@ -1,0 +1,20 @@
+items:
+  - kind: folder
+    name: credential-type-githubapp
+    displayName: "Folder with a GitHub App credential"
+    description: "Folder with a GitHub App credential"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - gitHubApp:
+                    id: github-app
+                    scope: GLOBAL
+                    description: "GitHub App for checks"
+                    appID: "123456"
+                    privateKey: |
+                      -----BEGIN PRIVATE KEY-----
+                      FAKEFIXTUREKEYNOTREAL0000000000000000000000000000000000
+                      -----END PRIVATE KEY-----
+                    owner: example-org
+                    apiUri: https://api.github.example.com

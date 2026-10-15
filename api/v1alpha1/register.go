@@ -12,7 +12,6 @@ const (
 	UserKind                  = "User"
 	GroupKind                 = "Group"
 	PodTemplateKind           = "PodTemplate"
-	BuildMetricKind           = "BuildMetric"
 	CatalogSourceKind         = "CatalogSource"
 	CatalogItemKind           = "CatalogItem"
 	ComposedBundleKind        = "ComposedBundle"
@@ -21,6 +20,7 @@ const (
 	UpdateCenterKind          = "UpdateCenter"
 	ControllerClassKind       = "ControllerClass"
 	TeamKind                  = "Team"
+	CellPoolKind              = "CellPool"
 )
 
 // GroupVersionKind instances for each CRD kind.
@@ -33,7 +33,6 @@ var (
 	UserGVK                  = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: UserKind}
 	GroupGVK                 = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: GroupKind}
 	PodTemplateGVK           = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: PodTemplateKind}
-	BuildMetricGVK           = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: BuildMetricKind}
 	CatalogSourceGVK         = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: CatalogSourceKind}
 	CatalogItemGVK           = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: CatalogItemKind}
 	ComposedBundleGVK        = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: ComposedBundleKind}
@@ -42,4 +41,5 @@ var (
 	UpdateCenterGVK          = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: UpdateCenterKind}
 	ControllerClassGVK       = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: ControllerClassKind}
 	TeamGVK                  = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: TeamKind}
+	CellPoolGVK              = schema.GroupVersionKind{Group: GroupName, Version: "v1alpha1", Kind: CellPoolKind}
 )

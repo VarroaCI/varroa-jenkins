@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
+  <displayName>Folder with Permitted Kubernetes Clouds</displayName>
+  <description>Folder restricted to one kubernetes cloud</description>
+  <properties>
+    <org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty>
+      <permittedClouds>
+        <string>team-a</string>
+      </permittedClouds>
+    </org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty>
+  </properties>
+</com.cloudbees.hudson.plugins.folder.Folder>

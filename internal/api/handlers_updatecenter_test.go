@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -488,4 +489,78 @@ func init() {
 			Claims: adminClaims, WantStatus: http.StatusConflict,
 		},
 	)
+}
+
+// TestUpdateCenterStatusServability: the servability fields map through, and
+// unservable is always a non-nil array so the wire shape never changes with the count.
+func TestUpdateCenterStatusServability(t *testing.T) {
+	t.Parallel()
+
+	empty := updateCenterStatusResponseFromCR(&v1alpha1.UpdateCenter{})
+	if empty.Unservable == nil || len(empty.Unservable) != 0 {
+		t.Errorf("Unservable with no entries = %#v, want a non-nil empty slice", empty.Unservable)
+	}
+	if empty.GapCount != 0 || empty.UnservableCount != 0 {
+		t.Errorf("counts = %d/%d, want 0/0", empty.GapCount, empty.UnservableCount)
+	}
+
+	uc := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
+		GapCount:        7,
+		UnservableCount: 1,
+		Gaps: []v1alpha1.UpdateCenterGap{
+			{Plugin: "bar", Version: "latest", RequiredBy: "bundle:ns/b", Core: "2.555.3"},
+		},
+		Unservable: []v1alpha1.UpdateCenterGap{
+			{Plugin: "foo", Version: "1.0", RequiredBy: "profile:p", Reason: "ArchiveDisabled"},
+			{Plugin: "baz", Version: "latest", RequiredBy: "profile:q", Core: "2.555.3", Reason: "NotListed"},
+		},
+	}}
+	resp := updateCenterStatusResponseFromCR(uc)
+	if resp.GapCount != 7 || resp.UnservableCount != 1 {
+		t.Errorf("counts = %d/%d, want 7/1", resp.GapCount, resp.UnservableCount)
+	}
+	if len(resp.Unservable) != 2 || resp.Unservable[0].Reason != "ArchiveDisabled" || resp.Unservable[0].Plugin != "foo" {
+		t.Errorf("Unservable = %+v, want foo with reason ArchiveDisabled first", resp.Unservable)
+	}
+	if resp.Unservable[0].Core != "" {
+		t.Errorf("pinned unservable core = %q, want empty", resp.Unservable[0].Core)
+	}
+	if resp.Unservable[1].Core != "2.555.3" {
+		t.Errorf("latest unservable core = %q, want 2.555.3", resp.Unservable[1].Core)
+	}
+	if len(resp.Gaps) != 1 || resp.Gaps[0].Core != "2.555.3" {
+		t.Errorf("Gaps = %+v, want bar with core 2.555.3", resp.Gaps)
+	}
+}
+
+// TestUpdateCenterStatusUnknownDependencies: the unknown-dependency fields map
+// through, and the list is a non-nil array so it is never null on the wire.
+func TestUpdateCenterStatusUnknownDependencies(t *testing.T) {
+	t.Parallel()
+
+	empty := updateCenterStatusResponseFromCR(&v1alpha1.UpdateCenter{})
+	if empty.UnknownDependencies == nil || len(empty.UnknownDependencies) != 0 {
+		t.Errorf("UnknownDependencies with no entries = %#v, want a non-nil empty slice", empty.UnknownDependencies)
+	}
+	raw, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"unknownDependencies":[]`) {
+		t.Errorf("wire shape = %s, want unknownDependencies:[]", raw)
+	}
+
+	uc := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{
+		UnknownDependencyCount: 60,
+		UnknownDependencies: []v1alpha1.UpdateCenterPluginRef{
+			{Plugin: "acme", Version: "1.0"},
+		},
+	}}
+	resp := updateCenterStatusResponseFromCR(uc)
+	if resp.UnknownDependencyCount != 60 {
+		t.Errorf("UnknownDependencyCount = %d, want 60", resp.UnknownDependencyCount)
+	}
+	if len(resp.UnknownDependencies) != 1 || resp.UnknownDependencies[0].Plugin != "acme" || resp.UnknownDependencies[0].Version != "1.0" {
+		t.Errorf("UnknownDependencies = %+v, want acme 1.0", resp.UnknownDependencies)
+	}
 }

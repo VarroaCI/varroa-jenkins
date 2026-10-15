@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"gopkg.in/yaml.v3"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,7 +41,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 	"github.com/varroaci/varroa-jenkins/internal/controller/pluginlock"
+	"github.com/varroaci/varroa-jenkins/internal/controller/rehydrate"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
@@ -49,6 +54,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 	"github.com/varroaci/varroa-jenkins/internal/tenancy"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 const (
@@ -61,6 +67,10 @@ const (
 
 	// defaultMaxConcurrentReconciles limits how many controllers can be in Reconcile() at once.
 	defaultMaxConcurrentReconciles = 8
+
+	// defaultApproveLockWait leaves the approve time for its own work
+	// inside the 60-second approve request.
+	defaultApproveLockWait = 20 * time.Second
 
 	// minReconcileInterval is the floor for per-controller interval configuration.
 	minReconcileInterval = 10 * time.Second
@@ -84,44 +94,47 @@ func (r *Reconciler) reconcileFleetPodLabel(ctx context.Context, cr *v1alpha1.Co
 	}
 }
 
-var (
+// controllerMetrics holds the instruments the Reconciler records on the
+// "varroa-operator" meter. NewReconciler builds them from the provider it
+// receives, so a test reads the values through its own provider.
+type controllerMetrics struct {
 	reconcileDuration       metric.Int64Histogram
 	reconcileErrors         metric.Int64Counter
 	reconcileBlockedGauge   metric.Int64Gauge
 	jcascResolveDuration    metric.Float64Histogram
 	pluginLockConflictGauge metric.Int64Gauge
 	miteImageStaleGauge     metric.Int64Gauge
-)
+	imperativeResultsTotal  metric.Int64Counter
+}
 
-func init() { bindControllerMetrics() }
-
-// bindControllerMetrics (re)binds the package-level instruments against the
-// current global MeterProvider. It runs once at package init; tests re-invoke
-// it after swapping in a test MeterProvider so they exercise the real package
-// instruments (and the real recording call sites) rather than a throwaway
-// local gauge — validating the actual metric name/description/attribute wiring
-// that production code emits.
-func bindControllerMetrics() {
-	m := otel.Meter("varroa-operator")
-	reconcileDuration, _ = m.Int64Histogram("varroa.reconcile.duration",
+// newControllerMetrics creates the Reconciler instruments on the
+// "varroa-operator" meter of mp.
+func newControllerMetrics(mp metric.MeterProvider) controllerMetrics {
+	m := mp.Meter("varroa-operator")
+	var cm controllerMetrics
+	cm.reconcileDuration, _ = m.Int64Histogram("varroa.reconcile.duration",
 		metric.WithUnit("ms"),
 		metric.WithDescription("Reconciler tick duration"),
 	)
-	reconcileErrors, _ = m.Int64Counter("varroa.reconcile.errors",
+	cm.reconcileErrors, _ = m.Int64Counter("varroa.reconcile.errors",
 		metric.WithDescription("Reconciler error count"),
 	)
-	reconcileBlockedGauge, _ = m.Int64Gauge("varroa.controller.reconcile.blocked",
+	cm.reconcileBlockedGauge, _ = m.Int64Gauge("varroa.controller.reconcile.blocked",
 		metric.WithDescription("1 if the controller's reconcile loop is currently blocked by an unresolved error, 0 otherwise"),
 	)
-	jcascResolveDuration, _ = m.Float64Histogram("varroa.jcasc.resolve.duration",
+	cm.jcascResolveDuration, _ = m.Float64Histogram("varroa.jcasc.resolve.duration",
 		metric.WithUnit("s"),
 	)
-	pluginLockConflictGauge, _ = m.Int64Gauge("varroa.controller.plugin_lock_conflict",
+	cm.pluginLockConflictGauge, _ = m.Int64Gauge("varroa.controller.plugin_lock_conflict",
 		metric.WithDescription("1 if ConditionPluginConflict is currently True for the controller, 0 otherwise (mirrors ConditionPluginConflict)"),
 	)
-	miteImageStaleGauge, _ = m.Int64Gauge("varroa.controller.mite_image_stale",
+	cm.miteImageStaleGauge, _ = m.Int64Gauge("varroa.controller.mite_image_stale",
 		metric.WithDescription("1 if the controller's running mite image differs from the operator-desired image, 0 if current"),
 	)
+	cm.imperativeResultsTotal, _ = m.Int64Counter("varroa.imperative_command.results",
+		metric.WithDescription("Imperative command results from the mite, labelled by kind and outcome"),
+	)
+	return cm
 }
 
 // miteTokenEntry caches a signed JWT for a mite together with its expiry.
@@ -132,24 +145,36 @@ type miteTokenEntry struct {
 
 // Reconciler reconciles Controller CRs.
 type Reconciler struct {
-	Resolver          *bundle.Resolver
-	Composer          *bundle.Composer
-	rbacGenerator     *rbac.Generator
-	client            ResourceClient
-	store             crdstore.Backend
-	miteTransport     transport.Transport
-	tokenSigner       *mite.TokenSigner
-	miteTokenSigner   *mite.MiteTokenSigner
-	miteTokenMu       sync.Mutex
-	miteTokens        map[string]miteTokenEntry // key "ns/name"; cached signed JWT
-	lastMiteEpoch     map[string]int64          // key "ns/name"; for reconnect detect
-	varroaEndpoint    string
-	varroaRedirectURL string
-	clusterName       string
-	disconnectedTicks map[string]int
-	Logger            *slog.Logger
-	caPEM             string
-	ucBaseURL         string // VARROA_UPDATE_CENTER_URL, read once at boot
+	metrics            controllerMetrics
+	Resolver           *bundle.Resolver
+	Composer           *bundle.Composer
+	rbacGenerator      *rbac.Generator
+	client             ResourceClient
+	store              crdstore.Backend
+	miteTransport      transport.Transport
+	tokenSigner        *mite.TokenSigner
+	miteTokenSigner    *mite.MiteTokenSigner
+	miteTokenMu        sync.Mutex
+	miteTokens         map[string]miteTokenEntry // key "ns/name"; cached signed JWT
+	lastMiteEpoch      map[string]int64          // key "ns/name"; for reconnect detect
+	varroaEndpoint     string
+	varroaRedirectURL  string
+	clusterName        string
+	disconnectedTicks  map[string]int
+	Logger             *slog.Logger
+	caPEM              string
+	ucBaseURL          string // VARROA_UPDATE_CENTER_URL, read once at boot
+	claimGate          string // VARROA_CLAIM_GATE, read once at boot; "0" or "1"
+	claimTimeoutMS     int    // VARROA_CLAIM_TIMEOUT_MS, read once at boot; 0 means unset
+	blobstoreURL       string // VARROA_BLOBSTORE_URL, read once at boot; drives the artifact-storage fragment
+	artifactSecretBase string // VARROA_ARTIFACT_SECRET, read once at boot; a base Secret name, "" disables artifact storage
+	// artifactSTS is the STS issuing configuration; a zero value keeps the
+	// static Secret path. artifactIssuer, artifactNow, and artifactFailures
+	// serve STS mode only (artifactsts.go).
+	artifactSTS      ArtifactSTSConfig
+	artifactIssuer   artifactIssuer
+	artifactNow      func() time.Time
+	artifactFailures artifactIssueFailures
 
 	reconcileEvents   chan event.GenericEvent // controller-runtime source.Channel: on-demand reconcile enqueue (wired in SetupWithManager)
 	activityPublisher *activity.Publisher
@@ -172,11 +197,95 @@ type Reconciler struct {
 	// real gate at construction. Contract: design.md section 4 of fix-version-driven-upgrade.
 	versionRollGate func(ctx context.Context, cr *v1alpha1.Controller, currentImage, targetImage string) (allow bool, reason, message string)
 	tenancy         *tenancy.Classifier // namespace classifier for the operator gate; nil ⇒ gate skipped
+	cellsConfig     CellsConfig         // warm pool, tenant cap, unready grace, and cell NetworkPolicy shape; read once at boot
 
 	// shardRing and shardSet provide shard-based ownership gating for
 	// active/active controller reconciliation. Nil ⇒ owns all (pre-wire default).
 	shardRing *sharding.Ring
 	shardSet  *sharding.ShardSet
+
+	// announce sends the C6 tenant.sync "announce" request (design D6,
+	// D7). A nil func makes announceSingleTenantPlacement a no-op, which is
+	// visible (the fence never opens for a controller with no cell role)
+	// rather than a panic.
+	announce cells.Announcer
+
+	// recordsFunc sends the C6 tenant.sync "records" request (design D6,
+	// tasks 5.7/5.8). A nil func makes attachCellRehydration a no-op for
+	// every cell, which is visible (the Rehydrated condition stays
+	// RehydrationPending) rather than a panic.
+	recordsFunc cells.RecordsFunc
+	// homesFunc sends the tenant.sync "homes" request: one tenant's
+	// member list and its job home map. A nil func leaves tenant_homes
+	// empty on every desired state, which costs at most one refused
+	// claim the fence corrects.
+	//
+	// homesCache holds the last answer for each cell key and tenant, so a
+	// failed call keeps the previous map for that tick.
+	homesFunc  cells.HomesFunc
+	homesMu    sync.Mutex
+	homesCache map[string]cells.HomesResult
+	// buildJobSeed renders one job's rehydration seed (design D4,
+	// tasks 5.7/5.8). Production wires rehydrate.BuildJobSeed; a test
+	// injects a fake that fails for a chosen job path, to prove a
+	// render failure keeps that job's fence open instead of vanishing
+	// from the accounting.
+	buildJobSeed func(jr rehydrate.JobRecords, n int, jenkinsHome string, opts rehydrate.Options) (rehydrate.JobSeed, error)
+	// buildBundle encodes the cell's selection into one bundle.
+	// Production wires rehydrate.BuildBundle; a test injects a failure,
+	// to prove a tick whose bundle build fails stamps no entry.
+	buildBundle func(result rehydrate.BudgetResult) (*mitev1.RehydrationBundle, error)
+	// numberSeededJobs tracks, per cell key ("ns/name"), the job paths a
+	// prior tick's number-only bundle already covered AND a matching
+	// DesiredStateResult confirmed applied, on one cell instance (design.md
+	// D4 order 4, task 5.7). Losing it (an operator restart) costs one
+	// harmless repeated round: design.md D5's write rule 3 makes resending
+	// an already-seeded nextBuildNumber a no-op.
+	numberSeededJobs map[string]*numberSeededSet
+	// rehydrationInFlight tracks, per cell key, the delivered
+	// rehydration push that has no result yet, with the number-only block
+	// it carried (task 5.7). markRehydrationSent writes it after a
+	// delivered push; the result drain consumes it. Losing it (an
+	// operator restart or a shard move) costs one more send of the
+	// bundle on the next tick.
+	rehydrationInFlight map[string]*rehydrationPush
+	// numberCacheMu guards numberSeededJobs, rehydrationInFlight, and
+	// rehydrationPendingSince: up to maxConcurrentReconciles cells
+	// reconcile at once and each touches only its own key, but the
+	// outer maps are shared.
+	numberCacheMu sync.Mutex
+	// rehydrationPendingSince tracks, per cell key + tenant, when a
+	// tenant's current placement generation and cell instance first
+	// became pending (task 6.3's deadline anchor). Guarded by
+	// numberCacheMu. Losing it (an operator restart) restarts the
+	// deadline clock, which is an accepted, harmless degradation.
+	rehydrationPendingSince map[string]rehydrationPendingMark
+
+	// downloadProbe checks an explicit plugin download URL during
+	// provisioning. Tests replace it so that no test makes a real request.
+	downloadProbe func(ctx context.Context, base, name, version string) downloadProbeResult
+
+	// controllerLocks serializes Reconcile with ApproveRestart and
+	// ApproveDeletion for one controller. The tick writes status from its
+	// first read, so an approve that writes between that read and the end
+	// write is lost. Only the shard owner runs either path, so a lock in
+	// this process is enough. Each path enters the shard first (enterShard),
+	// so a shard release waits for it before another replica can own the
+	// controller.
+	controllerLocks *keyLock
+	// approveLockWait limits how long an approve waits for a tick that
+	// holds controllerLocks. The approve request has its own deadline.
+	approveLockWait time.Duration
+}
+
+// rehydrationPendingMark is one cell key + tenant's deadline-anchor
+// record: the generation and cell instance the anchor was taken for,
+// and when. A later call whose generation or cellInstance differs
+// resets Since to that call's own time.
+type rehydrationPendingMark struct {
+	Generation   int64
+	CellInstance string
+	Since        time.Time
 }
 
 // SetVarroaEndpoint sets the gRPC endpoint that mite sidecars use to connect back to Varroa.
@@ -208,6 +317,60 @@ func (r *Reconciler) SetCAPEM(pem string) {
 // resolving init-container plugin update center URLs.
 func (r *Reconciler) SetUpdateCenterBaseURL(baseURL string) {
 	r.ucBaseURL = strings.TrimRight(baseURL, "/")
+}
+
+// SetClaimGate sets the value the operator stamps as VARROA_CLAIM_GATE on
+// every Jenkins container it provisions. gate is "1" when the record store
+// is enabled, else "0".
+func (r *Reconciler) SetClaimGate(gate string) {
+	r.claimGate = gate
+}
+
+// SetSyncAnnouncer injects the C6 tenant.sync "announce" requester.
+// Production wires NewNATSSyncAnnouncer(conn); a test injects a fake.
+func (r *Reconciler) SetSyncAnnouncer(fn cells.Announcer) {
+	r.announce = fn
+}
+
+// SetRecordsFunc injects the C6 tenant.sync "records" requester.
+// Production wires NewNATSSyncRecordsRequester(conn); a test injects a
+// fake.
+func (r *Reconciler) SetRecordsFunc(fn cells.RecordsFunc) {
+	r.recordsFunc = fn
+}
+
+// SetHomesFunc injects the tenant.sync "homes" requester. Production
+// wires NewNATSSyncHomesRequester(conn); a test injects a fake.
+func (r *Reconciler) SetHomesFunc(fn cells.HomesFunc) {
+	r.homesFunc = fn
+}
+
+// SetBuildJobSeedFunc injects the per-job rehydration seed renderer.
+// Production wires rehydrate.BuildJobSeed; a test injects a fake.
+func (r *Reconciler) SetBuildJobSeedFunc(fn func(jr rehydrate.JobRecords, n int, jenkinsHome string, opts rehydrate.Options) (rehydrate.JobSeed, error)) {
+	r.buildJobSeed = fn
+}
+
+// SetClaimTimeoutMS sets the operator's own raw VARROA_CLAIM_TIMEOUT_MS
+// value, in milliseconds. Zero means unset. buildStatefulSet validates the
+// value (floor of 5000 ms) before it stamps anything.
+func (r *Reconciler) SetClaimTimeoutMS(ms int) {
+	r.claimTimeoutMS = ms
+}
+
+// SetBlobstoreURL sets the operator's own VARROA_BLOBSTORE_URL, the same
+// value the chart sets on the gateway. artifactStorageFragment parses it to
+// derive the fragment's bucket, endpoint, region, and URL-style flags.
+func (r *Reconciler) SetBlobstoreURL(url string) {
+	r.blobstoreURL = url
+}
+
+// SetArtifactSecretBase sets VARROA_ARTIFACT_SECRET, the base name of the
+// per-cell artifact Secret in the release namespace. resolveArtifactSecret
+// reads "<base>-<controller>" and nothing else. Empty disables artifact
+// storage entirely: the operator emits no fragment for any controller.
+func (r *Reconciler) SetArtifactSecretBase(base string) {
+	r.artifactSecretBase = base
 }
 
 // resolvePluginUpdateCenterURLs resolves the plugin update center URLs for the
@@ -338,12 +501,15 @@ func (r *Reconciler) effectiveBundleRef(cr *v1alpha1.Controller) bundleIdentity 
 // - Unresolved ${var} placeholders remain after injection
 //
 // It also returns the bundle's ResolvedHash and resolved identity so callers can
-// use them as cross-sibling gate keys without an extra API read.
-func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha1.Controller) (*bundle.MaterializedBundle, string, bundleIdentity, error) {
+// use them as cross-sibling gate keys without an extra API read, and the
+// ArtifactStorage condition the artifact-storage merge step (design D6)
+// computed for this controller — the zero value on any error return, since
+// the pipeline never reached that step.
+func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha1.Controller) (*bundle.MaterializedBundle, string, bundleIdentity, v1alpha1.ControllerCondition, error) {
 	ident := r.effectiveBundleRef(cr)
 	cb, err := r.getComposedBundle(ctx, ident.Name, ident.Namespace)
 	if err != nil {
-		return nil, "", bundleIdentity{}, fmt.Errorf("get composed bundle %s: %w", ident.Name, err)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("get composed bundle %s: %w", ident.Name, err)
 	}
 
 	// Wait if bundle is not Ready or Drifted. Drifted bundles have valid
@@ -355,46 +521,35 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		if len(cb.Status.Errors) > 0 {
 			msg += fmt.Sprintf("; bundle errors: %s", strings.Join(cb.Status.Errors, ", "))
 		}
-		return nil, "", bundleIdentity{}, fmt.Errorf("%s", msg)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%s", msg)
 	}
 
 	// Read the materialized content from the ConfigMap.
 	if cb.Status.ContentRef == "" {
-		return nil, "", bundleIdentity{}, fmt.Errorf("composed bundle %s has no contentRef", cb.Name)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("composed bundle %s has no contentRef", cb.Name)
 	}
 
 	data, err := r.client.GetConfigMap(ctx, cb.Status.ContentRef, cb.Namespace)
 	if err != nil {
-		return nil, "", bundleIdentity{}, fmt.Errorf("read content configmap %s: %w", cb.Status.ContentRef, err)
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("read content configmap %s: %w", cb.Status.ContentRef, err)
 	}
 
 	// Build MaterializedBundle from ConfigMap data.
 	mat := &bundle.MaterializedBundle{
-		JenkinsYAML:    data["jenkins.yaml"],
-		PluginsYAML:    data["plugins.yaml"],
-		ItemsYAML:      data["items.yaml"],
-		RbacYAML:       data["rbac.yaml"],
-		RawPluginsYAML: data["plugins.yaml"],
+		JenkinsYAML:           data["jenkins.yaml"],
+		PluginsYAML:           data["plugins.yaml"],
+		ItemsYAML:             data["items.yaml"],
+		RbacYAML:              data["rbac.yaml"],
+		RawPluginsYAML:        data["plugins.yaml"],
+		PipelineTemplatesYAML: data["pipeline-templates.yaml"],
 	}
 
 	if resolvedBundleEmpty(mat) {
-		return nil, "", bundleIdentity{}, fmt.Errorf("materialized bundle content is empty")
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("materialized bundle content is empty")
 	}
 
 	// Restore bundle-defined variables from the ConfigMap.
-	vars := make(bundle.Variables)
-	if varYAML := data["variables.yaml"]; varYAML != "" {
-		for _, line := range strings.Split(varYAML, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-			}
-		}
-	}
+	vars := bundle.ParseVariables(data["variables.yaml"])
 
 	// Inject varroa_controller_* variables (highest priority).
 	// The endpoint must point at the UID-named Service (controllerPrefix(cr)+"-svc",
@@ -403,7 +558,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	// connection refused).
 	vars["varroa_controller_name"] = cr.Name
 	vars["varroa_controller_namespace"] = cr.Namespace
-	baseEndpoint := fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", controllerPrefix(cr), cr.Namespace)
+	baseEndpoint := inClusterEndpoint(cr)
 	vars["varroa_controller_endpoint"] = baseEndpoint
 	vars["varroa_frontend_url"] = varroaBaseURL(r.varroaRedirectURL)
 
@@ -423,7 +578,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 			}
 		}
 	}
-	if host != "" {
+	if host != "" && !v1alpha1.IsHeadless(cr) {
 		if cr.Spec.IngressSpec != nil && cr.Spec.IngressSpec.RoutingMode() == v1alpha1.RoutingModePath {
 			pp := v1alpha1.PathPrefix(cr.Namespace, cr.Name)
 			extURL = "https://" + host + pp
@@ -457,18 +612,88 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		}
 	}
 
-	// Resolve variables in all content.
+	// Apply the artifact-storage step (design D6): strip any bundle- or
+	// profile-overlay-authored artifact-manager key, then merge the
+	// operator's own fragment and inject its credential — still before
+	// ResolveVars, so the fragment's ${readFile:...} reference resolves
+	// like every other JCasC secret source. A no-op when the operator emits
+	// no fragment for this controller.
+	artifactCond, artifactErr := func() (v1alpha1.ControllerCondition, error) {
+		merged, cond, aErr := r.applyArtifactStorage(ctx, cr, mat.JenkinsYAML)
+		mat.JenkinsYAML = merged
+		return cond, aErr
+	}()
+	// A Secret read fault is not a bundle-content fault: handleProvisioning
+	// must mark the reconcile blocked instead of waiting on the bundle, so
+	// it needs this error, not a warning log. Every other artifact-storage
+	// fault (a merge or credential-injection failure) keeps the existing
+	// warn-and-continue behaviour, because the bundle content itself is
+	// still usable without the fragment.
+	if errors.Is(artifactErr, errArtifactSecretRead) {
+		return mat, cb.Status.ResolvedHash, ident, artifactCond, artifactErr
+	}
+	if artifactErr != nil && r.Logger != nil {
+		r.Logger.Warn("artifact-storage merge failed; using base bundle", "controller", cr.Namespace+"/"+cr.Name, "error", artifactErr)
+	}
+
+	// Assemble a cell's tenant items, clouds, and cloud credentials onto
+	// mat (design D7, D8, D10, D11) — still before ResolveVars. A no-op for
+	// a controller that is not a cell. A fault in one tenant's items holds
+	// only that tenant. A failure returned here is a fault of the cell
+	// itself, and it fails the whole resolve.
+	coreSet := r.coreSetForCr(ctx, cr, r.Logger)
+	if cellErr := r.applyCellContent(ctx, cr, mat, coreSet); cellErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("assemble cell content: %w", cellErr)
+	}
+
+	// Refuse to assemble items when the manifest holds a multibranch item or
+	// an organization folder item and the resolved plugin set omits
+	// basic-branch-build-strategies (design D12). This runs before
+	// ResolveVars so an item's kind is never templated. A cell already ran
+	// it on each tenant's items, so it cannot fail here for a cell.
+	if err := checkBranchBuildStrategiesPlugin(mat.ItemsYAML, coreSet); err != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
+	}
+
+	// Refuse to assemble items when a folder library needs a plugin that the
+	// resolved plugin set omits (git, github-branch-source, or
+	// pipeline-groovy-lib). A cell ran it on each tenant's items as well.
+	if err := checkFolderLibraryPlugins(mat.ItemsYAML, coreSet); err != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
+	}
+
+	// Refuse to assemble items when a gitea source or navigator needs the
+	// gitea plugin and the resolved plugin set omits it.
+	if err := checkGiteaPlugin(mat.ItemsYAML, coreSet); err != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
+	}
+
+	// Resolve variables in all content. mat.PipelineTemplatesYAML and
+	// mat.CellTemplateFragments are absent from this pass, and from the
+	// unresolved-variable check below. A template body holds its own
+	// ${...} Groovy text. That text is not a catalog variable (design D7).
+	// A cell's items are absent too: they are tenant content only, which
+	// applyCellContent resolved and checked per tenant. A cell variable
+	// must not reach a tenant item, and a tenant fault must not fail the
+	// cell.
 	mat.Variables = vars
 	{
 		resolveStart := time.Now()
+		cell := isCellController(cr)
 		mat.JenkinsYAML = bundle.ResolveVars(mat.JenkinsYAML, vars)
 		mat.PluginsYAML = bundle.ResolveVars(mat.PluginsYAML, vars)
-		mat.ItemsYAML = bundle.ResolveVars(mat.ItemsYAML, vars)
+		if !cell {
+			mat.ItemsYAML = bundle.ResolveVars(mat.ItemsYAML, vars)
+		}
 		mat.RbacYAML = bundle.ResolveVars(mat.RbacYAML, vars)
 		duration := time.Since(resolveStart).Seconds()
 		result := "success"
-		unresolved := findUnresolvedVars(true, mat.JenkinsYAML, mat.RbacYAML)
-		for _, v := range findUnresolvedVars(false, mat.PluginsYAML, mat.ItemsYAML) {
+		unresolved := bundle.RemainingVarRefs(true, mat.JenkinsYAML, mat.RbacYAML)
+		checked := []string{mat.PluginsYAML}
+		if !cell {
+			checked = append(checked, mat.ItemsYAML)
+		}
+		for _, v := range bundle.RemainingVarRefs(false, checked...) {
 			if !slices.Contains(unresolved, v) {
 				unresolved = append(unresolved, v)
 			}
@@ -476,19 +701,106 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		if len(unresolved) > 0 {
 			result = "error"
 		}
-		jcascResolveDuration.Record(ctx, duration, metric.WithAttributes(
+		r.metrics.jcascResolveDuration.Record(ctx, duration, metric.WithAttributes(
 			attribute.String("result", result),
 		))
 		if len(unresolved) > 0 {
-			return nil, "", bundleIdentity{}, fmt.Errorf("unresolved variables after injection: %s", strings.Join(unresolved, ", "))
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("unresolved variables after injection: %s", strings.Join(unresolved, ", "))
 		}
 	}
 
-	// Inject location URL whenever the controller has a resolvable external URL (both modes).
-	if vars["varroa_controller_external_url"] != "" {
-		out, overrode, lerr := bundle.InjectLocationURL(mat.JenkinsYAML, vars["varroa_controller_external_url"]+"/")
+	// A folder library on a plain controller sees GLOBAL-scope system
+	// credentials and the folder credentials of its folder chain. A cell
+	// checks each tenant's libraries in applyCellContent.
+	if !isCellController(cr) {
+		if err := checkPlainFolderLibraryCredentials(mat.ItemsYAML, mat.JenkinsYAML); err != nil {
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("%w: %w", errItemsRefused, err)
+		}
+	}
+
+	// Add each placed tenant's projected folder credentials, after
+	// ResolveVars and the unresolved-variable check. A credential value is
+	// Secret data and must reach Jenkins exactly as the Secret holds it. A
+	// no-op for a controller that is not a cell.
+	withCreds, credErr := injectTenantFolderCredentials(mat.ItemsYAML, mat.CellFolderCredentials)
+	if credErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject tenant folder credentials: %w", credErr)
+	}
+	mat.ItemsYAML = withCreds
+
+	// Inject the bundle's own pipeline-template set, after ResolveVars and
+	// the unresolved-variable check above (design D7). An earlier
+	// injection would fail that check: a template body holds its own
+	// ${...} Groovy text. folder is empty: this is the controller's own
+	// bundle, not a tenant's.
+	ownTemplatesMerged, ptErr := bundle.InjectPipelineTemplates(mat.JenkinsYAML, mat.PipelineTemplatesYAML, "")
+	if ptErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pipeline templates: %w", ptErr)
+	}
+	mat.JenkinsYAML = ownTemplatesMerged
+
+	// Merge each placed tenant's pipeline-template fragment. applyCellContent
+	// above already stamped folder with the Team name. This waits for the
+	// same reason: no tenant template body may reach ResolveVars or the
+	// unresolved-variable check above. A no-op for a controller that is not
+	// a cell.
+	for _, frag := range mat.CellTemplateFragments {
+		merged, ptErr := bundle.InjectPipelineTemplates(mat.JenkinsYAML, frag.TemplatesYAML, frag.Folder)
+		if ptErr != nil {
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject tenant %q pipeline templates: %w", frag.Folder, ptErr)
+		}
+		mat.JenkinsYAML = merged
+	}
+
+	// Render the pool's trusted global libraries. It runs
+	// after ResolveVars, so no pool value meets the catalog variable pass.
+	// A cell always gets the libraries key, even when empty, so a removed
+	// library does not stay live. A no-op for a controller that is not a
+	// cell.
+	if libErr := r.applyPoolLibraries(ctx, cr, mat, coreSet); libErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool libraries: %w", libErr)
+	}
+
+	// Render the pool's Gitea and Forgejo servers. A cell with the gitea
+	// plugin always gets the servers key, even when empty, so a removed
+	// server is unloaded. A no-op for a controller that is not a cell.
+	if gErr := r.applyPoolGiteaServers(ctx, cr, mat, coreSet); gErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool gitea servers: %w", gErr)
+	}
+
+	// Render the pool's approved script signatures. The cell always gets
+	// the approval key, even when empty, so a removed signature is revoked.
+	// A no-op for a controller that is not a cell.
+	if sigErr := r.applyPoolSignatures(ctx, cr, mat); sigErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject pool signatures: %w", sigErr)
+	}
+
+	// Render the pool's SMTP setting. It reaches the desired-state command
+	// only, never the ConfigMap. A no-op for a controller that is not a cell.
+	if mailErr := r.applyPoolMail(ctx, cr, mat, coreSet); mailErr != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("render pool mail: %w", mailErr)
+	}
+
+	// Inject location URL under the three-way rule: a headless controller
+	// gets the dashboard door URL when the operator has a dashboard origin,
+	// and the in-cluster endpoint otherwise. A non-headless controller with a
+	// resolvable external URL keeps that value, and a non-headless controller
+	// with neither gets no injection.
+	locationURL := ""
+	switch {
+	case v1alpha1.IsHeadless(cr):
+		if u := v1alpha1.HeadlessLocationURL(varroaBaseURL(r.varroaRedirectURL), r.clusterName, cr.Namespace, cr.Name); u != "" {
+			locationURL = u
+		} else {
+			locationURL = vars["varroa_controller_endpoint"] + "/"
+		}
+	case vars["varroa_controller_external_url"] != "":
+		locationURL = vars["varroa_controller_external_url"] + "/"
+	}
+	if locationURL != "" {
+		out, overrode, lerr := bundle.InjectLocationURL(mat.JenkinsYAML, locationURL)
 		if lerr != nil {
-			return nil, "", bundleIdentity{}, fmt.Errorf("inject location url: %w", lerr)
+			return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject location url: %w", lerr)
 		}
 		if overrode {
 			r.Logger.Info("overrode bundle-provided location url", "controller", cr.Name, "namespace", cr.Namespace)
@@ -496,39 +808,9 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.JenkinsYAML = out
 	}
 
-	return mat, cb.Status.ResolvedHash, ident, nil
-}
+	clearBundleFailed(cr)
 
-// findUnresolvedVars scans content for remaining ${var} placeholders.
-// JCasC literal escapes (^${var}) are skipped: Jenkins strips the caret and
-// the value is not Varroa's to resolve. JCasC secret-source references
-// (${readFile:...}, ${base64:...}) are also skipped: they must reach Jenkins
-// byte-for-byte so configuration-as-code's own SecretSourceResolver can
-// resolve them at Jenkins startup.
-func findUnresolvedVars(allowJcascSecretSources bool, contents ...string) []string {
-	var found []string
-	seen := make(map[string]bool)
-	for _, c := range contents {
-		for {
-			start := strings.Index(c, "${")
-			if start < 0 {
-				break
-			}
-			rel := strings.Index(c[start:], "}")
-			if rel < 0 {
-				break
-			}
-			end := start + rel
-			escaped := start > 0 && c[start-1] == '^'
-			varName := c[start+2 : end]
-			if !escaped && (!allowJcascSecretSources || !bundle.IsJCascSecretSourceRef(varName)) && !seen[varName] {
-				found = append(found, varName)
-				seen[varName] = true
-			}
-			c = c[end+1:]
-		}
-	}
-	return found
+	return mat, cb.Status.ResolvedHash, ident, artifactCond, nil
 }
 
 // StatefulSetSpec carries the spec for a Jenkins + mite StatefulSet.
@@ -560,6 +842,7 @@ type StatefulSetSpec struct {
 	ImagePullSecrets              []string
 	ServiceAccountName            string
 	OIDCIssuer                    string
+	LocalIssuer                   string
 	VarroaLoginURL                string
 	OIDCUserClaim                 string
 	OIDCGroupClaim                string
@@ -577,6 +860,44 @@ type StatefulSetSpec struct {
 	PluginUpdateCenterURL         string
 	PluginUpdateCenterDownloadURL string
 	VarroaBaseURL                 string
+
+	// ClaimGate is "1" when the record store is enabled, else "0". Stamped
+	// as VARROA_CLAIM_GATE on the Jenkins container. An empty value stamps
+	// "0", the same as an explicit "0".
+	ClaimGate string
+
+	// ArtifactSecretName is the projected per-cell artifact Secret
+	// ("<controller>-artifacts") CreateStatefulSet mounts at
+	// /run/secrets/varroa-artifacts on the Jenkins container. Empty means no
+	// per-cell Secret was found: no volume and no mount are added.
+	ArtifactSecretName string
+	// ArtifactSecretHash is a content hash of ArtifactSecretName's data,
+	// stamped as the varroa.dev/artifact-secret-hash pod-template
+	// annotation so a rotation rolls the pod even though the JCasC
+	// fragment's ${readFile:...} reference never changes.
+	ArtifactSecretHash string
+	// ArtifactSharedCredentials adds the AWS shared credentials file
+	// property to JAVA_OPTS. It is true in STS mode when ArtifactSecretName
+	// is set, so the JVM reads the projected credentials file.
+	ArtifactSharedCredentials bool
+
+	// CellSecretsName is the pool confidential store
+	// ("varroa-cell-secrets-<pool>") a pool cell mounts as the
+	// varroa-cell-secrets volume. Empty means the controller is not a pool
+	// cell: no volume and no mount are added. The builder stamps no content
+	// hash for it, because the operator never rotates the Secret.
+	CellSecretsName string
+
+	// ClaimTimeoutMS is the operator's own VARROA_CLAIM_TIMEOUT_MS value, in
+	// milliseconds. Zero means unset: the builder stamps neither
+	// VARROA_CLAIM_TIMEOUT_MS on the Jenkins container nor
+	// MITE_CLAIM_TIMEOUT_MS on the mite container, and both containers fall
+	// back to their built-in defaults of 5000 ms and 4500 ms. A non-zero
+	// value below 5000 is rejected: the builder stamps neither variable and
+	// logs a warning, because a smaller value would push the mite budget to
+	// or below the gateway's 4000 ms default and break the shrink-inward
+	// timeout rule (design D6).
+	ClaimTimeoutMS int
 
 	// PodOverrides supplies typed, pod-scoped customizations merged onto the
 	// Jenkins StatefulSet via strategic-merge patch.
@@ -600,6 +921,55 @@ type StatefulSetSpec struct {
 	// drift comparator can distinguish "spec block removed → roll" from
 	// "never user-set → skip".
 	ResourcesSource map[string]string `json:"resourcesSource,omitempty"`
+
+	// Cell is true when the Controller runs as a cell: a disposable
+	// Jenkins JVM with no durable state. buildStatefulSet omits
+	// volumeClaimTemplates and renders the jenkins-home pod volume as an
+	// emptyDir instead of a claim. buildStatefulSet also stamps
+	// VARROA_CELL=true on the jenkins container, which the plugin reads to
+	// block the jobDsl step at run time.
+	Cell bool
+
+	// CellPool is the varroa.dev/cell-pool label of a cell, and empty for a
+	// controller that is not a cell. CreateStatefulSet writes it as a pod
+	// template label after every overlay merge, so a pod selector finds the
+	// pods of a pool and no podLabels entry can change the value. The
+	// selector never carries it, because the selector is immutable.
+	CellPool string
+
+	// Headless is v1alpha1.IsHeadless(cr). buildStatefulSet stamps
+	// VARROA_HEADLESS=true on the jenkins container when true, and stamps
+	// nothing when false.
+	Headless bool
+
+	// InClusterEndpoint is the Service address of the controller
+	// (inClusterEndpoint). A headless pod gets it as KUBERNETES_JENKINS_URL,
+	// so clouds without an explicit jenkinsUrl keep their agents in-cluster.
+	InClusterEndpoint string
+}
+
+// StatefulSetRollout is the part of a StatefulSet that decides whether the
+// operator may replace a pod to advance a rollout.
+type StatefulSetRollout struct {
+	// UpdateRevision is status.updateRevision. It is "" when the
+	// StatefulSet does not exist.
+	UpdateRevision string
+	// RollingUpdate is true when spec.updateStrategy is RollingUpdate (or
+	// unset) and rollingUpdate.partition is nil or 0. Under OnDelete or a
+	// partition the user or the partition owns pod recycling.
+	RollingUpdate bool
+}
+
+// ContentReadGrant describes one name-scoped ConfigMap read grant: the
+// permission for a single ServiceAccount to get a single ConfigMap.
+type ContentReadGrant struct {
+	// Name is shared by the Role and the RoleBinding.
+	Name             string
+	Namespace        string
+	ConfigMapName    string
+	SubjectName      string
+	SubjectNamespace string
+	Owner            metav1.OwnerReference
 }
 
 // ResourceClient abstracts Kubernetes resource operations.
@@ -607,18 +977,37 @@ type ResourceClient interface {
 	CreateService(ctx context.Context, name, namespace string, port int32, overlayYAML string) error
 	CreateServiceAccount(ctx context.Context, name, namespace string) error
 	CreateAgentRBAC(ctx context.Context, name, namespace string) error
-	CreateStatefulSet(ctx context.Context, spec StatefulSetSpec) error
-	UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace, oidcIssuer, loginURL, oidcUserClaim, oidcGroupClaim, pubKeyPEM, pubKeyKID, aud, apikeyVerifyURL, caPEM string) error
+	// CreateOrUpdateContentReadGrant creates or updates the Role and
+	// RoleBinding that let one ServiceAccount read exactly one ConfigMap by
+	// name. It replaces the Role rule and the RoleBinding subjects on every
+	// call, so an edit made by hand converges back.
+	CreateOrUpdateContentReadGrant(ctx context.Context, g ContentReadGrant) error
+	// CreateServiceAccountTokenSecret creates a long-lived
+	// kubernetes.io/service-account-token Secret bound to serviceAccount.
+	// Used to project a tenant agent's identity as a Jenkins credential
+	// (design D11).
+	CreateServiceAccountTokenSecret(ctx context.Context, name, namespace, serviceAccount string) error
+	// CreateStatefulSet creates or updates the StatefulSet. fence runs before
+	// a create, or before an update that scales up from 0; see
+	// ClientsetClient.CreateStatefulSet.
+	CreateStatefulSet(ctx context.Context, spec StatefulSetSpec, fence func(context.Context) error) error
+	UpdateStatefulSetOIDCEnv(ctx context.Context, name, namespace string, authEnv JenkinsAuthEnv) error
 	EnsureStatefulSetPodLabel(ctx context.Context, namespace, stsName, key, value string) (bool, error)
 	IsStatefulSetReady(ctx context.Context, name, namespace string) (bool, error)
 	// GetStatefulSetPluginsChecksum returns the plugins-checksum annotation from the
 	// live StatefulSet's pod template, or "" if the StatefulSet does not exist.
 	GetStatefulSetPluginsChecksum(ctx context.Context, name, namespace string) (string, error)
+	// GetStatefulSetRollout returns the update revision and rollout strategy
+	// of the named StatefulSet. A missing StatefulSet returns the zero value.
+	GetStatefulSetRollout(ctx context.Context, name, namespace string) (StatefulSetRollout, error)
 	// GetStatefulSetImages returns the varroa.dev/computed-images stamp (nil when
 	// absent/unparseable) and the live container images (containers + initContainers,
 	// by name) of the controller StatefulSet. A missing StatefulSet returns
 	// (nil, nil, nil) — callers treat nil live as "nothing to roll".
 	GetStatefulSetImages(ctx context.Context, name, namespace string) (computed, live map[string]string, err error)
+	// GetStatefulSetContainerEnv returns the named container's env as a map.
+	// found is false when the StatefulSet or the container is absent.
+	GetStatefulSetContainerEnv(ctx context.Context, name, namespace, container string) (env map[string]string, found bool, err error)
 	// GetStatefulSetContainerSpecs returns the mite container's full independently-
 	// editable spec surface — computed-images stamp entry, live image, live
 	// resource requirements (requests+limits for both mite and Jenkins),
@@ -635,10 +1024,13 @@ type ResourceClient interface {
 		resourcesSource map[string]string,
 		found bool, err error,
 	)
-	// ScaleStatefulSet sets the StatefulSet's replica count (power on/off).
-	// Idempotent: a no-op when the count already matches, and not an error
-	// when the StatefulSet does not exist.
-	ScaleStatefulSet(ctx context.Context, name, namespace string, replicas int32) error
+	// ScaleStatefulSetToZero scales the StatefulSet to 0 for a power-off or
+	// hibernation tick. It returns nil when the StatefulSet is missing or
+	// already at 0, and does not call fence in that case. Otherwise it calls
+	// fence, then patches the replica count under the StatefulSet
+	// resourceVersion it read, so a scale-up that lands after the read
+	// conflicts. A fence error or a conflict is returned unchanged.
+	ScaleStatefulSetToZero(ctx context.Context, name, namespace string, fence func(context.Context) error) error
 	CreateSecret(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
 	CreateSecretExclusive(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
 	CreateOrUpdateSecret(ctx context.Context, name, namespace string, data map[string][]byte) error
@@ -673,6 +1065,14 @@ type ResourceClient interface {
 	UpdateConfigMapData(ctx context.Context, name, namespace string, data map[string]string) error
 	DeleteResource(ctx context.Context, kind, name, namespace string) error
 	DeleteSecret(ctx context.Context, name, namespace string) error
+	// DeleteCellNetworkPolicy deletes a cell's NetworkPolicy by name.
+	// NotFound is not an error: the policy never exists when cell
+	// isolation is disabled.
+	DeleteCellNetworkPolicy(ctx context.Context, name, namespace string) error
+	// CreateCellNetworkPolicy creates or updates a cell's NetworkPolicy
+	// (design D2). Rebuilt on every Running/Connected tick so a tenant
+	// placed or removed between ticks converges without a re-provision.
+	CreateCellNetworkPolicy(ctx context.Context, spec CellPolicySpec) error
 	EnsureWakeEndpointSlice(ctx context.Context, namespace, serviceName string, podIPs []string, port int32) error
 	DeleteWakeEndpointSlice(ctx context.Context, namespace, serviceName string) error
 	ListOperatorPodIPs(ctx context.Context, namespace string) ([]string, error)
@@ -699,13 +1099,28 @@ type ResourceClient interface {
 	// is invalid on the create path the server takes for a missing object).
 	// Existing ApplyControllerSpecSSA call sites are unaffected.
 	ApplyControllerSpecSSAIfExists(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
-	// SetHibernated is the single writer for status.hibernated and
-	// status.hibernatedAt. It reads the live object, returns (false, nil)
+	// SetHibernated writes status.hibernated and status.hibernatedAt for
+	// every caller outside the reconcile tick. It reads the live object, returns (false, nil)
 	// when the flag already matches want, and otherwise writes the STATUS
 	// SUBRESOURCE via Update carrying the fetched resourceVersion so a
 	// concurrent write conflicts instead of being clobbered.
 	SetHibernated(ctx context.Context, name, namespace string, want bool) (bool, error)
-	PatchControllerStatus(ctx context.Context, name, namespace string, status *v1alpha1.ControllerStatus) error
+	// SetHibernatedAt sets status.hibernated only while the Controller still
+	// carries resourceVersion, and returns the resourceVersion after the
+	// write. It does not read the Controller. A write since that version
+	// answers apierrors Conflict. The tick uses it through setTickHibernated.
+	SetHibernatedAt(ctx context.Context, name, namespace, resourceVersion string, want bool) (string, error)
+	// PatchControllerStatus merge-patches status only while the Controller
+	// still carries resourceVersion, and returns the resourceVersion after
+	// the patch. A write since that version answers apierrors Conflict.
+	PatchControllerStatus(ctx context.Context, name, namespace, resourceVersion string, status *v1alpha1.ControllerStatus) (string, error)
+	// PatchControllerCellStatus is the placement pass's one narrow writer of
+	// status.cell.tenants (design D4). It merge-patches exactly
+	// {"status":{"cell":{"tenants":[...]}}} — never conditions, phase, or
+	// any other status.cell field — so it never collides with the
+	// controller reconciler's own status.cell writes (warm, evacuate,
+	// unreadySince, rolledAt, appliedTenants, tenantWarnings).
+	PatchControllerCellStatus(ctx context.Context, name, namespace string, cell *v1alpha1.CellStatus) error
 
 	// CreateOrUpdateConfigMapWithOwner creates or updates a ConfigMap, setting
 	// the given owner reference on the ConfigMap's metadata.
@@ -729,9 +1144,21 @@ type ResourceClient interface {
 	// The StatefulSet recreates it. Idempotent: a missing pod is not an error.
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
 
+	// DeleteControllerPodGrace deletes the named pod with graceSeconds as
+	// the delete grace, only while its UID equals uid. A missing pod and a
+	// pod created again under the same name are not errors. graceSeconds
+	// must be above 0: a force delete can run two pods for one ordinal.
+	DeleteControllerPodGrace(ctx context.Context, namespace, podName string, uid types.UID, graceSeconds int64) error
+
 	// GetControllerPod returns the Jenkins pod for a controller. Returns nil
 	// without error when the pod does not exist.
 	GetControllerPod(ctx context.Context, namespace, name string) (*corev1.Pod, error)
+
+	// ListPodPhases answers the phase of every pod in namespace, keyed by
+	// the pod's UID. It reads pods, not Controllers, so it still sees a
+	// pod whose Controller is gone. It applies no label selector: a pod
+	// that lacks a label must never read as absent.
+	ListPodPhases(ctx context.Context, namespace string) (map[types.UID]corev1.PodPhase, error)
 
 	// ListResourceQuotas lists ResourceQuota objects in the given namespace.
 	ListResourceQuotas(ctx context.Context, namespace string) ([]corev1.ResourceQuota, error)
@@ -755,8 +1182,9 @@ func allowAllVersionRolls(context.Context, *v1alpha1.Controller, string, string)
 }
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Backend, miteTransport transport.Transport, signer *mite.TokenSigner, rbGen *rbac.Generator, composer *bundle.Composer) *Reconciler {
+func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceClient, store crdstore.Backend, miteTransport transport.Transport, signer *mite.TokenSigner, rbGen *rbac.Generator, composer *bundle.Composer) *Reconciler {
 	rec := &Reconciler{
+		metrics:                 newControllerMetrics(mp),
 		Resolver:                r,
 		Composer:                composer,
 		rbacGenerator:           rbGen,
@@ -773,11 +1201,19 @@ func NewReconciler(r *bundle.Resolver, client ResourceClient, store crdstore.Bac
 		maxConcurrentReconciles: defaultMaxConcurrentReconciles,
 		versionRollGate:         allowAllVersionRolls,
 		clusterName:             "core",
+		buildJobSeed:            rehydrate.BuildJobSeed,
+		buildBundle:             rehydrate.BuildBundle,
+		numberSeededJobs:        make(map[string]*numberSeededSet),
+		rehydrationInFlight:     make(map[string]*rehydrationPush),
+		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
+		controllerLocks:         newKeyLock(),
+		approveLockWait:         defaultApproveLockWait,
 	}
 	// Replaces the default allow-all gate with the composed core↔plugin
 	// compat + upgradePolicy gate. Assigned post-construction because it is a
 	// method value bound to rec.
 	rec.versionRollGate = rec.upgradePolicyVersionRollGate
+	rec.downloadProbe = newDownloadURLProber().Probe
 
 	return rec
 }
@@ -857,6 +1293,33 @@ func (r *Reconciler) TriggerReconcile(cluster, name, namespace string) {
 	r.wakeController(namespace + "/" + name)
 }
 
+// TriggerOwnedReconcile enqueues a reconcile for the Controller only when
+// this replica owns it. It never routes a wake to another shard. Use it for
+// a broadcast that every replica receives, because the owner receives the
+// same message and a routed wake from each other replica only adds patches.
+func (r *Reconciler) TriggerOwnedReconcile(cluster, name, namespace string) {
+	_ = cluster // operator always acts on its own cluster
+	if r.ownsController(namespace, name) {
+		r.enqueueReconcile(namespace + "/" + name)
+	}
+}
+
+// NotifyCommandResult enqueues a reconcile of an owned Controller when a
+// desired-state result applies its rehydration seed. The reconcile drains
+// the buffered result at once. A result that does not apply the seed wakes
+// nothing: a deferred job or a failure makes the next reconcile resend the
+// bundle, so the periodic tick must pace that resend. It never routes a
+// wake to another shard.
+func (r *Reconciler) NotifyCommandResult(ns, name string, res *mitev1.CommandResult) {
+	ds := res.GetDesiredState()
+	if ds == nil || !ds.RehydrationSuccess || ds.RehydrationError != "" || len(ds.RehydrationDeferredJobs) > 0 {
+		return
+	}
+	if r.ownsController(ns, name) {
+		r.enqueueReconcile(ns + "/" + name)
+	}
+}
+
 // SetProvisioningDefaults caches the cluster-wide ProvisioningDefaults for
 // resolution of default reconciliation policies.
 func (r *Reconciler) SetProvisioningDefaults(defaults *v1alpha1.ProvisioningDefaults) {
@@ -896,12 +1359,53 @@ func (r *Reconciler) SetTenancy(c *tenancy.Classifier) {
 	r.tenancy = c
 }
 
+// SetCellsConfig sets the warm pool, tenant cap, unready grace, and cell
+// NetworkPolicy shape, parsed once at boot by ParseCellsConfigFromEnv.
+func (r *Reconciler) SetCellsConfig(cfg CellsConfig) {
+	r.cellsConfig = cfg
+}
+
 // SetShardOwnership wires the shard ring and held set for ownership gating.
 // Nil values (or never called) mean the reconciler owns every controller,
 // which is the pre-wire default and the test/unsharded behavior.
 func (r *Reconciler) SetShardOwnership(ring *sharding.Ring, held *sharding.ShardSet) {
 	r.shardRing = ring
 	r.shardSet = held
+}
+
+// forgetMite drops the per-mite entries that the transport keeps for a
+// deleted controller.
+func (r *Reconciler) forgetMite(ns, name string) {
+	if r.miteTransport != nil {
+		r.miteTransport.Forget(ns, name)
+	}
+}
+
+// forgetIfDeleted forgets the mite of ns/name when the Controller is gone or
+// under deletion. A read error other than NotFound forgets nothing.
+func (r *Reconciler) forgetIfDeleted(ctx context.Context, ns, name string) {
+	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, ns)
+	switch {
+	case apierrors.IsNotFound(err):
+		r.forgetMite(ns, name)
+	case err == nil && !cr.DeletionTimestamp.IsZero():
+		r.forgetMite(ns, name)
+	}
+}
+
+// ForgetUnowned forgets the mite of every controller that this replica does
+// not own. Only the owner may hold the inbound subscription of a mite: every
+// holder answers the token refresh of the mite, and a held result channel
+// fills while no reconcile drains it. The shard manager calls it on a shard
+// release, and the shard resync tick calls it to catch a reconcile that was
+// in flight during the release.
+func (r *Reconciler) ForgetUnowned() {
+	if r.miteTransport == nil || r.shardRing == nil || r.shardSet == nil {
+		return
+	}
+	r.miteTransport.ForgetMatching(func(ns, name string) bool {
+		return !r.ownsController(ns, name)
+	})
 }
 
 // ownsController returns true if this replica owns the controller identified
@@ -911,6 +1415,19 @@ func (r *Reconciler) ownsController(ns, name string) bool {
 		return true
 	}
 	return r.shardSet.OwnsController(r.shardRing, ns, name)
+}
+
+// enterShard registers shard-owned work for namespace/name. It returns false
+// when this replica does not own the controller. On success the caller must
+// call leave when the work ends, and must use the returned context for every
+// write. A shard release waits for this work before it gives up the lease,
+// and cancels the context when the wait ends. When sharding is not wired,
+// it owns all and leave does nothing.
+func (r *Reconciler) enterShard(ctx context.Context, ns, name string) (context.Context, func(), bool) {
+	if r.shardRing == nil || r.shardSet == nil {
+		return ctx, func() {}, true
+	}
+	return r.shardSet.EnterController(ctx, r.shardRing, ns, name)
 }
 
 // EnqueueShards re-enqueues every Controller whose key hashes into one of the
@@ -1036,9 +1553,99 @@ func (r *Reconciler) resolveClassForCr(ctx context.Context, cr *v1alpha1.Control
 // the diagnostic keeps its last persisted value while the reconciler silently
 // retries.
 func (r *Reconciler) persistStatusDiagnostics(ctx context.Context, cr *v1alpha1.Controller) {
-	if err := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, &cr.Status); err != nil {
+	if err := r.writeTickStatus(ctx, cr); err != nil {
 		r.Logger.Warn("persist status diagnostics", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 	}
+}
+
+// writeTickStatus writes cr.Status only while the Controller still carries
+// cr.ResourceVersion, and moves cr.ResourceVersion to the version after the
+// write. Every write of the tick to its own Controller goes through
+// writeTickStatus or patchTickMeta. The chain starts at the tick's read, so a
+// write by another replica since that read makes the next tick write
+// conflict. A replica that stalled past its shard lease therefore cannot
+// write a status that it computed before the new owner wrote. A conflict
+// cancels the tick context through fenceTick, so the tick sends no further
+// write.
+func (r *Reconciler) writeTickStatus(ctx context.Context, cr *v1alpha1.Controller) error {
+	rv, err := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, cr.ResourceVersion, &cr.Status)
+	if err != nil {
+		fenceTick(ctx, err, "status", cr.ResourceVersion)
+		return err
+	}
+	cr.ResourceVersion = rv
+	return nil
+}
+
+// patchTickMeta merge-patches the metadata of the tick's Controller only
+// while it still carries cr.ResourceVersion, and moves cr.ResourceVersion to
+// the version after the patch. See writeTickStatus.
+func (r *Reconciler) patchTickMeta(ctx context.Context, cr *v1alpha1.Controller, meta map[string]any) error {
+	rv, err := crdstore.PatchMetaAt[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace, cr.ResourceVersion, meta)
+	if err != nil {
+		fenceTick(ctx, err, "metadata", cr.ResourceVersion)
+		return err
+	}
+	cr.ResourceVersion = rv
+	return nil
+}
+
+// scaleTickToZero is the only scale-down the tick sends to a StatefulSet. It
+// reads the StatefulSet first. It then runs the tick fence (writeTickStatus at
+// cr.ResourceVersion) before the patch, which carries the StatefulSet
+// resourceVersion that was read. A tick whose read predates a power-on or a
+// wake therefore cannot scale the workload down. A StatefulSet that is missing
+// or already at 0 gets no fence write. A conflict cancels the tick through
+// fenceTick.
+func (r *Reconciler) scaleTickToZero(ctx context.Context, cr *v1alpha1.Controller) error {
+	err := r.client.ScaleStatefulSetToZero(ctx, controllerPrefix(cr), cr.Namespace,
+		func(ctx context.Context) error { return r.writeTickStatus(ctx, cr) })
+	if err != nil {
+		fenceTick(ctx, err, "statefulset scale", cr.ResourceVersion)
+	}
+	return err
+}
+
+// createTickStatefulSet creates or updates the StatefulSet for a provisioning
+// tick. A create, or a scale-up from 0, runs writeTickStatus at cr.ResourceVersion
+// first. A steady tick, whose StatefulSet is already scaled up, sends no
+// fence write. A conflict cancels the tick through fenceTick. The same rule
+// as scaleTickToZero keeps a stalled replica from scaling up a controller that
+// a newer owner powered off.
+func (r *Reconciler) createTickStatefulSet(ctx context.Context, cr *v1alpha1.Controller, spec StatefulSetSpec) error {
+	err := r.client.CreateStatefulSet(ctx, spec,
+		func(ctx context.Context) error { return r.writeTickStatus(ctx, cr) })
+	if err != nil {
+		fenceTick(ctx, err, "statefulset scale-up", cr.ResourceVersion)
+	}
+	return err
+}
+
+// setTickHibernated sets status.hibernated of the tick's Controller to want
+// only while it still carries cr.ResourceVersion, and moves cr.ResourceVersion
+// forward. It reports whether it wrote. The tick decides from its own read,
+// so the flag in cr is the live flag exactly when the precondition holds. A
+// stalled replica therefore cannot hibernate a controller that a newer owner
+// woke. A conflict cancels the tick context through fenceTick. Never call
+// SetHibernated from the tick: its fresh read defeats the fence.
+func (r *Reconciler) setTickHibernated(ctx context.Context, cr *v1alpha1.Controller, want bool) (bool, error) {
+	if cr.Status.Hibernated == want {
+		return false, nil
+	}
+	rv, err := r.client.SetHibernatedAt(ctx, cr.Name, cr.Namespace, cr.ResourceVersion, want)
+	if err != nil {
+		fenceTick(ctx, err, "hibernation", cr.ResourceVersion)
+		return false, err
+	}
+	cr.ResourceVersion = rv
+	cr.Status.Hibernated = want
+	if want {
+		now := metav1Now()
+		cr.Status.HibernatedAt = &now
+	} else {
+		cr.Status.HibernatedAt = nil
+	}
+	return true, nil
 }
 
 const reconcileBlockedMessageCap = 2048
@@ -1074,7 +1681,7 @@ func (r *Reconciler) markReconcileBlocked(ctx context.Context, cr *v1alpha1.Cont
 	})
 	cr.Status.LastReconcileError = message
 	cr.Status.LastReconcileErrorAt = &now
-	reconcileBlockedGauge.Record(ctx, 1, metric.WithAttributes(
+	r.metrics.reconcileBlockedGauge.Record(ctx, 1, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -1366,6 +1973,23 @@ func (r *Reconciler) WakeHibernatedController(ctx context.Context, namespace, na
 // controller; the caller maps this to a conflict response.
 var ErrControllerStopped = errors.New("controller is stopped (spec.powerState=Stopped)")
 
+// lockForApprove takes the controller lock for an approve. It waits at most
+// approveLockWait for the tick that holds the lock, then returns an error
+// that tells the user to retry. On success the caller must call unlock.
+func (r *Reconciler) lockForApprove(ctx context.Context, key string) (unlock func(), err error) {
+	waitCtx, cancel := context.WithTimeout(ctx, r.approveLockWait)
+	defer cancel()
+	if err := r.controllerLocks.lock(waitCtx, key); err != nil {
+		return nil, fmt.Errorf("controller %s is reconciling; retry the approve: %w", key, err)
+	}
+	return func() { r.controllerLocks.unlock(key) }, nil
+}
+
+// ErrNotShardOwner reports that this replica does not own the controller.
+// Every replica receives an approve request, and only the owner may act on
+// it. The caller sends no reply, so the owner's reply is the only one.
+var ErrNotShardOwner = errors.New("controller is not owned by this operator replica")
+
 // HibernateController parks a controller on demand via the status
 // compare-and-swap helper, independent of spec.hibernation.enabled, then
 // nudges the owning replica so the hibernated branch scales the workload
@@ -1440,17 +2064,60 @@ func (r *Reconciler) Reprovision(cluster, namespace, name string) {
 	}
 }
 
+// ErrNoPendingRestart is the refusal of an approval for a controller with no
+// pending restart.
+var ErrNoPendingRestart = errors.New("no pending restart")
+
+// PendingRestartChangedError is the refusal of an approval whose pending
+// change is not the one that the caller reviewed. Changes names the
+// sections of the current pending change.
+type PendingRestartChangedError struct {
+	Changes []string
+}
+
+func (e *PendingRestartChangedError) Error() string {
+	return fmt.Sprintf("the pending change changed (%s); review it and approve again", strings.Join(e.Changes, ", "))
+}
+
+// pendingChanges answers the sections of a pending restart, and "unknown"
+// when it names none, so a refusal always names at least one section.
+func pendingChanges(p *v1alpha1.PendingRestart) []string {
+	if p == nil || len(p.Changes) == 0 {
+		return []string{"unknown"}
+	}
+	return append([]string(nil), p.Changes...)
+}
+
 // ApproveRestart applies a pending configuration change. action must be
 // "reload" (JCasC reload), "restart" (drain-aware safe restart),
 // "force-restart" (immediate restart), "approve" (release manual-drift push with idle gating),
-// or "force" (release manual-drift push immediately).
-func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, name, action string) error {
+// or "force" (release manual-drift push immediately). A non-empty
+// expectedContentHash is the content hash of the pending change that the
+// caller reviewed; the approval refuses when the pending change differs.
+func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, name, action, expectedContentHash string) error {
 	_ = cluster // operator always acts on its own cluster
+	// A send from a replica that does not own the controller subscribes to
+	// the mite there, and its status writes race the owner's.
+	ctx, leave, owned := r.enterShard(ctx, namespace, name)
+	if !owned {
+		return ErrNotShardOwner
+	}
+	defer leave()
 	key := namespace + "/" + name
+	unlock, err := r.lockForApprove(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
 	if err != nil {
 		return fmt.Errorf("get controller: %w", err)
+	}
+	// A send to a controller under deletion subscribes to its mite again
+	// after the deletion released the subscription.
+	if !cr.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("controller %s is being deleted", key)
 	}
 
 	pol := r.effectivePolicy(cr)
@@ -1462,12 +2129,14 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		if err := r.client.DeleteControllerPod(ctx, namespace, name); err != nil {
 			return fmt.Errorf("force-restart via pod delete: %w", err)
 		}
-		cr.Status.RestartDrain = nil
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type: v1alpha1.ConditionRestartDeferred, Status: metav1.ConditionFalse, Reason: "ForceRestarted",
-		})
 		logger.Info("force-restart issued", "commandId", cmdID)
-		if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+		if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			fresh.Status.RestartDrain = nil
+			fresh.Status.Conditions = setCondition(fresh.Status.Conditions, v1alpha1.ControllerCondition{
+				Type: v1alpha1.ConditionRestartDeferred, Status: metav1.ConditionFalse, Reason: "ForceRestarted",
+			})
+			return true, nil
+		}); err != nil {
 			logger.Warn("failed to patch status after force-restart", "error", err)
 		}
 		r.emitOperatorEvent("restart.approved", cr, "force restart approved by user", "")
@@ -1475,32 +2144,34 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		return nil
 	}
 
-	// Plugin-roll branch: when PendingPluginRoll is set, record the one-shot
-	// approval checksum so the next reconcile bumps the annotation.
-	if action == "plugin-roll" && cr.Status.PendingPluginRoll != nil {
-		cr.Status.ApprovedPluginRollChecksum = cr.Status.PendingPluginRoll.TargetChecksum
-		cr.Status.PendingPluginRoll = nil
-		logger.Info("plugin-roll approved, will roll on next reconcile",
-			"targetChecksum", cr.Status.ApprovedPluginRollChecksum)
-		if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+	// Plugin-roll branch: record the one-shot approval checksum so the next
+	// reconcile bumps the annotation. A plugin-roll approval never reaches
+	// the pending-restart path below, because that path sends the pending
+	// configuration change to the mite.
+	if action == "plugin-roll" {
+		if cr.Status.PendingPluginRoll == nil {
+			return fmt.Errorf("%w for %s", ErrNoPendingPluginRoll, key)
+		}
+		target := cr.Status.PendingPluginRoll.TargetChecksum
+		if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			return approvePluginRoll(&fresh.Status, target)
+		}); err != nil {
 			return fmt.Errorf("persist plugin-roll approval: %w", err)
 		}
+		logger.Info("plugin-roll approved, will roll on next reconcile", "targetChecksum", target)
 		r.emitOperatorEvent("pluginRoll.approved", cr, "plugin roll approved by user", "")
 		r.wakeController(key)
 		return nil
 	}
 
 	if cr.Status.PendingRestart == nil {
-		return fmt.Errorf("no pending restart for %s", key)
+		return fmt.Errorf("%w for %s", ErrNoPendingRestart, key)
 	}
 
-	// Re-fetch bundle content from the materialized ConfigMap and resolve vars.
-	resolvedBundle, _, _, err := r.resolveBundleForController(ctx, cr)
+	desired, err := r.assembleApproveState(ctx, cr)
 	if err != nil {
-		return fmt.Errorf("resolve bundle: %w", err)
+		return err
 	}
-
-	desired := r.buildDesiredStateCommand(cr, resolvedBundle)
 
 	// Set the Reload flag on the DesiredStateCommand for "reload" action
 	// before sending so the mite receives it.
@@ -1509,6 +2180,12 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	}
 
 	desiredHash := computeDesiredStateHash(desired)
+
+	// The approval sends only the content that the pending restart holds.
+	// Tenant homes are placement data, so they go out as current.
+	if err := r.checkPendingContent(ctx, cr, desired, desiredHash, expectedContentHash); err != nil {
+		return err
+	}
 
 	// "restart" action: release the manual-mode push and issue a drain-aware
 	// safe restart (re-honors idle gating).
@@ -1529,17 +2206,40 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		// reload: push with Reload=true (existing behavior, no idle gating).
 	}
 
-	if err := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
+	// The shard can move during the reads above. The new owner received
+	// this request as a non-owner and dropped it, so this replica replies
+	// with an error that the caller can retry.
+	if !r.ownsController(namespace, name) {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve", key)
+	}
+	// A shard release cancels ctx when another replica can own the
+	// controller.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve: %w", key, err)
+	}
+	sendErr := r.miteTransport.Send(ctx, namespace, name, &mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_DesiredState{
 			DesiredState: desired,
 		},
-	}); err != nil {
-		return fmt.Errorf("send desired state: %w", err)
+	})
+	// The deletion can complete between the check above and the send, and
+	// the send subscribes to the mite again. The second read releases that
+	// subscription.
+	r.forgetIfDeleted(ctx, namespace, name)
+	// A shard move during the send leaves the subscription on a replica
+	// that no longer owns the mite.
+	if !r.ownsController(namespace, name) {
+		r.forgetMite(namespace, name)
+	}
+	if sendErr != nil {
+		return fmt.Errorf("send desired state: %w", sendErr)
 	}
 
+	var restartCmdID string
+	var restartAt time.Time
 	if action == "restart" {
-		cr.Status.DesiredStateHash = desiredHash
-		if err := r.issueSafeRestart(ctx, cr, drainSec); err != nil {
+		var err error
+		if restartCmdID, restartAt, err = r.deletePodForSafeRestart(ctx, namespace, name); err != nil {
 			return fmt.Errorf("issue safe-restart: %w", err)
 		}
 		logger.Info("restart requested, desired state pushed with idle gating + safe-restart")
@@ -1547,11 +2247,23 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		logger.Info("manual config action completed", "action", action)
 	}
 
-	// Clear the pending restart flag.
-	cr.Status.PendingRestart = nil
-	cr.Status.DesiredStateHash = desiredHash
-
-	if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+	// The owner's reconcile can write status during the send. The
+	// compare-and-swap changes only the approve's own fields on a fresh read,
+	// so it never writes back a stale field.
+	approvedPending := cr.Status.PendingRestart.DesiredStateHash
+	if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+		// A pending restart raised after the read is not the one approved,
+		// so it stays for the user to approve.
+		if fresh.Status.PendingRestart != nil && fresh.Status.PendingRestart.DesiredStateHash == approvedPending {
+			fresh.Status.PendingRestart = nil
+		}
+		fresh.Status.DesiredStateHash = desiredHash
+		fresh.Status.DesiredContentHash = computeDesiredContentHash(desired)
+		if action == "restart" {
+			setRestartDrain(&fresh.Status, restartCmdID, restartAt, drainSec)
+		}
+		return true, nil
+	}); err != nil {
 		logger.Warn("failed to clear pending restart", "action", action, "error", err)
 	}
 
@@ -1562,50 +2274,165 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 	return nil
 }
 
+// assembleApproveState builds the desired state that an approval sends
+// from the current inputs.
+func (r *Reconciler) assembleApproveState(ctx context.Context, cr *v1alpha1.Controller) (*mitev1.DesiredStateCommand, error) {
+	// Re-fetch bundle content from the materialized ConfigMap and resolve vars.
+	resolvedBundle, _, _, _, err := r.resolveBundleForController(ctx, cr)
+	if err != nil {
+		return nil, fmt.Errorf("resolve bundle: %w", err)
+	}
+
+	contrib, err := r.runnerContribution(ctx, cr)
+	if err != nil {
+		return nil, fmt.Errorf("build runner contribution: %w", err)
+	}
+
+	desired, err := r.buildDesiredStateCommand(cr, resolvedBundle, contrib)
+	if err != nil {
+		return nil, fmt.Errorf("build desired state: %w", err)
+	}
+	// The mite replaces its tenant set from every cell push, so a push
+	// without tenant_homes holds back every tenant's triggers. The entries
+	// are also inside the full hash.
+	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
+	return desired, nil
+}
+
+// checkPendingContent refuses an approval when the content that it built
+// again differs from the content of the pending restart. It then records
+// the new content as the pending restart, so the user can review it. It
+// also refuses when the caller reviewed other content than the pending
+// restart holds.
+func (r *Reconciler) checkPendingContent(ctx context.Context, cr *v1alpha1.Controller,
+	desired *mitev1.DesiredStateCommand, desiredHash, expectedContentHash string) error {
+	contentHash := computeDesiredContentHash(desired)
+	if cr.Status.PendingRestart.ContentHash != contentHash {
+		changes := computeChangedSections(r.miteTransport.Snapshot(cr.Namespace, cr.Name), desired)
+		now := metav1Now()
+		var recorded []string
+		gone := false
+		if _, err := crdstore.MutateStatus(ctx, r.store, cr.Name, cr.Namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+			// A pending restart that another write cleared is not raised
+			// again here; the tick raises it when it is still due.
+			gone = fresh.Status.PendingRestart == nil
+			if gone {
+				return false, nil
+			}
+			raisePendingRestart(&fresh.Status, now, desiredHash, contentHash, changes)
+			recorded = pendingChanges(fresh.Status.PendingRestart)
+			return true, nil
+		}); err != nil {
+			return fmt.Errorf("record the new pending change: %w", err)
+		}
+		if gone {
+			return fmt.Errorf("%w for %s/%s", ErrNoPendingRestart, cr.Namespace, cr.Name)
+		}
+		r.Logger.Info("approve refused: the pending content changed",
+			"controller", cr.Namespace+"/"+cr.Name, "changes", recorded)
+		return &PendingRestartChangedError{Changes: recorded}
+	}
+	if expectedContentHash != "" && expectedContentHash != contentHash {
+		return &PendingRestartChangedError{Changes: pendingChanges(cr.Status.PendingRestart)}
+	}
+	return nil
+}
+
 // issueSafeRestart generates a command ID, sends a SAFE_RESTART imperative
 // with a deadline covering drain+restart, and sets RestartDrain for backoff
 // tracking. This is the single owner of CommandID+cooldown bookkeeping.
 func (r *Reconciler) issueSafeRestart(ctx context.Context, cr *v1alpha1.Controller, drainTimeoutSec int64) error {
+	cmdID, now, err := r.deletePodForSafeRestart(ctx, cr.Namespace, cr.Name)
+	if err != nil {
+		return err
+	}
+	setRestartDrain(&cr.Status, cmdID, now, drainTimeoutSec)
+	return nil
+}
+
+// deletePodForSafeRestart deletes the controller pod and returns the command
+// ID and the time of the restart.
+func (r *Reconciler) deletePodForSafeRestart(ctx context.Context, namespace, name string) (string, time.Time, error) {
 	now := time.Now()
 	cmdID := fmt.Sprintf("%d", now.UnixNano())
-	if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
-		return fmt.Errorf("restart via pod delete: %w", err)
+	if err := r.client.DeleteControllerPod(ctx, namespace, name); err != nil {
+		return "", time.Time{}, fmt.Errorf("restart via pod delete: %w", err)
 	}
+	return cmdID, now, nil
+}
 
+// setRestartDrain records the backoff state of a safe restart. It keeps the
+// attempt count of the current drain and takes the hash from
+// status.DesiredStateHash, so the caller sets that hash first.
+func setRestartDrain(status *v1alpha1.ControllerStatus, cmdID string, now time.Time, drainTimeoutSec int64) {
 	attempt := 0
-	if cr.Status.RestartDrain != nil {
-		attempt = cr.Status.RestartDrain.AttemptCount
+	if status.RestartDrain != nil {
+		attempt = status.RestartDrain.AttemptCount
 	}
-	cr.Status.RestartDrain = &v1alpha1.RestartDrainStatus{
-		DesiredStateHash: cr.Status.DesiredStateHash,
+	status.RestartDrain = &v1alpha1.RestartDrainStatus{
+		DesiredStateHash: status.DesiredStateHash,
 		CommandID:        cmdID,
 		AttemptCount:     attempt,
 		NextRetryAt:      &metav1.Time{Time: now.Add(time.Duration(drainTimeoutSec+restartHeadroomSec) * time.Second)},
 	}
-	return nil
+}
+
+// ErrNoPendingPluginRoll is the answer to a plugin-roll approval that finds
+// no pending roll at its read or at its write.
+var ErrNoPendingPluginRoll = errors.New("no plugin roll is pending; it was approved or is no longer needed")
+
+// ErrPluginRollChanged is the answer to a plugin-roll approval whose target
+// is no longer the pending target.
+var ErrPluginRollChanged = errors.New("the pending plugin roll changed after it was read; check the pending roll and approve it again")
+
+// approvePluginRoll records target as the approved plugin-roll checksum and
+// clears the pending roll. It approves only the target that the caller read:
+// a different pending target returns ErrPluginRollChanged. With no pending
+// roll it returns ErrNoPendingPluginRoll: an approval or a managed-set change
+// removed the roll, and this call cannot tell which target that was.
+func approvePluginRoll(status *v1alpha1.ControllerStatus, target string) (bool, error) {
+	if status.PendingPluginRoll == nil {
+		return false, ErrNoPendingPluginRoll
+	}
+	if status.PendingPluginRoll.TargetChecksum != target {
+		return false, ErrPluginRollChanged
+	}
+	status.ApprovedPluginRollChecksum = target
+	status.PendingPluginRoll = nil
+	return true, nil
 }
 
 // ApproveDeletion authorizes deleting a previously-deferred item even though a
 // build may be running, issuing a targeted delete to the mite.
 func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, name, path string) error {
 	_ = cluster // operator always acts on its own cluster
+	// Only the shard owner holds the mite's subscription, so a send from
+	// another replica subscribes to the mite there.
+	ctx, leave, owned := r.enterShard(ctx, namespace, name)
+	if !owned {
+		return ErrNotShardOwner
+	}
+	defer leave()
 	key := namespace + "/" + name
+	unlock, err := r.lockForApprove(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	logger := r.Logger.With("controller", key)
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, name, namespace)
 	if err != nil {
 		return fmt.Errorf("get controller: %w", err)
 	}
-	idx := -1
-	for i, d := range cr.Status.PendingItemDeletions {
-		if d.Path == path {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	if !slices.ContainsFunc(cr.Status.PendingItemDeletions, func(d v1alpha1.PendingDeletion) bool { return d.Path == path }) {
 		return fmt.Errorf("no pending deletion for %q on %s", path, key)
 	}
 
+	// A shard release cancels ctx when another replica can own the
+	// controller. That replica must not see a delete from this one.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("controller %s moved to another operator replica; retry the approve: %w", key, err)
+	}
 	cmdID := fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := r.miteTransport.SendImperative(ctx, namespace, name, &mitev1.ImperativeCommand{
 		CommandId: cmdID,
@@ -1614,21 +2441,52 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 	}); err != nil {
 		return fmt.Errorf("send delete-item: %w", err)
 	}
-
-	cr.Status.PendingItemDeletions = append(cr.Status.PendingItemDeletions[:idx], cr.Status.PendingItemDeletions[idx+1:]...)
-	if len(cr.Status.PendingItemDeletions) == 0 {
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:   v1alpha1.ConditionDeletionPending,
-			Status: metav1.ConditionFalse,
-			Reason: v1alpha1.ReasonNoDeletionPending,
-		})
+	// A shard move during the send makes the read above stale. The new
+	// owner rewrites the pending list from the mite's next result, so this
+	// replica skips the status write.
+	if !r.ownsController(namespace, name) {
+		logger.Info("shard moved during approve deletion; the new owner settles the status", "path", path)
+		r.emitOperatorEvent("deletion.approved", cr, "item deletion approved by user", path)
+		r.wakeController(key)
+		return nil
 	}
-	if err := r.client.PatchControllerStatus(ctx, name, namespace, &cr.Status); err != nil {
+
+	// The shard can still move, and the owner's reconcile can write status,
+	// after the check above. The compare-and-swap removes only this entry
+	// from a fresh read, so it never writes back a stale field.
+	if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
+		return removePendingDeletion(&fresh.Status, path), nil
+	}); err != nil {
 		logger.Warn("failed to clear pending deletion", "error", err)
 	}
 	r.emitOperatorEvent("deletion.approved", cr, "item deletion approved by user", path)
 	r.wakeController(key)
 	return nil
+}
+
+// removePendingDeletion removes the pending deletion entry for path from
+// status and reports whether it found one. It sets DeletionPending to False
+// when the list becomes empty.
+func removePendingDeletion(status *v1alpha1.ControllerStatus, path string) bool {
+	idx := -1
+	for i, d := range status.PendingItemDeletions {
+		if d.Path == path {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	status.PendingItemDeletions = append(status.PendingItemDeletions[:idx], status.PendingItemDeletions[idx+1:]...)
+	if len(status.PendingItemDeletions) == 0 {
+		status.Conditions = setCondition(status.Conditions, v1alpha1.ControllerCondition{
+			Type:   v1alpha1.ConditionDeletionPending,
+			Status: metav1.ConditionFalse,
+			Reason: v1alpha1.ReasonNoDeletionPending,
+		})
+	}
+	return true
 }
 
 // computeChangedSections compares old and new component hashes and returns
@@ -1689,7 +2547,7 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		result := "success"
 		if reconcileErr != nil {
 			result = "error"
-			reconcileErrors.Add(ctx, 1, metric.WithAttributes(
+			r.metrics.reconcileErrors.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("phase", string(cr.Status.Phase)),
 			))
 		} else if oldPhase != v1alpha1.ControllerPhaseFailed {
@@ -1702,13 +2560,13 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 				})
 				cr.Status.LastReconcileError = ""
 				cr.Status.LastReconcileErrorAt = nil
-				reconcileBlockedGauge.Record(ctx, 0, metric.WithAttributes(
+				r.metrics.reconcileBlockedGauge.Record(ctx, 0, metric.WithAttributes(
 					attribute.String("namespace", cr.Namespace),
 					attribute.String("controller", cr.Name),
 				))
 			}
 		}
-		reconcileDuration.Record(ctx, duration.Milliseconds(), metric.WithAttributes(
+		r.metrics.reconcileDuration.Record(ctx, duration.Milliseconds(), metric.WithAttributes(
 			attribute.String("phase", string(cr.Status.Phase)),
 			attribute.String("result", result),
 		))
@@ -1725,16 +2583,12 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedFinalizeFailed, err.Error())
 			return fmt.Errorf("finalize: %w", err)
 		}
-		// Remove the mite's persisted desired state so it does not outlive the CR.
-		if err := r.miteTransport.ClearDesired(ctx, cr.Namespace, cr.Name); err != nil {
-			logger.Error("clear desired state failed", "error", err)
-		}
-
 		// Clean up token record.
 		r.miteTokenMu.Lock()
 		delete(r.miteTokens, cr.Namespace+"/"+cr.Name)
 		delete(r.lastMiteEpoch, cr.Namespace+"/"+cr.Name)
 		r.miteTokenMu.Unlock()
+		r.forgetMite(cr.Namespace, cr.Name)
 
 		// Reset both per-controller gauges to 0 on deletion so series do not
 		// stick at 1 if the controller is deleted while in a conflict/stale state.
@@ -1742,11 +2596,11 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		// removed, it resets to 0 and lingers there until the operator restarts —
 		// so consumers must alert on == 1, not on series presence (see the C2/C4
 		// specs and docs/operations/observability.md).
-		pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
+		r.metrics.pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
 			attribute.String("namespace", cr.Namespace),
 			attribute.String("controller", cr.Name),
 		))
-		miteImageStaleGauge.Record(ctx, 0, metric.WithAttributes(
+		r.metrics.miteImageStaleGauge.Record(ctx, 0, metric.WithAttributes(
 			attribute.String("namespace", cr.Namespace),
 			attribute.String("controller", cr.Name),
 		))
@@ -1761,23 +2615,37 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	r.refreshMiteImageStaleness(ctx, cr)
 
 	var err error
+	// contrib carries the tick's one runners.BuildContribution read (design
+	// D2, D11) from the Running/Connected case below to handleConnected, so
+	// the cell NetworkPolicy and the pushed desired state never describe a
+	// different runner set. It stays the zero value for every other phase.
+	var contrib runners.RunnerContribution
+	// contribErr is that read's failure; a Connected tick returns it
+	// before any publish, so a failed read never stands in for an empty set.
+	var contribErr error
 	// Powered-off: scale the StatefulSet to 0 and report Stopped. This must
 	// actually scale the workload down (the replica count is otherwise only
 	// applied in handleProvisioning, which the Stopped phase never reaches),
-	// so powering off a running controller really stops Jenkins. ScaleStatefulSet
-	// is idempotent and a no-op when the StatefulSet is missing or already at 0.
+	// so powering off a running controller really stops Jenkins. scaleTickToZero
+	// is a no-op when the StatefulSet is missing or already at 0.
 	if cr.Spec.PowerState == "Stopped" {
-		if serr := r.client.ScaleStatefulSet(ctx, controllerPrefix(cr), cr.Namespace, 0); serr != nil {
+		if serr := r.scaleTickToZero(ctx, cr); serr != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedScaleDownFailed, fmt.Sprintf("scale down statefulset (phase %s, powerState Stopped): %v", cr.Status.Phase, serr))
 			return fmt.Errorf("scale down statefulset: %w", serr)
 		}
 		// Hard power beats hibernation: clear any stale hibernation flag so a
-		// later power-on cannot resurrect it. Must go through SetHibernated —
+		// later power-on cannot resurrect it. Must go through setTickHibernated:
 		// an in-memory assignment is silently dropped, because the flag is
 		// excluded from the end-of-reconcile PatchControllerStatus.
-		if cr.Status.Hibernated {
-			if _, herr := r.client.SetHibernated(ctx, cr.Name, cr.Namespace, false); herr != nil {
-				logger.Warn("clear hibernation flag on stop", "error", herr)
+		if _, herr := r.setTickHibernated(ctx, cr, false); herr != nil {
+			logger.Warn("clear hibernation flag on stop", "error", herr)
+			// A conflict cancelled the tick. Stop before the side effects
+			// below.
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
 			}
 		}
 		clearMiteConnection(cr)
@@ -1797,13 +2665,16 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	// Stopped branch above except the reason and phase names differ. Gated on
 	// status.hibernated — hard power (Stopped) beats hibernation.
 	if cr.Status.Hibernated && cr.Spec.PowerState != "Stopped" {
-		if serr := r.client.ScaleStatefulSet(ctx, controllerPrefix(cr), cr.Namespace, 0); serr != nil {
+		if serr := r.scaleTickToZero(ctx, cr); serr != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedScaleDownFailed, fmt.Sprintf("scale down statefulset for hibernation (phase %s, status.hibernated): %v", cr.Status.Phase, serr))
 			return fmt.Errorf("scale down statefulset for hibernation: %w", serr)
 		}
 		// Mint wake token if missing (D5).
 		if cr.Status.WakeToken == "" {
-			newToken, mintErr := mintWakeToken(cr.Spec.Hibernation, cr.Status.Hibernated, cr.Status.WakeToken)
+			newToken, mintErr := mintWakeToken(cr.Spec.Hibernation, cr.Status.Hibernated, cr.Status.WakeToken, isCellController(cr))
 			if mintErr != nil {
 				logger.Warn("failed to mint wake token", "error", mintErr)
 			} else if newToken != "" {
@@ -1820,7 +2691,10 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 				Message: "controller is hibernated (status.hibernated=true)",
 			})
 		}
-		if r.wakeEnabled {
+		// A headless controller has no Ingress, so the wake slice serves nobody
+		// (D5): skip the publish and remove any slice an earlier reconcile left
+		// behind.
+		if r.wakeEnabled && !v1alpha1.IsHeadless(cr) {
 			ips, ipErr := r.operatorPodIPs(ctx)
 			if ipErr != nil {
 				logger.Warn("list operator pod IPs for wake EndpointSlice", "error", ipErr)
@@ -1878,16 +2752,33 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	// so an in-memory-only assignment would be re-minted (and discarded) every
 	// tick and never reach the wake surface.
 	if cr.Status.WakeToken == "" {
-		newToken, mintErr := mintWakeToken(cr.Spec.Hibernation, cr.Status.Hibernated, cr.Status.WakeToken)
+		newToken, mintErr := mintWakeToken(cr.Spec.Hibernation, cr.Status.Hibernated, cr.Status.WakeToken, isCellController(cr))
 		if mintErr != nil {
 			logger.Warn("failed to mint wake token", "error", mintErr)
 		} else if newToken != "" {
 			cr.Status.WakeToken = newToken
-			if perr := r.client.PatchControllerStatus(ctx, cr.Name, cr.Namespace, &cr.Status); perr != nil {
+			if perr := r.writeTickStatus(ctx, cr); perr != nil {
 				logger.Warn("failed to persist wake token", "error", perr)
+				// A conflict cancelled the tick. Stop before the phase
+				// handlers: some of their side effects take no context.
+				if ctx.Err() != nil {
+					return context.Cause(ctx)
+				}
 			}
 		}
 	}
+
+	// Write status.cell.instance from the running pod (design D13, task
+	// 6.0), before the self-announcement below reads it: a controller
+	// with no cell role announces its own instance as its rehydrated
+	// one, and a cell reads it for cells.RehydrationInputs.
+	r.updateCellInstance(ctx, cr)
+
+	// Announce this controller's generation-zero placement row (design D6,
+	// D7) before any phase handler below can build a desired-state command.
+	// A controller that sets no cell role is its own tenant and its own
+	// cell; the fence needs the row with no exemption.
+	r.announceSingleTenantPlacement(ctx, cr)
 
 	// Keep the Service and Ingress converged after provisioning.
 	// handleProvisioning creates them initially; once the controller is past
@@ -1904,13 +2795,39 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		if err := r.reconcileIngress(ctx, cr); err != nil {
 			r.Logger.Warn("reconcile ingress", "controller", cr.Namespace+"/"+cr.Name, "error", err)
 		}
+		// Renew a cell's STS artifact credential before the phase
+		// dispatch, so the ArtifactStorage condition the dispatch writes
+		// sees this tick's issue result.
+		r.renewArtifactCredential(ctx, cr)
+		// One runner contribution read for the whole tick (design D2, D11):
+		// the NetworkPolicy egress peers and the desired-state node list
+		// below must describe the same runner set, so contrib is computed
+		// once here and handed to handleConnected instead of read again.
+		contrib, contribErr = r.runnerContribution(ctx, cr)
+		if contribErr != nil {
+			r.Logger.Warn("build runner contribution", "controller", cr.Namespace+"/"+cr.Name, "error", contribErr)
+		} else if err := r.reconcileCellNetworkPolicy(ctx, cr, contrib); err != nil {
+			r.Logger.Warn("reconcile cell network policy", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		}
 		rolled = r.reconcileVersionRoll(ctx, cr)
 		if !rolled {
 			rolled = r.reconcileContainerSpecRoll(ctx, cr)
 		}
+		if !rolled {
+			rolled = r.reconcileMiteTransportEnvRoll(ctx, cr)
+		}
+		if !rolled && oldPhase == v1alpha1.ControllerPhaseConnected {
+			rolled = r.reconcileHeadlessRoll(ctx, cr)
+		}
+		if !rolled && oldPhase == v1alpha1.ControllerPhaseConnected {
+			rolled = r.reconcileArtifactSecretRoll(ctx, cr)
+		}
 		r.deleteWakeSlice(ctx, cr, logger)
 	}
 
+	// eventFrom is the phase the end-of-pass phase event starts from. A pass
+	// that runs the Connected handler after handleRunning moves it forward.
+	eventFrom := oldPhase
 	if !rolled {
 		switch oldPhase {
 		case "":
@@ -1927,8 +2844,16 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 			err = r.handleProvisioning(ctx, cr)
 		case v1alpha1.ControllerPhaseRunning:
 			err = r.handleRunning(ctx, cr)
+			if err == nil && r.connectsInSamePass(cr, contribErr) {
+				r.emitPhaseEvent(cr, oldPhase)
+				eventFrom = v1alpha1.ControllerPhaseConnected
+				err = r.runConnectedAfterRunning(ctx, cr, contrib)
+			}
 		case v1alpha1.ControllerPhaseConnected:
-			err = r.handleConnected(ctx, cr)
+			if contribErr != nil {
+				return fmt.Errorf("build runner contribution: %w", contribErr)
+			}
+			err = r.handleConnected(ctx, cr, contrib)
 		case v1alpha1.ControllerPhaseStopped:
 			// Idle: StatefulSet is at 0 replicas. No action needed.
 			return nil
@@ -1955,9 +2880,15 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 	// Sync the OverlayActive condition on every non-deleting pass.
 	cr.Status.Conditions = setCondition(cr.Status.Conditions, overlayActiveCondition(cr))
 
+	// Evaluate cell readiness on every non-deleting pass (design D6): the
+	// CellReady/WarmPool conditions, the roll, and the evacuate signal.
+	// Runs after the phase handler above, so it always reads this tick's
+	// freshest ArtifactStorage condition. A no-op for a non-cell.
+	r.evaluateCellReadiness(ctx, cr, time.Now())
+
 	// Emit phase transition events if the phase changed.
-	if cr.Status.Phase != oldPhase {
-		r.emitPhaseEvent(cr, oldPhase)
+	if cr.Status.Phase != eventFrom {
+		r.emitPhaseEvent(cr, eventFrom)
 	}
 
 	return nil
@@ -2080,16 +3011,43 @@ func PodName(cr *v1alpha1.Controller, ordinal int) string {
 	return fmt.Sprintf("%s-%d", controllerPrefix(cr), ordinal)
 }
 
+// cellExcludedPlugins lists the plugins that a cell never installs. A cell
+// home is temporary, so a Job DSL seed job cannot keep the jobs it makes.
+var cellExcludedPlugins = map[string]bool{"job-dsl": true}
+
+// cellInstalledSet returns set without the cellExcludedPlugins entries when cr
+// is a cell. Every other controller gets set unchanged.
+func cellInstalledSet(cr *v1alpha1.Controller, set []pluginlock.PluginEntry) []pluginlock.PluginEntry {
+	if !isCellController(cr) {
+		return set
+	}
+	kept := make([]pluginlock.PluginEntry, 0, len(set))
+	for _, e := range set {
+		if !cellExcludedPlugins[e.ArtifactID] {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
 // managedPluginLines returns the ordered, deduplicated managed plugin lines for
 // plugins.txt. Core lockfile entries come first (pinned); non-core entries from
 // PluginSpec (if non-empty) or bundle plugins.yaml follow, with duplicates of
 // core entries dropped. Each line is "artifactId[:version]".
 // coreSet is the resolved plugin set from a JenkinsVersionProfile (or the
 // embedded baseline when no profile matched).
+// On a cell, the function drops each plugin in cellExcludedPlugins from the core set and from the bundle or pluginSpec entries.
 func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) []string {
+	var excluded map[string]bool
+	if isCellController(cr) {
+		excluded = cellExcludedPlugins
+	}
 	coreIDs := make(map[string]bool, len(coreSet))
 	var lines []string
 	for _, e := range coreSet {
+		if excluded[e.ArtifactID] {
+			continue
+		}
 		coreIDs[e.ArtifactID] = true
 		if e.Version != "" {
 			lines = append(lines, e.ArtifactID+":"+e.Version)
@@ -2101,7 +3059,7 @@ func managedPluginLines(cr *v1alpha1.Controller, resolved *bundle.MaterializedBu
 	nonCore, _ := nonCorePluginEntries(cr, resolved)
 
 	for _, e := range nonCore {
-		if e.ArtifactId == "" {
+		if e.ArtifactId == "" || excluded[e.ArtifactId] {
 			continue
 		}
 		if coreIDs[e.ArtifactId] {
@@ -2138,13 +3096,13 @@ func nonCorePluginEntries(cr *v1alpha1.Controller, resolved *bundle.Materialized
 func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, coreSet []pluginlock.PluginEntry) string {
 	locked := make(map[string]string, len(coreSet))
 	for _, e := range coreSet {
-		if e.ArtifactID != "" && !isUnpinnedPluginVersion(e.Version) {
+		if e.ArtifactID != "" && !ucmeta.IsLatest(e.Version) {
 			locked[e.ArtifactID] = e.Version
 		}
 	}
 	entries, pinSource := nonCorePluginEntries(cr, resolved)
 	for _, e := range entries {
-		if e.ArtifactId == "" || isUnpinnedPluginVersion(e.Version) {
+		if e.ArtifactId == "" || ucmeta.IsLatest(e.Version) {
 			continue
 		}
 		if lockedVersion, ok := locked[e.ArtifactId]; ok && lockedVersion != e.Version {
@@ -2152,11 +3110,6 @@ func pluginVersionConflict(cr *v1alpha1.Controller, resolved *bundle.Materialize
 		}
 	}
 	return ""
-}
-
-func isUnpinnedPluginVersion(version string) bool {
-	v := strings.TrimSpace(version)
-	return v == "" || strings.EqualFold(v, "latest")
 }
 
 // pluginChangeDiff computes the human-readable diff between new and old
@@ -2228,15 +3181,33 @@ func resourceOverlayIngress(cr *v1alpha1.Controller) string {
 // just Provisioning: the token TTL (15 min) can elapse while the pod is still
 // pulling plugins in init, and by the time the mite first registers the phase
 // has already advanced to Running. Without a remint there, the controller
-// wedges on Unauthenticated registrations until the disconnect-recovery path
-// thrashes it back through Pending — minutes of avoidable downtime. A
-// connected mite never reads the bootstrap token (it holds an mTLS cert), so
+// wedges on Unauthenticated registrations until provisioningTimeout fails it.
+// A connected mite never reads the bootstrap token (it holds an mTLS cert), so
 // reminting outside Connected is always safe.
+//
+// A token also belongs to one pod instance: the Secret's "instance" key
+// names the pod uid that first ran with it. A replaced pod re-mints, because
+// the old pod may have consumed the single-use token and a cell's emptyDir
+// home keeps no mite identity across pods, so the new mite must bootstrap
+// again. A token minted before any pod exists adopts the first pod it sees.
 func (r *Reconciler) ensureBootstrapToken(ctx context.Context, cr *v1alpha1.Controller, pre string) error {
 	secretName := pre + "-bootstrap"
 	existing, _ := r.client.GetSecret(ctx, secretName, cr.Namespace)
+	instance := ""
+	if cr.Status.Cell != nil {
+		instance = cr.Status.Cell.Instance
+	}
 	if !tokenNeedsRemint(r.tokenSigner, string(existing["token"]), cr.Name, cr.Namespace) {
-		return nil
+		minted := string(existing["instance"])
+		if instance == "" || minted == instance {
+			return nil
+		}
+		if minted == "" {
+			return r.client.CreateOrUpdateSecret(ctx, secretName, cr.Namespace, map[string][]byte{
+				"token":    existing["token"],
+				"instance": []byte(instance),
+			})
+		}
 	}
 	token, err := r.tokenSigner.GenerateToken(cr.Name, cr.Namespace, 15*time.Minute)
 	if err != nil {
@@ -2244,7 +3215,8 @@ func (r *Reconciler) ensureBootstrapToken(ctx context.Context, cr *v1alpha1.Cont
 		return fmt.Errorf("generate token: %w", err)
 	}
 	if err := r.client.CreateOrUpdateSecret(ctx, secretName, cr.Namespace, map[string][]byte{
-		"token": []byte(token),
+		"token":    []byte(token),
+		"instance": []byte(instance),
 	}); err != nil {
 		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedBootstrapTokenFailed, err.Error())
 		return fmt.Errorf("create bootstrap secret: %w", err)
@@ -2308,6 +3280,23 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		}
 	}
 
+	// Create the cell NetworkPolicy on the first tick a cell sees it. A
+	// tenant is placed only on a Connected cell, so the per-tick block below
+	// is what actually keeps this converged; this call only makes sure a
+	// fresh cell is never briefly unprotected. Non-fatal: a NetworkPolicy
+	// write failure must not wedge provisioning.
+	{
+		_, span := tracer.Start(ctx, "provision.reconcileCellNetworkPolicy")
+		provContrib, err := r.runnerContribution(ctx, cr)
+		if err == nil {
+			err = r.reconcileCellNetworkPolicy(ctx, cr, provContrib)
+		}
+		span.End()
+		if err != nil {
+			r.Logger.Warn("reconcile cell network policy", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		}
+	}
+
 	// Create ServiceAccount for StatefulSet pods.
 	// Create agent ServiceAccount and RBAC. Fail provisioning if the operator
 	// lacks permissions — silent RBAC gaps make agent pods impossible to debug.
@@ -2339,11 +3328,32 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		oldLines = nil
 	}
 
-	resolved, _, bundleIdent, resolveErr := r.resolveBundleForController(ctx, cr)
+	resolved, _, bundleIdent, artifactCond, resolveErr := r.resolveBundleForController(ctx, cr)
+	// A Secret read fault surfaces as ReconcileBlocked, not as a bundle wait:
+	// the bundle itself resolved fine, and cellConfigGateReason below would
+	// otherwise return nil on this same tick, before resolveArtifactSecret
+	// ever runs, leaving the fault invisible on status.
+	if errors.Is(resolveErr, errArtifactSecretRead) {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, artifactCond)
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed, resolveErr.Error())
+		return fmt.Errorf("resolve artifact secret: %w", resolveErr)
+	}
 	// Every Controller now has an effective bundle — a named one or the built-in
 	// starter — so a resolve failure is always worth blocking on. The former
 	// `&& ComposedBundleRef != nil` exemption existed only for the no-bundle
 	// case, which no longer occurs.
+	// A refused items bundle is a fault, not a wait. Report it under its own
+	// reason so the condition does not read as a bundle that still materializes.
+	if errors.Is(resolveErr, errItemsRefused) {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionBundleResolved,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.ReasonItemsRefused,
+			Message: resolveErr.Error(),
+		})
+		r.persistStatusDiagnostics(ctx, cr)
+		return fmt.Errorf("provisioning blocked: items refused: %w", resolveErr)
+	}
 	if resolveErr != nil {
 		// The bundle's plugins.yaml drives plugins.txt, which is baked into the
 		// plugins-init container at pod creation. handleProvisioning runs ONLY in
@@ -2363,6 +3373,29 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("provisioning blocked until bundle materializes: %w", resolveErr)
 	}
+	// The bundle resolved, so clear a stale False left by an earlier tick.
+	// setCondition keeps LastTransitionTime while the status is unchanged.
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionBundleResolved,
+		Status: metav1.ConditionTrue,
+		Reason: "BundleReferenceValid",
+	})
+	// Report the artifact-storage merge step's outcome (task 5.6): True/
+	// External when the fragment applied, False/LocalOnly or
+	// False/PluginMissing otherwise.
+	if artifactCond.Type != "" {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, artifactCond)
+	}
+	// Cell configuration gate (design D6, task 5.1): a cell that fails the
+	// record-store, blob-tier, or artifact-storage gate gets no pod. This
+	// check must run here, immediately after resolveBundleForController,
+	// because it reads the ArtifactStorage condition that call just
+	// computed — evaluateCellReadiness (called once per tick from
+	// reconcileController) sets the CellReady condition itself; this early
+	// return only stops the StatefulSet build below.
+	if isCellController(cr) && cellConfigGateReason(r.claimGate, r.blobstoreURL, &artifactCond) != "" {
+		return nil
+	}
 	// Resolve the plugin set from JenkinsVersionProfile (or embedded baseline).
 	profile, matchKind := r.resolveProfileForCr(cr)
 	// Bake-time compat gate (guard-version-upgrade-path §7): a provably-unsafe
@@ -2377,17 +3410,20 @@ func (r *Reconciler) handleProvisioning(ctx context.Context, cr *v1alpha1.Contro
 		return fmt.Errorf("version upgrade blocked: %s", compat.Message)
 	}
 	coreSet := r.resolveCoreSet(ctx, cr, profile, r.Logger)
+	// The pin gates judge only the plugins this controller installs. A cell
+	// never installs a cellExcludedPlugins entry, so its pin is not a conflict.
+	installedSet := cellInstalledSet(cr, coreSet)
 	// PluginPinConflict runs before the blocking pluginVersionConflict gate below
 	// so it still fires on the same reconcile that gate blocks on — placing it
 	// after would skip this independent signal exactly when it's most relevant.
-	if report, pinErr := bundle.CheckPluginPins(resolved.RawPluginsYAML, coreSet); pinErr == nil {
+	if report, pinErr := bundle.CheckPluginPins(resolved.RawPluginsYAML, installedSet); pinErr == nil {
 		if len(report.Conflicts) > 0 {
 			r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
 		} else {
 			r.clearPluginPinConflict(ctx, cr, bundleIdent)
 		}
 	}
-	if conflict := pluginVersionConflict(cr, resolved, coreSet); conflict != "" {
+	if conflict := pluginVersionConflict(cr, resolved, installedSet); conflict != "" {
 		r.surfacePluginConflict(ctx, cr, conflict)
 		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedPluginConflict, conflict)
 		return fmt.Errorf("plugin version conflict: %s", conflict)
@@ -2532,15 +3568,39 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		})
 	}
 
+	// Resolve and project a cell's artifact Secret (tasks 5.1a, 5.1b, design
+	// D1). Independent of the artifact-storage condition computed above:
+	// CreateStatefulSet mounts whatever artifact Secret exists, whether or
+	// not the fragment currently references it. A read or projection fault
+	// must not build a pod on a stale or missing projection.
+	artifactSecretName, artifactSecretHash, artifactSecretErr := r.resolveArtifactSecret(ctx, cr)
+	if artifactSecretErr != nil {
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedArtifactSecretFailed, artifactSecretErr.Error())
+		return fmt.Errorf("resolve artifact secret: %w", artifactSecretErr)
+	}
+
+	// Resolve the pool confidential store a pool cell mounts (design D5).
+	// Every fault blocks the reconcile: the operator never builds a pool
+	// cell on a private store.
+	cellSecretsName, cellSecretsErr := r.resolveCellSecretsName(ctx, cr)
+	if cellSecretsErr != nil {
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedCellSecretsFailed, cellSecretsErr.Error())
+		return fmt.Errorf("resolve cell secrets: %w", cellSecretsErr)
+	}
+
 	stsSpec := r.buildStatefulSetSpec(cr, class, defaults, profile, stsBuildInputs{
-		Name:             pre,
-		BootstrapSecret:  secretName,
-		InitConfigMap:    initCMName,
-		CascConfigMap:    cascCMName,
-		CascContentHash:  cascHash,
-		PluginsConfigMap: pluginsCMName,
-		PluginsChecksum:  stsPluginsChecksum,
-		Policy:           pol,
+		Name:                      pre,
+		BootstrapSecret:           secretName,
+		InitConfigMap:             initCMName,
+		CascConfigMap:             cascCMName,
+		CascContentHash:           cascHash,
+		PluginsConfigMap:          pluginsCMName,
+		PluginsChecksum:           stsPluginsChecksum,
+		Policy:                    pol,
+		ArtifactSecretName:        artifactSecretName,
+		ArtifactSecretHash:        artifactSecretHash,
+		ArtifactSharedCredentials: artifactSecretName != "" && r.artifactSTS.Enabled(),
+		CellSecretsName:           cellSecretsName,
 	})
 	// Resolve plugin update center URLs with 3-tier precedence.
 	// Fetch the UpdateCenter CR best-effort for UC readiness gating.
@@ -2580,12 +3640,20 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 		r.persistStatusDiagnostics(ctx, cr)
 		return fmt.Errorf("update center not ready in air-gap mode")
 	case ucGateClear:
-		// UC ready or not configured: clear any stale fallback/waiting conditions.
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:   v1alpha1.ConditionUpdateCenterFallback,
-			Status: metav1.ConditionFalse,
-			Reason: "UpdateCenterAvailable",
-		})
+		// UC ready or not configured: clear any stale fallback/waiting
+		// conditions. An explicit download URL never touches the UC, so the
+		// gate makes no claim for it and only clears its own stale True
+		// verdict. The download-URL check and the plugins-init report own
+		// their reasons.
+		fb := findCondition(cr.Status.Conditions, v1alpha1.ConditionUpdateCenterFallback)
+		gateStale := fb != nil && fb.Status == metav1.ConditionTrue && !ucFallbackOwnReason(fb.Reason)
+		if !ucGate.DownloadURLExplicit || gateStale {
+			cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+				Type:   v1alpha1.ConditionUpdateCenterFallback,
+				Status: metav1.ConditionFalse,
+				Reason: "UpdateCenterAvailable",
+			})
+		}
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:   v1alpha1.ConditionWaitingForUpdateCenter,
 			Status: metav1.ConditionFalse,
@@ -2594,11 +3662,28 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	case ucGateNoop:
 		// Explicit defaults override both URL tiers: leave conditions untouched.
 	}
+	// A wrong explicit download URL makes jenkins-plugin-cli fall back to the
+	// public archive for every plugin. The check only warns: it never blocks
+	// provisioning, because the operator can reach a different network than
+	// the pod.
+	if ucGate.DownloadURLExplicit && r.downloadProbe != nil {
+		if name, version, ok := firstVersionedPin(lines); ok {
+			res := r.downloadProbe(ctx, ucGate.DownloadURL, name, version)
+			if res.Verdict == downloadProbeNotFound {
+				r.Logger.Warn("explicit plugin download URL answers not found",
+					"controller", cr.Namespace+"/"+cr.Name, "url", res.URL, "status", res.Status)
+			}
+			cr.Status.Conditions = applyDownloadURLProbe(cr.Status.Conditions, res)
+		}
+	}
 	{
 		_, span := tracer.Start(ctx, "provision.createStatefulSet")
-		err := r.client.CreateStatefulSet(ctx, stsSpec)
+		err := r.createTickStatefulSet(ctx, cr, stsSpec)
 		span.End()
 		if err != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedStatefulSetCreateFailed, err.Error())
 			return fmt.Errorf("create statefulset: %w", err)
 		}
@@ -2724,7 +3809,11 @@ func (r *Reconciler) reconcileStreamDegradedCondition(cr *v1alpha1.Controller, l
 	})
 }
 
-func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controller) error {
+// contrib is the caller's own single runners.BuildContribution read for
+// this tick (design D2, D11), the same value the caller passes into
+// reconcileCellNetworkPolicy. Reading it again here would let the pushed
+// node list disagree with the cell NetworkPolicy's egress peers.
+func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controller, contrib runners.RunnerContribution) error {
 	tracer := otel.Tracer("varroa-operator")
 	ctx, span := tracer.Start(ctx, "reconcile.handleConnected")
 	defer span.End()
@@ -2736,7 +3825,18 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// if values differ, so calling it every tick is safe and idempotent.
 	currentIssuer := r.Resolver.OIDCIssuer()
 	currentLoginURL := r.Resolver.LoginURL(r.varroaRedirectURL)
-	if err := r.client.UpdateStatefulSetOIDCEnv(ctx, controllerPrefix(cr), cr.Namespace, currentIssuer, currentLoginURL, r.Resolver.OIDCUserClaim(), r.Resolver.OIDCGroupClaim(), r.mitePubKeyPEM(), r.mitePubKeyKID(), cr.Namespace+"/"+cr.Name, r.apikeyVerifyURL(), r.caPEM); err != nil {
+	if err := r.client.UpdateStatefulSetOIDCEnv(ctx, controllerPrefix(cr), cr.Namespace, JenkinsAuthEnv{
+		OIDCIssuer:      currentIssuer,
+		LocalIssuer:     r.Resolver.LocalIssuer(),
+		LoginURL:        currentLoginURL,
+		OIDCUserClaim:   r.Resolver.OIDCUserClaim(),
+		OIDCGroupClaim:  r.Resolver.OIDCGroupClaim(),
+		PubKeyPEM:       r.mitePubKeyPEM(),
+		PubKeyKID:       r.mitePubKeyKID(),
+		Aud:             cr.Namespace + "/" + cr.Name,
+		ApikeyVerifyURL: r.apikeyVerifyURL(),
+		CAPEM:           r.caPEM,
+	}); err != nil {
 		logger.Error("failed to sync StatefulSet OIDC env", "error", err)
 	}
 	r.reconcileFleetPodLabel(ctx, cr)
@@ -2756,6 +3856,9 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// desiredstate_test.go.
 	version, lastHeartbeat, certExpiry, transportConnected := r.miteTransport.Info(cr.Namespace, cr.Name)
 	snapshot := r.miteTransport.Snapshot(cr.Namespace, cr.Name)
+	if err := r.recordPendingSignatures(ctx, cr, snapshot); err != nil {
+		logger.Warn("read pool approvals for pending signatures", "error", err)
+	}
 	health := deriveMiteHealth(miteObservation{
 		TransportConnected: transportConnected,
 		Version:            version,
@@ -2775,7 +3878,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// so it stops being meaningful the moment the mite is gone — including
 		// during the reconnect grace window below. Nothing else clears it
 		// outside the Connected phase, so drop it here rather than leaving a
-		// stale True through the whole Pending/provisioning cycle.
+		// stale True while the controller waits in Running.
 		cr.Status.Conditions = removeConditionByType(cr.Status.Conditions,
 			v1alpha1.ConditionMiteStreamDegraded)
 		if r.disconnectedTicks[key] < 3 {
@@ -2789,17 +3892,8 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		r.miteTokenMu.Lock()
 		delete(r.miteTokens, key)
 		r.miteTokenMu.Unlock()
-		// Reset the disconnected-tick counter so a later re-provision attempt
-		// starts with a fresh grace window (see handleRunning) rather than
-		// immediately re-forcing Pending.
 		delete(r.disconnectedTicks, key)
-		cr.Status.Phase = v1alpha1.ControllerPhasePending
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:    v1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "MiteDisconnected",
-			Message: "mite sidecar disconnected",
-		})
+		markStreamLost(cr, key, lastHeartbeat)
 		return nil
 	}
 	// Reset disconnected counter when mite is connected.
@@ -2834,6 +3928,12 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	}
 
 	// Drain pending results
+	//
+	// recv aliases the Reconciler receiver so the results loop below can
+	// still reach it: the type switch on res.Result rebinds the name r to
+	// each case's own asserted value, shadowing the receiver for the rest
+	// of the loop body.
+	recv := r
 	results := r.miteTransport.DrainResults(cr.Namespace, cr.Name)
 	for _, res := range results {
 		switch r := res.Result.(type) {
@@ -2844,6 +3944,59 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				}
 				if r.DesiredState.RbacSuccess {
 					cr.Status.RBACHash = r.DesiredState.AppliedHash
+				}
+				// status.cell.appliedTenants (task 5.3b): advance only on a
+				// successful items apply whose hash still matches the
+				// tracked desired-state hash — the only success signal,
+				// since ControllerStatus carries no applied-hash field of
+				// its own. A hash match implies a tenant-set match too,
+				// because the tenant items pipeline folds every tenant's
+				// folder, or its retain entry, into the hashed items_yaml.
+				// A tenant the cell holds keeps its previous state.
+				if isCellController(cr) && r.DesiredState.ItemsSuccess &&
+					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
+					if cr.Status.Cell == nil {
+						cr.Status.Cell = &v1alpha1.CellStatus{}
+					}
+					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
+				}
+				// Rehydration result (design D13, task 6.2): update only
+				// the entries whose CommandID matches this result. The
+				// in-flight push maps each command that carried its bundle
+				// to the ID its entries carry, so the result of a push
+				// that a later push re-attached still counts. A
+				// whole-bundle rehydration_error applies to every matching
+				// entry; the flat rehydration_deferred_jobs list is
+				// partitioned back to each tenant by its own job-path
+				// prefix first.
+				rehydrationID := res.CommandId
+				var resultMatch rehydrationResultMatch
+				if isCellController(cr) {
+					if match, ok := recv.takeRehydrationResult(cr.Namespace+"/"+cr.Name, res.CommandId); ok {
+						rehydrationID = match.StampedID
+						resultMatch = match
+					}
+				}
+				if isCellController(cr) && cr.Status.Cell != nil && len(cr.Status.Cell.Rehydration) > 0 {
+					tenants := make([]string, 0, len(cr.Status.Cell.Rehydration))
+					for _, e := range cr.Status.Cell.Rehydration {
+						tenants = append(tenants, e.Tenant)
+					}
+					deferredByTenant := partitionJobPathsByTenant(r.DesiredState.RehydrationDeferredJobs, tenants)
+					coveredByTenant := partitionJobPathsByTenant(resultMatch.CoveredJobPaths, tenants)
+					cr.Status.Cell.Rehydration = applyRehydrationResult(
+						cr.Status.Cell.Rehydration, rehydrationID,
+						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
+						deferredByTenant, coveredByTenant, time.Now(),
+					)
+				}
+				// Number-only progress (design D4, task 5.7): a block
+				// counts as seeded only once this matching, successful
+				// result confirms it. See commitNumberOnlyProgress.
+				if isCellController(cr) {
+					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, resultMatch.CellInstance, resultMatch.NumberOnlyJobPaths,
+						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
+						r.DesiredState.RehydrationDeferredJobs)
 				}
 				// DeletionPending: surface deferred item deletions from the mite.
 				if len(r.DesiredState.DeferredItemDeletions) > 0 {
@@ -2905,6 +4058,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			// Every CommandResult without a DesiredState payload is an imperative
 			// ack (SAFE_RESTART, DELETE_ITEM, etc.). Always record it last-one-wins
 			// on LastImperativeResult for brood operation completion predicates.
+			recv.recordImperativeOutcome(ctx, cr, res)
 			cr.Status.LastImperativeResult = &v1alpha1.ImperativeResult{
 				CommandID:  res.CommandId,
 				Success:    res.Success,
@@ -2983,23 +4137,40 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		resolvedBundle   *bundle.MaterializedBundle
 		targetBundleHash string
 		bundleIdent      bundleIdentity
+		artifactCond     v1alpha1.ControllerCondition
 		bundleErr        error
 	)
 	func() {
 		_, span := tracer.Start(ctx, "bundle.resolve")
 		defer span.End()
-		resolvedBundle, targetBundleHash, bundleIdent, bundleErr = r.resolveBundleForController(ctx, cr)
+		resolvedBundle, targetBundleHash, bundleIdent, artifactCond, bundleErr = r.resolveBundleForController(ctx, cr)
 		if bundleErr == nil && resolvedBundle != nil {
 			span.SetAttributes(
 				attribute.Int("variables_count", len(resolvedBundle.Variables)),
 			)
 		}
 	}()
+	if errors.Is(bundleErr, errArtifactSecretRead) {
+		// The bundle resolved; only the artifact Secret read failed. Retire
+		// a stale BundleFailed from an earlier tick — this path never
+		// reaches the success-path clearBundleFailed call. Report the
+		// read-failed ArtifactStorage condition instead, and keep serving
+		// the last pushed desired state instead of pushing an incomplete
+		// one this tick.
+		clearBundleFailed(cr)
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, artifactCond)
+		logger.Warn("artifact secret read failed in connected phase; keeping last-good desired state", "error", bundleErr)
+		return nil //nolint:nilerr // non-fatal in Connected phase
+	}
 	if bundleErr != nil {
+		reason := "BundleResolutionFailed"
+		if errors.Is(bundleErr, errItemsRefused) {
+			reason = v1alpha1.ReasonItemsRefused
+		}
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionBundleFailed,
 			Status:  metav1.ConditionTrue,
-			Reason:  "BundleResolutionFailed",
+			Reason:  reason,
 			Message: bundleErr.Error(),
 		})
 		// Non-fatal in Connected: surface the error on status but don't
@@ -3018,7 +4189,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// Detection-only plugin lock conflict check (C4): surface the condition,
 		// metric, and edge event but do NOT disrupt a running Connected controller.
 		// The provisioning path (handleProvisioning) blocks on this same check.
-		if conflict := pluginVersionConflict(cr, resolvedBundle, coreSet); conflict != "" {
+		if conflict := pluginVersionConflict(cr, resolvedBundle, cellInstalledSet(cr, coreSet)); conflict != "" {
 			r.surfacePluginConflict(ctx, cr, conflict)
 		} else {
 			r.clearPluginConflict(ctx, cr)
@@ -3026,7 +4197,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 		// PluginPinConflict (C1): same detection-only treatment as above, but an
 		// independent condition/event pair — see surfacePluginPinConflict.
-		if report, pinErr := bundle.CheckPluginPins(resolvedBundle.RawPluginsYAML, coreSet); pinErr == nil {
+		if report, pinErr := bundle.CheckPluginPins(resolvedBundle.RawPluginsYAML, cellInstalledSet(cr, coreSet)); pinErr == nil {
 			if len(report.Conflicts) > 0 {
 				r.surfacePluginPinConflict(ctx, cr, bundleIdent, pluginPinConflictMessage(report))
 			} else {
@@ -3113,16 +4284,27 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// to the read model (invc/ KV key).
 	r.classifyPluginInventory(ctx, cr, coreSet, desiredLines)
 
-	// Build desired state
-	desired, desiredHash := func() (*mitev1.DesiredStateCommand, string) {
+	// Build desired state from the contrib the caller already read this
+	// tick (design D2, D11).
+	desired, desiredHash, err := func() (*mitev1.DesiredStateCommand, string, error) {
 		_, span := tracer.Start(ctx, "desiredState.build")
 		defer span.End()
-		d := r.buildDesiredStateCommand(cr, resolvedBundle)
+		d, buildErr := r.buildDesiredStateCommand(cr, resolvedBundle, contrib)
+		if buildErr != nil {
+			return nil, "", buildErr
+		}
+		// tenant_homes is inside the composite hash, so it is stamped
+		// before the hash is computed. A home change therefore pushes a
+		// new desired state.
+		r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), d)
 		h := computeDesiredStateHash(d)
 		d.DesiredStateHash = h
 		span.SetAttributes(attribute.String("hash", h))
-		return d, h
+		return d, h, nil
 	}()
+	if err != nil {
+		return fmt.Errorf("build desired state: %w", err)
+	}
 	if cr.Status.LastApplyResult != nil &&
 		cr.Status.LastApplyResult.Succeeded &&
 		cr.Status.LastApplyResult.Hash == desiredHash {
@@ -3138,15 +4320,37 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Detect (re)connection via epoch change and force a push so the
 	// mite always gets a fresh token. Also clear the cached token so it
-	// is re-minted for the new process.
-	forcePush := false
-	if epoch, ok := r.miteTransport.ConnEpoch(cr.Namespace, cr.Name); ok && epoch != r.lastMiteEpoch[key] {
-		r.lastMiteEpoch[key] = epoch
+	// is re-minted for the new process. The epoch is recorded only after
+	// a delivered push: NATS keeps no copy of the command, so every tick
+	// that delivers nothing must force the push again.
+	reconnected := false
+	var connEpoch int64
+	if epoch, ok := r.miteTransport.ConnEpoch(cr.Namespace, cr.Name); ok {
+		// miteTokenMu also guards lastMiteEpoch, because reconciles of
+		// different controllers run at once.
 		r.miteTokenMu.Lock()
-		delete(r.miteTokens, key)
+		if epoch != r.lastMiteEpoch[key] {
+			connEpoch = epoch
+			delete(r.miteTokens, key)
+			reconnected = true
+		}
 		r.miteTokenMu.Unlock()
-		forcePush = true
 	}
+	forcePush := reconnected
+
+	// Build-record rehydration (design D3/D4/D13, tasks 5.7/5.8/6.0a/6.1/
+	// 6.3/6.4): attach a bundle for every not-yet-applied tenant, or hold
+	// the in-flight one. A new mite process holds no command, so a
+	// reconnect ends the hold first.
+	if reconnected {
+		r.dropRehydrationInFlight(key)
+	}
+	rehydrationPlan := r.attachCellRehydration(ctx, cr, desired, pluginPinned(coreSet, "artifact-manager-s3"), now.Time)
+
+	// A reconnected mite gets the state it already had again, past the
+	// pause, manual-mode, and wave gates. Those gates hold back a new
+	// state, and this one was already delivered.
+	redeliver := reconnected && cr.Status.DesiredStateHash == desiredHash
 
 	// An explicit reprovision request forces a re-push regardless of the
 	// convergence window. Reconcile consumed the annotation one-shot before
@@ -3169,7 +4373,11 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// push and we must retry regardless of the operator-side hash tracking.
 	// Always push on a reconnect (forcePush) so the fresh token reaches the mite.
 	rbacInSync := snapshot == nil || desired.RbacYaml == "" || snapshot.RbacHash == rbacH
-	if !forcePush &&
+	// Field 17 stays out of desiredHash, so an attached rehydration bundle
+	// bypasses the short-circuit on its own. A tick that attaches no
+	// bundle only sends the delivered state again, so it waits for the
+	// drift window like any converged tick.
+	if !forcePush && desired.Rehydration == nil &&
 		cr.Status.DesiredStateHash == desiredHash &&
 		rbacInSync &&
 		cr.Status.LastDesiredPushAt != nil &&
@@ -3196,7 +4404,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// (empty AppliedBundleHash) and explicit reprovision still proceed.
 	// Evaluated before the manual-mode and wave-gate checks so pause supersedes
 	// all other gating behavior.
-	if targetBundleHash != "" && bundleErr == nil {
+	if targetBundleHash != "" && bundleErr == nil && !redeliver {
 		cb, cbErr := r.getComposedBundle(ctx, bundleIdent.Name, bundleIdent.Namespace)
 		paused := cbErr == nil && cb != nil &&
 			strings.EqualFold(strings.TrimSpace(cb.Annotations["varroa.dev/rollout-paused"]), "true")
@@ -3215,6 +4423,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			})
 			if cr.Status.DesiredStateHash == desiredHash {
 				cr.Status.DesiredStateHash = "" // clear stale desired hash so manual mode re-flags on resume
+				cr.Status.DesiredContentHash = ""
 			}
 			logger.Info("rollout paused by bundle annotation", "bundle", bundleIdent.Namespace+"/"+bundleIdent.Name)
 			return nil
@@ -3232,31 +4441,51 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Check reconciliation mode.
 	policy := r.effectivePolicy(cr)
-	if policy.Mode == v1alpha1.ReconciliationModeManual {
+	if policy.Mode == v1alpha1.ReconciliationModeManual && !redeliver {
 		// If the desired state hash hasn't changed since the last push
 		// (ApproveRestart sets DesiredStateHash), the mite is still applying
 		// the new configuration. Don't re-set PendingRestart yet — wait for
 		// the snapshot to catch up. Only re-flag if the mite reported a
 		// failure for this hash.
+		contentHash := computeDesiredContentHash(desired)
 		if cr.Status.DesiredStateHash == desiredHash {
 			if hasResultFailureForHash(results, desired, desiredHash) {
-				cr.Status.PendingRestart = &v1alpha1.PendingRestart{
-					DetectedAt:       now,
-					DesiredStateHash: desiredHash,
-					Changes:          computeChangedSections(snapshot, desired),
-				}
+				raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
+					computeChangedSections(snapshot, desired))
 				logger.Info("manual mode, mite reported failure for pending hash, re-flagging")
+				return nil
 			}
-			return nil
+			// The rehydration bundle stays outside the full hash, so a
+			// pending bundle arrives with an unchanged hash. It is
+			// operator-owned build-record data and needs no approval. It
+			// waits for an apply result of the delivered push, the same
+			// rule as a placement-only change.
+			if desired.Rehydration == nil ||
+				manualOperatorOwnedChange(&cr.Status, contentHash) != placementPush {
+				return nil
+			}
+			// The push carries the delivered and applied content, so a
+			// pending restart that remains is stale.
+			cr.Status.PendingRestart = nil
+			logger.Info("manual mode, pending rehydration bundle, pushing without approval")
+		} else {
+			switch manualOperatorOwnedChange(&cr.Status, contentHash) {
+			case placementPush:
+				// The content is the delivered and applied content, so the
+				// push carries only placement data. It needs no approval.
+				cr.Status.PendingRestart = nil
+				logger.Info("manual mode, placement-only change, pushing without approval")
+			case placementHold:
+				logger.Debug("manual mode, placement-only change waits for the delivered push to apply")
+				return nil
+			default:
+				// Manual mode: set PendingRestart instead of auto-pushing.
+				raisePendingRestart(&cr.Status, now, desiredHash, contentHash,
+					computeChangedSections(snapshot, desired))
+				logger.Info("manual mode, config drift detected, pending approval")
+				return nil
+			}
 		}
-		// Manual mode: set PendingRestart instead of auto-pushing.
-		cr.Status.PendingRestart = &v1alpha1.PendingRestart{
-			DetectedAt:       now,
-			DesiredStateHash: desiredHash,
-			Changes:          computeChangedSections(snapshot, desired),
-		}
-		logger.Info("manual mode, config drift detected, pending approval")
-		return nil
 	}
 
 	// Wave rollout gate: for controllers with rolloutWave > 0, block the push
@@ -3268,7 +4497,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	gateEvaluated := false
 	hadBlocked := cr.Status.Rollout != nil
 	overrideActive := strings.EqualFold(strings.TrimSpace(cr.Annotations[v1alpha1.AnnotationRolloutOverride]), "true")
-	gateWouldApply := wave > 0 &&
+	gateWouldApply := !redeliver && wave > 0 &&
 		cr.Status.AppliedBundleHash != "" &&
 		cr.Status.AppliedBundleHash != targetBundleHash &&
 		!reprovisionRequested
@@ -3307,7 +4536,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			return nil
 		}
 		cr.Status.Rollout = nil
-	} else {
+	} else if !redeliver {
 		// Clear any stale rollout state if we're no longer gated (wave 0,
 		// override active, reprovision, already on target, etc.).
 		cr.Status.Rollout = nil
@@ -3325,7 +4554,9 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 
 	// Automatic mode: push desired state to mite.
 	// Populate policy fields: idle mode sets ApplyWhen; drain timeout is always set.
-	if policy.Mode == v1alpha1.ReconciliationModeIdle {
+	// A manual-mode redelivery keeps the idle gating its approval carried.
+	if policy.Mode == v1alpha1.ReconciliationModeIdle ||
+		(redeliver && policy.Mode == v1alpha1.ReconciliationModeManual) {
 		desired.ApplyWhen = "idle"
 	}
 	desired.MaxDeferSec = int64(policy.MaxDeferSeconds)
@@ -3353,9 +4584,17 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 		// source.
 	}
 
-	cr.Status.DesiredStateHash = desiredHash
+	// A push that goes out while a rehydration push is in flight carries
+	// the held bundle. The mite keeps only the newest desired state, so a
+	// push without the bundle can replace the held push before it starts.
+	if rehydrationPlan != nil && rehydrationPlan.Held && desired.Rehydration == nil {
+		desired.Rehydration = rehydrationPlan.Bundle
+	}
 
-	if err := func() error {
+	// The hash and the push time are stamped only after a delivered push.
+	// NATS keeps no copy of the command, so a stamp after a failed push
+	// would let the convergence short-circuit skip the retry.
+	sendErr := func() error {
 		_, span := tracer.Start(ctx, "desiredState.push")
 		defer span.End()
 		span.SetAttributes(attribute.String("hash", desiredHash))
@@ -3364,19 +4603,55 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				DesiredState: desired,
 			},
 		})
-	}(); err != nil {
-		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed, err.Error())
-		return fmt.Errorf("send desired state: %w", err)
+	}()
+	switch {
+	case errors.Is(sendErr, transport.ErrMiteUnreachable):
+		// No gateway holds the mite stream. This is not a blocked
+		// reconcile: nothing is stamped, so the next tick pushes again.
+		logger.Info("desired state not delivered; no gateway holds the mite stream", "error", sendErr)
+	case sendErr != nil:
+		r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedDesiredStatePushFailed, sendErr.Error())
+		return fmt.Errorf("send desired state: %w", sendErr)
+	default:
+		cr.Status.DesiredStateHash = desiredHash
+		cr.Status.DesiredContentHash = computeDesiredContentHash(desired)
+		cr.Status.LastDesiredPushAt = &now
+		r.markRehydrationSent(cr, rehydrationPlan, desired, now.Time)
+		if reconnected {
+			r.miteTokenMu.Lock()
+			r.lastMiteEpoch[key] = connEpoch
+			r.miteTokenMu.Unlock()
+		}
 	}
-	cr.Status.LastDesiredPushAt = &now
 
 	r.checkPluginRollFailed(ctx, cr, resolvedBundle, logger)
 
 	// --- Hibernation policy (4.3) ---
 	if cr.Spec.Hibernation != nil && cr.Spec.Hibernation.Enabled && cr.Status.Phase == v1alpha1.ControllerPhaseConnected {
+		switch {
+		case isCellController(cr):
+			// A cell accepts spec.hibernation.enabled and ignores it
+			// (design D16, gate 6 of shouldHibernate). Record the warning
+			// for every placed tenant instead of evaluating the gates.
+			r.recordCellHibernationIgnored(cr)
+		default:
+			if err := r.evaluateHibernationPolicy(ctx, cr, now.Time); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// evaluateHibernationPolicy runs the ordinary (non-cell) auto-hibernate
+// gates and, when they pass, parks the controller. Split out of
+// handleConnected so the cell branch above never reaches this path.
+func (r *Reconciler) evaluateHibernationPolicy(ctx context.Context, cr *v1alpha1.Controller, now time.Time) error {
+	{
 		gauges, receivedAt, ok := r.miteTransport.IdleGauges(cr.Namespace, cr.Name)
 		if ok {
-			shouldHib, lastActivity := shouldHibernate(cr, gauges, receivedAt, now.Time)
+			shouldHib, lastActivity := shouldHibernate(cr, gauges, receivedAt, now)
 
 			// Keep status.lastActivityAt current every tick (rate-limited to >60s
 			// advances to avoid needless status churn), regardless of whether we
@@ -3388,14 +4663,20 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			}
 
 			if shouldHib {
-				// Persist status.hibernated via the CAS helper, then wake the
-				// follow-up reconcile so it observes the flag and scales the
-				// StatefulSet down. Persist FIRST: enqueueReconcile is a
-				// non-blocking send drained after this reconcile returns, so
-				// waking first could let the follow-up read a stale false and
-				// skip the scale-down.
-				changed, terr := r.client.SetHibernated(ctx, cr.Name, cr.Namespace, true)
+				// Persist status.hibernated conditionally on the tick's read,
+				// then wake the follow-up reconcile so it observes the flag
+				// and scales the StatefulSet down. Persist FIRST:
+				// enqueueReconcile is a non-blocking send drained after this
+				// reconcile returns, so waking first could let the follow-up
+				// read a stale false and skip the scale-down.
+				changed, terr := r.setTickHibernated(ctx, cr, true)
 				if terr != nil {
+					// A conflict cancelled the tick: a newer write, such as
+					// a wake by the new shard owner, supersedes this
+					// decision. Reconcile requeues without an error.
+					if ctx.Err() != nil {
+						return context.Cause(ctx)
+					}
 					r.markReconcileBlocked(ctx, cr, v1alpha1.ReasonReconcileBlockedHibernateTransitionFailed, terr.Error())
 					return fmt.Errorf("hibernate setHibernated: %w", terr)
 				}
@@ -3431,8 +4712,16 @@ func (r *Reconciler) checkPluginRollFailed(ctx context.Context, cr *v1alpha1.Con
 	// Resolve bundle if not provided (e.g. called from handleRunning).
 	if resolved == nil {
 		var resolveErr error
-		resolved, _, _, resolveErr = r.resolveBundleForController(ctx, cr)
+		resolved, _, _, _, resolveErr = r.resolveBundleForController(ctx, cr)
 		if resolveErr != nil {
+			// The bundle resolved; only the artifact Secret read failed. A
+			// verdict computed without the bundle's own plugin pins would
+			// be wrong, so the check gives no verdict and waits for the
+			// next tick instead of clearing or flagging PluginRollFailed
+			// on an incomplete plugin set.
+			if errors.Is(resolveErr, errArtifactSecretRead) {
+				return
+			}
 			resolved = nil
 		}
 	}
@@ -3455,6 +4744,11 @@ func (r *Reconciler) checkPluginRollFailed(ctx context.Context, cr *v1alpha1.Con
 	if err != nil {
 		logger.Warn("failed to get controller pod for roll-failed check", "error", err)
 		return
+	}
+	// The termination record of plugins-init outlives the roll, so the
+	// download report runs before the early return for a completed roll.
+	if pod != nil {
+		cr.Status.Conditions = applyPluginInitUCReport(cr.Status.Conditions, pluginInitUCReport(pod))
 	}
 
 	// If no pod OR the pod is Ready and checksums match, the roll completed.
@@ -3486,6 +4780,7 @@ func (r *Reconciler) reconcileProvisioningPluginInitFailure(ctx context.Context,
 	if err != nil || pod == nil {
 		return
 	}
+	cr.Status.Conditions = applyPluginInitUCReport(cr.Status.Conditions, pluginInitUCReport(pod))
 	if reason, failed := pluginInitFailureMessage(pod); failed {
 		msg := "plugins-init failed during provisioning"
 		if reason != "" {
@@ -3512,11 +4807,28 @@ func pluginInitFailureMessage(pod *corev1.Pod) (string, bool) {
 			continue
 		}
 		if t := s.State.Terminated; t != nil && t.ExitCode != 0 {
+			if text, ok := describePluginInitMarker(t.Message); ok {
+				return text, true
+			}
 			reason := t.Message
 			if reason == "" {
 				reason = t.Reason
 			}
 			return reason, true
+		}
+		// An init container restarts in place after a failure, so its current
+		// state is Running or Waiting and the failure sits only in
+		// LastTerminationState.
+		// A terminated container never reads this history, so a recovered
+		// plugins-init clears the condition.
+		if t := s.LastTerminationState.Terminated; s.State.Terminated == nil && s.RestartCount > 0 && t != nil && t.ExitCode != 0 {
+			reason := t.Message
+			if text, ok := describePluginInitMarker(t.Message); ok {
+				reason = text
+			} else if reason == "" {
+				reason = t.Reason
+			}
+			return fmt.Sprintf("plugins-init exited with code %d (%d restarts): %s", t.ExitCode, s.RestartCount, reason), true
 		}
 		if w := s.State.Waiting; w != nil {
 			switch w.Reason {
@@ -3624,6 +4936,7 @@ func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alph
 			Reason:  v1alpha1.ReasonJenkinsBootFailed,
 			Message: msg,
 		})
+		r.replaceStaleBootFailedPod(ctx, cr, pod)
 		return
 	}
 	// Not failing is two different states, and the reason has to say which:
@@ -3639,6 +4952,41 @@ func (r *Reconciler) reconcileJenkinsBootFailure(ctx context.Context, cr *v1alph
 		Status: metav1.ConditionFalse,
 		Reason: reason,
 	})
+}
+
+// replaceStaleBootFailedPod deletes a boot-failed pod that runs an older
+// StatefulSet revision than status.updateRevision. Under OrderedReady the
+// StatefulSet controller waits for the pod to become Ready before it rolls
+// it. A crash-looping pod therefore blocks its own replacement. The
+// StatefulSet recreates the deleted pod at the update revision. A pod that
+// already runs the update revision is kept, which prevents a delete loop
+// when the new revision also fails to boot. A terminating pod is kept so
+// the delete and its event fire once. OnDelete and partitioned strategies
+// hand pod recycling to the user, so the helper does nothing for them.
+func (r *Reconciler) replaceStaleBootFailedPod(ctx context.Context, cr *v1alpha1.Controller, pod *corev1.Pod) {
+	if pod.DeletionTimestamp != nil {
+		return
+	}
+	podRevision := pod.Labels[appsv1.StatefulSetRevisionLabel]
+	if podRevision == "" {
+		return
+	}
+	rollout, err := r.client.GetStatefulSetRollout(ctx, controllerPrefix(cr), cr.Namespace)
+	if err != nil {
+		r.Logger.Warn("read statefulset rollout failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return
+	}
+	if !rollout.RollingUpdate || rollout.UpdateRevision == "" || rollout.UpdateRevision == podRevision {
+		return
+	}
+	if err := r.client.DeleteControllerPod(ctx, cr.Namespace, cr.Name); err != nil {
+		r.Logger.Warn("delete stale boot-failed pod failed", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return
+	}
+	r.Logger.Info("deleted boot-failed pod that lags the statefulset revision",
+		"controller", cr.Namespace+"/"+cr.Name, "podRevision", podRevision, "updateRevision", rollout.UpdateRevision)
+	r.emitOperatorEvent("pod.replaced", cr,
+		"deleted the boot-failed pod so the StatefulSet can roll the new revision", "")
 }
 
 // jenkinsContainerReady reports the Jenkins container's own readiness, which is
@@ -3660,6 +5008,33 @@ func isPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// connectsInSamePass reports whether a pass that moved the phase from
+// Running to Connected runs the Connected handler too. A failed runner
+// contribution read waits for the next pass, which returns that error
+// before any publish. An armed force-reprovision annotation also waits,
+// because only a pass that starts in Connected consumes it.
+func (r *Reconciler) connectsInSamePass(cr *v1alpha1.Controller, contribErr error) bool {
+	return cr.Status.Phase == v1alpha1.ControllerPhaseConnected &&
+		contribErr == nil &&
+		cr.Annotations[annotationForceReprovision] == ""
+}
+
+// runConnectedAfterRunning runs the Connected-only roll checks and then
+// handleConnected, so the first desired-state push follows a mite connect
+// in the same pass. A failed reconcile writes no status, so on an error
+// this writes the status first. Otherwise the Connected phase is lost and
+// the Running timeout guard can fail a connected controller.
+func (r *Reconciler) runConnectedAfterRunning(ctx context.Context, cr *v1alpha1.Controller, contrib runners.RunnerContribution) error {
+	if r.reconcileHeadlessRoll(ctx, cr) || r.reconcileArtifactSecretRoll(ctx, cr) {
+		return nil
+	}
+	err := r.handleConnected(ctx, cr, contrib)
+	if err != nil && ctx.Err() == nil {
+		r.persistStatusDiagnostics(ctx, cr)
+	}
+	return err
 }
 
 func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller) error {
@@ -3687,7 +5062,10 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 
 	// Same timeout guard as handleProvisioning — use ProvisioningStartedAt
 	// so an operator restart doesn't immediately fail long-lived controllers.
-	if cr.Status.ProvisioningStartedAt != nil && time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout {
+	// A stream lost after the last provisioning run is not a connect timeout:
+	// ProvisioningStartedAt predates the loss, so the guard skips it.
+	if cr.Status.ProvisioningStartedAt != nil && time.Since(cr.Status.ProvisioningStartedAt.Time) > provisioningTimeout &&
+		!streamLostSince(cr, cr.Status.ProvisioningStartedAt.Time) {
 		cr.Status.Phase = v1alpha1.ControllerPhaseFailed
 		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 			Type:    v1alpha1.ConditionFailed,
@@ -3707,46 +5085,17 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 	r.checkPluginRollFailed(ctx, cr, nil, logger)
 
 	version, lastHeartbeat, certExpiry, connected := r.miteTransport.Info(cr.Namespace, cr.Name)
-	key := cr.Namespace + "/" + cr.Name
+	// handleConnected treats a stale heartbeat as a lost stream. The same rule
+	// applies here, or the two handlers flap the phase on one presence record.
+	connected = connected && !heartbeatStale(lastHeartbeat)
 	if !connected {
-		// (Bootstrap token freshness is handled at the top of this function,
-		// before the timeout guard.)
-		// Prolonged-disconnect recovery. A controller observed in Running whose
-		// mite never (re)connects would otherwise only escape via the 5-minute
-		// provisioningTimeout → Failed. Mirror handleConnected: after a short
-		// grace period, reset to Pending so the Pending→Provisioning pass runs
-		// the FULL provisioning reconcile (CreateStatefulSet). That path re-renders
-		// the mite container's VARROA_CA_PEM env and rolls the pod on AlreadyExists
-		// — the recovery route after a control-plane reinstall regenerates the CA
-		// (UpdateStatefulSetOIDCEnv would not, as it only patches the Jenkins
-		// container).
-		r.disconnectedTicks[key]++
-		if r.disconnectedTicks[key] < 3 {
-			// Grace period: mite may be (re)connecting after an operator or
-			// control-plane restart.
-			return nil
-		}
-
-		// Clear the token record so a fresh one is issued on reconnect. The
-		// mite's in-memory token is lost when it restarts.
-		r.miteTokenMu.Lock()
-		delete(r.miteTokens, key)
-		r.miteTokenMu.Unlock()
-		// Reset the disconnected-tick counter so the next Provisioning→Running
-		// attempt gets a fresh grace window instead of immediately re-forcing
-		// Pending (which would thrash Pending↔Provisioning↔Running).
-		delete(r.disconnectedTicks, key)
-		cr.Status.Phase = v1alpha1.ControllerPhasePending
-		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-			Type:    v1alpha1.ConditionReady,
-			Status:  metav1.ConditionFalse,
-			Reason:  "MiteDisconnected",
-			Message: "mite sidecar disconnected",
-		})
+		// A disconnected mite never moves a Running controller back to
+		// Pending. Reprovisioning an unchanged pod does not reconnect it.
+		// reconcileMiteTransportEnvRoll rolls the pod when its transport env
+		// is stale, and provisioningTimeout fails a pod that never connects.
 		return nil
 	}
-	// Reset disconnected counter when mite is connected.
-	delete(r.disconnectedTicks, key)
+	delete(r.disconnectedTicks, cr.Namespace+"/"+cr.Name)
 
 	// Mite is connected — transition to Connected and populate MiteStatus.
 	cr.Status.Phase = v1alpha1.ControllerPhaseConnected
@@ -3768,7 +5117,113 @@ func (r *Reconciler) handleRunning(ctx context.Context, cr *v1alpha1.Controller)
 		Reason:  "MiteConnected",
 		Message: "mite sidecar connected and streaming",
 	})
+	// MiteConnected exists only after a loss, so a first connect writes none.
+	if existing := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected); existing != nil {
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionMiteConnected,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonStreamRestored,
+			Message: fmt.Sprintf("mite %s/%s reconnected", cr.Namespace, cr.Name),
+		})
+	}
 	return nil
+}
+
+// markStreamLost moves a Connected controller whose mite stream stays lost to
+// Running. The pod is unchanged, so the controller must not reprovision.
+// lastHeartbeat is the transport's last heartbeat; a zero value falls back to
+// status.miteStatus.lastSeen.
+func markStreamLost(cr *v1alpha1.Controller, key string, lastHeartbeat time.Time) {
+	if lastHeartbeat.IsZero() && cr.Status.MiteStatus != nil && cr.Status.MiteStatus.LastSeen != nil {
+		lastHeartbeat = cr.Status.MiteStatus.LastSeen.Time
+	}
+	last := "never"
+	if !lastHeartbeat.IsZero() {
+		last = lastHeartbeat.UTC().Format(time.RFC3339)
+	}
+	cr.Status.Phase = v1alpha1.ControllerPhaseRunning
+	clearMiteConnection(cr)
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  "MiteDisconnected",
+		Message: "mite sidecar disconnected",
+	})
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:    v1alpha1.ConditionMiteConnected,
+		Status:  metav1.ConditionFalse,
+		Reason:  v1alpha1.ReasonStreamLost,
+		Message: fmt.Sprintf("mite %s command stream lost; last heartbeat %s", key, last),
+	})
+}
+
+// heartbeatStale reports whether a transport heartbeat is older than
+// staleMiteThreshold. deriveMiteHealth applies the same rule.
+func heartbeatStale(lastHeartbeat time.Time) bool {
+	return time.Since(lastHeartbeat) > staleMiteThreshold
+}
+
+// streamLostSince reports whether the mite stream is lost and the loss
+// happened after t.
+func streamLostSince(cr *v1alpha1.Controller, t time.Time) bool {
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonStreamLost &&
+		c.LastTransitionTime.After(t)
+}
+
+// isStreamLost reports whether the controller carries MiteConnected=False
+// with reason StreamLost.
+func isStreamLost(cr *v1alpha1.Controller) bool {
+	c := findCondition(cr.Status.Conditions, v1alpha1.ConditionMiteConnected)
+	return c != nil && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonStreamLost
+}
+
+// reconcileMiteTransportEnvRoll rolls the pod of a controller that lost its
+// mite stream only when a reprovision changes the pod. It compares the
+// StatefulSet template's mite VARROA_CA_PEM and VARROA_ENDPOINT with the
+// operator's values, and rolls when either differs or the StatefulSet is gone.
+// A new CA after a control-plane reinstall is the case this catches. An
+// OnDelete or partitioned overlay keeps the old pod, as for every template
+// roll. Returns true when it moved the phase to Provisioning; the caller then
+// skips the phase dispatch this tick.
+func (r *Reconciler) reconcileMiteTransportEnvRoll(ctx context.Context, cr *v1alpha1.Controller) bool {
+	if cr.Status.Phase != v1alpha1.ControllerPhaseRunning || !isStreamLost(cr) {
+		return false
+	}
+	if _, lastHeartbeat, _, connected := r.miteTransport.Info(cr.Namespace, cr.Name); connected && !heartbeatStale(lastHeartbeat) {
+		return false
+	}
+	env, found, err := r.client.GetStatefulSetContainerEnv(ctx, controllerPrefix(cr), cr.Namespace, overlay.MiteContainerName)
+	if err != nil {
+		r.Logger.Warn("mite transport env roll evaluation skipped", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return false
+	}
+	var deltas []string
+	switch {
+	case !found:
+		deltas = append(deltas, "StatefulSet or mite container missing")
+	default:
+		if env["VARROA_CA_PEM"] != r.caPEM {
+			deltas = append(deltas, "VARROA_CA_PEM changed")
+		}
+		if env["VARROA_ENDPOINT"] != r.varroaEndpoint {
+			deltas = append(deltas, fmt.Sprintf("VARROA_ENDPOINT %q -> %q", env["VARROA_ENDPOINT"], r.varroaEndpoint))
+		}
+	}
+	if len(deltas) == 0 {
+		return false
+	}
+	now := metav1Now()
+	cr.Status.Phase = v1alpha1.ControllerPhaseProvisioning
+	cr.Status.ProvisioningStartedAt = &now
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:               v1alpha1.ConditionProvisioning,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: now,
+		Reason:             "ProvisioningStarted",
+		Message:            "re-provisioning to apply mite transport change: " + strings.Join(deltas, "; "),
+	})
+	return true
 }
 
 func (r *Reconciler) handleFailed(_ context.Context, cr *v1alpha1.Controller) {
@@ -3807,19 +5262,34 @@ func (r *Reconciler) Finalize(ctx context.Context, cr *v1alpha1.Controller) erro
 	if err := r.client.DeleteResource(ctx, "StatefulSet", pre, cr.Namespace); err != nil {
 		return err
 	}
-	// Delete ConfigMaps
-	for _, suffix := range []string{"-init", "-plugins"} {
-		_ = r.client.DeleteResource(ctx, "ConfigMap", pre+suffix, cr.Namespace)
+	// Delete the init, plugins, and casc ConfigMaps.
+	for _, name := range []string{pre + "-init", pre + "-plugins", cascConfigMapName(pre)} {
+		_ = r.client.DeleteResource(ctx, "ConfigMap", name, cr.Namespace)
 	}
 	// Delete bootstrap Secret
 	_ = r.client.DeleteSecret(ctx, pre+"-bootstrap", cr.Namespace)
 	// Delete Service
 	r.deleteWakeSlice(ctx, cr, logger)
 	_ = r.client.DeleteResource(ctx, "Service", pre+"-svc", cr.Namespace)
-	// Delete PVCs (StatefulSet volumeClaimTemplates are not auto-deleted)
+	// Delete the PVC (StatefulSet volumeClaimTemplates are not auto-deleted).
+	// A cell has none — NotFound tolerates that.
 	_ = r.client.DeleteResource(ctx, "PersistentVolumeClaim", "jenkins-home-"+pre+"-0", cr.Namespace)
 	// Delete Ingress
 	_ = r.client.DeleteResource(ctx, "Ingress", pre+"-ingress", cr.Namespace)
+	// Delete the cell NetworkPolicy. It has no owner reference, so it never
+	// self-cleans; a non-cell controller never had one — NotFound tolerates
+	// that.
+	_ = r.client.DeleteCellNetworkPolicy(ctx, pre+"-cell", cr.Namespace)
+	// Delete the agent RoleBinding, Role, and ServiceAccount. Provisioning
+	// creates all three under this same name; a controller that never left
+	// Pending has none, and NotFound tolerates that. Any other error keeps
+	// the finalizer so the next pass retries instead of leaking the objects.
+	agentName := pre + "-agent"
+	for _, kind := range []string{"RoleBinding", "Role", "ServiceAccount"} {
+		if err := r.client.DeleteResource(ctx, kind, agentName, cr.Namespace); err != nil {
+			return fmt.Errorf("delete agent %s %q: %w", kind, agentName, err)
+		}
+	}
 	return nil
 }
 
@@ -3902,6 +5372,16 @@ func removeConditionByType(conditions []v1alpha1.ControllerCondition, ctype v1al
 	return result
 }
 
+// clearBundleFailed retires a stale BundleFailed condition. Bundle
+// resolution can fail on one reconcile pass and succeed on the next; a
+// status merge patch never clears a condition on its own, so every phase
+// or action that re-resolves the bundle must call this on success, before
+// the status patch goes out. Idempotent: a no-op when the condition is
+// already absent.
+func clearBundleFailed(cr *v1alpha1.Controller) {
+	cr.Status.Conditions = removeConditionByType(cr.Status.Conditions, v1alpha1.ConditionBundleFailed)
+}
+
 // setCondition upserts a condition by Type — only one entry per ConditionType.
 func setCondition(conditions []v1alpha1.ControllerCondition, c v1alpha1.ControllerCondition) []v1alpha1.ControllerCondition {
 	// Stamp LastTransitionTime with standard k8s-condition semantics: preserve it
@@ -3965,7 +5445,7 @@ func (r *Reconciler) surfacePluginConflict(ctx context.Context, cr *v1alpha1.Con
 		Reason:  v1alpha1.ReasonPluginConflict,
 		Message: conflict,
 	})
-	pluginLockConflictGauge.Record(ctx, 1, metric.WithAttributes(
+	r.metrics.pluginLockConflictGauge.Record(ctx, 1, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -3992,7 +5472,7 @@ func (r *Reconciler) clearPluginConflict(ctx context.Context, cr *v1alpha1.Contr
 		Status: metav1.ConditionFalse,
 		Reason: "NoConflict",
 	})
-	pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
+	r.metrics.pluginLockConflictGauge.Record(ctx, 0, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -4144,6 +5624,26 @@ func (r *Reconciler) reconcileService(ctx context.Context, cr *v1alpha1.Controll
 // reconcile path so changes to TLS, annotations, or host converge instead of
 // going stale. Returns nil when no host resolves (nothing to reconcile).
 func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controller) error {
+	if v1alpha1.IsHeadless(cr) {
+		// A headless controller gets no route in. This rule covers a cell and
+		// a one-tenant controller that opts in. Delete an Ingress from an
+		// earlier reconcile. DeleteResource already treats a missing object
+		// as success, so any error here is a real failure — it must reach
+		// the caller, or the reconcile reports success while the old
+		// Ingress still routes in.
+		if err := r.client.DeleteResource(ctx, "Ingress", controllerPrefix(cr)+"-ingress", cr.Namespace); err != nil {
+			return fmt.Errorf("delete ingress for headless controller: %w", err)
+		}
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:               v1alpha1.ConditionNoExternalURL,
+			Status:             metav1.ConditionTrue,
+			Reason:             "Headless",
+			Message:            "this controller has no external URL. Use the Pipelines surface, or run `varroactl break-glass` for a temporary admin session.",
+			LastTransitionTime: metav1Now(),
+		})
+		cr.Status.Endpoint = ""
+		return nil
+	}
 	var defaults *v1alpha1.ProvisioningDefaults
 	if d, err := crdstore.Get[v1alpha1.ProvisioningDefaults](ctx, r.store, provisioningDefaultsName, ""); err == nil && d != nil {
 		defaults = d
@@ -4167,6 +5667,7 @@ func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controll
 			Message:            "no ingress host resolved; reach this controller with `kubectl port-forward` or set ProvisioningDefaults.rootDomain (or spec.ingressSpec.host)",
 			LastTransitionTime: metav1Now(),
 		})
+		cr.Status.Endpoint = ""
 		return nil
 	}
 	if c := findCondition(cr.Status.Conditions, v1alpha1.ConditionNoExternalURL); c != nil &&
@@ -4179,6 +5680,9 @@ func (r *Reconciler) reconcileIngress(ctx context.Context, cr *v1alpha1.Controll
 			LastTransitionTime: metav1Now(),
 		})
 	}
+	// The member's own operator publishes the URL, so the BFF never derives
+	// it from a root domain of another cluster.
+	cr.Status.Endpoint = v1alpha1.ExternalURL(cr, resolvedHost)
 
 	// Path-mode routing shares the dashboard host and terminates TLS upstream,
 	// so the per-controller Ingress carries a path prefix and no TLS block.
@@ -4304,12 +5808,47 @@ func (r *Reconciler) reconcileVersionRoll(ctx context.Context, cr *v1alpha1.Cont
 	return true
 }
 
+// reconcileHeadlessRoll compares the desired headless flag (v1alpha1.IsHeadless)
+// against the live VARROA_HEADLESS environment entry and, on a delta,
+// transitions a Connected controller to Provisioning so the existing
+// provisioning flow re-renders the pod template. Returns true when it
+// transitioned the phase (caller must skip the normal phase dispatch this
+// tick). Design section 3.
+func (r *Reconciler) reconcileHeadlessRoll(ctx context.Context, cr *v1alpha1.Controller) bool {
+	desired := v1alpha1.IsHeadless(cr)
+	env, found, err := r.client.GetStatefulSetContainerEnv(ctx, controllerPrefix(cr), cr.Namespace, overlay.JenkinsContainerName)
+	if err != nil {
+		r.Logger.Warn("headless-roll evaluation skipped", "controller", cr.Namespace+"/"+cr.Name, "error", err)
+		return false
+	}
+	if !found {
+		return false // no StatefulSet yet: nothing to roll
+	}
+	// An absent VARROA_HEADLESS entry means false.
+	live := env["VARROA_HEADLESS"] == "true"
+	if live == desired {
+		return false
+	}
+	now := metav1Now()
+	cr.Status.Phase = v1alpha1.ControllerPhaseProvisioning
+	cr.Status.ProvisioningStartedAt = &now
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:               v1alpha1.ConditionProvisioning,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: now,
+		Reason:             "ProvisioningStarted",
+		Message:            fmt.Sprintf("re-provisioning to apply headless change: %t -> %t", live, desired),
+	})
+	return true
+}
+
 // reconcileSharedHostMismatch sets or clears the Degraded/SharedHostMismatch
 // condition depending on whether the path-mode controller's Host matches the
 // dashboard host. Non-path-mode controllers get the condition cleared.
 func (r *Reconciler) reconcileSharedHostMismatch(cr *v1alpha1.Controller) {
-	if cr.Spec.IngressSpec == nil || cr.Spec.IngressSpec.RoutingMode() != v1alpha1.RoutingModePath {
-		// Clear any stale SharedHostMismatch condition.
+	if cr.Spec.IngressSpec == nil || cr.Spec.IngressSpec.RoutingMode() != v1alpha1.RoutingModePath || v1alpha1.IsHeadless(cr) {
+		// Clear any stale SharedHostMismatch condition. A headless controller
+		// renders no Ingress, so a host mismatch has no effect.
 		cr.Status.Conditions = removeCondition(cr.Status.Conditions, v1alpha1.ConditionDegraded, "SharedHostMismatch")
 		return
 	}
@@ -4357,7 +5896,36 @@ func parsePluginEntries(yamlContent string) ([]v1alpha1.PluginEntry, error) {
 	return entries, nil
 }
 
-func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle) *mitev1.DesiredStateCommand {
+// runnerContribution reads a cell's whole runner output — the node list, the
+// SSH credentials, and the egress peers — fresh from the CRDs on every call
+// (design D2). It is a no-op for a controller that is not a cell. The
+// caller passes the result into buildDesiredStateCommand once, so the
+// pushed node list and the rendered cell NetworkPolicy always describe the
+// same runner set.
+//
+// internal/controller/runners.BuildContribution fills Nodes and
+// EgressPeers; this method fills Credentials from its own Secret read,
+// because BuildContribution stays leader/non-leader agnostic with no
+// Kubernetes Secret access of its own.
+func (r *Reconciler) runnerContribution(ctx context.Context, cr *v1alpha1.Controller) (runners.RunnerContribution, error) {
+	if !isCellController(cr) {
+		return runners.RunnerContribution{}, nil
+	}
+
+	contrib, err := runners.BuildContribution(ctx, r.store, r.client, cr)
+	if err != nil {
+		return runners.RunnerContribution{}, fmt.Errorf("build runner contribution: %w", err)
+	}
+	return contrib, nil
+}
+
+// buildDesiredStateCommand takes contrib rather than reading it, so the
+// pushed node list and the rendered cell NetworkPolicy always describe the
+// same runner set (design D2). It performs no I/O of its own: every value
+// it injects is read by the caller beforehand, at the same place contrib
+// itself is built. It returns an error because the runner-node injector
+// (design D3) rejects a node-name collision.
+func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved *bundle.MaterializedBundle, contrib runners.RunnerContribution) (*mitev1.DesiredStateCommand, error) {
 	logger := r.Logger.With("controller", cr.Namespace+"/"+cr.Name, "phase", cr.Status.Phase)
 	cmd := &mitev1.DesiredStateCommand{
 		CommandId: fmt.Sprintf("%d", time.Now().UnixNano()),
@@ -4366,6 +5934,7 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 		// Jenkins.ADMINISTER. Reload is always true; the flag is retained on the
 		// proto for compatibility.
 		Reload: true,
+		Cell:   isCellController(cr),
 	}
 
 	// JCasC and items YAML from resolved bundle.
@@ -4378,6 +5947,68 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 		cmd.JcascYaml = injectProjectNamingStrategy(
 			stripAuthorizationStrategy(resolved.JenkinsYAML))
 		cmd.ItemsYaml = resolved.ItemsYAML
+
+		// A cell's SYSTEM-scope tenant-cloud credentials (design D8, D11)
+		// are injected here, on the command's own JcascYaml, and nowhere
+		// else. resolved.JenkinsYAML — the same string the CASC ConfigMap
+		// write uses — never carries them, so no secret value enters a
+		// ConfigMap.
+		if len(resolved.CellCloudCredentials) > 0 {
+			withCreds, credErr := injectTenantCloudCredentials(cmd.JcascYaml, resolved.CellCloudCredentials)
+			if credErr != nil {
+				logger.Warn("tenant cloud credential injection failed; the mite gets a cell jcasc with no cloud credential",
+					"error", credErr)
+			} else {
+				cmd.JcascYaml = withCreds
+			}
+		}
+
+		// A cell's runner nodes (design D3) and their SSH credentials
+		// (design D5) are injected here, on the same JcascYaml, for the
+		// same ConfigMap-avoidance reason: neither resolved.JenkinsYAML
+		// nor the ConfigMap it feeds ever carries a runner node or a
+		// private key.
+		if isCellController(cr) {
+			withNodes, nodeErr := bundle.InjectRunnerNodes(cmd.JcascYaml, contrib.Nodes)
+			if nodeErr != nil {
+				return nil, fmt.Errorf("inject runner nodes: %w", nodeErr)
+			}
+			cmd.JcascYaml = withNodes
+
+			if len(contrib.Credentials) > 0 {
+				withRunnerCreds, credErr := appendSystemCredentials(cmd.JcascYaml, contrib.Credentials)
+				if credErr != nil {
+					logger.Warn("runner credential injection failed; the mite gets a cell jcasc with no runner credential",
+						"error", credErr)
+				} else {
+					cmd.JcascYaml = withRunnerCreds
+				}
+			}
+
+			// A pool library's login follows the same
+			// rule: it reaches the mite command only.
+			if len(resolved.CellPoolLibraryCredentials) > 0 {
+				withLibCreds, credErr := appendSystemCredentials(cmd.JcascYaml, resolved.CellPoolLibraryCredentials)
+				if credErr != nil {
+					logger.Warn("pool library credential injection failed; the mite gets a cell jcasc with no pool library credential",
+						"error", credErr)
+				} else {
+					cmd.JcascYaml = withLibCreds
+				}
+			}
+
+			// A pool's SMTP setting follows the same rule: its mailer
+			// password reaches the mite command only.
+			if len(resolved.CellPoolMail) > 0 {
+				withMail, mailErr := injectPoolMail(cmd.JcascYaml, resolved.CellPoolMail)
+				if mailErr != nil {
+					logger.Warn("pool mail injection failed; the mite gets a cell jcasc with no pool mail",
+						"error", mailErr)
+				} else {
+					cmd.JcascYaml = withMail
+				}
+			}
+		}
 	}
 
 	// RBAC: generate from Group/JenkinsRole CRDs.
@@ -4433,7 +6064,72 @@ func (r *Reconciler) buildDesiredStateCommand(cr *v1alpha1.Controller, resolved 
 	}
 
 	cmd.DesiredStateHash = computeDesiredStateHash(cmd)
-	return cmd
+	return cmd, nil
+}
+
+// appendSystemCredentials appends SYSTEM-scope credentials to jenkins.yaml's
+// global credentials domain. It serves a cell's ssh runner keys (design D5)
+// and its pool library logins. It mirrors
+// injectTenantCloudCredentials's list-aware edit: MergeJenkinsYAML replaces
+// a list wholesale on conflict, so this edit runs on the already-parsed
+// document instead. Each entry in creds is already shaped as one Jenkins
+// credential block, such as {"basicSSHUserPrivateKey": {...}}.
+//
+// The caller MUST run this only on the JcascYaml sent to the mite, never on
+// content that reaches a ConfigMap (design D5: "The key value never enters
+// a ConfigMap"). buildDesiredStateCommand is the one caller.
+func appendSystemCredentials(yamlDoc string, creds []any) (string, error) {
+	if len(creds) == 0 {
+		return yamlDoc, nil
+	}
+
+	var doc map[string]any
+	if strings.TrimSpace(yamlDoc) != "" {
+		if err := yaml.Unmarshal([]byte(yamlDoc), &doc); err != nil {
+			return "", fmt.Errorf("parse jcasc for runner credential injection: %w", err)
+		}
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+
+	credentials, _ := doc["credentials"].(map[string]any)
+	if credentials == nil {
+		credentials = map[string]any{}
+		doc["credentials"] = credentials
+	}
+	system, _ := credentials["system"].(map[string]any)
+	if system == nil {
+		system = map[string]any{}
+		credentials["system"] = system
+	}
+	domainCredentials, _ := system["domainCredentials"].([]any)
+
+	var globalDomain map[string]any
+	for _, d := range domainCredentials {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, hasDomain := dm["domain"]; !hasDomain {
+			globalDomain = dm
+			break
+		}
+	}
+	if globalDomain == nil {
+		globalDomain = map[string]any{"credentials": []any{}}
+		domainCredentials = append(domainCredentials, globalDomain)
+	}
+
+	existing, _ := globalDomain["credentials"].([]any)
+	globalDomain["credentials"] = append(existing, creds...)
+	system["domainCredentials"] = domainCredentials
+
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal jcasc after runner credential injection: %w", err)
+	}
+	return string(out), nil
 }
 
 // MintMiteToken is the public entry point for token minting, callable from
@@ -4552,8 +6248,15 @@ func defaultMiteImage() string {
 // plugin set agree by construction, and keeps this in step with
 // EvaluateCoreCompat, which reports both sentinels as baseline-backed.
 func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProfile) string {
+	return "jenkins/jenkins:" + deployedCore(version, profile)
+}
+
+// deployedCore returns the Jenkins core version a Controller runs for version and
+// profile. The profile's ResolveVersion wins. Otherwise the trimmed version is used,
+// and an empty version or "lts" resolves to the build-time baseline.
+func deployedCore(version string, profile *v1alpha1.JenkinsVersionProfile) string {
 	if profile != nil && profile.Spec.ResolveVersion != "" {
-		return "jenkins/jenkins:" + profile.Spec.ResolveVersion
+		return profile.Spec.ResolveVersion
 	}
 	// Trim to stay in step with ResolveProfile and EvaluateCoreCompat, which both
 	// normalize before matching. Without this, a whitespace-only spec.version
@@ -4561,9 +6264,9 @@ func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProf
 	// "jenkins/jenkins: " tag.
 	v := strings.TrimSpace(version)
 	if v == "" || v == "lts" {
-		return "jenkins/jenkins:" + pluginlock.Baseline()
+		return pluginlock.Baseline()
 	}
-	return "jenkins/jenkins:" + v
+	return v
 }
 
 // effectiveDesiredMiteImage returns the mite sidecar image that provisioning
@@ -4684,7 +6387,7 @@ func (r *Reconciler) refreshMiteImageStaleness(ctx context.Context, cr *v1alpha1
 	if stale {
 		gaugeVal = 1
 	}
-	miteImageStaleGauge.Record(ctx, gaugeVal, metric.WithAttributes(
+	r.metrics.miteImageStaleGauge.Record(ctx, gaugeVal, metric.WithAttributes(
 		attribute.String("namespace", cr.Namespace),
 		attribute.String("controller", cr.Name),
 	))
@@ -5052,6 +6755,12 @@ func (r *Reconciler) effectiveDesiredJenkinsImage(cr *v1alpha1.Controller) strin
 	return desired
 }
 
+// inClusterEndpoint returns the Service address of a controller's Jenkins
+// HTTP port. It names the UID-based Service that handleProvisioning creates.
+func inClusterEndpoint(cr *v1alpha1.Controller) string {
+	return fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", controllerPrefix(cr), cr.Namespace)
+}
+
 // varroaBaseURL returns scheme+host from an OIDC redirect URL (e.g. "https://varroa.example.com/callback" → "https://varroa.example.com").
 func varroaBaseURL(redirectURL string) string {
 	if redirectURL == "" {
@@ -5064,19 +6773,118 @@ func varroaBaseURL(redirectURL string) string {
 	return u.Scheme + "://" + u.Host
 }
 
+// computeDesiredStateHash answers the composite hash of a desired state:
+// the content hash and the tenant homes hash, each framed with its name
+// and length. Plugins stay outside, because they converge through the
+// init-container pod roll. The rehydration bundle stays outside, because
+// it changes after every build. The cell flag stays outside, because the
+// role of a controller does not change the applied content.
 func computeDesiredStateHash(cmd *mitev1.DesiredStateCommand) string {
-	// Compute per-component hashes the same way the mite computes file hashes.
-	jcascHash := sha256Hex([]byte(cmd.JcascYaml))
-	rbacHash := sha256Hex([]byte(cmd.RbacYaml))
-	itemsHash := sha256Hex([]byte(cmd.ItemsYaml))
-
-	// Composite hash (without plugins, which converge via the init-container
-	// pod roll and are no longer sent to the mite).
 	h := sha256.New()
-	h.Write([]byte(jcascHash))
-	h.Write([]byte(rbacHash))
-	h.Write([]byte(itemsHash))
+	writeFramedPart(h, "content", computeDesiredContentHash(cmd))
+	writeFramedPart(h, "homes", tenantHomesHash(cmd.TenantHomes))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// computeDesiredContentHash answers the hash of the content that a user
+// reviews before an approval: the JCasC, RBAC, and items. Tenant homes are
+// placement data that the operator owns, so they stay outside this hash.
+// Each section is framed with its name and length, so content that moves
+// from one section to another changes the hash. Stored pending restarts
+// hold this value, so its encoding must not change.
+func computeDesiredContentHash(cmd *mitev1.DesiredStateCommand) string {
+	h := sha256.New()
+	writeFramedPart(h, "jcasc", cmd.JcascYaml)
+	writeFramedPart(h, "rbac", cmd.RbacYaml)
+	writeFramedPart(h, "items", cmd.ItemsYaml)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeFramedPart writes one part of a composite hash as "name:length:"
+// and then the body. The frame makes the boundary of each part
+// unambiguous, so an empty part cannot shift the next part into its place.
+func writeFramedPart(h hash.Hash, name, body string) {
+	fmt.Fprintf(h, "%s:%d:", name, len(body))
+	_, _ = io.WriteString(h, body)
+}
+
+// raisePendingRestart records a pending restart for a desired state. While
+// the content hash stays the same, it keeps DetectedAt and Changes and
+// updates only the full hash. A tenant home move thus does not change what
+// the user reviews.
+func raisePendingRestart(status *v1alpha1.ControllerStatus, now metav1.Time, desiredHash, contentHash string, changes []string) {
+	if p := status.PendingRestart; p != nil && contentHash != "" && p.ContentHash == contentHash {
+		p.DesiredStateHash = desiredHash
+		return
+	}
+	status.PendingRestart = &v1alpha1.PendingRestart{
+		DetectedAt:       now,
+		DesiredStateHash: desiredHash,
+		ContentHash:      contentHash,
+		Changes:          changes,
+	}
+}
+
+// placementVerdict is the manual-mode answer for a desired state that
+// differs from the delivered one only in operator-owned data: the tenant
+// homes or the rehydration bundle.
+type placementVerdict int
+
+const (
+	// placementApproval: the content changed, the delivered content hash
+	// is unknown, or the delivered push failed. A user must approve.
+	placementApproval placementVerdict = iota
+	// placementPush: only placement data changed, and the delivered push
+	// applied. The tick pushes at once.
+	placementPush
+	// placementHold: only placement data changed, but the delivered push
+	// has no apply result yet. The tick sends nothing, so a newer push
+	// does not replace an approved push that waits for idle builds.
+	placementHold
+)
+
+// manualOperatorOwnedChange classifies a manual-mode change by its content
+// hash. Tenant homes and the rehydration bundle stay outside the content
+// hash, so a change that keeps the delivered content hash changes only
+// operator-owned data.
+func manualOperatorOwnedChange(status *v1alpha1.ControllerStatus, contentHash string) placementVerdict {
+	if status.DesiredContentHash == "" || status.DesiredContentHash != contentHash {
+		return placementApproval
+	}
+	applied := status.LastApplyResult
+	if applied == nil || applied.Hash != status.DesiredStateHash {
+		return placementHold
+	}
+	if applied.Succeeded {
+		return placementPush
+	}
+	return placementApproval
+}
+
+// tenantHomesHash answers a stable hash of a desired state's tenant home
+// entries. The entries are sorted by tenant, then slot, then role.
+// encoding/json sorts each JobHomes map and quotes every string, so a
+// control byte in a value cannot shift a field boundary.
+func tenantHomesHash(homes []*mitev1.TenantHomes) string {
+	if len(homes) == 0 {
+		return ""
+	}
+	sorted := make([]*mitev1.TenantHomes, len(homes))
+	copy(sorted, homes)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Tenant != sorted[j].Tenant {
+			return sorted[i].Tenant < sorted[j].Tenant
+		}
+		if sorted[i].Slot != sorted[j].Slot {
+			return sorted[i].Slot < sorted[j].Slot
+		}
+		return sorted[i].Role < sorted[j].Role
+	})
+	b, err := json.Marshal(sorted)
+	if err != nil {
+		return ""
+	}
+	return sha256Hex(b)
 }
 
 // hasResultFailureForHash checks drained CommandResults for any failure
@@ -5310,8 +7118,9 @@ func generateRealmDocument() string {
   securityRealm:
     varroaMiteAuth:
       oidcIssuer: "${VARROA_OIDC_ISSUER}"
+      localIssuer: "${VARROA_LOCAL_ISSUER:-}"
       userClaimNames: "${VARROA_OIDC_USER_CLAIM}"
-      groupClaimName: "${VARROA_OIDC_GROUP_CLAIM}"
+      groupClaimNames: "${VARROA_OIDC_GROUP_CLAIM}"
 `
 }
 
@@ -5325,9 +7134,16 @@ func hibernationIgnoreRegex(spec *v1alpha1.HibernationSpec) string {
 }
 
 // mintWakeToken generates a wake token if needed per D5:
-// when (hibernation.enabled OR status.hibernated) AND currentToken == "",
-// a 128-bit crypto/rand hex token is returned. Otherwise returns "".
-func mintWakeToken(spec *v1alpha1.HibernationSpec, hibernated bool, currentToken string) (string, error) {
+// when (hibernation.enabled OR status.hibernated) AND currentToken == ""
+// AND the controller is not a cell, a 128-bit crypto/rand hex token is
+// returned. Otherwise returns "". isCell is a separate flag, never derived
+// from spec: a cell may legally carry hibernation.enabled=true while the
+// operator ignores it (design D16), so the exclusion must test the cell
+// role directly.
+func mintWakeToken(spec *v1alpha1.HibernationSpec, hibernated bool, currentToken string, isCell bool) (string, error) {
+	if isCell {
+		return "", nil
+	}
 	needed := (spec != nil && spec.Enabled) || hibernated
 	if !needed || currentToken != "" {
 		return "", nil
@@ -5349,11 +7165,18 @@ func mintWakeToken(spec *v1alpha1.HibernationSpec, hibernated bool, currentToken
 //  3. No running builds
 //  4. No queued items
 //  5. Gauges are not stale (received within 5 minutes)
+//  6. The controller is not a cell
 //
 // lastActivityAt is the max of three sources per D5:
 // last_http_activity_unix, last_event_unix, and the Ready condition's
 // lastTransitionTime for entering Connected.
 func shouldHibernate(cr *v1alpha1.Controller, gauges *mitev1.IdleGauges, receivedAt, now time.Time) (bool, time.Time) {
+	// Gate 6: a cell never hibernates. It keeps nothing on disk, so a
+	// hibernate-then-wake cycle loses every tenant's in-flight state and
+	// every rehydratable projection (design D16).
+	if isCellController(cr) {
+		return false, time.Time{}
+	}
 	// Gate 1: Hibernation must be enabled.
 	if cr.Spec.Hibernation == nil || !cr.Spec.Hibernation.Enabled {
 		return false, time.Time{}

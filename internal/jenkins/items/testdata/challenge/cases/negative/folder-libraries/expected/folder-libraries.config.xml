@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder">
+  <displayName>Folder with Libraries</displayName>
+  <description>Folder with folderLibraries property and a modern-SCM GitHub retriever</description>
+  <properties>
+    <org.jenkinsci.plugins.workflow.libs.FolderLibraries>
+      <libraries>
+        <org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
+          <name>my-shared-lib</name>
+          <retriever class="org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever">
+            <scm class="org.jenkinsci.plugins.github_branch_source.GitHubSCMSource" plugin="github-branch-source">
+              <credentialsId>github-lib</credentialsId>
+              <repoOwner>fake-org</repoOwner>
+              <repository>shared-library</repository>
+              <traits>
+                <org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>
+                  <strategyId>3</strategyId>
+                </org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait>
+              </traits>
+            </scm>
+          </retriever>
+          <allowVersionOverride>true</allowVersionOverride>
+        </org.jenkinsci.plugins.workflow.libs.LibraryConfiguration>
+      </libraries>
+    </org.jenkinsci.plugins.workflow.libs.FolderLibraries>
+  </properties>
+</com.cloudbees.hudson.plugins.folder.Folder>

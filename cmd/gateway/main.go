@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -108,8 +109,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-gateway"), "gateway"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+	meterProvider := otel.GetMeterProvider()
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-gateway"), "gateway"); err != nil {
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for KV buckets and the imperative command stream
 	// (from the NATS cluster size, clamped 1..3 by the chart). Hive-mode
@@ -200,11 +202,6 @@ func main() {
 		logger.Error("failed to create presence KV", "error", err)
 		os.Exit(1)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		logger.Error("failed to create desired KV", "error", err)
-		os.Exit(1)
-	}
 	// Cross-replica bootstrap-token single-use. Bucket TTL must be >= the 15m
 	// token TTL (minted in controller_controller.go) so consumed entries outlive
 	// their token before evicting. EnsureKV does not retro-update the TTL of a
@@ -220,10 +217,47 @@ func main() {
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 
-	handler := mitesrv.NewBusHandler(cluster, busConn, snapshotKV, presenceKV, desiredKV, actPub)
+	handler, err := mitesrv.NewBusHandler(meterProvider, cluster, busConn, snapshotKV, presenceKV, actPub)
+	if err != nil {
+		logger.Error("failed to create the mite stream handler", "error", err)
+		os.Exit(1)
+	}
 	srv.SetStreamHandler(handler)
 	defer handler.Close()
 	logger.Info("gateway using bus transport for mite streams", "endpoint", endpoint)
+
+	// --- Blob store (build-log externalization) ---
+	// Opened unconditionally so a postgres-mode misconfiguration (a DSN
+	// with no blob URL) is caught at startup, not on the first log chunk.
+	recordStoreDSN := os.Getenv("VARROA_RECORDSTORE_DSN")
+	var recordStorePool *pgxpool.Pool
+	if recordStoreDSN != "" {
+		p, err := pgxpool.New(context.Background(), recordStoreDSN)
+		if err != nil {
+			logger.Error("failed to open record store pool", "error", err)
+			os.Exit(1)
+		}
+		recordStorePool = p
+		defer recordStorePool.Close()
+	}
+	logStore, err := openGatewayBlobStore(context.Background(), recordStoreDSN, os.Getenv("VARROA_BLOBSTORE_URL"), recordStorePool)
+	if err != nil {
+		logger.Error("failed to open blob store", "error", err)
+		os.Exit(1)
+	}
+	// The failed-trigger record rides the builds stream, which exists only
+	// with a record store. The blob store is the one signal that is true
+	// exactly then: the chart gives the gateway VARROA_RECORDSTORE_DSN only
+	// in postgres blob mode, and VARROA_BLOBSTORE_URL in every mode. A
+	// discriminator read from the DSN is therefore false on an s3-mode
+	// install, which would acknowledge every failed trigger with no record.
+	// A gateway with no record store gets neither variable, and records
+	// nothing.
+	handler.SetRecordStoreEnabled(logStore != nil)
+	if logStore != nil {
+		handler.SetLogStore(logStore, logPendingBytesFromEnv(), logFinalizeWaitFromEnv(), runOwnerCacheSizeFromEnv())
+		logger.Info("gateway log writer enabled")
+	}
 
 	// --- Start gateway ---
 	port := flagOrEnv("VARROA_GATEWAY_PORT", fmt.Sprintf("%d", *grpcPort))
@@ -256,6 +290,12 @@ func main() {
 	if err != nil {
 		logger.Warn("verify endpoint disabled: failed to create clientset", "error", err)
 	} else {
+		// *ClientsetClient implements crdstore.Backend, so the same client
+		// that backs the verify endpoint also backs the real CellTenantResolver
+		// (design.md D14) — replacing the single-tenant placeholder with one
+		// that reads Controller and Team placement.
+		handler.SetCellTenantResolver(mitesrv.NewCellTenantResolver(kclient))
+
 		verifier := apikey.NewVerifier(gatewayKeyStore{kclient, kclient}, operatorNamespace)
 		verifyMux := http.NewServeMux()
 		verifyMux.Handle("/v1/verify-apikey", apikey.VerifyHandler(verifier, logger))

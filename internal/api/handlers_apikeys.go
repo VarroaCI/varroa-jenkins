@@ -236,8 +236,17 @@ func (s *Server) handleRotateOwnKey(w http.ResponseWriter, r *http.Request, pref
 
 // --- Admin handlers ---
 
+// adminKeyOwner maps the User name in an admin path to the key owner. Beside
+// OIDC, a local account owns its keys as "local:<name>".
+func (s *Server) adminKeyOwner(user string) string {
+	if s.deps.IdentityConfig.LocalAccounts && !identity.IsOIDCName(user) {
+		return auth.LocalSubjectPrefix + user
+	}
+	return user
+}
+
 func (s *Server) handleAdminListKeys(w http.ResponseWriter, r *http.Request, user string) {
-	keys, err := s.deps.KeyVerifier.ListByUser(r.Context(), user)
+	keys, err := s.deps.KeyVerifier.ListByUser(r.Context(), s.adminKeyOwner(user))
 	if err != nil {
 		s.deps.Logger.Error("admin list api keys", "error", err)
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to list keys")
@@ -249,7 +258,7 @@ func (s *Server) handleAdminListKeys(w http.ResponseWriter, r *http.Request, use
 func (s *Server) handleAdminRevokeKey(w http.ResponseWriter, r *http.Request, user, prefix string) {
 	// Confirm the key belongs to the user named in the path so the action
 	// cannot silently revoke a different user's key than the URL implies.
-	if !s.ownsKey(r.Context(), user, prefix) {
+	if !s.ownsKey(r.Context(), s.adminKeyOwner(user), prefix) {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}

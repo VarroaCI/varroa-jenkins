@@ -1,16 +1,24 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getRoleBinding, createRoleBinding, updateRoleBinding, listRoles } from "../api/client";
-import type { VarroaRoleBinding, VarroaRole, SubjectRef } from "../types";
+import type { VarroaRoleBinding, VarroaRole, SubjectRef, VarroaRoleBindingScope, VarroaRoleBindingStatus } from "../types";
+import type { TenantScope } from "../types/auth";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import TenantScopeEditor, { validateTenantScope } from "../components/TenantScopeEditor";
+import { FederationStatusTable } from "../components/FederationStatus";
 import styles from "./RoleBindingForm.module.css";
 
 interface LabelEntry {
   key: string;
   value: string;
 }
+
+const TENANTS_DISABLED_REASON =
+  "A scope names one dimension. Clear the namespaces and the selector labels to scope by tenant.";
+const OTHERS_DISABLED_REASON =
+  "A scope names one dimension. Remove every tenant entry to scope by namespace or by selector.";
 
 export default function RoleBindingForm() {
   const { name } = useParams();
@@ -22,6 +30,13 @@ export default function RoleBindingForm() {
   const [roleRef, setRoleRef] = useState("");
   const [scopeNamespaces, setScopeNamespaces] = useState("");
   const [selectorLabels, setSelectorLabels] = useState<LabelEntry[]>([]);
+  // The whole loaded scope is held, not only the dimensions this form
+  // edits. A submit spreads this value, so a stored dimension the form does
+  // not edit survives the edit.
+  const [loadedScope, setLoadedScope] = useState<VarroaRoleBindingScope | undefined>(undefined);
+  const [tenants, setTenants] = useState<TenantScope[] | undefined>(undefined);
+  // Read-only. The core BFF writes the status, and a submit never sends it.
+  const [federation, setFederation] = useState<VarroaRoleBindingStatus | undefined>(undefined);
   const [roleOptions, setRoleOptions] = useState<VarroaRole[]>([]);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -38,6 +53,9 @@ export default function RoleBindingForm() {
         setBindingName(binding.metadata.name);
         setSubjects(binding.spec.subjects || []);
         setRoleRef(binding.spec.roleRef || "");
+        setLoadedScope(binding.spec.scope);
+        setTenants(binding.spec.scope?.tenants);
+        setFederation(binding.status);
         setScopeNamespaces((binding.spec.scope?.namespaces || []).join(", "));
         setSelectorLabels(
           Object.entries(binding.spec.scope?.controllerSelector?.matchLabels || {}).map(([k, v]) => ({
@@ -56,6 +74,13 @@ export default function RoleBindingForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const tenantErrors = validateTenantScope(tenants);
+    if (tenantErrors.length > 0) {
+      setError(tenantErrors[0]);
+      return;
+    }
+
     setLoading(true);
     setError("");
 
@@ -71,6 +96,22 @@ export default function RoleBindingForm() {
         matchLabels[l.key.trim()] = l.value.trim();
       });
 
+    // The stored scope is the base. Only the dimensions this form edits are
+    // overwritten, so a stored controllerSelector.matchExpressions list and
+    // any other dimension survive an edit that does not touch it.
+    const scope: VarroaRoleBindingScope = { ...loadedScope };
+    if (namespaces.length > 0) scope.namespaces = namespaces;
+    else delete scope.namespaces;
+    if (Object.keys(matchLabels).length > 0) {
+      scope.controllerSelector = { ...scope.controllerSelector, matchLabels };
+    } else if (scope.controllerSelector) {
+      const { matchLabels: _removed, ...rest } = scope.controllerSelector;
+      if (rest.matchExpressions && rest.matchExpressions.length > 0) scope.controllerSelector = rest;
+      else delete scope.controllerSelector;
+    }
+    if (tenants && tenants.length > 0) scope.tenants = tenants;
+    else delete scope.tenants;
+
     const binding: VarroaRoleBinding = {
       apiVersion: "varroa.dev/v1alpha1",
       kind: "VarroaRoleBinding",
@@ -78,15 +119,7 @@ export default function RoleBindingForm() {
       spec: {
         subjects: subjects.filter((s) => s.name.trim().length > 0),
         roleRef,
-        scope:
-          namespaces.length > 0 || Object.keys(matchLabels).length > 0
-            ? {
-                ...(namespaces.length > 0 ? { namespaces } : {}),
-                ...(Object.keys(matchLabels).length > 0
-                  ? { controllerSelector: { matchLabels } }
-                  : {}),
-              }
-            : undefined,
+        scope: Object.keys(scope).length > 0 ? scope : undefined,
       },
     };
 
@@ -126,6 +159,12 @@ export default function RoleBindingForm() {
   const addLabel = () => setSelectorLabels([...selectorLabels, { key: "", value: "" }]);
   const removeLabel = (idx: number) =>
     setSelectorLabels(selectorLabels.filter((_, i) => i !== idx));
+
+  // The one-dimension rule: a scope names tenants, or namespaces and a
+  // selector, never both. The API server's own rule stays the authority.
+  const hasTenants = (tenants?.length ?? 0) > 0;
+  const hasOtherDimension =
+    scopeNamespaces.trim().length > 0 || selectorLabels.some((l) => l.key.trim().length > 0);
 
   if (fetching) return <LoadingSpinner />;
 
@@ -215,9 +254,12 @@ export default function RoleBindingForm() {
                     className={styles.formInput}
                     placeholder="namespace-a, namespace-b"
                     value={scopeNamespaces}
+                    disabled={hasTenants}
                     onChange={(e) => setScopeNamespaces(e.target.value)}
                   />
-                  <p className={styles.hint}>Leave empty for cluster-wide scope.</p>
+                  <p className={styles.hint}>
+                    {hasTenants ? OTHERS_DISABLED_REASON : "Leave empty for cluster-wide scope."}
+                  </p>
                 </div>
 
                 <div className={styles.formGroup}>
@@ -228,6 +270,7 @@ export default function RoleBindingForm() {
                         className={styles.formInput}
                         placeholder="Key"
                         value={label.key}
+                        disabled={hasTenants}
                         onChange={(e) => updateLabel(idx, "key", e.target.value)}
                       />
                       <span className={styles.labelEquals}>=</span>
@@ -235,6 +278,7 @@ export default function RoleBindingForm() {
                         className={styles.formInput}
                         placeholder="Value"
                         value={label.value}
+                        disabled={hasTenants}
                         onChange={(e) => updateLabel(idx, "value", e.target.value)}
                       />
                       <button type="button" className={styles.removeBtn} onClick={() => removeLabel(idx)}>
@@ -242,9 +286,25 @@ export default function RoleBindingForm() {
                       </button>
                     </div>
                   ))}
-                  <button type="button" className={styles.addBtn} onClick={addLabel}>
+                  <button
+                    type="button"
+                    className={styles.addBtn}
+                    disabled={hasTenants}
+                    onClick={addLabel}
+                  >
                     + Add Label
                   </button>
+                  {hasTenants && <p className={styles.hint}>{OTHERS_DISABLED_REASON}</p>}
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Pipelines Tenants</label>
+                  <TenantScopeEditor
+                    value={tenants}
+                    onChange={setTenants}
+                    disabled={hasOtherDimension}
+                    disabledReason={TENANTS_DISABLED_REASON}
+                  />
                 </div>
               </div>
             )}
@@ -258,6 +318,12 @@ export default function RoleBindingForm() {
           </div>
         </Card>
       </form>
+
+      {isEdit && (
+        <Card>
+          <FederationStatusTable status={federation} />
+        </Card>
+      )}
     </div>
   );
 }

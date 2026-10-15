@@ -3,11 +3,15 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -21,17 +25,20 @@ type BusTransport struct {
 	conn       *bus.Conn
 	snapshotKV *bus.KV
 	presenceKV *bus.KV
-	desiredKV  *bus.KV
 
 	mu      sync.Mutex
 	results map[string]chan *mitev1.CommandResult  // keyed by "ns/name"
-	subs    map[string]*bus.Sub                    // subscriptions per mite
+	subs    map[string]*inboundSub                 // subscriptions per mite
 	reports map[string]*mitev1.ObservabilityReport // latest report per mite
 
 	// TokenGrantFunc mints a fresh Jenkins token for a mite. When set, a
 	// TokenRefreshRequest received from a mite is answered with a TokenGrant
 	// published to the mite's outbound subject. Nil disables the grant path.
 	TokenGrantFunc func(ns, name string) (token string, exp int64, err error)
+
+	// OnCommandResult runs after a result is in the buffer. It must not
+	// block. Nil disables it.
+	OnCommandResult func(ns, name string, res *mitev1.CommandResult)
 
 	Logger *slog.Logger
 }
@@ -46,37 +53,93 @@ func (b *BusTransport) log() *slog.Logger {
 	return slog.Default()
 }
 
-// NewBusTransport creates a BusTransport. snapshotKV holds mite snapshots,
-// presenceKV holds liveness records, and desiredKV holds the latest desired
-// state per mite (last-value; written here by Send, watched by the gateway).
-func NewBusTransport(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desiredKV *bus.KV) *BusTransport {
+// NewBusTransport creates a BusTransport. snapshotKV holds mite snapshots and
+// presenceKV holds liveness records.
+func NewBusTransport(cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV) *BusTransport {
 	return &BusTransport{
 		cluster:    cluster,
 		conn:       conn,
 		snapshotKV: snapshotKV,
 		presenceKV: presenceKV,
-		desiredKV:  desiredKV,
 		results:    make(map[string]chan *mitev1.CommandResult),
-		subs:       make(map[string]*bus.Sub),
+		subs:       make(map[string]*inboundSub),
 		reports:    make(map[string]*mitev1.ObservabilityReport),
 	}
 }
 
-// ensureSub creates a NATS subscription for the given mite if one does not
-// already exist. Incoming CommandResult messages are buffered in a channel.
+// inboundSub is the operator's subscription to one mite's inbound subject.
+// The server can reject a subscription after the subscribe call returned,
+// so denied holds the watcher signal for that subject. Only ensureSub reads
+// it, under BusTransport.mu.
+type inboundSub struct {
+	sub     *bus.Sub
+	denied  <-chan struct{}
+	release func()
+	// wasDenied records that this entry replaces a denied subscription.
+	// ensureSub logs the first denial at Error and later rebuilds at Debug.
+	// It logs Info once when the entry is older than inboundAcceptGrace
+	// and has no denial signal.
+	wasDenied bool
+	// subscribedAt is when ensureSub sent this subscription. A denial
+	// arrives asynchronously, so a call soon after the subscribe cannot
+	// tell an accepted subscription from one that the server will deny.
+	subscribedAt time.Time
+}
+
+// inboundAcceptGrace is how long a rebuilt subscription must stay without
+// a denial signal before ensureSub reports it as accepted. The server
+// answers a subscription in one round trip, so one second is ample.
+const inboundAcceptGrace = time.Second
+
+func (s *inboundSub) close() {
+	_ = s.sub.Unsubscribe()
+	s.release()
+}
+
+// ensureSub creates a NATS subscription for the given mite if none exists.
+// It subscribes again when the server denied the current subscription.
+// Incoming CommandResult messages go to a buffered channel that a rebuild
+// keeps.
+//
+// Every read and write of b.subs and b.results happens under b.mu. A denial
+// only queues a signal on the entry's buffered watcher channel, and only
+// this function reads that signal and replaces the entry.
 func (b *BusTransport) ensureSub(ns, name string) {
 	key := ns + "/" + name
+	subject := bus.MiteInSubject(b.cluster, ns, name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, ok := b.subs[key]; ok {
-		return
+	wasDenied := false
+	if cur, ok := b.subs[key]; ok {
+		select {
+		case <-cur.denied:
+		default:
+			if cur.wasDenied && time.Since(cur.subscribedAt) >= inboundAcceptGrace {
+				cur.wasDenied = false
+				b.log().Info("mite inbound subscription accepted again", "controller", key, "subject", subject)
+			}
+			return
+		}
+		cur.close()
+		delete(b.subs, key)
+		if cur.wasDenied {
+			b.log().Debug("mite inbound subscription still denied; subscribing again", "controller", key, "subject", subject)
+		} else {
+			b.log().Error("mite inbound subscription denied; subscribing again", "controller", key, "subject", subject)
+		}
+		wasDenied = true
 	}
 
-	ch := make(chan *mitev1.CommandResult, 64)
-	b.results[key] = ch
+	ch, kept := b.results[key]
+	if !kept {
+		ch = make(chan *mitev1.CommandResult, 64)
+		b.results[key] = ch
+	}
 
-	sub, err := b.conn.SubscribeData(bus.MiteInSubject(b.cluster, ns, name), func(data []byte) {
+	denied, release := b.conn.WatchSubscribeDenied(subject)
+	entry := &inboundSub{denied: denied, release: release, wasDenied: wasDenied}
+	sub, err := b.conn.SubscribeData(subject, func(data []byte) {
 		var mm mitev1.MiteMessage
 		if err := json.Unmarshal(data, &mm); err != nil {
 			b.log().Error("unmarshal mite message failed", "controller", key, "error", err)
@@ -85,15 +148,16 @@ func (b *BusTransport) ensureSub(ns, name string) {
 		if cr := mm.GetCommandResult(); cr != nil {
 			select {
 			case ch <- cr:
+				if b.OnCommandResult != nil {
+					b.OnCommandResult(ns, name, cr)
+				}
 			default:
 				b.log().Error("results channel full, dropping message", "controller", key)
 			}
 			return
 		}
 		if report := mm.GetObservabilityReport(); report != nil {
-			b.mu.Lock()
-			b.reports[key] = report
-			b.mu.Unlock()
+			b.storeReport(key, entry, report)
 			return
 		}
 		if mm.GetTokenRefreshRequest() != nil {
@@ -101,11 +165,75 @@ func (b *BusTransport) ensureSub(ns, name string) {
 		}
 	})
 	if err != nil {
-		b.log().Error("subscribe failed", "subject", bus.MiteInSubject(b.cluster, ns, name), "error", err)
-		delete(b.results, key)
+		release()
+		b.log().Error("subscribe failed", "subject", subject, "error", err)
+		if !kept {
+			delete(b.results, key)
+		}
 		return
 	}
-	b.subs[key] = sub
+	entry.sub = sub
+	entry.subscribedAt = time.Now()
+	b.subs[key] = entry
+}
+
+// storeReport keeps report as the latest report of key while entry is still
+// the current subscription of key. A callback can run after Forget or a
+// rebuild replaced entry, and its report must not come back into b.reports.
+func (b *BusTransport) storeReport(key string, entry *inboundSub, report *mitev1.ObservabilityReport) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.subs[key] != entry {
+		return
+	}
+	b.reports[key] = report
+}
+
+// Forget removes every entry that BusTransport keeps for the mite of ns/name.
+// It unsubscribes from the inbound subject, releases the denial watcher, and
+// deletes the result channel and the latest report. The reconciler calls it
+// when the controller is deleted. A later call for the same key, from a new
+// controller of the same name, starts with a new subscription and an empty
+// result channel. A result that a callback delivers after Forget goes to the
+// old channel, which no reader holds.
+func (b *BusTransport) Forget(ns, name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.forgetLocked(ns + "/" + name)
+}
+
+// ForgetMatching forgets every mite whose ns and name match. It reads the
+// keys of all three maps, because a failed subscribe can leave a report
+// without a subscription.
+func (b *BusTransport) ForgetMatching(match func(ns, name string) bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	keys := make(map[string]struct{}, len(b.subs))
+	for key := range b.subs {
+		keys[key] = struct{}{}
+	}
+	for key := range b.results {
+		keys[key] = struct{}{}
+	}
+	for key := range b.reports {
+		keys[key] = struct{}{}
+	}
+	for key := range keys {
+		ns, name, ok := strings.Cut(key, "/")
+		if ok && match(ns, name) {
+			b.forgetLocked(key)
+		}
+	}
+}
+
+// forgetLocked removes every entry of key. The caller holds b.mu.
+func (b *BusTransport) forgetLocked(key string) {
+	if cur, ok := b.subs[key]; ok {
+		cur.close()
+		delete(b.subs, key)
+	}
+	delete(b.results, key)
+	delete(b.reports, key)
 }
 
 // handleTokenRefresh mints a fresh Jenkins token and publishes a TokenGrant to
@@ -139,13 +267,16 @@ func (b *BusTransport) handleTokenRefresh(ns, name string) {
 	}
 }
 
-// Send stores the latest desired state for the mite. Last-value semantics: this
-// overwrites any previous unsent desired state (the mite only needs the newest).
-// The gateway's KV watch forwards it to the live gRPC stream. The value persists
-// in KV across gateway/mite restarts, so delivery survives reconnects without a
-// durable queue. A single KV Put is fast and non-blocking relative to a
-// JetStream publish-ack, which also addresses the prior reconcile-blocking issue.
-func (b *BusTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
+// desiredRequestTimeout bounds how long Send waits for the gateway to
+// confirm that it forwarded the desired state to the mite stream.
+const desiredRequestTimeout = 5 * time.Second
+
+// Send delivers the desired state to the mite as a core NATS request. The
+// gateway that holds the mite stream answers after it forwards the command.
+// NATS keeps no copy of the command, because the command carries credential
+// values. When no gateway answers, Send returns ErrMiteUnreachable. The
+// reconciler sends the command again on the next tick or on the reconnect.
+func (b *BusTransport) Send(ctx context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
 	// Ensure the NATS subscription for this mite's inbound subject exists
 	// before the mite connects, so TokenRefreshRequest messages are never
 	// published without a subscriber. The subscription is idempotent.
@@ -155,29 +286,39 @@ func (b *BusTransport) Send(_ context.Context, ns, name string, msg *mitev1.Oper
 	if err != nil {
 		return err
 	}
-	return b.desiredKV.Put(bus.DesiredKey(b.cluster, ns, name), data)
+	if _, err := b.conn.RequestWithContext(ctx, bus.MiteDesiredSubject(b.cluster, ns, name), data, desiredRequestTimeout); err != nil {
+		if bus.IsNoReply(err) {
+			return fmt.Errorf("%w: %v", ErrMiteUnreachable, err)
+		}
+		if errors.Is(err, nats.ErrMaxPayload) {
+			return fmt.Errorf("desired-state command is %d bytes, above the NATS max payload: %w", len(data), err)
+		}
+		return fmt.Errorf("desired-state request: %w", err)
+	}
+	return nil
 }
 
 // SendImperative publishes an edge-triggered one-shot command to the JetStream
-// durable subject (NOT the last-value desiredKV), so the command survives
+// durable subject (NOT the desired-state request path), so the command survives
 // gateway restarts. JetStream delivery is at-least-once (a lost ack triggers
 // redelivery); the gateway only acks a command after the mite reports a matching
 // CommandResult, and the mite's actions (e.g. safe restart) are idempotent, so a
-// duplicate delivery is harmless.
-func (b *BusTransport) SendImperative(_ context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+// duplicate delivery is harmless. An ended ctx publishes nothing: a shard
+// release cancels ctx when another replica can own the controller.
+func (b *BusTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(&mitev1.OperatorMessage{
 		Message: &mitev1.OperatorMessage_Imperative{Imperative: cmd},
 	})
 	if err != nil {
 		return err
 	}
+	// The publish ignores ctx. A cancel during the ack wait would report a
+	// command that the server already has as not sent.
 	_, err = b.conn.PublishJetStream(bus.MiteOutSubject(b.cluster, ns, name), data)
 	return err
-}
-
-// ClearDesired removes stored desired state for the mite (Controller deletion).
-func (b *BusTransport) ClearDesired(_ context.Context, ns, name string) error {
-	return b.desiredKV.Delete(bus.DesiredKey(b.cluster, ns, name))
 }
 
 // ObservabilityReport returns the latest observability report seen on the mite's
@@ -334,10 +475,11 @@ func (b *BusTransport) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for key, sub := range b.subs {
-		_ = sub.Unsubscribe()
+		sub.close()
 		delete(b.subs, key)
 		delete(b.results, key)
 	}
+	clear(b.reports)
 }
 
 // FetchLastApplied requests the mite's last-applied content via a NATS

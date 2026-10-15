@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -59,20 +60,35 @@ type APICapabilitySet map[string]map[string]bool
 // decide relevance. Namespaces is the scope's namespace allowlist (nil/empty ⇒ the
 // scope is not namespace-bounded). HasControllerSelector is true when the scope
 // carries a controller label selector (opaque to the client — it cannot evaluate
-// controller labels).
+// controller labels). Tenants is the scope's canonicalized pipelines-tenant
+// allowlist (nil/empty ⇒ the scope names no tenant).
 type ScopedCapabilities struct {
-	Namespaces            []string         `json:"namespaces"`
-	HasControllerSelector bool             `json:"hasControllerSelector"`
-	Capabilities          APICapabilitySet `json:"capabilities"`
+	Namespaces            []string               `json:"namespaces"`
+	HasControllerSelector bool                   `json:"hasControllerSelector"`
+	Tenants               []v1alpha1.TenantScope `json:"tenants"`
+	Capabilities          APICapabilitySet       `json:"capabilities"`
 }
 
 // PermissionScopes is the scope-aware introspection result for /me/permissions.
 // Global holds capabilities from cluster-wide (nil-scope) bindings ONLY; Scopes
 // holds one entry per distinct scoped binding scope. Scoped grants are never
-// flattened into Global.
+// flattened into Global. Tenants holds one entry per pipelines-tenant grant;
+// the caller of EffectivePermissionScopes fills it separately, through
+// TenantGrants.
 type PermissionScopes struct {
-	Global APICapabilitySet     `json:"global"`
-	Scopes []ScopedCapabilities `json:"scopes"`
+	Global  APICapabilitySet     `json:"global"`
+	Scopes  []ScopedCapabilities `json:"scopes"`
+	Tenants []TenantCapabilities `json:"tenants"`
+}
+
+// TenantCapabilities describes one grant the caller holds on one pipelines
+// tenant. Jobs is always an array, possibly empty, never null; an empty
+// array means every job. A tenant name MAY appear in more than one entry,
+// because the caller can hold two grants on it with different job globs.
+type TenantCapabilities struct {
+	Tenant       string           `json:"tenant"`
+	Jobs         []string         `json:"jobs"`
+	Capabilities APICapabilitySet `json:"capabilities"`
 }
 
 // Backend renders a list of RoleAssignments into a string (typically YAML).
@@ -89,26 +105,32 @@ type Resolver struct {
 	jenkinsRoleLister       cache.GenericLister
 	jenkinsRoleBindingIndex cache.Indexer
 	controllerLister        cache.GenericLister
+	teamLister              cache.GenericLister
 	defaultRead             bool
 	userClaimNames          []string // e.g. ["sub", "preferred_username"]
-	groupClaimNames         []string // e.g. ["groups"]
 }
 
 // NewResolver creates a new Resolver backed by the given informers.
 // roleBindingInformer must be configured with BySubjectIndex.
 // jenkinsRoleBindingInformer must be configured with JenkinsBySubjectIndex.
-// userClaimNames and groupClaimNames map JWT claims to VarroaRoleBinding
-// subject kinds (e.g. --oidc-user-claim=sub,preferred_username).
+// userClaimNames map JWT claims to VarroaRoleBinding User subjects (e.g.
+// sub,preferred_username). Group subjects read Claims.Groups, which the OIDC
+// validator resolves from the configured group claims.
+// teamInformer feeds tenant capability resolution's Team-membership path. A
+// nil teamInformer leaves that path contributing nothing; the operator
+// passes nil because it resolves Jenkins assignments, never HTTP
+// capabilities.
 func NewResolver(
 	roleInformer cache.SharedIndexInformer,
 	roleBindingInformer cache.SharedIndexInformer,
 	jenkinsRoleInformer cache.SharedIndexInformer,
 	jenkinsRoleBindingInformer cache.SharedIndexInformer,
 	controllerInformer cache.SharedIndexInformer,
+	teamInformer cache.SharedIndexInformer,
 	defaultRead bool,
-	userClaimNames, groupClaimNames []string,
+	userClaimNames []string,
 ) *Resolver {
-	return &Resolver{
+	r := &Resolver{
 		roleLister: cache.NewGenericLister(
 			roleInformer.GetIndexer(),
 			schema.GroupResource{Group: "varroa.dev", Resource: "varroaroles"},
@@ -123,10 +145,16 @@ func NewResolver(
 			controllerInformer.GetIndexer(),
 			schema.GroupResource{Group: "varroa.dev", Resource: "controllers"},
 		),
-		defaultRead:     defaultRead,
-		userClaimNames:  userClaimNames,
-		groupClaimNames: groupClaimNames,
+		defaultRead:    defaultRead,
+		userClaimNames: userClaimNames,
 	}
+	if teamInformer != nil {
+		r.teamLister = cache.NewGenericLister(
+			teamInformer.GetIndexer(),
+			schema.GroupResource{Group: "varroa.dev", Resource: "teams"},
+		)
+	}
+	return r
 }
 
 // EffectiveAPICapabilities returns the union of apiRules from all bindings
@@ -149,11 +177,11 @@ func (r *Resolver) EffectiveAPICapabilities(claims *auth.Claims, namespace, cont
 		return caps
 	}
 
-	// Build subject keys from the configured JWT claims.
-	// Which claims are used is controlled by --oidc-user-claim and
-	// --oidc-group-claim flags (e.g. "sub,preferred_username" and "groups").
+	// Build subject keys from the claims. Users come from the configured
+	// user claims (--oidc-user-claim, e.g. "sub,preferred_username"); groups
+	// come from Claims.Groups.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -170,6 +198,14 @@ func (r *Resolver) EffectiveAPICapabilities(claims *auth.Claims, namespace, cont
 		for _, obj := range objs {
 			binding, ok := obj.(*v1alpha1.VarroaRoleBinding)
 			if !ok {
+				continue
+			}
+
+			// A tenant-scoped binding answers a tenant question only. Skip
+			// it here, before the empty-target shortcut below, or a tenant
+			// scope would grant its role's catalog and bundle verbs on
+			// every /me/permissions-style call.
+			if binding.Spec.Scope != nil && len(binding.Spec.Scope.Tenants) > 0 {
 				continue
 			}
 
@@ -236,7 +272,7 @@ func (r *Resolver) EffectiveClusterAPICapabilities(claims *auth.Claims) APICapab
 	}
 
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -318,7 +354,7 @@ func (r *Resolver) EffectivePermissionScopes(claims *auth.Claims) PermissionScop
 
 	// Build subject keys from the configured JWT claims.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -376,6 +412,7 @@ func (r *Resolver) EffectivePermissionScopes(claims *auth.Claims) PermissionScop
 					b = &ScopedCapabilities{
 						Namespaces:            ns,
 						HasControllerSelector: sc.ControllerSelector != nil,
+						Tenants:               canonicalTenantScopes(sc.Tenants),
 						Capabilities:          make(APICapabilitySet),
 					}
 					buckets[bkey] = b
@@ -416,6 +453,8 @@ func (r *Resolver) EffectivePermissionScopes(claims *auth.Claims) PermissionScop
 
 // scopeBucketKey canonicalizes a scope into a dedup/order key.
 // nil scope is handled by the caller (goes to Global) and never reaches here.
+// The key includes the whole canonicalized tenant list, so two scopes that
+// name one tenant with different jobs lists land in different buckets.
 func scopeBucketKey(scope *v1alpha1.VarroaRoleBindingScope) string {
 	ns := append([]string(nil), scope.Namespaces...)
 	sort.Strings(ns)
@@ -423,7 +462,61 @@ func scopeBucketKey(scope *v1alpha1.VarroaRoleBindingScope) string {
 	if scope.ControllerSelector != nil {
 		sel = "1:" + metav1.FormatLabelSelector(scope.ControllerSelector)
 	}
-	return strings.Join(ns, ",") + "|" + sel
+	return strings.Join(ns, ",") + "|" + sel + "|" + tenantScopesKey(scope.Tenants)
+}
+
+// canonicalTenantScopes returns a copy of tenants with each entry's Jobs
+// sorted, then the entries sorted by Name and, for equal names, by the
+// joined Jobs list. It returns nil for an empty input.
+func canonicalTenantScopes(tenants []v1alpha1.TenantScope) []v1alpha1.TenantScope {
+	if len(tenants) == 0 {
+		return nil
+	}
+	out := make([]v1alpha1.TenantScope, len(tenants))
+	for i, t := range tenants {
+		jobs := append([]string(nil), t.Jobs...)
+		sort.Strings(jobs)
+		out[i] = v1alpha1.TenantScope{Name: t.Name, Jobs: jobs}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return lessJobs(out[i].Jobs, out[j].Jobs)
+	})
+	return out
+}
+
+// lessJobs orders two already-sorted job lists element by element, with a
+// shorter list preceding an equal-prefix longer one. It never joins the
+// lists into one string, so no separator byte can make two different lists
+// compare equal.
+func lessJobs(a, b []string) bool {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return len(a) < len(b)
+}
+
+// tenantScopesKey renders a canonicalized tenant list into a single string
+// component for scopeBucketKey. It JSON-encodes the canonicalized list: JSON
+// syntax delimits every field and escapes every byte, so no tenant name or
+// job glob can be crafted to collide with another list's encoding.
+func tenantScopesKey(tenants []v1alpha1.TenantScope) string {
+	canon := canonicalTenantScopes(tenants)
+	if canon == nil {
+		return ""
+	}
+	b, err := json.Marshal(canon)
+	if err != nil {
+		// TenantScope holds only a string and a string slice; marshaling it
+		// cannot fail. Treat an impossible failure as an empty key rather
+		// than panicking.
+		return ""
+	}
+	return string(b)
 }
 
 // CreateScopeNamespaces returns the namespaces in which the caller may create
@@ -439,7 +532,7 @@ func (r *Resolver) CreateScopeNamespaces(claims *auth.Claims) (namespaces []stri
 
 	// Build subject keys exactly as EffectiveAPICapabilities does.
 	var subjectKeys []string
-	for _, v := range claims.GroupValues(r.groupClaimNames) {
+	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
 	for _, v := range claims.UserValues(r.userClaimNames) {
@@ -456,6 +549,11 @@ func (r *Resolver) CreateScopeNamespaces(claims *auth.Claims) (namespaces []stri
 		for _, obj := range objs {
 			binding, ok := obj.(*v1alpha1.VarroaRoleBinding)
 			if !ok {
+				continue
+			}
+
+			// A tenant-scoped binding grants no namespace create authority.
+			if binding.Spec.Scope != nil && len(binding.Spec.Scope.Tenants) > 0 {
 				continue
 			}
 
@@ -521,6 +619,311 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// TenantGrant is one grant a caller holds on a tenant: a capability set and
+// the job globs that narrow it. Globs is nil when the grant covers every
+// job of the tenant.
+type TenantGrant struct {
+	Capabilities APICapabilitySet
+	Globs        []string
+}
+
+// EffectiveTenantCapabilities returns one entry per grant the caller holds
+// on the tenant ref names. It reads the Team named by a pipelines tenant,
+// through the teamLister. It never reads a Controller.
+//
+// The result is a list, not one merged set: a caller can hold an unnarrowed
+// pipelines:write grant from one binding and a narrowed pipelines:read grant
+// from another, and merging would clear the read restriction. The caller of
+// this method tests whether some entry holds the verb and covers the job
+// path; entries are never combined.
+func (r *Resolver) EffectiveTenantCapabilities(claims *auth.Claims, ref ParsedTenant) []TenantGrant {
+	if claims == nil {
+		return nil
+	}
+
+	// Build subject keys from the configured JWT claims, exactly as
+	// EffectiveAPICapabilities does.
+	var subjectKeys []string
+	for _, v := range groupValues(claims) {
+		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
+	}
+	for _, v := range claims.UserValues(r.userClaimNames) {
+		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
+	}
+
+	switch ref.Kind {
+	case TenantTeam:
+		return r.effectiveTeamTenantGrants(subjectKeys, ref.Team)
+	case TenantController:
+		return r.effectiveControllerTenantGrants(subjectKeys, ref)
+	default:
+		return nil
+	}
+}
+
+// effectiveTeamTenantGrants resolves the three paths D4 defines for a
+// pipelines tenant: Team membership, a tenant-scoped binding, and a
+// cluster-wide binding.
+func (r *Resolver) effectiveTeamTenantGrants(subjectKeys []string, team string) []TenantGrant {
+	var grants []TenantGrant
+
+	// Path 1: Team membership.
+	if g, ok := r.teamMembershipGrant(subjectKeys, team); ok {
+		grants = append(grants, g)
+	}
+
+	for _, binding := range r.matchingBindings(subjectKeys) {
+		sc := binding.Spec.Scope
+
+		// Path 3: a cluster-wide binding.
+		if sc == nil {
+			if caps, ok := r.roleCapabilities(binding.Spec.RoleRef); ok {
+				grants = append(grants, TenantGrant{Capabilities: caps})
+			}
+			continue
+		}
+
+		// Path 2: a tenant-scoped binding. One grant per matching
+		// scope.tenants entry, so two bindings that narrow differently
+		// stay separate.
+		for _, t := range sc.Tenants {
+			if t.Name != team {
+				continue
+			}
+			if caps, ok := r.roleCapabilities(binding.Spec.RoleRef); ok {
+				grants = append(grants, TenantGrant{Capabilities: caps, Globs: t.Jobs})
+			}
+		}
+	}
+
+	return grants
+}
+
+// teamMembershipGrant resolves path 1: the caller matches the Team's
+// effective subject set. It returns false when the resolver has no
+// teamLister, when no Team of that name exists, when the caller does not
+// match, when the Team's roleRef is "admin", or when no VarroaRole of that
+// name exists.
+func (r *Resolver) teamMembershipGrant(subjectKeys []string, teamName string) (TenantGrant, bool) {
+	if r.teamLister == nil {
+		return TenantGrant{}, false
+	}
+	obj, err := r.teamLister.Get(teamName)
+	if err != nil {
+		return TenantGrant{}, false
+	}
+	team, ok := obj.(*v1alpha1.Team)
+	if !ok {
+		return TenantGrant{}, false
+	}
+	if !callerInTeamSubjectSet(subjectKeys, team) {
+		return TenantGrant{}, false
+	}
+
+	role := team.Spec.RoleRef
+	if role == "" {
+		role = "developer"
+	}
+	if role == "admin" {
+		return TenantGrant{}, false
+	}
+
+	caps, ok := r.roleCapabilities(role)
+	if !ok {
+		return TenantGrant{}, false
+	}
+	return TenantGrant{Capabilities: caps}, true
+}
+
+// callerInTeamSubjectSet reports whether the caller's subject keys match the
+// Team's effective subject set: the managed Group "team-<name>", only when
+// status.groupRef names it AND TeamRBACReady is true, unioned with every
+// entry of spec.subjects. spec.members is never matched directly — those
+// usernames belong to the managed Group, which the local auth provider
+// already resolves into the caller's groups claim.
+func callerInTeamSubjectSet(subjectKeys []string, team *v1alpha1.Team) bool {
+	keys := make(map[string]bool, len(subjectKeys))
+	for _, k := range subjectKeys {
+		keys[k] = true
+	}
+
+	wantGroupRef := "team-" + team.Name
+	if team.Status.GroupRef == wantGroupRef && teamRBACReady(team) {
+		if keys[subjectIndexKey("Group", wantGroupRef)] {
+			return true
+		}
+	}
+	for _, s := range team.Spec.Subjects {
+		if keys[subjectIndexKey(s.Kind, s.Name)] {
+			return true
+		}
+	}
+	return false
+}
+
+// teamRBACReady reports whether the Team's TeamRBACReady condition is True.
+// A stale groupRef survives a Group-ownership collision, so the condition,
+// not the groupRef field alone, is what closes that window.
+func teamRBACReady(team *v1alpha1.Team) bool {
+	for _, c := range team.Status.Conditions {
+		if c.Type == v1alpha1.TeamConditionRBACReady {
+			return c.Status == metav1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// effectiveControllerTenantGrants resolves the two paths D4 defines for a
+// synthetic (single-controller) tenant: a cluster-wide binding, and a
+// binding whose namespace allowlist holds the reference's namespace. A
+// controllerSelector-scoped binding contributes nothing: a selector is a
+// label match over a live Controller, and a tenant's records outlive the
+// cell that produced them.
+func (r *Resolver) effectiveControllerTenantGrants(subjectKeys []string, ref ParsedTenant) []TenantGrant {
+	var grants []TenantGrant
+	for _, binding := range r.matchingBindings(subjectKeys) {
+		sc := binding.Spec.Scope
+		switch {
+		case sc == nil:
+			// A cluster-wide binding contributes.
+		case sc.ControllerSelector != nil:
+			continue
+		case len(sc.Namespaces) > 0 && contains(sc.Namespaces, ref.Namespace):
+			// The namespace allowlist holds the reference's namespace.
+		default:
+			continue
+		}
+		if caps, ok := r.roleCapabilities(binding.Spec.RoleRef); ok {
+			grants = append(grants, TenantGrant{Capabilities: caps})
+		}
+	}
+	return grants
+}
+
+// matchingBindings returns the caller's VarroaRoleBindings, deduplicated by
+// binding identity, via the by-subject index.
+func (r *Resolver) matchingBindings(subjectKeys []string) []*v1alpha1.VarroaRoleBinding {
+	seen := make(map[*v1alpha1.VarroaRoleBinding]bool)
+	var out []*v1alpha1.VarroaRoleBinding
+	for _, key := range subjectKeys {
+		objs, err := r.roleBindingIndex.ByIndex(BySubjectIndex, key)
+		if err != nil {
+			continue
+		}
+		for _, obj := range objs {
+			binding, ok := obj.(*v1alpha1.VarroaRoleBinding)
+			if !ok || seen[binding] {
+				continue
+			}
+			seen[binding] = true
+			out = append(out, binding)
+		}
+	}
+	return out
+}
+
+// roleCapabilities looks up a VarroaRole by name and returns its API
+// capability set. It returns false when the role does not exist.
+func (r *Resolver) roleCapabilities(roleRef string) (APICapabilitySet, bool) {
+	roleObj, err := r.roleLister.Get(roleRef)
+	if err != nil {
+		return nil, false
+	}
+	role, ok := roleObj.(*v1alpha1.VarroaRole)
+	if !ok {
+		return nil, false
+	}
+	caps := make(APICapabilitySet)
+	for _, rule := range role.Spec.APIRules {
+		for _, resource := range rule.Resources {
+			if caps[resource] == nil {
+				caps[resource] = make(map[string]bool)
+			}
+			for _, verb := range rule.Verbs {
+				caps[resource][verb] = true
+			}
+		}
+	}
+	return caps, true
+}
+
+// pipelinesVerbs lists the verbs D2 defines for the "pipelines" resource.
+var pipelinesVerbs = []string{"read", "write", "admin"}
+
+// GrantsPipelinesVerb reports whether caps holds at least one
+// pipelines verb, honoring "*" resource and "*" verb wildcards exactly as
+// the Authorizer checks do.
+func GrantsPipelinesVerb(caps APICapabilitySet) bool {
+	for _, verb := range pipelinesVerbs {
+		if caps["*"] != nil && (caps["*"]["*"] || caps["*"][verb]) {
+			return true
+		}
+		if caps["pipelines"] != nil && (caps["pipelines"]["*"] || caps["pipelines"][verb]) {
+			return true
+		}
+	}
+	return false
+}
+
+// TenantGrants lists every Team and evaluates each one, returning one
+// TenantCapabilities entry per grant that holds a pipelines verb. It never
+// reads Team.spec.pipelines: that field belongs to a later change and does
+// not exist yet. A Team that later drops the field keeps its members'
+// access to the records its tenant already produced.
+//
+// The result is ordered by tenant name, then by each entry's sorted Jobs
+// list. One tenant MAY produce several entries, because a caller can hold
+// two grants on it with different job globs; they are never merged. The
+// result is always a non-nil slice, and each entry's Jobs is always a
+// non-nil slice.
+func (r *Resolver) TenantGrants(claims *auth.Claims) []TenantCapabilities {
+	out := []TenantCapabilities{}
+	if claims == nil || r.teamLister == nil {
+		return out
+	}
+
+	objs, err := r.teamLister.List(labels.Everything())
+	if err != nil {
+		return out
+	}
+	names := make([]string, 0, len(objs))
+	for _, obj := range objs {
+		team, ok := obj.(*v1alpha1.Team)
+		if !ok {
+			continue
+		}
+		names = append(names, team.Name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		ref, err := ParseTenant(name)
+		if err != nil {
+			continue
+		}
+		grants := r.EffectiveTenantCapabilities(claims, ref)
+
+		entries := make([]TenantCapabilities, 0, len(grants))
+		for _, g := range grants {
+			if !GrantsPipelinesVerb(g.Capabilities) {
+				continue
+			}
+			jobs := append([]string{}, g.Globs...)
+			sort.Strings(jobs)
+			entries = append(entries, TenantCapabilities{
+				Tenant:       name,
+				Jobs:         jobs,
+				Capabilities: g.Capabilities,
+			})
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			return strings.Join(entries[i].Jobs, "\x1f") < strings.Join(entries[j].Jobs, "\x1f")
+		})
+		out = append(out, entries...)
+	}
+	return out
 }
 
 // SubjectAssignment pairs a subject kind with its name.
@@ -629,6 +1032,14 @@ func (r *Resolver) JenkinsAssignments(controller *v1alpha1.Controller) ([]RoleAs
 func (r *Resolver) scopeMatches(scope *v1alpha1.VarroaRoleBindingScope, namespace, controllerName string) (bool, error) {
 	if scope == nil {
 		return true, nil
+	}
+
+	// A tenant scope answers a tenant question and nothing else. Without
+	// this rule an all-tenants scope would set no namespace allowlist and
+	// no controller selector, so it would fall through and match every
+	// controller in the fleet.
+	if len(scope.Tenants) > 0 {
+		return false, nil
 	}
 
 	// Check namespace allowlist
@@ -800,6 +1211,67 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 		}
 	}
 
+	// Synthesize: one Item-type role and one Agent-type role per tenant
+	// placed on this cell (controller.Status.Cell.Tenants), each assigned
+	// to the tenant's service-identity group authority
+	// "ROLE:varroa:tenant:<team>" (VarroaSecurityRealm synthesizes that
+	// authority for the principal "svc-<team>" with no persisted record —
+	// see the tenant-isolation build-identity requirement). A
+	// JenkinsRoleBinding can never produce either role name: the resolver
+	// appends a scope suffix to a bound role, so a direct-set (rather than
+	// a merge-into-existing) is safe here.
+	//
+	// The item role grants ordinary job access under the tenant's own
+	// folder. Credentials/UseItem is required in addition to Credentials/View
+	// because CredentialsProvider.USE_ITEM is disabled by default; the cell
+	// JVM runs with -Dcom.cloudbees.plugins.credentials.UseItemPermission=true
+	// to activate the check this role satisfies.
+	//
+	// The agent role grants Computer.Build on every node: Node.canTake
+	// checks this permission for the build's authentication before the
+	// plugin's own QueueTaskDispatcher fence runs, and a role-strategy
+	// agent pattern matches node names, never labels, so no pattern can
+	// name the reserved "varroa-tenant-<team>" label the operator stamps
+	// on the tenant's pod templates. Ownership is the fence's job: it
+	// refuses every node that does not carry the tenant's own label.
+	if controller.Status.Cell != nil {
+		for _, team := range controller.Status.Cell.Tenants {
+			itemRole := TenantItemRoleName(team)
+			tenantSubj := SubjectAssignment{Kind: "Group", Name: "ROLE:" + itemRole}
+
+			itemKey := accKey{name: itemRole, scopeKey: ""}
+			acc[itemKey] = &RoleAssignment{
+				RoleName: itemRole,
+				RoleType: "Item",
+				Pattern:  TenantItemRolePattern(team),
+				Permissions: []string{
+					"hudson.model.Item.Read",
+					"hudson.model.Item.Build",
+					"hudson.model.Item.Cancel",
+					"hudson.model.Item.Workspace",
+					"hudson.model.Item.Discover",
+					"hudson.model.Run.Replay",
+					"hudson.model.Run.Update",
+					"hudson.model.Run.Delete",
+					"hudson.model.View.Read",
+					"hudson.scm.SCM.Tag",
+					"com.cloudbees.plugins.credentials.CredentialsProvider.View",
+					"com.cloudbees.plugins.credentials.CredentialsProvider.UseItem",
+				},
+				Subjects: []SubjectAssignment{tenantSubj},
+			}
+
+			agentKey := accKey{name: "varroa:tenant-agent:" + team, scopeKey: ""}
+			acc[agentKey] = &RoleAssignment{
+				RoleName:    "varroa:tenant-agent:" + team,
+				RoleType:    "Agent",
+				Pattern:     ".*",
+				Permissions: []string{"hudson.model.Computer.Build"},
+				Subjects:    []SubjectAssignment{tenantSubj},
+			}
+		}
+	}
+
 	// Sort and return
 	var result []RoleAssignment
 	for _, a := range acc {
@@ -937,6 +1409,11 @@ func controllerScopeMatches(scope *v1alpha1.VarroaRoleBindingScope, controller *
 	if scope == nil {
 		return true
 	}
+	// A Jenkins role binding has no tenant meaning; the CRD rejects the
+	// field outright and this is the code rule that fails closed behind it.
+	if len(scope.Tenants) > 0 {
+		return false
+	}
 	if len(scope.Namespaces) > 0 {
 		found := false
 		for _, ns := range scope.Namespaces {
@@ -1007,4 +1484,17 @@ func scopeSuffix(js *v1alpha1.JenkinsScope) string {
 	default:
 		return ""
 	}
+}
+
+// groupValues returns the non-empty, de-duplicated group names of a credential.
+func groupValues(c *auth.Claims) []string {
+	var vals []string
+	seen := map[string]bool{}
+	for _, v := range c.Groups {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			vals = append(vals, v)
+		}
+	}
+	return vals
 }

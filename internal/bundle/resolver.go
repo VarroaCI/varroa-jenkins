@@ -16,14 +16,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"gopkg.in/yaml.v3"
 
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	"github.com/varroaci/varroa-jenkins/internal/oci"
-)
-
-var (
-	bundleCloneDuration, _ = otel.Meter("varroa-operator").Float64Histogram("varroa.bundle.clone.duration",
-		metric.WithUnit("s"),
-	)
 )
 
 // Variables holds resolved bundle variables.
@@ -52,6 +48,74 @@ type MaterializedBundle struct {
 	// variable substitution. PluginsYAML may be mutated in place by
 	// ResolveVars; this field never is.
 	RawPluginsYAML string
+
+	// CellCloudCredentials are a cell's SYSTEM-scope tenant-cloud
+	// credentials (design D8, D11). The caller that builds the desired-
+	// state command injects them into JcascYaml itself. No code path
+	// that writes a ConfigMap from MaterializedBundle reads this field,
+	// so a secret value carried here never enters a ConfigMap.
+	CellCloudCredentials []CellCloudCredential
+
+	// DroppedItemKeys lists the top-level keys of each item manifest that
+	// the composer does not keep. It goes into the content ConfigMap under
+	// DroppedItemKeysConfigMapKey. It is never part of the resolved hash.
+	DroppedItemKeys []DroppedItemKey
+
+	// PipelineTemplatesYAML holds the templates the bundle's
+	// pipeline-template inputs carry, in input order. It is never subject
+	// to ResolveVars: a template body holds its own ${...} text that is
+	// not a catalog variable.
+	PipelineTemplatesYAML string
+
+	// CellTemplateFragments holds one placed tenant's pipeline-templates.yaml
+	// content per entry, for a cell. No entry is ever subject to
+	// ResolveVars, like PipelineTemplatesYAML. The caller merges each
+	// fragment into the final jenkins.yaml after the resolve step.
+	CellTemplateFragments []CellTemplateFragment
+
+	// CellFolderCredentials holds each placed tenant's projected folder
+	// credentials, for a cell. A value comes from a tenant Secret, not from
+	// bundle content, so no entry is ever subject to ResolveVars or to the
+	// unresolved-variable check. The caller adds each entry to ItemsYAML
+	// after both steps. No code path that writes a ConfigMap reads this
+	// field.
+	CellFolderCredentials []CellFolderCredentials
+
+	// CellPoolLibraryCredentials holds the SYSTEM-scope git credentials of a
+	// cell's pool libraries, in the shape the Jenkins credentials domain
+	// expects. A value comes from a pool Secret. The caller that builds the
+	// desired-state command injects them into JcascYaml itself. No code path
+	// that writes a ConfigMap from MaterializedBundle reads this field.
+	CellPoolLibraryCredentials []any
+
+	// CellPoolMail holds the unclassified keys of a cell's pool mail
+	// setting. The mailer value carries the SMTP password. Only the
+	// desired-state command builder reads this field. No code path that
+	// writes a ConfigMap from MaterializedBundle reads it.
+	CellPoolMail map[string]any
+}
+
+// CellFolderCredentials is the projected credentials of one tenant folder.
+// Folder is the name of the tenant's top-level folder item.
+type CellFolderCredentials struct {
+	Folder  string
+	Entries []items.FolderCredentialEntry
+}
+
+// CellTemplateFragment is one placed tenant's pipeline-templates.yaml
+// content, and the folder the operator stamps on every entry it carries. A
+// tenant document has no folder field of its own. The operator is the only
+// writer of folder.
+type CellTemplateFragment struct {
+	Folder        string
+	TemplatesYAML string
+}
+
+// CellCloudCredential is one SYSTEM-scope secret-text credential a cell
+// injects for one tenant's kubernetes cloud (design D11).
+type CellCloudCredential struct {
+	ID     string
+	Secret string
 }
 
 // Resolver orchestrates git clone → validate → variable resolution.
@@ -65,7 +129,10 @@ type Resolver struct {
 	oidcClientSecret string
 	oidcUserClaim    string
 	oidcGroupClaim   string
-	Logger           *slog.Logger
+	localIssuer      string
+	// cloneDuration is nil on a Resolver that NewResolver did not build.
+	cloneDuration metric.Float64Histogram
+	Logger        *slog.Logger
 }
 
 // UseCloneCache sets an optional clone cache. When set, Materialize uses the
@@ -75,12 +142,23 @@ func (r *Resolver) UseCloneCache(c *CloneCache) { r.cloneCache = c }
 // Cloner returns the GitCloner used by this resolver.
 func (r *Resolver) Cloner() *GitCloner { return r.cloner }
 
-// NewResolver creates a new Resolver.
-func NewResolver(workDir string) *Resolver {
+// NewResolver creates a new Resolver. It creates the clone-duration
+// histogram on the "varroa-operator" meter of mp. When the histogram cannot
+// be created, NewResolver logs a warning and the Resolver records no
+// clone duration.
+func NewResolver(mp metric.MeterProvider, workDir string) *Resolver {
+	cloneDuration, err := mp.Meter("varroa-operator").Float64Histogram("varroa.bundle.clone.duration",
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		slog.Warn("failed to create bundle clone duration histogram", "error", err)
+		cloneDuration = nil
+	}
 	return &Resolver{
-		cloner:    NewGitCloner(),
-		validator: NewValidator(),
-		workDir:   workDir,
+		cloner:        NewGitCloner(),
+		validator:     NewValidator(),
+		workDir:       workDir,
+		cloneDuration: cloneDuration,
 	}
 }
 
@@ -98,6 +176,13 @@ func (r *Resolver) OIDCUserClaim() string { return r.oidcUserClaim }
 
 // OIDCGroupClaim returns the configured OIDC group claim (may be empty if unset).
 func (r *Resolver) OIDCGroupClaim() string { return r.oidcGroupClaim }
+
+// LocalIssuer returns the issuer of local account sessions beside OIDC, or
+// "" when local accounts are off.
+func (r *Resolver) LocalIssuer() string { return r.localIssuer }
+
+// SetLocalIssuer sets the issuer of local account sessions beside OIDC.
+func (r *Resolver) SetLocalIssuer(issuer string) { r.localIssuer = issuer }
 
 // SetOIDCClaims configures the OIDC claim names.
 func (r *Resolver) SetOIDCClaims(userClaim, groupClaim string) {
@@ -159,16 +244,18 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 		if r.cloneCache != nil {
 			_, _, err = r.cloneCache.Checkout(ctx, repoURL, revision, cloneDir, auth)
 		} else {
-			err = r.cloner.Clone(repoURL, revision, cloneDir, auth)
+			err = r.cloner.Clone(ctx, repoURL, revision, cloneDir, auth)
 		}
 		duration := time.Since(start).Seconds()
 		result := "success"
 		if err != nil {
 			result = "error"
 		}
-		bundleCloneDuration.Record(ctx, duration, metric.WithAttributes(
-			attribute.String("result", result),
-		))
+		if r.cloneDuration != nil {
+			r.cloneDuration.Record(ctx, duration, metric.WithAttributes(
+				attribute.String("result", result),
+			))
+		}
 		return err
 	}(); err != nil {
 		if r.Logger != nil {
@@ -443,4 +530,38 @@ var InjectedVariableNames = []string{
 	"varroa_controller_name", "varroa_controller_namespace", "varroa_controller_endpoint",
 	"varroa_controller_external_url", "varroa_controller_path_prefix", "varroa_frontend_url",
 	"varroa_oidc_issuer", "varroa_oidc_client_id", "varroa_login_url",
+}
+
+// DroppedItemKeysConfigMapKey is the content ConfigMap key that holds the
+// DroppedItemKey list of a composed bundle.
+const DroppedItemKeysConfigMapKey = "dropped-item-keys.yaml"
+
+// DroppedItemKey names one top-level key of an item manifest that the
+// composer drops, and the source that declared it.
+type DroppedItemKey struct {
+	Source string `yaml:"source"`
+	Key    string `yaml:"key"`
+}
+
+// MarshalDroppedItemKeys renders keys as the content ConfigMap value. It
+// returns "" for an empty list.
+func MarshalDroppedItemKeys(keys []DroppedItemKey) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	out, _ := yaml.Marshal(keys)
+	return string(out)
+}
+
+// ParseDroppedItemKeys reads a value that MarshalDroppedItemKeys wrote. A
+// blank value gives nil.
+func ParseDroppedItemKeys(content string) ([]DroppedItemKey, error) {
+	if strings.TrimSpace(content) == "" {
+		return nil, nil
+	}
+	var keys []DroppedItemKey
+	if err := yaml.Unmarshal([]byte(content), &keys); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

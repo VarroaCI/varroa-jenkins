@@ -39,7 +39,7 @@ func testResolverAndAuthorizer(roles []*v1alpha1.VarroaRole, bindings []*v1alpha
 	ctrlIdx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	resolver := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, false, []string{"sub", "preferred_username"}, []string{"groups"})
+	resolver := rbac.NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, false, []string{"sub", "preferred_username"})
 	return NewAuthorizer(resolver, false)
 }
 

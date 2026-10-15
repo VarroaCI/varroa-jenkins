@@ -19,6 +19,7 @@ import (
 func TestDrainNoToken(t *testing.T) {
 	dir := t.TempDir()
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		cfg:             Config{ControllerName: "test", Namespace: "ns"},
 		Logger:          slog.Default(),
 		drainMarkerPath: filepath.Join(dir, "drain.done"),
@@ -38,6 +39,7 @@ func TestDrainNoToken(t *testing.T) {
 func TestDrainZeroTimeoutWithToken(t *testing.T) {
 	dir := t.TempDir()
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		cfg:             Config{ControllerName: "test", Namespace: "ns"},
 		Logger:          slog.Default(),
 		drainMarkerPath: filepath.Join(dir, "drain.done"),
@@ -123,6 +125,7 @@ func TestDrainBuildsDrainToZero(t *testing.T) {
 
 	dir := t.TempDir()
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		cfg:             Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL},
 		Logger:          slog.Default(),
 		drainMarkerPath: filepath.Join(dir, "drain.done"),
@@ -213,6 +216,7 @@ func TestDrainTimeout(t *testing.T) {
 
 	dir := t.TempDir()
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		cfg:             Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL},
 		Logger:          slog.Default(),
 		drainMarkerPath: filepath.Join(dir, "drain.done"),
@@ -245,6 +249,7 @@ func TestDrainTimeout(t *testing.T) {
 func TestDrainMarkerIsWrittenAfterPanic(t *testing.T) {
 	dir := t.TempDir()
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		cfg:             Config{ControllerName: "test", Namespace: "ns"},
 		Logger:          slog.Default(),
 		drainMarkerPath: filepath.Join(dir, "drain.done"),
@@ -281,7 +286,7 @@ func TestDrainMarkerIsWrittenAfterPanic(t *testing.T) {
 // reads under deferMu (no bare read of appliedDrainTimeoutSec that -race
 // would flag).
 func TestDrainGetAppliedDrainTimeoutSecUsesDeferMu(t *testing.T) {
-	agent := &Agent{}
+	agent := &Agent{metrics: noopMiteMetrics()}
 	agent.deferMu.Lock()
 	agent.appliedDrainTimeoutSec = 42
 	agent.deferMu.Unlock()
@@ -294,7 +299,7 @@ func TestDrainGetAppliedDrainTimeoutSecUsesDeferMu(t *testing.T) {
 // TestDrainMarkerPathDefaults verifies that NewAgent sets drainMarkerPath
 // to the const default.
 func TestDrainMarkerPathDefaults(t *testing.T) {
-	agent := NewAgent(Config{ControllerName: "test", Namespace: "ns"})
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns"})
 	if agent.drainMarkerPath != defaultDrainMarkerPath {
 		t.Errorf("drainMarkerPath = %q, want %q", agent.drainMarkerPath, defaultDrainMarkerPath)
 	}
@@ -312,6 +317,7 @@ func TestDrainRemoveMarkerAtStartup(t *testing.T) {
 	}
 
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		Logger:          slog.Default(),
 		drainMarkerPath: markerPath,
 	}
@@ -331,6 +337,7 @@ func TestDrainWriteMarkerCreatesFile(t *testing.T) {
 	markerPath := filepath.Join(dir, "drain.done")
 
 	agent := &Agent{
+		metrics:         noopMiteMetrics(),
 		Logger:          slog.Default(),
 		drainMarkerPath: markerPath,
 	}

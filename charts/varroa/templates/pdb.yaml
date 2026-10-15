@@ -57,4 +57,24 @@ spec:
       {{- include "varroa.selectorLabels" . | nindent 6 }}
 {{- end }}
 {{- end }}
+
+{{- if .Values.recordStore.enabled }}
+{{- $recorderReplicas := .Values.recorder.replicas | int }}
+{{- if gt $recorderReplicas 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: varroa-recorder
+  labels:
+    app.kubernetes.io/component: varroa-recorder
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-recorder
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- end }}
 {{- end }}

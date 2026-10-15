@@ -41,6 +41,19 @@ type fakeConfigBrood struct {
 	// visible to Get/Create, simulating a role created between the
 	// reconciler's list and its create (the isConvergentCreate race).
 	hiddenFromList map[string]bool
+	// failBindingCreate makes CreateJenkinsRoleBinding answer an invalid
+	// error for the named binding, as the API server does for a spec that
+	// fails CRD validation.
+	failBindingCreate map[string]bool
+	// failBindingDelete makes DeleteJenkinsRoleBinding answer an internal
+	// error for the named binding and keep the object.
+	failBindingDelete map[string]bool
+	// failRoleDelete makes DeleteJenkinsRole answer an internal error for
+	// the named role and keep the object.
+	failRoleDelete map[string]bool
+	// goneRoleDelete makes DeleteJenkinsRole answer not found for the named
+	// role, as the API server does after another writer deleted it.
+	goneRoleDelete map[string]bool
 	ops            []string
 }
 
@@ -109,6 +122,13 @@ func (f *fakeConfigBrood) UpdateJenkinsRole(_ context.Context, cluster, name str
 
 func (f *fakeConfigBrood) DeleteJenkinsRole(_ context.Context, cluster, name string) error {
 	f.ensure(cluster)
+	if f.failRoleDelete[name] {
+		return &BroodError{Code: bus.CodeInternal, Msg: "etcd timeout"}
+	}
+	if f.goneRoleDelete[name] {
+		delete(f.roles[cluster], name)
+		return &BroodError{Code: bus.CodeNotFound, Msg: "not found"}
+	}
 	delete(f.roles[cluster], name)
 	f.ops = append(f.ops, "delete-role:"+cluster+":"+name)
 	return nil
@@ -133,6 +153,9 @@ func (f *fakeConfigBrood) GetJenkinsRoleBinding(_ context.Context, cluster, name
 
 func (f *fakeConfigBrood) CreateJenkinsRoleBinding(_ context.Context, cluster, name string, obj json.RawMessage) (json.RawMessage, error) {
 	f.ensure(cluster)
+	if f.failBindingCreate[name] {
+		return nil, &BroodError{Code: bus.CodeInvalid, Msg: "spec.subjects: Required value"}
+	}
 	if f.bindings[cluster][name] != nil {
 		return nil, &BroodError{Code: bus.CodeConflict}
 	}
@@ -157,6 +180,9 @@ func (f *fakeConfigBrood) UpdateJenkinsRoleBinding(_ context.Context, cluster, n
 
 func (f *fakeConfigBrood) DeleteJenkinsRoleBinding(_ context.Context, cluster, name string) error {
 	f.ensure(cluster)
+	if f.failBindingDelete[name] {
+		return &BroodError{Code: bus.CodeInternal, Msg: "etcd timeout"}
+	}
 	delete(f.bindings[cluster], name)
 	f.ops = append(f.ops, "delete-binding:"+cluster+":"+name)
 	return nil
@@ -337,6 +363,73 @@ func TestRBACFederationReconcilerUnreachableHiveDoesNotAbortOthers(t *testing.T)
 	}
 }
 
+// A source binding that loses its last subject stops federating. The child
+// that an earlier pass created on the hive is garbage-collected, and so is a
+// role that only that binding referenced.
+func TestRBACFederationReconcilerDeletesChildWhenSubjectsEmpty(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("first pass warnings = %v", warnings)
+	}
+	federated := reconciler.desiredBindingsForTest()
+	if len(federated) != 1 || brood.bindings["dev-cluster"][federated[0].Name] == nil {
+		t.Fatalf("first pass did not federate the binding")
+	}
+
+	source := reconciler.bindings.(*fakeFederationStore).items["bind-admin"].(*v1alpha1.VarroaRoleBinding)
+	source.Spec.Subjects = []v1alpha1.SubjectRef{}
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("second pass warnings = %v", warnings)
+	}
+	if len(brood.bindings["dev-cluster"]) != 0 {
+		t.Fatalf("hive bindings = %v, want none", brood.bindings["dev-cluster"])
+	}
+	if brood.roles["dev-cluster"]["jenkins-admin"] != nil {
+		t.Fatalf("role that only the empty binding referenced stayed on the hive")
+	}
+}
+
+// A create that the hive rejects on one binding is a warning. The pass
+// continues: a later binding is created and the garbage-collect loop runs.
+func TestRBACFederationReconcilerCreateFailureDoesNotAbortCluster(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	store := reconciler.bindings.(*fakeFederationStore)
+	store.items["bind-zeta"] = &v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "bind-zeta"}, Spec: v1alpha1.VarroaRoleBindingSpec{RoleRef: "team-admin", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "zed"}}}}
+	desired := reconciler.desiredBindingsForTest()
+	if len(desired) != 2 {
+		t.Fatalf("desired bindings = %d, want 2", len(desired))
+	}
+	brood.failBindingCreate = map[string]bool{desired[0].Name: true}
+	brood.ensure("dev-cluster")
+	brood.bindings["dev-cluster"]["varroa-fed-team-admin-stale"] = &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "varroa-fed-team-admin-stale", Labels: map[string]string{rbac.LabelFederatedFrom: "team-admin"}}}
+
+	warnings := reconciler.Reconcile(context.Background())
+	if len(warnings) != 1 || !strings.Contains(warnings[0], desired[0].Name) || !strings.Contains(warnings[0], "dev-cluster") {
+		t.Fatalf("warnings = %v, want one warning naming %s", warnings, desired[0].Name)
+	}
+	if brood.bindings["dev-cluster"][desired[1].Name] == nil {
+		t.Fatalf("binding after the failed one was not created")
+	}
+	if brood.bindings["dev-cluster"]["varroa-fed-team-admin-stale"] != nil {
+		t.Fatalf("garbage-collect loop did not run after a create failure")
+	}
+}
+
+// A create failure that repeats on every pass logs one warning line.
+func TestRBACFederationReconcilerRepeatedCreateFailureLogsOnce(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	writer := &bytes.Buffer{}
+	reconciler.logger = slog.New(slog.NewTextHandler(writer, nil))
+	desired := reconciler.desiredBindingsForTest()
+	brood.failBindingCreate = map[string]bool{desired[0].Name: true}
+
+	reconciler.reconcileAndLog(context.Background())
+	reconciler.reconcileAndLog(context.Background())
+	if got := strings.Count(writer.String(), "rbac federation warning"); got != 1 {
+		t.Fatalf("warning count after two passes = %d, want 1; log = %s", got, writer.String())
+	}
+}
+
 func TestRBACFederationEnqueueIsDebounced(t *testing.T) {
 	reconciler, _ := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
 	reconciler.Enqueue()
@@ -377,13 +470,13 @@ func testFederationReconciler(clusters []bus.ClusterInfo) (*RBACFederationReconc
 		"jenkins-admin": &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "jenkins-admin"}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}, Description: "core copy"}},
 	}}
 	brood := newFakeConfigBrood()
-	reconciler := NewRBACFederationReconciler(roles, bindings, jenkinsRoles, brood, nil, "core", testLogger())
+	reconciler := NewRBACFederationReconciler(roles, bindings, jenkinsRoles, brood, nil, nil, "core", testLogger())
 	reconciler.clusterLister = func() ([]bus.ClusterInfo, error) { return clusters, nil }
 	return reconciler, brood
 }
 
 func (r *RBACFederationReconciler) desiredBindingsForTest() []*v1alpha1.JenkinsRoleBinding {
-	_, bindings, _ := r.desired()
+	_, bindings, _, _ := r.desired(r.sourceBindings(), r.sourceRoles())
 	return bindings
 }
 
@@ -399,6 +492,47 @@ func TestRoleDriftedIgnoresResourceVersion(t *testing.T) {
 	actual.ResourceVersion = "123"
 	if !reflect.DeepEqual(actual.Spec, desired.Spec) || roleDrifted(actual, desired) {
 		t.Fatalf("resourceVersion should not cause drift")
+	}
+}
+
+// roleDrifted sees a change of the source annotation and ignores an
+// annotation that another writer adds.
+func TestRoleDriftedComparesSourceAnnotation(t *testing.T) {
+	desired := &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{
+		Name:        "role",
+		Labels:      map[string]string{rbac.LabelFederatedFrom: "vr"},
+		Annotations: map[string]string{rbac.AnnotationFederatedRoles: "vr,vr-two"},
+	}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}
+	actual := desired.DeepCopy()
+	actual.Annotations["example.com/other"] = "x"
+	if roleDrifted(actual, desired) {
+		t.Fatalf("an unrelated annotation caused drift")
+	}
+	actual.Annotations[rbac.AnnotationFederatedRoles] = "vr"
+	if !roleDrifted(actual, desired) {
+		t.Fatalf("a changed source annotation caused no drift")
+	}
+}
+
+// An existing role copy with no source annotation gets it on one update, and
+// the next pass writes nothing.
+func TestReconcileAnnotatesExistingRoleOnce(t *testing.T) {
+	r, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	r.Reconcile(context.Background())
+	delete(brood.roles["dev-cluster"]["jenkins-admin"].Annotations, rbac.AnnotationFederatedRoles)
+	brood.ops = nil
+
+	r.Reconcile(context.Background())
+	if len(brood.ops) != 1 || brood.ops[0] != "update-role:dev-cluster:jenkins-admin" {
+		t.Fatalf("ops = %v, want one role update", brood.ops)
+	}
+	if got := brood.roles["dev-cluster"]["jenkins-admin"].Annotations[rbac.AnnotationFederatedRoles]; got != "team-admin" {
+		t.Fatalf("role annotation = %q, want team-admin", got)
+	}
+	brood.ops = nil
+	r.Reconcile(context.Background())
+	if len(brood.ops) != 0 {
+		t.Fatalf("ops = %v, want none after the annotation settles", brood.ops)
 	}
 }
 
@@ -423,7 +557,7 @@ func (f *fakeConfigBrood) PauseComposedBundle(context.Context, string, string, s
 func (f *fakeConfigBrood) ComposeBundle(context.Context, string, string, json.RawMessage) (*bus.BundleComposePreview, error) {
 	panic("not implemented")
 }
-func (f *fakeConfigBrood) ListCatalogItems(context.Context, string, string, CatalogItemFilter) ([]json.RawMessage, string, error) {
+func (f *fakeConfigBrood) ListCatalogItems(context.Context, string, string, CatalogItemFilter) ([]json.RawMessage, error) {
 	panic("not implemented")
 }
 func (f *fakeConfigBrood) GetCatalogItem(context.Context, string, string, string) (json.RawMessage, error) {

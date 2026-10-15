@@ -3,10 +3,14 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/auth/identity"
 	"github.com/varroaci/varroa-jenkins/internal/auth/ldap"
 	"github.com/varroaci/varroa-jenkins/internal/auth/local"
 )
@@ -34,7 +38,14 @@ type setPasswordRequest struct {
 	NewPassword string `json:"newPassword"`
 }
 
-// HandleAuthConfig returns the configured auth mode.
+// authConfigResponse is the JSON body of GET /api/v1/auth-config.
+type authConfigResponse struct {
+	Mode          string `json:"mode"`
+	LocalAccounts bool   `json:"localAccounts"`
+}
+
+// HandleAuthConfig returns the configured auth mode and whether declared
+// local accounts sign in beside OIDC.
 // GET /api/v1/auth-config (unauthenticated).
 func (s *Server) HandleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -48,7 +59,44 @@ func (s *Server) HandleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"mode": mode})
+	json.NewEncoder(w).Encode(authConfigResponse{
+		Mode:          mode,
+		LocalAccounts: s.deps.IdentityConfig.LocalAccounts,
+	})
+}
+
+// localAccountsOn reports whether local accounts exist on this release:
+// local mode, or local accounts beside OIDC.
+func (s *Server) localAccountsOn() bool {
+	return s.deps.IdentityConfig.Mode == string(auth.AuthModeLocal) || s.deps.IdentityConfig.LocalAccounts
+}
+
+// auditLocalLogin publishes the audit event for a local sign-in beside
+// OIDC. A break-glass account is audited at warning severity. A failed
+// attempt is audited only for a declared account, so the event never
+// confirms that an unknown name exists.
+func (s *Server) auditLocalLogin(username string, purpose v1alpha1.UserPurpose, failed bool) {
+	if !s.deps.IdentityConfig.LocalAccounts || purpose == "" {
+		return
+	}
+	actor := auth.LocalSubjectPrefix + username
+	e := activity.Event{
+		Type:     "auth.local.login",
+		Source:   "user",
+		Severity: "info",
+		Actor:    actor,
+		Reason:   string(purpose),
+		Message:  fmt.Sprintf("%s signed in with a local %s account", actor, purpose),
+	}
+	if purpose == v1alpha1.UserPurposeBreakGlass {
+		e.Severity = "warning"
+	}
+	if failed {
+		e.Type = "auth.local.login_failed"
+		e.Severity = "warning"
+		e.Message = fmt.Sprintf("failed sign-in for the local %s account %s", purpose, actor)
+	}
+	s.notifyActivity(e)
 }
 
 // HandleLogin authenticates a user and returns an id_token.
@@ -90,15 +138,18 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		tok, expiresIn, err = s.deps.Local.Login(r.Context(), req.Username, req.Password)
-		if err != nil {
+		res, lerr := s.deps.Local.Login(r.Context(), req.Username, req.Password)
+		if lerr != nil {
 			status := http.StatusUnauthorized
-			if errors.Is(err, local.ErrRateLimited) {
+			if errors.Is(lerr, local.ErrRateLimited) {
 				status = http.StatusTooManyRequests
 			}
-			s.writeJSONError(w, status, err.Error())
+			s.auditLocalLogin(req.Username, res.Purpose, true)
+			s.writeJSONError(w, status, lerr.Error())
 			return
 		}
+		s.auditLocalLogin(req.Username, res.Purpose, false)
+		tok, expiresIn = res.IDToken, res.ExpiresIn
 	}
 
 	// Set httpOnly cookie for browser access.
@@ -156,7 +207,8 @@ func (s *Server) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.deps.Local.ChangePassword(r.Context(), claims.Subject, req.OldPassword, req.NewPassword); err != nil {
+	username := identity.UserResourceName(claims, auth.AuthMode(s.deps.IdentityConfig.Mode))
+	if err := s.deps.Local.ChangePassword(r.Context(), username, req.OldPassword, req.NewPassword); err != nil {
 		s.writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -228,6 +280,13 @@ func (s *Server) HandleAdminSetPassword(w http.ResponseWriter, r *http.Request, 
 
 	if len(req.NewPassword) < 8 {
 		s.writeJSONError(w, http.StatusBadRequest, "new password must be at least 8 characters")
+		return
+	}
+
+	// Beside OIDC, an IdP user can never sign in locally, so a password on it
+	// has no use.
+	if s.deps.IdentityConfig.LocalAccounts && identity.IsOIDCName(username) {
+		s.writeJSONError(w, http.StatusBadRequest, "only a local account can have a password")
 		return
 	}
 

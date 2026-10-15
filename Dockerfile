@@ -9,9 +9,6 @@ RUN mvn package -DskipTests -B
 # Stage 2: Build Go binaries
 FROM golang:1.26-alpine AS builder
 
-ARG GIT_SHA=unknown
-ARG GIT_BRANCH=unknown
-
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /build
@@ -21,8 +18,12 @@ RUN go mod download
 
 COPY . .
 
+# Build arguments change on every commit. Declare them after the dependency layers, so those layers stay cached.
+ARG GIT_SHA=unknown
+ARG GIT_BRANCH=unknown
+
 RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-mite \
     ./cmd/mite/ && \
     CGO_ENABLED=0 go build \
@@ -30,7 +31,7 @@ RUN CGO_ENABLED=0 go build \
     -o /build/bin/varroa-gateway \
     ./cmd/gateway/ && \
     CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-bff \
     ./cmd/bff/ && \
     CGO_ENABLED=0 go build \
@@ -38,9 +39,13 @@ RUN CGO_ENABLED=0 go build \
     -o /build/bin/varroa-operator \
     ./cmd/operator/ && \
     CGO_ENABLED=0 go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
     -o /build/bin/varroa-updatecenter \
     ./cmd/updatecenter/ && \
+    CGO_ENABLED=0 go build \
+    -ldflags="-s -w -X main.version=${GIT_SHA}" \
+    -o /build/bin/varroa-recorder \
+    ./cmd/recorder/ && \
     CGO_ENABLED=0 go build \
     -ldflags="-s -w" \
     -o /build/bin/varroactl \
@@ -58,6 +63,7 @@ COPY --from=builder /build/bin/varroa-gateway /app/varroa-gateway
 COPY --from=builder /build/bin/varroa-bff /app/varroa-bff
 COPY --from=builder /build/bin/varroa-operator /app/varroa-operator
 COPY --from=builder /build/bin/varroa-updatecenter /app/varroa-updatecenter
+COPY --from=builder /build/bin/varroa-recorder /app/varroa-recorder
 COPY --from=builder /build/bin/varroactl /app/varroactl
 
 # Bake the auth plugin HPI into the image for init-container delivery.

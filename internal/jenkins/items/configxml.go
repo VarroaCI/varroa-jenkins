@@ -1,9 +1,11 @@
 package items
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -42,6 +44,25 @@ func GenerateConfigXML(item Item) (string, error) {
 }
 
 type xmlConfig interface{}
+
+// varroaMiteAuthPlugin is the short name of the plugin providing every
+// varroa-prefixed class this file renders.
+const varroaMiteAuthPlugin = "varroa-mite-auth"
+
+// varroaTemplateValuesJSON renders template values as compact JSON text for
+// the values element of a rendered VarroaTemplateFlowDefinition. Values
+// decodes from YAML into plain Go values, so it always encodes; a nil map
+// renders as an empty object.
+func varroaTemplateValuesJSON(values map[string]any) string {
+	if values == nil {
+		values = map[string]any{}
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 // ---- Folder ----
 
@@ -200,17 +221,156 @@ type jenkinsDiscarderXML struct {
 	ArtifactNumToKeep  int    `xml:"artifactNumToKeep,omitempty"`
 }
 
+// jenkinsTriggersXML is the triggers list of a freeStyle job and of a
+// pipeline job's PipelineTriggersJobProperty. Jenkins reads the same
+// element names in both places.
 type jenkinsTriggersXML struct {
-	PollSCM []*jenkinsPollSCMXML `xml:"hudson.triggers.SCMTrigger,omitempty"`
-	Cron    []*jenkinsCronXML    `xml:"hudson.triggers.TimerTrigger,omitempty"`
+	PollSCM        []*jenkinsPollSCMXML        `xml:"hudson.triggers.SCMTrigger,omitempty"`
+	Cron           []*jenkinsCronXML           `xml:"hudson.triggers.TimerTrigger,omitempty"`
+	GitHubPush     []*jenkinsGitHubPushXML     `xml:"com.cloudbees.jenkins.GitHubPushTrigger,omitempty"`
+	VarroaUpstream []*jenkinsVarroaUpstreamXML `xml:"org.jenkinsci.plugins.varroamiteauth.VarroaUpstreamTrigger,omitempty"`
+	GenericTrigger []*jenkinsGenericTriggerXML `xml:"org.jenkinsci.plugins.gwt.GenericTrigger,omitempty"`
+}
+
+// genericPlugin is the plugin that owns GenericTrigger.
+const genericPlugin = "generic-webhook-trigger"
+
+// genericDefaultCauseString is the build cause a generic trigger writes
+// when the item sets no causeString.
+const genericDefaultCauseString = "Generic Cause"
+
+// jenkinsGenericTriggerXML renders a genericTrigger. Spec is always an
+// empty element, for the same reason as jenkinsVarroaUpstreamXML. The
+// request and header variable lists are always empty elements: XStream
+// skips the constructor, so a missing list loads as null.
+type jenkinsGenericTriggerXML struct {
+	Plugin                    string                     `xml:"plugin,attr"`
+	Spec                      string                     `xml:"spec"`
+	GenericVariables          jenkinsGenericVariablesXML `xml:"genericVariables"`
+	RegexpFilterText          string                     `xml:"regexpFilterText"`
+	RegexpFilterExpression    string                     `xml:"regexpFilterExpression"`
+	GenericRequestVariables   struct{}                   `xml:"genericRequestVariables"`
+	GenericHeaderVariables    struct{}                   `xml:"genericHeaderVariables"`
+	PrintPostContent          bool                       `xml:"printPostContent"`
+	PrintContributedVariables bool                       `xml:"printContributedVariables"`
+	CauseString               string                     `xml:"causeString"`
+	Token                     string                     `xml:"token"`
+	SilentResponse            bool                       `xml:"silentResponse"`
+}
+
+type jenkinsGenericVariablesXML struct {
+	Items []jenkinsGenericVariableXML `xml:"org.jenkinsci.plugins.gwt.GenericVariable"`
+}
+
+type jenkinsGenericVariableXML struct {
+	ExpressionType string `xml:"expressionType"`
+	Key            string `xml:"key"`
+	Value          string `xml:"value"`
+	RegexpFilter   string `xml:"regexpFilter"`
+	DefaultValue   string `xml:"defaultValue"`
 }
 
 type jenkinsPollSCMXML struct {
-	Spec string `xml:"spec"`
+	Spec                  string `xml:"spec"`
+	IgnorePostCommitHooks bool   `xml:"ignorePostCommitHooks"`
 }
 
 type jenkinsCronXML struct {
 	Spec string `xml:"spec"`
+}
+
+// jenkinsGitHubPushXML renders a githubPush trigger. Jenkins writes an
+// empty spec element for this trigger, so the renderer writes one too.
+type jenkinsGitHubPushXML struct {
+	Plugin string `xml:"plugin,attr"`
+	Spec   string `xml:"spec"`
+}
+
+// githubPlugin is the plugin that owns GitHubPushTrigger.
+const githubPlugin = "github"
+
+// buildTriggersXML converts trigger declarations into the triggers list.
+// It returns nil for an empty list, so the caller omits the element.
+func buildTriggersXML(triggers []Trigger) *jenkinsTriggersXML {
+	if len(triggers) == 0 {
+		return nil
+	}
+	t := &jenkinsTriggersXML{}
+	for _, tr := range triggers {
+		if tr.PollSCM != nil {
+			t.PollSCM = append(t.PollSCM, &jenkinsPollSCMXML{
+				Spec:                  tr.PollSCM.EffectiveSpec(),
+				IgnorePostCommitHooks: tr.PollSCM.IgnorePostCommitHooks,
+			})
+		}
+		if tr.Cron != nil {
+			t.Cron = append(t.Cron, &jenkinsCronXML{Spec: tr.Cron.Spec})
+		}
+		if tr.GitHubPush != nil {
+			t.GitHubPush = append(t.GitHubPush, &jenkinsGitHubPushXML{Plugin: githubPlugin})
+		}
+		if tr.VarroaUpstream != nil {
+			result := tr.VarroaUpstream.Result
+			if result == "" {
+				result = varroaUpstreamDefaultResult
+			}
+			t.VarroaUpstream = append(t.VarroaUpstream, &jenkinsVarroaUpstreamXML{
+				Plugin: varroaMiteAuthPlugin,
+				Tenant: tr.VarroaUpstream.Tenant,
+				Job:    tr.VarroaUpstream.Job,
+				Result: result,
+			})
+		}
+		if tr.GenericTrigger != nil {
+			t.GenericTrigger = append(t.GenericTrigger, genericTriggerXML(tr.GenericTrigger))
+		}
+	}
+	return t
+}
+
+// genericTriggerXML converts a genericTrigger declaration. It applies the
+// defaults the plugin would otherwise write: the JSONPath expression type
+// and the generic cause string.
+func genericTriggerXML(g *GenericTrigger) *jenkinsGenericTriggerXML {
+	cause := g.CauseString
+	if cause == "" {
+		cause = genericDefaultCauseString
+	}
+	x := &jenkinsGenericTriggerXML{
+		Plugin:                 genericPlugin,
+		RegexpFilterText:       g.RegexpFilterText,
+		RegexpFilterExpression: g.RegexpFilterExpression,
+		CauseString:            cause,
+		Token:                  g.Token,
+	}
+	for _, v := range g.GenericVariables {
+		expr := v.ExpressionType
+		if expr == "" {
+			expr = "JSONPath"
+		}
+		x.GenericVariables.Items = append(x.GenericVariables.Items, jenkinsGenericVariableXML{
+			ExpressionType: expr,
+			Key:            v.Key,
+			Value:          v.Value,
+			RegexpFilter:   v.RegexpFilter,
+			DefaultValue:   v.DefaultValue,
+		})
+	}
+	return x
+}
+
+// jenkinsVarroaUpstreamXML renders a varroaUpstream trigger. Its element
+// name is the trigger's full class name, design.md D9. Result always
+// carries an explicit value: the renderer applies the SUCCESS default
+// before it reaches this struct. Spec is always an empty element: Jenkins
+// core's Trigger.readResolve parses spec with no null check, so Jenkins
+// drops a trigger that has no spec element when it loads the job.
+type jenkinsVarroaUpstreamXML struct {
+	Plugin string `xml:"plugin,attr"`
+	Spec   string `xml:"spec"`
+	Tenant string `xml:"tenant"`
+	Job    string `xml:"job"`
+	Result string `xml:"result"`
 }
 
 type jenkinsParamsPropXML struct {
@@ -221,13 +381,108 @@ type paramsDefPropXML struct {
 	ParameterDefs []jenkinsParamXML `xml:"parameterDefinitions"`
 }
 
+// MarshalXML writes the parameterDefinitions wrapper Jenkins core expects,
+// then each parameter definition under its own class name. A plain struct
+// tag cannot express this: a definition's XMLName value, set to its class
+// name, takes precedence over the wrapping field's own tag.
+func (p paramsDefPropXML) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	if err := e.EncodeToken(start); err != nil {
+		return err
+	}
+	wrap := xml.StartElement{Name: xml.Name{Local: "parameterDefinitions"}}
+	if err := e.EncodeToken(wrap); err != nil {
+		return err
+	}
+	for _, def := range p.ParameterDefs {
+		if err := e.Encode(def); err != nil {
+			return err
+		}
+	}
+	if err := e.EncodeToken(wrap.End()); err != nil {
+		return err
+	}
+	return e.EncodeToken(start.End())
+}
+
 type jenkinsParamXML struct {
 	XMLName      xml.Name
-	Name         string   `xml:"name"`
-	Description  string   `xml:"description,omitempty"`
-	DefaultValue string   `xml:"defaultValue,omitempty"`
-	Trim         bool     `xml:"trim,omitempty"`
-	Choices      []string `xml:"choices,omitempty"`
+	Name         string           `xml:"name"`
+	Description  string           `xml:"description,omitempty"`
+	DefaultValue string           `xml:"defaultValue,omitempty"`
+	Trim         bool             `xml:"trim,omitempty"`
+	Choices      *paramChoicesXML `xml:"choices,omitempty"`
+}
+
+// paramChoicesXML mirrors the java.util.Arrays$ArrayList shape XStream
+// gives a choice parameter's choices field, so a config.xml push round
+// trips through Jenkins core the same way a UI-saved job does.
+type paramChoicesXML struct {
+	Class string          `xml:"class,attr"`
+	Array *stringArrayXML `xml:"a"`
+}
+
+type stringArrayXML struct {
+	Class   string   `xml:"class,attr"`
+	Strings []string `xml:"string"`
+}
+
+// Jenkins core class names for the three parameter kinds this DSL models.
+const (
+	stringParamClass  = "hudson.model.StringParameterDefinition"
+	choiceParamClass  = "hudson.model.ChoiceParameterDefinition"
+	booleanParamClass = "hudson.model.BooleanParameterDefinition"
+)
+
+// collectParameters gathers an item's build parameters from both spellings:
+// the item's own flat list and its parameters property. A renderer folds
+// both sources into one ParametersDefinitionProperty, the same merge the
+// pipelines API applies when it lists a job's parameters.
+func collectParameters(item Item) []Parameter {
+	params := append([]Parameter(nil), item.Parameters...)
+	for _, prop := range item.Properties {
+		if prop.Parameters != nil {
+			params = append(params, prop.Parameters.ParameterDefinitions...)
+		}
+	}
+	return params
+}
+
+// convertParameters renders a collected parameter list into the
+// ParameterDefinition elements a ParametersDefinitionProperty carries. A
+// caller has already run validateParameters, so every entry sets exactly
+// one of String, Choice, and BooleanParam.
+func convertParameters(params []Parameter) []jenkinsParamXML {
+	out := make([]jenkinsParamXML, 0, len(params))
+	for _, p := range params {
+		switch {
+		case p.String != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:      xml.Name{Local: stringParamClass},
+				Name:         p.String.Name,
+				Description:  p.String.Description,
+				DefaultValue: p.String.DefaultValue,
+				Trim:         p.String.Trim,
+			})
+		case p.Choice != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:     xml.Name{Local: choiceParamClass},
+				Name:        p.Choice.Name,
+				Description: p.Choice.Description,
+				Choices: &paramChoicesXML{
+					Class: "java.util.Arrays$ArrayList",
+					Array: &stringArrayXML{Class: "string-array", Strings: p.Choice.Choices},
+				},
+			})
+		case p.BooleanParam != nil:
+			out = append(out, jenkinsParamXML{
+				XMLName:      xml.Name{Local: booleanParamClass},
+				Name:         p.BooleanParam.Name,
+				Description:  p.BooleanParam.Description,
+				DefaultValue: strconv.FormatBool(p.BooleanParam.DefaultValue),
+			})
+		}
+	}
+	return out
 }
 
 // ---- Conversion helpers ----
@@ -299,21 +554,11 @@ func freeStyleConfigXML(item Item) xmlConfig {
 			ArtifactNumToKeep:  item.BuildDiscarder.LogRotator.ArtifactNumToKeep,
 		}
 	}
-	if len(item.Triggers) > 0 {
-		t := &jenkinsTriggersXML{}
-		for _, tr := range item.Triggers {
-			if tr.PollSCM != nil {
-				spec := tr.PollSCM.ScmpollSpec
-				if spec == "" {
-					spec = "H * * * *"
-				}
-				t.PollSCM = append(t.PollSCM, &jenkinsPollSCMXML{Spec: spec})
-			}
-			if tr.Cron != nil {
-				t.Cron = append(t.Cron, &jenkinsCronXML{Spec: tr.Cron.Spec})
-			}
+	f.Triggers = buildTriggersXML(item.Triggers)
+	if params := collectParameters(item); len(params) > 0 {
+		f.Properties = &jenkinsParamsPropXML{
+			ParamsDefProp: &paramsDefPropXML{ParameterDefs: convertParameters(params)},
 		}
-		f.Triggers = t
 	}
 	return f
 }
@@ -394,17 +639,21 @@ type pipelineXML struct {
 	Definition      *cpsFlowDefXML         `xml:"definition"`
 	Disabled        bool                   `xml:"disabled,omitempty"`
 	ConcurrentBuild bool                   `xml:"concurrentBuild,omitempty"`
+	QuietPeriod     int                    `xml:"quietPeriod,omitempty"`
 	Properties      *pipelinePropertiesXML `xml:"properties,omitempty"`
 }
 
 type cpsFlowDefXML struct {
-	Class       string         `xml:"class,attr"`
-	Plugin      string         `xml:"plugin,attr"`
-	SCM         *jenkinsScmXML `xml:"scm,omitempty"`
-	ScriptPath  string         `xml:"scriptPath,omitempty"`
-	Lightweight bool           `xml:"lightweight,omitempty"`
-	Script      string         `xml:"script,omitempty"`
-	Sandbox     bool           `xml:"sandbox,omitempty"`
+	Class           string         `xml:"class,attr"`
+	Plugin          string         `xml:"plugin,attr"`
+	SCM             *jenkinsScmXML `xml:"scm,omitempty"`
+	ScriptPath      string         `xml:"scriptPath,omitempty"`
+	Lightweight     bool           `xml:"lightweight,omitempty"`
+	Script          string         `xml:"script,omitempty"`
+	Sandbox         bool           `xml:"sandbox,omitempty"`
+	Template        string         `xml:"template,omitempty"`
+	TemplateVersion string         `xml:"templateVersion,omitempty"`
+	Values          string         `xml:"values,omitempty"`
 }
 
 type pipelinePropertiesXML struct {
@@ -412,6 +661,15 @@ type pipelinePropertiesXML struct {
 	DisableConcurrentBuilds *disableConcurrentBuildsXML `xml:"org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty,omitempty"`
 	DisableResume           *disableResumeXML           `xml:"org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty,omitempty"`
 	DurabilityHint          *durabilityHintXML          `xml:"org.jenkinsci.plugins.workflow.job.properties.DurabilityHintJobProperty,omitempty"`
+	ParamsDefProp           *paramsDefPropXML           `xml:"hudson.model.ParametersDefinitionProperty,omitempty"`
+	PipelineTriggers        *pipelineTriggersPropXML    `xml:"org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty,omitempty"`
+}
+
+// pipelineTriggersPropXML holds a pipeline job's triggers. A pipeline job
+// has no top-level triggers element: Jenkins starts only the triggers in
+// this property.
+type pipelineTriggersPropXML struct {
+	Triggers *jenkinsTriggersXML `xml:"triggers"`
 }
 
 type pipelineBuildDiscarderXML struct {
@@ -441,6 +699,7 @@ func pipelineConfigXML(item Item) xmlConfig {
 		Description:     item.Description,
 		Disabled:        item.Disabled,
 		ConcurrentBuild: item.ConcurrentBuild,
+		QuietPeriod:     item.QuietPeriod,
 	}
 	if item.Definition != nil {
 		if item.Definition.CpsScmFlowDefinition != nil {
@@ -462,6 +721,15 @@ func pipelineConfigXML(item Item) xmlConfig {
 				Plugin:  "workflow-cps",
 				Script:  item.Definition.Script,
 				Sandbox: true,
+			}
+		} else if item.Definition.VarroaTemplate != nil {
+			vt := item.Definition.VarroaTemplate
+			p.Definition = &cpsFlowDefXML{
+				Class:           "org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateFlowDefinition",
+				Plugin:          varroaMiteAuthPlugin,
+				Template:        vt.Template,
+				TemplateVersion: vt.TemplateVersion,
+				Values:          varroaTemplateValuesJSON(vt.Values),
 			}
 		}
 	}
@@ -499,18 +767,73 @@ func pipelineConfigXML(item Item) xmlConfig {
 			p.Properties.DurabilityHint = &durabilityHintXML{Hint: prop.DurabilityHint.Hint}
 		}
 	}
+	// resumeBlocked and a disableResume property render the same single
+	// job property. The WorkflowJob field of that name is deprecated.
+	if item.ResumeBlocked {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.DisableResume = &disableResumeXML{}
+	}
+	if params := collectParameters(item); len(params) > 0 {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.ParamsDefProp = &paramsDefPropXML{ParameterDefs: convertParameters(params)}
+	}
+	if t := buildTriggersXML(collectTriggers(item)); t != nil {
+		if p.Properties == nil {
+			p.Properties = &pipelinePropertiesXML{}
+		}
+		p.Properties.PipelineTriggers = &pipelineTriggersPropXML{Triggers: t}
+	}
 	return p
 }
 
 // ---- Multibranch ----
 
 type multibranchXML struct {
-	XMLName     xml.Name          `xml:"org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject"`
-	Plugin      string            `xml:"plugin,attr"`
-	DisplayName string            `xml:"displayName,omitempty"`
-	Description string            `xml:"description,omitempty"`
-	Sources     *branchSourcesXML `xml:"sources"`
-	Factory     *mbFactoryXML     `xml:"factory"`
+	XMLName              xml.Name                 `xml:"org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject"`
+	Plugin               string                   `xml:"plugin,attr"`
+	DisplayName          string                   `xml:"displayName,omitempty"`
+	Description          string                   `xml:"description,omitempty"`
+	OrphanedItemStrategy *orphanedItemStrategyXML `xml:"orphanedItemStrategy,omitempty"`
+	Sources              *branchSourcesXML        `xml:"sources"`
+	Factory              *mbFactoryXML            `xml:"factory"`
+}
+
+// orphanedItemStrategyXML renders the dead-branch pruning policy of a
+// multibranch project. Pruning is always on when the element is present.
+type orphanedItemStrategyXML struct {
+	Class             string `xml:"class,attr"`
+	Plugin            string `xml:"plugin,attr"`
+	PruneDeadBranches bool   `xml:"pruneDeadBranches"`
+	DaysToKeep        int    `xml:"daysToKeep"`
+	NumToKeep         int    `xml:"numToKeep"`
+}
+
+// orphanedItemStrategyFor returns nil when the item declares no strategy,
+// so the element is omitted and Jenkins keeps its default.
+func orphanedItemStrategyFor(s *OrphanedStrategy) *orphanedItemStrategyXML {
+	if s == nil {
+		return nil
+	}
+	return &orphanedItemStrategyXML{
+		Class:             "com.cloudbees.hudson.plugins.folder.computed.DefaultOrphanedItemStrategy",
+		Plugin:            "cloudbees-folder",
+		PruneDeadBranches: true,
+		DaysToKeep:        orphanLimit(s.DaysToKeep),
+		NumToKeep:         orphanLimit(s.NumToKeep),
+	}
+}
+
+// orphanLimit maps a zero or absent limit to -1. Jenkins reads -1 as no
+// limit on that axis, and it normalizes a zero limit to -1 the same way.
+func orphanLimit(n int) int {
+	if n <= 0 {
+		return -1
+	}
+	return n
 }
 
 type branchSourcesXML struct {
@@ -523,32 +846,163 @@ type branchSourceData struct {
 }
 
 type branchSourceItemXML struct {
-	Source *branchSourceSourceXML `xml:"source"`
+	// Source is a *branchSourceSourceXML for a git source, a *gitHubSourceXML
+	// for a GitHub source, or a *giteaSourceXML for a Gitea source.
+	Source          any                 `xml:"source"`
+	BuildStrategies *buildStrategiesXML `xml:"buildStrategies"`
 }
 
-// branchSourceSourceXML holds either a git or github SCM source.
-// Only one is populated; omitempty ensures clean XML.
+// buildStrategiesXML renders the skip-initial-build strategy every
+// multibranch branch source and every organization folder carries (design
+// D12). The rendering does not depend on the item's own YAML: a scan
+// discovers a branch, a webhook builds it.
+type buildStrategiesXML struct {
+	SkipInitialBuildOnFirstBranchIndexing *skipInitialBuildStrategyXML `xml:"jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing"`
+}
+
+// skipInitialBuildStrategyXML has a no-argument data-bound constructor, so
+// it carries no child element.
+type skipInitialBuildStrategyXML struct {
+	Plugin string `xml:"plugin,attr,omitempty"`
+}
+
+func skipInitialBuildStrategies() *buildStrategiesXML {
+	return &buildStrategiesXML{
+		SkipInitialBuildOnFirstBranchIndexing: &skipInitialBuildStrategyXML{
+			Plugin: "basic-branch-build-strategies",
+		},
+	}
+}
+
+// branchSourceSourceXML is a git SCM source.
 type branchSourceSourceXML struct {
-	Class           string `xml:"class,attr"`
-	Plugin          string `xml:"plugin,attr,omitempty"`
-	Remote          string `xml:"remote,omitempty"`
-	CredentialsID   string `xml:"credentialsId,omitempty"`
-	RepoOwner       string `xml:"repoOwner,omitempty"`
-	Repository      string `xml:"repository,omitempty"`
-	RepositoryURL   string `xml:"repositoryUrl,omitempty"`
-	ConfiguredByURL bool   `xml:"configuredByUrl,omitempty"`
+	Class         string               `xml:"class,attr"`
+	Plugin        string               `xml:"plugin,attr,omitempty"`
+	Remote        string               `xml:"remote,omitempty"`
+	CredentialsID string               `xml:"credentialsId,omitempty"`
+	Traits        *gitLibraryTraitsXML `xml:"traits,omitempty"`
+}
+
+// gitHubSourceXML is a GitHub branch source. Its traits follow the scalar
+// fields. The element names come from XStream, which writes each underscore
+// in a Java class name as a double underscore.
+type gitHubSourceXML struct {
+	Class           string           `xml:"class,attr"`
+	Plugin          string           `xml:"plugin,attr,omitempty"`
+	CredentialsID   string           `xml:"credentialsId,omitempty"`
+	RepoOwner       string           `xml:"repoOwner,omitempty"`
+	Repository      string           `xml:"repository,omitempty"`
+	RepositoryURL   string           `xml:"repositoryUrl,omitempty"`
+	ConfiguredByURL bool             `xml:"configuredByUrl,omitempty"`
+	Traits          *gitHubTraitsXML `xml:"traits,omitempty"`
+}
+
+// gitHubTraitsXML lists the declared GitHub traits in a fixed order. A nil
+// field is omitted, so the plugin applies its own default for that kind.
+type gitHubTraitsXML struct {
+	Branch      *gitHubStrategyXML `xml:"org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait"`
+	PullRequest *gitHubStrategyXML `xml:"org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait"`
+	Fork        *gitHubForkXML     `xml:"org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait"`
+	Wildcard    *wildcardFilterXML `xml:"jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait"`
+	SSHCheckout *gitHubSSHXML      `xml:"org.jenkinsci.plugins.github__branch__source.SSHCheckoutTrait"`
+	// SkipNotifications renders the skip-notifications-trait plugin's trait.
+	SkipNotifications *gitHubSkipNotificationsXML `xml:"org.jenkinsci.plugins.github.notifications.GithubSkipNotifications"`
+}
+
+// gitHubSkipNotificationsXML is the skip notifications trait from the
+// skip-notifications-trait plugin. It carries no settings.
+type gitHubSkipNotificationsXML struct {
+	Plugin string `xml:"plugin,attr"`
+}
+
+type gitHubStrategyXML struct {
+	StrategyID int `xml:"strategyId"`
+}
+
+type gitHubForkXML struct {
+	StrategyID int            `xml:"strategyId"`
+	Trust      gitHubTrustXML `xml:"trust"`
+}
+
+// gitHubTrustXML names the trust class of the fork trait. The class attribute
+// carries the Java nested class name.
+type gitHubTrustXML struct {
+	Class string `xml:"class,attr"`
+}
+
+// wildcardFilterXML is the head wildcard filter from the scm-api plugin.
+type wildcardFilterXML struct {
+	Plugin   string `xml:"plugin,attr"`
+	Includes string `xml:"includes"`
+	Excludes string `xml:"excludes"`
+}
+
+type gitHubSSHXML struct {
+	CredentialsID string `xml:"credentialsId"`
+}
+
+// gitHubTraitsFor renders the declared GitHub traits. It returns nil for an
+// empty list, so the source has no traits element.
+func gitHubTraitsFor(traits []GitHubTrait) *gitHubTraitsXML {
+	if len(traits) == 0 {
+		return nil
+	}
+	x := &gitHubTraitsXML{}
+	for _, t := range traits {
+		switch {
+		case t.GitHubBranchDiscovery != nil:
+			x.Branch = &gitHubStrategyXML{StrategyID: t.GitHubBranchDiscovery.StrategyID}
+		case t.GitHubPullRequestDiscovery != nil:
+			x.PullRequest = &gitHubStrategyXML{StrategyID: t.GitHubPullRequestDiscovery.StrategyID}
+		case t.GitHubForkDiscovery != nil:
+			f := t.GitHubForkDiscovery
+			trust := "org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission"
+			if f.Trust.GitHubTrustEveryone != nil {
+				trust = "org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustEveryone"
+			}
+			x.Fork = &gitHubForkXML{StrategyID: f.StrategyID, Trust: gitHubTrustXML{Class: trust}}
+		case t.HeadWildcardFilter != nil:
+			w := t.HeadWildcardFilter
+			includes := w.Includes
+			if includes == "" {
+				includes = "*"
+			}
+			x.Wildcard = &wildcardFilterXML{Plugin: "scm-api", Includes: includes, Excludes: w.Excludes}
+		case t.GitHubSshCheckout != nil:
+			x.SSHCheckout = &gitHubSSHXML{CredentialsID: t.GitHubSshCheckout.CredentialsID}
+		case t.GitHubSkipNotifications != nil:
+			x.SkipNotifications = &gitHubSkipNotificationsXML{Plugin: "skip-notifications-trait"}
+		}
+	}
+	return x
+}
+
+// gitHubSourceFor renders a GitHub branch source with its declared traits.
+func gitHubSourceFor(gh *GitHubSCMSource) *gitHubSourceXML {
+	return &gitHubSourceXML{
+		Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
+		Plugin:          "github-branch-source",
+		CredentialsID:   gh.CredentialsID,
+		RepoOwner:       gh.RepoOwner,
+		Repository:      gh.Repository,
+		RepositoryURL:   gh.RepositoryURL,
+		ConfiguredByURL: gh.ConfiguredByURL,
+		Traits:          gitHubTraitsFor(gh.Traits),
+	}
 }
 
 type mbFactoryXML struct {
 	Class      string `xml:"class,attr"`
-	ScriptPath string `xml:"scriptPath"`
+	Plugin     string `xml:"plugin,attr,omitempty"`
+	ScriptPath string `xml:"scriptPath,omitempty"`
 }
 
 func multibranchConfigXML(item Item) xmlConfig {
 	m := &multibranchXML{
-		Plugin:      "workflow-multibranch",
-		DisplayName: item.DisplayName,
-		Description: item.Description,
+		Plugin:               "workflow-multibranch",
+		DisplayName:          item.DisplayName,
+		Description:          item.Description,
+		OrphanedItemStrategy: orphanedItemStrategyFor(item.OrphanedItemStrategy),
 	}
 	// Build Sources struct once before the loop
 	m.Sources = &branchSourcesXML{
@@ -557,16 +1011,18 @@ func multibranchConfigXML(item Item) xmlConfig {
 	}
 	for _, entry := range item.SourcesList {
 		// Official spec: branchSource.source.github
-		if entry.BranchSource.Source.GitHub != nil {
+		if gh := entry.BranchSource.Source.GitHub; gh != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
-				Source: &branchSourceSourceXML{
-					Class:           "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-					Plugin:          "github-branch-source",
-					RepoOwner:       entry.BranchSource.Source.GitHub.RepoOwner,
-					Repository:      entry.BranchSource.Source.GitHub.Repository,
-					RepositoryURL:   entry.BranchSource.Source.GitHub.RepositoryURL,
-					ConfiguredByURL: entry.BranchSource.Source.GitHub.ConfiguredByURL,
-				},
+				Source:          gitHubSourceFor(gh),
+				BuildStrategies: skipInitialBuildStrategies(),
+			})
+			continue
+		}
+		// Official spec: branchSource.source.gitea
+		if g := entry.BranchSource.Source.Gitea; g != nil {
+			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
+				Source:          giteaSourceFor(g),
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
@@ -579,6 +1035,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.BranchSource.Source.Git.Remote,
 					CredentialsID: entry.BranchSource.Source.Git.CredentialsID,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
@@ -591,33 +1048,39 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.Git.Remote,
 					CredentialsID: entry.Git.CredentialsID,
 				},
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
 		// Legacy format: bare github at top level
 		if entry.GitHub != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
-				Source: &branchSourceSourceXML{
-					Class:     "org.jenkinsci.plugins.github_branch_source.GitHubSCMSource",
-					Plugin:    "github-branch-source",
-					RepoOwner: entry.GitHub.RepoOwner,
-				},
+				Source:          gitHubSourceFor(entry.GitHub),
+				BuildStrategies: skipInitialBuildStrategies(),
 			})
 			continue
 		}
 	}
-	// Project factory: WorkflowBranchProjectFactory (official spec name) or MultiBranchProjectFactory
+	// Project factory: WorkflowBranchProjectFactory (official spec name),
+	// MultiBranchProjectFactory, or the plugin's marker factory.
 	if item.ProjectFactory != nil {
-		sp := ""
-		if item.ProjectFactory.WorkflowBranch != nil {
-			sp = item.ProjectFactory.WorkflowBranch.ScriptPath
-		} else if item.ProjectFactory.MultiBranch != nil {
-			sp = item.ProjectFactory.MultiBranch.ScriptPath
-		}
-		if sp != "" {
+		if item.ProjectFactory.VarroaMarker != nil {
 			m.Factory = &mbFactoryXML{
-				Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
-				ScriptPath: sp,
+				Class:  "org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateBranchProjectFactory",
+				Plugin: varroaMiteAuthPlugin,
+			}
+		} else {
+			sp := ""
+			if item.ProjectFactory.WorkflowBranch != nil {
+				sp = item.ProjectFactory.WorkflowBranch.ScriptPath
+			} else if item.ProjectFactory.MultiBranch != nil {
+				sp = item.ProjectFactory.MultiBranch.ScriptPath
+			}
+			if sp != "" {
+				m.Factory = &mbFactoryXML{
+					Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
+					ScriptPath: sp,
+				}
 			}
 		}
 	}
@@ -628,9 +1091,10 @@ func multibranchConfigXML(item Item) xmlConfig {
 
 type folderPropertiesXML struct {
 	EnvVars           *envVarsFolderXML     `xml:"org.jenkinsci.plugins.envinject.EnvInjectFolderProperty,omitempty"`
-	FolderCredentials *folderCredentialsXML `xml:"com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProperty,omitempty"`
-	FolderLibraries   *folderLibrariesXML   `xml:"org.jenkinsci.plugins.pipeline.modeldefinition.model.GlobalSharedLibraryFolderProperty,omitempty"`
+	FolderCredentials *folderCredentialsXML `xml:"com.cloudbees.hudson.plugins.folder.properties.FolderCredentialsProvider_-FolderCredentialsProperty,omitempty"`
+	FolderLibraries   *folderLibrariesXML   `xml:"org.jenkinsci.plugins.workflow.libs.FolderLibraries,omitempty"`
 	ItemRestrictions  *itemRestrictionsXML  `xml:"com.cloudbees.hudson.plugins.folder.properties.RestrictedProjectsProperty,omitempty"`
+	Kubernetes        *kubernetesFolderXML  `xml:"org.csanchez.jenkins.plugins.kubernetes.KubernetesFolderProperty,omitempty"`
 }
 
 type envVarsFolderXML struct {
@@ -658,8 +1122,71 @@ type domainXML struct {
 type domainSpecificationsXML struct{}
 
 type credentialListXML struct {
-	UsernamePassword []*usernamePasswordCredXML `xml:"com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl,omitempty"`
-	SecretText       []*secretTextCredXML       `xml:"org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl,omitempty"`
+	UsernamePassword       []*usernamePasswordCredXML       `xml:"com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl,omitempty"`
+	SecretText             []*secretTextCredXML             `xml:"org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl,omitempty"`
+	BasicSSHUserPrivateKey []*basicSSHUserPrivateKeyCredXML `xml:"com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey,omitempty"`
+	File                   []*fileCredXML                   `xml:"org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl,omitempty"`
+	Certificate            []*certificateCredXML            `xml:"com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl,omitempty"`
+	GitHubApp              []*gitHubAppCredXML              `xml:"org.jenkinsci.plugins.github__branch__source.GitHubAppCredentials,omitempty"`
+}
+
+// gitHubAppCredXML is a GitHub App credential. The element name comes from
+// the github-branch-source plugin, which uses double underscores.
+type gitHubAppCredXML struct {
+	Scope       string `xml:"scope"`
+	ID          string `xml:"id"`
+	Description string `xml:"description,omitempty"`
+	AppID       string `xml:"appID"`
+	PrivateKey  string `xml:"privateKey"`
+	APIURI      string `xml:"apiUri,omitempty"`
+	Owner       string `xml:"owner,omitempty"`
+}
+
+// uploadedKeyStoreSourceClass is the XStream class of an uploaded keystore
+// source. Jenkins cannot read the keystore source without it.
+const uploadedKeyStoreSourceClass = "com.cloudbees.plugins.credentials.impl.CertificateCredentialsImpl$UploadedKeyStoreSource"
+
+type fileCredXML struct {
+	Scope       string `xml:"scope"`
+	ID          string `xml:"id"`
+	Description string `xml:"description,omitempty"`
+	FileName    string `xml:"fileName"`
+	SecretBytes string `xml:"secretBytes"`
+}
+
+// certificateCredXML always renders the password element, so XStream reads
+// an empty Secret and never a null field.
+type certificateCredXML struct {
+	Scope          string            `xml:"scope"`
+	ID             string            `xml:"id"`
+	Description    string            `xml:"description,omitempty"`
+	KeyStoreSource keyStoreSourceXML `xml:"keyStoreSource"`
+	Password       string            `xml:"password"`
+}
+
+type keyStoreSourceXML struct {
+	Class                 string `xml:"class,attr"`
+	UploadedKeystoreBytes string `xml:"uploadedKeystoreBytes"`
+}
+
+// directEntryPrivateKeySourceClass is the XStream class of a direct-entry
+// key source. Jenkins cannot read the key source without it.
+const directEntryPrivateKeySourceClass = "com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey$DirectEntryPrivateKeySource"
+
+// basicSSHUserPrivateKeyCredXML always renders the passphrase element, so
+// XStream reads an empty Secret and never a null field.
+type basicSSHUserPrivateKeyCredXML struct {
+	Scope            string              `xml:"scope"`
+	ID               string              `xml:"id"`
+	Description      string              `xml:"description,omitempty"`
+	Username         string              `xml:"username"`
+	PrivateKeySource privateKeySourceXML `xml:"privateKeySource"`
+	Passphrase       string              `xml:"passphrase"`
+}
+
+type privateKeySourceXML struct {
+	Class      string `xml:"class,attr"`
+	PrivateKey string `xml:"privateKey"`
 }
 
 type usernamePasswordCredXML struct {
@@ -678,19 +1205,43 @@ type secretTextCredXML struct {
 }
 
 type folderLibrariesXML struct {
-	Libraries []libraryEntryXML `xml:"libraries>org.jenkinsci.plugins.pipeline.modeldefinition.model.LibraryConfiguration"`
+	Libraries []libraryEntryXML `xml:"libraries>org.jenkinsci.plugins.workflow.libs.LibraryConfiguration"`
 }
 
+// libraryEntryXML renders one folder library. AllowVersionOverride has no
+// omitempty so that false is written: XStream does not run the Java field
+// initialiser for a missing element.
 type libraryEntryXML struct {
-	Name                 string `xml:"name"`
-	Implicit             bool   `xml:"implicit,omitempty"`
-	AllowVersionOverride bool   `xml:"allowVersionOverride,omitempty"`
-	IncludeInChangesets  bool   `xml:"includeInChangesets,omitempty"`
+	Name                 string        `xml:"name"`
+	Retriever            *retrieverXML `xml:"retriever,omitempty"`
+	DefaultVersion       string        `xml:"defaultVersion,omitempty"`
+	Implicit             bool          `xml:"implicit,omitempty"`
+	AllowVersionOverride bool          `xml:"allowVersionOverride"`
+	IncludeInChangesets  bool          `xml:"includeInChangesets,omitempty"`
+}
+
+// retrieverXML renders a shared-library retriever. The class selects the
+// retriever: SCMSourceRetriever for a modern source (scm holds a branch
+// source), or SCMRetriever for the legacy form (scm holds a git SCM block).
+type retrieverXML struct {
+	Class string `xml:"class,attr"`
+	SCM   any    `xml:"scm"`
+}
+
+// gitLibraryTraitsXML holds the discovery traits of a git library source.
+// Both traits are fixed so that every branch and tag resolves as a version.
+type gitLibraryTraitsXML struct {
+	Branch *struct{} `xml:"jenkins.plugins.git.traits.BranchDiscoveryTrait"`
+	Tag    *struct{} `xml:"jenkins.plugins.git.traits.TagDiscoveryTrait"`
 }
 
 type itemRestrictionsXML struct {
 	AllowedTypes []string `xml:"allowedTypes>string"`
 	Filter       bool     `xml:"filter"`
+}
+
+type kubernetesFolderXML struct {
+	PermittedClouds []string `xml:"permittedClouds>string"`
 }
 
 func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
@@ -739,6 +1290,56 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 							Description: c.SecretText.Description,
 							Secret:      c.SecretText.Secret,
 						})
+					case c.BasicSSHUserPrivateKey != nil:
+						k := c.BasicSSHUserPrivateKey
+						if k.PrivateKeySource.DirectEntry == nil {
+							return nil, fmt.Errorf("basicSSHUserPrivateKey credential %q has no directEntry private key source", k.ID)
+						}
+						creds.BasicSSHUserPrivateKey = append(creds.BasicSSHUserPrivateKey, &basicSSHUserPrivateKeyCredXML{
+							Scope:       k.Scope,
+							ID:          k.ID,
+							Description: k.Description,
+							Username:    k.Username,
+							PrivateKeySource: privateKeySourceXML{
+								Class:      directEntryPrivateKeySourceClass,
+								PrivateKey: k.PrivateKeySource.DirectEntry.PrivateKey,
+							},
+							Passphrase: k.Passphrase,
+						})
+					case c.File != nil:
+						creds.File = append(creds.File, &fileCredXML{
+							Scope:       c.File.Scope,
+							ID:          c.File.ID,
+							Description: c.File.Description,
+							FileName:    c.File.FileName,
+							SecretBytes: c.File.SecretBytes,
+						})
+					case c.Certificate != nil:
+						k := c.Certificate
+						if k.KeyStoreSource.Uploaded == nil {
+							return nil, fmt.Errorf("certificate credential %q has no uploaded keystore source", k.ID)
+						}
+						creds.Certificate = append(creds.Certificate, &certificateCredXML{
+							Scope:       k.Scope,
+							ID:          k.ID,
+							Description: k.Description,
+							KeyStoreSource: keyStoreSourceXML{
+								Class:                 uploadedKeyStoreSourceClass,
+								UploadedKeystoreBytes: k.KeyStoreSource.Uploaded.UploadedKeystore,
+							},
+							Password: k.Password,
+						})
+					case c.GitHubApp != nil:
+						g := c.GitHubApp
+						creds.GitHubApp = append(creds.GitHubApp, &gitHubAppCredXML{
+							Scope:       g.Scope,
+							ID:          g.ID,
+							Description: g.Description,
+							AppID:       g.AppID,
+							PrivateKey:  g.PrivateKey,
+							APIURI:      g.APIURI,
+							Owner:       g.Owner,
+						})
 					default:
 						return nil, fmt.Errorf("folder credential entry has no recognized credential type")
 					}
@@ -750,8 +1351,77 @@ func buildFolderProperties(item Item) (*folderPropertiesXML, error) {
 			}
 			props.FolderCredentials = &folderCredentialsXML{DomainCredentials: entries}
 		}
+		if p.FolderLibraries != nil {
+			var entries []libraryEntryXML
+			for _, lc := range p.FolderLibraries.Libraries {
+				cfg := lc.LibraryConfiguration
+				retriever, err := libraryRetrieverXML(cfg.Retriever)
+				if err != nil {
+					return nil, fmt.Errorf("folder library %q: %w", cfg.Name, err)
+				}
+				entries = append(entries, libraryEntryXML{
+					Name:                 cfg.Name,
+					Retriever:            retriever,
+					DefaultVersion:       cfg.DefaultVersion,
+					Implicit:             cfg.Implicit,
+					AllowVersionOverride: cfg.AllowVersionOverride,
+					IncludeInChangesets:  cfg.IncludeInChangesets,
+				})
+			}
+			props.FolderLibraries = &folderLibrariesXML{Libraries: entries}
+		}
+		if p.Kubernetes != nil {
+			props.Kubernetes = &kubernetesFolderXML{PermittedClouds: p.Kubernetes.PermittedClouds}
+		}
 	}
 	return props, nil
+}
+
+// libraryRetrieverXML renders a shared-library retriever. A GitHub or git
+// modern source uses SCMSourceRetriever with a branch-source element. A
+// legacy source uses SCMRetriever with a git SCM element. The validator
+// rejects every other shape before this runs; the errors remain as a backstop.
+func libraryRetrieverXML(r LibraryRetriever) (*retrieverXML, error) {
+	switch {
+	case r.ModernSCM != nil && r.LegacySCM != nil:
+		return nil, fmt.Errorf("retriever must set exactly one of modernSCM and legacySCM")
+	case r.LegacySCM != nil:
+		git := r.LegacySCM.SCM.GitSCM
+		if git == nil {
+			return nil, fmt.Errorf("legacySCM retriever names no gitSCM")
+		}
+		return &retrieverXML{
+			Class: "org.jenkinsci.plugins.workflow.libs.SCMRetriever",
+			SCM:   convertGitSCM(git),
+		}, nil
+	case r.ModernSCM == nil:
+		return nil, fmt.Errorf("retriever names no source (set modernSCM or legacySCM)")
+	}
+	s := r.ModernSCM.SCM
+	const retrieverClass = "org.jenkinsci.plugins.workflow.libs.SCMSourceRetriever"
+	switch {
+	case s.GitHub != nil && s.Git != nil:
+		return nil, fmt.Errorf("modernSCM.scm must set exactly one of github and git")
+	case s.GitHub != nil:
+		return &retrieverXML{
+			Class: retrieverClass,
+			SCM:   gitHubSourceFor(s.GitHub),
+		}, nil
+	case s.Git != nil:
+		g := s.Git
+		return &retrieverXML{
+			Class: retrieverClass,
+			SCM: &branchSourceSourceXML{
+				Class:         "jenkins.plugins.git.GitSCMSource",
+				Plugin:        "git",
+				Remote:        g.Remote,
+				CredentialsID: g.CredentialsID,
+				Traits:        &gitLibraryTraitsXML{Branch: &struct{}{}, Tag: &struct{}{}},
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("modernSCM.scm must set exactly one of github and git")
+	}
 }
 
 // ---- Organization Folder ----
@@ -763,11 +1433,110 @@ type orgFolderXML struct {
 	Description      string               `xml:"description,omitempty"`
 	Navigators       *navigatorsXML       `xml:"navigators"`
 	ProjectFactories *projectFactoriesXML `xml:"projectFactories"`
+	BuildStrategies  *buildStrategiesXML  `xml:"buildStrategies"`
 }
 
 type navigatorsXML struct {
 	GitHub []*githubNavigatorXML `xml:"org.jenkinsci.plugins.github_branch_source.GitHubSCMNavigator"`
 	Git    []*gitNavigatorXML    `xml:"jenkins.plugins.git.GitSCMNavigator"`
+	Gitea  []*giteaNavigatorXML  `xml:"org.jenkinsci.plugin.gitea.GiteaSCMNavigator"`
+}
+
+// giteaSourceXML is a Gitea or Forgejo branch source.
+type giteaSourceXML struct {
+	Class         string          `xml:"class,attr"`
+	Plugin        string          `xml:"plugin,attr"`
+	ServerURL     string          `xml:"serverUrl"`
+	RepoOwner     string          `xml:"repoOwner"`
+	Repository    string          `xml:"repository"`
+	CredentialsID string          `xml:"credentialsId,omitempty"`
+	Traits        *giteaTraitsXML `xml:"traits"`
+}
+
+// giteaNavigatorXML is a Gitea or Forgejo organization scan.
+type giteaNavigatorXML struct {
+	Plugin        string          `xml:"plugin,attr"`
+	ServerURL     string          `xml:"serverUrl"`
+	RepoOwner     string          `xml:"repoOwner"`
+	CredentialsID string          `xml:"credentialsId,omitempty"`
+	Traits        *giteaTraitsXML `xml:"traits"`
+}
+
+// giteaTraitsXML lists the discovery traits in a fixed order. The webhook
+// trait is always present and always disabled: a cell's root URL is the
+// dashboard door, so the plugin must not register hooks of its own.
+type giteaTraitsXML struct {
+	Branch      *giteaStrategyXML    `xml:"org.jenkinsci.plugin.gitea.BranchDiscoveryTrait"`
+	PullRequest *giteaStrategyXML    `xml:"org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait"`
+	Fork        *giteaForkXML        `xml:"org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait"`
+	Tag         *struct{}            `xml:"org.jenkinsci.plugin.gitea.TagDiscoveryTrait"`
+	Webhook     giteaWebhookTraitXML `xml:"org.jenkinsci.plugin.gitea.WebhookRegistrationTrait"`
+}
+
+type giteaStrategyXML struct {
+	StrategyID int `xml:"strategyId"`
+}
+
+type giteaForkXML struct {
+	StrategyID int           `xml:"strategyId"`
+	Trust      giteaTrustXML `xml:"trust"`
+}
+
+type giteaTrustXML struct {
+	Class string `xml:"class,attr"`
+}
+
+type giteaWebhookTraitXML struct {
+	Mode string `xml:"mode"`
+}
+
+// giteaTraitsFor renders the effective discovery traits of a Gitea source or
+// navigator.
+func giteaTraitsFor(traits []GiteaTrait) *giteaTraitsXML {
+	x := &giteaTraitsXML{Webhook: giteaWebhookTraitXML{Mode: "DISABLE"}}
+	for _, t := range EffectiveGiteaTraits(traits) {
+		switch {
+		case t.GiteaBranchDiscovery != nil:
+			x.Branch = &giteaStrategyXML{StrategyID: t.GiteaBranchDiscovery.StrategyID}
+		case t.GiteaPullRequestDiscovery != nil:
+			x.PullRequest = &giteaStrategyXML{StrategyID: t.GiteaPullRequestDiscovery.StrategyID}
+		case t.GiteaForkDiscovery != nil:
+			f := t.GiteaForkDiscovery
+			x.Fork = &giteaForkXML{
+				StrategyID: f.StrategyID,
+				Trust:      giteaTrustXML{Class: giteaTrustClass(f.Trust)},
+			}
+		case t.GiteaTagDiscovery != nil:
+			x.Tag = &struct{}{}
+		}
+	}
+	return x
+}
+
+// giteaTrustClass maps a trust keyword to the fork trait's inner class.
+func giteaTrustClass(trust string) string {
+	const prefix = "org.jenkinsci.plugin.gitea.ForkPullRequestDiscoveryTrait$"
+	switch trust {
+	case "nobody":
+		return prefix + "TrustNobody"
+	case "everyone":
+		return prefix + "TrustEveryone"
+	default:
+		return prefix + "TrustContributors"
+	}
+}
+
+// giteaSourceFor renders a Gitea branch source.
+func giteaSourceFor(g *GiteaSCMSource) *giteaSourceXML {
+	return &giteaSourceXML{
+		Class:         "org.jenkinsci.plugin.gitea.GiteaSCMSource",
+		Plugin:        "gitea",
+		ServerURL:     strings.TrimRight(g.ServerURL, "/"),
+		RepoOwner:     g.RepoOwner,
+		Repository:    g.Repository,
+		CredentialsID: g.CredentialsID,
+		Traits:        giteaTraitsFor(g.Traits),
+	}
 }
 
 type githubNavigatorXML struct {
@@ -788,9 +1557,10 @@ type projectFactoriesXML struct {
 
 func orgFolderConfigXML(item Item) xmlConfig {
 	o := &orgFolderXML{
-		Plugin:      "branch-api",
-		DisplayName: item.DisplayName,
-		Description: item.Description,
+		Plugin:          "branch-api",
+		DisplayName:     item.DisplayName,
+		Description:     item.Description,
+		BuildStrategies: skipInitialBuildStrategies(),
 	}
 	if len(item.Navigators) > 0 {
 		o.Navigators = &navigatorsXML{}
@@ -807,6 +1577,15 @@ func orgFolderConfigXML(item Item) xmlConfig {
 					Plugin:        "git",
 					Remote:        nav.Git.Remote,
 					CredentialsID: nav.Git.CredentialsID,
+				})
+			}
+			if g := nav.Gitea; g != nil {
+				o.Navigators.Gitea = append(o.Navigators.Gitea, &giteaNavigatorXML{
+					Plugin:        "gitea",
+					ServerURL:     strings.TrimRight(g.ServerURL, "/"),
+					RepoOwner:     g.RepoOwner,
+					CredentialsID: g.CredentialsID,
+					Traits:        giteaTraitsFor(g.Traits),
 				})
 			}
 		}

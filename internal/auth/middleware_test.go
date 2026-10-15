@@ -246,3 +246,39 @@ func TestAuthMiddleware_OIDCAuthEndpoints(t *testing.T) {
 		})
 	}
 }
+
+// TestAuthMiddleware_PipelinesTicketBoundToOneTeam proves the middleware
+// verifies a stream ticket against the path's own scope, so a ticket for
+// one team cannot open another team's stream.
+func TestAuthMiddleware_PipelinesTicketBoundToOneTeam(t *testing.T) {
+	mp := &mockProvider{}
+	mkv := &mockKeyVerifier{}
+	logger := slog.Default()
+	signer := newTestSigner(t)
+	iss := NewTicketIssuer(signer, "iss", 30*time.Second)
+	tv := NewTicketVerifier(signer.PublicKey(), "iss")
+
+	ticket, _, _ := iss.Mint(&Claims{Subject: "alice"}, "pipelines:team-a")
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{"the ticket's own team", "/api/v1/pipelines/team-a/stream", http.StatusOK},
+		{"another team", "/api/v1/pipelines/team-b/stream", http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			mw := AuthMiddleware(mp, mkv, tv, nil, next, logger)
+			req := httptest.NewRequest(http.MethodGet, tc.path+"?ticket="+ticket, nil)
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Errorf("%s: status = %d, want %d", tc.path, rec.Code, tc.want)
+			}
+		})
+	}
+}

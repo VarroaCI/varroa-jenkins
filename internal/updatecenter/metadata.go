@@ -1,14 +1,17 @@
 package updatecenter
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // updateCenterJSON is the shape of the Jenkins update-center JSON payload.
@@ -19,11 +22,20 @@ type updateCenterJSON struct {
 }
 
 type updateCenterPlugin struct {
-	Name         string   `json:"name"`
-	Version      string   `json:"version"`
-	URL          string   `json:"url"`
-	SHA256       string   `json:"sha256"`
-	Dependencies []string `json:"dependencies"`
+	Name         string                   `json:"name"`
+	Version      string                   `json:"version"`
+	URL          string                   `json:"url"`
+	SHA256       string                   `json:"sha256"`
+	RequiredCore string                   `json:"requiredCore"`
+	Dependencies []updateCenterDependency `json:"dependencies"`
+}
+
+// updateCenterDependency is one entry of a served plugin's dependency list.
+// Version is the manifest minimum, as Jenkins reads it.
+type updateCenterDependency struct {
+	Name     string `json:"name"`
+	Optional bool   `json:"optional"`
+	Version  string `json:"version"`
 }
 
 // handleMetadataPlain serves GET /update-center.actual.json.
@@ -57,22 +69,88 @@ func (s *Server) handleMetadataJSONP(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildMetadataPayload regenerates the update-center JSON per-request
-// from live store inventory. MVP: dependencies is always empty, core is
-// always "", updateCenterVersion is always "1".
+// from live store inventory. Each plugin lists its dependencies from its own
+// manifest. A plugin whose dependency list is unknown is left out of the
+// document, but it stays downloadable at its explicit version. core is always
+// "", and updateCenterVersion is always "1".
+//
+// A ?version=<core> query names the requesting controller's core. The document then
+// lists, for each plugin, the highest stored version that core runs. A declared
+// latest plugin with no compatible stored version takes the newest compatible
+// version from the upstream metadata sources, when pull-through is on. Without the
+// query, the served version does not depend on the core.
 func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 	uc := &updateCenterJSON{
 		UpdateCenterVersion: "1",
 		Core:                "",
 		Plugins:             make(map[string]updateCenterPlugin),
 	}
+	core := strings.TrimSpace(r.URL.Query().Get("version"))
+
+	winners := s.servedPlugins(r.Context(), core)
+	// withheld names a stored winner that the document omits. Its name must not
+	// be filled from upstream, because the stored bytes would not match the
+	// advertised digest.
+	withheld := make(map[string]bool)
+	for name, winner := range winners {
+		// Convert the stored hex digest ("sha256:<hex>") to base64 as
+		// Jenkins' update-center schema expects.
+		rawBytes, err := hex.DecodeString(stripDigestPrefix(winner.SHA256))
+		if err != nil {
+			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
+			withheld[name] = true
+			continue
+		}
+		deps, known := s.pluginDependencies(r.Context(), winner)
+		if !known {
+			withheld[name] = true
+			continue
+		}
+		served := make([]updateCenterDependency, 0, len(deps))
+		for _, d := range deps {
+			served = append(served, updateCenterDependency{Name: d.Name, Optional: d.Optional, Version: d.Min})
+		}
+		uc.Plugins[name] = updateCenterPlugin{
+			Name:         name,
+			Version:      winner.Version,
+			URL:          name + "/" + winner.Version + "/" + name + ".hpi",
+			SHA256:       base64.StdEncoding.EncodeToString(rawBytes),
+			RequiredCore: winner.RequiredCore,
+			Dependencies: served,
+		}
+	}
+
+	declared, _ := ReadDeclaredPlugins(s.declaredPluginsFile)
+	for _, name := range declaredLatestNames(declared) {
+		if winner, stored := winners[name]; stored {
+			// A stored winner that is withheld, compatible, or pinned by the declared
+			// set stays as it is. Only an incompatible stored winner is replaced.
+			if withheld[name] || ucmeta.CoreCompatible(winner.RequiredCore, core) || slices.Contains(declared[name], winner.Version) {
+				continue
+			}
+		}
+		if entry, ok := s.upstreamLatestEntry(r.Context(), name, core); ok {
+			uc.Plugins[name] = entry
+		}
+	}
+
+	return uc
+}
+
+// servedPlugins returns the one version each stored plugin serves, keyed by name.
+// The metadata document and the latest download both read it, so a latest request
+// gets the version that update-center.actual.json advertises. A non-empty core
+// restricts the choice to versions that core runs, when any such version is stored.
+func (s *Server) servedPlugins(ctx context.Context, core string) map[string]pluginLayerInfo {
+	served := make(map[string]pluginLayerInfo)
 
 	// Skips are deliberately discarded: serving metadata for the packs that ARE
 	// readable is strictly better than failing the whole request because one
 	// unrelated manifest is unreachable. Only /api/v1/inventory fails closed.
-	packs, _, err := s.listPackInfos(r.Context())
+	packs, _, err := s.listPackInfos(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list pack infos for metadata", "error", err)
-		return uc
+		return served
 	}
 
 	// The declared set is advisory here: metadata serving must never fail because
@@ -91,27 +169,15 @@ func (s *Server) buildMetadataPayload(r *http.Request) *updateCenterJSON {
 	}
 
 	for name, candidates := range byName {
-		winner, ok := selectServedVersion(name, candidates, declared)
-		if !ok {
-			continue
+		eligible := candidates
+		if !pinnedInStore(declared, name, candidates) {
+			eligible = preferCompatible(candidates, core)
 		}
-		// Convert the stored hex digest ("sha256:<hex>") to base64 as
-		// Jenkins' update-center schema expects.
-		rawBytes, err := hex.DecodeString(stripDigestPrefix(winner.SHA256))
-		if err != nil {
-			s.logger.Warn("invalid hex digest for plugin", "name", name, "sha256", winner.SHA256, "error", err)
-			continue
-		}
-		uc.Plugins[name] = updateCenterPlugin{
-			Name:         name,
-			Version:      winner.Version,
-			URL:          name + "/" + winner.Version + "/" + name + ".hpi",
-			SHA256:       base64.StdEncoding.EncodeToString(rawBytes),
-			Dependencies: []string{},
+		if winner, ok := selectServedVersion(name, eligible, declared); ok {
+			served[name] = winner
 		}
 	}
-
-	return uc
+	return served
 }
 
 // selectServedVersion applies the total version-precedence rule across every

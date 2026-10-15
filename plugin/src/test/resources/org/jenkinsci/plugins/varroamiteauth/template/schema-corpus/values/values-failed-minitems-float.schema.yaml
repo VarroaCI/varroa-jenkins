@@ -1,0 +1,10 @@
+type: object
+additionalProperties: false
+properties:
+  tags:
+    type: array
+    minItems: 2.0
+    items:
+      type: string
+required:
+- tags

@@ -69,9 +69,9 @@ spec:
 
 	err := editLoop(
 		func() (map[string]any, error) { return fetched, nil },
-		func(doc map[string]any) error {
+		func(_, mod map[string]any) error {
 			putCalled = true
-			putDoc = doc
+			putDoc = mod
 			return nil
 		},
 		"test", "myobj",
@@ -161,7 +161,7 @@ spec:
 
 	err := editLoop(
 		func() (map[string]any, error) { return fetched, nil },
-		func(doc map[string]any) error {
+		func(_, _ map[string]any) error {
 			putCalled = true
 			return nil
 		},
@@ -216,7 +216,7 @@ func TestEditLoop_ParseErrorKeepsTemp(t *testing.T) {
 
 	err := editLoop(
 		func() (map[string]any, error) { return fetched, nil },
-		func(doc map[string]any) error {
+		func(_, _ map[string]any) error {
 			putCalled = true
 			return nil
 		},
@@ -291,8 +291,8 @@ spec:
 
 	err := editLoop(
 		func() (map[string]any, error) { return fetched, nil },
-		func(doc map[string]any) error {
-			putDoc = doc
+		func(_, mod map[string]any) error {
+			putDoc = mod
 			return nil
 		},
 		"test", "myobj",

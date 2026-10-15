@@ -87,6 +87,50 @@ describe("Roles", () => {
     expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(2);
   });
 
+  it("shows the failed-hive count of a role with stale-copy faults", async () => {
+    const faulted = createRole({
+      metadata: { name: "ops-role" },
+      spec: {},
+      status: {
+        observedGeneration: 2,
+        federation: [
+          {
+            cluster: "edge",
+            state: "failed",
+            reason: "StaleJenkinsRoleDeleteFailed",
+            message: "delete of earlier copy JenkinsRole jenkins-admin failed: denied",
+            lastTransitionTime: "2026-09-28T12:00:00Z",
+          },
+          {
+            cluster: "member-c",
+            state: "failed",
+            reason: "StaleJenkinsRoleDeleteFailed",
+            message: "delete of earlier copy JenkinsRole jenkins-admin failed: denied",
+            lastTransitionTime: "2026-09-28T12:00:00Z",
+          },
+        ],
+      },
+    });
+    mockListRoles.mockResolvedValue({ items: [faulted, customRole] });
+    renderWithProviders(<Roles />);
+    await waitFor(() => {
+      expect(screen.getByText("ops-role")).toBeInTheDocument();
+    });
+    expect(screen.getByText("2 failed")).toBeInTheDocument();
+    expect(screen.getAllByText(/failed$/)).toHaveLength(1);
+  });
+
+  it("shows no federation text for a role with no status entries", async () => {
+    const empty = createRole({ metadata: { name: "quiet-role" }, spec: {}, status: { observedGeneration: 1 } });
+    mockListRoles.mockResolvedValue({ items: [empty, customRole] });
+    renderWithProviders(<Roles />);
+    await waitFor(() => {
+      expect(screen.getByText("quiet-role")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Not reported")).not.toBeInTheDocument();
+  });
+
   it('navigates to /roles/create when "＋ New Role" is clicked', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Roles />);

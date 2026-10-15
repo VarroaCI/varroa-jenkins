@@ -114,7 +114,7 @@
 
 .roleRow {
   display: grid;
-  grid-template-columns: 1.6fr .7fr .7fr 1fr .6fr;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, .7fr) minmax(0, .7fr) minmax(0, 1fr) 128px;
   align-items: center;
   gap: 14px;
   padding: 14px 18px;
@@ -124,6 +124,13 @@
 
 .roleRow:last-child {
   border-bottom: none;
+}
+
+/* Each row is its own grid. Fixed-minimum tracks keep every row, and the
+   header, on the same column positions. Long names wrap inside their track. */
+.roleRow > * {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .head {
@@ -147,6 +154,12 @@
 .roleName {
   font-weight: 600;
   font-size: 14px;
+}
+
+.federationFault {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 12px;
 }
 
 .monoMuted {

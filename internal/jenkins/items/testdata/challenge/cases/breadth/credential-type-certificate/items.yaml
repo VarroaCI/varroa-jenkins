@@ -1,0 +1,17 @@
+items:
+  - kind: folder
+    name: credential-type-certificate
+    displayName: "Folder with a certificate credential"
+    description: "Folder with a certificate credential"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - certificate:
+                    id: signing-cert
+                    scope: GLOBAL
+                    description: "Signing certificate"
+                    password: fixture-password
+                    keyStoreSource:
+                      uploaded:
+                        uploadedKeystore: MIIBAv8=

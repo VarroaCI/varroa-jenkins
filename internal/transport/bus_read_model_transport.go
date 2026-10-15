@@ -10,7 +10,7 @@ import (
 
 // BusReadModelTransport wraps a BusReadModel to implement Transport for
 // read-only BFF use. Read methods are delegated to the underlying
-// BusReadModel. Send, DrainResults, and ClearDesired return errors.
+// BusReadModel. Send and DrainResults return errors.
 // SendImperative delegates to PublishSafeRestart for publish-only delivery.
 type BusReadModelTransport struct {
 	model *BusReadModel
@@ -27,9 +27,22 @@ func (t *BusReadModelTransport) Send(_ context.Context, _, _ string, _ *mitev1.O
 	return fmt.Errorf("BusReadModelTransport does not support Send")
 }
 
+// Forget does nothing. The read model keeps no per-mite subscription and no
+// result buffer.
+func (t *BusReadModelTransport) Forget(_, _ string) {}
+
+// ForgetMatching does nothing, for the same reason as Forget.
+func (t *BusReadModelTransport) ForgetMatching(func(ns, name string) bool) {}
+
 // SendImperative delegates to the publish-only PublishSafeRestart method.
 func (t *BusReadModelTransport) SendImperative(ctx context.Context, ns, name string, cmd *mitev1.ImperativeCommand) error {
 	return t.model.PublishSafeRestart(ctx, ns, name, cmd)
+}
+
+// SendImperativeToCluster publishes cmd for the mite of ns/name on
+// cluster, which can be a member cluster of the brood.
+func (t *BusReadModelTransport) SendImperativeToCluster(ctx context.Context, cluster, ns, name string, cmd *mitev1.ImperativeCommand) error {
+	return t.model.PublishImperativeToCluster(ctx, cluster, ns, name, cmd)
 }
 
 // DrainResults returns nil; BusReadModelTransport does not collect command results.
@@ -71,11 +84,6 @@ func (t *BusReadModelTransport) StreamDegraded(ns, name string) (string, bool) {
 // ConnEpoch returns zero values; BusReadModelTransport does not track connection epochs.
 func (t *BusReadModelTransport) ConnEpoch(_, _ string) (int64, bool) {
 	return 0, false
-}
-
-// ClearDesired returns an error; BusReadModelTransport is read-only.
-func (t *BusReadModelTransport) ClearDesired(_ context.Context, _, _ string) error {
-	return fmt.Errorf("BusReadModelTransport does not support ClearDesired")
 }
 
 // ObservabilityReport delegates to the underlying BusReadModel.

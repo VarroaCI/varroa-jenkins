@@ -8,7 +8,7 @@ import { http, HttpResponse } from "msw";
 
 const BASE = "/api/v1";
 
-const disabledStatus = { enabled: false, conditions: [], gaps: [], lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false };
+const disabledStatus = { enabled: false, conditions: [], gaps: [], gapCount: 0, unservable: [], unservableCount: 0, lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false };
 const enabledStatus = {
   enabled: true, phase: "Ready", pluginCount: 5, storeBytes: 2097152,
   conditions: [
@@ -21,6 +21,9 @@ const enabledStatus = {
     { plugin: "blueocean", version: "1.25.3", requiredBy: "profile-a" },
     { plugin: "workflow-api", version: "2.47", requiredBy: "profile-b" },
   ],
+  gapCount: 2,
+  unservable: [],
+  unservableCount: 0,
   lastSyncTime: "2025-02-01T12:00:00Z",
   storageType: "oci",
   pullThroughEnabled: true,
@@ -125,14 +128,15 @@ describe("SettingsUpdateCenterTab", () => {
     expect(await screen.findByText(/Last sync: never/)).toBeInTheDocument();
   });
 
-  it("renders gaps table when gaps.length > 0", async () => {
+  it("renders the not-yet-stored table with the pull-through note when gaps.length > 0", async () => {
     createServer(
       () => HttpResponse.json(enabledStatus),
       () => HttpResponse.json(pluginsData),
     );
     renderWithProviders(<SettingsUpdateCenterTab />);
     await vi.runAllTimersAsync();
-    expect(await screen.findByText("Plugin gaps")).toBeInTheDocument();
+    expect(await screen.findByText("Plugins not yet stored")).toBeInTheDocument();
+    expect(screen.getByText("Pull-through fetches these on demand.")).toBeInTheDocument();
     expect(screen.getAllByText("blueocean").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("workflow-api").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("profile-a")).toBeInTheDocument();
@@ -140,7 +144,7 @@ describe("SettingsUpdateCenterTab", () => {
   });
 
   it("does not show gaps table when gaps.length === 0", async () => {
-    const statusNoGaps = { ...enabledStatus, gaps: [] };
+    const statusNoGaps = { ...enabledStatus, gaps: [], gapCount: 0 };
     createServer(
       () => HttpResponse.json(statusNoGaps),
       () => HttpResponse.json(pluginsData),
@@ -150,7 +154,90 @@ describe("SettingsUpdateCenterTab", () => {
 
     // First await the status card to confirm DOM settled, then assert absence
     expect(await screen.findByText(/Storage:/)).toBeInTheDocument();
-    expect(screen.queryByText("Plugin gaps")).not.toBeInTheDocument();
+    expect(screen.queryByText("Plugins not yet stored")).not.toBeInTheDocument();
+  });
+
+  it("renders the unservable table with reasons and a truncation note", async () => {
+    const statusUnservable = {
+      ...enabledStatus,
+      pullThroughEnabled: false,
+      gapCount: 60,
+      unservableCount: 51,
+      unservable: [
+        { plugin: "aged-plugin", version: "1.0", requiredBy: "profile-a", reason: "ArchiveDisabled" },
+      ],
+    };
+    createServer(
+      () => HttpResponse.json(statusUnservable),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins the update center cannot serve")).toBeInTheDocument();
+    expect(screen.getByText("Aged pin; archive checksum fallback is disabled")).toBeInTheDocument();
+    expect(screen.getByText("showing 1 of 51")).toBeInTheDocument();
+    expect(screen.getByText("Seed these before an air-gapped cutover.")).toBeInTheDocument();
+    expect(screen.getByText("showing 2 of 60")).toBeInTheDocument();
+  });
+
+  it("shows the requesting core on a latest unservable row", async () => {
+    const statusCore = {
+      ...enabledStatus,
+      pullThroughEnabled: true,
+      unservableCount: 1,
+      unservable: [
+        { plugin: "core-bound", version: "latest", requiredBy: "profile-b", core: "2.555.3", reason: "NotListed" },
+      ],
+    };
+    createServer(
+      () => HttpResponse.json(statusCore),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("latest (core 2.555.3)")).toBeInTheDocument();
+  });
+
+  it("does not render the unservable table when unservable is empty", async () => {
+    createServer(
+      () => HttpResponse.json(enabledStatus),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins not yet stored")).toBeInTheDocument();
+    expect(screen.queryByText("Plugins the update center cannot serve")).not.toBeInTheDocument();
+  });
+
+  it("renders the unknown-dependency table with a truncation note", async () => {
+    const statusUnknown = {
+      ...enabledStatus,
+      unknownDependencyCount: 60,
+      unknownDependencies: [
+        { plugin: "acme-lib", version: "1.0" },
+        { plugin: "beta-lib", version: "2.1" },
+      ],
+    };
+    createServer(
+      () => HttpResponse.json(statusUnknown),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins with an unknown dependency list")).toBeInTheDocument();
+    expect(screen.getByText("acme-lib")).toBeInTheDocument();
+    expect(screen.getByText("showing 2 of 60")).toBeInTheDocument();
+  });
+
+  it("does not render the unknown-dependency table when the list is empty", async () => {
+    createServer(
+      () => HttpResponse.json({ ...enabledStatus, unknownDependencies: [], unknownDependencyCount: 0 }),
+      () => HttpResponse.json(pluginsData),
+    );
+    renderWithProviders(<SettingsUpdateCenterTab />);
+    await vi.runAllTimersAsync();
+    expect(await screen.findByText("Plugins not yet stored")).toBeInTheDocument();
+    expect(screen.queryByText("Plugins with an unknown dependency list")).not.toBeInTheDocument();
   });
 
   it("renders inventory plugins when enabled", async () => {

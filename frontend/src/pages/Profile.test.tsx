@@ -397,3 +397,49 @@ describe("Profile page", () => {
     await screen.findByText("Saving...");
   });
 });
+
+describe("Profile session source (#1201)", () => {
+  const baseMe = {
+    subject: "local:admin", preferredUsername: "admin", email: "admin@example.com",
+    name: "Admin", displayName: "Admin", groups: ["varroa-admins"],
+  };
+
+  it("labels a local break-glass session as a local account", async () => {
+    mockBffFetch.mockResolvedValue({ ...baseMe, authMode: "local" });
+    renderProfile();
+
+    await screen.findAllByText("Admin");
+    expect(screen.getByText(/via local account/)).toBeInTheDocument();
+    expect(screen.getByText("Subject")).toBeInTheDocument();
+    expect(screen.getByText("local:admin")).toBeInTheDocument();
+    expect(screen.queryByText("OIDC subject")).toBeNull();
+    expect(screen.queryByText(/via OIDC/)).toBeNull();
+  });
+
+  it("labels an OIDC session via OIDC", async () => {
+    mockBffFetch.mockResolvedValue({ ...baseMe, subject: "user:admin", authMode: "oidc" });
+    renderProfile();
+
+    await screen.findAllByText("Admin");
+    expect(screen.getByText(/via OIDC/)).toBeInTheDocument();
+    expect(screen.getByText("OIDC subject")).toBeInTheDocument();
+  });
+
+  it("shows the session start when signedInAt is present", async () => {
+    const iso = "2026-10-10T08:15:00Z";
+    mockBffFetch.mockResolvedValue({ ...baseMe, authMode: "local", signedInAt: iso });
+    renderProfile();
+
+    await screen.findAllByText("Admin");
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
+    expect(screen.getByText(new Date(iso).toLocaleString())).toBeInTheDocument();
+  });
+
+  it("omits Signed in when signedInAt is absent", async () => {
+    mockBffFetch.mockResolvedValue({ ...baseMe, authMode: "local" });
+    renderProfile();
+
+    await screen.findAllByText("Admin");
+    expect(screen.queryByText("Signed in")).toBeNull();
+  });
+});

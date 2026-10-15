@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // ValidateResult holds the result of bundle validation.
@@ -202,11 +204,12 @@ func ValidateContent(jenkinsYAML, pluginsYAML, itemsYAML, rbacYAML string, defin
 					result.Valid = false
 					result.Errors = append(result.Errors, fmt.Sprintf("plugins[%d]: artifactId is required", i))
 				}
-				switch p.Version {
-				case "":
+				v := strings.TrimSpace(p.Version)
+				switch {
+				case v == "":
 					result.Valid = false
 					result.Errors = append(result.Errors, fmt.Sprintf("plugins[%d] (%s): version is required (pin an exact version)", i, p.ArtifactID))
-				case "latest":
+				case ucmeta.IsLatest(v):
 					result.Warnings = append(result.Warnings, fmt.Sprintf("plugins[%d] (%s): version \"latest\" is non-deterministic; pin an exact version", i, p.ArtifactID))
 				}
 			}

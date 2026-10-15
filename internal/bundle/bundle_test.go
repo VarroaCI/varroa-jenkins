@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 func TestParseManifestValid(t *testing.T) {
@@ -106,6 +108,26 @@ jcasc: []
 	}
 }
 
+func TestParseManifestIgnoresUndeclaredKeys(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := `id: "test"
+version: "1"
+apiVersion: "1"
+jcasc:
+  - "jenkins.yaml"
+itemRemoveStrategy:
+  items: remove-all
+rbacRemoveStrategy: delete
+`
+	writeFile(t, dir, "bundle.yaml", manifest)
+	writeFile(t, dir, "jenkins.yaml", "jenkins:\n  systemMessage: hello")
+
+	if _, err := ParseManifest(dir); err != nil {
+		t.Fatalf("ParseManifest: undeclared keys must not fail the parse: %v", err)
+	}
+}
+
 func TestParseManifestInvalidFieldValues(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -123,29 +145,6 @@ apiVersion: "1"
 jcasc:
   - "jenkins.yaml"
 jcascMergeStrategy: "merge"
-`},
-		{"bad itemRemoveStrategy.items", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-itemRemoveStrategy:
-  items: "delete-all"
-`},
-		{"bad itemRemoveStrategy.rbac", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-itemRemoveStrategy:
-  rbac: "delete"
-`},
-		{"bad rbacRemoveStrategy", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-rbacRemoveStrategy: "delete"
 `},
 	}
 
@@ -358,7 +357,7 @@ jcasc:
 
 func TestResolverValidation(t *testing.T) {
 	dir := t.TempDir()
-	r := NewResolver(dir)
+	r := NewResolver(noop.NewMeterProvider(), dir)
 
 	// Empty repoURL
 	_, err := r.Resolve("", "path", "main", "ctrl", "ns")
@@ -490,7 +489,7 @@ items:
 	// ParseManifest validates declared paths (the directory itself passes).
 	// The symlink is caught by materializeDir when readFiles scans directory
 	// contents and hits the evil symlink.
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	_, err := r.materializeDir(dir)
 	if err == nil {
 		t.Fatal("expected error for symlinked directory entry, got nil")

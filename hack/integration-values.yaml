@@ -18,8 +18,9 @@ dex:
     # All authenticated users will have groups=[] in their ID tokens.
     # This is acceptable for auth flow tests, but group-based RBAC
     # assignment CANNOT be tested with this connector. For group claim
-    # testing, use a connector that supports groups (GitHub, OIDC, LDAP)
-    # with a claims mapping.
+    # testing, use a connector that sends groups: github or gitea with
+    # loadAllGroups: true, oidc with insecureEnableGroups: true, or ldap
+    # with a groupSearch block.
     - type: local
       id: local
       name: Local

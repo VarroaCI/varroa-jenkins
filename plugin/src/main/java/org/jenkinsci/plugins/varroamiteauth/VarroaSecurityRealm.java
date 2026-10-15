@@ -42,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -72,14 +73,24 @@ public class VarroaSecurityRealm extends SecurityRealm {
     static final String COOKIE_NAME = "varroa_token";
     static final String SYSTEM_AUTH = "varroa-mite-system";
 
+    /**
+     * Subject prefix of a local account that signs in beside OIDC. Only a
+     * session from the local issuer may carry it.
+     */
+    static final String LOCAL_SUBJECT_PREFIX = "local:";
+
     // Non-final only to allow test injection via setJwtValidatorForTest.
     private JWTValidator jwtValidator;
+    // Validator for local account sessions beside OIDC; null when off.
+    // Non-final only to allow test injection via setLocalJwtValidatorForTest.
+    private JWTValidator localJwtValidator;
     // Non-final only to allow test injection via setApiKeyValidatorForTest.
     private ApiKeyValidator apiKeyValidator;
     // Test seam for VARROA_LOGIN_URL, which is otherwise read from the environment.
     String loginUrlForTest;
     private final List<String> userClaimNames;
-    private final String groupClaimName;
+    // Non-final: an older config.xml leaves it null, and readResolve sets the default.
+    private List<String> groupClaimNames;
 
     // Stapler.getCurrentRequest() returns null inside authenticate() because
     // SecurityFilter calls authenticate BEFORE Stapler dispatches the request.
@@ -101,11 +112,11 @@ public class VarroaSecurityRealm extends SecurityRealm {
      * Data-bound constructor for JCasC.
      *
      * @param oidcIssuer      OIDC issuer URL; defaults to {@code VARROA_OIDC_ISSUER} when empty
-     * @param userClaimNames  comma-separated claim names for user identity; defaults to {@code VARROA_OIDC_USER_CLAIM}
-     * @param groupClaimName  claim name for group memberships; defaults to {@code VARROA_OIDC_GROUP_CLAIM}
+     * @param userClaimNames   comma-separated claim names for user identity; defaults to {@code VARROA_OIDC_USER_CLAIM}
+     * @param groupClaimNames  comma-separated claim names for group memberships; defaults to {@code VARROA_OIDC_GROUP_CLAIM}
      */
     @DataBoundConstructor
-    public VarroaSecurityRealm(String oidcIssuer, String userClaimNames, String groupClaimName) {
+    public VarroaSecurityRealm(String oidcIssuer, String userClaimNames, String groupClaimNames) {
         if (oidcIssuer == null || oidcIssuer.isEmpty()) {
             oidcIssuer = System.getenv("VARROA_OIDC_ISSUER");
         }
@@ -115,17 +126,110 @@ public class VarroaSecurityRealm extends SecurityRealm {
         if (userClaimNames == null || userClaimNames.isEmpty()) {
             userClaimNames = System.getenv("VARROA_OIDC_USER_CLAIM");
         }
-        if (userClaimNames != null && !userClaimNames.isEmpty()) {
-            this.userClaimNames = Arrays.asList(userClaimNames.split(","));
-        } else {
-            this.userClaimNames = Arrays.asList("preferred_username", "sub");
-        }
+        List<String> users = parseClaimNames(userClaimNames);
+        this.userClaimNames = users.isEmpty() ? Arrays.asList("preferred_username", "sub") : users;
 
-        if (groupClaimName == null || groupClaimName.isEmpty()) {
-            groupClaimName = System.getenv("VARROA_OIDC_GROUP_CLAIM");
+        if (groupClaimNames == null || groupClaimNames.isEmpty()) {
+            groupClaimNames = System.getenv("VARROA_OIDC_GROUP_CLAIM");
         }
-        this.groupClaimName = (groupClaimName != null && !groupClaimName.isEmpty())
-                ? groupClaimName : "groups";
+        List<String> groups = parseClaimNames(groupClaimNames);
+        this.groupClaimNames = groups.isEmpty() ? List.of("groups") : groups;
+
+        setLocalIssuer(null);
+    }
+
+    /**
+     * Splits a comma-separated claim name list. Each name is trimmed and
+     * empty names are dropped. Returns an empty list for {@code null}.
+     */
+    static List<String> parseClaimNames(String csv) {
+        List<String> names = new java.util.ArrayList<>();
+        if (csv == null) {
+            return names;
+        }
+        for (String raw : csv.split(",")) {
+            String name = raw.trim();
+            if (!name.isEmpty() && !names.contains(name)) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Sets the issuer of local account sessions beside OIDC. An empty value
+     * falls back to {@code VARROA_LOCAL_ISSUER}; an empty result turns local
+     * account sessions off.
+     *
+     * @param localIssuer the BFF URL that issues local account sessions
+     */
+    @DataBoundSetter
+    public void setLocalIssuer(String localIssuer) {
+        if (localIssuer == null || localIssuer.isEmpty()) {
+            localIssuer = System.getenv("VARROA_LOCAL_ISSUER");
+        }
+        this.localJwtValidator = (localIssuer != null && !localIssuer.isEmpty())
+                ? new JWTValidator(localIssuer) : null;
+    }
+
+    /**
+     * The configured local account issuer, or {@code null} when local
+     * account sessions are off. Exposed so JCasC can export the realm.
+     *
+     * @return the resolved local issuer, or {@code null}.
+     */
+    public String getLocalIssuer() {
+        return localJwtValidator != null ? localJwtValidator.getOidcIssuer() : null;
+    }
+
+    /**
+     * Validates a session token from the OIDC issuer or, beside OIDC, from
+     * the local account issuer. The unverified iss claim selects the
+     * validator; the selected validator checks the signature, the issuer,
+     * the audience, and the expiry. A token from the OIDC issuer whose
+     * subject uses the local prefix is refused.
+     *
+     * @return the claims, or {@code null} when the token is invalid.
+     */
+    Map<String, Object> validateSession(String token) {
+        JWTValidator local = localJwtValidator;
+        if (local != null && local.getOidcIssuer() != null
+                && local.getOidcIssuer().equals(JWTValidator.unverifiedIssuer(token))) {
+            return local.validate(token);
+        }
+        Map<String, Object> claims = jwtValidator.validate(token);
+        if (claims != null && usesLocalPrefix(claims)) {
+            LOGGER.warning("varroa-mite-auth: OIDC token uses the reserved local: subject prefix");
+            return null;
+        }
+        return claims;
+    }
+
+    /**
+     * Reports whether an OIDC token carries the local account prefix in the
+     * subject, the standard user claims, or any configured user claim.
+     */
+    private boolean usesLocalPrefix(Map<String, Object> claims) {
+        for (String name : List.of("sub", "preferred_username", "email", "name")) {
+            if (hasLocalPrefix(claims.get(name))) {
+                return true;
+            }
+        }
+        for (String name : userClaimNames) {
+            if (hasLocalPrefix(claims.get(name))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Reports whether a claim value starts with the local account prefix after
+     * surrounding space is removed and letter case is ignored.
+     */
+    private static boolean hasLocalPrefix(Object v) {
+        return v instanceof String
+                && ((String) v).strip().toLowerCase(Locale.ROOT).startsWith(LOCAL_SUBJECT_PREFIX);
     }
 
     // ---- Data-bound property accessors (JCasC export) ----
@@ -154,12 +258,13 @@ public class VarroaSecurityRealm extends SecurityRealm {
     }
 
     /**
-     * The configured group-claim name.
+     * The configured group-claim names, comma-joined to round-trip with the
+     * data-bound constructor.
      *
-     * @return the group-claim name; never {@code null}.
+     * @return the comma-separated claim names; never {@code null}.
      */
-    public String getGroupClaimName() {
-        return groupClaimName;
+    public String getGroupClaimNames() {
+        return String.join(",", groupClaimNames);
     }
 
     /** @return the resolved user-claim names as an immutable list (internal use/tests). */
@@ -407,7 +512,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
      * Returns [authenticated] + one GrantedAuthorityImpl per group value.
      */
     private GrantedAuthority[] authoritiesFor(Map<String, Object> claims) {
-        List<String> groups = JWTValidator.getGroups(claims, groupClaimName);
+        List<String> groups = sessionGroups(claims);
         GrantedAuthority[] authorities = new GrantedAuthority[1 + groups.size()];
         authorities[0] = new GrantedAuthorityImpl("authenticated");
         for (int i = 0; i < groups.size(); i++) {
@@ -416,8 +521,22 @@ public class VarroaSecurityRealm extends SecurityRealm {
         return authorities;
     }
 
+    /**
+     * Returns the group values of a session token. A local account session
+     * beside OIDC always carries its groups under {@code groups}. An OIDC
+     * session reads the configured group claims.
+     */
+    List<String> sessionGroups(Map<String, Object> claims) {
+        JWTValidator local = localJwtValidator;
+        if (local != null && local.getOidcIssuer() != null
+                && local.getOidcIssuer().equals(claims.get("iss"))) {
+            return JWTValidator.getGroups(claims, List.of("groups"));
+        }
+        return JWTValidator.getGroups(claims, groupClaimNames);
+    }
+
     private GrantedAuthority[] authoritiesForOperatorUser(Map<String, Object> claims) {
-        List<String> groups = JWTValidator.getGroups(claims, "groups");
+        List<String> groups = JWTValidator.getGroups(claims, List.of("groups"));
         java.util.ArrayList<GrantedAuthority> authorities = new java.util.ArrayList<>();
         authorities.add(new GrantedAuthorityImpl("authenticated"));
         for (String group : groups) {
@@ -472,7 +591,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
         String token = getCookieValue(req, COOKIE_NAME);
         if (token == null || token.isEmpty()) return null;
 
-        Map<String, Object> claims = jwtValidator.validate(token);
+        Map<String, Object> claims = validateSession(token);
         if (claims == null) {
             LOGGER.warning("varroa-mite-auth: JWT validation failed for cookie");
             return null;
@@ -485,7 +604,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
         }
         String email = (String) claims.get("email");
         String name = (String) claims.getOrDefault("name", userId);
-        List<String> groups = JWTValidator.getGroups(claims, groupClaimName);
+        List<String> groups = sessionGroups(claims);
 
         LOGGER.info("varroa-mite-auth: proactive sign-in for " + userId +
             " groups=" + groups + " claims=" + claims);
@@ -620,7 +739,13 @@ public class VarroaSecurityRealm extends SecurityRealm {
             authorities[i + 1] = new GrantedAuthorityImpl(groups.get(i));
         }
 
-        return new UsernamePasswordAuthenticationToken(user.impersonate2(), null, authorities);
+        // The principal is the user id string. The role strategy matches a
+
+        // user entry on Authentication.getName(), and a nested Authentication
+
+        // as principal never matches, so the key would hold no role.
+
+        return new UsernamePasswordAuthenticationToken(user.getId(), null, authorities);
     }
 
     public ApiKeyValidator getApiKeyValidator() {
@@ -637,6 +762,10 @@ public class VarroaSecurityRealm extends SecurityRealm {
     // env vars, which JenkinsRule tests cannot set.
     void setJwtValidatorForTest(JWTValidator v) {
         this.jwtValidator = v;
+    }
+
+    void setLocalJwtValidatorForTest(JWTValidator v) {
+        this.localJwtValidator = v;
     }
 
     /**
@@ -688,7 +817,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                 // 1. Check varroa_token cookie (user auth).
                 String token = getCookie(req, COOKIE_NAME);
                 if (token != null && !token.isEmpty()) {
-                    Map<String, Object> claims = jwtValidator.validate(token);
+                    Map<String, Object> claims = validateSession(token);
                     if (claims != null) {
                         String userId = JWTValidator.getUserId(claims, userClaimNames);
                         if (userId == null) userId = (String) claims.get("sub");
@@ -705,7 +834,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                         span.setAttribute("auth.outcome", "jwt_cookie");
                         span.setAttribute("auth.subject", userId);
                         return new UsernamePasswordAuthenticationToken(
-                                user.impersonate2(), null, authoritiesFor(claims));
+                                user.getId(), null, authoritiesFor(claims));
                     }
                     LOGGER.info("varroa-mite-auth: cookie JWT validation failed");
                 }
@@ -740,7 +869,7 @@ public class VarroaSecurityRealm extends SecurityRealm {
                         for (int i = 0; i < groups.size(); i++) {
                             authorities[i + 1] = new GrantedAuthorityImpl(groups.get(i));
                         }
-                        return new UsernamePasswordAuthenticationToken(user.impersonate2(), null, authorities);
+                        return new UsernamePasswordAuthenticationToken(user.getId(), null, authorities);
                     }
                     LOGGER.info("varroa-mite-auth: vk_ Bearer validation failed");
                     throw new BadCredentialsException("Invalid vk_ token");
@@ -829,6 +958,23 @@ public class VarroaSecurityRealm extends SecurityRealm {
                 }
             }
 
+            // Tenant service identity. The authority set is synthesized
+            // from the cell's applied role-strategy document, so it needs
+            // no persisted User record and it never varies between
+            // reloads. An unhosted tenant falls through to the
+            // UsernameNotFoundException below, unchanged.
+            if (username != null && username.startsWith("svc-")) {
+                String tenant = username.substring("svc-".length());
+                if (VarroaTenantResolver.hostsTenant(tenant)) {
+                    GrantedAuthority[] authorities = new GrantedAuthority[]{
+                        new GrantedAuthorityImpl("authenticated"),
+                        new GrantedAuthorityImpl("ROLE:varroa:tenant:" + tenant)
+                    };
+                    return new org.acegisecurity.userdetails.User(
+                        username, "", true, true, true, true, authorities);
+                }
+            }
+
             // Handle OIDC-cookie / vk_ Bearer users.
             // The SecurityFilter calls this after the filter injects authentication,
             // and we must return valid UserDetails so the principal survives reload.
@@ -873,6 +1019,9 @@ public class VarroaSecurityRealm extends SecurityRealm {
     private Object readResolve() {
         if (apiKeyValidator == null) {
             apiKeyValidator = new ApiKeyValidator();
+        }
+        if (groupClaimNames == null) {
+            groupClaimNames = List.of("groups");
         }
         return this;
     }

@@ -6,6 +6,7 @@
  *
  * Assumes the table is rendered inside a <Card>, whose body padding is what
  * insets the header band from the card edge.
+ * Wrap the table in an element that composes tableScroll.
  */
 
 .dataTable {
@@ -52,6 +53,17 @@
 .nameCell {
   font-weight: 600;
   font-size: 14px;
+}
+
+/*
+ * A dataTable inside a Card sits in a .tableScroll wrapper. The wrapper is
+ * the scroll container at every width. The table keeps width: 100%, so a
+ * narrow table still fills the card.
+ */
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /*

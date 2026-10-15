@@ -137,6 +137,10 @@ func (c *CommandBroodOps) HandleGet(data []byte) []byte {
 }
 
 // HandleList handles operator.<cluster>.broodops.list.
+//
+// Rows sort by "namespace/name". A reply holds whole rows up to
+// bus.ListPageBudget. Next names the last row of a full page, and the caller
+// passes it back as After to read the following rows.
 func (c *CommandBroodOps) HandleList(data []byte) []byte {
 	var req bus.BroodOpsListRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -155,26 +159,30 @@ func (c *CommandBroodOps) HandleList(data []byte) []byte {
 		return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: err.Error()})
 	}
 
-	// Strip managedFields and marshal each CR.
-	rawItems := make([]json.RawMessage, 0, len(list.Items))
+	ptrs := make([]*v1alpha1.BroodOperation, 0, len(list.Items))
 	for i := range list.Items {
-		broodStripManagedFields(&list.Items[i])
-		raw, err := json.Marshal(list.Items[i])
+		ptrs = append(ptrs, &list.Items[i])
+	}
+	rows, next, err := pageList(ptrs, req.After, bus.ListPageBudget, func(op *v1alpha1.BroodOperation) (json.RawMessage, error) {
+		broodStripManagedFields(op)
+		raw, err := json.Marshal(op)
 		if err != nil {
-			c.Logger.Error("marshal broodop failed", "name", list.Items[i].Name, "namespace", list.Items[i].Namespace, "error", err)
-			return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: "marshal error"})
+			c.Logger.Error("marshal broodop failed", "name", op.Name, "namespace", op.Namespace, "error", err)
 		}
-		rawItems = append(rawItems, raw)
+		return raw, err
+	})
+	if err != nil {
+		msg := listPageErr(err)
+		return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: msg})
 	}
 
-	// Check size budget.
-	reply, err := json.Marshal(bus.BroodOpsListResponse{Ops: rawItems})
+	reply, err := json.Marshal(bus.BroodOpsListResponse{Ops: rows, Next: next})
 	if err != nil {
 		c.Logger.Error("broodops list reply marshal failed", "error", err)
 		return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: "marshal error"})
 	}
-	if len(reply) > 900*1024 {
-		return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: "list too large"})
+	if len(reply) > bus.ListPageBudget {
+		return c.broodOpsReply(bus.BroodOpsListResponse{Code: bus.CodeInternal, Error: "list page too large"})
 	}
 	return reply
 }

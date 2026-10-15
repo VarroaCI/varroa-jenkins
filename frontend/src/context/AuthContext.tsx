@@ -21,7 +21,14 @@ interface AuthState {
   isLoading: boolean;
   isAuthenticated: boolean;
   permissions: Permissions | undefined;
+  /** True while a signed-in user's permissions query has no answer yet. */
+  permissionsLoading: boolean;
+  /** The last error of the permissions query, or null. */
+  permissionsError: Error | null;
+  retryPermissions: () => void;
   authMode?: "oidc" | "local" | "ldap";
+  /** True when declared local accounts sign in beside OIDC. */
+  localAccounts: boolean;
   /** OIDC error description from provider callback. */
   authError?: string;
   login: (username?: string, password?: string) => Promise<void>;
@@ -57,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<AuthPhase>("loadingConfig");
   const [authError, setAuthError] = useState<string | undefined>();
-  const prevModeRef = useRef<string | undefined>();
+  const prevModeRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const unauthorized = () => {
@@ -79,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const mode = authConfig?.mode;
+  const localAccounts = authConfig?.localAccounts === true;
   const prevMode = prevModeRef.current;
   prevModeRef.current = mode;
 
@@ -131,11 +139,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isLoading, user, mode]);
 
   const isAuthenticated = !isLoading && user != null;
-  const { data: permissions } = usePermissions(isAuthenticated);
+  const {
+    data: permissions,
+    isPending: permissionsPending,
+    error: permissionsError,
+    refetch: refetchPermissions,
+  } = usePermissions(isAuthenticated);
+  const retryPermissions = useCallback(() => { void refetchPermissions(); }, [refetchPermissions]);
+  // A disabled query also reports pending, so a signed-out user never loads.
+  const permissionsLoading = isAuthenticated && permissionsPending;
 
   const login = useCallback(async (username?: string, password?: string) => {
-    // Local/LDAP auth: POST to /api/v1/login with credentials.
-    if ((mode === "local" || mode === "ldap") && username && password) {
+    // Local/LDAP auth, or a local account beside OIDC: POST to /api/v1/login
+    // with credentials.
+    if ((mode === "local" || mode === "ldap" || localAccounts) && username && password) {
       setPhase("checkingSession");
       const res = await bffFetch<{ id_token: string; expires_in: number }>("/login", {
         method: "POST",
@@ -152,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const returnPath = window.location.pathname !== "/login" ? window.location.pathname : "/";
     setPhase("redirecting");
     window.location.href = `/api/v1/auth/login?return=${encodeURIComponent(returnPath)}`;
-  }, [mode, queryClient]);
+  }, [mode, localAccounts, queryClient]);
 
   const logout = useCallback(async () => {
     try {
@@ -175,7 +192,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated,
       permissions,
+      permissionsLoading,
+      permissionsError,
+      retryPermissions,
       authMode: mode,
+      localAccounts,
       authError,
       login,
       logout,

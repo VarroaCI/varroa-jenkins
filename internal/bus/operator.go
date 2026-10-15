@@ -156,12 +156,19 @@ type ApproveRestartRequest struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Action    string `json:"action"` // "reload" or "restart"
+	// ExpectedContentHash is the content hash of the pending change that
+	// the caller reviewed. It is empty when the caller did not review one.
+	ExpectedContentHash string `json:"expectedContentHash,omitempty"`
 }
 
 // ApproveRestartResponse is the reply for operator.<cluster>.approverestart.
-// An empty Error field indicates success.
+// An empty Error field indicates success. Changes names the sections of the
+// current pending change when the operator refuses because that change is
+// not the one that the caller approved.
 type ApproveRestartResponse struct {
-	Error string `json:"error,omitempty"`
+	Error   string   `json:"error,omitempty"`
+	Code    string   `json:"code,omitempty"`
+	Changes []string `json:"changes,omitempty"`
 }
 
 // ApproveDeletionRequest is the payload for operator.<cluster>.approvedeletion.
@@ -183,13 +190,17 @@ type ApproveDeletionResponse struct {
 // Namespace is an optional narrow filter.
 type ControllersListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	// After is the Next key of the previous page. Empty requests the first page.
+	After string `json:"after,omitempty"`
 }
 
 // ControllersListResponse is the reply for operator.<cluster>.controllers.list.
 type ControllersListResponse struct {
 	Items []json.RawMessage `json:"items,omitempty"`
-	Error string            `json:"error,omitempty"`
-	Code  string            `json:"code,omitempty"`
+	// Next is the key of the last row on this page when more rows follow. Empty on the last page.
+	Next  string `json:"next,omitempty"`
+	Error string `json:"error,omitempty"`
+	Code  string `json:"code,omitempty"`
 }
 
 // ControllersGetRequest is the payload for operator.<cluster>.controllers.get.
@@ -338,8 +349,10 @@ type BroodOpsGetRequest struct {
 }
 
 // BroodOpsListRequest is the payload for operator.<cluster>.broodops.list.
+// After is the Next key of the previous page. Empty requests the first page.
 type BroodOpsListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	After     string `json:"after,omitempty"`
 }
 
 // BroodOpsCancelRequest is the payload for operator.<cluster>.broodops.cancel.
@@ -368,9 +381,11 @@ type BroodOpsOpResponse struct {
 	Error string          `json:"error,omitempty"`
 }
 
-// BroodOpsListResponse is the reply for list.
+// BroodOpsListResponse is the reply for list. Next is the After key of the
+// following page. Empty on the last page.
 type BroodOpsListResponse struct {
 	Ops   []json.RawMessage `json:"ops,omitempty"`
+	Next  string            `json:"next,omitempty"`
 	Code  string            `json:"code,omitempty"`
 	Error string            `json:"error,omitempty"`
 }
@@ -424,6 +439,8 @@ type BroodScheduleGetRequest struct {
 // BroodScheduleListRequest is the payload for operator.<cluster>.broodschedules.list.
 type BroodScheduleListRequest struct {
 	Namespace string `json:"namespace,omitempty"`
+	// After is the Next key of the previous page. Empty requests the first page.
+	After string `json:"after,omitempty"`
 }
 
 // BroodScheduleDeleteRequest is the payload for operator.<cluster>.broodschedules.delete.
@@ -451,6 +468,9 @@ type BroodScheduleResponse struct {
 
 // BroodScheduleListResponse is the reply for list.
 type BroodScheduleListResponse struct {
-	Items []BroodScheduleResponse `json:"items,omitempty"`
-	Error string                  `json:"error,omitempty"`
+	// Items holds one BroodScheduleResponse JSON object per element.
+	Items []json.RawMessage `json:"items,omitempty"`
+	// Next is the After key of the following page. Empty on the last page.
+	Next  string `json:"next,omitempty"`
+	Error string `json:"error,omitempty"`
 }

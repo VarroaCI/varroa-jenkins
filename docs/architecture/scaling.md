@@ -14,9 +14,11 @@ Scale the Varroa control plane independently from Jenkins workloads. Each `Contr
 | NATS | 3 servers | `nats.config.cluster.*` |
 | Update center | Storage-dependent | `updateCenter.replicas`, storage type, upload mode |
 
-Gateway and BFF HPAs target 70 percent CPU utilization and require the Kubernetes metrics API. Resource requests must remain set for CPU scaling to work.
+The BFF reads the mite state of a controllers list with at most 16 concurrent NATS requests. A member operator answers its controllers list in pages of at most 900 KB, and the BFF reads every page. The member operator reads each page from its informer cache. A page sends no list request to the Kubernetes API server. The cache can lag a recent change by about one second. The config lists (bundles, catalog sources and items, roles, bindings, version profiles, and cell pools), the brood-operation list, and the brood-schedule list page the same way.
 
-Operator replicas divide controller ownership through virtual shards. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more concurrent work. `operator.shardCount` must match across every replica. Changing it is disruptive and requires restarting all operator replicas together.
+Gateway and BFF HPAs target 70 percent CPU. They need the Kubernetes metrics API and resource requests.
+
+Operator replicas divide controllers through virtual shards. A replica that loses a shard stops listening to its mites. A replica gives up a shard after its work ends. It waits at most 5 seconds, or 12 seconds at shutdown. A replica drops its shards after 25 seconds without a renewal. A long rebalance pass renews the due shards between its claims, oldest first. Each lease call times out after 20 seconds. Tick writes are conditional, so a stalled replica cannot overwrite newer status. Increase `operator.maxConcurrentReconciles` only when the Kubernetes API and NATS can absorb more work. `operator.shardCount` must match across every replica. Changing it requires restarting all replicas together.
 
 ## Jenkins Capacity
 
@@ -35,11 +37,13 @@ Jenkins controllers do not scale horizontally. Add controllers to isolate teams 
 
 The chart defaults to a three-server NATS cluster. `jetStreamReplicas` derives from the NATS cluster size and is capped at three unless explicitly set. The chart rejects a JetStream replica count larger than the NATS server count.
 
-Size NATS persistent storage for activity retention and control-plane state. Activity history defaults to seven days and is also bounded by `activity.maxMsgs` and `activity.maxBytes`. If NATS loses quorum, API reads that depend on shared state and controller convergence can stall even when Jenkins remains available.
+Size NATS persistent storage for control-plane state and the fixed activity transport buffer. That buffer is the `varroa_activity` JetStream stream. It holds at most 72 hours or 1 GiB, whichever it reaches first. The limit is fixed in code: the buffer only hands events to the recorder and serves no history.
+
+Durable activity history lives in Postgres, sized by `recordStore.retention.activity` (default `30d`), not by NATS. See [Build records](../operations/build-records.md#activity-history) for the retention arithmetic. If NATS loses quorum, shared-state API reads and controller convergence can stall, even when Jenkins stays available.
 
 ## Update-Center Availability
 
-Local update-center storage uses one replica because the PVC is a single-writer store. OCI storage can use multiple replicas, but enabling uploads forces one writer. Plugin downloads fail or provisioning waits when the configured update center is unavailable, depending on whether online fallback is allowed.
+Local update-center storage uses one replica because the PVC is a single-writer store. OCI storage can use multiple replicas, but enabling uploads forces one writer. When the update center is unavailable, plugin downloads fail or provisioning waits, depending on whether online fallback is allowed.
 
 ## Capacity Checks
 

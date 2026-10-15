@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -140,11 +141,16 @@ type busBrood struct {
 	membership   *bus.ClusterDirectory
 	client       controller.ResourceClient
 	store        crdstore.Backend
+	controllers  ControllerLister
 	logger       *slog.Logger
 
 	// request is the injectable NATS request function; defaults to conn.Request.
 	// Override in tests to avoid needing a live NATS connection.
 	request func(subject string, data []byte, timeout time.Duration) ([]byte, error)
+
+	// requestWithCtx is the context-aware request that NewBusBrood wires to
+	// conn.RequestWithContext. When nil, requestCtx runs request on a goroutine.
+	requestWithCtx func(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 
 	// membershipCache stores the last List() result (nil = no cache).
 	// Guarded by membershipMu: busBrood is a shared singleton hit by
@@ -155,13 +161,14 @@ type busBrood struct {
 }
 
 // NewBusBrood creates a new bus-backed Brood.
-func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, client controller.ResourceClient, store crdstore.Backend, logger *slog.Logger) Brood {
+func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDirectory, client controller.ResourceClient, store crdstore.Backend, controllers ControllerLister, logger *slog.Logger) Brood {
 	return &busBrood{
 		localCluster: localCluster,
 		conn:         conn,
 		membership:   membership,
 		client:       client,
 		store:        store,
+		controllers:  controllers,
 		logger:       logger.With("component", "bus_brood"),
 		request: func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
 			resp, err := conn.Request(subject, data, timeout)
@@ -170,6 +177,7 @@ func NewBusBrood(localCluster string, conn *bus.Conn, membership *bus.ClusterDir
 			}
 			return resp.Data, nil
 		},
+		requestWithCtx: connRequestWithContext(conn),
 	}
 }
 
@@ -242,7 +250,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		if clusterFilter == f.localCluster {
 			return f.listLocal(ctx, ns)
 		}
-		return f.listRemote(clusterFilter, ns)
+		return f.listRemote(ctx, clusterFilter, ns)
 	}
 
 	// Fan-out: local + all remote members.
@@ -261,7 +269,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
-			statuses = append(statuses, ClusterFanoutStatus{Name: f.localCluster, OK: false, Error: err.Error()})
+			statuses = append(statuses, fanoutFailureStatus(f.localCluster, localStatus, err))
 			return
 		}
 		controllers = append(controllers, local...)
@@ -281,11 +289,12 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 		wg.Add(1)
 		go func(cluster string) {
 			defer wg.Done()
-			cl, st, err := f.listRemote(cluster, ns)
+			cl, st, err := f.listRemote(ctx, cluster, ns)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				statuses = append(statuses, ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()})
+				f.logger.Warn("list remote failed", "cluster", cluster, "error", err)
+				statuses = append(statuses, fanoutFailureStatus(cluster, st, err))
 				return
 			}
 			controllers = append(controllers, cl...)
@@ -310,7 +319,7 @@ func (f *busBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]Clu
 }
 
 func (f *busBrood) listLocal(ctx context.Context, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
-	items, err := crdstore.List[v1alpha1.Controller](ctx, f.store, ns, "")
+	items, err := localControllers(ctx, f.controllers, f.store, ns)
 	if err != nil {
 		return nil, []ClusterFanoutStatus{{Name: f.localCluster, OK: false, Error: err.Error()}}, err
 	}
@@ -321,28 +330,65 @@ func (f *busBrood) listLocal(ctx context.Context, ns string) ([]ClusterControlle
 	return cc, []ClusterFanoutStatus{{Name: f.localCluster, OK: true}}, nil
 }
 
-func (f *busBrood) listRemote(cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
-	req := bus.ControllersListRequest{Namespace: ns}
-	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
-	if err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "cluster unreachable"}}, fmt.Errorf("list remote %s: %w", cluster, err)
+// fanoutFailureStatus returns the status row for a member whose list failed.
+// It keeps the reason that the list produced. A list that returned no
+// status row gets the error text.
+func fanoutFailureStatus(cluster string, st []ClusterFanoutStatus, err error) ClusterFanoutStatus {
+	if len(st) > 0 {
+		return st[0]
 	}
-	var resp bus.ControllersListResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: "invalid response"}}, fmt.Errorf("list remote %s decode: %w", cluster, err)
-	}
-	if resp.Error != "" {
-		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: resp.Error}}, fmt.Errorf("list remote %s error: %s", cluster, resp.Error)
-	}
-	cc := make([]ClusterController, len(resp.Items))
-	for i, raw := range resp.Items {
-		var cr v1alpha1.Controller
-		if err := json.Unmarshal(raw, &cr); err != nil {
-			f.logger.Warn("list remote unmarshal skip", "cluster", cluster, "error", err)
-			continue
+	return ClusterFanoutStatus{Name: cluster, OK: false, Error: err.Error()}
+}
+
+// requestCtx sends a request that ends when ctx ends. The bus request is
+// cancelled when a context-aware seam is wired; otherwise f.request runs on
+// a goroutine and the caller returns early.
+func (f *busBrood) requestCtx(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error) {
+	return requestWithFallback(ctx, f.requestWithCtx, f.request, subject, data, timeout)
+}
+
+// listRemote reads every page of a member's controllers list through
+// readRemotePages. A failed page fails the whole member: it returns no rows
+// and one status row whose Error names the reason. A row that does not
+// decode fails the member with "invalid controller row".
+func (f *busBrood) listRemote(ctx context.Context, cluster, ns string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	cc := make([]ClusterController, 0)
+	reason := ""
+	err := readRemotePages(ctx, func(after string) (string, error) {
+		data, _ := json.Marshal(bus.ControllersListRequest{Namespace: ns, After: after})
+		respData, err := f.requestCtx(ctx, bus.OperatorControllersSubject(cluster, "list"), data, broodListTimeout)
+		if err != nil {
+			reason = "cluster unreachable"
+			return "", err
 		}
-		cc[i] = ClusterController{Cluster: cluster, CR: &cr}
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			reason = "invalid response"
+			return "", fmt.Errorf("decode: %w", err)
+		}
+		if resp.Error != "" {
+			reason = resp.Error
+			return "", fmt.Errorf("error: %s", resp.Error)
+		}
+		for _, raw := range resp.Items {
+			var cr v1alpha1.Controller
+			if err := json.Unmarshal(raw, &cr); err != nil {
+				reason = "invalid controller row"
+				return "", fmt.Errorf("decode controller row: %w", err)
+			}
+			cc = append(cc, ClusterController{Cluster: cluster, CR: &cr})
+		}
+		return resp.Next, nil
+	})
+	if err != nil {
+		var be *BroodError
+		switch {
+		case errors.As(err, &be):
+			reason = be.Msg
+		case reason == "":
+			reason = err.Error()
+		}
+		return nil, []ClusterFanoutStatus{{Name: cluster, OK: false, Error: reason}}, fmt.Errorf("list remote %s: %w", cluster, err)
 	}
 	return cc, []ClusterFanoutStatus{{Name: cluster, OK: true}}, nil
 }
@@ -355,11 +401,9 @@ func (f *busBrood) Get(ctx context.Context, cluster, ns, name string) (*v1alpha1
 		}
 		return cr, nil
 	}
-	req := bus.ControllersGetRequest{Namespace: ns, Name: name}
-	data, _ := json.Marshal(req)
-	respData, err := f.request(bus.OperatorControllersSubject(cluster, "get"), data, broodGetTimeout)
+	respData, err := f.readTo(ctx, "get", cluster, bus.ControllersGetRequest{Namespace: ns, Name: name}, broodGetTimeout)
 	if err != nil {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
+		return nil, err
 	}
 	var resp bus.ControllersGetResponse
 	if err := json.Unmarshal(respData, &resp); err != nil {
@@ -386,7 +430,7 @@ func (f *busBrood) Create(ctx context.Context, cluster string, req ControllersCr
 		DryRun:     req.DryRun,
 	}
 	if req.DryRun {
-		resp, err := f.requestTo("create", cluster, busReq, broodDryRunTimeout)
+		resp, err := f.readTo(ctx, "create", cluster, busReq, broodDryRunTimeout)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -538,9 +582,9 @@ func (f *busBrood) DiscoverNamespaces(ctx context.Context, cluster string) (*bus
 		return nil, fmt.Errorf("DiscoverNamespaces called for local cluster %q", cluster)
 	}
 	data, _ := json.Marshal(bus.NamespacesListRequest{})
-	respData, err := f.request(bus.OperatorNamespacesSubject(cluster), data, broodNamespacesTimeout)
+	respData, err := f.requestCtx(ctx, bus.OperatorNamespacesSubject(cluster), data, broodNamespacesTimeout)
 	if err != nil {
-		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
+		return nil, f.readErr(ctx, cluster, err)
 	}
 	var resp bus.NamespacesListResponse
 	if err := json.Unmarshal(respData, &resp); err != nil {
@@ -552,7 +596,7 @@ func (f *busBrood) DiscoverNamespaces(ctx context.Context, cluster string) (*bus
 	return &resp, nil
 }
 
-// requestTo sends a request to the given cluster and returns the raw response bytes.
+// requestTo sends a write to the given cluster. It does not end when the caller's context ends.
 func (f *busBrood) requestTo(verb, cluster string, req any, timeout time.Duration) ([]byte, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -564,6 +608,29 @@ func (f *busBrood) requestTo(verb, cluster string, req any, timeout time.Duratio
 		return nil, &ErrClusterUnreachable{Cluster: cluster, Err: err}
 	}
 	return resp, nil
+}
+
+// readTo sends a read to the cluster's controllers subject. It ends when ctx
+// ends and returns a "request cancelled" error.
+func (f *busBrood) readTo(ctx context.Context, verb, cluster string, req any, timeout time.Duration) ([]byte, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s request: %w", verb, err)
+	}
+	resp, err := f.requestCtx(ctx, bus.OperatorControllersSubject(cluster, verb), data, timeout)
+	if err != nil {
+		return nil, f.readErr(ctx, cluster, err)
+	}
+	return resp, nil
+}
+
+// readErr names a cancelled read as a cancellation. A deadline or any other
+// failure is an unreachable cluster.
+func (f *busBrood) readErr(ctx context.Context, cluster string, err error) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return &BroodError{Code: bus.CodeInternal, Msg: "request cancelled"}
+	}
+	return &ErrClusterUnreachable{Cluster: cluster, Err: err}
 }
 
 func (f *busBrood) wrapK8sErr(err error) error {

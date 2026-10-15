@@ -2,7 +2,7 @@ items:
   - kind: folder
     name: folder-libraries
     displayName: "Folder with Libraries"
-    description: "Folder with folderLibraries property (known gap — silently dropped)"
+    description: "Folder with folderLibraries property and a modern-SCM GitHub retriever"
     properties:
       - folderLibraries:
           libraries:
@@ -16,6 +16,7 @@ items:
                       github:
                         repoOwner: fake-org
                         repository: shared-library
+                        credentialsId: github-lib
                         traits:
                           - gitHubBranchDiscovery:
                               strategyId: 3

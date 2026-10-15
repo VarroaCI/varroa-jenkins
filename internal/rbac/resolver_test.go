@@ -2,9 +2,11 @@ package rbac
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -1128,7 +1130,7 @@ func testResolverWithJenkins(
 	}
 	ctrlInf := &fakeInformer{indexer: ctrlIdx}
 
-	return NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, defaultRead, []string{"sub", "preferred_username"}, []string{"groups"})
+	return NewResolver(roleInf, bindingInf, jrInf, jrbInf, ctrlInf, nil, defaultRead, []string{"sub", "preferred_username"})
 }
 
 // TestJenkinsRoleAssignments_MiteUsesGroupAuthority verifies the synthesized
@@ -1213,6 +1215,224 @@ func TestJenkinsRoleAssignments_SystemOperatorUsesGroupAuthority(t *testing.T) {
 	if len(found.Permissions) != 1 || found.Permissions[0] != "hudson.model.Hudson.Administer" {
 		t.Errorf("expected exactly [hudson.model.Hudson.Administer], got %v", found.Permissions)
 	}
+}
+
+// The tenant item and agent role synthesis (D15) reads Controller.Status.Cell.Tenants
+// and emits one Item-type role and one Agent-type role per tenant, both assigned to
+// the tenant's synthesized group authority. Neither role can come from a
+// JenkinsRoleBinding (the resolver would append a scope suffix to a bound role's
+// name), so the test seeds none.
+func TestJenkinsRoleAssignments_TenantSynthesis(t *testing.T) {
+	controllers := []*v1alpha1.Controller{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+			Status: v1alpha1.ControllerStatus{
+				Cell: &v1alpha1.CellStatus{Tenants: []string{"payments", "search"}},
+			},
+		},
+	}
+	r := testResolverWithJenkins(nil, nil, nil, nil, controllers, false)
+
+	assignments, err := r.JenkinsRoleAssignments(controllers[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantItemPerms := []string{
+		"hudson.model.Item.Read",
+		"hudson.model.Item.Build",
+		"hudson.model.Item.Cancel",
+		"hudson.model.Item.Workspace",
+		"hudson.model.Item.Discover",
+		"hudson.model.Run.Replay",
+		"hudson.model.Run.Update",
+		"hudson.model.Run.Delete",
+		"hudson.model.View.Read",
+		"hudson.scm.SCM.Tag",
+		"com.cloudbees.plugins.credentials.CredentialsProvider.View",
+		"com.cloudbees.plugins.credentials.CredentialsProvider.UseItem",
+	}
+
+	for _, team := range []string{"payments", "search"} {
+		var item, agent *RoleAssignment
+		for i := range assignments {
+			switch assignments[i].RoleName {
+			case "varroa:tenant:" + team:
+				item = &assignments[i]
+			case "varroa:tenant-agent:" + team:
+				agent = &assignments[i]
+			}
+		}
+
+		if item == nil {
+			t.Fatalf("expected synthesized varroa:tenant:%s assignment, got: %+v", team, assignments)
+		}
+		if item.RoleType != "Item" {
+			t.Errorf("%s: expected RoleType Item, got %s", team, item.RoleType)
+		}
+		wantPattern := "^" + team + "($|/.*)$"
+		if item.Pattern != wantPattern {
+			t.Errorf("%s: expected pattern %q, got %q", team, wantPattern, item.Pattern)
+		}
+		if len(item.Permissions) == 0 {
+			t.Errorf("%s: item role permission set must not be empty", team)
+		}
+		if !equalStringSets(item.Permissions, wantItemPerms) {
+			t.Errorf("%s: expected item permissions %v, got %v", team, wantItemPerms, item.Permissions)
+		}
+		if len(item.Subjects) != 1 || item.Subjects[0].Kind != "Group" || item.Subjects[0].Name != "ROLE:varroa:tenant:"+team {
+			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", team, team, item.Subjects)
+		}
+
+		if agent == nil {
+			t.Fatalf("expected synthesized varroa:tenant-agent:%s assignment, got: %+v", team, assignments)
+		}
+		if agent.RoleType != "Agent" {
+			t.Errorf("%s: expected RoleType Agent, got %s", team, agent.RoleType)
+		}
+		// A role-strategy agent pattern matches node names, never labels,
+		// so the role covers every node and the plugin's fence owns the
+		// per-tenant check.
+		wantAgentPattern := ".*"
+		if agent.Pattern != wantAgentPattern {
+			t.Errorf("%s: expected agent pattern %q, got %q", team, wantAgentPattern, agent.Pattern)
+		}
+		if len(agent.Permissions) != 1 || agent.Permissions[0] != "hudson.model.Computer.Build" {
+			t.Errorf("%s: expected exactly [hudson.model.Computer.Build], got %v", team, agent.Permissions)
+		}
+		if len(agent.Subjects) != 1 || agent.Subjects[0].Kind != "Group" || agent.Subjects[0].Name != "ROLE:varroa:tenant:"+team {
+			t.Errorf("%s: expected single subject Group:ROLE:varroa:tenant:%s, got %+v", team, team, agent.Subjects)
+		}
+	}
+}
+
+// A controller with no Cell status (an ordinary, non-cell Controller) gets no
+// tenant synthesis at all.
+func TestJenkinsRoleAssignments_TenantSynthesis_NonCellSkipped(t *testing.T) {
+	controllers := []*v1alpha1.Controller{
+		{ObjectMeta: metav1.ObjectMeta{Name: "ordinary", Namespace: "ns1"}},
+	}
+	r := testResolverWithJenkins(nil, nil, nil, nil, controllers, false)
+
+	assignments, err := r.JenkinsRoleAssignments(controllers[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range assignments {
+		if strings.HasPrefix(a.RoleName, "varroa:tenant") {
+			t.Errorf("expected no tenant assignment for a non-cell controller, got: %+v", a)
+		}
+	}
+}
+
+// Generate renders the tenant item and agent roles into the role-strategy
+// YAML for two tenants, in the items and agents buckets respectively, with
+// a non-empty permission list each (the acceptance criterion for 9.1: the
+// role-strategy backend drops any assignment whose permission set is
+// empty, so a rendered role proves the set was non-empty).
+func TestGenerate_TenantSynthesisTwoTenants(t *testing.T) {
+	controllers := []*v1alpha1.Controller{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "ns1"},
+			Status: v1alpha1.ControllerStatus{
+				Cell: &v1alpha1.CellStatus{Tenants: []string{"payments", "search"}},
+			},
+		},
+	}
+	resolver := testResolverWithJenkins(nil, nil, nil, nil, controllers, false)
+	gen := NewGenerator(resolver)
+
+	yamlOut, err := gen.Generate(controllers[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, team := range []string{"payments", "search"} {
+		if !strings.Contains(yamlOut, "varroa:tenant:"+team) {
+			t.Errorf("expected YAML to contain 'varroa:tenant:%s', got:\n%s", team, yamlOut)
+		}
+		if !strings.Contains(yamlOut, "varroa:tenant-agent:"+team) {
+			t.Errorf("expected YAML to contain 'varroa:tenant-agent:%s', got:\n%s", team, yamlOut)
+		}
+		if !strings.Contains(yamlOut, "ROLE:varroa:tenant:"+team) {
+			t.Errorf("expected YAML to contain 'ROLE:varroa:tenant:%s', got:\n%s", team, yamlOut)
+		}
+	}
+	if !strings.Contains(yamlOut, "Credentials/UseItem") {
+		t.Errorf("expected YAML to contain 'Credentials/UseItem', got:\n%s", yamlOut)
+	}
+	if !strings.Contains(yamlOut, "Agent/Build") {
+		t.Errorf("expected YAML to contain 'Agent/Build', got:\n%s", yamlOut)
+	}
+
+	var doc struct {
+		Jenkins struct {
+			AuthorizationStrategy struct {
+				RoleBased struct {
+					Roles struct {
+						Items  []map[string]any `yaml:"items"`
+						Agents []map[string]any `yaml:"agents"`
+					} `yaml:"roles"`
+				} `yaml:"roleBased"`
+			} `yaml:"authorizationStrategy"`
+		} `yaml:"jenkins"`
+	}
+	if err := yaml.Unmarshal([]byte(yamlOut), &doc); err != nil {
+		t.Fatalf("failed to unmarshal generated YAML: %v", err)
+	}
+	itemRoles := doc.Jenkins.AuthorizationStrategy.RoleBased.Roles.Items
+	agentRoles := doc.Jenkins.AuthorizationStrategy.RoleBased.Roles.Agents
+	gotItemTenants := 0
+	for _, role := range itemRoles {
+		name, _ := role["name"].(string)
+		if !strings.HasPrefix(name, "varroa:tenant:") {
+			continue
+		}
+		gotItemTenants++
+		perms, ok := role["permissions"].([]any)
+		if !ok || len(perms) == 0 {
+			t.Errorf("expected non-empty permission list for %s, got: %v", name, role["permissions"])
+		}
+	}
+	if gotItemTenants != 2 {
+		t.Errorf("expected exactly two tenant item roles, got %d in %+v", gotItemTenants, itemRoles)
+	}
+	gotAgentTenants := 0
+	for _, role := range agentRoles {
+		name, _ := role["name"].(string)
+		if !strings.HasPrefix(name, "varroa:tenant-agent:") {
+			continue
+		}
+		gotAgentTenants++
+		perms, ok := role["permissions"].([]any)
+		if !ok || len(perms) == 0 {
+			t.Errorf("expected non-empty permission list for %s, got: %v", name, role["permissions"])
+		}
+	}
+	if gotAgentTenants != 2 {
+		t.Errorf("expected exactly two tenant agent roles, got %d in %+v", gotAgentTenants, agentRoles)
+	}
+}
+
+// equalStringSets reports whether a and b contain the same elements,
+// ignoring order.
+func equalStringSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, s := range a {
+		seen[s]++
+	}
+	for _, s := range b {
+		seen[s]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // --------------------------------------------------------------------------
@@ -1611,5 +1831,72 @@ func TestEffectivePermissionScopes_DefaultReadNotFiredWhenScoped(t *testing.T) {
 	// Global should be empty — defaultRead fallback must NOT fire when buckets is non-empty.
 	if len(ps.Global) != 0 {
 		t.Errorf("expected empty Global when scoped binding exists (defaultRead should not fire), got %v", ps.Global)
+	}
+}
+
+// TestEffectivePermissionScopes_TenantScopesLandInDistinctBuckets proves two
+// scopes that name one tenant with different jobs lists are different
+// scopes, so scopeBucketKey lands them in different buckets, and each
+// bucket's ScopedCapabilities.Tenants is canonicalized (jobs sorted, then
+// entries sorted by name).
+func TestEffectivePermissionScopes_TenantScopesLandInDistinctBuckets(t *testing.T) {
+	roles := []*v1alpha1.VarroaRole{
+		{ObjectMeta: metav1.ObjectMeta{Name: "viewer"}, Spec: v1alpha1.VarroaRoleSpec{
+			APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}},
+		}},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{ObjectMeta: metav1.ObjectMeta{Name: "b1"}, Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "u1"}},
+			RoleRef:  "viewer",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "payments", Jobs: []string{"z/*", "a/*"}}},
+			},
+		}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b2"}, Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "u1"}},
+			RoleRef:  "viewer",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "payments", Jobs: []string{"release/*"}}},
+			},
+		}},
+	}
+	r := testResolver(roles, bindings, nil, false)
+	claims := &auth.Claims{Subject: "u1"}
+	ps := r.EffectivePermissionScopes(claims)
+
+	if len(ps.Scopes) != 2 {
+		t.Fatalf("expected 2 distinct scope buckets for differently-jobbed tenant grants, got %d: %+v", len(ps.Scopes), ps.Scopes)
+	}
+	for _, sc := range ps.Scopes {
+		if len(sc.Tenants) != 1 || sc.Tenants[0].Name != "payments" {
+			t.Fatalf("expected one payments tenant entry per bucket, got %+v", sc.Tenants)
+		}
+	}
+	// The first bucket's jobs list must come back sorted, regardless of the
+	// unsorted input order on the binding.
+	found := false
+	for _, sc := range ps.Scopes {
+		jobs := sc.Tenants[0].Jobs
+		if len(jobs) == 2 && jobs[0] == "a/*" && jobs[1] == "z/*" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected one bucket to carry the sorted jobs [a/* z/*], got %+v", ps.Scopes)
+	}
+}
+
+// TestTenantScopesKey_NoSeparatorCollision proves that a tenant name or job
+// glob holding a byte the old \x1e/\x1f separator encoding relied on cannot
+// make two different tenant lists produce the same bucket key.
+func TestTenantScopesKey_NoSeparatorCollision(t *testing.T) {
+	a := []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"x\x1fy"}}}
+	b := []v1alpha1.TenantScope{{Name: "team-a\x1fx", Jobs: []string{"y"}}}
+
+	ka := tenantScopesKey(a)
+	kb := tenantScopesKey(b)
+	if ka == kb {
+		t.Fatalf("expected distinct keys for distinct tenant lists, both encoded to %q", ka)
 	}
 }

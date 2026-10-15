@@ -9,6 +9,7 @@ import { Button } from "../components/Button";
 import ClusterSelector from "../components/ClusterSelector";
 import NoAccessibleClusters from "../components/NoAccessibleClusters";
 import { useConfigurationCluster } from "../hooks/useConfigurationCluster";
+import { UPDATE_CENTER_SOURCE } from "../lib/compat";
 import type { CatalogSource, CatalogSourceSpec, CatalogSyncPhase } from "../types";
 import type { Permissions } from "../types/auth";
 import styles from "./CatalogSources.module.css";
@@ -47,14 +48,57 @@ interface DialogState {
   source?: CatalogSource;
 }
 
+// Kubernetes object name rule (DNS-1123 subdomain), max 253 characters.
+const DNS1123 = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+
+type SourceKind = "git" | "oci";
+
 const EMPTY_SPEC: CatalogSourceSpec = {
   repoURL: "",
+  ociRef: "",
   revision: "",
   path: "",
   syncIntervalSeconds: 300,
   secretRef: "",
   trusted: false,
 };
+
+function kindOf(spec: CatalogSourceSpec): SourceKind {
+  return spec.ociRef ? "oci" : "git";
+}
+
+// The CRD allows exactly one of repoURL or ociRef. Drop the fields the chosen kind does not use.
+function buildSpec(kind: SourceKind, spec: CatalogSourceSpec): CatalogSourceSpec {
+  const out: CatalogSourceSpec = { ...spec };
+  if (kind === "git") {
+    delete out.ociRef;
+  } else {
+    delete out.repoURL;
+    delete out.revision;
+  }
+  if (!out.secretRef) delete out.secretRef;
+  if (!out.path) delete out.path;
+  return out;
+}
+
+function sourceLocation(source: CatalogSource): { kind: "git" | "oci" | "updatecenter" | "none"; value: string } {
+  if (source.spec.repoURL) return { kind: "git", value: source.spec.repoURL };
+  if (source.spec.ociRef) return { kind: "oci", value: source.spec.ociRef };
+  if (source.metadata.name === UPDATE_CENTER_SOURCE) return { kind: "updatecenter", value: "" };
+  return { kind: "none", value: "-" };
+}
+
+function revisionLabel(source: CatalogSource): { text: string; title?: string } {
+  const loc = sourceLocation(source);
+  if (loc.kind === "git") return { text: source.spec.revision || "main" };
+  if (loc.kind === "oci") {
+    const digest = source.status?.observedRevision;
+    if (!digest) return { text: "-" };
+    const short = digest.startsWith("sha256:") ? `sha256:${digest.slice(7, 19)}` : digest.slice(0, 12);
+    return { text: short, title: digest };
+  }
+  return { text: "-" };
+}
 
 function PhaseBadge({ phase }: { phase?: CatalogSyncPhase }) {
   if (!phase) return null;
@@ -72,9 +116,13 @@ function PhaseBadge({ phase }: { phase?: CatalogSyncPhase }) {
 
 function SourceForm({
   spec,
+  kind,
+  onKindChange,
   onChange,
 }: {
   spec: CatalogSourceSpec;
+  kind: SourceKind;
+  onKindChange: (k: SourceKind) => void;
   onChange: (s: CatalogSourceSpec) => void;
 }) {
   function setField(field: keyof CatalogSourceSpec, type: "string" | "number" | "boolean" = "string") {
@@ -87,23 +135,52 @@ function SourceForm({
   return (
     <div>
       <div className={styles.formGroup}>
-        <label className={styles.formLabel}>Repository URL *</label>
-        <input
+        <label className={styles.formLabel}>Source type</label>
+        <select
+          aria-label="Source type"
           className={styles.formInput}
-          value={spec.repoURL}
-          onChange={setField("repoURL")}
-          placeholder="https://github.com/org/repo"
-        />
+          value={kind}
+          onChange={(e) => onKindChange(e.target.value as SourceKind)}
+        >
+          <option value="git">Git repository</option>
+          <option value="oci">OCI artifact</option>
+        </select>
       </div>
-      <div className={styles.formGroup}>
-        <label className={styles.formLabel}>Revision</label>
-        <input
-          className={styles.formInput}
-          value={spec.revision || ""}
-          onChange={setField("revision")}
-          placeholder="main (default)"
-        />
-      </div>
+      {kind === "git" ? (
+        <>
+          <div className={styles.formGroup}>
+            <label className={styles.formLabel}>Repository URL *</label>
+            <input
+              className={styles.formInput}
+              value={spec.repoURL || ""}
+              onChange={setField("repoURL")}
+              placeholder="https://github.com/org/repo"
+            />
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.formLabel}>Revision</label>
+            <input
+              className={styles.formInput}
+              value={spec.revision || ""}
+              onChange={setField("revision")}
+              placeholder="main (default)"
+            />
+          </div>
+        </>
+      ) : (
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>OCI reference *</label>
+          <input
+            className={styles.formInput}
+            value={spec.ociRef || ""}
+            onChange={setField("ociRef")}
+            placeholder="ghcr.io/org/catalog:v1"
+          />
+          <span className={styles.formHint}>
+            Use a tag or a digest (@sha256:…). The operator resolves a tag again on each sync. A digest pins the content.
+          </span>
+        </div>
+      )}
       <div className={styles.formGroup}>
         <label className={styles.formLabel}>Path</label>
         <input
@@ -131,8 +208,13 @@ function SourceForm({
           className={styles.formInput}
           value={spec.secretRef || ""}
           onChange={setField("secretRef")}
-          placeholder="Optional git auth secret"
+          placeholder={kind === "git" ? "Optional git auth secret" : "Optional registry pull secret"}
         />
+        {kind === "oci" && (
+          <span className={styles.formHint}>
+            Same-namespace Secret with .dockerconfigjson (one registry) or username and password.
+          </span>
+        )}
       </div>
       <div className={styles.formGroup}>
         <label className={styles.formCheckbox}>
@@ -159,6 +241,8 @@ export default function CatalogSources() {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [formSpec, setFormSpec] = useState<CatalogSourceSpec>({ ...EMPTY_SPEC });
   const [namespace, setNamespace] = useState<string>("");
+  const [name, setName] = useState<string>("");
+  const [kind, setKind] = useState<SourceKind>("git");
   const [saving, setSaving] = useState(false);
 
   const sources = data?.items ?? [];
@@ -166,14 +250,23 @@ export default function CatalogSources() {
   const globalCreate = canDoGlobal(perms, "catalogsources", "create");
   const scopedCreateNamespaces = scopedCatalogNamespaces(perms, "create");
 
+  const nameTrimmed = name.trim();
+  const nameReserved = nameTrimmed === UPDATE_CENTER_SOURCE;
+  const nameValid = nameTrimmed.length > 0 && nameTrimmed.length <= 253 && DNS1123.test(nameTrimmed) && !nameReserved;
+  const locationSet = kind === "git" ? !!formSpec.repoURL?.trim() : !!formSpec.ociRef?.trim();
+  const canSubmit = locationSet && (dialog?.open === "edit" || nameValid);
+
   function openCreate() {
     setFormSpec({ ...EMPTY_SPEC });
+    setKind("git");
+    setName("");
     setNamespace(globalCreate ? DEFAULT_CATALOG_NAMESPACE : (scopedCreateNamespaces[0] ?? ""));
     setDialog({ open: "create" });
   }
 
   function openEdit(source: CatalogSource) {
     setFormSpec({ ...source.spec });
+    setKind(kindOf(source.spec));
     setDialog({ open: "edit", source });
   }
 
@@ -190,8 +283,8 @@ export default function CatalogSources() {
         await createCatalogSource(cluster!, namespace || DEFAULT_CATALOG_NAMESPACE, {
           apiVersion: "varroa.dev/v1alpha1",
           kind: "CatalogSource",
-          metadata: { name: "" },
-          spec: formSpec,
+          metadata: { name: nameTrimmed },
+          spec: buildSpec(kind, formSpec),
         });
         toast("Catalog source created");
       } else if (dialog.open === "edit" && dialog.source) {
@@ -199,7 +292,7 @@ export default function CatalogSources() {
         const name = dialog.source.metadata.name;
         await updateCatalogSource(cluster!, ns, name, {
           ...dialog.source,
-          spec: formSpec,
+          spec: buildSpec(kind, formSpec),
         });
         toast("Catalog source updated");
       }
@@ -244,7 +337,7 @@ export default function CatalogSources() {
         <div>
           <div className={styles.pageTitle}>Catalog Sources</div>
           <div className={styles.pageDesc}>
-            Manage repositories that provide catalog items
+            Manage Git repositories and OCI artifacts that provide catalog items
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
@@ -287,14 +380,19 @@ export default function CatalogSources() {
             <span>Trusted</span>
             <span />
           </div>
-          {sources.map((source) => (
+          {sources.map((source) => {
+            const loc = sourceLocation(source);
+            const rev = revisionLabel(source);
+            return (
             <div key={source.metadata.name} className={styles.tableRow}>
               <span className={styles.cellName}>{source.metadata.name}</span>
-              <span className={styles.cellMono}>
-                {source.spec.repoURL}
+              <span className={styles.cellMono} title={loc.value || undefined}>
+                {loc.kind === "oci" && <span className={styles.kindTag}>OCI</span>}
+                {loc.kind === "updatecenter" && <span className={styles.kindTag}>Update center</span>}
+                {loc.kind !== "updatecenter" && loc.value}
               </span>
-              <span className={styles.cellMono}>
-                {source.spec.revision || "main"}
+              <span className={styles.cellMono} title={rev.title}>
+                {rev.text}
               </span>
               <span>
                 <PhaseBadge phase={source.status?.phase} />
@@ -307,19 +405,22 @@ export default function CatalogSources() {
                     Sync
                   </Button>
                 )}
-                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "update") && (
+                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "update") &&
+                  source.metadata.name !== UPDATE_CENTER_SOURCE && (
                   <Button size="sm" variant="ghost" onClick={() => openEdit(source)}>
                     Edit
                   </Button>
                 )}
-                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "delete") && (
+                {canManageCatalogSourceIn(perms, source.metadata.namespace ?? "default", "delete") &&
+                  source.metadata.name !== UPDATE_CENTER_SOURCE && (
                   <Button size="sm" variant="ghost" onClick={() => openDelete(source)}>
                     Delete
                   </Button>
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -356,12 +457,34 @@ export default function CatalogSources() {
                   )}
                 </div>
               )}
-              <SourceForm spec={formSpec} onChange={setFormSpec} />
+              {dialog.open === "create" && (
+                <div className={styles.formGroup}>
+                  <label className={styles.formLabel}>Name *</label>
+                  <input
+                    className={styles.formInput}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="my-catalog"
+                  />
+                  {nameTrimmed && nameReserved && (
+                    <span className={styles.formHint}>This name is reserved for the operator.</span>
+                  )}
+                  {nameTrimmed && !nameReserved && !nameValid && (
+                    <span className={styles.formHint}>Use lowercase letters, digits, '-' and '.'</span>
+                  )}
+                </div>
+              )}
+              <SourceForm
+                spec={formSpec}
+                kind={kind}
+                onKindChange={setKind}
+                onChange={setFormSpec}
+              />
               <div className={styles.dialogActions}>
                 <Button type="button" onClick={() => setDialog(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" disabled={saving || !formSpec.repoURL}>
+                <Button type="submit" variant="primary" disabled={saving || !canSubmit}>
                   {saving ? "Saving..." : "Save"}
                 </Button>
               </div>

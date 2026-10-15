@@ -65,9 +65,9 @@ func (r *Reconciler) upgradePolicyVersionRollGate(ctx context.Context, cr *v1alp
 	// precedence over upgradePolicy=manual without ever consulting
 	// ProvisioningDefaults.
 	if released, ok := cr.Annotations[annotationUpgradeRelease]; ok && released == targetImage {
-		if err := crdstore.PatchAnnotations[v1alpha1.Controller](ctx, r.store, cr.Name, cr.Namespace, map[string]*string{
+		if err := r.patchTickMeta(ctx, cr, map[string]any{"annotations": map[string]any{
 			annotationUpgradeRelease: nil,
-		}); err != nil {
+		}}); err != nil {
 			msg := "upgrade held: release annotation clear failed, retrying"
 			setUpgradePending(cr, msg)
 			return false, "UpgradePending", msg

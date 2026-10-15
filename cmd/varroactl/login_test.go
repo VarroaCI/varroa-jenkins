@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -171,6 +173,55 @@ func TestLogin_BrowserDenied(t *testing.T) {
 	}
 }
 
+// TestLogin_BrowserContextCancel tests that cancelling the command context
+// stops a waiting browser login with an error that wraps context.Canceled.
+func TestLogin_BrowserContextCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("VARROACTL_CONFIG", tmpDir+"/config.yaml")
+	t.Setenv("VARROACTL_API_KEY", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	t.Setenv("VARROACTL_SERVER", srv.URL)
+
+	urlCh := make(chan string, 1)
+	oldBrowser := openBrowser
+	openBrowser = func(u string) error {
+		urlCh <- u
+		return nil
+	}
+	t.Cleanup(func() { openBrowser = oldBrowser })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"login", "--timeout", "30s"})
+	root.SetContext(ctx)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- root.Execute()
+	}()
+
+	select {
+	case <-urlCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for browser URL")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected error wrapping context.Canceled, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("login did not stop after context cancel")
+	}
+}
+
 // TestLogin_BrowserTimeout tests timeout
 func TestLogin_BrowserTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -316,6 +367,46 @@ func TestLogin_Username_OIDCRefusal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OIDC") {
 		t.Errorf("expected OIDC error, got %v", err)
+	}
+}
+
+// TestUsernameLogin_OIDCWithLocalAccounts: an OIDC server with local accounts
+// accepts the username flow and reaches POST /login.
+func TestUsernameLogin_OIDCWithLocalAccounts(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("VARROACTL_CONFIG", tmpDir+"/config.yaml")
+
+	loginCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/auth-config") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"mode": "oidc", "localAccounts": true})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/login") {
+			loginCalled = true
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("VARROACTL_SERVER", srv.URL)
+
+	root := newRootCmd()
+	root.SetArgs([]string{"login", "--username", "rescue", "--password-stdin"})
+	oldStdin := os.Stdin
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("wrongpass\n")
+	pw.Close()
+	os.Stdin = pr
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	err := root.Execute()
+	if !loginCalled {
+		t.Fatalf("expected POST /login, got err %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "invalid credentials") {
+		t.Errorf("expected 'invalid credentials', got %v", err)
 	}
 }
 

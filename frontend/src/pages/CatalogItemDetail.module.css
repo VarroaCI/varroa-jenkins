@@ -155,6 +155,26 @@
   margin-bottom: 16px;
 }
 
+.markerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+
+.copyBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.copyBtn:hover {
+  text-decoration: underline;
+}
+
 /* --- Pinned closure + compatibility tables --------------------------- */
 
 /* Wide tables scroll inside their own container so the page body never

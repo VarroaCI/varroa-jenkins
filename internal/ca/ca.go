@@ -14,6 +14,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -127,10 +129,23 @@ func (c *CA) IssueServerCert(extraSANs ...string) (tls.Certificate, error) {
 	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
+// cellInstanceURIScheme and cellInstanceURIPrefix build the URI SAN that
+// carries a mite's cell instance on its client certificate: the full URI is
+// "urn:varroa:cell-instance:<pod-uid>".
+const (
+	cellInstanceURIScheme = "urn"
+	cellInstanceURIPrefix = "varroa:cell-instance:"
+)
+
 // IssueMiteCert issues a client certificate for a mite sidecar agent using
 // the provided ed25519 public key. The CommonName is set to
 // "controllerName.namespace" and the certificate is valid for 72 hours.
-func (c *CA) IssueMiteCert(controllerName, namespace string, pubkey ed25519.PublicKey) (*x509.Certificate, error) {
+// When cellInstance is not empty, the certificate carries it as a URI SAN
+// (urn:varroa:cell-instance:<cellInstance>), so a gateway replica that never
+// saw the mite's registration can still read the value from the peer
+// certificate at stream open. A renewal that passes the same cellInstance
+// re-issues the same URI SAN.
+func (c *CA) IssueMiteCert(controllerName, namespace string, pubkey ed25519.PublicKey, cellInstance string) (*x509.Certificate, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return nil, fmt.Errorf("generate serial: %w", err)
@@ -151,6 +166,9 @@ func (c *CA) IssueMiteCert(controllerName, namespace string, pubkey ed25519.Publ
 			x509.ExtKeyUsageClientAuth,
 		},
 	}
+	if cellInstance != "" {
+		tmpl.URIs = []*url.URL{{Scheme: cellInstanceURIScheme, Opaque: cellInstanceURIPrefix + cellInstance}}
+	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, pubkey, c.privateKey)
 	if err != nil {
@@ -163,6 +181,18 @@ func (c *CA) IssueMiteCert(controllerName, namespace string, pubkey ed25519.Publ
 	}
 
 	return cert, nil
+}
+
+// CellInstanceFromCert reads the cell instance a mite certificate carries in
+// its URI SAN. It returns the empty string when the certificate carries no
+// such SAN.
+func CellInstanceFromCert(cert *x509.Certificate) string {
+	for _, u := range cert.URIs {
+		if u.Scheme == cellInstanceURIScheme && strings.HasPrefix(u.Opaque, cellInstanceURIPrefix) {
+			return strings.TrimPrefix(u.Opaque, cellInstanceURIPrefix)
+		}
+	}
+	return ""
 }
 
 // VerifyClientCert verifies a client certificate chain against the CA

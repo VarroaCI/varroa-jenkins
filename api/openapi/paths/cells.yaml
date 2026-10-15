@@ -1,0 +1,115 @@
+# cells - the flat cell usage family. A cell usage row is a fleet view,
+# so it does not live under /clusters/{cluster}/controllers/.
+/api/v1/cells/usage:
+  get:
+    operationId: listCellUsage
+    tags: [Cells]
+    summary: Lists the load of every cell the caller may read in one cluster.
+    description: >
+      Gates each cell with the controller read check and drops a cell the
+      check refuses. The counts come from the record store over a fixed
+      24-hour window. A run whose result is TRIGGER_FAILED counts in no
+      value, and a tenant that left the cell contributes no count to it.
+    parameters:
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+      - $ref: '../components/parameters.yaml#/namespace'
+    responses:
+      "200":
+        description: Cell usage list (items envelope).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/CellUsage'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/cells/{namespace}/{name}/usage:
+  get:
+    operationId: getCellUsage
+    tags: [Cells]
+    summary: Returns one cell's load, tenant by tenant.
+    description: >
+      Answers 404 for an unknown controller, a controller that is not a
+      cell, and a caller the controller read check refuses. One code for
+      all three keeps the surface from confirming that a cell exists.
+      maxTenants is a first-match chain: the cell's own
+      spec.cell.maxTenants when that value is not zero, else the owning
+      pool's maxTenantsPerCell, else the chart value, else ten. It is never
+      a minimum over the tiers.
+    parameters:
+      - name: namespace
+        in: path
+        description: The cell's namespace.
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        description: The cell's name.
+        required: true
+        schema:
+          type: string
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    responses:
+      "200":
+        description: The cell's load.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellUsage'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/cells/{namespace}/{name}/grants:
+  get:
+    operationId: getCellGrants
+    tags: [Cells]
+    summary: Returns the grants that reach each tenant of one cell.
+    description: >
+      Applies two gates. It applies the controller read check on the cell,
+      exactly as the usage reads do. It then applies rolebindings:read on
+      the caller's cluster-wide capability partition. It answers 404 for an
+      unknown controller, a controller that is not a cell, and a caller the
+      controller read check refuses. It answers 403 when the controller
+      check passes and the caller holds no rolebindings:read. The read is
+      resolver backed, so it touches no record store and answers no 503.
+    parameters:
+      - name: namespace
+        in: path
+        description: The cell's namespace.
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        description: The cell's name.
+        required: true
+        schema:
+          type: string
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    responses:
+      "200":
+        description: The grants of each tenant.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellGrants'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'

@@ -25,6 +25,14 @@ clusterQuery:
   schema:
     type: string
 
+teamQuery:
+  name: team
+  in: query
+  description: Team name filter for the runner list.
+  required: false
+  schema:
+    type: string
+
 ns:
   name: ns
   in: path
@@ -56,3 +64,63 @@ force:
   required: false
   schema:
     type: boolean
+
+team:
+  name: team
+  in: path
+  description: >
+    Team or controller name that addresses one pipelines tenant.
+  required: true
+  schema:
+    type: string
+
+job:
+  name: job
+  in: path
+  description: >
+    Percent-encoded job path, one path segment. The router reads it with
+    PathValue, which returns the decoded value, so the job path's slashes
+    reach the handler intact.
+  required: true
+  schema:
+    type: string
+
+case:
+  name: case
+  in: path
+  description: >
+    Percent-encoded test case key, one path segment. The key is the
+    caseKey value that GET /runs/{run}/tests returns. Encode the whole
+    key again, because the key holds a literal "/". The router reads it
+    with PathValue, which returns the decoded value.
+  required: true
+  schema:
+    type: string
+
+run:
+  name: run
+  in: path
+  description: Run identifier, a UUIDv7 string.
+  required: true
+  schema:
+    type: string
+    format: uuid
+
+input:
+  name: input
+  in: path
+  description: >
+    Percent-encoded input step identifier, one path segment. The router
+    reads it with PathValue, which returns the decoded value.
+  required: true
+  schema:
+    type: string
+
+artifactPath:
+  name: path
+  in: path
+  description: >
+    Multi-segment artifact path, exactly as run_artifacts.path stored it.
+  required: true
+  schema:
+    type: string

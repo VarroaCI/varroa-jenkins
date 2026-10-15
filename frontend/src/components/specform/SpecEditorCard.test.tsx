@@ -51,17 +51,15 @@ vi.mock("@codemirror/lang-yaml", () => ({ yaml: vi.fn(() => []), yamlLanguage: {
 vi.mock("@codemirror/lint", () => ({ linter: vi.fn(() => vi.fn()), Diagnostic: {} }));
 vi.mock("@codemirror/commands", () => ({ defaultKeymap: [] }));
 
-// useOpenAPISchema drives both SpecEditorCard's own schema lookups (for
-// ingressSpec/miteSpec YAML validation) and the inner ControllerSpecForm's
-// Tier-1 schema — return the fixture synchronously for both.
+// useOpenAPISchema drives both SpecEditorCard's own schema lookup (for the
+// podOverrides YAML tier) and the inner ControllerSpecForm's Tier-1 schema —
+// return the fixture synchronously for both.
 vi.mock("../../api/openapiSchema", async () => {
   const actual = await vi.importActual<typeof import("../../api/openapiSchema")>("../../api/openapiSchema");
   return {
     useOpenAPISchema: () => ({ data: fixture, isLoading: false, error: null }),
     getControllerSpecSchema: actual.getControllerSpecSchema,
     getPodOverridesSchema: actual.getPodOverridesSchema,
-    getIngressSpecSchema: actual.getIngressSpecSchema,
-    getMiteSpecSchema: actual.getMiteSpecSchema,
   };
 });
 
@@ -86,6 +84,7 @@ const mockPreviewControllerOverlay = vi.fn();
 vi.mock("../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../api/client")>("../../api/client");
   return {
+    BFF_BASE: actual.BFF_BASE,
     updateController: (...args: unknown[]) => mockUpdateController(...args),
     previewControllerOverlay: (...args: unknown[]) => mockPreviewControllerOverlay(...args),
     ControllerConflictError: actual.ControllerConflictError,
@@ -94,6 +93,7 @@ vi.mock("../../api/client", async () => {
 
 import SpecEditorCard from "./SpecEditorCard";
 import { ControllerConflictError } from "../../api/client";
+import { ApiError } from "../../hooks/useApi";
 import type { ControllerSpec } from "../../types";
 
 type CardProps = React.ComponentProps<typeof SpecEditorCard>;
@@ -178,33 +178,13 @@ beforeEach(() => {
 });
 
 describe("SpecEditorCard tabs", () => {
-  it("renders an Ingress tab and a Mite sidecar tab alongside the existing tiers", () => {
+  it("renders Form, Pod overrides and Resource overlay tabs only", () => {
     renderCard();
     expect(screen.getByText("Form")).toBeInTheDocument();
     expect(screen.getByText("Pod overrides")).toBeInTheDocument();
     expect(screen.getByText("Resource overlay")).toBeInTheDocument();
-    expect(screen.getByText("Ingress")).toBeInTheDocument();
-    expect(screen.getByText("Mite sidecar")).toBeInTheDocument();
-  });
-
-  it("shows the ingressSpec YAML tier when the Ingress tab is selected", () => {
-    renderCard();
-    fireEvent.click(screen.getByText("Ingress"));
-    expect(screen.getByText("Ingress (YAML)")).toBeInTheDocument();
-  });
-
-  it("shows the miteSpec YAML tier when the Mite sidecar tab is selected", () => {
-    renderCard();
-    fireEvent.click(screen.getByText("Mite sidecar"));
-    expect(screen.getByText("Mite sidecar (YAML)")).toBeInTheDocument();
-  });
-
-  it("pre-populates the ingressSpec tier from initialIngressSpec as YAML", () => {
-    renderCard({ initialIngressSpec: { host: "ci.example.com", mode: "existing" } });
-    fireEvent.click(screen.getByText("Ingress"));
-    expect(screen.getByText("Ingress (YAML)")).toBeInTheDocument();
-    // The editor itself is CodeMirror-mocked, so we only assert the tier
-    // rendered without crashing when initial data is supplied.
+    expect(screen.queryByText("Mite sidecar (YAML)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ingress (YAML)")).not.toBeInTheDocument();
   });
 });
 
@@ -221,7 +201,7 @@ describe("SpecEditorCard hydration", () => {
     expect(classNameInput().value).toBe("my-class");
   });
 
-  it("hydrates the YAML tiers from spec so an untouched save sends nothing for them", async () => {
+  it("an untouched save sends nothing for any tier, ingressSpec and miteSpec included", async () => {
     renderCard({
       spec: {
         className: "a",
@@ -314,34 +294,15 @@ describe("SpecEditorCard hydration", () => {
 });
 
 describe("SpecEditorCard save", () => {
-  it("includes parsed ingressSpec and miteSpec in the patch sent to updateController", async () => {
-    renderCard({
-      initialIngressSpec: { host: "old.example.com" },
-      initialMiteSpec: { image: "old-image:1" },
-    });
-
-    fireEvent.click(screen.getByText("Save spec"));
-
-    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
-    const [, , , patch] = mockUpdateController.mock.calls[0];
-    // Both fields were untouched (initial values preserved via the YAML
-    // textarea state seeded from initial*), so the patch should carry
-    // through the parsed initial values rather than dropping them.
-    expect(patch.spec).toHaveProperty("ingressSpec");
-    expect(patch.spec).toHaveProperty("miteSpec");
-    expect(patch.spec.ingressSpec).toEqual({ host: "old.example.com" });
-    expect(patch.spec.miteSpec).toEqual({ image: "old-image:1" });
-  });
-
   it("aborts the save and surfaces an error when a YAML tier does not parse", async () => {
-    renderCard({ initialIngressSpec: { host: "__INVALID__" } });
+    renderCard({ initialPodOverrides: { jvmOpts: "__INVALID__" } as never });
 
     fireEvent.click(screen.getByText("Save spec"));
 
     // The whole save is abandoned — previously the unparseable tier was
     // silently dropped from the patch and the user still saw "Spec saved".
     await waitFor(() =>
-      expect(screen.getByText(/Ingress YAML is invalid/)).toBeInTheDocument(),
+      expect(screen.getByText(/Pod overrides YAML is invalid/)).toBeInTheDocument(),
     );
     expect(mockUpdateController).not.toHaveBeenCalled();
     expect(screen.queryByText("Spec saved")).not.toBeInTheDocument();
@@ -638,7 +599,7 @@ describe("SpecEditorCard refetch during editing", () => {
     fireEvent.change(classNameInput(), { target: { value: "b" } });
 
     fireEvent.click(screen.getByText("Save spec"));
-    await waitFor(() => expect(screen.getByText(/Failed: boom/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Save failed: boom/)).toBeInTheDocument());
 
     // Draft kept the edit; baseline unchanged — a save with no further edits
     // would still send { className: "b" } (it was never rebased).
@@ -1202,65 +1163,127 @@ describe("SpecEditorCard section 7 request-body tests", () => {
     });
   });
 
-  it("7.11a: ingress mode omitted from a YAML-tier edit (previously path) emits mode: null and is rejected", async () => {
-    // The mode field is immutable after create (oldSelf rule, types.go:353),
-    // so the server rejects any mode change — here, its explicit null.
+  it("7.11a: the ingress routing mode renders read-only in the curated form", async () => {
+    renderCard({
+      spec: { className: "x", ingressSpec: { host: "ci.example.com", mode: "path" } },
+    });
+    await waitFor(() => expect(classNameInput().value).toBe("x"));
+    const mode = document.getElementById("root_ingressSpec_mode") as HTMLInputElement;
+    expect(mode).toBeDisabled();
+    expect(mode.value).toBe("path");
+  });
+
+  it("7.11b: an ingress host edit in the form emits only the host, never mode", async () => {
+    renderCard({
+      spec: { className: "x", ingressSpec: { host: "ci.example.com", mode: "path" } },
+    });
+    await waitFor(() => expect(classNameInput().value).toBe("x"));
+
+    const host = document.getElementById("root_ingressSpec_host") as HTMLInputElement;
+    fireEvent.change(host, { target: { value: "new.example.com" } });
+
+    fireEvent.click(screen.getByText("Save spec"));
+    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
+    const [, , , patch] = mockUpdateController.mock.calls[0];
+    expect(patch.spec).toEqual({ ingressSpec: { host: "new.example.com" } });
+  });
+
+  it("7.11c: a server rejection shows the server message in the card and keeps the draft", async () => {
     mockUpdateController.mockRejectedValue(
-      new Error('cannot set field "spec.ingressSpec.mode": value is immutable'),
+      new ApiError(400, "The request could not be completed.", {
+        error: "ingressSpec.mode is immutable",
+      }),
     );
     renderCard({
       spec: { className: "x", ingressSpec: { host: "ci.example.com", mode: "path" } },
     });
     await waitFor(() => expect(classNameInput().value).toBe("x"));
 
-    fireEvent.click(screen.getByText("Ingress"));
-    // Omit mode entirely — it was previously "path".
-    typeYaml("host: ci.example.com");
+    const host = document.getElementById("root_ingressSpec_host") as HTMLInputElement;
+    fireEvent.change(host, { target: { value: "new.example.com" } });
+    fireEvent.click(screen.getByText("Save spec"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("ingressSpec.mode is immutable");
+    expect(screen.queryByText(/The request could not be completed/)).not.toBeInTheDocument();
+    expect(
+      (document.getElementById("root_ingressSpec_host") as HTMLInputElement).value,
+    ).toBe("new.example.com");
 
     fireEvent.click(screen.getByText("Save spec"));
-    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
-    const [, , , patch] = mockUpdateController.mock.calls[0];
-    // "Omission preserves" is FALSE: diffValues emits an explicit null for an
-    // absent key.
-    expect(patch.spec.ingressSpec).toEqual({ mode: null });
-    // The immutable-field change is rejected, and the failure names the field.
-    await waitFor(() => expect(screen.getByText(/ingressSpec\.mode/)).toBeInTheDocument());
+    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(2));
+    expect(mockUpdateController.mock.calls[1][3]).toEqual(mockUpdateController.mock.calls[0][3]);
   });
 
-  it("7.11b: ingress mode left unchanged in a YAML-tier edit emits no mode key and succeeds", async () => {
-    renderCard({
-      spec: { className: "x", ingressSpec: { host: "ci.example.com", mode: "path" } },
-    });
-    await waitFor(() => expect(classNameInput().value).toBe("x"));
-
-    fireEvent.click(screen.getByText("Ingress"));
-    // Edit host only; keep mode as-is.
-    typeYaml("host: new.example.com\nmode: path");
-
-    fireEvent.click(screen.getByText("Save spec"));
-    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
-    const [, , , patch] = mockUpdateController.mock.calls[0];
-    expect(patch.spec.ingressSpec).toEqual({ host: "new.example.com" });
-    expect(patch.spec.ingressSpec).not.toHaveProperty("mode");
-  });
-
-  it("7.11c: ingress mode changed via the YAML tier is rejected with a field-level error naming ingressSpec.mode", async () => {
-    mockUpdateController.mockRejectedValue(
-      new Error("failed to apply spec: spec.ingressSpec.mode is immutable after create"),
+  it("7.11d: the save-failure banner clears on the next successful save", async () => {
+    mockUpdateController.mockRejectedValueOnce(
+      new ApiError(400, "The request could not be completed.", { error: "boom" }),
     );
+    renderCard({ spec: { className: "a" } });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+    fireEvent.change(classNameInput(), { target: { value: "b" } });
+
+    fireEvent.click(screen.getByText("Save spec"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+
+    fireEvent.click(screen.getByText("Save spec"));
+    await waitFor(() => expect(screen.getByText(/Spec saved/)).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("an annotation edit in the form emits only that annotation key", async () => {
     renderCard({
-      spec: { className: "x", ingressSpec: { host: "ci.example.com", mode: "path" } },
+      spec: { className: "x", ingressSpec: { annotations: { "a.example.com/one": "1" } } },
     });
     await waitFor(() => expect(classNameInput().value).toBe("x"));
 
-    fireEvent.click(screen.getByText("Ingress"));
-    typeYaml("host: ci.example.com\nmode: subdomain");
+    const value = document.getElementById("root_ingressSpec_annotations_a.example.com/one") as HTMLInputElement;
+    fireEvent.change(value, { target: { value: "2" } });
 
     fireEvent.click(screen.getByText("Save spec"));
     await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
     const [, , , patch] = mockUpdateController.mock.calls[0];
-    expect(patch.spec.ingressSpec.mode).toBe("subdomain");
-    // The rejection names the offending field rather than failing opaquely.
-    await waitFor(() => expect(screen.getByText(/ingressSpec\.mode/)).toBeInTheDocument());
+    expect(patch.spec).toEqual({ ingressSpec: { annotations: { "a.example.com/one": "2" } } });
+  });
+
+  it("a mite limits edit in the form emits only that quantity", async () => {
+    renderCard({
+      spec: { className: "x", miteSpec: { resources: { limits: { cpu: "100m" } } } },
+    });
+    await waitFor(() => expect(classNameInput().value).toBe("x"));
+
+    const cpu = document.getElementById("root_miteSpec_resources_limits_cpu") as HTMLInputElement;
+    fireEvent.change(cpu, { target: { value: "200m" } });
+
+    fireEvent.click(screen.getByText("Save spec"));
+    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
+    const [, , , patch] = mockUpdateController.mock.calls[0];
+    expect(patch.spec).toEqual({ miteSpec: { resources: { limits: { cpu: "200m" } } } });
+  });
+
+  it("an invalid mite quantity blocks save", async () => {
+    renderCard({
+      spec: { className: "x", miteSpec: { resources: { limits: { cpu: "100m" } } } },
+    });
+    await waitFor(() => expect(classNameInput().value).toBe("x"));
+
+    const cpu = document.getElementById("root_miteSpec_resources_limits_cpu") as HTMLInputElement;
+    fireEvent.change(cpu, { target: { value: "12qq" } });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Cannot save: invalid value at miteSpec\.resources\.limits\.cpu/)).toBeInTheDocument(),
+    );
+    expect(mockUpdateController).not.toHaveBeenCalled();
+  });
+
+  it("an unrelated edit on a controller with no ingressSpec or miteSpec emits neither", async () => {
+    renderCard({ spec: { className: "a" } });
+    await waitFor(() => expect(classNameInput().value).toBe("a"));
+    fireEvent.change(classNameInput(), { target: { value: "b" } });
+
+    fireEvent.click(screen.getByText("Save spec"));
+    await waitFor(() => expect(mockUpdateController).toHaveBeenCalledTimes(1));
+    const [, , , patch] = mockUpdateController.mock.calls[0];
+    expect(patch.spec).toEqual({ className: "b" });
   });
 });

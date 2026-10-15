@@ -1,6 +1,6 @@
 # Reconciliation
 
-Reconciliation compares a controller's desired configuration with its running Jenkins instance. Use the configured policy to control when disruptive changes apply.
+Reconciliation compares a controller's desired configuration with its running Jenkins instance. The policy controls when disruptive changes apply.
 
 ## Choose a mode
 
@@ -8,9 +8,9 @@ Reconciliation compares a controller's desired configuration with its running Je
 |---|---|
 | `automatic` | Apply desired state when drift is detected. |
 | `idle` | Defer an apply while builds run, up to the configured maximum. |
-| `manual` | Hold changes until an authorized user approves them. |
+| `manual` | Hold content changes until approval; placement and rehydration data apply. |
 
-Configure the policy in `ProvisioningDefaults` or the controller specification. `interval` sets the steady-state check interval, `drainTimeoutSeconds` controls the Jenkins drain before restart-class changes, and `maxDeferSeconds` bounds idle-mode delay. The controller status reports pending changes and their reason.
+Configure the policy in `ProvisioningDefaults` or the controller specification. `interval` sets the check interval, `drainTimeoutSeconds` limits the drain before a restart, and `maxDeferSeconds` limits idle-mode delay.
 
 ## Approve or investigate a change
 
@@ -20,4 +20,4 @@ varroactl approve controller <namespace>/<name>
 varroactl reconcile controller <namespace>/<name>
 ```
 
-Approval applies the pending action when safety checks permit it. A running build, rollout-wave gate, or maintenance window can delay work. Inspect the controller status and activity feed, then use [Troubleshooting](troubleshooting.md) if the reason does not clear.
+Approval applies the pending action when safety checks permit. A running build, rollout wave, or maintenance window can delay it. A busy reconcile can fail an approval after 20 seconds; retry it. An approval refuses content that changed after detection and names the new sections; review them and approve again. A client that omits `expectedContentHash` approves the current pending change. Then check the status, activity feed, and [Troubleshooting](troubleshooting.md).

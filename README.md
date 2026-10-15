@@ -173,8 +173,6 @@ dex:
           orgs:
             - name: your-github-org
           loadAllGroups: true
-          claims:
-            groups: ["groups"]
 
 ingress:
   enabled: true
@@ -296,7 +294,6 @@ the UI.
 | [`Group`](docs/security/varroa-rbac.md) | Cluster | Identity group used by RBAC subjects. |
 | [`User`](docs/security/authentication.md) | Namespaced | Local-auth user record. |
 | [`PodTemplate`](docs/config/pod-customization.md) | Namespaced | Kubernetes pod template for Jenkins agents. |
-| [`BuildMetric`](docs/operations/observability.md) | Namespaced | Per-build metrics collected by the mite. |
 
 ## Auth model
 

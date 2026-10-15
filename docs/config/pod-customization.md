@@ -45,6 +45,16 @@ Environment variables, volumes, and mounts merge by name. Prefer controller
 fields such as `resources`, `persistence`, `ingressSpec`, and `probes` when
 available.
 
+## Edit in the dashboard
+
+Open the controller, then select Configuration, then Spec Editor. The Form tab
+edits the typed fields: controller class, resources, persistence, RBAC, plugins,
+backups, cell, headless, ingress, and the mite sidecar. Map fields, such as
+resource limits and ingress annotations, accept any key. The Pod overrides tab
+and the Resource overlay tab edit YAML. The ingress routing mode and the cell role are read-only.
+When the server refuses a save, the card shows the server message and keeps
+your edits.
+
 ## Tune health probes
 
 `spec.probes` controls startup, readiness, and liveness timing. Set

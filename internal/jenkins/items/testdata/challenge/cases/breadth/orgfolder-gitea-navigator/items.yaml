@@ -1,0 +1,13 @@
+items:
+  - kind: organizationFolder
+    name: orgfolder-gitea-navigator
+    displayName: "Gitea Org Folder"
+    description: "Organization folder with Gitea SCM navigator"
+    navigators:
+      - giteaNavigator:
+          serverUrl: https://git.fake-forge.example
+          repoOwner: fake-org
+          credentialsId: gitea-cred
+    projectFactories:
+      - multiBranchProjectFactory:
+          scriptPath: Jenkinsfile

@@ -1,0 +1,227 @@
+# CEL cases for charts/varroa/crds/varroa.dev_teams.yaml.
+# The base is not a pipelines tenant. Each pipelines case patches a full
+# pipelines block, because the base has none to merge into.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: Team
+  metadata:
+    name: team-a
+  spec:
+    namespaces: [team-a]
+cases:
+  # Root rule: a pipelines tenant name fits a Service name (47 characters, no dot).
+  - name: short tenant name accepted
+    rule: |-
+      !has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+    field: ""
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: accept
+  - name: tenant name of 47 characters accepted
+    rule: |-
+      !has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+    field: ""
+    new: {metadata: {name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}, spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: accept
+  - name: tenant name of 48 characters refused
+    rule: |-
+      !has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+    field: ""
+    new: {metadata: {name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}, spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: reject
+  - name: tenant name with a dot refused
+    rule: |-
+      !has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+    field: ""
+    new: {metadata: {name: payments.core}, spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: reject
+  - name: long name with a dot accepted without pipelines
+    rule: |-
+      !has(self.spec) || !has(self.spec.pipelines) || (size(self.metadata.name) <= 47 && !self.metadata.name.contains('.'))
+    field: ""
+    new: {metadata: {name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.core}}
+    want: accept
+
+  # Pipelines profile must be non-empty.
+  - name: empty profile refused
+    rule: |-
+      !has(self.pipelines) || size(self.pipelines.profile) > 0
+    field: spec
+    new: {spec: {pipelines: {profile: "", agentNamespace: team-a}}}
+    want: reject
+  - name: non-empty profile accepted
+    rule: |-
+      !has(self.pipelines) || size(self.pipelines.profile) > 0
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: accept
+
+  # Agent namespace must be non-empty and one of the managed namespaces.
+  # An empty agent namespace also fails the membership rule.
+  - name: empty agentNamespace refused
+    rule: |-
+      !has(self.pipelines) || size(self.pipelines.agentNamespace) > 0
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: ""}}}
+    want: reject
+  - name: non-empty agentNamespace accepted
+    rule: |-
+      !has(self.pipelines) || size(self.pipelines.agentNamespace) > 0
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: accept
+  - name: agentNamespace outside namespaces refused
+    rule: |-
+      !has(self.pipelines) || self.pipelines.agentNamespace in self.namespaces
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: search}}}
+    want: reject
+  - name: agentNamespace inside namespaces accepted
+    rule: |-
+      !has(self.pipelines) || self.pipelines.agentNamespace in self.namespaces
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a}}}
+    want: accept
+
+  # composedBundleRef: a namespace is required, and it must be managed.
+  - name: composedBundleRef without a namespace refused
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace) > 0)
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, composedBundleRef: {name: bundle-a}}}}
+    want: reject
+  - name: composedBundleRef naming a managed namespace accepted
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || (has(self.pipelines.composedBundleRef.namespace) && size(self.pipelines.composedBundleRef.namespace) > 0)
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, composedBundleRef: {name: bundle-a, namespace: team-a}}}}
+    want: accept
+  - name: composedBundleRef naming a namespace outside spec.namespaces refused
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace in self.namespaces
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, composedBundleRef: {name: bundle-a, namespace: search}}}}
+    want: reject
+  - name: composedBundleRef naming a managed namespace accepted by membership
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.composedBundleRef) || !has(self.pipelines.composedBundleRef.namespace) || self.pipelines.composedBundleRef.namespace in self.namespaces
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, composedBundleRef: {name: bundle-a, namespace: team-a}}}}
+    want: accept
+
+  # Durations: rehydrateDeadline 1m to 24h, cronGrace 1m to 60m.
+  - name: rehydrateDeadline below one minute refused
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.rehydrateDeadline) || (duration(self.pipelines.rehydrateDeadline) >= duration('1m') && duration(self.pipelines.rehydrateDeadline) <= duration('24h'))
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, rehydrateDeadline: 30s}}}
+    want: reject
+  - name: rehydrateDeadline of two hours accepted
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.rehydrateDeadline) || (duration(self.pipelines.rehydrateDeadline) >= duration('1m') && duration(self.pipelines.rehydrateDeadline) <= duration('24h'))
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, rehydrateDeadline: 2h}}}
+    want: accept
+  - name: cronGrace above sixty minutes refused
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.cronGrace) || (duration(self.pipelines.cronGrace) >= duration('1m') && duration(self.pipelines.cronGrace) <= duration('60m'))
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, cronGrace: 2h}}}
+    want: reject
+  - name: cronGrace of ten minutes accepted
+    rule: |-
+      !has(self.pipelines) || !has(self.pipelines.cronGrace) || (duration(self.pipelines.cronGrace) >= duration('1m') && duration(self.pipelines.cronGrace) <= duration('60m'))
+    field: spec
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, cronGrace: 10m}}}
+    want: accept
+
+  # Exports: exactly one of job or locks, with non-empty callers.
+  - name: export with neither job nor locks refused
+    rule: |-
+      (has(self.job)?1:0)+(has(self.locks)?1:0)==1
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{callers: [team-b]}]}}}
+    want: reject
+  - name: export with one job accepted
+    rule: |-
+      (has(self.job)?1:0)+(has(self.locks)?1:0)==1
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [team-b]}]}}}
+    want: accept
+
+  - name: export with an empty job refused
+    rule: |-
+      !has(self.job) || size(self.job) > 0
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: "", callers: [team-b]}]}}}
+    want: reject
+  - name: export with a job glob accepted
+    rule: |-
+      !has(self.job) || size(self.job) > 0
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [team-b]}]}}}
+    want: accept
+
+  - name: export job starting with a slash refused
+    rule: |-
+      !has(self.job) || !self.job.startsWith('/')
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: /builds, callers: [team-b]}]}}}
+    want: reject
+  - name: export job without a leading slash accepted
+    rule: |-
+      !has(self.job) || !self.job.startsWith('/')
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [team-b]}]}}}
+    want: accept
+
+  - name: export with an empty lock name refused
+    rule: |-
+      !has(self.locks) || self.locks.all(l, size(l) > 0)
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{locks: [""], callers: [team-b]}]}}}
+    want: reject
+  - name: export with a lock glob accepted
+    rule: |-
+      !has(self.locks) || self.locks.all(l, size(l) > 0)
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{locks: [deploy-*], callers: [team-b]}]}}}
+    want: accept
+
+  - name: export with an empty caller refused
+    rule: |-
+      self.callers.all(c, size(c) > 0)
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [""]}]}}}
+    want: reject
+  - name: export with a caller accepted
+    rule: |-
+      self.callers.all(c, size(c) > 0)
+    field: spec.pipelines.exports[0]
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, exports: [{job: builds/*, callers: [team-b]}]}}}
+    want: accept
+
+  # Webhook URL must start with https:// or http://.
+  - name: https webhook url accepted
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "https://hooks.example.com/varroa", secretRef: {name: hook}}}}}}
+    want: accept
+  - name: http webhook url accepted
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "http://receiver.team-a.svc/hook", secretRef: {name: hook}}}}}}
+    want: accept
+  - name: webhook url without a scheme refused
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "hooks.example.com/varroa", secretRef: {name: hook}}}}}}
+    want: reject
+  - name: webhook url with an ftp scheme refused
+    rule: |-
+      self.url.startsWith('https://') || self.url.startsWith('http://')
+    field: spec.pipelines.notifications.webhook
+    new: {spec: {pipelines: {profile: lts, agentNamespace: team-a, notifications: {webhook: {url: "ftp://files.example.com/hook", secretRef: {name: hook}}}}}}
+    want: reject

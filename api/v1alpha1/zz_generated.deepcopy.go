@@ -135,6 +135,26 @@ func (in *ControllerSpec) DeepCopyInto(out *ControllerSpec) {
 		*out = new(HibernationSpec)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Cell != nil {
+		in, out := &in.Cell, &out.Cell
+		*out = new(CellSpec)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopyInto for CellSpec.
+func (in *CellSpec) DeepCopyInto(out *CellSpec) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellSpec.
+func (in *CellSpec) DeepCopy() *CellSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(CellSpec)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for ProbesSpec.
@@ -366,6 +386,169 @@ func (in *ControllerStatus) DeepCopyInto(out *ControllerStatus) {
 		*out = new(PluginInventoryStatus)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Cell != nil {
+		in, out := &in.Cell, &out.Cell
+		*out = new(CellStatus)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopyInto for CellStatus.
+func (in *CellStatus) DeepCopyInto(out *CellStatus) {
+	*out = *in
+	if in.Tenants != nil {
+		in, out := &in.Tenants, &out.Tenants
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.UnreadySince != nil {
+		in, out := &in.UnreadySince, &out.UnreadySince
+		*out = (*in).DeepCopy()
+	}
+	if in.RolledAt != nil {
+		in, out := &in.RolledAt, &out.RolledAt
+		*out = (*in).DeepCopy()
+	}
+	if in.PreviousInstanceLastSeen != nil {
+		in, out := &in.PreviousInstanceLastSeen, &out.PreviousInstanceLastSeen
+		*out = (*in).DeepCopy()
+	}
+	if in.AppliedTenants != nil {
+		in, out := &in.AppliedTenants, &out.AppliedTenants
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.TenantWarnings != nil {
+		in, out := &in.TenantWarnings, &out.TenantWarnings
+		*out = make([]TenantWarning, len(*in))
+		copy(*out, *in)
+	}
+	if in.Rehydration != nil {
+		in, out := &in.Rehydration, &out.Rehydration
+		*out = make([]CellRehydrationEntry, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.PendingTenants != nil {
+		in, out := &in.PendingTenants, &out.PendingTenants
+		*out = make([]CellPendingTenant, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.PendingSignatures != nil {
+		in, out := &in.PendingSignatures, &out.PendingSignatures
+		*out = make([]CellPendingSignature, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellPendingSignature) DeepCopyInto(out *CellPendingSignature) {
+	*out = *in
+	if in.Requesters != nil {
+		in, out := &in.Requesters, &out.Requesters
+		*out = make([]CellSignatureRequester, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of CellPendingSignature.
+func (in *CellPendingSignature) DeepCopy() *CellPendingSignature {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPendingSignature)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellSignatureRequester) DeepCopyInto(out *CellSignatureRequester) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellSignatureRequester.
+func (in *CellSignatureRequester) DeepCopy() *CellSignatureRequester {
+	if in == nil {
+		return nil
+	}
+	out := new(CellSignatureRequester)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out.
+func (in *CellPendingTenant) DeepCopyInto(out *CellPendingTenant) {
+	*out = *in
+	in.ClaimedAt.DeepCopyInto(&out.ClaimedAt)
+}
+
+// DeepCopy creates a deep copy of CellPendingTenant.
+func (in *CellPendingTenant) DeepCopy() *CellPendingTenant {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPendingTenant)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopy creates a deep copy of CellStatus.
+func (in *CellStatus) DeepCopy() *CellStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(CellStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellRehydrationEntry.
+func (in *CellRehydrationEntry) DeepCopyInto(out *CellRehydrationEntry) {
+	*out = *in
+	if in.Deferred != nil {
+		in, out := &in.Deferred, &out.Deferred
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Unseeded != nil {
+		in, out := &in.Unseeded, &out.Unseeded
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.At != nil {
+		in, out := &in.At, &out.At
+		*out = (*in).DeepCopy()
+	}
+}
+
+// DeepCopy creates a deep copy of CellRehydrationEntry.
+func (in *CellRehydrationEntry) DeepCopy() *CellRehydrationEntry {
+	if in == nil {
+		return nil
+	}
+	out := new(CellRehydrationEntry)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TenantWarning.
+func (in *TenantWarning) DeepCopyInto(out *TenantWarning) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of TenantWarning.
+func (in *TenantWarning) DeepCopy() *TenantWarning {
+	if in == nil {
+		return nil
+	}
+	out := new(TenantWarning)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for ApplySectionResult.
@@ -671,6 +854,216 @@ func (in *TeamSpec) DeepCopyInto(out *TeamSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Pipelines != nil {
+		in, out := &in.Pipelines, &out.Pipelines
+		*out = new(TeamPipelinesSpec)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopyInto for TeamPipelinesSpec.
+func (in *TeamPipelinesSpec) DeepCopyInto(out *TeamPipelinesSpec) {
+	*out = *in
+	if in.ComposedBundleRef != nil {
+		in, out := &in.ComposedBundleRef, &out.ComposedBundleRef
+		*out = new(ComposedBundleRef)
+		**out = **in
+	}
+	if in.RehydrateBuilds != nil {
+		in, out := &in.RehydrateBuilds, &out.RehydrateBuilds
+		*out = new(int32)
+		**out = **in
+	}
+	if in.RehydrateDeadline != nil {
+		in, out := &in.RehydrateDeadline, &out.RehydrateDeadline
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.CronBackstop != nil {
+		in, out := &in.CronBackstop, &out.CronBackstop
+		*out = new(bool)
+		**out = **in
+	}
+	if in.CronGrace != nil {
+		in, out := &in.CronGrace, &out.CronGrace
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.Exports != nil {
+		in, out := &in.Exports, &out.Exports
+		*out = make([]TeamExport, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Retention != nil {
+		in, out := &in.Retention, &out.Retention
+		*out = new(TeamPipelinesRetention)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.ConcurrencyLimits != nil {
+		in, out := &in.ConcurrencyLimits, &out.ConcurrencyLimits
+		*out = make([]TeamConcurrencyLimit, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Members != nil {
+		in, out := &in.Members, &out.Members
+		*out = new(int32)
+		**out = **in
+	}
+	if in.Standby != nil {
+		in, out := &in.Standby, &out.Standby
+		*out = new(int32)
+		**out = **in
+	}
+	if in.Notifications != nil {
+		in, out := &in.Notifications, &out.Notifications
+		*out = new(TeamNotificationsSpec)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamPipelinesSpec.
+func (in *TeamPipelinesSpec) DeepCopy() *TeamPipelinesSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamPipelinesSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamNotificationsSpec.
+func (in *TeamNotificationsSpec) DeepCopyInto(out *TeamNotificationsSpec) {
+	*out = *in
+	if in.Webhook != nil {
+		in, out := &in.Webhook, &out.Webhook
+		*out = new(TeamWebhookSpec)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TeamNotificationsSpec.
+func (in *TeamNotificationsSpec) DeepCopy() *TeamNotificationsSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamNotificationsSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamWebhookSpec.
+func (in *TeamWebhookSpec) DeepCopyInto(out *TeamWebhookSpec) {
+	*out = *in
+	out.SecretRef = in.SecretRef
+}
+
+// DeepCopy creates a deep copy of TeamWebhookSpec.
+func (in *TeamWebhookSpec) DeepCopy() *TeamWebhookSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamWebhookSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamWebhookSecretRef.
+func (in *TeamWebhookSecretRef) DeepCopyInto(out *TeamWebhookSecretRef) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of TeamWebhookSecretRef.
+func (in *TeamWebhookSecretRef) DeepCopy() *TeamWebhookSecretRef {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamWebhookSecretRef)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamExport.
+func (in *TeamExport) DeepCopyInto(out *TeamExport) {
+	*out = *in
+	if in.Locks != nil {
+		in, out := &in.Locks, &out.Locks
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Callers != nil {
+		in, out := &in.Callers, &out.Callers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamExport.
+func (in *TeamExport) DeepCopy() *TeamExport {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamExport)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamConcurrencyLimit.
+func (in *TeamConcurrencyLimit) DeepCopyInto(out *TeamConcurrencyLimit) {
+	*out = *in
+	if in.Jobs != nil {
+		in, out := &in.Jobs, &out.Jobs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamConcurrencyLimit.
+func (in *TeamConcurrencyLimit) DeepCopy() *TeamConcurrencyLimit {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamConcurrencyLimit)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamPipelinesRetention.
+func (in *TeamPipelinesRetention) DeepCopyInto(out *TeamPipelinesRetention) {
+	*out = *in
+	if in.Jobs != nil {
+		in, out := &in.Jobs, &out.Jobs
+		*out = make([]TeamJobRetention, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TeamPipelinesRetention.
+func (in *TeamPipelinesRetention) DeepCopy() *TeamPipelinesRetention {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamPipelinesRetention)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamJobRetention.
+func (in *TeamJobRetention) DeepCopyInto(out *TeamJobRetention) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of TeamJobRetention.
+func (in *TeamJobRetention) DeepCopy() *TeamJobRetention {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamJobRetention)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for TeamStatus.
@@ -688,6 +1081,112 @@ func (in *TeamStatus) DeepCopyInto(out *TeamStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.Placement != nil {
+		in, out := &in.Placement, &out.Placement
+		*out = new(TeamPlacementStatus)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Pipelines != nil {
+		in, out := &in.Pipelines, &out.Pipelines
+		*out = new(TeamPipelinesStatus)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Rehydration != nil {
+		in, out := &in.Rehydration, &out.Rehydration
+		*out = new(TeamRehydrationStatus)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.StaleAgentServiceNamespaces != nil {
+		in, out := &in.StaleAgentServiceNamespaces, &out.StaleAgentServiceNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyInto for TeamRehydrationStatus.
+func (in *TeamRehydrationStatus) DeepCopyInto(out *TeamRehydrationStatus) {
+	*out = *in
+	if in.Deferred != nil {
+		in, out := &in.Deferred, &out.Deferred
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.LastAttempt != nil {
+		in, out := &in.LastAttempt, &out.LastAttempt
+		*out = (*in).DeepCopy()
+	}
+}
+
+// DeepCopy creates a deep copy of TeamRehydrationStatus.
+func (in *TeamRehydrationStatus) DeepCopy() *TeamRehydrationStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamRehydrationStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamPlacementStatus.
+func (in *TeamPlacementStatus) DeepCopyInto(out *TeamPlacementStatus) {
+	*out = *in
+	if in.Members != nil {
+		in, out := &in.Members, &out.Members
+		*out = make([]TeamMemberStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of TeamPlacementStatus.
+func (in *TeamPlacementStatus) DeepCopy() *TeamPlacementStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamPlacementStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamMemberStatus.
+func (in *TeamMemberStatus) DeepCopyInto(out *TeamMemberStatus) {
+	*out = *in
+	if in.Slot != nil {
+		in, out := &in.Slot, &out.Slot
+		*out = new(int32)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TeamMemberStatus.
+func (in *TeamMemberStatus) DeepCopy() *TeamMemberStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamMemberStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for TeamPipelinesStatus.
+func (in *TeamPipelinesStatus) DeepCopyInto(out *TeamPipelinesStatus) {
+	*out = *in
+	if in.PendingPurgeGeneration != nil {
+		in, out := &in.PendingPurgeGeneration, &out.PendingPurgeGeneration
+		*out = new(int64)
+		**out = **in
+	}
+}
+
+// DeepCopy creates a deep copy of TeamPipelinesStatus.
+func (in *TeamPipelinesStatus) DeepCopy() *TeamPipelinesStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamPipelinesStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for TeamNamespaceState.
@@ -699,6 +1198,308 @@ func (in *TeamNamespaceState) DeepCopyInto(out *TeamNamespaceState) {
 func (in *TeamCondition) DeepCopyInto(out *TeamCondition) {
 	*out = *in
 	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+// DeepCopyInto for Runner.
+func (in *Runner) DeepCopyInto(out *Runner) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a deep copy of Runner.
+func (in *Runner) DeepCopy() *Runner {
+	if in == nil {
+		return nil
+	}
+	out := new(Runner)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *Runner) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for RunnerList.
+func (in *RunnerList) DeepCopyInto(out *RunnerList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]Runner, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of RunnerList.
+func (in *RunnerList) DeepCopy() *RunnerList {
+	if in == nil {
+		return nil
+	}
+	out := new(RunnerList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *RunnerList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for RunnerSpec.
+func (in *RunnerSpec) DeepCopyInto(out *RunnerSpec) {
+	*out = *in
+	if in.Labels != nil {
+		in, out := &in.Labels, &out.Labels
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Port != nil {
+		in, out := &in.Port, &out.Port
+		*out = new(int)
+		**out = **in
+	}
+}
+
+// DeepCopyInto for RunnerStatus.
+func (in *RunnerStatus) DeepCopyInto(out *RunnerStatus) {
+	*out = *in
+	if in.LastSeen != nil {
+		in, out := &in.LastSeen, &out.LastSeen
+		*out = (*in).DeepCopy()
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]RunnerCondition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto for RunnerCondition.
+func (in *RunnerCondition) DeepCopyInto(out *RunnerCondition) {
+	*out = *in
+	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+// DeepCopyInto for CellPool.
+func (in *CellPool) DeepCopyInto(out *CellPool) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a deep copy of CellPool.
+func (in *CellPool) DeepCopy() *CellPool {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPool)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *CellPool) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for CellPoolList.
+func (in *CellPoolList) DeepCopyInto(out *CellPoolList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]CellPool, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of CellPoolList.
+func (in *CellPoolList) DeepCopy() *CellPoolList {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *CellPoolList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto for CellPoolSpec.
+func (in *CellPoolSpec) DeepCopyInto(out *CellPoolSpec) {
+	*out = *in
+	if in.UnreadyGracePeriod != nil {
+		in, out := &in.UnreadyGracePeriod, &out.UnreadyGracePeriod
+		*out = new(metav1.Duration)
+		**out = **in
+	}
+	if in.CellTemplate != nil {
+		in, out := &in.CellTemplate, &out.CellTemplate
+		*out = new(CellTemplate)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Libraries != nil {
+		in, out := &in.Libraries, &out.Libraries
+		*out = make([]CellPoolLibrary, len(*in))
+		copy(*out, *in)
+	}
+	if in.ApprovedSignatures != nil {
+		in, out := &in.ApprovedSignatures, &out.ApprovedSignatures
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Mail != nil {
+		in, out := &in.Mail, &out.Mail
+		*out = new(CellPoolMail)
+		**out = **in
+	}
+	if in.GiteaServers != nil {
+		in, out := &in.GiteaServers, &out.GiteaServers
+		*out = make([]CellPoolGiteaServer, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyInto for CellPoolGiteaServer.
+func (in *CellPoolGiteaServer) DeepCopyInto(out *CellPoolGiteaServer) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolGiteaServer.
+func (in *CellPoolGiteaServer) DeepCopy() *CellPoolGiteaServer {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolGiteaServer)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellPoolMail.
+func (in *CellPoolMail) DeepCopyInto(out *CellPoolMail) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolMail.
+func (in *CellPoolMail) DeepCopy() *CellPoolMail {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolMail)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopy creates a deep copy of CellPoolSpec.
+func (in *CellPoolSpec) DeepCopy() *CellPoolSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellPoolLibrary.
+func (in *CellPoolLibrary) DeepCopyInto(out *CellPoolLibrary) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of CellPoolLibrary.
+func (in *CellPoolLibrary) DeepCopy() *CellPoolLibrary {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolLibrary)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellTemplate.
+func (in *CellTemplate) DeepCopyInto(out *CellTemplate) {
+	*out = *in
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = new(corev1.ResourceRequirements)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.MiteResources != nil {
+		in, out := &in.MiteResources, &out.MiteResources
+		*out = new(corev1.ResourceRequirements)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.PodOverrides != nil {
+		in, out := &in.PodOverrides, &out.PodOverrides
+		*out = new(PodOverrides)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy creates a deep copy of CellTemplate.
+func (in *CellTemplate) DeepCopy() *CellTemplate {
+	if in == nil {
+		return nil
+	}
+	out := new(CellTemplate)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto for CellPoolStatus.
+func (in *CellPoolStatus) DeepCopyInto(out *CellPoolStatus) {
+	*out = *in
+	if in.Tenants != nil {
+		in, out := &in.Tenants, &out.Tenants
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy creates a deep copy of CellPoolStatus.
+func (in *CellPoolStatus) DeepCopy() *CellPoolStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(CellPoolStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for PodTemplate.
@@ -814,64 +1615,6 @@ func (in *ContainerSpec) DeepCopyInto(out *ContainerSpec) {
 		}
 	}
 	in.Resources.DeepCopyInto(&out.Resources)
-}
-
-// DeepCopyInto for BuildMetric.
-func (in *BuildMetric) DeepCopyInto(out *BuildMetric) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	out.Spec = in.Spec
-}
-
-// DeepCopy for BuildMetric.
-func (in *BuildMetric) DeepCopy() *BuildMetric {
-	if in == nil {
-		return nil
-	}
-	out := new(BuildMetric)
-	in.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyObject implements runtime.Object.
-func (in *BuildMetric) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-// DeepCopyInto for BuildMetricList.
-func (in *BuildMetricList) DeepCopyInto(out *BuildMetricList) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ListMeta.DeepCopyInto(&out.ListMeta)
-	if in.Items != nil {
-		in, out := &in.Items, &out.Items
-		*out = make([]BuildMetric, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-}
-
-// DeepCopy for BuildMetricList.
-func (in *BuildMetricList) DeepCopy() *BuildMetricList {
-	if in == nil {
-		return nil
-	}
-	out := new(BuildMetricList)
-	in.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyObject implements runtime.Object.
-func (in *BuildMetricList) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
 }
 
 // DeepCopyInto for ProvisioningDefaults.
@@ -1188,6 +1931,27 @@ func (in *VarroaRole) DeepCopyInto(out *VarroaRole) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *VarroaRoleStatus) DeepCopyInto(out *VarroaRoleStatus) {
+	*out = *in
+	if in.Federation != nil {
+		in, out := &in.Federation, &out.Federation
+		*out = make([]BindingFederationStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *VarroaRoleStatus) DeepCopy() *VarroaRoleStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(VarroaRoleStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func (in *VarroaRole) DeepCopy() *VarroaRole {
@@ -1270,6 +2034,41 @@ func (in *VarroaRoleBinding) DeepCopyInto(out *VarroaRoleBinding) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *VarroaRoleBindingStatus) DeepCopyInto(out *VarroaRoleBindingStatus) {
+	*out = *in
+	if in.Federation != nil {
+		in, out := &in.Federation, &out.Federation
+		*out = make([]BindingFederationStatus, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+func (in *VarroaRoleBindingStatus) DeepCopy() *VarroaRoleBindingStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(VarroaRoleBindingStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *BindingFederationStatus) DeepCopyInto(out *BindingFederationStatus) {
+	*out = *in
+	in.LastTransitionTime.DeepCopyInto(&out.LastTransitionTime)
+}
+
+func (in *BindingFederationStatus) DeepCopy() *BindingFederationStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(BindingFederationStatus)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func (in *VarroaRoleBinding) DeepCopy() *VarroaRoleBinding {
@@ -1347,6 +2146,33 @@ func (in *VarroaRoleBindingScope) DeepCopyInto(out *VarroaRoleBindingScope) {
 		*out = new(metav1.LabelSelector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Tenants != nil {
+		in, out := &in.Tenants, &out.Tenants
+		*out = make([]TenantScope, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyInto for TenantScope.
+func (in *TenantScope) DeepCopyInto(out *TenantScope) {
+	*out = *in
+	if in.Jobs != nil {
+		in, out := &in.Jobs, &out.Jobs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy creates a deep copy of TenantScope.
+func (in *TenantScope) DeepCopy() *TenantScope {
+	if in == nil {
+		return nil
+	}
+	out := new(TenantScope)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // JenkinsRole
@@ -2488,6 +3314,16 @@ func (in *UpdateCenterStatus) DeepCopyInto(out *UpdateCenterStatus) {
 		*out = make([]UpdateCenterGap, len(*in))
 		copy(*out, *in)
 	}
+	if in.Unservable != nil {
+		in, out := &in.Unservable, &out.Unservable
+		*out = make([]UpdateCenterGap, len(*in))
+		copy(*out, *in)
+	}
+	if in.UnknownDependencies != nil {
+		in, out := &in.UnknownDependencies, &out.UnknownDependencies
+		*out = make([]UpdateCenterPluginRef, len(*in))
+		copy(*out, *in)
+	}
 	in.LastSyncTime.DeepCopyInto(&out.LastSyncTime)
 	if in.SeedImportedDigests != nil {
 		in, out := &in.SeedImportedDigests, &out.SeedImportedDigests
@@ -2526,6 +3362,19 @@ func (in *UpdateCenterCondition) DeepCopy() *UpdateCenterCondition {
 
 func (in *UpdateCenterGap) DeepCopyInto(out *UpdateCenterGap) {
 	*out = *in
+}
+
+func (in *UpdateCenterPluginRef) DeepCopyInto(out *UpdateCenterPluginRef) {
+	*out = *in
+}
+
+func (in *UpdateCenterPluginRef) DeepCopy() *UpdateCenterPluginRef {
+	if in == nil {
+		return nil
+	}
+	out := new(UpdateCenterPluginRef)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func (in *UpdateCenterGap) DeepCopy() *UpdateCenterGap {

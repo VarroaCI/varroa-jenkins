@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -66,7 +67,7 @@ func newUCTestServer(t *testing.T) *ucTestServer {
 func newUCReconciler(t *testing.T, tc *catalogTestClient, ucURL string) *CatalogReconciler {
 	t.Helper()
 	cloner := bundle.NewGitCloner()
-	resolver := bundle.NewResolver(t.TempDir())
+	resolver := bundle.NewResolver(noop.NewMeterProvider(), t.TempDir())
 	return NewCatalogReconciler(tc, tc.store, cloner, resolver, nil, t.TempDir(),
 		discardLogger(), testOperatorNS, ucURL, &http.Client{})
 }
@@ -1218,5 +1219,73 @@ func TestUCSyncDigest_SkippedPacksParticipate(t *testing.T) {
 	degraded := ucSyncDigest(entries, []ucSkippedPack{{Ref: "oci://packs/x:1"}}, nil)
 	if clean == degraded {
 		t.Error("an unreadable pack must move the digest even with an identical readable set")
+	}
+}
+
+// TestUCSyncDigest_FieldBoundariesAreUnambiguous pins the framing of the
+// update-center sync digest. Each pair joins to the same text under a
+// separator encoding, so the two inputs must answer different digests.
+func TestUCSyncDigest_FieldBoundariesAreUnambiguous(t *testing.T) {
+	entries := []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	t.Run("lock value with separators", func(t *testing.T) {
+		a := ucSyncDigest(entries, nil, []ucProfile{{Name: "p", Lock: map[string]string{"a": "1,b=2"}}})
+		b := ucSyncDigest(entries, nil, []ucProfile{{Name: "p", Lock: map[string]string{"a": "1", "b": "2"}}})
+		if a == b {
+			t.Fatal("a lock value with a comma and an equals sign collides with two locks")
+		}
+	})
+	t.Run("profile field with pipe", func(t *testing.T) {
+		a := ucSyncDigest(entries, nil, []ucProfile{{Name: "p|x", EffectiveCore: "y"}})
+		b := ucSyncDigest(entries, nil, []ucProfile{{Name: "p", EffectiveCore: "x|y"}})
+		if a == b {
+			t.Fatal("a pipe in a profile name collides with a pipe in the core")
+		}
+	})
+	t.Run("skipped ref with comma", func(t *testing.T) {
+		a := ucSyncDigest(entries, []ucSkippedPack{{Ref: "a,b"}}, nil)
+		b := ucSyncDigest(entries, []ucSkippedPack{{Ref: "a"}, {Ref: "b"}}, nil)
+		if a == b {
+			t.Fatal("a comma in a skipped ref collides with two skipped refs")
+		}
+	})
+}
+
+// TestUCSyncDigest_Deterministic pins the rule that the digest does not
+// depend on the order of profiles, skipped refs, or lock map insertion.
+func TestUCSyncDigest_Deterministic(t *testing.T) {
+	entries := []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	p1 := ucProfile{Name: "p1", EffectiveCore: "2.5", Eligible: true, Lock: map[string]string{}}
+	p1.Lock["x"] = "1"
+	p1.Lock["y"] = "2"
+	p1.Lock["z"] = "3"
+	p2 := ucProfile{Name: "p2", EffectiveCore: "2.5", Eligible: false}
+	skippedA := []ucSkippedPack{{Ref: "r1"}, {Ref: "r2"}}
+	skippedB := []ucSkippedPack{{Ref: "r2"}, {Ref: "r1"}}
+
+	want := ucSyncDigest(entries, skippedA, []ucProfile{p1, p2})
+	for i := 0; i < 50; i++ {
+		if got := ucSyncDigest(entries, skippedB, []ucProfile{p2, p1}); got != want {
+			t.Fatalf("iteration %d: reordered digest %q, want %q", i, got, want)
+		}
+	}
+	nilLock := ucSyncDigest(entries, nil, []ucProfile{{Name: "p", Lock: nil}})
+	emptyLock := ucSyncDigest(entries, nil, []ucProfile{{Name: "p", Lock: map[string]string{}}})
+	if nilLock != emptyLock {
+		t.Fatal("a nil lock and an empty lock answer different digests")
+	}
+}
+
+// TestUCSyncDigest_GoldenValue pins the encoding. Changing it costs one
+// extra update-center derive pass.
+func TestUCSyncDigest_GoldenValue(t *testing.T) {
+	entries := []inventoryEntry{{Name: "a", Version: "1.0", SHA256: "sha256:a"}}
+	got := ucSyncDigest(entries,
+		[]ucSkippedPack{{Ref: "skip-ref"}},
+		[]ucProfile{{Name: "p", EffectiveCore: "2.5", Eligible: true, Lock: map[string]string{"x": "1", "y": "2"}}})
+	// The inventory entry now encodes dependenciesKnown, so the digest changes
+	// once on upgrade and every derived item resyncs.
+	const want = "ac8b66c1b7a7aaf63bafe6dbbc00b39bc17c4270d7d97b5e510979e00d6efb79"
+	if got != want {
+		t.Errorf("ucSyncDigest = %s, want %s", got, want)
 	}
 }

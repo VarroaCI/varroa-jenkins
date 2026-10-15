@@ -20,6 +20,7 @@
     <scriptPath>Jenkinsfile</scriptPath>
   </definition>
   <concurrentBuild>true</concurrentBuild>
+  <quietPeriod>5</quietPeriod>
   <properties>
     <jenkins.model.BuildDiscarderProperty>
       <strategy class="hudson.tasks.LogRotator">

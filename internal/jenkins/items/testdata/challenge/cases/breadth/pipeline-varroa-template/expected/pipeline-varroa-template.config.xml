@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<flow-definition plugin="workflow-job">
+  <displayName>Pipeline From Template</displayName>
+  <description>Pipeline job bound to a catalog-delivered template</description>
+  <definition class="org.jenkinsci.plugins.varroamiteauth.template.VarroaTemplateFlowDefinition" plugin="varroa-mite-auth">
+    <template>golang-service</template>
+    <templateVersion>2.1.0</templateVersion>
+    <values>{&#34;goVersion&#34;:&#34;1.22&#34;,&#34;replicas&#34;:3,&#34;runTests&#34;:true}</values>
+  </definition>
+</flow-definition>

@@ -81,16 +81,17 @@ func (p *NATSReconcilerProxy) Reprovision(cluster, namespace, name string) {
 // ApproveRestart relays an approve-restart command to the operator and returns
 // the result. It respects the caller's context deadline if one is set, and
 // cancels the in-flight NATS request if the context is cancelled.
-func (p *NATSReconcilerProxy) ApproveRestart(ctx context.Context, cluster, namespace, name, action string) error {
+func (p *NATSReconcilerProxy) ApproveRestart(ctx context.Context, cluster, namespace, name, action, expectedContentHash string) error {
 	// If the context is already done, fail fast.
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("approve restart: %w", err)
 	}
 
 	req := bus.ApproveRestartRequest{
-		Name:      name,
-		Namespace: namespace,
-		Action:    action,
+		Name:                name,
+		Namespace:           namespace,
+		Action:              action,
+		ExpectedContentHash: expectedContentHash,
 	}
 	data, _ := json.Marshal(req)
 
@@ -112,10 +113,16 @@ func (p *NATSReconcilerProxy) ApproveRestart(ctx context.Context, cluster, names
 	if err := json.Unmarshal(respMsg.Data, &resp); err != nil {
 		return fmt.Errorf("approve restart decode response: %w", err)
 	}
-	if resp.Error != "" {
-		return fmt.Errorf("%s", resp.Error)
+	if resp.Error == "" {
+		return nil
 	}
-	return nil
+	if resp.Code == bus.CodeConflict && len(resp.Changes) > 0 {
+		return &PendingRestartChangedError{Changes: resp.Changes}
+	}
+	if resp.Code != "" {
+		return &ActionError{Code: resp.Code, Msg: resp.Error}
+	}
+	return fmt.Errorf("%s", resp.Error)
 }
 
 // ApproveDeletion relays an approve-deletion command to the operator and returns

@@ -100,6 +100,16 @@ func (a *Authorizer) CanApproveDeletion(claims *auth.Claims, namespace, name str
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, name), "controllers", "approve-deletion")
 }
 
+// CanBreakGlass checks if the caller can request a break-glass grant on a controller.
+// The verb is distinct from every other controllers verb: it grants and is granted
+// independently of approve-restart, approve-deletion, and every other action.
+func (a *Authorizer) CanBreakGlass(claims *auth.Claims, namespace, name string) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, name), "controllers", "break-glass")
+}
+
 // CanManageController checks if the caller can manage a controller (power, restart, reprovision, ingress).
 func (a *Authorizer) CanManageController(claims *auth.Claims, namespace, name string) bool {
 	if claims == nil {
@@ -279,20 +289,86 @@ func (a *Authorizer) CanDeleteVersionProfile(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "version-profiles", "delete")
 }
 
+// CanReadRunners checks if the caller can read Runners. Runner is
+// cluster-scoped, so the check honors only cluster-wide (nil-scope)
+// bindings, matching CanReadJenkinsRoles.
+func (a *Authorizer) CanReadRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "read")
+}
+
+// CanCreateRunners checks if the caller can create Runners.
+func (a *Authorizer) CanCreateRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "create")
+}
+
+// CanUpdateRunners checks if the caller can update Runners.
+func (a *Authorizer) CanUpdateRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "update")
+}
+
+// CanDeleteRunners checks if the caller can delete Runners.
+func (a *Authorizer) CanDeleteRunners(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "runners", "delete")
+}
+
+// CanReadCellPools checks if the caller can read CellPools. CellPool is
+// cluster-scoped, so the decision reads the cluster-wide partition only.
+func (a *Authorizer) CanReadCellPools(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "cellpools", "read")
+}
+
+// CanUpdateCellPools checks if the caller can scale a CellPool. CellPool is
+// cluster-scoped, so the decision reads the cluster-wide partition only.
+func (a *Authorizer) CanUpdateCellPools(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "cellpools", "update")
+}
+
+// CanReadFleetLocks checks if the caller can read the fleet-wide lock
+// list. varroa.fleet_locks is a Postgres table and not a CRD, and the
+// decision takes the cluster-wide partition anyway: one fleet-wide read
+// discloses every tenant's lock names and job paths at once, which is
+// the disclosure CanReadCellPools guards against.
+func (a *Authorizer) CanReadFleetLocks(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "fleetlocks", "read")
+}
+
+// CanReleaseFleetLocks checks if the caller can force-release a releasing
+// fleet lock. The release can reach any tenant's lock, so the decision
+// takes the cluster-wide partition, as CanReadFleetLocks does.
+func (a *Authorizer) CanReleaseFleetLocks(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "fleetlocks", "release")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {
 		return false
 	}
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "catalogsources", "read")
-}
-
-// CanManageCatalogSources checks if the caller can manage CatalogSources with the given verb.
-func (a *Authorizer) CanManageCatalogSources(claims *auth.Claims, verb string) bool {
-	if claims == nil {
-		return false
-	}
-	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "catalogsources", verb)
 }
 
 // CanManageCatalogSourcesInNamespace checks the CatalogSource write capability
@@ -331,12 +407,35 @@ func (a *Authorizer) CanReadComposedBundles(claims *auth.Claims) bool {
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "composedbundles", "read")
 }
 
-// CanWriteComposedBundles checks if the caller can write ComposedBundles with the given verb.
-func (a *Authorizer) CanWriteComposedBundles(claims *auth.Claims, verb string) bool {
-	if claims == nil {
+// CanReadConfigInNamespace reports whether the caller may read one
+// namespaced config object. resource is catalogitems, catalogsources, or
+// composedbundles. A caller reads an object in a namespace where a binding
+// grants the read verb. A caller with the read verb in any scope also reads
+// the operator namespace, because an unqualified itemRef resolves there.
+// An empty namespace denies.
+func (a *Authorizer) CanReadConfigInNamespace(claims *auth.Claims, resource, namespace, operatorNamespace string) bool {
+	if claims == nil || namespace == "" {
 		return false
 	}
-	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), "composedbundles", verb)
+	if operatorNamespace != "" && namespace == operatorNamespace &&
+		hasVerb(a.resolver.EffectiveAPICapabilities(claims, "", ""), resource, "read") {
+		return true
+	}
+	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, ""), resource, "read")
+}
+
+// ConfigReadFilter returns a predicate that applies CanReadConfigInNamespace
+// and caches each namespace's answer for one list call.
+func (a *Authorizer) ConfigReadFilter(claims *auth.Claims, resource, operatorNamespace string) func(namespace string) bool {
+	seen := map[string]bool{}
+	return func(ns string) bool {
+		if v, ok := seen[ns]; ok {
+			return v
+		}
+		v := a.CanReadConfigInNamespace(claims, resource, ns, operatorNamespace)
+		seen[ns] = v
+		return v
+	}
 }
 
 // CanWriteComposedBundlesInNamespace checks the ComposedBundle write capability
@@ -345,6 +444,11 @@ func (a *Authorizer) CanWriteComposedBundles(claims *auth.Claims, verb string) b
 // namespace comes from the request.
 func (a *Authorizer) CanWriteComposedBundlesInNamespace(claims *auth.Claims, verb, namespace string) bool {
 	if claims == nil {
+		return false
+	}
+	// An empty namespace must deny for the same reason as
+	// CanManageCatalogSourcesInNamespace: an empty scope passes every binding.
+	if namespace == "" {
 		return false
 	}
 	return hasVerb(a.resolver.EffectiveAPICapabilities(claims, namespace, ""), "composedbundles", verb)
@@ -393,8 +497,14 @@ func (a *Authorizer) CanReadActivityEvent(claims *auth.Claims, e activity.Event)
 
 // EffectivePermissions returns the caller's scope-partitioned capabilities for
 // /me/permissions. nil claims honor defaultRead in the Global partition.
+// Tenants is always a non-nil array, and so is each entry's Jobs.
 func (a *Authorizer) EffectivePermissions(claims *auth.Claims) rbac.PermissionScopes {
-	return a.resolver.EffectivePermissionScopes(claims)
+	perms := a.resolver.EffectivePermissionScopes(claims)
+	perms.Tenants = a.resolver.TenantGrants(claims)
+	if perms.Tenants == nil {
+		perms.Tenants = []rbac.TenantCapabilities{}
+	}
+	return perms
 }
 
 // DeployableNamespaces contains the set of namespaces the caller may deploy

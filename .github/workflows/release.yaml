@@ -94,8 +94,10 @@ jobs:
             GIT_BRANCH=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Each image has its own cache scope. A shared scope lets one image
+          # overwrite the cache index of the other.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max,ignore-error=true
 
   frontend:
     name: Build & push frontend
@@ -139,8 +141,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Each image has its own cache scope. A shared scope lets one image
+          # overwrite the cache index of the other.
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max,ignore-error=true
 
   chart:
     name: Push Helm chart (OCI)

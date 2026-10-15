@@ -112,6 +112,34 @@ describe("useActivityFeed live ingest (named `activity` frames)", () => {
     });
   });
 
+  it("drops a named activity frame that has no type or timestamp", async () => {
+    const { result } = renderHook(
+      () => useActivityFeed({ namespace: "ns", name: "ctrl" }),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const es = MockEventSource.instances[0];
+
+    act(() => {
+      es.emitNamedEvent(
+        "activity",
+        JSON.stringify({ event: "heartbeat", name: "c1", namespace: "ns", cluster: "core" }),
+      );
+    });
+    const valid = createEvent({
+      timestamp: "2024-01-01T00:00:03Z",
+      namespace: "ns",
+      controller: "ctrl",
+      message: "valid",
+    });
+    act(() => {
+      es.emitNamedEvent("activity", JSON.stringify(valid));
+    });
+
+    await waitFor(() => expect(result.current.events).toHaveLength(1));
+    expect(result.current.events[0].message).toBe("valid");
+  });
+
   it("filters an out-of-scope named activity frame", async () => {
     const { result } = renderHook(
       () => useActivityFeed({ namespace: "ns", name: "ctrl" }),

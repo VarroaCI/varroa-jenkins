@@ -12,23 +12,20 @@ Varroa combines the selected Jenkins core lock with one non-core plugin source.
 
 The controller list replaces the bundle list. It does not merge with it. Core
 pins always win. A conflicting non-core pin sets `PluginConflict=True` and
-blocks provisioning.
+blocks provisioning. On a cell, a pin on a plugin that the cell never installs (`job-dsl`) is not compared and sets neither condition.
 
 ## Preflight bundle pins before they block anything
 
-`PluginPinConflict` is a separate, advisory check: it compares the composed
-bundle's own `plugins.yaml` against the resolved plugin set and reports what
-it finds as a condition on both the controller and the bundle, without ever
-blocking provisioning. It runs at the same points `PluginConflict` does, but
-the two are independent: a bundle can carry a pin problem while
-`PluginConflict` stays clear, and vice versa.
+`PluginPinConflict` is a separate advisory check. It compares the bundle's own
+`plugins.yaml` with the resolved plugin set. It reports the result as a
+condition on the controller and the bundle, and never blocks provisioning. It
+runs at the same points as `PluginConflict`, but the two checks are
+independent.
 
 A conflict means the bundle pins a non-core artifact to a version that
 differs from the resolved set. A missing entry means the bundle pins an
-artifact the resolved set does not carry at all; that case is reported the
-same way but is never treated as a conflict. Either way, `PluginPinConflict`
-only tells you something worth checking before you attach the bundle to a
-controller. It doesn't change what gets installed.
+artifact the resolved set does not carry. It is reported the same way, but it
+is not a conflict. `PluginPinConflict` does not change what gets installed.
 
 ## Add bundle plugins
 
@@ -40,8 +37,7 @@ plugins:
     version: "1.28"
 ```
 
-Commit the file referenced by the bundle manifest, then wait for composition
-and controller reconciliation.
+Commit the file that the bundle manifest names, then wait for reconciliation.
 
 ## Replace the list for one controller
 
@@ -61,8 +57,8 @@ spec:
         version: "1.28"
 ```
 
-Include every required non-core plugin because the controller entries replace
-the bundle entries.
+Include every required non-core plugin: these entries replace the bundle
+entries.
 
 ## Apply a plugin roll
 
@@ -77,6 +73,11 @@ Check the pending change before approval:
 kubectl get controller demo -n teams-platform \
   -o jsonpath='{.status.pendingPluginRoll}{"\n"}'
 ```
+
+The approval applies to the target that is pending when the operator reads
+it. If that target changes before the write, the operator refuses the
+approval. Check again and approve again. An approval with no pending roll
+gets a conflict and changes nothing.
 
 ## Troubleshoot
 

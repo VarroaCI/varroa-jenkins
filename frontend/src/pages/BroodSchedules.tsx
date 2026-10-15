@@ -33,6 +33,7 @@ export default function BroodSchedules() {
   });
 
   const schedules: BroodSchedule[] = items?.items ?? [];
+  const failedClusters = (items?.clusters ?? []).filter((s) => !s.ok);
 
   const handleDelete = useCallback(async (ns: string, name: string) => {
     try {
@@ -66,6 +67,12 @@ export default function BroodSchedules() {
 
       {isLoading && <p>Loading…</p>}
       {error && <p className={styles.error}>Failed to load brood schedules</p>}
+
+      {failedClusters.map((s) => (
+        <div key={s.cluster} className={styles.warningBanner} role="status">
+          Brood schedules of cluster <strong>{s.cluster}</strong> are absent from this list: {s.error || "the cluster did not answer"}.
+        </div>
+      ))}
 
       {!isLoading && schedules.length === 0 && (
         <div className={styles.empty}>

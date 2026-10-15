@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -1437,7 +1439,7 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	existing := &unstructured.Unstructured{Object: map[string]interface{}{
 		"apiVersion": "varroa.dev/v1alpha1",
 		"kind":       "Controller",
-		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns"},
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
 		"status": map[string]interface{}{
 			"phase":                "Running",
 			"lastReconcileError":   "some old error",
@@ -1452,7 +1454,7 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	c := &ClientsetClient{dynamic: dyn}
 
 	// Patch with a nil LastReconcileErrorAt — this must explicitly null the field.
-	err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", &v1alpha1.ControllerStatus{
+	_, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7", &v1alpha1.ControllerStatus{
 		Phase:                v1alpha1.ControllerPhaseRunning,
 		LastReconcileError:   "",
 		LastReconcileErrorAt: nil,
@@ -1478,6 +1480,230 @@ func TestPatchControllerStatus_ClearsLastReconcileErrorAt(t *testing.T) {
 	// not absent. Assert it carries no stale non-empty value.
 	if ler, found, _ := unstructured.NestedString(got.Object, "status", "lastReconcileError"); found && ler != "" {
 		t.Errorf("lastReconcileError should be empty after clearing, got %q", ler)
+	}
+}
+
+// TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries pins
+// that a nil pendingItemDeletions list clears a stored entry. A merge patch
+// keeps an omitted key, so the patch must send an empty list.
+func TestPatchControllerStatus_NilPendingDeletionsClearsStoredEntries(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+		"status": map[string]interface{}{
+			"phase":                "Connected",
+			"pendingItemDeletions": []interface{}{map[string]interface{}{"path": "team/job"}},
+		},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	c := &ClientsetClient{dynamic: dyn}
+
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7", &v1alpha1.ControllerStatus{
+		Phase: v1alpha1.ControllerPhaseConnected,
+	}); err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "ctrl", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	list, _, err := unstructured.NestedSlice(got.Object, "status", "pendingItemDeletions")
+	if err != nil {
+		t.Fatalf("read pendingItemDeletions: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("pendingItemDeletions = %v, want empty", list)
+	}
+}
+
+// TestPatchControllerStatus_CellPatchShape asserts task 5.3a: the
+// end-of-reconcile status patch builds status.cell as an explicit partial
+// map carrying only the controller reconciler's own fields — warm,
+// appliedTenants, evacuate, unreadySince, rolledAt, and tenantWarnings —
+// and never tenants, the placement pass's own field. Sending the whole
+// in-memory CellStatus would carry a stale tenants list and clobber a
+// placement change a narrower patch would leave untouched.
+func TestPatchControllerStatus_CellPatchShape(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns", "resourceVersion": "7"},
+		"status": map[string]interface{}{
+			"phase": "Connected",
+			"cell": map[string]interface{}{
+				"tenants": []interface{}{"payments", "search"},
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var capturedPatch []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		capturedPatch = pa.GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	unreadySince := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	prevSeen := metav1.NewTime(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
+	_, err := c.PatchControllerStatus(context.Background(), "cell1", "ns", "7", &v1alpha1.ControllerStatus{
+		Phase: v1alpha1.ControllerPhaseConnected,
+		Cell: &v1alpha1.CellStatus{
+			AppliedTenants:           []string{"payments"},
+			Evacuate:                 true,
+			UnreadySince:             &unreadySince,
+			TenantWarnings:           []v1alpha1.TenantWarning{{Tenant: "payments", Reason: "HibernationIgnored", Message: "ignored"}},
+			Instance:                 "pod-uid-new",
+			PreviousInstance:         "pod-uid-old",
+			PreviousInstanceLastSeen: &prevSeen,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+	if capturedPatch == nil {
+		t.Fatal("expected the status subresource patch to be captured")
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(capturedPatch, &decoded); err != nil {
+		t.Fatalf("decode captured patch: %v", err)
+	}
+	status, _ := decoded["status"].(map[string]interface{})
+	cell, ok := status["cell"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("patch body carries no status.cell: %v", decoded)
+	}
+	for _, key := range []string{
+		"warm", "appliedTenants", "evacuate", "unreadySince", "rolledAt", "tenantWarnings",
+		"instance", "previousInstance", "previousInstanceLastSeen", "rehydration",
+	} {
+		if _, present := cell[key]; !present {
+			t.Errorf("patch body's status.cell missing key %q: %v", key, cell)
+		}
+	}
+	if _, present := cell["tenants"]; present {
+		t.Errorf("patch body's status.cell must never carry tenants, got %v", cell["tenants"])
+	}
+
+	// The pre-existing tenants list — the placement pass's own field — must
+	// survive untouched, proving the merge patch never sent that key.
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "cell1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	tenants, _, _ := unstructured.NestedStringSlice(got.Object, "status", "cell", "tenants")
+	want := []string{"payments", "search"}
+	if len(tenants) != len(want) || tenants[0] != want[0] || tenants[1] != want[1] {
+		t.Errorf("status.cell.tenants = %v, want unchanged %v", tenants, want)
+	}
+
+	// previousInstance/previousInstanceLastSeen must persist — omitting
+	// them from the merge patch drops the replaced pod's dead-instance
+	// report for good the moment the next tenant.sync announce misses it.
+	prevInstance, _, _ := unstructured.NestedString(got.Object, "status", "cell", "previousInstance")
+	if prevInstance != "pod-uid-old" {
+		t.Errorf("status.cell.previousInstance = %q, want pod-uid-old", prevInstance)
+	}
+	prevSeenGot, _, _ := unstructured.NestedString(got.Object, "status", "cell", "previousInstanceLastSeen")
+	if prevSeenGot == "" {
+		t.Error("status.cell.previousInstanceLastSeen did not persist")
+	}
+}
+
+// TestPatchControllerCellStatus_TenantsOnlyPatchShape asserts task 6.6: the
+// placement pass's PatchControllerCellStatus sends exactly
+// {"status":{"cell":{"tenants":[...]}}}, and a cell carrying evacuate (the
+// controller reconciler's own half of status.cell) keeps it after the
+// patch.
+func TestPatchControllerCellStatus_TenantsOnlyPatchShape(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "cell1", "namespace": "ns"},
+		"status": map[string]interface{}{
+			"phase": "Connected",
+			"cell": map[string]interface{}{
+				"tenants":  []interface{}{"payments"},
+				"evacuate": true,
+				"warm":     false,
+			},
+		},
+	}}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var capturedPatch []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		capturedPatch = pa.GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	err := c.PatchControllerCellStatus(context.Background(), "cell1", "ns", &v1alpha1.CellStatus{
+		Tenants: []string{"payments", "search"},
+	})
+	if err != nil {
+		t.Fatalf("PatchControllerCellStatus failed: %v", err)
+	}
+	if capturedPatch == nil {
+		t.Fatal("expected the status subresource patch to be captured")
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(capturedPatch, &decoded); err != nil {
+		t.Fatalf("decode captured patch: %v", err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("patch body carries more than status: %v", decoded)
+	}
+	status, _ := decoded["status"].(map[string]interface{})
+	if len(status) != 1 {
+		t.Fatalf("patch body's status carries more than cell: %v", status)
+	}
+	cell, ok := status["cell"].(map[string]interface{})
+	if !ok || len(cell) != 1 {
+		t.Fatalf("patch body's status.cell must carry only tenants: %v", status["cell"])
+	}
+	tenants, _ := cell["tenants"].([]interface{})
+	if len(tenants) != 2 || tenants[0] != "payments" || tenants[1] != "search" {
+		t.Fatalf("patch body's status.cell.tenants = %v, want [payments search]", cell["tenants"])
+	}
+
+	got, err := dyn.Resource(controllerGVR).Namespace("ns").Get(context.Background(), "cell1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	evacuate, _, _ := unstructured.NestedBool(got.Object, "status", "cell", "evacuate")
+	if !evacuate {
+		t.Error("status.cell.evacuate did not survive the narrow tenants patch")
 	}
 }
 
@@ -2215,5 +2441,647 @@ func TestPatchUpdateCenterStatus_ZeroesStoreBytes(t *testing.T) {
 	}
 	if pc, _, _ := unstructured.NestedInt64(status, "pluginCount"); pc != 72 {
 		t.Errorf("expected pluginCount=72 preserved, got: %d", pc)
+	}
+}
+
+// TestPatchControllerStatus_SendsResourceVersionPrecondition pins that the
+// status patch body carries the caller's resourceVersion. The apiserver
+// treats that value as a precondition. The client-go fake tracker does not
+// check it on a patch, so the test asserts the request body.
+func TestPatchControllerStatus_SendsResourceVersionPrecondition(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+		"status":     map[string]interface{}{"phase": "Running"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	var subresource string
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		body = pa.GetPatch()
+		subresource = pa.GetSubresource()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "7",
+		&v1alpha1.ControllerStatus{Phase: v1alpha1.ControllerPhaseConnected}); err != nil {
+		t.Fatalf("PatchControllerStatus failed: %v", err)
+	}
+	if subresource != "status" {
+		t.Errorf("subresource = %q, want status", subresource)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if phase, _, _ := unstructured.NestedString(patch, "status", "phase"); phase != "Connected" {
+		t.Errorf("patch status.phase = %q, want Connected", phase)
+	}
+}
+
+// TestPatchControllerStatus_RequiresResourceVersion pins that an empty
+// resourceVersion fails before any request: an empty value in a patch is no
+// precondition.
+func TestPatchControllerStatus_RequiresResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.PatchControllerStatus(context.Background(), "ctrl", "ns", "",
+		&v1alpha1.ControllerStatus{}); err == nil {
+		t.Fatal("PatchControllerStatus with an empty resourceVersion succeeded")
+	}
+	if n := len(dyn.Actions()); n != 0 {
+		t.Fatalf("requests sent = %d, want 0", n)
+	}
+}
+
+// TestPatchObjectMetaAt_SendsResourceVersionPrecondition pins that the
+// metadata patch body carries the caller's resourceVersion next to the
+// patched keys, and that an empty resourceVersion fails before any request.
+// The client-go fake tracker does not check a patch precondition, so the
+// test asserts the request body.
+func TestPatchObjectMetaAt_SendsResourceVersionPrecondition(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		body = action.(clienttesting.PatchActionImpl).GetPatch()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+
+	if _, err := c.PatchObjectMetaAt(context.Background(), controllerGVR, "ns", "ctrl", "",
+		map[string]any{"finalizers": []string{"f"}}); err == nil {
+		t.Fatal("PatchObjectMetaAt with an empty resourceVersion succeeded")
+	}
+	if body != nil {
+		t.Fatal("PatchObjectMetaAt with an empty resourceVersion sent a request")
+	}
+	if _, err := c.PatchObjectMetaAt(context.Background(), controllerGVR, "ns", "ctrl", "7",
+		map[string]any{"finalizers": []string{"f"}}); err != nil {
+		t.Fatalf("PatchObjectMetaAt: %v", err)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if fin, _, _ := unstructured.NestedStringSlice(patch, "metadata", "finalizers"); len(fin) != 1 || fin[0] != "f" {
+		t.Errorf("patch metadata.finalizers = %v, want [f]", fin)
+	}
+}
+
+// setHibernatedAtBody calls SetHibernatedAt on a fake dynamic client and
+// returns the patch body, the subresource, and the verbs of every request.
+func setHibernatedAtBody(t *testing.T, want bool) (map[string]any, string, []string) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "Controller"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ControllerList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata":   map[string]interface{}{"name": "ctrl", "namespace": "ns", "resourceVersion": "7"},
+		"status":     map[string]interface{}{"hibernated": !want, "hibernatedAt": "2026-01-01T00:00:00Z"},
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"},
+		existing,
+	)
+	var body []byte
+	var subresource string
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa := action.(clienttesting.PatchActionImpl)
+		body = pa.GetPatch()
+		subresource = pa.GetSubresource()
+		return false, nil, nil
+	})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.SetHibernatedAt(context.Background(), "ctrl", "ns", "7", want); err != nil {
+		t.Fatalf("SetHibernatedAt failed: %v", err)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(body, &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v", err)
+	}
+	actions := dyn.Actions()
+	verbs := make([]string, 0, len(actions))
+	for _, a := range actions {
+		verbs = append(verbs, a.GetVerb())
+	}
+	return patch, subresource, verbs
+}
+
+// TestSetHibernatedAt_SendsResourceVersionPrecondition pins that the tick's
+// hibernation write is one status patch that carries the caller's
+// resourceVersion, with no read of its own.
+func TestSetHibernatedAt_SendsResourceVersionPrecondition(t *testing.T) {
+	patch, subresource, verbs := setHibernatedAtBody(t, true)
+	if subresource != "status" {
+		t.Errorf("subresource = %q, want status", subresource)
+	}
+	if len(verbs) != 1 || verbs[0] != "patch" {
+		t.Errorf("requests = %v, want one patch and no read", verbs)
+	}
+	if rv, _, _ := unstructured.NestedString(patch, "metadata", "resourceVersion"); rv != "7" {
+		t.Errorf("patch metadata.resourceVersion = %q, want 7", rv)
+	}
+	if h, _, _ := unstructured.NestedBool(patch, "status", "hibernated"); !h {
+		t.Error("patch status.hibernated is not true")
+	}
+	if at, _, _ := unstructured.NestedString(patch, "status", "hibernatedAt"); at == "" {
+		t.Error("patch status.hibernatedAt is empty on a set")
+	}
+}
+
+// TestSetHibernatedAt_ClearSendsNullHibernatedAt pins that a clear sends a
+// null hibernatedAt, which a merge patch reads as a delete.
+func TestSetHibernatedAt_ClearSendsNullHibernatedAt(t *testing.T) {
+	patch, _, _ := setHibernatedAtBody(t, false)
+	status, _ := patch["status"].(map[string]any)
+	if h, ok := status["hibernated"].(bool); !ok || h {
+		t.Errorf("patch status.hibernated = %v, want false", status["hibernated"])
+	}
+	at, ok := status["hibernatedAt"]
+	if !ok || at != nil {
+		t.Errorf("patch status.hibernatedAt = %v (present %v), want an explicit null", at, ok)
+	}
+}
+
+// TestSetHibernatedAt_RequiresResourceVersion pins that an empty
+// resourceVersion fails before any request.
+func TestSetHibernatedAt_RequiresResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{controllerGVR: "ControllerList"})
+	c := &ClientsetClient{dynamic: dyn}
+	if _, err := c.SetHibernatedAt(context.Background(), "ctrl", "ns", "", true); err == nil {
+		t.Fatal("SetHibernatedAt with an empty resourceVersion succeeded")
+	}
+	if n := len(dyn.Actions()); n != 0 {
+		t.Fatalf("requests sent = %d, want 0", n)
+	}
+}
+
+// scaleTestClient returns a ClientsetClient over a fake clientset that holds
+// sts (when non-nil). The returned slice collects every StatefulSet patch body.
+func scaleTestClient(sts *appsv1.StatefulSet) (*ClientsetClient, *[]string) {
+	var objs []runtime.Object
+	if sts != nil {
+		objs = append(objs, sts)
+	}
+	cs := fake.NewSimpleClientset(objs...)
+	patches := &[]string{}
+	cs.PrependReactor("patch", "statefulsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		*patches = append(*patches, string(action.(clienttesting.PatchAction).GetPatch()))
+		return false, nil, nil
+	})
+	return &ClientsetClient{clientset: cs}, patches
+}
+
+// scaleTestStatefulSet returns ns/web at the given replicas with resourceVersion 7.
+func scaleTestStatefulSet(replicas *int32) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns", ResourceVersion: "7"},
+		Spec:       appsv1.StatefulSetSpec{Replicas: replicas},
+	}
+}
+
+func TestScaleStatefulSetToZero_FencesThenSendsResourceVersionPrecondition(t *testing.T) {
+	one := int32(1)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&one))
+	fenceCalls := 0
+	fence := func(context.Context) error {
+		fenceCalls++
+		if len(*patches) != 0 {
+			t.Errorf("fence ran after a patch was sent")
+		}
+		return nil
+	}
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", fence); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	got, err := c.clientset.AppsV1().StatefulSets("ns").Get(context.Background(), "web", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ResourceVersion == "" {
+		t.Fatal("statefulset has no resourceVersion to pin")
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	want := fmt.Sprintf(`{"metadata":{"resourceVersion":%q},"spec":{"replicas":0}}`, "7")
+	if len(*patches) != 1 || (*patches)[0] != want {
+		t.Fatalf("patches = %v, want one patch %s", *patches, want)
+	}
+}
+
+func TestScaleStatefulSetToZero_NilReplicasScales(t *testing.T) {
+	c, patches := scaleTestClient(scaleTestStatefulSet(nil))
+	fenceCalls := 0
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		fenceCalls++
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	if fenceCalls != 1 || len(*patches) != 1 {
+		t.Fatalf("fence calls = %d, patches = %d; want 1 and 1 for a nil replica count", fenceCalls, len(*patches))
+	}
+}
+
+func TestScaleStatefulSetToZero_SkipsFenceWhenAlreadyZero(t *testing.T) {
+	zero := int32(0)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&zero))
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		t.Error("fence must not run for a StatefulSet already at 0")
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero: %v", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none", *patches)
+	}
+}
+
+func TestScaleStatefulSetToZero_SkipsFenceWhenMissing(t *testing.T) {
+	c, patches := scaleTestClient(nil)
+	if err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error {
+		t.Error("fence must not run for a missing StatefulSet")
+		return nil
+	}); err != nil {
+		t.Fatalf("ScaleStatefulSetToZero on a missing StatefulSet: %v", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none", *patches)
+	}
+}
+
+func TestScaleStatefulSetToZero_FenceErrorSendsNoPatch(t *testing.T) {
+	one := int32(1)
+	c, patches := scaleTestClient(scaleTestStatefulSet(&one))
+	fenceErr := errors.New("fence refused")
+	err := c.ScaleStatefulSetToZero(context.Background(), "web", "ns", func(context.Context) error { return fenceErr })
+	if !errors.Is(err, fenceErr) {
+		t.Fatalf("err = %v, want the fence error", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("patches = %v, want none after a fence error", *patches)
+	}
+}
+
+// noStatefulSetFence is a fence that always passes.
+func noStatefulSetFence(context.Context) error { return nil }
+
+// seedFenceStatefulSet returns a fake client whose store holds StatefulSet
+// "web" in namespace "ns" with resourceVersion "7". A nil replicas omits
+// spec.replicas.
+func seedFenceStatefulSet(t *testing.T, replicas any) (*ClientsetClient, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	c, dyn := newFakeStsClient()
+	spec := map[string]any{}
+	if replicas != nil {
+		spec["replicas"] = replicas
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "StatefulSet",
+		"metadata":   map[string]any{"name": "web", "namespace": "ns", "resourceVersion": "7"},
+		"spec":       spec,
+	}}
+	if _, err := dyn.Resource(stsGVR).Namespace("ns").Create(context.Background(), obj, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed statefulset: %v", err)
+	}
+	// The seed write is not part of the call under test.
+	dyn.ClearActions()
+	return c, dyn
+}
+
+// statefulSetVerbs returns the verbs of the StatefulSet actions that the
+// fake dynamic client recorded, in order.
+func statefulSetVerbs(dyn *dynamicfake.FakeDynamicClient) []string {
+	var verbs []string
+	for _, a := range dyn.Actions() {
+		if a.GetResource().Resource == "statefulsets" {
+			verbs = append(verbs, a.GetVerb())
+		}
+	}
+	return verbs
+}
+
+func TestCreateStatefulSet_FencesBeforeCreate(t *testing.T) {
+	c, dyn := newFakeStsClient()
+	var atFence []string
+	fenceCalls := 0
+	err := c.CreateStatefulSet(context.Background(), baseCascHashSpec("web", ""), func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before any write", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "create"}) {
+		t.Fatalf("verbs = %v, want [get create]", got)
+	}
+}
+
+func TestCreateStatefulSet_FencesScaleUpFromZero(t *testing.T) {
+	c, dyn := seedFenceStatefulSet(t, int64(0))
+	var atFence []string
+	fenceCalls := 0
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before the update", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "update"}) {
+		t.Fatalf("verbs = %v, want [get update]", got)
+	}
+	var updated *unstructured.Unstructured
+	for _, a := range dyn.Actions() {
+		if u, ok := a.(clienttesting.UpdateAction); ok && a.GetResource().Resource == "statefulsets" {
+			updated = u.GetObject().(*unstructured.Unstructured)
+		}
+	}
+	if updated == nil {
+		t.Fatal("no statefulset update recorded")
+	}
+	if rv := updated.GetResourceVersion(); rv != "7" {
+		t.Fatalf("update resourceVersion = %q, want the value read before the fence (7)", rv)
+	}
+	if n := stsReplicaCount(updated); n != 1 {
+		t.Fatalf("update replicas = %d, want 1", n)
+	}
+}
+
+func TestCreateStatefulSet_SkipsFenceWhenReplicasUnchanged(t *testing.T) {
+	for name, replicas := range map[string]any{"one": int64(1), "missing": nil} {
+		t.Run(name, func(t *testing.T) {
+			c, dyn := seedFenceStatefulSet(t, replicas)
+			spec := baseCascHashSpec("web", "")
+			spec.Replicas = ptr32(1)
+			err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+				t.Error("fence must not run when the replica count does not scale up from 0")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("CreateStatefulSet: %v", err)
+			}
+			if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "update"}) {
+				t.Fatalf("verbs = %v, want [get update]", got)
+			}
+		})
+	}
+}
+
+func TestCreateStatefulSet_FenceErrorSendsNoWrite(t *testing.T) {
+	fenceErr := errors.New("fence refused")
+	fail := func(context.Context) error { return fenceErr }
+
+	c, dyn := newFakeStsClient()
+	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec("web", ""), fail); !errors.Is(err, fenceErr) {
+		t.Fatalf("create: err = %v, want the fence error", err)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get"}) {
+		t.Fatalf("create: verbs = %v, want [get] only", got)
+	}
+
+	zero, dynZero := seedFenceStatefulSet(t, int64(0))
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	if err := zero.CreateStatefulSet(context.Background(), spec, fail); !errors.Is(err, fenceErr) {
+		t.Fatalf("scale-up: err = %v, want the fence error", err)
+	}
+	if got := statefulSetVerbs(dynZero); !reflect.DeepEqual(got, []string{"get"}) {
+		t.Fatalf("scale-up: verbs = %v, want [get] only", got)
+	}
+}
+
+func TestStsReplicaCount(t *testing.T) {
+	cases := []struct {
+		name     string
+		replicas any
+		want     int64
+	}{
+		{"missing", nil, 1},
+		{"int64 zero", int64(0), 0},
+		{"int32 three", int32(3), 3},
+		{"int four", 4, 4},
+		{"float64 zero", float64(0), 0},
+		{"float64 two", float64(2), 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{}}}
+			if tc.replicas != nil {
+				obj.Object["spec"].(map[string]any)["replicas"] = tc.replicas
+			}
+			if got := stsReplicaCount(obj); got != tc.want {
+				t.Fatalf("stsReplicaCount = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateStatefulSet_AdoptsPeerCreateOnAlreadyExists(t *testing.T) {
+	c, dyn := newFakeStsClient()
+	raced := false
+	dyn.PrependReactor("create", "statefulsets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		if raced {
+			return false, nil, nil
+		}
+		raced = true
+		// A peer tick creates the StatefulSet between our read and our create.
+		peer := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "StatefulSet",
+			"metadata":   map[string]any{"name": "web", "namespace": "ns", "resourceVersion": "3"},
+			"spec":       map[string]any{"replicas": int64(1)},
+		}}
+		if err := dyn.Tracker().Create(stsGVR, peer, "ns"); err != nil {
+			t.Errorf("seed peer statefulset: %v", err)
+		}
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "apps", Resource: "statefulsets"}, "web")
+	})
+	// The fake tracker clears resourceVersion on the recorded update object,
+	// so the value is captured here, before the tracker handles the update.
+	updateRV := ""
+	dyn.PrependReactor("update", "statefulsets", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		updateRV = action.(clienttesting.UpdateAction).GetObject().(*unstructured.Unstructured).GetResourceVersion()
+		return false, nil, nil
+	})
+	var atFence []string
+	fenceCalls := 0
+	spec := baseCascHashSpec("web", "")
+	spec.Replicas = ptr32(1)
+	err := c.CreateStatefulSet(context.Background(), spec, func(context.Context) error {
+		fenceCalls++
+		atFence = statefulSetVerbs(dyn)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CreateStatefulSet on a peer's create: %v", err)
+	}
+	if fenceCalls != 1 {
+		t.Fatalf("fence calls = %d, want 1: the adopted update must not fence again", fenceCalls)
+	}
+	if !reflect.DeepEqual(atFence, []string{"get"}) {
+		t.Fatalf("verbs at fence = %v, want [get] before the create", atFence)
+	}
+	if got := statefulSetVerbs(dyn); !reflect.DeepEqual(got, []string{"get", "create", "get", "update"}) {
+		t.Fatalf("verbs = %v, want [get create get update]", got)
+	}
+	if updateRV != "3" {
+		t.Fatalf("update resourceVersion = %q, want the peer's 3 from the re-read", updateRV)
+	}
+}
+
+// unknownDependencyFixture returns a client seeded with one UpdateCenter whose
+// status carries the given fields.
+func unknownDependencyFixture(t *testing.T, status map[string]interface{}) (*ClientsetClient, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "UpdateCenter"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UpdateCenterList"), &unstructured.UnstructuredList{})
+	existing := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "UpdateCenter",
+		"metadata":   map[string]interface{}{"name": "varroa-update-center"},
+		"status":     status,
+	}}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{updateCentersGVR: "UpdateCenterList"},
+		existing,
+	)
+	return &ClientsetClient{dynamic: dyn}, dyn
+}
+
+// TestPatchUpdateCenterStatus_ZeroesUnknownDependencyCount guards the regression
+// where a store with no unknown dependency lists kept its last nonzero count.
+// The count carries omitempty, so a zero must be written explicitly.
+func TestPatchUpdateCenterStatus_ZeroesUnknownDependencyCount(t *testing.T) {
+	c, dyn := unknownDependencyFixture(t, map[string]interface{}{
+		"phase":                  "Ready",
+		"unknownDependencyCount": int64(60),
+	})
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready"})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+	n, found, _ := unstructured.NestedInt64(status, "unknownDependencyCount")
+	if !found || n != 0 {
+		t.Errorf("expected unknownDependencyCount=0 (found=%v), got: %d", found, n)
+	}
+}
+
+// TestPatchUpdateCenterStatus_ClearsStaleUnknownDependencies guards the
+// regression where a stale unknown-dependency list outlived the store state it
+// described.
+func TestPatchUpdateCenterStatus_ClearsStaleUnknownDependencies(t *testing.T) {
+	c, dyn := unknownDependencyFixture(t, map[string]interface{}{
+		"phase":                  "Ready",
+		"unknownDependencyCount": int64(1),
+		"unknownDependencies": []interface{}{
+			map[string]interface{}{"plugin": "acme", "version": "1.0"},
+		},
+	})
+	err := c.PatchObjectStatus(context.Background(), updateCentersGVR, "", "varroa-update-center",
+		&v1alpha1.UpdateCenterStatus{Phase: "Ready"})
+	if err != nil {
+		t.Fatalf("patch failed: %v", err)
+	}
+	got, err := dyn.Resource(updateCentersGVR).Get(context.Background(), "varroa-update-center", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	status, _, _ := unstructured.NestedMap(got.Object, "status")
+	if s, found := status["unknownDependencies"]; found && s != nil {
+		if sl, ok := s.([]interface{}); !ok || len(sl) > 0 {
+			t.Errorf("expected unknownDependencies cleared, got: %v", s)
+		}
+	}
+}
+
+// TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten proves the
+// pending-signature keys are in the cell patch even when empty, so a merge
+// patch clears a list that the mite no longer reports.
+func TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten(t *testing.T) {
+	patch := controllerStatusPatch(&v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{}})
+	cell, ok := patch["cell"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("cell missing from the status patch: %+v", patch)
+	}
+	for _, key := range []string{"pendingSignatures", "pendingSignaturesTotal"} {
+		if _, ok := cell[key]; !ok {
+			t.Fatalf("%s absent from the cell patch for an empty status", key)
+		}
+	}
+}
+
+// The status patch always carries endpoint, so an empty value clears a stale
+// URL under the merge patch.
+func TestControllerStatusPatchAlwaysCarriesEndpoint(t *testing.T) {
+	empty := controllerStatusPatch(&v1alpha1.ControllerStatus{})
+	if v, ok := empty["endpoint"]; !ok || v != "" {
+		t.Fatalf("endpoint = %v (present %v) for an empty status, want an empty value", v, ok)
+	}
+	set := controllerStatusPatch(&v1alpha1.ControllerStatus{Endpoint: "https://x.example.com"})
+	if v := set["endpoint"]; v != "https://x.example.com" {
+		t.Fatalf("endpoint = %v, want https://x.example.com", v)
 	}
 }

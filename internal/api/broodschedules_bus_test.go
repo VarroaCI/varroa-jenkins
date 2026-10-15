@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -15,6 +16,38 @@ func TestNewBusBroodSchedules(t *testing.T) {
 	svc := NewBusBroodSchedules("core", nil, nil, slog.Default())
 	if svc == nil {
 		t.Fatal("NewBusBroodSchedules returned nil")
+	}
+}
+
+func TestBusBroodSchedules_ListCancelReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	started := make(chan struct{})
+	f := &busBroodSchedules{
+		localCluster: "core",
+		logger:       slog.Default(),
+		request: func(_ string, _ []byte, _ time.Duration) ([]byte, error) {
+			close(started)
+			<-release
+			return nil, errors.New("released")
+		},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := f.List(ctx, "test-ns")
+		done <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("List did not return after cancel")
 	}
 }
 
@@ -103,9 +136,13 @@ func TestBusBroodSchedules_GetWithError(t *testing.T) {
 }
 
 func TestBusBroodSchedules_List(t *testing.T) {
-	items := []bus.BroodScheduleResponse{
+	items := make([]json.RawMessage, 0, 2)
+	for _, s := range []bus.BroodScheduleResponse{
 		{Namespace: "ns1", Name: "sched-a"},
 		{Namespace: "ns1", Name: "sched-b"},
+	} {
+		raw, _ := json.Marshal(s)
+		items = append(items, raw)
 	}
 	resp := bus.BroodScheduleListResponse{Items: items}
 	respData, _ := json.Marshal(resp)
@@ -122,7 +159,7 @@ func TestBusBroodSchedules_List(t *testing.T) {
 		membership: nil,
 	}
 
-	got, err := f.List(context.Background(), "ns1")
+	got, statuses, err := f.List(context.Background(), "ns1")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -137,6 +174,9 @@ func TestBusBroodSchedules_List(t *testing.T) {
 		if item.Cluster != "core" {
 			t.Errorf("Cluster = %q, want core", item.Cluster)
 		}
+	}
+	if len(statuses) != 1 || statuses[0] != (ClusterFanoutStatus{Name: "core", OK: true}) {
+		t.Errorf("statuses = %+v, want one ok row for core", statuses)
 	}
 }
 

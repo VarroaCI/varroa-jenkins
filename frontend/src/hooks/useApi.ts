@@ -6,6 +6,7 @@ const STATUS_COPY: Record<number, string> = {
   403: "You do not have access to this page.",
   404: "We could not find that page.",
   409: "The request conflicts with the current state.",
+  413: "The script is too large.",
   429: "Too many requests. Please try again shortly.",
 };
 const CODE_COPY: Record<string, string> = { PREFLIGHT_FAILED: "Preflight checks failed." };
@@ -14,6 +15,20 @@ export class ApiError extends Error {
   constructor(public readonly status: number, message: string, public readonly body?: unknown) {
     super(message);
     this.name = "ApiError";
+  }
+
+  /**
+   * serverMessage is the error text the BFF wrote in its JSON envelope,
+   * or an empty string when the response carried none. The message field
+   * holds the fixed copy for the status, so a control that must state the
+   * rule the server named reads this field.
+   */
+  get serverMessage(): string {
+    const body = this.body;
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      return body.error;
+    }
+    return "";
   }
 }
 

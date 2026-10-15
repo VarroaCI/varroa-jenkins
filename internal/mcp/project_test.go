@@ -9,13 +9,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/api"
 )
 
-// listControllersResult calls list_controllers and returns the decoded
-// structuredContent.
+// listControllersResult calls list_controllers with no brood and returns the
+// decoded structuredContent.
 func listControllersResult(t *testing.T, args map[string]interface{}) map[string]any {
 	t.Helper()
-	handler := NewHandler(adminDeps())
+	return listControllersResultWith(t, adminDeps(), args)
+}
+
+// listControllersResultWith calls list_controllers against deps and returns the
+// decoded structuredContent.
+func listControllersResultWith(t *testing.T, deps *api.Dependencies, args map[string]interface{}) map[string]any {
+	t.Helper()
+	handler := NewHandler(deps)
 	resp := mcpRequest(t, handler, "tools/call", map[string]interface{}{
 		"name":      "list_controllers",
 		"arguments": args,
@@ -136,13 +144,21 @@ func TestListControllers_OutputMatchesDeclaredSchema(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
+		deps *api.Dependencies
 		args map[string]interface{}
 	}{
-		{"summary", map[string]interface{}{"namespace": "ns"}},
-		{"verbose", map[string]interface{}{"namespace": "ns", "verbose": true}},
+		{"summary", adminDeps(), map[string]interface{}{"namespace": "ns"}},
+		{"verbose", adminDeps(), map[string]interface{}{"namespace": "ns", "verbose": true}},
+		{"fanout-summary", fanoutDeps(&fanoutBrood{
+			rows: []api.ClusterController{fanoutCoreRow()},
+			statuses: []api.ClusterFanoutStatus{
+				{Name: "core", OK: true},
+				{Name: "member-b", OK: false, Error: "cluster unreachable"},
+			},
+		}), map[string]interface{}{"namespace": "ns"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sc := listControllersResult(t, tc.args)
+			sc := listControllersResultWith(t, tc.deps, tc.args)
 			// Round-trip so the instance is plain JSON types.
 			b, _ := json.Marshal(sc)
 			var instance any
@@ -153,6 +169,22 @@ func TestListControllers_OutputMatchesDeclaredSchema(t *testing.T) {
 				t.Errorf("%s output violates declared outputSchema: %v\npayload: %s", tc.name, err, b)
 			}
 		})
+	}
+}
+
+// The clusters property is part of the declared contract, so a schema that
+// drops it fails here before any client sees the result.
+func TestControllerListOutputSchema_DeclaresClusters(t *testing.T) {
+	var doc struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(controllerListOutputSchema, &doc); err != nil {
+		t.Fatalf("declared schema is not valid JSON: %v", err)
+	}
+	if got := doc.Properties["clusters"].Type; got != "array" {
+		t.Errorf("properties.clusters.type = %q, want %q", got, "array")
 	}
 }
 

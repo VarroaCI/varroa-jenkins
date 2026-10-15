@@ -104,12 +104,12 @@ public class ActivityEndpointTest {
 
             ActivityEndpoint endpoint = new ActivityEndpoint();
             StaplerRequest2 req = mock(StaplerRequest2.class);
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
             when(req.getMethod()).thenReturn("GET");
 
             endpoint.doEvents(req, rsp);
 
-            verify(rsp).sendError(403, "Forbidden: requires ROLE:varroa:system-mite authority");
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
         }
     }
 
@@ -122,12 +122,12 @@ public class ActivityEndpointTest {
 
             ActivityEndpoint endpoint = new ActivityEndpoint();
             StaplerRequest2 req = mock(StaplerRequest2.class);
-            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            StaplerResponse2 rsp = RefusalAssert.capturing();
             when(req.getMethod()).thenReturn("POST");
 
             endpoint.doEvents(req, rsp);
 
-            verify(rsp).sendError(405, "Method Not Allowed: only GET is served");
+            RefusalAssert.assertRefused(rsp, 405, "Method Not Allowed: only GET is served");
         }
     }
 

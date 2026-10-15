@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import ControllerDetail from "./ControllerDetail";
 import { useEventStream } from "../hooks/useEventStream";
-import { restartController } from "../api/client";
+import { approveRestart, restartController } from "../api/client";
+import { ApiError } from "../hooks/useApi";
 import type { PodOverrides, ResourceOverlay, ProbesSpec, ControllerSpec } from "../types";
 
 const queryClient = new QueryClient({
@@ -47,6 +48,7 @@ vi.mock("../api/client", async () => {
     updateController: (...args: unknown[]) => mockUpdateController(...args),
     previewControllerOverlay: (...args: unknown[]) => mockPreviewControllerOverlay(...args),
     ControllerConflictError: actual.ControllerConflictError,
+    pendingChangeChanged: actual.pendingChangeChanged,
     BFF_BASE: "/api/v1",
     approveRestart: vi.fn(),
     reprovisionController: vi.fn(),
@@ -114,6 +116,13 @@ vi.mock("../components/Toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+// The Cell tab's own panels are proved by CellTab.test.tsx. This file
+// proves the tab frame and the query parameter.
+vi.mock("./CellTab", () => ({
+  CellTab: () => <div data-testid="cell-tab">cell tab</div>,
+  default: () => <div data-testid="cell-tab">cell tab</div>,
+}));
+
 // Mock BundleSelector
 vi.mock("../components/BundleSelector", () => ({
   BundleSelector: ({
@@ -145,7 +154,14 @@ vi.mock("../components/BundleSelector", () => ({
 // Helpers
 function setControllerData(
   overrides: Partial<
-    typeof mockControllerData & { podOverrides?: PodOverrides; resourceOverlay?: ResourceOverlay; probes?: ProbesSpec; spec?: ControllerSpec }
+    typeof mockControllerData & {
+      podOverrides?: PodOverrides;
+      resourceOverlay?: ResourceOverlay;
+      probes?: ProbesSpec;
+      spec?: ControllerSpec;
+      kind?: string;
+      cell?: Record<string, unknown>;
+    }
   >,
 ) {
   mockUseController.mockReturnValue({
@@ -580,6 +596,26 @@ describe("ControllerDetail — Routing-mode links", () => {
     expect(screen.queryByText(/View embedded/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Managed view/)).not.toBeInTheDocument();
     expect(screen.getByText(/Open Jenkins/)).toBeInTheDocument();
+  });
+
+  it("renders neither Open Jenkins nor View embedded for a headless controller", () => {
+    setControllerData({
+      routingMode: "path",
+      endpoint: "",
+      headless: true,
+    } as Partial<typeof mockControllerData>);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.queryByText(/Open Jenkins/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/View embedded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not ready/)).not.toBeInTheDocument();
+  });
+
+  it("reports the endpoint row as headless for a headless controller", () => {
+    setControllerData({ endpoint: "", headless: true } as Partial<typeof mockControllerData>);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.getByText("Headless — no external URL")).toBeInTheDocument();
   });
 });
 
@@ -1173,6 +1209,33 @@ describe("ControllerDetail — Permission matrix", () => {
     expect(screen.getByText(/Reload Configuration/)).toBeInTheDocument();
   });
 
+  it("sends the reviewed content hash with the approval", async () => {
+    const user = userEvent.setup();
+    vi.mocked(approveRestart).mockResolvedValueOnce({ status: "approved", action: "reload" });
+    setControllerData({ pendingRestart: { detectedAt: new Date().toISOString(), desiredStateHash: "abc", contentHash: "seen", changes: ["config"] } } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    await user.click(screen.getByText(/Reload Configuration/));
+    expect(approveRestart).toHaveBeenCalledWith("core", "my-ns", "my-ctrl", "reload", "seen");
+  });
+
+  it("refetches the controller and names the new changes when approve answers 409", async () => {
+    const user = userEvent.setup();
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    vi.mocked(approveRestart).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the pending change changed (rbac, items); review it and approve again", changes: ["rbac", "items"] }),
+    );
+    setControllerData({ pendingRestart: { detectedAt: new Date().toISOString(), desiredStateHash: "abc", contentHash: "seen", changes: ["config"] } } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    await user.click(screen.getByText(/Reload Configuration/));
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith("The pending change changed (rbac, items). Review it and approve again."),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["controller", "core", "my-ns", "my-ctrl"] });
+    invalidate.mockRestore();
+  });
+
   it("hides Reload Configuration when approve-restart is denied", () => {
     mockCanDo.mockImplementation(
       (_perms?: unknown, _ns?: string, resource?: string, verb?: string) =>
@@ -1313,5 +1376,113 @@ describe("ControllerDetail — Mutation refresh triggers invalidation", () => {
         expect.objectContaining({ queryKey: ["controllers"] })
       );
     });
+  });
+});
+
+describe("The tab query parameter", () => {
+  // BackButton drives the router's own history, which MemoryRouter keeps in
+  // memory. window.history is a different stack and does not reach it.
+  function BackButton() {
+    const navigate = useNavigate();
+    return <button onClick={() => navigate(-1)}>go back</button>;
+  }
+
+  function renderAt(entry: string) {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[entry]}>
+          <BackButton />
+          <ControllerDetail />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("opens the Cell tab from a deep link", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: ["acme"] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+  });
+
+  it("keeps the parameter while the detail read is in flight", () => {
+    mockUseController.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    expect(screen.getByText("Loading controller...")).toBeInTheDocument();
+    expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument();
+  });
+
+  it("renders no Cell tab for a stateful controller", () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl");
+    expect(screen.queryByRole("tab", { name: /Cell/ })).not.toBeInTheDocument();
+  });
+
+  it("falls back to Overview for a stateful controller deep link", async () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+    expect(screen.getAllByText(/Overview/)[0]).toBeInTheDocument();
+  });
+
+  it("falls back to Overview for an unknown value", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=nonsense");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+  });
+
+  it("writes the parameter back on a tab click", async () => {
+    const user = userEvent.setup();
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl");
+    await user.click(screen.getAllByText(/Cell/)[0]);
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+  });
+
+  it("walks the tabs on a Back navigation", async () => {
+    const user = userEvent.setup();
+    setControllerData({ kind: "cell", cell: { tenants: [] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=overview");
+    await user.click(screen.getAllByText(/Cell/)[0]);
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+    // A user's click pushes an entry, so Back returns to Overview.
+    await user.click(screen.getByRole("button", { name: "go back" }));
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+  });
+
+  // The tab panel must name a tab that the tablist renders, and exactly one
+  // tab must report aria-selected. The early return in ControllerDetail
+  // keeps the panel and the tab row out of the DOM until the read answers.
+  function expectPanelNamesSelectedTab(expectedTabId: string) {
+    const panel = screen.getByRole("tabpanel");
+    const labelId = panel.getAttribute("aria-labelledby");
+    expect(labelId).toBe(`controller-detail-tab-${expectedTabId}`);
+    const tab = document.getElementById(labelId!);
+    expect(tab).not.toBeNull();
+    expect(tab).toHaveAttribute("role", "tab");
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    const selected = screen.getAllByRole("tab").filter((t) => t.getAttribute("aria-selected") === "true");
+    expect(selected).toHaveLength(1);
+    expect(tab).toHaveAttribute("aria-controls", panel.id);
+  }
+
+  it("renders no tab panel and no tab row while the detail read is in flight", () => {
+    mockUseController.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  });
+
+  it("names the Cell tab from the panel on a cold load of a cell", async () => {
+    setControllerData({ kind: "cell", cell: { tenants: ["acme"] } });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.getByTestId("cell-tab")).toBeInTheDocument());
+    expectPanelNamesSelectedTab("cell");
+  });
+
+  it("names the Overview tab from the panel on a cold load of a stateful controller at ?tab=cell", async () => {
+    setControllerData({ kind: "stateful" });
+    renderAt("/controllers/core/my-ns/my-ctrl?tab=cell");
+    await waitFor(() => expect(screen.queryByTestId("cell-tab")).not.toBeInTheDocument());
+    expectPanelNamesSelectedTab("overview");
   });
 });

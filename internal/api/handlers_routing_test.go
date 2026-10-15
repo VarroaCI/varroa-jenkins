@@ -3,16 +3,22 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
@@ -69,13 +75,164 @@ func TestControllerEndpoint(t *testing.T) {
 			},
 			want: "https://varroa.example.com/jenkins/team-a/ci/",
 		},
+		{
+			name: "headless overrides a non-empty status endpoint",
+			cr: &v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "x.example.com"}, Headless: true},
+				Status:     v1alpha1.ControllerStatus{Endpoint: "https://from-status.example.com"},
+			},
+			want: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := srv.controllerEndpoint(tt.cr); got != tt.want {
+			if got := srv.controllerEndpoint(context.Background(), tt.cr, ""); got != tt.want {
 				t.Errorf("controllerEndpoint() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+
+	t.Run("root-domain fallback in subdomain mode", func(t *testing.T) {
+		fcDefaults := newFakeResourceClient()
+		crdstore.MustSeed(storeFromFake(fcDefaults), &v1alpha1.ProvisioningDefaults{
+			ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+			Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.test"},
+		})
+		withDefaults := NewServer(&Dependencies{
+			Client:            fcDefaults,
+			Store:             storeFromFake(fcDefaults),
+			OperatorNamespace: "test-ns",
+			Logger:            slog.Default(),
+		})
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
+		if got, want := withDefaults.controllerEndpoint(context.Background(), cr, ""), "https://ci.example.test"; got != want {
+			t.Errorf("controllerEndpoint() = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestControllerEndpointRemoteRowSkipsCoreRootDomain asserts that a row of a
+// remote cluster never takes the core's root domain. The local cluster keeps
+// that fallback.
+func TestControllerEndpointRemoteRowSkipsCoreRootDomain(t *testing.T) {
+	fc := newFakeResourceClient()
+	crdstore.MustSeed(storeFromFake(fc), &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "example.test"},
+	})
+	srv := NewServer(&Dependencies{
+		Client:            fc,
+		Store:             storeFromFake(fc),
+		Brood:             newFakeBrood(fc),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+	})
+	bare := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"}}
+	explicit := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "x.example.com"}},
+	}
+	withStatus := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+		Status:     v1alpha1.ControllerStatus{Endpoint: "https://r.member.test"},
+	}
+	tests := []struct {
+		name    string
+		cr      *v1alpha1.Controller
+		cluster string
+		want    string
+	}{
+		{"remote bare row", bare, "dev-cluster", ""},
+		{"remote explicit host", explicit, "dev-cluster", "https://x.example.com"},
+		{"remote status endpoint", withStatus, "dev-cluster", "https://r.member.test"},
+		{"local bare row keeps core root domain", bare, "", "https://ci.example.test"},
+		{"local cluster name keeps core root domain", bare, "core", "https://ci.example.test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := srv.controllerEndpoint(context.Background(), tt.cr, tt.cluster); got != tt.want {
+				t.Errorf("controllerEndpoint() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleControllersRemoteRowSkipsCoreRootDomain asserts the list path: a
+// remote row with no host and no status endpoint gets an empty endpoint, while
+// a local row keeps the core's root-domain fallback.
+func TestHandleControllersRemoteRowSkipsCoreRootDomain(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	crdstore.MustSeed(client.crdStore, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "core.test"},
+	})
+	client.controllers["local-ctrl"] = &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "local-ctrl", Namespace: "team-a"},
+	}
+	crdstore.MustSeed(client.crdStore, client.controllers["local-ctrl"])
+	srv.deps.Brood = &remoteRowBrood{
+		Brood: newFakeBrood(client),
+		remote: ClusterController{Cluster: "dev-cluster", CR: &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "remote-ctrl", Namespace: "team-b"},
+		}},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	endpoints := map[string]interface{}{}
+	for _, item := range envelope.Items {
+		endpoints[item["name"].(string)] = item["endpoint"]
+	}
+	if got := endpoints["local-ctrl"]; got != "https://local-ctrl.core.test" {
+		t.Errorf("local endpoint = %v, want https://local-ctrl.core.test", got)
+	}
+	if got, ok := endpoints["remote-ctrl"]; !ok || got != "" {
+		t.Errorf("remote endpoint = %v (present %v), want empty", got, ok)
+	}
+}
+
+// TestHandleControllerDetailRemoteSkipsCoreRootDomain asserts the detail path:
+// a remote controller with no host and no status endpoint returns an empty
+// endpoint.
+func TestHandleControllerDetailRemoteSkipsCoreRootDomain(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	crdstore.MustSeed(client.crdStore, &v1alpha1.ProvisioningDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "varroa-defaults"},
+		Spec:       v1alpha1.ProvisioningDefaultsSpec{RootDomain: "core.test"},
+	})
+	srv.deps.Brood = &remoteGetBrood{
+		Brood:       newFakeBrood(client),
+		hiveCluster: "dev-cluster",
+		remoteNS:    "team-b",
+		remoteName:  "remote-ctrl",
+		remoteCR: &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "remote-ctrl", Namespace: "team-b"},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/clusters/dev-cluster/controllers/team-b/remote-ctrl", nil)
+	srv.handleControllerDetail(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "dev-cluster", "team-b", "remote-ctrl")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var detail map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail["endpoint"] != "" {
+		t.Errorf("remote detail endpoint = %v, want empty", detail["endpoint"])
 	}
 }
 
@@ -106,6 +263,12 @@ func TestRoutingModeInResponses(t *testing.T) {
 		Spec:       v1alpha1.ControllerSpec{IngressSpec: &v1alpha1.IngressSpec{Host: "ci.example.com"}},
 	}
 	crdstore.MustSeed(client.crdStore, client.controllers["sub-ctrl"])
+	client.controllers["headless-ctrl"] = &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "headless-ctrl", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Headless: true, IngressSpec: &v1alpha1.IngressSpec{Host: "hl.example.com"}},
+		Status:     v1alpha1.ControllerStatus{Endpoint: "https://hl.example.com"},
+	}
+	crdstore.MustSeed(client.crdStore, client.controllers["headless-ctrl"])
 
 	// List: routingMode present and never empty.
 	w := httptest.NewRecorder()
@@ -122,18 +285,30 @@ func TestRoutingModeInResponses(t *testing.T) {
 	}
 	modes := map[string]string{}
 	endpoints := map[string]string{}
+	headless := map[string]bool{}
 	for _, item := range envelope.Items {
 		name, _ := item["name"].(string)
 		mode, _ := item["routingMode"].(string)
 		ep, _ := item["endpoint"].(string)
+		hl, _ := item["headless"].(bool)
 		modes[name] = mode
 		endpoints[name] = ep
+		headless[name] = hl
 	}
 	if modes["path-ctrl"] != "path" || modes["sub-ctrl"] != "subdomain" {
 		t.Errorf("list routingModes = %v, want path-ctrl:path sub-ctrl:subdomain", modes)
 	}
 	if endpoints["path-ctrl"] != "https://varroa.example.com/jenkins/team-a/path-ctrl/" {
 		t.Errorf("path endpoint = %q, want derived path URL with trailing slash", endpoints["path-ctrl"])
+	}
+	if headless["path-ctrl"] || headless["sub-ctrl"] {
+		t.Errorf("list headless = %v, want false for non-headless controllers", headless)
+	}
+	if !headless["headless-ctrl"] {
+		t.Error("list headless = false for headless-ctrl, want true")
+	}
+	if endpoints["headless-ctrl"] != "" {
+		t.Errorf("headless list endpoint = %q, want empty despite a non-empty Status.Endpoint", endpoints["headless-ctrl"])
 	}
 
 	// Detail: routingMode present.
@@ -149,6 +324,27 @@ func TestRoutingModeInResponses(t *testing.T) {
 	}
 	if detail["routingMode"] != "path" {
 		t.Errorf("detail routingMode = %v, want path", detail["routingMode"])
+	}
+	if hl, _ := detail["headless"].(bool); hl {
+		t.Errorf("detail headless = %v, want false for path-ctrl", detail["headless"])
+	}
+
+	// Detail: headless controller reports headless:true and endpoint:"".
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/controllers/team-a/headless-ctrl", nil)
+	srv.handleControllerDetail(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)), "core", "team-a", "headless-ctrl")
+	if w.Code != http.StatusOK {
+		t.Fatalf("headless detail: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var headlessDetail map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &headlessDetail); err != nil {
+		t.Fatalf("decode headless detail: %v", err)
+	}
+	if hl, _ := headlessDetail["headless"].(bool); !hl {
+		t.Errorf("headless detail headless = %v, want true", headlessDetail["headless"])
+	}
+	if headlessDetail["endpoint"] != "" {
+		t.Errorf("headless detail endpoint = %v, want empty despite a non-empty Status.Endpoint", headlessDetail["endpoint"])
 	}
 }
 
@@ -208,6 +404,31 @@ func TestCreateControllerRoutingValidation(t *testing.T) {
 		}
 		if _, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.crdStore, "ci", "team-a"); err != nil {
 			t.Error("controller should have been applied")
+		}
+	})
+
+	t.Run("path mode host mismatch skipped for a headless controller", func(t *testing.T) {
+		srv, client := newRoutingTestServer()
+		srv.deps.DashboardHost = "varroa.example.com"
+		w := postCreateController(t, srv,
+			`{"metadata":{"name":"ci"},"spec":{"headless":true,"ingressSpec":{"host":"other.example.com","mode":"path"}}}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 (headless skips the shared-host check), got %d: %s", w.Code, w.Body.String())
+		}
+		if _, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.crdStore, "ci", "team-a"); err != nil {
+			t.Error("controller should have been applied")
+		}
+	})
+
+	t.Run("invalid mode enum still rejected on a headless controller", func(t *testing.T) {
+		srv, _ := newRoutingTestServer()
+		w := postCreateController(t, srv,
+			`{"metadata":{"name":"ci"},"spec":{"headless":true,"ingressSpec":{"host":"x.example.com","mode":"proxy"}}}`)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 (rule 1 still fires), got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "ingressSpec.mode") {
+			t.Errorf("error body should name the rule, got %s", w.Body.String())
 		}
 	})
 
@@ -272,6 +493,30 @@ func TestUpdateControllerRoutingValidation(t *testing.T) {
 		w := patchController(t, srv, `{"spec":{"ingressSpec":{"mode":"subdomain","annotations":{"nginx.ingress.kubernetes.io/rewrite-target":"/"}}}}`)
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	// A headless controller adds no BFF-side bypass on the update path: the
+	// mode-changing patch below still reaches the bus verbatim, so the
+	// operator's mode-immutability rejection (rule 2, enforced there, not
+	// here) stays reachable exactly as it is for a non-headless controller.
+	t.Run("mode change on a headless controller still reaches the bus unchanged", func(t *testing.T) {
+		srv, client := newRoutingTestServer()
+		client.controllers["ci"] = &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: "ci", Namespace: "team-a"},
+			Spec:       v1alpha1.ControllerSpec{Headless: true, IngressSpec: &v1alpha1.IngressSpec{Host: "ci.example.com", Mode: ""}},
+		}
+		crdstore.MustSeed(client.crdStore, client.controllers["ci"])
+		w := patchController(t, srv, `{"spec":{"ingressSpec":{"mode":"path"}}}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 (the fake bus applies any patch; only the real operator enforces rule 2), got %d: %s", w.Code, w.Body.String())
+		}
+		fb, ok := srv.deps.Brood.(*fakeBrood)
+		if !ok {
+			t.Fatal("expected *fakeBrood")
+		}
+		if !strings.Contains(string(fb.updatePatch), `"mode":"path"`) {
+			t.Errorf("update patch = %s, want the mode change forwarded verbatim", fb.updatePatch)
 		}
 	})
 }
@@ -945,5 +1190,297 @@ func TestLiveSnapshotWithoutHealthKeepsPersistedVerdict(t *testing.T) {
 	}
 	if row["lastSeen"] != now.Format("2006-01-02T15:04:05Z") || row["miteConnected"] != true {
 		t.Errorf("live heartbeat must still win for lastSeen/liveness: %v", row)
+	}
+}
+
+// concurrencyMiteTransport records the peak number of mite KV reads in flight.
+// Each read sleeps for delay, so overlapping reads show up in maxInFlight.
+type concurrencyMiteTransport struct {
+	transport.Transport
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+	delay       time.Duration
+}
+
+func (m *concurrencyMiteTransport) track() {
+	n := m.inFlight.Add(1)
+	defer m.inFlight.Add(-1)
+	for {
+		cur := m.maxInFlight.Load()
+		if n <= cur || m.maxInFlight.CompareAndSwap(cur, n) {
+			break
+		}
+	}
+	time.Sleep(m.delay)
+}
+
+func (m *concurrencyMiteTransport) Info(_, name string) (string, time.Time, time.Time, bool) {
+	m.track()
+	return "mite-" + name, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC), time.Time{}, true
+}
+
+func (m *concurrencyMiteTransport) Snapshot(_, _ string) *mitev1.StateSnapshot {
+	m.track()
+	return &mitev1.StateSnapshot{JenkinsVersion: "2.504.3", JenkinsHealth: "healthy"}
+}
+
+// nameSortedBrood fixes the listing order. The fake brood lists in map order,
+// so the test sorts it to compare the response order with a known order.
+type nameSortedBrood struct {
+	Brood
+}
+
+func (b *nameSortedBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	cc, cs, err := b.Brood.ListAll(ctx, ns, clusterFilter)
+	sort.Slice(cc, func(i, j int) bool { return cc[i].CR.Name < cc[j].CR.Name })
+	return cc, cs, err
+}
+
+func seedConcurrencyFleet(client *fakeResourceClient, n int) {
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("ctrl-%03d", i)
+		cr := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}}
+		client.controllers[name] = cr
+		crdstore.MustSeed(client.crdStore, cr)
+	}
+}
+
+// The list reads each local mite in a bounded pool. Reads overlap, and the
+// pool never exceeds listMiteReadConcurrency. Rows keep the brood order.
+func TestHandleControllersListReadsMiteStateConcurrently(t *testing.T) {
+	srv, client := newRoutingTestServer()
+	mite := &concurrencyMiteTransport{delay: 2 * time.Millisecond}
+	srv.deps.MiteRegistry = mite
+	seedConcurrencyFleet(client, 64)
+	srv.deps.Brood = &nameSortedBrood{Brood: newFakeBrood(client)}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	listing, _, err := srv.deps.Brood.ListAll(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(envelope.Items) != 64 || len(listing) != 64 {
+		t.Fatalf("expected 64 items, got %d (listing %d)", len(envelope.Items), len(listing))
+	}
+	for i, cc := range listing {
+		item := envelope.Items[i]
+		if item["name"] != cc.CR.Name {
+			t.Fatalf("item %d = %v, want %s (brood order)", i, item["name"], cc.CR.Name)
+		}
+		if item["miteVersion"] != "mite-"+cc.CR.Name {
+			t.Errorf("%s miteVersion = %v, want mite-%s", cc.CR.Name, item["miteVersion"], cc.CR.Name)
+		}
+	}
+	if got := mite.maxInFlight.Load(); got <= 1 || got > listMiteReadConcurrency {
+		t.Errorf("peak in-flight mite reads = %d, want between 2 and %d", got, listMiteReadConcurrency)
+	}
+}
+
+// BenchmarkHandleControllersList400 times one controllers list of 400 local
+// rows. Each mite read takes one millisecond.
+func BenchmarkHandleControllersList400(b *testing.B) {
+	srv, client := newRoutingTestServer()
+	srv.deps.MiteRegistry = &concurrencyMiteTransport{delay: time.Millisecond}
+	seedConcurrencyFleet(client, 400)
+	srv.deps.Brood = newFakeBrood(client)
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	req = req.WithContext(contextWithClaims(req.Context(), adminClaims))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w := httptest.NewRecorder()
+		srv.HandleControllers(w, req)
+		if w.Code != http.StatusOK {
+			b.Fatalf("expected 200, got %d", w.Code)
+		}
+	}
+}
+
+// One malformed remote row fails its member: no rows from that member, and
+// the status row names the reason. The list does not panic.
+func TestHandleControllersFailsMemberOnUnreadableRow(t *testing.T) {
+	srv, _ := newRoutingTestServer()
+	fc := newFakeBroodClient()
+	bf := &busBrood{localCluster: "core", client: fc, store: fc.store, logger: slog.Default()}
+	bf.membershipCache = []bus.ClusterInfo{{Name: "dev-cluster"}}
+	bf.membershipCacheTime = time.Now()
+	valid := func(name string) json.RawMessage {
+		raw, _ := json.Marshal(&v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"}})
+		return raw
+	}
+	bf.request = func(subject string, data []byte, timeout time.Duration) ([]byte, error) {
+		return json.Marshal(bus.ControllersListResponse{Items: []json.RawMessage{
+			valid("remote-a"), json.RawMessage(`42`), valid("remote-b"),
+		}})
+	}
+	srv.deps.Brood = bf
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	srv.HandleControllers(w, req.WithContext(contextWithClaims(req.Context(), adminClaims)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Items    []map[string]interface{} `json:"items"`
+		Clusters []ClusterFanoutStatus    `json:"clusters"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	for _, item := range envelope.Items {
+		if item["cluster"] == "dev-cluster" {
+			t.Fatalf("expected no dev-cluster rows, got %v", item["name"])
+		}
+	}
+	var st *ClusterFanoutStatus
+	for i := range envelope.Clusters {
+		if envelope.Clusters[i].Name == "dev-cluster" {
+			st = &envelope.Clusters[i]
+		}
+	}
+	if st == nil || st.OK || st.Error != "invalid controller row" {
+		t.Fatalf("expected dev-cluster failed with invalid controller row, got %+v", st)
+	}
+}
+
+// apiserverJSONStore stands in for the apiserver list path. Each ListObjects
+// call decodes the same prebuilt JSON list, as a real list response does.
+type apiserverJSONStore struct {
+	crdstore.Backend
+	raw []byte
+}
+
+func (s *apiserverJSONStore) ListObjects(_ context.Context, _ schema.GroupVersionResource, _, _ string) ([]unstructured.Unstructured, error) {
+	var list unstructured.UnstructuredList
+	if err := json.Unmarshal(s.raw, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// BenchmarkBroodListLocal400 compares a local controller list decoded from a
+// JSON apiserver response with the same list read from the informer cache.
+// Each CR carries a padded managedFields entry, as the apiserver returns.
+func BenchmarkBroodListLocal400(b *testing.B) {
+	const n = 400
+	padding := strings.Repeat("f:spec{}", 1200)
+	items := make([]any, 0, n)
+	for i := 0; i < n; i++ {
+		cr := &v1alpha1.Controller{
+			TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller"},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:       "team-a",
+				Name:            fmt.Sprintf("ctrl-%03d", i),
+				ResourceVersion: fmt.Sprint(i),
+				ManagedFields: []metav1.ManagedFieldsEntry{{
+					Manager:    "varroa-operator",
+					Operation:  metav1.ManagedFieldsOperationApply,
+					APIVersion: "varroa.dev/v1alpha1",
+					FieldsType: "FieldsV1",
+					FieldsV1:   &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:version":{}},"pad":"` + padding + `"}`)},
+				}},
+			},
+			Spec: v1alpha1.ControllerSpec{Version: "2.504.3"},
+		}
+		items = append(items, cr)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "ControllerList",
+		"metadata":   map[string]any{"resourceVersion": "1"},
+		"items":      items,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var decoded unstructured.UnstructuredList
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		b.Fatal(err)
+	}
+	idx := newTestControllerIndexer(b)
+	for i := range decoded.Items {
+		obj, err := ControllerCacheTransform(&decoded.Items[i])
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := idx.Add(obj); err != nil {
+			b.Fatal(err)
+		}
+	}
+	cached := &busBrood{localCluster: "core", store: crdstore.NewFake(), controllers: NewIndexerControllerLister(idx), logger: slog.Default()}
+	apiserver := &busBrood{localCluster: "core", store: &apiserverJSONStore{raw: raw}, logger: slog.Default()}
+
+	for _, tc := range []struct {
+		name string
+		bf   *busBrood
+	}{
+		{"apiserver-json", apiserver},
+		{"informer", cached},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				rows, _, err := tc.bf.ListAll(context.Background(), "", "core")
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(rows) != n {
+					b.Fatalf("got %d rows, want %d", len(rows), n)
+				}
+			}
+		})
+	}
+}
+
+// ctxCaptureBrood records the context that the controllers handler passes to
+// ListAll, then delegates to the wrapped Brood.
+type ctxCaptureBrood struct {
+	Brood
+	got context.Context
+}
+
+func (b *ctxCaptureBrood) ListAll(ctx context.Context, ns, clusterFilter string) ([]ClusterController, []ClusterFanoutStatus, error) {
+	b.got = ctx
+	return b.Brood.ListAll(ctx, ns, clusterFilter)
+}
+
+func TestHandleControllersPassesRequestContext(t *testing.T) {
+	type ctxKey struct{}
+	client := newFakeResourceClient()
+	client.controllers = map[string]*v1alpha1.Controller{}
+	capture := &ctxCaptureBrood{Brood: newFakeBrood(client)}
+	srv := NewServer(&Dependencies{
+		Client:            client,
+		Store:             storeFromFake(client),
+		Authorizer:        adminTestAuthorizer(),
+		OperatorNamespace: "test-ns",
+		Logger:            slog.Default(),
+		Brood:             capture,
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/controllers", nil)
+	ctx := context.WithValue(contextWithClaims(req.Context(), adminClaims), ctxKey{}, "marker")
+	srv.HandleControllers(w, req.WithContext(ctx))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if capture.got == nil {
+		t.Fatal("ListAll was not called")
+	}
+	if v, _ := capture.got.Value(ctxKey{}).(string); v != "marker" {
+		t.Fatalf("ListAll context lost the request context value, got %q", v)
 	}
 }

@@ -548,6 +548,30 @@ func TestResolveGroups_LocalUserViaUserRef(t *testing.T) {
 	}
 }
 
+// TestResolveGroups_LocalPrefixedUserViaUserRef: a local account beside OIDC
+// carries "local:<name>" in its claims; group members name the bare User name.
+func TestResolveGroups_LocalPrefixedUserViaUserRef(t *testing.T) {
+	store := newMockStore()
+	store.users["rescue"] = &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "rescue", Labels: map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal}},
+	}
+	store.groups = []*v1alpha1.Group{
+		{ObjectMeta: metav1.ObjectMeta{Name: "platform-admins"}, Spec: v1alpha1.GroupSpec{Members: []string{"rescue"}}},
+	}
+	data := map[string][]byte{
+		"preferredUsername": []byte("local:rescue"),
+		"subject":           []byte("local:rescue"),
+		"userRef":           []byte("rescue"),
+	}
+	groups, err := resolveGroups(context.Background(), store, "ns", data)
+	if err != nil {
+		t.Fatalf("resolveGroups() error: %v", err)
+	}
+	if len(groups) != 1 || groups[0] != "platform-admins" {
+		t.Errorf("groups = %v, want [platform-admins]", groups)
+	}
+}
+
 // TestResolveGroups_IdPUserViaUserRef tests ladder step 1 + 4b: idp user via
 // userRef → ObservedGroups verbatim, Group CRDs NOT consulted.
 func TestResolveGroups_IdPUserViaUserRef(t *testing.T) {
@@ -677,4 +701,42 @@ type errorStore struct {
 
 func (e *errorStore) GetUserCRD(_ context.Context, _, _ string) (*v1alpha1.User, error) {
 	return nil, errors.New("simulated k8s API error")
+}
+
+// TestGenerate_LocalAccountLabel: a local account beside OIDC owns its keys
+// as "local:<name>", which is not a valid label value. The label uses
+// "local.<name>", and an IdP user named "local.<name>" sees none of them.
+func TestGenerate_LocalAccountLabel(t *testing.T) {
+	store := newMockStore()
+	v := NewVerifier(store, "default")
+	claims := &auth.Claims{Subject: "local:rescue", PreferredUsername: "local:rescue"}
+	prefix, _, _, err := v.Generate(context.Background(), claims, 0, "rescue", "ci")
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got := store.labels["apikey-"+prefix]["varroa.dev/apikey-user"]; got != "local.rescue" {
+		t.Errorf("label = %q, want local.rescue", got)
+	}
+	keys, err := v.ListByUser(context.Background(), "local:rescue")
+	if err != nil || len(keys) != 1 || keys[0].Prefix != prefix {
+		t.Fatalf("ListByUser(local:rescue) = %v, %v; want the key", keys, err)
+	}
+	keys, err = v.ListByUser(context.Background(), "local.rescue")
+	if err != nil || len(keys) != 0 {
+		t.Errorf("ListByUser(local.rescue) = %v, %v; want none", keys, err)
+	}
+}
+
+func TestOwnerLabel_LongLocalName(t *testing.T) {
+	name := strings.Repeat("a", 60)
+	label := ownerLabel("local:" + name)
+	if len(label) > 63 {
+		t.Fatalf("label length %d, want at most 63", len(label))
+	}
+	if label == ownerLabel("local:"+name+"b") {
+		t.Error("two long owners must not share a label in this test")
+	}
+	if got := ownerLabel("local:rescue"); got != "local.rescue" {
+		t.Errorf("ownerLabel(local:rescue) = %q", got)
+	}
 }

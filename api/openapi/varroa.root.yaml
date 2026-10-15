@@ -61,6 +61,8 @@ tags:
     description: Group management (admin).
   - name: teams
     description: Team management (admin).
+  - name: runners
+    description: External agent (runner) registration for a pipelines tenant.
   - name: identity
     description: Identity settings and built-in roles (admin).
   - name: controllers
@@ -91,6 +93,12 @@ tags:
     description: Fleet-wide installed-plugin inventory and version-range queries.
   - name: upgrade-tracking
     description: Upstream Jenkins version observation and upgrade candidate promotion.
+  - name: Pipelines
+    description: Team-scoped pipeline, run, log, and artifact surfaces.
+  - name: CellPools
+    description: Cell-pool capacity read and scale control.
+  - name: Cells
+    description: Cell load, tenant by tenant, for the operator surfaces.
 paths:
   /healthz:
     $ref: './paths/ops.yaml#/~1healthz'
@@ -144,6 +152,18 @@ paths:
     $ref: './paths/teams.yaml#/~1api~1v1~1teams'
   /api/v1/teams/{name}:
     $ref: './paths/teams.yaml#/~1api~1v1~1teams~1{name}'
+  /api/v1/runners:
+    $ref: './paths/runners.yaml#/~1api~1v1~1runners'
+  /api/v1/runners/{name}:
+    $ref: './paths/runners.yaml#/~1api~1v1~1runners~1{name}'
+  /api/v1/cellpools:
+    $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools'
+  /api/v1/cellpools/{name}:
+    $ref: './paths/cellpools.yaml#/~1api~1v1~1cellpools~1{name}'
+  /api/v1/locks:
+    $ref: './paths/locks.yaml#/~1api~1v1~1locks'
+  /api/v1/locks/release:
+    $ref: './paths/locks.yaml#/~1api~1v1~1locks~1release'
   /api/v1/identity-settings:
     $ref: './paths/users.yaml#/~1api~1v1~1identity-settings'
   /api/v1/builtin-roles:
@@ -174,6 +194,8 @@ paths:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1approve'
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/approve-deletion:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1approve-deletion'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/break-glass:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1break-glass'
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/reprovision:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1reprovision'
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/restart:
@@ -190,6 +212,8 @@ paths:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1diff'
   /api/v1/clusters/{cluster}/controllers/{ns}/{name}/plugins:
     $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1plugins'
+  /api/v1/clusters/{cluster}/controllers/{ns}/{name}/jenkins-link:
+    $ref: './paths/controllers.yaml#/~1api~1v1~1clusters~1{cluster}~1controllers~1{ns}~1{name}~1jenkins-link'
   /api/v1/roles:
     $ref: './paths/rbac.yaml#/~1api~1v1~1roles'
   /api/v1/roles/{name}:
@@ -288,6 +312,62 @@ paths:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}'
   /api/v1/version-candidates/{name}/promote:
     $ref: './paths/version-candidates.yaml#/~1api~1v1~1version-candidates~1{name}~1promote'
+  /api/v1/pipelines:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines'
+  /api/v1/pipelines/{team}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}'
+  /api/v1/pipelines/{team}/jobs/{job}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}'
+  /api/v1/pipelines/{team}/jobs/{job}/branches:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1branches'
+  /api/v1/pipelines/{team}/jobs/{job}/runs:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1runs'
+  /api/v1/pipelines/{team}/jobs/{job}/scan:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1scan'
+  /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1tests~1{case}'
+  /api/v1/pipelines/{team}/locks:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1locks'
+  /api/v1/pipelines/{team}/markers/validate:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1markers~1validate'
+  /api/v1/pipelines/{team}/cell:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1cell'
+  /api/v1/pipelines/{team}/stream:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1stream'
+  /api/v1/cells/usage:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1usage'
+  /api/v1/cells/{namespace}/{name}/usage:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1{namespace}~1{name}~1usage'
+  /api/v1/cells/{namespace}/{name}/grants:
+    $ref: './paths/cells.yaml#/~1api~1v1~1cells~1{namespace}~1{name}~1grants'
+  /api/v1/runs/{run}:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}'
+  /api/v1/runs/{run}/log:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1log'
+  /api/v1/runs/{run}/artifacts:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1artifacts'
+  /api/v1/runs/{run}/artifacts/{path}:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1artifacts~1{path}'
+  /api/v1/runs/{run}/tests:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1tests'
+  /api/v1/runs/{run}/changes:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1changes'
+  /api/v1/runs/{run}/downstream:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1downstream'
+  /api/v1/runs/{run}/cancel:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1cancel'
+  /api/v1/runs/{run}/rerun:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1rerun'
+  /api/v1/runs/{run}/script:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1script'
+  /api/v1/runs/{run}/replay:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1replay'
+  /api/v1/runs/{run}/restart:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1restart'
+  /api/v1/runs/{run}/inputs/{input}/proceed:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1proceed'
+  /api/v1/runs/{run}/inputs/{input}/abort:
+    $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1abort'
 components:
   securitySchemes:
     bearerAuth:
@@ -308,6 +388,10 @@ components:
       $ref: './components/schemas.yaml#/ApplyResult'
     ApplySectionResult:
       $ref: './components/schemas.yaml#/ApplySectionResult'
+    ApproveConflict:
+      $ref: './components/schemas.yaml#/ApproveConflict'
+    BindingFederationStatus:
+      $ref: './components/schemas.yaml#/BindingFederationStatus'
     BuiltinRoleRef:
       $ref: './components/schemas.yaml#/BuiltinRoleRef'
     CatalogItemSpec:
@@ -440,6 +524,8 @@ components:
       $ref: './components/schemas.yaml#/VarroaRoleBindingScope'
     VarroaRoleBindingSpec:
       $ref: './components/schemas.yaml#/VarroaRoleBindingSpec'
+    VarroaRoleBindingStatus:
+      $ref: './components/schemas.yaml#/VarroaRoleBindingStatus'
     VarroaRoleSpec:
       $ref: './components/schemas.yaml#/VarroaRoleSpec'
     VersionCatalogEntry:
@@ -478,9 +564,71 @@ components:
       $ref: './components/schemas.yaml#/ClassifiedPlugin'
     PluginAdvisory:
       $ref: './components/schemas.yaml#/PluginAdvisory'
+    RunSummary:
+      $ref: './components/schemas.yaml#/RunSummary'
+    RunningRun:
+      $ref: './components/schemas.yaml#/RunningRun'
+    PipelineSummary:
+      $ref: './components/schemas.yaml#/PipelineSummary'
+    PipelineListResponse:
+      $ref: './components/schemas.yaml#/PipelineListResponse'
+    PipelineDefinition:
+      $ref: './components/schemas.yaml#/PipelineDefinition'
+    PipelineTriggers:
+      $ref: './components/schemas.yaml#/PipelineTriggers'
+    PipelineParameter:
+      $ref: './components/schemas.yaml#/PipelineParameter'
+    PipelineJobDetail:
+      $ref: './components/schemas.yaml#/PipelineJobDetail'
+    RunListResponse:
+      $ref: './components/schemas.yaml#/RunListResponse'
+    CreateRunRequest:
+      $ref: './components/schemas.yaml#/CreateRunRequest'
+    RunActionResponse:
+      $ref: './components/schemas.yaml#/RunActionResponse'
+    CancelRunResponse:
+      $ref: './components/schemas.yaml#/CancelRunResponse'
+    RunStage:
+      $ref: './components/schemas.yaml#/RunStage'
+    RunInput:
+      $ref: './components/schemas.yaml#/RunInput'
+    RunInputParameter:
+      $ref: './components/schemas.yaml#/RunInputParameter'
+    RunDetail:
+      $ref: './components/schemas.yaml#/RunDetail'
+    RunArtifact:
+      $ref: './components/schemas.yaml#/RunArtifact'
+    RunArtifactListResponse:
+      $ref: './components/schemas.yaml#/RunArtifactListResponse'
+    RunTestSuite:
+      $ref: './components/schemas.yaml#/RunTestSuite'
+    RunTestTotals:
+      $ref: './components/schemas.yaml#/RunTestTotals'
+    RunTestListResponse:
+      $ref: './components/schemas.yaml#/RunTestListResponse'
+    RunTestCase:
+      $ref: './components/schemas.yaml#/RunTestCase'
+    RunTestReport:
+      $ref: './components/schemas.yaml#/RunTestReport'
+    RunDetailTestReport:
+      $ref: './components/schemas.yaml#/RunDetailTestReport'
+    RunCommandRefusal:
+      $ref: './components/schemas.yaml#/RunCommandRefusal'
+    RunScript:
+      $ref: './components/schemas.yaml#/RunScript'
+    TestCaseOutcome:
+      $ref: './components/schemas.yaml#/TestCaseOutcome'
+    TestCaseHistoryResponse:
+      $ref: './components/schemas.yaml#/TestCaseHistoryResponse'
+    RunChange:
+      $ref: './components/schemas.yaml#/RunChange'
+    RunChangeListResponse:
+      $ref: './components/schemas.yaml#/RunChangeListResponse'
   responses:
     BadRequest:
       $ref: './components/responses.yaml#/BadRequest'
+    ApproveConflict:
+      $ref: './components/responses.yaml#/ApproveConflict'
     Conflict:
       $ref: './components/responses.yaml#/Conflict'
     Forbidden:

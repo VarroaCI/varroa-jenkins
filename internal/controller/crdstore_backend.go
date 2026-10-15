@@ -88,6 +88,37 @@ func (c *ClientsetClient) DeleteObject(ctx context.Context, gvr schema.GroupVers
 	return err
 }
 
+// DeleteObjectIfUnchanged deletes an object only while it still carries uid
+// and resourceVersion. The apiserver answers Conflict when either has moved,
+// so a caller that decided from an earlier read never acts on a stale view.
+// A missing object is not an error.
+func (c *ClientsetClient) DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, uid, resourceVersion string) error {
+	pre := &metav1.Preconditions{}
+	if uid != "" {
+		v := types.UID(uid)
+		pre.UID = &v
+	}
+	if resourceVersion != "" {
+		v := resourceVersion
+		pre.ResourceVersion = &v
+	}
+	opts := metav1.DeleteOptions{}
+	if pre.UID != nil || pre.ResourceVersion != nil {
+		opts.Preconditions = pre
+	}
+
+	var err error
+	if namespace == "" {
+		err = c.dynamic.Resource(gvr).Delete(ctx, name, opts)
+	} else {
+		err = c.dynamic.Resource(gvr).Namespace(namespace).Delete(ctx, name, opts)
+	}
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // PatchObjectStatus merge-patches the /status subresource.
 // Fields tagged with `json:"...,omitempty"` that are zero-valued in the Go
 // struct are dropped during json.Marshal, which means a JSON merge patch
@@ -107,11 +138,7 @@ func (c *ClientsetClient) PatchObjectStatus(ctx context.Context, gvr schema.Grou
 	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
 		return fmt.Errorf("unmarshal status: %w", err)
 	}
-	for key, zero := range crdstore.ClearStatusFields(gvr) {
-		if _, ok := statusMap[key]; !ok {
-			statusMap[key] = zero
-		}
-	}
+	crdstore.ApplyStatusClears(gvr, statusMap)
 	data, err := json.Marshal(map[string]any{"status": statusMap})
 	if err != nil {
 		return fmt.Errorf("marshal status patch: %w", err)
@@ -137,4 +164,33 @@ func (c *ClientsetClient) PatchObjectMeta(ctx context.Context, gvr schema.GroupV
 		_, err = c.dynamic.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
 	}
 	return err
+}
+
+// PatchObjectMetaAt merge-patches {"metadata": meta} with resourceVersion in
+// the body. The apiserver treats a resourceVersion in a patch as a
+// precondition and answers Conflict when the object moved since.
+func (c *ClientsetClient) PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, namespace, name, resourceVersion string, meta map[string]any) (string, error) {
+	// An empty resourceVersion in a patch is no precondition at all.
+	if resourceVersion == "" {
+		return "", fmt.Errorf("patch %s %q metadata: resourceVersion is required", gvr.Resource, name)
+	}
+	body := make(map[string]any, len(meta)+1)
+	for k, v := range meta {
+		body[k] = v
+	}
+	body["resourceVersion"] = resourceVersion
+	data, err := json.Marshal(map[string]any{"metadata": body})
+	if err != nil {
+		return "", fmt.Errorf("marshal metadata patch: %w", err)
+	}
+	var out *unstructured.Unstructured
+	if namespace == "" {
+		out, err = c.dynamic.Resource(gvr).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	} else {
+		out, err = c.dynamic.Resource(gvr).Namespace(namespace).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	}
+	if err != nil {
+		return "", err
+	}
+	return out.GetResourceVersion(), nil
 }

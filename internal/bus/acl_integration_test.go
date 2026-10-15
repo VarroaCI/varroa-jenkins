@@ -16,15 +16,7 @@
 // │                                                                             │
 // │  operator:                                                                  │
 // │    publish:                                                                 │
-// │      $KV.mite_desired.>                                                     │
-// │      $JS.API.STREAM.*.KV_mite_desired                                       │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired                                   │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired.>                                 │
-// │      $JS.API.DIRECT.GET.KV_mite_desired                                     │
-// │      $JS.API.DIRECT.GET.KV_mite_desired.>                                   │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired                                │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired.>                              │
-// │      $JS.API.CONSUMER.*.KV_mite_desired.>                                   │
+// │      mite.*.*.*.desired                                                     │
 // │      $JS.API.STREAM.*.KV_mite_snapshots                                     │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots                                 │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots.>                               │
@@ -60,14 +52,6 @@
 // │      $JS.API.STREAM.*.varroa                                                │
 // │      $JS.API.CONSUMER.CREATE.varroa.>                                       │
 // │      $JS.API.CONSUMER.*.varroa.>                                            │
-// │      $JS.API.STREAM.*.KV_mite_desired                                       │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired                                   │
-// │      $JS.API.STREAM.MSG.*.KV_mite_desired.>                                 │
-// │      $JS.API.DIRECT.GET.KV_mite_desired                                     │
-// │      $JS.API.DIRECT.GET.KV_mite_desired.>                                   │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired                                │
-// │      $JS.API.CONSUMER.CREATE.KV_mite_desired.>                              │
-// │      $JS.API.CONSUMER.*.KV_mite_desired.>                                   │
 // │      $JS.API.STREAM.*.KV_mite_snapshots                                     │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots                                 │
 // │      $JS.API.STREAM.MSG.*.KV_mite_snapshots.>                               │
@@ -93,7 +77,7 @@
 // │      $JS.API.CONSUMER.CREATE.KV_varroa_consumed_tokens.>                  │
 // │      $JS.API.CONSUMER.*.KV_varroa_consumed_tokens.>                       │
 // │    subscribe:                                                               │
-// │      $KV.mite_desired.>                                                     │
+// │      mite.*.*.*.desired                                                     │
 // │      mite.*.*.content                                                       │
 // │      _INBOX_gateway.>                                                       │
 // │                                                                             │
@@ -126,7 +110,8 @@
 // │  NO service is granted:                                                     │
 // │      $JS.API.STREAM.NAMES, $JS.API.STREAM.LIST                              │
 // │      $JS.API.CONSUMER.NAMES.*, $JS.API.CONSUMER.LIST.*                     │
-// │      $KV.mite_desired.> (sub for non-gateway, pub for non-operator)         │
+// │      mite.*.*.*.desired (sub for non-gateway, pub for non-operator)        │
+// │      any KV_mite_desired operation (the bucket does not exist)            │
 // └────────────────────────────────────────────────────────────────────────────┘
 package bus
 
@@ -141,7 +126,7 @@ import (
 )
 
 // startACLTestServer starts an embedded nats-server with the same single-account,
-// three-user permission model the chart renders (design D3/D4).
+// four-user permission model the chart renders (design D3/D4).
 func startACLTestServer(t *testing.T) *server.Server {
 	t.Helper()
 
@@ -164,16 +149,10 @@ func startACLTestServer(t *testing.T) *server.Server {
 					// publish allow-list (D3 + D4)
 					[]string{
 						"$JS.API.INFO",
-						"$KV.mite_desired.>",
-						// KV_mite_desired JS API
-						"$JS.API.STREAM.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired.>",
-						"$JS.API.DIRECT.GET.KV_mite_desired",
-						"$JS.API.DIRECT.GET.KV_mite_desired.>",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired.>",
-						"$JS.API.CONSUMER.*.KV_mite_desired.>",
+						// desired-state request to the gateway (core NATS)
+						"mite.*.*.*.desired",
+						// content-fetch request to the gateway (the chart grants it)
+						"mite.*.*.*.content",
 						// KV_mite_snapshots JS API
 						"$JS.API.STREAM.*.KV_mite_snapshots",
 						"$JS.API.STREAM.MSG.*.KV_mite_snapshots",
@@ -219,15 +198,6 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.STREAM.*.varroa",
 						"$JS.API.CONSUMER.CREATE.varroa.>",
 						"$JS.API.CONSUMER.*.varroa.>",
-						// KV_mite_desired JS API
-						"$JS.API.STREAM.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired",
-						"$JS.API.STREAM.MSG.*.KV_mite_desired.>",
-						"$JS.API.DIRECT.GET.KV_mite_desired",
-						"$JS.API.DIRECT.GET.KV_mite_desired.>",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired",
-						"$JS.API.CONSUMER.CREATE.KV_mite_desired.>",
-						"$JS.API.CONSUMER.*.KV_mite_desired.>",
 						// KV_mite_snapshots JS API
 						"$JS.API.STREAM.*.KV_mite_snapshots",
 						"$JS.API.STREAM.MSG.*.KV_mite_snapshots",
@@ -257,7 +227,7 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.CONSUMER.*.KV_varroa_consumed_tokens.>",
 					},
 					[]string{
-						"$KV.mite_desired.>",
+						"mite.*.*.*.desired",
 						"mite.*.*.*.content",
 						"_INBOX_gateway.>",
 					},
@@ -288,12 +258,43 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.CONSUMER.CREATE.KV_mite_presence",
 						"$JS.API.CONSUMER.CREATE.KV_mite_presence.>",
 						"$JS.API.CONSUMER.*.KV_mite_presence.>",
+						// Fleet lock force release request to the recorder.
+						"varroa.recordstore.fleetlock.release",
 					},
 					[]string{
 						"events.brood.>",
 						"$KV.mite_snapshots.>",
 						"$KV.mite_presence.>",
 						"_INBOX_bff.>",
+					},
+				),
+			},
+			{
+				// The recorder's grants, per design D3: it publishes its
+				// claim reply to the gateway's inbox and its own JetStream
+				// API calls on the build stream; it subscribes to its own
+				// inbox and the claim request subject only.
+				Username: "recorder",
+				Password: "rec_pass",
+				Permissions: makePerms(
+					[]string{
+						"$JS.API.INFO",
+						"_INBOX_gateway.>",
+						// The fleet lock release reply to the BFF's inbox.
+						"_INBOX_bff.>",
+						"$JS.API.STREAM.CREATE.varroa_builds",
+						"$JS.API.STREAM.UPDATE.varroa_builds",
+						"$JS.API.STREAM.INFO.varroa_builds",
+						"$JS.API.CONSUMER.CREATE.varroa_builds.>",
+						"$JS.API.CONSUMER.DURABLE.CREATE.varroa_builds.>",
+						"$JS.API.CONSUMER.INFO.varroa_builds.>",
+						"$JS.API.CONSUMER.MSG.NEXT.varroa_builds.>",
+						"$JS.ACK.varroa_builds.>",
+					},
+					[]string{
+						"varroa.ledger.claim",
+						"varroa.recordstore.fleetlock.release",
+						"_INBOX_recorder.>",
 					},
 				),
 			},
@@ -334,45 +335,29 @@ func TestACLIntegration(t *testing.T) {
 	srv := startACLTestServer(t)
 	url := srv.ClientURL()
 
-	// --- Connect all three identities ---
+	// --- Connect all four identities ---
 	op := connectACL(t, url, "operator", "op_pass", "_INBOX_operator")
 	gw := connectACL(t, url, "gateway", "gw_pass", "_INBOX_gateway")
 	bf := connectACL(t, url, "bff", "bff_pass", "_INBOX_bff")
+	rec := connectACL(t, url, "recorder", "rec_pass", "_INBOX_recorder")
 
 	// -----------------------------------------------------------------------
-	// ALLOW: operator can create and Put to mite_desired KV
+	// ALLOW: the operator's desired-state request reaches the gateway, and
+	// the gateway's confirm reaches the operator's inbox
 	// -----------------------------------------------------------------------
-	t.Run("operator_put_desired", func(t *testing.T) {
-		kv, err := op.EnsureKV(KVDesiredBucket, 0)
+	t.Run("operator_request_desired_to_gateway", func(t *testing.T) {
+		subj := MiteDesiredSubject(DefaultCluster, "ns1", "ctrl1")
+		sub, err := gw.NATSConn().Subscribe(subj, func(m *nats.Msg) {
+			_ = m.Respond(nil)
+		})
 		if err != nil {
-			t.Fatalf("operator EnsureKV(mite_desired): %v", err)
+			t.Fatalf("gateway subscribe desired: %v", err)
 		}
-		if err := kv.PutString("ns1/ctrl1", `{"desired":"running"}`); err != nil {
-			t.Fatalf("operator Put to mite_desired: %v", err)
-		}
-	})
+		defer sub.Unsubscribe()
+		gw.NATSConn().Flush()
 
-	// -----------------------------------------------------------------------
-	// ALLOW: gateway can Watch mite_desired KV
-	// -----------------------------------------------------------------------
-	t.Run("gateway_watch_desired", func(t *testing.T) {
-		kv, err := gw.EnsureKV(KVDesiredBucket, 0)
-		if err != nil {
-			t.Fatalf("gateway EnsureKV(mite_desired): %v", err)
-		}
-		watcher, err := kv.Watch("ns1/ctrl1")
-		if err != nil {
-			t.Fatalf("gateway Watch(mite_desired): %v", err)
-		}
-		defer watcher.Stop()
-		select {
-		case entry := <-watcher.Updates():
-			if entry == nil {
-				t.Fatal("expected non-nil entry from Watch")
-			}
-			t.Logf("gateway received desired update: %s", string(entry.Value()))
-		case <-time.After(3 * time.Second):
-			t.Fatal("timed out waiting for Watch update")
+		if _, err := op.Request(subj, []byte(`{"desired":"running"}`), 3*time.Second); err != nil {
+			t.Fatalf("operator desired-state request: %v", err)
 		}
 	})
 
@@ -544,19 +529,42 @@ func TestACLIntegration(t *testing.T) {
 	})
 
 	// -----------------------------------------------------------------------
-	// DENY: bff Put to mite_desired KV must be refused
+	// ALLOW: the BFF's fleet lock release request reaches the recorder, and
+	// the recorder's reply reaches the BFF's inbox
 	// -----------------------------------------------------------------------
-	t.Run("deny_bff_put_desired", func(t *testing.T) {
-		// bff is not granted $KV.mite_desired.> nor the JS API for KV_mite_desired.
-		_, err := bf.EnsureKV(KVDesiredBucket, 0)
-		if err == nil {
-			t.Fatal("expected error for bff EnsureKV(mite_desired), got nil")
+	t.Run("bff_recorder_fleet_lock_release", func(t *testing.T) {
+		sub, err := rec.SubscribeRequest(FleetLockReleaseSubject, "recorder", func([]byte) []byte {
+			return []byte("recorder-reply")
+		})
+		if err != nil {
+			t.Fatalf("recorder SubscribeRequest for fleet lock release: %v", err)
 		}
-		t.Logf("bff EnsureKV(mite_desired) correctly denied: %v", err)
+		defer func() { _ = sub.Unsubscribe() }()
+		rec.NATSConn().Flush()
+
+		resp, err := bf.Request(FleetLockReleaseSubject, []byte("{}"), 3*time.Second)
+		if err != nil {
+			t.Fatalf("bff fleet lock release request: %v", err)
+		}
+		if string(resp.Data) != "recorder-reply" {
+			t.Fatalf("expected 'recorder-reply', got %q", string(resp.Data))
+		}
 	})
 
 	// -----------------------------------------------------------------------
-	// DENY: operator subscribing to $KV.mite_desired.> is not allowed
+	// DENY: no identity may create the mite_desired bucket. The desired-state
+	// command carries credential values, so no grant may store it in a bucket.
+	// -----------------------------------------------------------------------
+	t.Run("deny_every_identity_desired_bucket", func(t *testing.T) {
+		for name, c := range map[string]*Conn{"operator": op, "gateway": gw, "bff": bf} {
+			if _, err := c.EnsureKV("mite_desired", 0); err == nil {
+				t.Fatalf("%s EnsureKV(mite_desired) succeeded; it must be denied", name)
+			}
+		}
+	})
+
+	// -----------------------------------------------------------------------
+	// DENY: operator subscribing to the desired-state subject is not allowed
 	// (permissions violations are delivered asynchronously by nats.go)
 	// -----------------------------------------------------------------------
 	t.Run("deny_operator_sub_desired", func(t *testing.T) {
@@ -577,7 +585,7 @@ func TestACLIntegration(t *testing.T) {
 		defer nc.Close()
 
 		// Subscribe to a subject not in operator's allow-list.
-		sub, err := nc.Subscribe("$KV.mite_desired.>", func(_ *nats.Msg) {})
+		sub, err := nc.Subscribe("mite.*.*.*.desired", func(_ *nats.Msg) {})
 		if err != nil {
 			t.Fatalf("Subscribe itself must succeed (async denial): %v", err)
 		}
@@ -591,9 +599,9 @@ func TestACLIntegration(t *testing.T) {
 		got := asyncErr
 		asyncMu.Unlock()
 		if got == nil {
-			t.Fatal("expected async permissions violation for operator subscribe $KV.mite_desired.>")
+			t.Fatal("expected async permissions violation for operator subscribe mite.*.*.*.desired")
 		}
-		t.Logf("operator subscribe $KV.mite_desired.> correctly denied: %v", got)
+		t.Logf("operator subscribe mite.*.*.*.desired correctly denied: %v", got)
 	})
 
 	// -----------------------------------------------------------------------
@@ -668,6 +676,45 @@ func TestACLIntegration(t *testing.T) {
 			t.Fatal("expected async permissions violation for bff subscribe _INBOX_operator.>")
 		}
 		t.Logf("bff subscribe _INBOX_operator.> correctly denied: %v", got)
+	})
+
+	// -----------------------------------------------------------------------
+	// DENY: the recorder cannot read another service's inbox. It publishes
+	// its claim reply to _INBOX_gateway.>, but never subscribes there.
+	// -----------------------------------------------------------------------
+	t.Run("deny_recorder_sub_gateway_inbox", func(t *testing.T) {
+		var (
+			asyncMu  sync.Mutex
+			asyncErr error
+		)
+		nc, err := nats.Connect(url, nats.UserInfo("recorder", "rec_pass"),
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+				asyncMu.Lock()
+				asyncErr = err
+				asyncMu.Unlock()
+			}),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer nc.Close()
+
+		sub, err := nc.Subscribe("_INBOX_gateway.>", func(_ *nats.Msg) {})
+		if err != nil {
+			t.Fatalf("Subscribe itself must succeed (async denial): %v", err)
+		}
+		defer sub.Unsubscribe()
+
+		nc.Flush()
+		time.Sleep(200 * time.Millisecond)
+
+		asyncMu.Lock()
+		got := asyncErr
+		asyncMu.Unlock()
+		if got == nil {
+			t.Fatal("expected async permissions violation for recorder subscribe _INBOX_gateway.>")
+		}
+		t.Logf("recorder subscribe _INBOX_gateway.> correctly denied: %v", got)
 	})
 
 	// -----------------------------------------------------------------------

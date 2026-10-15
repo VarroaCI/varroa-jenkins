@@ -1,0 +1,106 @@
+# cellpools — the read and scale surface over the CellPool CRD. CellPool is
+# cluster-scoped, so no namespace segment appears in any path. There is no
+# POST and no DELETE: an operator creates and deletes a pool with kubectl or
+# through GitOps. Each cluster of the brood holds its own pools, so every
+# operation takes an optional cluster query parameter, and every pool names
+# its cluster.
+/api/v1/cellpools:
+  get:
+    operationId: listCellPools
+    tags: [CellPools]
+    summary: >-
+      Lists the cell pools of every known cluster, or of the named cluster,
+      with their spec and status. The list sorts by cluster, with the BFF's
+      own cluster first, and then by name. A cluster whose read fails is
+      reported with ok false in clusters and adds no item. Requires the
+      cellpools:read verb on a cluster-wide binding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    responses:
+      "200":
+        description: Cell-pool list with one read status for each cluster the list covered.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, clusters]
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/CellPool'
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/ClusterFanoutStatus'
+              additionalProperties: false
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+
+/api/v1/cellpools/{name}:
+  get:
+    operationId: getCellPool
+    tags: [CellPools]
+    summary: >-
+      Gets one cell pool's spec and status from the named cluster, or from
+      the BFF's own cluster when no cluster is named. Requires the
+      cellpools:read verb on a cluster-wide binding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    responses:
+      "200":
+        description: Cell-pool details.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellPool'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "502":
+        $ref: '../components/responses.yaml#/ClusterUnreachable'
+  patch:
+    operationId: patchCellPool
+    tags: [CellPools]
+    summary: >-
+      Scales a cell pool. The body carries only the four scale dials; a body
+      naming profileRef or cellTemplate is refused with 400. The write goes
+      to the pool of the named cluster, or of the BFF's own cluster when no
+      cluster is named. Requires the cellpools:update verb on a cluster-wide
+      binding.
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+      - $ref: '../components/parameters.yaml#/clusterQuery'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CellPoolScaleRequest'
+    responses:
+      "200":
+        description: Cell pool updated.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/CellPool'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
+      "502":
+        $ref: '../components/responses.yaml#/ClusterUnreachable'

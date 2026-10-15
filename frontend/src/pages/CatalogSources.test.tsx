@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
 import CatalogSources from "./CatalogSources";
@@ -125,7 +125,7 @@ describe("CatalogSources", () => {
       renderPage();
       expect(screen.getByText("Catalog Sources")).toBeInTheDocument();
       expect(
-        screen.getByText(/Manage repositories that provide catalog items/),
+        screen.getByText(/Manage Git repositories and OCI artifacts that provide catalog items/),
       ).toBeInTheDocument();
     });
 
@@ -224,6 +224,7 @@ describe("CatalogSources", () => {
       renderPage();
 
       await user.click(screen.getByText("+ New Source"));
+      await user.type(screen.getByPlaceholderText("my-catalog"), "my-repo");
       await user.type(
         screen.getByPlaceholderText("https://github.com/org/repo"),
         "https://github.com/my-org/my-repo",
@@ -231,8 +232,82 @@ describe("CatalogSources", () => {
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
-        expect(mockCreateCatalogSource).toHaveBeenCalled();
+        expect(mockCreateCatalogSource).toHaveBeenCalledWith(
+          "core",
+          "varroa-system",
+          expect.objectContaining({
+            metadata: { name: "my-repo" },
+            spec: expect.objectContaining({ repoURL: "https://github.com/my-org/my-repo" }),
+          }),
+        );
       });
+      const body = mockCreateCatalogSource.mock.calls[0][2];
+      expect(body.spec).not.toHaveProperty("ociRef");
+    });
+
+    it("disables Save until the active kind's location and a valid name are set", async () => {
+      const user = userEvent.setup();
+      mockUseCatalogSources.mockReturnValue({ data: { items: [] }, isLoading: false, error: null });
+      renderPage();
+
+      await user.click(screen.getByText("+ New Source"));
+      const save = screen.getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+
+      await user.type(screen.getByPlaceholderText("my-catalog"), "my-repo");
+      expect(save).toBeDisabled();
+
+      await user.selectOptions(screen.getByLabelText("Source type"), "oci");
+      expect(save).toBeDisabled();
+
+      await user.type(screen.getByPlaceholderText("ghcr.io/org/catalog:v1"), "ghcr.io/org/catalog:v1");
+      expect(save).toBeEnabled();
+
+      await user.selectOptions(screen.getByLabelText("Source type"), "git");
+      expect(save).toBeDisabled();
+    });
+
+    it("rejects the reserved name and an invalid name on create", async () => {
+      const user = userEvent.setup();
+      mockUseCatalogSources.mockReturnValue({ data: { items: [] }, isLoading: false, error: null });
+      renderPage();
+
+      await user.click(screen.getByText("+ New Source"));
+      await user.type(screen.getByPlaceholderText("my-catalog"), "varroa-update-center");
+      await user.type(
+        screen.getByPlaceholderText("https://github.com/org/repo"),
+        "https://github.com/my-org/my-repo",
+      );
+      expect(screen.getByText("This name is reserved for the operator.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+      await user.clear(screen.getByPlaceholderText("my-catalog"));
+      await user.type(screen.getByPlaceholderText("my-catalog"), "Bad_Name");
+      expect(screen.getByText("Use lowercase letters, digits, '-' and '.'")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("creates an OCI source with ociRef and no repoURL or revision", async () => {
+      mockCreateCatalogSource.mockResolvedValueOnce({});
+      const user = userEvent.setup();
+      mockUseCatalogSources.mockReturnValue({ data: { items: [] }, isLoading: false, error: null });
+      renderPage();
+
+      await user.click(screen.getByText("+ New Source"));
+      await user.type(screen.getByPlaceholderText("my-catalog"), "oci-catalog");
+      await user.selectOptions(screen.getByLabelText("Source type"), "oci");
+      expect(screen.queryByPlaceholderText("main (default)")).not.toBeInTheDocument();
+      await user.type(screen.getByPlaceholderText("ghcr.io/org/catalog:v1"), "ghcr.io/org/catalog:v1");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockCreateCatalogSource).toHaveBeenCalledTimes(1);
+      });
+      const body = mockCreateCatalogSource.mock.calls[0][2];
+      expect(body.metadata).toEqual({ name: "oci-catalog" });
+      expect(body.spec).toHaveProperty("ociRef", "ghcr.io/org/catalog:v1");
+      expect(body.spec).not.toHaveProperty("repoURL");
+      expect(body.spec).not.toHaveProperty("revision");
     });
   });
 
@@ -269,6 +344,86 @@ describe("CatalogSources", () => {
       await waitFor(() => {
         expect(mockUpdateCatalogSource).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("OCI and reserved sources", () => {
+    it("renders the ociRef with an OCI tag when repoURL is empty", () => {
+      mockUseCatalogSources.mockReturnValue({
+        data: {
+          items: [
+            sourceFixture("team-data-catalog", {
+              spec: { repoURL: undefined, revision: undefined, ociRef: "ghcr.io/example/catalog:v1" },
+              status: { observedRevision: "sha256:0123456789abcdef0123" },
+            }),
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      const row = screen.getByText("team-data-catalog").closest("div");
+      expect(row).not.toBeNull();
+      expect(screen.getByText("ghcr.io/example/catalog:v1")).toBeInTheDocument();
+      expect(screen.getByText("OCI")).toBeInTheDocument();
+      expect(screen.getByText("sha256:0123456789ab")).toBeInTheDocument();
+      expect(within(row as HTMLElement).queryByText("main")).not.toBeInTheDocument();
+    });
+
+    it("renders an Update center marker for the reserved source and hides Edit and Delete", () => {
+      mockUseCatalogSources.mockReturnValue({
+        data: {
+          items: [
+            sourceFixture("varroa-update-center", {
+              spec: { repoURL: undefined, revision: undefined },
+            }),
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      expect(screen.getByText("Update center")).toBeInTheDocument();
+      expect(screen.queryByText("Edit")).not.toBeInTheDocument();
+      expect(screen.getByText("Sync")).toBeInTheDocument();
+      expect(screen.queryByText("Delete")).not.toBeInTheDocument();
+    });
+
+    it("edit of an OCI source opens on the OCI kind and switching to git clears ociRef", async () => {
+      mockUpdateCatalogSource.mockResolvedValueOnce({});
+      const user = userEvent.setup();
+      mockUseCatalogSources.mockReturnValue({
+        data: {
+          items: [
+            sourceFixture("team-data-catalog", {
+              spec: { repoURL: undefined, revision: undefined, ociRef: "ghcr.io/example/catalog:v1" },
+            }),
+          ],
+        },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      await user.click(screen.getByText("Edit"));
+      expect(screen.getByLabelText("Source type")).toHaveValue("oci");
+      expect(screen.getByDisplayValue("ghcr.io/example/catalog:v1")).toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText("Source type"), "git");
+      await user.type(
+        screen.getByPlaceholderText("https://github.com/org/repo"),
+        "https://github.com/example/team-data-catalog",
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateCatalogSource).toHaveBeenCalledTimes(1);
+      });
+      const body = mockUpdateCatalogSource.mock.calls[0][3];
+      expect(body.spec).toHaveProperty("repoURL", "https://github.com/example/team-data-catalog");
+      expect(body.spec).not.toHaveProperty("ociRef");
     });
   });
 

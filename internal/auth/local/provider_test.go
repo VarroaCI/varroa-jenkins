@@ -116,7 +116,7 @@ func TestProvider_CookieDomain(t *testing.T) {
 
 func TestProvider_Login_UnknownUser(t *testing.T) {
 	p, _ := newTestProvider(t)
-	_, _, err := p.Login(context.Background(), "nobody", "password")
+	_, err := p.Login(context.Background(), "nobody", "password")
 	if err != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for unknown user, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestProvider_Login_NotFoundError(t *testing.T) {
 	// user enumeration.
 	p, _ := newTestProvider(t)
 	p.store.(*mockStore).notFoundErr = true
-	_, _, err := p.Login(context.Background(), "ghost", "password")
+	_, err := p.Login(context.Background(), "ghost", "password")
 	if err != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for NotFound user, got %v", err)
 	}
@@ -139,12 +139,12 @@ func TestProvider_Login_WrongPassword(t *testing.T) {
 	p, _ := newTestProvider(t)
 	// Add a user with a known password.
 	p.store.(*mockStore).addUser("alice", "correct", "alice@example.com", "Alice")
-	_, _, err := p.Login(context.Background(), "alice", "wrong")
+	_, err := p.Login(context.Background(), "alice", "wrong")
 	if err != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for wrong password, got %v", err)
 	}
 	// Same error as unknown user (no user enumeration).
-	_, _, err = p.Login(context.Background(), "nobody", "password")
+	_, err = p.Login(context.Background(), "nobody", "password")
 	if err != ErrInvalidCredentials {
 		t.Errorf("expected ErrInvalidCredentials for unknown user, got %v", err)
 	}
@@ -153,7 +153,8 @@ func TestProvider_Login_WrongPassword(t *testing.T) {
 func TestProvider_Login_Success(t *testing.T) {
 	p, signer := newTestProvider(t)
 	p.store.(*mockStore).addUser("alice", "correct", "alice@example.com", "Alice")
-	tok, expiresIn, err := p.Login(context.Background(), "alice", "correct")
+	res, err := p.Login(context.Background(), "alice", "correct")
+	tok, expiresIn := res.IDToken, res.ExpiresIn
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -175,6 +176,12 @@ func TestProvider_Login_Success(t *testing.T) {
 	if claims.Email != "alice@example.com" {
 		t.Errorf("expected email=alice@example.com, got %s", claims.Email)
 	}
+	if claims.IssuedAt.IsZero() {
+		t.Fatal("expected IssuedAt from the iat claim")
+	}
+	if d := time.Since(claims.IssuedAt); d < -time.Minute || d > time.Minute {
+		t.Errorf("IssuedAt = %v, want within a minute of now", claims.IssuedAt)
+	}
 	if signer.KID() == "" {
 		t.Error("expected non-empty kid in signer")
 	}
@@ -186,7 +193,8 @@ func TestProvider_Login_WithGroups(t *testing.T) {
 	p.store.(*mockStore).addGroup("admins", []string{"alice"})
 	p.store.(*mockStore).addGroup("developers", []string{"alice", "bob"})
 
-	tok, _, err := p.Login(context.Background(), "alice", "correct")
+	res, err := p.Login(context.Background(), "alice", "correct")
+	tok := res.IDToken
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -212,12 +220,12 @@ func TestProvider_Login_WithGroups(t *testing.T) {
 func TestProvider_Login_RateLimit(t *testing.T) {
 	p, _ := newTestProvider(t)
 	for i := 0; i < 5; i++ {
-		_, _, err := p.Login(context.Background(), "alice", "x")
+		_, err := p.Login(context.Background(), "alice", "x")
 		if err != ErrInvalidCredentials {
 			t.Fatalf("call %d: expected ErrInvalidCredentials, got %v", i+1, err)
 		}
 	}
-	_, _, err := p.Login(context.Background(), "alice", "x")
+	_, err := p.Login(context.Background(), "alice", "x")
 	if err != ErrRateLimited {
 		t.Errorf("6th call: expected ErrRateLimited, got %v", err)
 	}
@@ -339,5 +347,98 @@ func TestProvider_Discovery(t *testing.T) {
 	key := keys[0].(map[string]any)
 	if key["kid"] != signer.KID() {
 		t.Errorf("expected kid=%s, got %v", signer.KID(), key["kid"])
+	}
+}
+
+func TestLogin_BesideOIDC_PrefixesSubject(t *testing.T) {
+	p, _ := newTestProvider(t)
+	p.SetBesideOIDC(true)
+	st := p.store.(*mockStore)
+	st.addUser("rescue", "correct", "", "Rescue")
+	st.users["rescue"].Spec.Purpose = v1alpha1.UserPurposeBreakGlass
+	st.addGroup("platform-admins", []string{"rescue"})
+
+	res, err := p.Login(context.Background(), "rescue", "correct")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if res.Purpose != v1alpha1.UserPurposeBreakGlass {
+		t.Errorf("Purpose = %q, want break-glass", res.Purpose)
+	}
+	claims, err := p.Verify(context.Background(), res.IDToken)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Subject != "local:rescue" || claims.PreferredUsername != "local:rescue" {
+		t.Errorf("sub/preferred_username = %q/%q, want local:rescue", claims.Subject, claims.PreferredUsername)
+	}
+	if len(claims.Groups) != 1 || claims.Groups[0] != "platform-admins" {
+		t.Errorf("groups = %v, want [platform-admins]", claims.Groups)
+	}
+}
+
+func TestLogin_BesideOIDC_RefusesMissingPurpose(t *testing.T) {
+	p, _ := newTestProvider(t)
+	p.SetBesideOIDC(true)
+	p.store.(*mockStore).addUser("alice", "correct", "", "")
+	res, err := p.Login(context.Background(), "alice", "correct")
+	if err != ErrInvalidCredentials {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+	if res.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", res.Purpose)
+	}
+}
+
+func TestLogin_BesideOIDC_RefusesIDPManagedUser(t *testing.T) {
+	p, _ := newTestProvider(t)
+	p.SetBesideOIDC(true)
+	st := p.store.(*mockStore)
+	st.addUser("bob", "correct", "", "")
+	st.users["bob"].Spec.Purpose = v1alpha1.UserPurposeService
+	st.users["bob"].Labels = map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP}
+	if _, err := p.Login(context.Background(), "bob", "correct"); err != ErrInvalidCredentials {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+	if _, err := p.Login(context.Background(), "oidc-0123", "correct"); err != ErrInvalidCredentials {
+		t.Fatalf("oidc- name: err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func TestLogin_BesideOIDC_WrongPasswordReportsPurpose(t *testing.T) {
+	p, _ := newTestProvider(t)
+	p.SetBesideOIDC(true)
+	st := p.store.(*mockStore)
+	st.addUser("ci", "ci-secret", "", "")
+	st.users["ci"].Spec.Purpose = v1alpha1.UserPurposeService
+	res, err := p.Login(context.Background(), "ci", "wrong")
+	if err != ErrInvalidCredentials {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+	if res.Purpose != v1alpha1.UserPurposeService {
+		t.Errorf("Purpose = %q, want service", res.Purpose)
+	}
+	res, _ = p.Login(context.Background(), "nobody", "wrong")
+	if res.Purpose != "" {
+		t.Errorf("unknown user Purpose = %q, want empty", res.Purpose)
+	}
+}
+
+func TestLogin_LocalOnly_Unchanged(t *testing.T) {
+	p, _ := newTestProvider(t)
+	p.store.(*mockStore).addUser("alice", "correct", "", "")
+	res, err := p.Login(context.Background(), "alice", "correct")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if res.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", res.Purpose)
+	}
+	claims, err := p.Verify(context.Background(), res.IDToken)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if claims.Subject != "alice" {
+		t.Errorf("sub = %q, want alice", claims.Subject)
 	}
 }

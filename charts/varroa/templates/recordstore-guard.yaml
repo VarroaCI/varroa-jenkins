@@ -1,0 +1,109 @@
+{{- /*
+recordstore-guard.yaml
+Fails the render when the retired "activity" values block is set, and
+validates recordStore.* values when the record store is enabled. A hive
+release renders no recorder and no database: it must name an external
+Postgres, and it needs the DSN Secret only in postgres blob mode, where
+the gateway writes log chunks to the core database. Renders no objects.
+*/}}
+
+{{- if hasKey .Values "activity" -}}
+{{- fail "the \"activity\" values block no longer exists; set recordStore.retention.activity instead" -}}
+{{- end -}}
+
+{{- if .Values.recordStore.enabled }}
+{{- $hive := include "varroa.isHive" . -}}
+
+{{- $validPostgresModes := list "cnpg" "external" -}}
+{{- if not (has .Values.recordStore.postgres.mode $validPostgresModes) -}}
+{{- fail (printf "recordStore.postgres.mode must be one of %v, got %q" $validPostgresModes .Values.recordStore.postgres.mode) -}}
+{{- end -}}
+
+{{- if and $hive (ne .Values.recordStore.postgres.mode "external") -}}
+{{- fail "mode=hive with recordStore.enabled requires recordStore.postgres.mode=external: a member cluster renders no database and uses the core record store" -}}
+{{- end -}}
+
+{{- $me := .Values.recordStore.postgres.memberEndpoint | default dict -}}
+{{- $memberEndpoint := and (not $hive) $me.enabled -}}
+{{- if and $memberEndpoint (ne .Values.recordStore.postgres.mode "cnpg") -}}
+{{- fail "recordStore.postgres.memberEndpoint requires recordStore.postgres.mode=cnpg; expose an external Postgres through its own endpoint" -}}
+{{- end -}}
+
+{{- if and $memberEndpoint (empty $me.host) -}}
+{{- fail "recordStore.postgres.memberEndpoint.enabled requires recordStore.postgres.memberEndpoint.host" -}}
+{{- end -}}
+
+{{- /* The database ingress rule admits these sources. An empty list would admit every source, so the chart asks for an explicit list. */ -}}
+{{- if and $memberEndpoint .Values.networkPolicy.enabled (empty $me.allowedCIDRs) -}}
+{{- fail "recordStore.postgres.memberEndpoint.allowedCIDRs must list the source CIDRs when networkPolicy.enabled is true; set 0.0.0.0/0 explicitly to admit every source" -}}
+{{- end -}}
+
+{{- if and (eq .Values.recordStore.postgres.mode "external") (or (not $hive) (eq .Values.recordStore.blobs.mode "postgres")) -}}
+{{- if not .Values.recordStore.postgres.external.existingSecret -}}
+{{- fail "recordStore.postgres.external.existingSecret is required when recordStore.postgres.mode is \"external\"" -}}
+{{- end -}}
+{{- if not .Values.recordStore.postgres.external.dsnKey -}}
+{{- fail "recordStore.postgres.external.dsnKey is required when recordStore.postgres.mode is \"external\"" -}}
+{{- end -}}
+{{- end -}}
+
+{{- $validBlobModes := list "postgres" "s3" -}}
+{{- if not (has .Values.recordStore.blobs.mode $validBlobModes) -}}
+{{- fail (printf "recordStore.blobs.mode must be one of %v, got %q" $validBlobModes .Values.recordStore.blobs.mode) -}}
+{{- end -}}
+
+{{- if and (eq .Values.recordStore.blobs.mode "s3") (not .Values.recordStore.blobs.s3.url) -}}
+{{- fail "recordStore.blobs.s3.url is required when recordStore.blobs.mode is \"s3\"" -}}
+{{- end -}}
+
+{{- $sts := .Values.recordStore.blobs.s3.artifactSTS | default dict -}}
+{{- if $sts.enabled -}}
+{{- if ne .Values.recordStore.blobs.mode "s3" -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.enabled requires recordStore.blobs.mode=s3" -}}
+{{- end -}}
+{{- if .Values.recordStore.blobs.s3.artifactSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.enabled and recordStore.blobs.s3.artifactSecret are exclusive; set one" -}}
+{{- end -}}
+{{- if not $sts.issuerSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.issuerSecret is required when artifactSTS.enabled is true" -}}
+{{- end -}}
+{{- if eq $sts.issuerSecret .Values.recordStore.blobs.s3.existingSecret -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.issuerSecret must not be recordStore.blobs.s3.existingSecret" -}}
+{{- end -}}
+{{- if not $sts.roleArn -}}
+{{- fail "recordStore.blobs.s3.artifactSTS.roleArn is required when artifactSTS.enabled is true" -}}
+{{- end -}}
+{{- if and $sts.endpoint (not (regexMatch "^https?://[^/]+" $sts.endpoint)) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.endpoint must be an http or https URL, got %q" $sts.endpoint) -}}
+{{- end -}}
+{{- $duration := toString ($sts.duration | default "1h") -}}
+{{- if not (regexMatch "^[1-9][0-9]*[mh]$" $duration) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.duration must be a whole number of minutes or hours, such as 90m or 2h, got %q" $duration) -}}
+{{- end -}}
+{{- $minutes := int (trimSuffix "m" (trimSuffix "h" $duration)) -}}
+{{- if hasSuffix "h" $duration -}}
+{{- $minutes = mul $minutes 60 -}}
+{{- end -}}
+{{- if or (lt $minutes 15) (gt $minutes 720) -}}
+{{- fail (printf "recordStore.blobs.s3.artifactSTS.duration must be from 15m to 12h, got %q" $duration) -}}
+{{- end -}}
+{{- end -}}
+
+{{- $retentionKeys := list "runs" "logs" "artifacts" "activity" "restartSource" -}}
+{{- range $key := $retentionKeys -}}
+{{- $val := index $.Values.recordStore.retention $key -}}
+{{- if not (regexMatch "^[1-9][0-9]{0,3}d$" $val) -}}
+{{- fail (printf "recordStore.retention.%s must match ^[1-9][0-9]{0,3}d$ (1 to 4 digits, a whole day count with a \"d\" suffix, at most 3650), got %q" $key $val) -}}
+{{- end -}}
+{{- $days := int (trimSuffix "d" $val) -}}
+{{- if gt $days 3650 -}}
+{{- fail (printf "recordStore.retention.%s must be at most 3650 days, got %q" $key $val) -}}
+{{- end -}}
+{{- end -}}
+{{- $restartDays := int (trimSuffix "d" $.Values.recordStore.retention.restartSource) -}}
+{{- $runDays := int (trimSuffix "d" $.Values.recordStore.retention.runs) -}}
+{{- if gt $restartDays $runDays -}}
+{{- fail (printf "recordStore.retention.restartSource must not be longer than recordStore.retention.runs, got %q and %q" $.Values.recordStore.retention.restartSource $.Values.recordStore.retention.runs) -}}
+{{- end -}}
+
+{{- end -}}

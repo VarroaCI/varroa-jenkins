@@ -1,0 +1,36 @@
+# CEL cases for charts/varroa/crds/varroa.dev_composedbundles.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: ComposedBundle
+  metadata:
+    name: bundle-a
+  spec:
+    inputs:
+      - itemRef:
+          name: item-a
+cases:
+  - name: input with no source refused
+    rule: |-
+      (has(self.itemRef)?1:0)+(has(self.gitSource)?1:0)+(has(self.ociSource)?1:0)==1
+    field: spec.inputs[0]
+    new: {spec: {inputs: [{}]}}
+    want: reject
+  - name: input with one item source accepted
+    rule: |-
+      (has(self.itemRef)?1:0)+(has(self.gitSource)?1:0)+(has(self.ociSource)?1:0)==1
+    field: spec.inputs[0]
+    new: {spec: {inputs: [{itemRef: {name: item-b}}]}}
+    want: accept
+
+  - name: git source over http refused
+    rule: |-
+      self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://') || self.repoURL.startsWith('git@')
+    field: spec.inputs[0].gitSource
+    new: {spec: {inputs: [{gitSource: {repoURL: "http://example.com/bundles.git", path: "a"}}]}}
+    want: reject
+  - name: git source over https accepted
+    rule: |-
+      self.repoURL.startsWith('https://') || self.repoURL.startsWith('ssh://') || self.repoURL.startsWith('git@')
+    field: spec.inputs[0].gitSource
+    new: {spec: {inputs: [{gitSource: {repoURL: "https://example.com/bundles.git", path: "a"}}]}}
+    want: accept

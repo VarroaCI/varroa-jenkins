@@ -2,9 +2,17 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/getkin/kin-openapi/openapi3filter"
 )
 
 func init() {
+	// kin-openapi decodes only application/json out of the box. runners'
+	// PATCH declares application/merge-patch+json (design D12); the merge
+	// patch body is still plain JSON on the wire, so the same decoder
+	// applies.
+	openapi3filter.RegisterBodyDecoder("application/merge-patch+json", openapi3filter.JSONBodyDecoder)
+
 	// ── ops (2 cases) ─────────────────────────────────────────────────────
 	registerContractCases(
 		contractCase{Name: "getHealthz", Method: "GET", Path: "/healthz", WantStatus: http.StatusOK},
@@ -57,6 +65,15 @@ func init() {
 		contractCase{Name: "updateTeam", Method: "PUT", Path: "/api/v1/teams/new-team", Claims: adminClaims, Body: map[string]interface{}{"name": "new-team", "members": []string{"user"}, "namespaces": []string{"ns"}}, WantStatus: http.StatusOK},
 	)
 
+	// ── runners (5 cases) ────────────────────────────────────────────────
+	registerContractCases(
+		contractCase{Name: "listRunners", Method: "GET", Path: "/api/v1/runners", Claims: adminClaims, WantStatus: http.StatusOK},
+		contractCase{Name: "createRunner-400-unknown-team", Method: "POST", Path: "/api/v1/runners", Claims: adminClaims, Body: map[string]interface{}{"name": "new-runner", "spec": map[string]interface{}{"team": "nonexistent-team", "launcher": "inbound", "remoteFS": "/var/j"}}, WantStatus: http.StatusBadRequest},
+		contractCase{Name: "getRunner", Method: "GET", Path: "/api/v1/runners/test-runner", Claims: adminClaims, WantStatus: http.StatusOK},
+		contractCase{Name: "patchRunner", Method: "PATCH", Path: "/api/v1/runners/test-runner", Claims: adminClaims, RawBody: []byte(`{"spec":{"numExecutors":2}}`), ContentType: "application/merge-patch+json", WantStatus: http.StatusOK},
+		contractCase{Name: "zz-deleteRunner", Method: "DELETE", Path: "/api/v1/runners/test-runner", Claims: adminClaims, WantStatus: http.StatusNoContent},
+	)
+
 	// ── controllers (19 cases) ───────────────────────────────────────────
 	registerContractCases(
 		contractCase{Name: "listControllers", Method: "GET", Path: "/api/v1/controllers", Claims: adminClaims, WantStatus: http.StatusOK},
@@ -74,12 +91,14 @@ func init() {
 		contractCase{Name: "wakeController-503", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/wake", Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "approveController-503", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/approve", Claims: adminClaims, Body: map[string]string{"action": "restart"}, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "approveControllerDeletion-503", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/approve-deletion", Claims: adminClaims, Body: map[string]string{"path": "some/path"}, WantStatus: http.StatusServiceUnavailable},
+		contractCase{Name: "breakGlassController-503", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/break-glass", Claims: adminClaims, Body: map[string]string{"reason": "incident"}, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "reprovisionController-503", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/reprovision", Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "restartController-202", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/restart", Claims: adminClaims, WantStatus: http.StatusAccepted},
 		contractCase{Name: "previewController-200", Method: "POST", Path: "/api/v1/clusters/core/controllers/test-ns/missing/preview", Claims: adminClaims, Body: map[string]string{"baseline": "base"}, WantStatus: http.StatusOK},
 		contractCase{Name: "getControllerLogs-200", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/logs", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "getControllerDiff-404", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/diff", Claims: adminClaims, WantStatus: http.StatusNotFound},
 		contractCase{Name: "getControllerPlugins-404", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/plugins", Claims: adminClaims, WantStatus: http.StatusNotFound},
+		contractCase{Name: "getControllerJenkinsLink-503", Method: "GET", Path: "/api/v1/clusters/core/controllers/test-ns/missing/jenkins-link?path=job/missing/1", Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		// Drain operations
 		contractCase{Name: "drainCluster-400-core", Method: "POST", Path: "/api/v1/clusters/core/drain", Claims: adminClaims, Body: map[string]string{"confirm": "core"}, WantStatus: http.StatusBadRequest},
 		contractCase{Name: "drainCluster-403-nonadmin", Method: "POST", Path: "/api/v1/clusters/dev-cluster/drain", Claims: operatorClaims, Body: map[string]string{"confirm": "dev-cluster"}, WantStatus: http.StatusForbidden},
@@ -120,6 +139,9 @@ func init() {
 		contractCase{Name: "createCatalogSource", Method: "POST", Path: "/api/v1/clusters/core/catalogsources/test-ns", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{"repoURL": "https://example.com/repo", "path": "catalog"}}, WantStatus: http.StatusCreated},
 		contractCase{Name: "zz-deleteCatalogSource", Method: "DELETE", Path: "/api/v1/clusters/core/catalogsources/test-ns/test-src", Claims: adminClaims, WantStatus: http.StatusNoContent},
 		contractCase{Name: "updateCatalogSource", Method: "PUT", Path: "/api/v1/clusters/core/catalogsources/test-ns/test-src", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{"repoURL": "https://example.com/repo", "path": "new-path"}}, WantStatus: http.StatusOK},
+		contractCase{Name: "createCatalogSource-reserved-409", Method: "POST", Path: "/api/v1/clusters/core/catalogsources/test-ns", Claims: adminClaims, Body: map[string]interface{}{"metadata": map[string]interface{}{"name": "varroa-update-center"}, "spec": map[string]interface{}{"repoURL": "https://example.com/repo", "path": "catalog"}}, WantStatus: http.StatusConflict},
+		contractCase{Name: "updateCatalogSource-reserved-409", Method: "PUT", Path: "/api/v1/clusters/core/catalogsources/test-ns/varroa-update-center", Claims: adminClaims, Body: map[string]interface{}{"spec": map[string]interface{}{"repoURL": "https://example.com/repo", "path": "new-path"}}, WantStatus: http.StatusConflict},
+		contractCase{Name: "deleteCatalogSource-reserved-409", Method: "DELETE", Path: "/api/v1/clusters/core/catalogsources/test-ns/varroa-update-center", Claims: adminClaims, WantStatus: http.StatusConflict},
 		contractCase{Name: "syncCatalogSource-202", Method: "POST", Path: "/api/v1/clusters/core/catalogsources/test-ns/test-src/sync", Claims: adminClaims, WantStatus: http.StatusAccepted},
 		contractCase{Name: "syncCatalogSource-colon-405", Method: "POST", Path: "/api/v1/clusters/core/catalogsources/test-ns/test-src:sync", Claims: adminClaims, WantStatus: http.StatusMethodNotAllowed, SkipSpecValidation: true},
 	)

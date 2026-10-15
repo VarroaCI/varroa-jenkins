@@ -1,9 +1,10 @@
 .tabs {
   display: flex;
   gap: 3px;
-  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 -1px 0 var(--border);
   margin-bottom: 20px;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .tab {
@@ -12,7 +13,6 @@
   font-weight: 600;
   color: var(--text-2);
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   white-space: nowrap;
   transition: .15s;
   display: flex;
@@ -22,6 +22,11 @@
 
 .tab:hover {
   color: var(--text);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .on {

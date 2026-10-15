@@ -1,0 +1,182 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-build plugin="workflow-job@1600.v6f36ed83529d">
+  <actions>
+    <hudson.model.ParametersAction>
+      <safeParameters class="sorted-set"/>
+      <parameters/>
+      <parameterDefinitionNames class="empty-list"/>
+    </hudson.model.ParametersAction>
+    <org.jenkinsci.plugins.varroamiteauth.VarroaIntentAction plugin="varroa-mite-auth@1.0-SNAPSHOT">
+      <runId>01a0d0d5-c589-7955-8264-23edb2cb068e</runId>
+      <deliveryId></deliveryId>
+      <admittedAtMillis>1790210065808</admittedAtMillis>
+      <origin>VARROA_INTENT</origin>
+      <intentKey>manual:01a0d0d5-c589-7955-8264-23edb2cb068e</intentKey>
+      <revision></revision>
+      <granted>true</granted>
+      <actor>admin</actor>
+    </org.jenkinsci.plugins.varroamiteauth.VarroaIntentAction>
+    <hudson.model.CauseAction>
+      <causeBag class="linked-hash-map">
+        <entry>
+          <org.jenkinsci.plugins.varroamiteauth.VarroaUserCause plugin="varroa-mite-auth@1.0-SNAPSHOT">
+            <userId>admin</userId>
+          </org.jenkinsci.plugins.varroamiteauth.VarroaUserCause>
+          <int>1</int>
+        </entry>
+      </causeBag>
+    </hudson.model.CauseAction>
+    <jenkins.metrics.impl.TimeInQueueAction plugin="metrics@4.2.37-494.v06f9a_939d33a_">
+      <queuingDurationMillis>4914</queuingDurationMillis>
+      <blockedDurationMillis>4912</blockedDurationMillis>
+      <buildableDurationMillis>0</buildableDurationMillis>
+      <waitingDurationMillis>0</waitingDurationMillis>
+    </jenkins.metrics.impl.TimeInQueueAction>
+    <org.jenkinsci.plugins.workflow.libs.LibrariesAction plugin="pipeline-groovy-lib@805.va_fc79344957d">
+      <libraries/>
+    </org.jenkinsci.plugins.workflow.libs.LibrariesAction>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.ExecutionModelAction plugin="pipeline-model-definition@2.2293.v6e7193cec599">
+      <stagesUUID>b0d5dbb6-f86c-493a-a243-0a6a5225c80d</stagesUUID>
+      <pipelineDefs>
+        <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPipelineDef plugin="pipeline-model-api@2.2293.v6e7193cec599">
+          <stages>
+            <stages>
+              <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStage>
+                <name>Test</name>
+                <branches>
+                  <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBranch>
+                    <name>default</name>
+                    <steps>
+                      <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTScriptBlock>
+                        <name>script</name>
+                        <args class="org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTNamedArgumentList">
+                          <arguments class="linked-hash-map">
+                            <entry>
+                              <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTKey>
+                                <key>scriptBlock</key>
+                              </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTKey>
+                              <org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue_-ConstantValue>
+                                <value class="string">writeFile file: &apos;results.xml&apos;, text: &apos;&apos;&apos;&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+&lt;testsuite name=&quot;smoke.junit&quot; tests=&quot;3&quot; failures=&quot;1&quot; skipped=&quot;1&quot;&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;passes&quot; time=&quot;0.25&quot;/&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;fails&quot; time=&quot;1.25&quot;&gt;
+    &lt;failure message=&quot;expected 1 but was 2&quot;&gt;java.lang.AssertionError: expected 1 but was 2
+    at com.example.SmokeTest.fails(SmokeTest.java:12)&lt;/failure&gt;
+  &lt;/testcase&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;skips&quot; time=&quot;0.0&quot;&gt;
+    &lt;skipped message=&quot;not on this platform&quot;/&gt;
+  &lt;/testcase&gt;
+&lt;/testsuite&gt;
+&apos;&apos;&apos;
+      junit &apos;results.xml&apos;</value>
+                              </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue_-ConstantValue>
+                            </entry>
+                          </arguments>
+                        </args>
+                      </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTScriptBlock>
+                    </steps>
+                  </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBranch>
+                </branches>
+              </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStage>
+            </stages>
+            <uuid>b0d5dbb6-f86c-493a-a243-0a6a5225c80d</uuid>
+          </stages>
+          <agent>
+            <variables class="org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue$ConstantValue">
+              <value class="string">smoke-a-default</value>
+            </variables>
+            <agentType>
+              <key>label</key>
+            </agentType>
+          </agent>
+        </org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPipelineDef>
+      </pipelineDefs>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.ExecutionModelAction>
+    <hudson.tasks.junit.TestResultAction plugin="junit@1425.v9c7318dca_96d">
+      <descriptions class="concurrent-hash-map"/>
+      <failCount>1</failCount>
+      <skipCount>1</skipCount>
+      <totalCount>3</totalCount>
+      <healthScaleFactor>1.0</healthScaleFactor>
+      <testData/>
+    </hudson.tasks.junit.TestResultAction>
+    <jenkins.metrics.impl.SubTaskTimeInQueueAction plugin="metrics@4.2.37-494.v06f9a_939d33a_">
+      <queuingDurationMillis>8544</queuingDurationMillis>
+      <blockedDurationMillis>0</blockedDurationMillis>
+      <buildableDurationMillis>8543</buildableDurationMillis>
+      <waitingDurationMillis>0</waitingDurationMillis>
+      <executingDurationMillis>5149</executingDurationMillis>
+      <workUnitCount>1</workUnitCount>
+    </jenkins.metrics.impl.SubTaskTimeInQueueAction>
+  </actions>
+  <queueId>3</queueId>
+  <timestamp>1790210070722</timestamp>
+  <startTime>1790210070729</startTime>
+  <result>UNSTABLE</result>
+  <duration>13888</duration>
+  <charset>UTF-8</charset>
+  <keepLog>false</keepLog>
+  <artifactManager class="io.jenkins.plugins.artifact_manager_jclouds.JCloudsArtifactManager" plugin="artifact-manager-s3@986.v7c9a_d15576b_b_">
+    <provider class="io.jenkins.plugins.artifact_manager_jclouds.s3.S3BlobStore"/>
+  </artifactManager>
+  <execution class="org.jenkinsci.plugins.workflow.cps.CpsFlowExecution">
+    <result>SUCCESS</result>
+    <script>pipeline { agent { label &apos;smoke-a-default&apos; }
+  stages {
+    stage(&apos;Test&apos;) { steps { script {
+      writeFile file: &apos;results.xml&apos;, text: &apos;&apos;&apos;&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+&lt;testsuite name=&quot;smoke.junit&quot; tests=&quot;3&quot; failures=&quot;1&quot; skipped=&quot;1&quot;&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;passes&quot; time=&quot;0.25&quot;/&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;fails&quot; time=&quot;1.25&quot;&gt;
+    &lt;failure message=&quot;expected 1 but was 2&quot;&gt;java.lang.AssertionError: expected 1 but was 2
+    at com.example.SmokeTest.fails(SmokeTest.java:12)&lt;/failure&gt;
+  &lt;/testcase&gt;
+  &lt;testcase classname=&quot;com.example.SmokeTest&quot; name=&quot;skips&quot; time=&quot;0.0&quot;&gt;
+    &lt;skipped message=&quot;not on this platform&quot;/&gt;
+  &lt;/testcase&gt;
+&lt;/testsuite&gt;
+&apos;&apos;&apos;
+      junit &apos;results.xml&apos;
+    } } }
+  } }
+</script>
+    <loadedScripts class="linked-hash-map"/>
+    <durabilityHint>MAX_SURVIVABILITY</durabilityHint>
+    <timings class="map">
+      <entry>
+        <string>flowNode</string>
+        <long>107896430</long>
+      </entry>
+      <entry>
+        <string>classLoad</string>
+        <long>94871787</long>
+      </entry>
+      <entry>
+        <string>runQueue</string>
+        <long>295764287</long>
+      </entry>
+      <entry>
+        <string>run</string>
+        <long>347684784</long>
+      </entry>
+      <entry>
+        <string>parse</string>
+        <long>15652848</long>
+      </entry>
+      <entry>
+        <string>saveProgram</string>
+        <long>63393111</long>
+      </entry>
+    </timings>
+    <internalCalls class="sorted-set"/>
+    <sandbox>true</sandbox>
+    <user>svc-smoke-a</user>
+    <iota>17</iota>
+    <head>1:17</head>
+    <done>true</done>
+    <resumeBlocked>false</resumeBlocked>
+    <storageDir>workflow-completed</storageDir>
+  </execution>
+  <completed>true</completed>
+  <checkouts class="hudson.util.PersistedList"/>
+</flow-build>

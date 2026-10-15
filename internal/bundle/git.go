@@ -2,10 +2,10 @@ package bundle
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -225,8 +225,9 @@ func validateRepoURL(repoURL string, allowLocal bool) error {
 // Clone performs a shallow clone of a repository at the given revision.
 // If revision looks like a full SHA (40 hex chars), the default branch is
 // cloned and then the SHA is checked out — --branch only works with ref names.
-// auth may be nil for public repositories.
-func (g *GitCloner) Clone(repoURL, revision, targetDir string, auth *GitAuth) error {
+// auth may be nil for public repositories. Every git process stops when ctx
+// is done, and the returned error then wraps ctx.Err().
+func (g *GitCloner) Clone(ctx context.Context, repoURL, revision, targetDir string, auth *GitAuth) error {
 	if err := validateRepoURL(repoURL, g.allowLocalTransport); err != nil {
 		return err
 	}
@@ -258,25 +259,34 @@ func (g *GitCloner) Clone(repoURL, revision, targetDir string, auth *GitAuth) er
 	}
 	args = append(args, repoURL, targetDir)
 
-	cmd := exec.Command("git", args...)
+	cmd := gitCommand(ctx, args...)
 	cmd.Env = gitEnv
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("git clone %s: %w", redactURL(repoURL), ctx.Err())
+		}
 		return fmt.Errorf("git clone %s: %s", redactURL(repoURL), stderr.String())
 	}
 
 	if isSHA {
-		cmd := exec.Command("git", "-C", targetDir, "fetch", "--depth=1", "origin", revision)
+		cmd := gitCommand(ctx, "-C", targetDir, "fetch", "--depth=1", "origin", revision)
 		cmd.Env = gitEnv
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("fetch revision %s: %w", revision, ctx.Err())
+			}
 			return fmt.Errorf("fetch revision %s: %s", revision, stderr.String())
 		}
-		cmd = exec.Command("git", "-C", targetDir, "checkout", "--quiet", revision)
+		cmd = gitCommand(ctx, "-C", targetDir, "checkout", "--quiet", revision)
 		cmd.Env = gitEnv
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("checkout revision %s: %w", revision, ctx.Err())
+			}
 			return fmt.Errorf("checkout revision %s: %s", revision, stderr.String())
 		}
 	}
@@ -361,22 +371,12 @@ func redactURL(rawURL string) string {
 	return rawURL
 }
 
-// Checkout switches to a specific revision in an existing repository.
-func (g *GitCloner) Checkout(repoDir, revision string) error {
-	cmd := exec.Command("git", "-C", repoDir, "checkout", "--quiet", revision)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git checkout %s: %s", revision, stderr.String())
-	}
-	return nil
-}
-
 // RemoteSHA fetches the HEAD commit SHA for a remote branch or tag using
 // git ls-remote. If revision is a 40-char hex SHA, it is returned directly
 // to avoid an unnecessary ls-remote call that would return empty.
-// auth may be nil for public repositories.
-func (g *GitCloner) RemoteSHA(repoURL, revision string, auth *GitAuth) (string, error) {
+// auth may be nil for public repositories. The git process stops when ctx is
+// done, and the returned error then wraps ctx.Err().
+func (g *GitCloner) RemoteSHA(ctx context.Context, repoURL, revision string, auth *GitAuth) (string, error) {
 	if err := validateRepoURL(repoURL, g.allowLocalTransport); err != nil {
 		return "", err
 	}
@@ -401,7 +401,7 @@ func (g *GitCloner) RemoteSHA(repoURL, revision string, auth *GitAuth) (string, 
 	}
 	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL="+allowProto)
 
-	cmd := exec.Command("git", "ls-remote", repoURL, revision)
+	cmd := gitCommand(ctx, "ls-remote", repoURL, revision)
 	// Run from a neutral directory: ls-remote attempts enclosing-repo
 	// discovery from the cwd, and a broken .git (e.g. a worktree whose
 	// gitdir pointer is outside a container mount) hard-fails it even
@@ -413,6 +413,9 @@ func (g *GitCloner) RemoteSHA(repoURL, revision string, auth *GitAuth) (string, 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("git ls-remote %s %s: %w", redactURL(repoURL), revision, ctx.Err())
+		}
 		return "", fmt.Errorf("git ls-remote %s %s: %s", redactURL(repoURL), revision, stderr.String())
 	}
 	parts := strings.Fields(stdout.String())

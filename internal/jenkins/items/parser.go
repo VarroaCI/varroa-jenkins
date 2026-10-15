@@ -34,6 +34,21 @@ func (m *Manifest) EffectiveRemoveStrategy() string {
 	return RemoveNone
 }
 
+// retains reports whether path is a retained top-level path or lies under
+// one. The match is on whole path segments, so "pay" does not retain
+// "payments/build".
+func (m *Manifest) retains(path string) bool {
+	for _, r := range m.Retain {
+		if r == "" {
+			continue
+		}
+		if path == r || strings.HasPrefix(path, r+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // validateItems recursively validates all items.
 func validateItems(items []Item, parent string) error {
 	for i := range items {

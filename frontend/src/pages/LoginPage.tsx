@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { useAuth, PROGRESS_COPY } from "../context/AuthContext";
 import styles from "./LoginPage.module.css";
 
@@ -11,7 +11,9 @@ const PHASES = ["Pending", "Provisioning", "Running", "Connected"] as const;
 const CURRENT_PHASE = "Connected";
 
 export function LoginPage({ authError }: LoginPageProps) {
-  const { login, authMode } = useAuth();
+  const { login, authMode, localAccounts } = useAuth();
+  // Beside OIDC, the local form stays behind a secondary control.
+  const [showLocal, setShowLocal] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,10 +21,11 @@ export function LoginPage({ authError }: LoginPageProps) {
   const [invalid, setInvalid] = useState({ username: false, password: false });
 
   const isOIDC = authMode === "oidc";
+  const localForm = !isOIDC || (localAccounts && showLocal);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (isOIDC) {
+    if (!localForm) {
       // OIDC mode: navigate to BFF authorization endpoint.
       setSubmitting(true);
       try {
@@ -121,9 +124,9 @@ export function LoginPage({ authError }: LoginPageProps) {
         <form className={styles.card} onSubmit={handleSubmit} noValidate>
           <h2 className={styles.title}>Sign in to Varroa</h2>
           <p className={styles.sub}>
-            {isOIDC
-              ? "Continue with your identity provider."
-              : "Sign in with your Varroa account."}
+            {localForm
+              ? "Sign in with your Varroa account."
+              : "Continue with your identity provider."}
           </p>
 
           <div className={styles.body}>
@@ -137,8 +140,11 @@ export function LoginPage({ authError }: LoginPageProps) {
               </div>
             )}
 
-            {!isOIDC ? (
-              <>
+            {/* Each branch has its own key. React must not reuse a button node
+                across branches, because a reused node can change its type
+                during a click. */}
+            {localForm ? (
+              <Fragment key="local">
                 <div className={styles.field}>
                   <label htmlFor="username" className={styles.label}>
                     Username
@@ -190,9 +196,19 @@ export function LoginPage({ authError }: LoginPageProps) {
                   {submitting && <span className={styles.spinner} />}
                   {submitting ? "Signing in..." : "Sign in"}
                 </button>
-              </>
+                {isOIDC && (
+                  <button
+                    type="button"
+                    className={`${styles.secondaryButton} ${styles.focusRing}`}
+                    onClick={() => { setShowLocal(false); setError(""); }}
+                    disabled={submitting}
+                  >
+                    Back to single sign-on
+                  </button>
+                )}
+              </Fragment>
             ) : (
-              <>
+              <Fragment key="sso">
                 <p className={styles.oidcNote}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
                     <rect x="4" y="10.5" width="16" height="10" rx="2" />
@@ -208,11 +224,21 @@ export function LoginPage({ authError }: LoginPageProps) {
                   {submitting && <span className={styles.spinner} />}
                   {submitting ? PROGRESS_COPY.redirecting : "Sign in with SSO"}
                 </button>
-              </>
+                {localAccounts && (
+                  <button
+                    type="button"
+                    className={`${styles.secondaryButton} ${styles.focusRing}`}
+                    onClick={() => { setShowLocal(true); setError(""); }}
+                    disabled={submitting}
+                  >
+                    Sign in with a local account
+                  </button>
+                )}
+              </Fragment>
             )}
 
             <p className={styles.footNote}>
-              {isOIDC ? "varroa-system · single sign-on" : "varroa-system · local accounts"}
+              {localForm ? "varroa-system · local accounts" : "varroa-system · single sign-on"}
             </p>
           </div>
         </form>

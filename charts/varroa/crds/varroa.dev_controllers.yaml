@@ -71,6 +71,25 @@ spec:
                     description: Schedule is a cron expression for the backup schedule.
                     type: string
                 type: object
+              cell:
+                description: |-
+                  Cell configures this Controller as a cell: a disposable Jenkins JVM
+                  with no durable state that hosts many tenants as top-level folders.
+                  The cell role (enabled) cannot change after creation, and a patch cannot
+                  add or remove it either. A block without enabled is not a cell.
+                  MaxTenants stays mutable: it changes placement capacity, never the
+                  storage shape.
+                properties:
+                  enabled:
+                    description: Enabled marks this Controller as a cell.
+                    type: boolean
+                  maxTenants:
+                    description: |-
+                      MaxTenants caps the number of tenants a placement pass may bind to
+                      this cell.
+                    format: int32
+                    type: integer
+                type: object
               className:
                 description: |-
                   ClassName references a ControllerClass by name, layering its defaults
@@ -94,6 +113,12 @@ spec:
               endpoint:
                 description: API endpoint URL for the controller.
                 type: string
+              headless:
+                description: |-
+                  Headless blocks the Jenkins web UI for every non-admin caller. A cell
+                  is always headless. Set this to true to headless a one-tenant
+                  controller too. Read this field only through v1alpha1.IsHeadless.
+                type: boolean
               hibernation:
                 description: Hibernation configures automatic controller hibernation.
                 properties:
@@ -145,7 +170,8 @@ spec:
                     description: |-
                       Mode selects how the controller is exposed: "subdomain" (default) gives the
                       controller its own host; "path" serves it at /jenkins/<ns>/<name> on the
-                      shared host. Immutable after create.
+                      shared host. Immutable after create. A missing block or a missing mode
+                      counts as subdomain. A patch cannot remove or add the block to change the mode.
                     enum:
                     - ""
                     - subdomain
@@ -156,10 +182,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-validations:
-                - message: ingressSpec.mode is immutable
-                  rule: '(has(oldSelf.mode) ? (oldSelf.mode == ''path'' ? ''path''
-                    : ''subdomain'') : ''subdomain'') == (has(self.mode) ? (self.mode
-                    == ''path'' ? ''path'' : ''subdomain'') : ''subdomain'')'
                 - message: ingressSpec.annotations keys must be valid Kubernetes annotation
                     names (optional DNS-subdomain prefix + '/' + alphanumeric name)
                   rule: '!has(self.annotations) || self.annotations.all(k, k.matches(r''^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$''))'
@@ -3960,6 +3982,14 @@ spec:
                 description: Controller version tag.
                 type: string
             type: object
+            x-kubernetes-validations:
+            - message: cell.enabled is immutable
+              rule: (has(self.cell) && has(self.cell.enabled) && self.cell.enabled)
+                == (has(oldSelf.cell) && has(oldSelf.cell.enabled) && oldSelf.cell.enabled)
+            - message: ingressSpec.mode is immutable
+              rule: (has(self.ingressSpec) && has(self.ingressSpec.mode) && self.ingressSpec.mode
+                == 'path') == (has(oldSelf.ingressSpec) && has(oldSelf.ingressSpec.mode)
+                && oldSelf.ingressSpec.mode == 'path')
           status:
             description: ControllerStatus defines the observed state of Controller.
             properties:
@@ -4024,6 +4054,278 @@ spec:
                   ApprovedPluginRollChecksum is a one-shot approval of the target checksum for a
                   pending plugin roll. Set by ApproveRestart, consumed and cleared on next reconcile.
                 type: string
+              cell:
+                description: |-
+                  Cell reports the placement and health of this Controller when it runs
+                  as a cell. The placement pass writes only Tenants; the controller
+                  reconciler writes the other fields. A merge patch that names only one
+                  side leaves the other untouched.
+                properties:
+                  appliedTenants:
+                    description: |-
+                      AppliedTenants is the tenant set of the desired state whose apply
+                      last succeeded. A tenant absent here has no folder building on this
+                      cell.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                  evacuate:
+                    description: |-
+                      Evacuate is true when the roll gate has given up on this cell; every
+                      tenant must move to another cell.
+                    type: boolean
+                  instance:
+                    description: |-
+                      Instance is the running Jenkins pod's metadata.uid. Empty when no
+                      pod runs. Written by the controller reconciler on every tick.
+                    type: string
+                  pendingSignatures:
+                    description: |-
+                      PendingSignatures lists the script signatures the sandbox refused in
+                      this cell and that no operator has approved yet. The mite reports the
+                      list from the plugin on each snapshot. Empty when the cell has no
+                      refused signature.
+                    items:
+                      description: |-
+                        CellPendingSignature is one script signature the sandbox refused in a
+                        cell, with the tenant jobs that requested it.
+                      properties:
+                        dangerous:
+                          description: |-
+                            Dangerous is true when the script-security plugin marks the signature
+                            as dangerous.
+                          type: boolean
+                        requesters:
+                          description: |-
+                            Requesters lists up to three tenant jobs that hit this signature,
+                            newest first.
+                          items:
+                            description: |-
+                              CellSignatureRequester names one tenant job that requested a refused
+                              script signature.
+                            properties:
+                              buildNumber:
+                                description: BuildNumber is the build that hit the
+                                  refused signature.
+                                format: int64
+                                type: integer
+                              jobPath:
+                                description: JobPath is the full name of the job.
+                                type: string
+                              runId:
+                                description: RunID is the run identifier of that build.
+                                type: string
+                              tenant:
+                                description: |-
+                                  Tenant is the Team name that owns the job. Empty when the plugin
+                                  cannot resolve a tenant.
+                                type: string
+                            required:
+                            - jobPath
+                            type: object
+                          maxItems: 3
+                          type: array
+                        signature:
+                          description: Signature is the method signature the sandbox
+                            refused.
+                          maxLength: 1024
+                          type: string
+                      required:
+                      - signature
+                      type: object
+                    maxItems: 25
+                    type: array
+                  pendingSignaturesTotal:
+                    description: |-
+                      PendingSignaturesTotal is the number of pending signatures the plugin
+                      reports. It can exceed the length of PendingSignatures.
+                    format: int32
+                    type: integer
+                  pendingTenants:
+                    description: |-
+                      PendingTenants holds one placement claim per tenant the placement
+                      pass has chosen this cell for and has not yet added to Tenants. The
+                      placement pass is its only writer. The pool drain skips a cell that
+                      carries a live claim.
+                    items:
+                      description: |-
+                        CellPendingTenant is one placement claim on a cell. The placement pass
+                        writes it before it writes the Team fence, so a pool drain that re-read
+                        the cell earlier cannot delete the cell the tenant is about to use.
+                      properties:
+                        claimedAt:
+                          description: |-
+                            ClaimedAt is when the placement pass wrote the claim. A claim older
+                            than the claim window holds no cell, so a placement pass that stops
+                            between the claim and the tenant patch cannot pin a cell.
+                          format: date-time
+                          type: string
+                        tenant:
+                          description: Tenant is the Team name this claim belongs
+                            to.
+                          type: string
+                      required:
+                      - claimedAt
+                      - tenant
+                      type: object
+                    maxItems: 64
+                    type: array
+                  previousInstance:
+                    description: |-
+                      PreviousInstance is the pod uid Instance held before its last
+                      change. A controller with no cell role reports it as a dead
+                      instance in its own tenant.sync announcement, so the recorder's
+                      interrupted-run sweep can confirm a replaced pod is gone.
+                    type: string
+                  previousInstanceLastSeen:
+                    description: |-
+                      PreviousInstanceLastSeen is the last mite heartbeat recorded while
+                      PreviousInstance was the running pod.
+                    format: date-time
+                    type: string
+                  rehydration:
+                    description: |-
+                      Rehydration holds one build-record rehydration entry per tenant on
+                      this cell. The controller reconciler is its only writer.
+                    items:
+                      description: |-
+                        CellRehydrationEntry tracks one tenant's build-record rehydration bundle
+                        on a cell.
+                      properties:
+                        applied:
+                          description: |-
+                            Applied is true once the mite reports this bundle applied with no
+                            error, on the generation and cell instance this entry names. A
+                            deferred job does not clear it. A deadline give-up keeps it true
+                            only after a real apply.
+                          type: boolean
+                        at:
+                          description: At is when the controller reconciler last wrote
+                            this entry.
+                          format: date-time
+                          type: string
+                        bundleId:
+                          description: |-
+                            BundleID identifies the rehydration bundle this entry was built
+                            from.
+                          type: string
+                        cellInstance:
+                          description: CellInstance is the cell pod UID this entry
+                            was built for.
+                          type: string
+                        commandId:
+                          description: |-
+                            CommandID correlates this entry with the desired-state command that
+                            carried its bundle. Persisting it survives a controller restart,
+                            which an in-memory map does not.
+                          type: string
+                        deferred:
+                          description: |-
+                            Deferred lists the job paths the mite could not seed, because the
+                            job did not exist yet.
+                          items:
+                            type: string
+                          maxItems: 50
+                          type: array
+                        error:
+                          description: |-
+                            Error is the whole-bundle rehydration failure the mite reported, or
+                            empty.
+                          type: string
+                        generation:
+                          description: Generation is the placement generation this
+                            entry was built for.
+                          format: int64
+                          type: integer
+                        records:
+                          description: Records is the number of thin build records
+                            the bundle carried.
+                          format: int32
+                          type: integer
+                        tenant:
+                          description: Tenant is the Team name this entry belongs
+                            to.
+                          type: string
+                        truncated:
+                          description: |-
+                            Truncated is true when the bundle dropped changelogs or older
+                            records to fit the byte budget.
+                          type: boolean
+                        unseeded:
+                          description: |-
+                            Unseeded lists the job paths that wait for a number seed on CellInstance:
+                            the jobs no bundle covers, and the jobs of an outstanding bundle that no
+                            earlier apply covered. An entry whose UnseededJobs is above the length of
+                            this list holds the whole tenant.
+                          items:
+                            type: string
+                          maxItems: 256
+                          type: array
+                        unseededJobs:
+                          description: UnseededJobs counts the jobs no bundle has
+                            covered yet.
+                          format: int32
+                          type: integer
+                      required:
+                      - tenant
+                      type: object
+                    maxItems: 64
+                    type: array
+                  rolledAt:
+                    description: |-
+                      RolledAt is when the operator last deleted this cell's pod to recover
+                      from an unready state. Compared against UnreadySince so a tick does
+                      not delete the pod again on every pass.
+                    format: date-time
+                    type: string
+                  tenantWarnings:
+                    description: |-
+                      TenantWarnings lists non-blocking findings the controller reconciler
+                      records about a tenant during cell item assembly or the hibernation
+                      gate. Rebuilt each tick.
+                    items:
+                      description: TenantWarning records one non-blocking finding
+                        about a tenant on a cell.
+                      properties:
+                        message:
+                          description: Message is a human-readable description of
+                            the finding.
+                          type: string
+                        reason:
+                          description: Reason names the warning class.
+                          type: string
+                        tenant:
+                          description: Tenant is the Team name the warning is about.
+                          type: string
+                      required:
+                      - message
+                      - reason
+                      - tenant
+                      type: object
+                    maxItems: 50
+                    type: array
+                  tenants:
+                    description: |-
+                      Tenants lists the Team names the placement pass has bound to this
+                      cell.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                  unreadySince:
+                    description: |-
+                      UnreadySince is when CellReady first went False for a reason other
+                      than the three configuration gates. Cleared, together with RolledAt
+                      and Evacuate, on recovery.
+                    format: date-time
+                    type: string
+                  warm:
+                    description: |-
+                      Warm is true while this cell is a free member of the warm pool: it
+                      carries no tenant.
+                    type: boolean
+                type: object
               conditions:
                 description: Conditions represent the latest available observations
                   of the controller's state.
@@ -4056,12 +4358,21 @@ spec:
               configHash:
                 description: ConfigHash is the hash of the JCasC configuration.
                 type: string
+              desiredContentHash:
+                description: |-
+                  DesiredContentHash is the content hash of the last delivered desired
+                  state: its JCasC, RBAC, and items, without tenant homes. In manual
+                  mode, a change that keeps this hash is a placement-only change and
+                  needs no approval.
+                type: string
               desiredStateHash:
                 description: DesiredStateHash is the combined hash of the desired
                   state.
                 type: string
               endpoint:
-                description: Endpoint is the resolved endpoint for the running controller.
+                description: Endpoint is the external URL of the controller. The operator
+                  of the cluster that holds the controller writes it. It is empty
+                  when no host resolves or when the controller is headless.
                 type: string
               firstConnectedAt:
                 description: |-
@@ -4074,13 +4385,14 @@ spec:
                 description: |-
                   Hibernated is true when the operator has parked this controller (scaled its
                   StatefulSet to 0) for automatic or manual hibernation. It is written only by
-                  the status compare-and-swap helper SetHibernated, never by the
-                  end-of-reconcile status patch.
+                  the status compare-and-swap helper SetHibernated and by the reconcile's
+                  conditional SetHibernatedAt, never by the end-of-reconcile status patch.
                 type: boolean
               hibernatedAt:
                 description: |-
                   HibernatedAt is when the controller was last hibernated. It is cleared when
-                  the controller wakes, and like Hibernated is written only by SetHibernated.
+                  the controller wakes, and like Hibernated is written only by SetHibernated
+                  and SetHibernatedAt.
                 format: date-time
                 type: string
               jenkinsRef:
@@ -4337,6 +4649,13 @@ spec:
                     items:
                       type: string
                     type: array
+                  contentHash:
+                    description: |-
+                      ContentHash is the hash of the content that the user reviews: the
+                      JCasC, RBAC, and items of the pending desired state. Tenant homes
+                      stay outside it. An approval refuses when the content it builds
+                      again has a different hash.
+                    type: string
                   desiredStateHash:
                     description: DesiredStateHash is the pending desired state hash.
                     type: string

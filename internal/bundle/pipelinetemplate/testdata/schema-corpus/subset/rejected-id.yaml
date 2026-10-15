@@ -1,0 +1,6 @@
+type: object
+additionalProperties: false
+$id: https://example.com/schema
+properties:
+  name:
+    type: string

@@ -1,0 +1,10 @@
+{{- /*
+auth-mode-guard.yaml
+Validates auth.bffUrl for the local and ldap modes. In these modes the BFF
+signs the dashboard sessions, and each Jenkins controller fetches their keys
+from auth.bffUrl. The operator also stops at startup without it. Renders no
+objects.
+*/}}
+{{- if and (or (eq .Values.auth.mode "local") (eq .Values.auth.mode "ldap")) (not .Values.auth.bffUrl) }}
+{{- fail (printf "auth.mode %q needs auth.bffUrl: the BFF issues the sessions and controllers fetch their keys from it" .Values.auth.mode) }}
+{{- end }}

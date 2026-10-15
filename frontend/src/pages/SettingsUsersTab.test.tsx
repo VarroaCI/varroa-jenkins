@@ -148,4 +148,36 @@ describe("SettingsUsersTab", () => {
     expect(screen.queryByText("Edit — oidc-abc")).not.toBeInTheDocument();
     expect(screen.queryByText("Reset")).not.toBeInTheDocument();
   });
+
+  it("beside OIDC: a local account needs a purpose, and an IdP user is read-only", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "oidc", localAccounts: true });
+    m(client.listUsers).mockResolvedValue([
+      { name: "rescue", groups: [], managedBy: "local", purpose: "break-glass" },
+      { name: "oidc-abc", email: "bob@example.com", groups: ["eng"], managedBy: "idp" },
+    ]);
+    renderTab();
+
+    await screen.findByText("local · break-glass");
+    await userEvent.click(screen.getByText("+ New User"));
+    await userEvent.type(screen.getByPlaceholderText("alice"), "ci-bot");
+    await userEvent.type(screen.getByPlaceholderText("Min 8 characters"), "password1");
+    await userEvent.selectOptions(screen.getByLabelText("Purpose"), "service");
+    await userEvent.click(screen.getByText("Create"));
+    await waitFor(() => expect(client.createUser).toHaveBeenCalled());
+    expect(m(client.createUser).mock.calls[0][0]).toMatchObject({ username: "ci-bot", purpose: "service" });
+
+    await userEvent.click(screen.getByRole("button", { name: "oidc-abc" }));
+    expect(screen.queryByText(/Edit — oidc-abc/)).not.toBeInTheDocument();
+  });
+
+  it("wraps the user table in a horizontal scroll container", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    m(client.listUsers).mockResolvedValue([
+      { name: "alice", email: "alice@example.com", displayName: "Alice", groups: [], managedBy: "local" },
+    ]);
+    renderTab();
+
+    await screen.findByText("alice");
+    expect(screen.getByRole("table").parentElement?.className).toMatch(/tableWrap/);
+  });
 });

@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  value:
+    type: string
+    pattern: ^abc$
+required:
+- value

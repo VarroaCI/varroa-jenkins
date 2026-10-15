@@ -118,12 +118,12 @@ describe("Settings page", () => {
 
     await screen.findByText(/Defaults applied to controllers on the selected cluster/);
     // Provisioning + Versions gated on provisioningdefaults:update both appear.
-    expect(screen.getByRole("button", { name: "Provisioning" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Versions" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Provisioning" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Versions" })).toBeInTheDocument();
     // Admin-only tabs must not be present.
-    expect(screen.queryByRole("button", { name: "Users" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Groups" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Identity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Users" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Groups" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Identity" })).not.toBeInTheDocument();
   });
 
   it("hides the Versions tab when the user lacks provisioningdefaults update", async () => {
@@ -134,8 +134,8 @@ describe("Settings page", () => {
     renderSettings();
 
     await screen.findByRole("heading", { name: "Settings" });
-    expect(screen.queryByRole("button", { name: "Provisioning" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Versions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Provisioning" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Versions" })).not.toBeInTheDocument();
   });
 
   it("removes a plugin row when its '×' is clicked", async () => {

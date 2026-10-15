@@ -2,14 +2,16 @@ package bundle
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 )
 
 // ValidateCatalogItem validates the content of a catalog item against
-// structural rules for the given item type.
+// structural rules for the given item type. indexVersion is the catalog
+// index entry's declared version; only the pipeline-template case uses it.
 //
 // Supported types and their requirements:
 //   - plugin:            must unmarshal into a struct with a non-empty plugins list;
@@ -18,10 +20,11 @@ import (
 //   - podtemplate:        must unmarshal into a non-empty list of pod-template objects.
 //   - item:               must unmarshal into a struct with a non-empty items list.
 //   - rbac:               must unmarshal into a struct with a non-empty roles map.
-//   - pipeline-template:  must unmarshal into an items.Manifest whose items are all
-//     kind=pipeline or kind=multibranch, validated via (*items.Item).Validate(); declared
-//     variables' Type/AllowedValues are also validated for internal consistency.
-func ValidateCatalogItem(itemType string, content []byte, variables []CatalogVarDecl) (valid bool, message string) {
+//   - pipeline-template:  content is one PipelineTemplate document, validated by
+//     internal/bundle/pipelinetemplate; declared variables' Type/AllowedValues are
+//     validated for internal consistency, and a declared variable warns because
+//     pipeline-template content never resolves a ${var} placeholder.
+func ValidateCatalogItem(itemType string, content []byte, variables []CatalogVarDecl, indexVersion string) (valid bool, message string) {
 	switch itemType {
 	case "plugin":
 		return validatePluginContent(content)
@@ -34,7 +37,7 @@ func ValidateCatalogItem(itemType string, content []byte, variables []CatalogVar
 	case "rbac":
 		return validateRBACContent(content)
 	case "pipeline-template":
-		return validatePipelineTemplateContent(content, variables)
+		return validatePipelineTemplateContent(content, variables, indexVersion)
 	default:
 		return false, fmt.Sprintf("unknown type: %s", itemType)
 	}
@@ -121,24 +124,39 @@ func validateRBACContent(content []byte) (bool, string) {
 	return true, ""
 }
 
-func validatePipelineTemplateContent(content []byte, variables []CatalogVarDecl) (bool, string) {
-	var m items.Manifest
-	if err := yaml.Unmarshal(content, &m); err != nil {
-		return false, err.Error()
-	}
-	if len(m.Items) == 0 {
-		return false, "items list is empty"
-	}
-	for i := range m.Items {
-		kind := m.Items[i].Kind
-		if kind != "pipeline" && kind != "multibranch" {
-			return false, fmt.Sprintf("item[%d] %q: pipeline-template requires kind=pipeline or kind=multibranch, got %q", i, m.Items[i].Name, kind)
+// validatePipelineTemplateContent validates a pipeline-template item's
+// content as a PipelineTemplate document (design D2, L1 in D11). It also
+// validates the item's declared CatalogVariable list for Type/AllowedValues
+// consistency, and warns — without invalidating — about two conditions the
+// document alone cannot show: a declared variable never reaches the
+// template body, and the catalog index's declared version disagrees with
+// the document's own spec.version.
+func validatePipelineTemplateContent(content []byte, variables []CatalogVarDecl, indexVersion string) (bool, string) {
+	findings, doc := pipelinetemplate.ValidateDocument(content)
+	if len(findings) > 0 {
+		msgs := make([]string, len(findings))
+		for i, f := range findings {
+			msgs[i] = f.String()
 		}
-		if err := m.Items[i].Validate(); err != nil {
-			return false, err.Error()
-		}
+		return false, "pipeline-template content must be a PipelineTemplate document: " + strings.Join(msgs, "; ")
 	}
-	return validateVariableTypes(variables)
+
+	if valid, msg := validateVariableTypes(variables); !valid {
+		return false, msg
+	}
+
+	var warnings []string
+	for _, v := range variables {
+		warnings = append(warnings, fmt.Sprintf(
+			"variable %q does not reach the pipeline-template body: pipeline-templates.yaml is never resolved by ${var} substitution",
+			v.Name))
+	}
+	if indexVersion != "" && doc.Spec.Version != "" && indexVersion != doc.Spec.Version {
+		warnings = append(warnings, fmt.Sprintf(
+			"catalog index declares version %q but the document declares spec.version %q; the document value is used",
+			indexVersion, doc.Spec.Version))
+	}
+	return true, strings.Join(warnings, "; ")
 }
 
 // validateVariableTypes checks Type/AllowedValues internal consistency on a

@@ -39,7 +39,9 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		mcp.WithDescription("List Jenkins controllers managed by Varroa. Returns a compact "+
 			"summary per controller (name, namespace, cluster, phase, version, "+
 			"powerState, createdAt, lastReconcileError) — enough to survey a fleet and spot "+
-			"what is broken. Use get_controller for the full resource."),
+			"what is broken. Use get_controller for the full resource."+
+			" The result also carries clusters, one read status for each cluster the list read. "+
+			"A cluster with ok false did not answer, and its controllers are absent."),
 		mcp.WithString("namespace", mcp.Description("Optional namespace to filter by")),
 		mcp.WithString("cluster", mcp.Description("Optional cluster to filter by (default: local cluster)")),
 		mcp.WithBoolean("verbose", mcp.Description("Return full Controller resources instead of "+
@@ -62,11 +64,21 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			cr      *v1alpha1.Controller
 		}
 		var entries []entry
+		clusters := []api.ClusterFanoutStatus{}
 
 		if deps.Brood != nil {
-			cc, _, err := deps.Brood.ListAll(ctx, ns, clusterFilter)
-			if err != nil {
+			if clusterFilter != "" && !deps.Brood.IsKnown(ctx, clusterFilter) {
+				return mcp.NewToolResultError("unknown cluster: " + clusterFilter), nil
+			}
+			cc, statuses, err := deps.Brood.ListAll(ctx, ns, clusterFilter)
+			// A filtered call to a member that does not answer returns its
+			// status row with the error. That row is the answer, not a tool error.
+			// A failed read of the local cluster is a tool error, even with a row.
+			if err != nil && (len(statuses) == 0 || clusterFilter == deps.Brood.LocalCluster()) {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
+			}
+			if statuses != nil {
+				clusters = statuses
 			}
 			claims, _ := requireClaims(ctx)
 			for _, c := range cc {
@@ -78,7 +90,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			}
 		} else {
 			// Fallback: direct local list.
-			controllers, err := crdstore.List[v1alpha1.Controller](ctx, deps.Store, ns, "")
+			controllers, err := deps.LocalControllers(ctx, ns)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to list controllers: %v", err)), nil
 			}
@@ -96,18 +108,25 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			}
 		}
 
+		var items any
 		if verbose {
 			full := make([]*v1alpha1.Controller, 0, len(entries))
 			for _, e := range entries {
 				full = append(full, e.cr)
 			}
-			return resultJSON(full)
+			items = full
+		} else {
+			summaries := make([]controllerSummary, 0, len(entries))
+			for _, e := range entries {
+				summaries = append(summaries, summarizeController(e.cluster, e.cr))
+			}
+			items = summaries
 		}
-		summaries := make([]controllerSummary, 0, len(entries))
-		for _, e := range entries {
-			summaries = append(summaries, summarizeController(e.cluster, e.cr))
-		}
-		return resultJSON(summaries)
+		return resultJSON(map[string]any{
+			"items":    items,
+			"count":    len(entries),
+			"clusters": clusters,
+		})
 	})
 
 	getC := mcp.NewTool("get_controller",
@@ -198,7 +217,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		// carry both of those fields now, so skipping this would let MCP create
 		// a controller REST rejects.
 		svc := controllerSvc(deps)
-		if serr := svc.ValidateIngress(cr.Spec.IngressSpec, true, cluster, name); serr != nil {
+		if serr := svc.ValidateIngress(cr.Spec.IngressSpec, true, cluster, name, v1alpha1.IsHeadless(cr)); serr != nil {
 			return mcp.NewToolResultError(serr.Message), nil
 		}
 		if cluster == deps.Brood.LocalCluster() {
@@ -399,7 +418,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if deps.Reconciler == nil {
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
-		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart"); err != nil {
+		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart", ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to restart controller: %v", err)), nil
 		}
 		emitActivityForCluster(deps, claims, cluster, activity.Event{

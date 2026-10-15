@@ -1,20 +1,22 @@
 import { useState, type FocusEvent, type MouseEvent } from "react";
 import { NavLink } from "react-router-dom";
-import { Activity, Boxes, ChevronRight, CircleUserRound, Clock3, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, PlugZap, Server, Shield, Workflow, type LucideIcon } from "lucide-react";
+import { Activity, Boxes, ChevronRight, CircleUserRound, Clock3, Hexagon, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, PlugZap, Server, Shield, Waypoints, Workflow, type LucideIcon } from "lucide-react";
 import { Pulse } from "./Pulse";
 import { NavIcon } from "./NavIcon";
-import { usePermissions } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea } from "../lib/navPermissions";
+import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
+import { canCatalogArea, canAdminArea, canCellsRow } from "../lib/navPermissions";
 import { useControllers } from "../hooks/useControllers";
 import styles from "./Sidebar.module.css";
 
-interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean }
+interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean; gate?: "pipelines" | "cells" }
 interface NavGroup { label: string; items: NavItem[] }
 
 const GROUPS: NavGroup[] = [
   { label: "Operate", items: [
     { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+    { to: "/pipelines", label: "Pipelines", icon: Waypoints, gate: "pipelines" },
     { to: "/controllers", label: "Controllers", icon: Server },
+    { to: "/cells", label: "Cells", icon: Hexagon, gate: "cells" },
     { to: "/plugins", label: "Plugins", icon: PlugZap },
     { to: "/clusters", label: "Clusters", icon: Network },
     { to: "/activity", label: "Activity", icon: Activity },
@@ -29,7 +31,12 @@ const GROUPS: NavGroup[] = [
   ] },
 ];
 
-function isDoorVisible(item: NavItem, permissions: ReturnType<typeof usePermissions>["data"]): boolean {
+function isItemVisible(item: NavItem, permissions: ReturnType<typeof usePermissions>["data"]): boolean {
+  // The pipelines gate reads the caller's grants, not the record store: the
+  // row still renders when the pipelines API answers 503.
+  if (item.gate === "pipelines") return canSeePipelines(permissions);
+  // CellPool is cluster scoped, so the row takes the cluster-wide partition.
+  if (item.gate === "cells") return canCellsRow(permissions);
   if (!item.door) return true;
   if (item.to === "/catalog") return canCatalogArea(permissions);
   if (item.to === "/settings") return canAdminArea(permissions);
@@ -76,7 +83,7 @@ export function Sidebar({ collapsed = false, onToggle = () => {} }: SidebarProps
 
   return <aside className={`${styles.sidebar} ${collapsed ? styles.collapsed : ""}`}>
     <a href="/" className={styles.brand}><div className={styles.brandMark}><svg viewBox="0 0 34 34" width="34" height="34" aria-hidden="true"><polygon points="17,2 30,9.5 30,24.5 17,32 4,24.5 4,9.5" fill="var(--accent)" /><polygon points="17,9 24,13 24,21 17,25 10,21 10,13" fill="var(--surface)" /><circle cx="17" cy="17" r="2.6" fill="var(--accent)" /></svg></div><div><div className={styles.brandName}>Varroa</div><div className={styles.brandSub}>Jenkins control plane</div></div></a>
-    {GROUPS.map((group) => <div key={group.label}><div className={styles.navLabel}>{group.label}</div>{group.items.filter((item) => isDoorVisible(item, permissions)).map((item) => {
+    {GROUPS.map((group) => <div key={group.label}><div className={styles.navLabel}>{group.label}</div>{group.items.filter((item) => isItemVisible(item, permissions)).map((item) => {
       const itemCount = item.to === "/controllers" ? controllersCount : undefined;
       return <NavLink key={item.to} to={item.to} end={item.end} aria-label={itemCount !== undefined ? `${item.label}, ${itemCount}` : item.label} className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ""}`} onMouseEnter={handleFlyoutShow(item.label, itemCount)} onMouseLeave={handleFlyoutHide} onFocus={handleFlyoutShow(item.label, itemCount)} onBlur={handleFlyoutHide}><span className={styles.ic}><NavIcon icon={item.icon} /></span><span className={styles.navText}>{item.label}</span>{itemCount !== undefined && <span className={styles.navCount}>{itemCount}</span>}{item.door && <ChevronRight className={styles.doorChevron} aria-hidden={true} size={14} />}</NavLink>;
     })}</div>)}

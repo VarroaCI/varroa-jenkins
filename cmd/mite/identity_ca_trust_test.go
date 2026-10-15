@@ -22,7 +22,7 @@ func writeMiteIdentity(t *testing.T, miteDir string, caAuth *ca.CA, controllerNa
 	if err != nil {
 		t.Fatalf("generate mite key: %v", err)
 	}
-	cert, err := caAuth.IssueMiteCert(controllerName, namespace, pub)
+	cert, err := caAuth.IssueMiteCert(controllerName, namespace, pub, "")
 	if err != nil {
 		t.Fatalf("issue mite cert: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestLoadOrCreateIdentity_StaleCADiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          string(caB.CAPEM()), // current CA differs from the saved identity's CA-A
@@ -112,7 +112,7 @@ func TestLoadOrCreateIdentity_CurrentCAReused(t *testing.T) {
 	}
 	writeMiteIdentity(t, miteDir, caA, "test", "ns")
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          string(caA.CAPEM()), // current CA matches the saved identity
@@ -149,7 +149,7 @@ func TestLoadOrCreateIdentity_EmptyCAPEMExpiryOnly(t *testing.T) {
 	}
 	writeMiteIdentity(t, miteDir, caA, "test", "ns")
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		CAPEM:          "", // unset → expiry-only reuse
@@ -167,5 +167,61 @@ func TestLoadOrCreateIdentity_EmptyCAPEMExpiryOnly(t *testing.T) {
 	}
 	if agent.cert == nil {
 		t.Error("expected in-memory cert to be retained under expiry-only reuse")
+	}
+}
+
+// TestLoadOrCreateIdentity_StaleInstanceRenews proves a saved identity
+// whose leaf names another pod instance is never reused as is: a reused
+// leaf would stamp every build event with the previous pod, so each
+// completion would land as foreign to the claim the new pod made. With no
+// gateway to renew against, the agent falls through to bootstrap.
+func TestLoadOrCreateIdentity_StaleInstanceRenews(t *testing.T) {
+	miteDir := t.TempDir()
+	caA, err := ca.NewCA()
+	if err != nil {
+		t.Fatalf("new CA: %v", err)
+	}
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := caA.IssueMiteCert("test", "ns", pub, "old-pod")
+	if err != nil {
+		t.Fatalf("issue cert: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{
+		"cert.pem": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}),
+		"key.pem":  pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+		"ca.pem":   caA.CAPEM(),
+	} {
+		if err := os.WriteFile(filepath.Join(miteDir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("fresh-bootstrap-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := mustNewAgent(t, Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		CAPEM:          string(caA.CAPEM()),
+		CellInstance:   "new-pod",
+		BootstrapFile:  tokenFile,
+	})
+	agent.Logger = slog.Default()
+	agent.miteDir = miteDir
+
+	id, err := agent.loadOrCreateIdentity(context.Background())
+	if err != nil {
+		t.Fatalf("loadOrCreateIdentity: %v", err)
+	}
+	if !id.isBootstrap {
+		t.Error("expected the renewal path, then bootstrap when no gateway answers, for a leaf naming another pod instance")
 	}
 }

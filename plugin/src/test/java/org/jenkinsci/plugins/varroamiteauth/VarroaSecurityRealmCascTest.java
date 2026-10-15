@@ -49,7 +49,7 @@ public class VarroaSecurityRealmCascTest {
         // JWTValidator normalises trailing slashes; getter reflects that.
         assertEquals("https://issuer.example", realm.getOidcIssuer());
         assertEquals("login,sub", realm.getUserClaimNames());
-        assertEquals("team", realm.getGroupClaimName());
+        assertEquals("team", realm.getGroupClaimNames());
         assertEquals(Arrays.asList("login", "sub"), realm.userClaimNamesList());
     }
 
@@ -64,7 +64,7 @@ public class VarroaSecurityRealmCascTest {
 
         assertEquals("https://explicit.example", realm.getOidcIssuer());
         assertEquals("explicit_claim", realm.getUserClaimNames());
-        assertEquals("explicit_group", realm.getGroupClaimName());
+        assertEquals("explicit_group", realm.getGroupClaimNames());
     }
 
     /**
@@ -88,10 +88,10 @@ public class VarroaSecurityRealmCascTest {
 
         String envGroup = System.getenv("VARROA_OIDC_GROUP_CLAIM");
         if (envGroup != null && !envGroup.isEmpty()) {
-            assertEquals("omitted groupClaimName must fall back to VARROA_OIDC_GROUP_CLAIM",
-                    envGroup, realm.getGroupClaimName());
+            assertEquals("omitted groupClaimNames must fall back to VARROA_OIDC_GROUP_CLAIM",
+                    envGroup, realm.getGroupClaimNames());
         } else {
-            assertEquals("default groupClaimName", "groups", realm.getGroupClaimName());
+            assertEquals("default groupClaimNames", "groups", realm.getGroupClaimNames());
         }
 
         // Issuer: env value when set, otherwise null (no hard default).
@@ -121,8 +121,9 @@ public class VarroaSecurityRealmCascTest {
                 realm instanceof VarroaSecurityRealm);
         VarroaSecurityRealm vsr = (VarroaSecurityRealm) realm;
         assertEquals("https://dex.example/dex", vsr.getOidcIssuer());
+        assertEquals("https://varroa.example", vsr.getLocalIssuer());
         assertEquals("login,sub", vsr.getUserClaimNames());
-        assertEquals("memberOf", vsr.getGroupClaimName());
+        assertEquals("memberOf,roles", vsr.getGroupClaimNames());
     }
 
     /**
@@ -144,7 +145,7 @@ public class VarroaSecurityRealmCascTest {
 
         String envGroup = System.getenv("VARROA_OIDC_GROUP_CLAIM");
         String expectedGroup = (envGroup != null && !envGroup.isEmpty()) ? envGroup : "groups";
-        assertEquals(expectedGroup, vsr.getGroupClaimName());
+        assertEquals(expectedGroup, vsr.getGroupClaimNames());
     }
 
     // ---- JCasC export → import equality ----
@@ -174,13 +175,16 @@ public class VarroaSecurityRealmCascTest {
         assertThat(exportedYaml, containsString("https://dex.example/dex"));
         assertThat(exportedYaml, containsString("login,sub"));
         assertThat(exportedYaml, containsString("memberOf"));
+        assertThat(exportedYaml, containsString("https://varroa.example"));
 
         // Re-import the exported document and assert value equality with the
         // original import (true round-trip, not just a string match).
         VarroaSecurityRealm reimported = new VarroaSecurityRealm(
-                imported.getOidcIssuer(), imported.getUserClaimNames(), imported.getGroupClaimName());
+                imported.getOidcIssuer(), imported.getUserClaimNames(), imported.getGroupClaimNames());
+        reimported.setLocalIssuer(imported.getLocalIssuer());
         assertThat(reimported.getOidcIssuer(), is(equalTo(imported.getOidcIssuer())));
         assertThat(reimported.getUserClaimNames(), is(equalTo(imported.getUserClaimNames())));
-        assertThat(reimported.getGroupClaimName(), is(equalTo(imported.getGroupClaimName())));
+        assertThat(reimported.getGroupClaimNames(), is(equalTo(imported.getGroupClaimNames())));
+        assertThat(reimported.getLocalIssuer(), is(equalTo(imported.getLocalIssuer())));
     }
 }

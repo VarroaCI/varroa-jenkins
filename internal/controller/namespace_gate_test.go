@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,7 +73,7 @@ func TestHandlePendingNamespaceGate(t *testing.T) {
 		set := tenancy.NewManagedSet("ns-a", "") // now ns-a IS managed
 		c := tenancy.NewClassifier(fc, set)
 		tc := newTestClient()
-		r := &Reconciler{tenancy: c, client: tc, store: tc.store}
+		r := &Reconciler{metrics: newControllerMetrics(noop.NewMeterProvider()), tenancy: c, client: tc, store: tc.store}
 
 		cr := &v1alpha1.Controller{}
 		cr.Namespace = "ns-a"
@@ -109,7 +110,7 @@ func TestHandlePendingNamespaceGate(t *testing.T) {
 		set := tenancy.NewManagedSet("ns-a", "")
 		c := tenancy.NewClassifier(fc, set)
 		tc := newTestClient()
-		r := &Reconciler{tenancy: c, client: tc, store: tc.store}
+		r := &Reconciler{metrics: newControllerMetrics(noop.NewMeterProvider()), tenancy: c, client: tc, store: tc.store}
 
 		cr := &v1alpha1.Controller{}
 		cr.Namespace = "ns-a"

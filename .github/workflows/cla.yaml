@@ -31,7 +31,7 @@ jobs:
           # never touch them.
           branch: cla-signatures
           path-to-signatures: signatures/version1/cla.json
-          allowlist: dependabot[bot],release-please[bot],github-actions[bot]
+          allowlist: dependabot[bot],release-please[bot],github-actions[bot],bambash
           custom-notsigned-prcomment: >
             Thanks for the contribution! Before we can merge, we need you to
             sign the [Varroa Contributor License

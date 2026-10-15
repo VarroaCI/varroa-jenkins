@@ -1,0 +1,11 @@
+/* The commit id, shown in the monospace face whether it links or not. */
+.mono {
+  font-family: var(--mono);
+}
+
+/* A commit id with its copy button, on one line. */
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

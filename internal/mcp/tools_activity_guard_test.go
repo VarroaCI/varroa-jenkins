@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -12,9 +13,103 @@ import (
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
+	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
+
+// guardRecordReader is a non-nil recordstore.Reader for the one method a
+// guarded tool calls before its activity emit. run_pipeline resolves the
+// job's home member, so JobHome is implemented here; the two run input
+// tools read the run they answer, so GetRun answers one. Every other
+// method comes from the embedded nil interface and must stay uncalled.
+type guardRecordReader struct{ recordstore.Reader }
+
+// JobHome answers slot 0, which is the tenant reference the guard's own
+// resolver already hands the tool. The guard asserts the activity emit,
+// not the placement, so the answer only needs to leave the reference
+// unchanged.
+func (guardRecordReader) JobHome(_ context.Context, _, _, _ string) (recordstore.JobHome, error) {
+	return recordstore.JobHome{}, nil
+}
+
+// guardReplayRunID names the one run the guard answers as a completed,
+// replicated run, which replay_run needs. Every other identifier answers
+// a RUNNING run.
+const guardReplayRunID = "replay-source"
+
+// GetRun answers one RUNNING run for any identifier. The tenant matches
+// the guard resolver's fixed reference, and the build number is the one
+// an input answers. guardReplayRunID answers a completed run whose record
+// names one build.xml, which guardBlobStore serves.
+func (guardRecordReader) GetRun(_ context.Context, runID string) (recordstore.Run, []recordstore.Stage, error) {
+	buildNumber := int64(7)
+	if runID == guardReplayRunID {
+		return recordstore.Run{
+			RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
+			Tenant: "team-a/obj", JobPath: "build", Status: "COMPLETED", BuildNumber: &buildNumber,
+			Payload: json.RawMessage(`{"mesh":{"files":[{"relpath":"build/builds/7/build.xml","bytes":200,"seq":1,"state_gen":1,"epoch":1}]},"run.completed":{"payload":{"restart_stages":["deploy"]}}}`),
+		}, nil, nil
+	}
+	return recordstore.Run{
+		RunID: runID, Cluster: "core", Namespace: "team-a", Cell: "obj",
+		Tenant: "team-a/obj", JobPath: "build", Status: "RUNNING", BuildNumber: &buildNumber,
+	}, nil, nil
+}
+
+// ListAllFleetLocks answers the one lock release_fleet_lock names, so its
+// pre-read finds the lock's cluster.
+func (guardRecordReader) ListAllFleetLocks(_ context.Context) ([]recordstore.FleetLock, error) {
+	return []recordstore.FleetLock{{Name: "team-a/obj/deploy", RunID: "obj", Cluster: "core",
+		Tenant: "team-a/obj", JobPath: "build", State: recordstore.FleetLockStateReleasing}}, nil
+}
+
+// guardFleetLockReleaser answers every force release as released, so
+// release_fleet_lock reaches its emit.
+type guardFleetLockReleaser struct{}
+
+func (guardFleetLockReleaser) ForceRelease(_ context.Context,
+	req recordstore.FleetLockForceReleaseRequest) (recordstore.FleetLockForceReleaseResponse, error) {
+	return recordstore.FleetLockForceReleaseResponse{
+		Outcome: recordstore.FleetLockForceReleased, Cluster: "core", Tenant: "team-a/obj", JobPath: "build",
+	}, nil
+}
+
+// guardBlobStore answers one sandboxed build.xml for every range read,
+// the read a run-state object takes, so replay_run's eligibility rules
+// pass.
+type guardBlobStore struct{ blob.Store }
+
+func (guardBlobStore) NewRangeReader(_ context.Context, _ string, _, _ int64) (io.ReadCloser, error) {
+	doc := "<flow-build><execution><script>echo 'source'</script><sandbox>true</sandbox></execution></flow-build>"
+	return io.NopCloser(strings.NewReader(doc)), nil
+}
+
+// guardTenantResolver is a fixed-answer api.TenantResolver for
+// run_pipeline: every team resolves to the one write-admitted tenant
+// guardAuthorizer's wildcard grant covers, and folder "" admits any job
+// path.
+type guardTenantResolver struct{ ref api.TenantRef }
+
+func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, _ string) ([]api.TenantRef, error) {
+	return []api.TenantRef{g.ref}, nil
+}
+
+func (g *guardTenantResolver) ResolveRun(_ context.Context, _ *auth.Claims, _ recordstore.Run) (api.TenantRef, error) {
+	return g.ref, nil
+}
+
+// guardTransport is a transport.Transport that accepts every
+// SendImperative call, so run_pipeline's publish step succeeds.
+type guardTransport struct{ transport.Transport }
+
+func (g *guardTransport) SendImperative(_ context.Context, _, _ string, _ *mitev1.ImperativeCommand) error {
+	return nil
+}
 
 // sourceOverride pins the expected activity Source for mutating tools whose
 // underlying shared business logic stamps Source itself rather than
@@ -66,7 +161,7 @@ func (g *guardReconciler) TriggerReconcile(_, _, _ string) {}
 func (g *guardReconciler) WakeController(_, _, _ string)   {}
 func (g *guardReconciler) Reprovision(_, _, _ string)      {}
 
-func (g *guardReconciler) ApproveRestart(_ context.Context, _, _, _, _ string) error { return nil }
+func (g *guardReconciler) ApproveRestart(_ context.Context, _, _, _, _, _ string) error { return nil }
 func (g *guardReconciler) ApproveDeletion(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
@@ -94,6 +189,18 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 			stub, stub, "varroa-system", slog.New(slog.DiscardHandler)),
 		ActivityPublisher: sink,
 		OperatorNamespace: "varroa-system",
+		// run_pipeline's dependencies: a non-nil RecordStore (checked but
+		// never called), a fixed tenant, and a transport that accepts the
+		// publish.
+		RecordStore: &guardRecordReader{},
+		TenantResolver: &guardTenantResolver{ref: api.TenantRef{
+			Tenant: "team-a/obj", Team: "obj", Namespace: "team-a", Controller: "obj",
+		}},
+		MiteRegistry: &guardTransport{},
+		// replay_run reads the source run's script replica.
+		BlobStore: guardBlobStore{},
+		// release_fleet_lock asks the recorder through this seam.
+		FleetLockReleaser: guardFleetLockReleaser{},
 	}
 }
 
@@ -119,6 +226,10 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 		&v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+		&v1alpha1.CellPool{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555", MaxTenantsPerCell: 10},
+		},
 	)
 
 	// promote_version_candidate additionally needs a Ready ProfileCandidate,
@@ -208,6 +319,16 @@ func guardArgsFor(name string) map[string]interface{} {
 		"delete_group": {"name": obj},
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},
+		// Pipelines (record store + tenant resolver + mite transport)
+		"run_pipeline":       {"team": "team-a", "job": "build"},
+		"proceed_run_input":  {"run": obj, "input": "in-1"},
+		"abort_run_input":    {"run": obj, "input": "in-1"},
+		"replay_run":         {"run": guardReplayRunID, "script": "echo 'edited'"},
+		"scan_multibranch":   {"team": "team-a", "job": "build"},
+		"restart_run":        {"run": guardReplayRunID, "stage": "deploy"},
+		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
+		// CellPools (cluster-scoped, direct store)
+		"update_cell_pool": {"name": obj, "warm": 2},
 	}
 	args, ok := byName[name]
 	if !ok {

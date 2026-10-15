@@ -11,6 +11,21 @@ Error:
       description: Human-readable error message.
   additionalProperties: false
 
+ApproveConflict:
+  type: object
+  description: Refusal of an approval. changes is present when the pending change is not the one the caller approved.
+  required: [error]
+  properties:
+    error:
+      type: string
+      description: Human-readable error message.
+    changes:
+      type: array
+      description: The sections of the current pending change.
+      items:
+        type: string
+  additionalProperties: false
+
 VersionInfo:
   type: object
   required: [component, version]
@@ -106,9 +121,14 @@ Me:
     authMode:
       type: string
       enum: [local, ldap, oidc]
+      description: Source of this session. A local account beside OIDC reports local.
     lastLogin:
       type: string
       description: ISO 8601 last login time, absent if never logged in.
+    signedInAt:
+      type: string
+      format: date-time
+      description: Issue time of the session token. Absent for an API key caller.
   additionalProperties: false
 
 Preferences:
@@ -170,11 +190,15 @@ UserListEntry:
     managedBy:
       type: string
       description: Source of user management, e.g. "local" or "idp".
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Purpose of a local account beside OIDC. Absent when not set.
   additionalProperties: false
 
 CreateUserRequest:
   type: object
-  description: Request body for creating a user (admin, local auth only).
+  description: Request body for creating a local account (admin only).
   required: [username, password]
   properties:
     username:
@@ -189,16 +213,24 @@ CreateUserRequest:
       type: array
       items:
         type: string
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Required when local accounts run beside OIDC.
   additionalProperties: false
 
 UpdateUserRequest:
   type: object
-  description: Request body for updating a user's identity fields.
+  description: Request body for updating a local account's identity fields.
   properties:
     email:
       type: string
     displayName:
       type: string
+    purpose:
+      type: string
+      enum: [service, break-glass]
+      description: Required when local accounts run beside OIDC.
   additionalProperties: false
 
 GroupEntry:
@@ -268,6 +300,364 @@ TeamRequest:
     provisionNamespaces:
       type: boolean
       description: Whether to auto-provision namespaces.
+    pipelines:
+      $ref: '#/TeamPipelines'
+  additionalProperties: false
+
+TeamPipelines:
+  type: object
+  description: >-
+    A Team's pipelines tenancy declaration (spec.pipelines). A Team that
+    sets this becomes a pipelines tenant: one top-level folder on exactly
+    one cell.
+  required: [profile, agentNamespace]
+  properties:
+    profile:
+      type: string
+      minLength: 1
+      description: >-
+        JenkinsVersionProfile the placement pass resolves a cell against.
+        Required when pipelines is set.
+    cellPool:
+      type: string
+      description: >-
+        The CellPool the placement pass selects a cell from. Empty means the
+        profile's default pool: the pool whose name equals profile. A tenant
+        that needs a cell of its own names a pool whose maxTenantsPerCell
+        is 1.
+    agentNamespace:
+      type: string
+      minLength: 1
+      description: >-
+        Kubernetes namespace this tenant's agents run in. Must be one of
+        the team's own namespaces. Required when pipelines is set.
+    composedBundleRef:
+      $ref: '#/ComposedBundleRef'
+      description: >-
+        The ComposedBundle this tenant's items come from. Both name and
+        namespace are set: a Team is cluster-scoped and has no namespace
+        to default to.
+    rehydrateBuilds:
+      type: integer
+      format: int32
+      minimum: 0
+      maximum: 100
+      description: >-
+        How many of a job's newest completed builds the operator seeds
+        when this tenant's cell changes. The newest successful build is
+        always seeded in addition. Default 10.
+    rehydrateDeadline:
+      type: string
+      description: >-
+        How long the operator keeps retrying a deferred rehydration seed
+        before it stops and reports RehydrationFailed. Default 30m, range
+        1m to 24h.
+    interruptedRetry:
+      type: string
+      enum: [manual, automatic]
+      description: >-
+        Whether an interrupted run retries on its own. "manual" (default)
+        leaves the retry to a user. "automatic" retries once.
+    concurrency:
+      type: string
+      enum: [allow, cancelInProgress]
+      description: >-
+        This tenant's job concurrency policy. "allow" (default) runs
+        builds side by side. "cancelInProgress" cancels the running build
+        of the same job path when a new one starts.
+    cronBackstop:
+      type: boolean
+      description: >-
+        Turns the backstop cron scheduler on for this tenant. Default
+        true.
+    cronCatchUp:
+      type: string
+      enum: [one, none]
+      description: >-
+        How many missed cron occurrences the backstop fires on wake.
+        "one" (default) fires the newest missed occurrence. "none" fires
+        nothing.
+    cronGrace:
+      type: string
+      description: >-
+        How long the backstop waits past a missed cron occurrence before
+        it fires. Default 5m, range 1m to 60m.
+    members:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 16
+      description: >-
+        The number of active slots this tenant runs. Each slot holds one
+        cell, and a job runs only on its home slot's holder. Default 1.
+        This field is not spec.members, which lists local usernames.
+    standby:
+      type: integer
+      format: int32
+      minimum: 0
+      maximum: 8
+      description: >-
+        The number of warm members this tenant keeps. A standby holds the
+        folder and no slot. It takes a slot whose holder dies. Default 0.
+    exports:
+      type: array
+      items:
+        $ref: '#/TeamExport'
+      description: >-
+        Grants of this tenant's jobs and locks to other tenants. An absent
+        list exports nothing.
+    notifications:
+      $ref: '#/TeamNotifications'
+    retention:
+      $ref: '#/TeamPipelinesRetention'
+    concurrencyLimits:
+      type: array
+      maxItems: 32
+      items:
+        $ref: '#/TeamConcurrencyLimit'
+      description: >-
+        Named caps on how many builds of a set of this tenant's jobs run at
+        one time. A build over a limit waits in the queue. A tenant pipelines
+        admin may write this field.
+  additionalProperties: false
+
+TeamNotifications:
+  type: object
+  description: >-
+    Outward notifications of a pipelines tenant. The record store posts
+    the completion webhook for each run.
+  properties:
+    webhook:
+      $ref: '#/TeamWebhook'
+  additionalProperties: false
+
+TeamWebhook:
+  type: object
+  description: >-
+    A completion webhook. The record store posts a signed JSON payload to
+    url for each run this tenant completes. The signing key lives in the
+    Secret that secretRef names, in the tenant's agent namespace.
+  required: [url, secretRef]
+  properties:
+    url:
+      type: string
+      maxLength: 2048
+      description: >-
+        Receiver endpoint. Starts with https:// or http://. Use https://
+        for a receiver outside the cluster.
+    secretRef:
+      $ref: '#/TeamWebhookSecret'
+  additionalProperties: false
+
+TeamWebhookSecret:
+  type: object
+  description: >-
+    The Secret and data key that hold the HMAC signing key. The key
+    defaults to hmac-key.
+  required: [name]
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: Name of the Secret in the tenant's agent namespace.
+    key:
+      type: string
+      description: Data key that holds the signing key. Default hmac-key.
+  additionalProperties: false
+
+TeamPipelinesRetention:
+  type: object
+  description: >-
+    Record-store windows for this tenant's runs. A job rule replaces the
+    tenant window for the jobs it matches. The store-wide window caps both.
+    Only an operator may set it.
+  properties:
+    runs:
+      type: string
+      pattern: '^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$'
+      description: >-
+        The tenant window, in whole days, such as 30d. It shortens the
+        store-wide window and never lengthens it.
+    jobs:
+      type: array
+      maxItems: 64
+      items:
+        $ref: '#/TeamJobRetention'
+      description: >-
+        Per-job windows. The first rule whose job glob matches sets the
+        window of that job.
+  additionalProperties: false
+
+TeamJobRetention:
+  type: object
+  description: A run window for the jobs that match a folder-relative glob.
+  required: [job, runs]
+  properties:
+    job:
+      type: string
+      minLength: 1
+      maxLength: 512
+      pattern: '^[^/]'
+      description: Folder-relative job glob. It must not start with /.
+    runs:
+      type: string
+      pattern: '^([1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]|3650)d$'
+      description: The job window, in whole days, such as 7d.
+  additionalProperties: false
+
+TeamConcurrencyLimit:
+  type: object
+  description: A cap on the builds of a named set of jobs that run at once.
+  required: [name, jobs, max]
+  properties:
+    name:
+      type: string
+      maxLength: 63
+      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+      description: Name of the limit, a DNS label. The queue and the run views show it.
+    jobs:
+      type: array
+      minItems: 1
+      maxItems: 64
+      items:
+        type: string
+        minLength: 1
+        maxLength: 512
+        pattern: '^[^/]'
+      description: Folder-relative job globs (*, **, ?).
+    max:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 1000
+      description: Number of builds the set runs at one time.
+  additionalProperties: false
+
+TeamExport:
+  type: object
+  description: >-
+    One grant a pipelines tenant makes to other tenants: a job pattern or
+    a list of lock patterns, plus the callers allowed to use it. Exactly
+    one of job or locks is set.
+  required: [callers]
+  properties:
+    job:
+      type: string
+      description: >-
+        Folder-relative job glob this tenant exports. Exactly one of job
+        or locks is set.
+    locks:
+      type: array
+      items:
+        type: string
+      description: >-
+        Globs over the bare names of this tenant's own locks. Exactly one
+        of job or locks is set.
+    callers:
+      type: array
+      items:
+        type: string
+      minItems: 1
+      description: Team names allowed to use this export.
+  additionalProperties: false
+
+TeamRehydration:
+  type: object
+  description: >-
+    A pipelines tenant's build-record rehydration state
+    (status.rehydration). Response-only: TeamReconciler is its only
+    writer.
+  properties:
+    generation:
+      type: integer
+      format: int64
+      description: Placement generation this state was built for.
+    cellInstance:
+      type: string
+      description: Cell pod UID this state was built for.
+    records:
+      type: integer
+      format: int32
+      description: Number of thin build records the last bundle carried.
+    truncated:
+      type: boolean
+      description: >-
+        True when the last bundle dropped changelogs or older records to
+        fit the byte budget.
+    unseededJobs:
+      type: integer
+      format: int32
+      description: Number of jobs no bundle has covered yet.
+    deferred:
+      type: array
+      items:
+        type: string
+      description: >-
+        Job paths the mite could not seed on the last apply, because the
+        job did not exist yet.
+    attempts:
+      type: integer
+      format: int32
+      description: Rehydration retries since the last applied bundle.
+    lastAttempt:
+      type: string
+      format: date-time
+      description: When the operator last sent a rehydration bundle for this tenant.
+  additionalProperties: false
+
+TeamPlacement:
+  type: object
+  description: >-
+    The cell a pipelines tenant is bound to (status.placement).
+    Response-only: the placement pass is its only writer.
+  properties:
+    cluster:
+      type: string
+      description: Cluster the bound cell runs in.
+    cell:
+      type: string
+      description: Name of the bound cell Controller.
+    cellNamespace:
+      type: string
+      description: Namespace of the bound cell Controller.
+    generation:
+      type: integer
+      format: int64
+      description: Increases only when the bound cell changes.
+    members:
+      type: array
+      items:
+        $ref: '#/TeamMember'
+      description: >-
+        Every member of this tenant. The scalar fields above keep
+        describing slot 0.
+  additionalProperties: false
+
+TeamMember:
+  type: object
+  description: >-
+    One member of a pipelines tenant (status.placement.members).
+    Response-only: the placement pass is its only writer.
+  properties:
+    cell:
+      type: string
+      description: Name of the cell Controller that holds this member.
+    cellNamespace:
+      type: string
+      description: Namespace of that cell Controller.
+    role:
+      type: string
+      enum: [active, standby]
+      description: >-
+        An active member holds one slot. A standby holds the folder, holds
+        no slot, and runs no build.
+    slot:
+      type: integer
+      format: int32
+      description: The slot index. Set only on an active member.
+    applied:
+      type: boolean
+      description: True when the member's cell reports this tenant applied.
   additionalProperties: false
 
 TeamEntry:
@@ -295,6 +685,8 @@ TeamEntry:
       type: string
     provisionNamespaces:
       type: boolean
+    pipelines:
+      $ref: '#/TeamPipelines'
     observedGeneration:
       type: integer
       format: int64
@@ -312,6 +704,10 @@ TeamEntry:
       type: array
       items:
         $ref: '#/TeamCondition'
+    placement:
+      $ref: '#/TeamPlacement'
+    rehydration:
+      $ref: '#/TeamRehydration'
   additionalProperties: false
 
 SubjectRef:
@@ -357,10 +753,134 @@ TeamCondition:
       type: string
   additionalProperties: false
 
+RunnerSpec:
+  type: object
+  description: >-
+    A Runner's mutable configuration (spec.*). team and launcher are
+    immutable after creation.
+  required: [team, launcher, remoteFS]
+  properties:
+    team:
+      type: string
+      description: The pipelines Team that owns this runner. Immutable.
+    launcher:
+      type: string
+      enum: [ssh, inbound]
+      description: Connection direction. Immutable.
+    labels:
+      type: array
+      items:
+        type: string
+      description: >-
+        Unprefixed label suffixes; the operator prefixes each one with
+        <team>-.
+    remoteFS:
+      type: string
+      description: The agent work directory on the node.
+    numExecutors:
+      type: integer
+      description: The node's executor count. Defaults to 1.
+    host:
+      type: string
+      description: The SSH target. Required for launcher ssh; forbidden for inbound.
+    port:
+      type: integer
+      description: The SSH port. Required for launcher ssh; forbidden for inbound.
+    credentialRef:
+      type: string
+      description: >-
+        Name of a Secret in the Team's agent namespace holding the SSH
+        credential. Required for launcher ssh; forbidden for inbound.
+    javaPath:
+      type: string
+      description: An explicit java binary path for the ssh launcher.
+  additionalProperties: false
+
+RunnerCondition:
+  type: object
+  description: Status condition for a Runner. Type Ready.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+      description: ISO 8601 last transition time.
+    reason:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+RunnerStatus:
+  type: object
+  description: >-
+    A Runner's observed state (status.*). status.token is present only for
+    a caller holding runners:create; the BFF redacts it for every other
+    caller (design D12).
+  required: [connected]
+  properties:
+    nodeName:
+      type: string
+      description: The rendered Jenkins node name, <team>-<runner name>.
+    cell:
+      type: string
+      description: The Controller that hosts this runner's node.
+    cellNamespace:
+      type: string
+    token:
+      type: string
+      description: >-
+        The door bearer credential for an inbound runner. Minted once by
+        the operator; never set for an ssh runner.
+    connected:
+      type: boolean
+      description: The last liveness probe result for this runner's node.
+    lastSeen:
+      type: string
+      description: ISO 8601 time of the last online probe result.
+    observedGeneration:
+      type: integer
+      format: int64
+    conditions:
+      type: array
+      items:
+        $ref: '#/RunnerCondition'
+  additionalProperties: false
+
+RunnerEntry:
+  type: object
+  description: Full runner object returned from get/list operations.
+  required: [name, spec, status]
+  properties:
+    name:
+      type: string
+    spec:
+      $ref: '#/RunnerSpec'
+    status:
+      $ref: '#/RunnerStatus'
+  additionalProperties: false
+
+RunnerCreateRequest:
+  type: object
+  description: Request body for POST /runners.
+  required: [name, spec]
+  properties:
+    name:
+      type: string
+      description: >-
+        metadata.name. Not generated: the operator names the machine, and
+        the rendered node is <team>-<name>.
+    spec:
+      $ref: '#/RunnerSpec'
+  additionalProperties: false
+
 IdentitySettings:
   type: object
   description: Identity and OIDC configuration (admin view, client secret never included).
-  required: [mode, cookieDomain, defaultRead]
+  required: [mode, cookieDomain, defaultRead, localAccounts]
   properties:
     mode:
       type: string
@@ -369,6 +889,9 @@ IdentitySettings:
       type: string
     defaultRead:
       type: boolean
+    localAccounts:
+      type: boolean
+      description: True when declared local accounts sign in beside OIDC.
     issuer:
       type: string
       description: OIDC issuer URL (present in OIDC mode only).
@@ -473,6 +996,9 @@ ControllerSpec:
       type: string
       enum: ["", Running, Stopped]
       description: Controls whether the controller runs. Hibernation is reported in status.hibernated, not requested here.
+    headless:
+      type: boolean
+      description: Blocks the Jenkins web UI for every non-admin caller. A cell is always headless.
     resources:
       type: object
       description: CPU/memory resource requests and limits (transcribed from corev1.ResourceRequirements).
@@ -509,6 +1035,8 @@ ControllerSpec:
       description: References a ControllerClass by name, layering its defaults between ProvisioningDefaults and the Controller's own spec.
     hibernation:
       $ref: '#/HibernationSpec'
+    cell:
+      $ref: '#/CellSpec'
     probes:
       $ref: '#/ProbesSpec'
   additionalProperties: false
@@ -713,11 +1241,16 @@ MiteSpec:
           description: Minimum resource requests.
           additionalProperties:
             type: string
+            # Kubernetes quantity pattern, mirrored from the Controller CRD.
+            # See the pattern note on ControllerSpec.resources.
+            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
         limits:
           type: object
           description: Maximum resource limits.
           additionalProperties:
             type: string
+            # See the pattern note on requests.
+            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
     image:
       type: string
       description: Mite sidecar container image override for this Controller.
@@ -790,6 +1323,20 @@ ProbeSpec:
       description: Minimum consecutive successes for the probe to be considered successful.
   additionalProperties: false
 
+CellSpec:
+  type: object
+  description: >-
+    Marks a controller as a shared cell that hosts tenant pipelines. enabled is
+    immutable after creation; maxTenants bounds placement.
+  properties:
+    enabled:
+      type: boolean
+    maxTenants:
+      type: integer
+      format: int32
+  required: [enabled]
+  additionalProperties: false
+
 HibernationSpec:
   type: object
   description: Automatic hibernation configuration (transcribed from v1alpha1.HibernationSpec).
@@ -808,7 +1355,7 @@ HibernationSpec:
 ControllerSummary:
   type: object
   description: Summary entry for each controller in the list.
-  required: [name, namespace, cluster, phase, endpoint, miteConnected, routingMode]
+  required: [name, namespace, cluster, phase, endpoint, headless, miteConnected, routingMode, kind, createdAt]
   properties:
     name:
       type: string
@@ -820,6 +1367,44 @@ ControllerSummary:
       type: string
     endpoint:
       type: string
+      description: External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+    kind:
+      type: string
+      enum: [cell, stateful]
+      description: >-
+        Mirrors v1alpha1.IsCell. Always present, so a client never reads the
+        kind from an absent field.
+    cellPool:
+      type: string
+      description: The controller's varroa.dev/cell-pool label. Absent while no label is set.
+    tenantCount:
+      type: integer
+      format: int32
+      description: >-
+        The length of status.cell.tenants, never of status.cell.appliedTenants.
+        Absent for a controller that is not a cell.
+    maxTenants:
+      type: integer
+      format: int32
+      description: >-
+        The same effective cap the cell usage read resolves. Absent for a
+        controller that is not a cell.
+    warm:
+      type: boolean
+      description: status.cell.warm. Absent for a controller that is not a cell.
+    createdAt:
+      type: string
+      format: date-time
+      description: metadata.creationTimestamp, RFC 3339. Present for every controller.
+    unreadySince:
+      type: string
+      format: date-time
+      description: status.cell.unreadySince, RFC 3339. Absent while the cell is ready.
+    headless:
+      type: boolean
+      description: >-
+        Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty
+        string, whatever the controller's Status.Endpoint carries.
     version:
       type: string
       description: Desired Jenkins version (from spec.version).
@@ -855,12 +1440,12 @@ ControllerAttention:
   description: >-
     Why the controller needs an operator's attention, if it does. Exactly one kind is
     reported, chosen by precedence failed > reconcileBlocked > bootFailed >
-    pluginRollFailed > applyFailed.
+    pluginRollFailed > applyFailed > miteUnreachable.
   required: [kind]
   properties:
     kind:
       type: string
-      enum: [failed, reconcileBlocked, bootFailed, pluginRollFailed, applyFailed]
+      enum: [failed, reconcileBlocked, bootFailed, pluginRollFailed, applyFailed, miteUnreachable]
     reason:
       type: string
     message:
@@ -893,6 +1478,9 @@ PendingRestart:
       type: string
     desiredStateHash:
       type: string
+    contentHash:
+      type: string
+      description: Hash of the JCasC, RBAC, and items of the pending change. Send it as expectedContentHash to approve this change only.
     changes:
       type: array
       items:
@@ -1139,10 +1727,16 @@ ControllerObservability:
 ControllerDetail:
   type: object
   description: Full controller detail including status and sub-resources.
-  required: [name, namespace, cluster, phase, endpoint, version, miteConnected, routingMode, reconcileBlocked, spec]
+  required: [name, namespace, cluster, phase, endpoint, headless, version, miteConnected, routingMode, reconcileBlocked, spec, kind]
   properties:
     spec:
       $ref: '#/ControllerSpec'
+    kind:
+      type: string
+      enum: [cell, stateful]
+      description: Mirrors v1alpha1.IsCell. Present for every controller.
+    cell:
+      $ref: '#/CellStatusProjection'
     name:
       type: string
     namespace:
@@ -1153,6 +1747,12 @@ ControllerDetail:
       type: string
     endpoint:
       type: string
+      description: External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+    headless:
+      type: boolean
+      description: >-
+        Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty
+        string, whatever the controller's Status.Endpoint carries.
     version:
       type: string
     powerState:
@@ -1359,7 +1959,18 @@ LogEntry:
 
 ControllerDiff:
   type: object
-  description: Diff between incoming bundle content and last-applied content.
+  description: >-
+    Diff between incoming bundle content and last-applied content. The
+    jcasc and items text of both sides is redacted: each secret value
+    shows as the marker "<redacted>". A key that contains password,
+    secret, passphrase, privatekey, or token, and does not end in id,
+    marks every value below it as a secret. Inside a domainCredentials or folderCredentials
+    store, every value is a secret except id, scope, description,
+    username, name, includes, excludes, and schemes. A jcasc value that is one whole ${...} reference to a named
+    entry, a file, or a system property stays visible. Text that does
+    not parse shows as "<redacted: unparseable content>". Every YAML
+    comment is removed. No caller
+    gets an unredacted value, and a rotated secret shows no difference.
   properties:
     incoming:
       type: object
@@ -1429,6 +2040,12 @@ VarroaRoleBindingScope:
     controllerSelector:
       type: object
       description: Label selector (metav1.LabelSelector).
+    tenants:
+      type: array
+      maxItems: 64
+      items:
+        $ref: '#/TenantScope'
+      description: An allow-list of pipelines tenants. A scope names one dimension; tenants never combines with namespaces or controllerSelector.
   additionalProperties: false
 
 VarroaRoleBindingSpec:
@@ -1494,6 +2111,94 @@ JenkinsRoleBindingSpec:
       $ref: '#/VarroaRoleBindingScope'
     jenkinsScope:
       $ref: '#/JenkinsScope'
+  additionalProperties: false
+
+APICapabilitySet:
+  type: object
+  description: Resource-to-verb-to-allowed capability map.
+  additionalProperties:
+    type: object
+    additionalProperties:
+      type: boolean
+
+TenantScope:
+  type: object
+  description: One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.
+  required: [name]
+  properties:
+    name:
+      type: string
+      maxLength: 253
+      description: A tenant is a Team name.
+    jobs:
+      type: array
+      maxItems: 64
+      items:
+        type: string
+        maxLength: 512
+      description: Jobs are folder-relative globs. An absent jobs list covers every job.
+  additionalProperties: false
+
+ScopedCapabilities:
+  type: object
+  description: The capability set granted by bindings that carry one scope, plus the scope descriptor. Scoped grants are never flattened into the global partition.
+  required: [namespaces, hasControllerSelector, capabilities]
+  properties:
+    namespaces:
+      type: array
+      nullable: true
+      items:
+        type: string
+      description: The scope's namespace allowlist. Null or empty means the scope is not namespace-bounded.
+    hasControllerSelector:
+      type: boolean
+      description: True when the scope carries a controller label selector, which the client cannot evaluate.
+    tenants:
+      type: array
+      nullable: true
+      items:
+        $ref: '#/TenantScope'
+      description: The scope's canonicalized pipelines-tenant allowlist. Null or empty means the scope names no tenant.
+    capabilities:
+      $ref: '#/APICapabilitySet'
+  additionalProperties: false
+
+TenantCapabilities:
+  type: object
+  description: One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.
+  required: [tenant, jobs, capabilities]
+  properties:
+    tenant:
+      type: string
+    jobs:
+      type: array
+      items:
+        type: string
+      description: Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.
+    capabilities:
+      $ref: '#/APICapabilitySet'
+  additionalProperties: false
+
+PermissionScopes:
+  type: object
+  description: Scope-aware introspection result for /me/permissions.
+  required: [global, scopes, tenants]
+  properties:
+    global:
+      allOf:
+        - $ref: '#/APICapabilitySet'
+      description: Capabilities from cluster-wide (nil-scope) bindings only.
+    scopes:
+      type: array
+      nullable: true
+      items:
+        $ref: '#/ScopedCapabilities'
+      description: One entry per distinct scoped binding scope.
+    tenants:
+      type: array
+      items:
+        $ref: '#/TenantCapabilities'
+      description: One entry per pipelines-tenant grant the caller holds. Always an array, never null.
   additionalProperties: false
 
 # --- 3.4 Catalog schemas ---
@@ -1667,7 +2372,7 @@ ComposedBundleSpec:
 ComposedBundlePreview:
   type: object
   description: Response from a composed bundle preview.
-  required: [bundleYaml, jenkinsYaml, pluginsYaml, itemsYaml, rbacYaml, missing, drifted, warnings, unresolvedVariables, pinPreflight]
+  required: [bundleYaml, jenkinsYaml, pluginsYaml, itemsYaml, rbacYaml, pipelineTemplatesYaml, missing, drifted, warnings, unresolvedVariables, pinPreflight, pipelineTemplates]
   properties:
     bundleYaml:
       type: string
@@ -1679,6 +2384,11 @@ ComposedBundlePreview:
       type: string
     rbacYaml:
       type: string
+    pipelineTemplatesYaml:
+      type: string
+      description: >
+        The composed pipeline-template content, never resolved by ${var}
+        substitution. Empty for a bundle with no pipeline-template input.
     missing:
       type: array
       items:
@@ -1697,15 +2407,40 @@ ComposedBundlePreview:
         type: string
     pinPreflight:
       $ref: '#/PinPreflightReport'
+    pipelineTemplates:
+      type: array
+      description: One entry per template the composition delivered, in input order.
+      items:
+        $ref: '#/PipelineTemplateSummary'
+  additionalProperties: false
+
+PipelineTemplateSummary:
+  type: object
+  description: One pipeline-template a composition delivered.
+  required: [name, version]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    displayName:
+      type: string
+    description:
+      type: string
   additionalProperties: false
 
 ComposedBundleValidateResponse:
   type: object
   description: Response from a composed bundle validation.
-  required: [valid, unresolvedVariables, pinPreflight]
+  required: [valid, unresolvedVariables, pinPreflight, pipelineTemplates]
   properties:
     valid:
       type: boolean
+    pipelineTemplates:
+      type: array
+      description: One entry per template the composition delivered, in input order.
+      items:
+        $ref: '#/PipelineTemplateSummary'
     errors:
       type: array
       items:
@@ -2199,6 +2934,12 @@ SearchResult:
   properties:
     type:
       type: string
+      enum: [controller, namespace, group, catalogitem, job, run, activity]
+      x-enum-varnames: [ComponentsSchemasSearchResultTypeController, ComponentsSchemasSearchResultTypeNamespace, ComponentsSchemasSearchResultTypeGroup, ComponentsSchemasSearchResultTypeCatalogitem, ComponentsSchemasSearchResultTypeJob, ComponentsSchemasSearchResultTypeRun, ComponentsSchemasSearchResultTypeActivity]
+      description: >-
+        controller, namespace, group, and catalogitem come from a live
+        Kubernetes read; job, run, and activity come from the record store
+        and are absent when it is not wired.
     name:
       type: string
     cluster:
@@ -2252,6 +2993,27 @@ VarroaRole:
       $ref: '#/ObjectMeta'
     spec:
       $ref: '#/VarroaRoleSpec'
+    status:
+      $ref: '#/VarroaRoleStatus'
+
+VarroaRoleStatus:
+  type: object
+  readOnly: true
+  description: >-
+    Federation faults of the role on each hive. The core BFF federation pass
+    writes it. A create or update request cannot set it.
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+      description: Spec generation the federation entries describe.
+    federation:
+      type: array
+      description: >-
+        One entry for each hive where the delete of a stale federated
+        JenkinsRole failed. A hive with no fault has no entry.
+      items:
+        $ref: '#/BindingFederationStatus'
 
 VarroaRoleBinding:
   type: object
@@ -2265,6 +3027,57 @@ VarroaRoleBinding:
       $ref: '#/ObjectMeta'
     spec:
       $ref: '#/VarroaRoleBindingSpec'
+    status:
+      $ref: '#/VarroaRoleBindingStatus'
+
+VarroaRoleBindingStatus:
+  type: object
+  readOnly: true
+  description: >-
+    Federation outcome of the binding on each hive. The core BFF federation
+    pass writes it. A create or update request cannot set it.
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+      description: Spec generation the federation entries describe.
+    federation:
+      type: array
+      description: One entry for each hive cluster. The core cluster has no entry.
+      items:
+        $ref: '#/BindingFederationStatus'
+
+BindingFederationStatus:
+  type: object
+  description: >-
+    Federation outcome of a binding on one hive, or a federation fault of a
+    role on one hive.
+  required: [cluster, state, lastTransitionTime]
+  properties:
+    cluster:
+      type: string
+      description: Hive cluster name.
+    state:
+      type: string
+      enum: [federated, skipped, failed]
+    reason:
+      type: string
+      description: >-
+        CamelCase code for the state. Skipped codes are NoSubjects, TenantScope,
+        RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
+        NonGlobalJenkinsRole, and ReservedRole. Failed codes are
+        HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed,
+        JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed,
+        StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed.
+        StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The
+        federated code is Federated.
+    message:
+      type: string
+      description: Human-readable detail for the state.
+    lastTransitionTime:
+      type: string
+      format: date-time
+      description: Time the state, reason, or message last changed.
 
 JenkinsRole:
   type: object
@@ -2951,6 +3764,9 @@ ClusterInfo:
       type: string
     k8sVersion:
       type: string
+    operatorNamespace:
+      type: string
+      description: Namespace of the cluster's operator.
     controllerCount:
       type: integer
       format: int32
@@ -3075,10 +3891,25 @@ UpdateCenterStatus:
     storeBytes:
       type: integer
       format: int64
+    gapCount:
+      type: integer
     gaps:
       type: array
       items:
         $ref: '#/UpdateCenterGap'
+    unservable:
+      type: array
+      items:
+        $ref: '#/UpdateCenterGap'
+    unservableCount:
+      type: integer
+    unknownDependencyCount:
+      type: integer
+    unknownDependencies:
+      type: array
+      description: The first 50 stored plugin versions whose dependency list is unknown.
+      items:
+        $ref: '#/UpdateCenterPluginRef'
     lastSyncTime:
       type: string
       format: date-time
@@ -3087,6 +3918,14 @@ UpdateCenterStatus:
       type: string
     pullThroughEnabled:
       type: boolean
+
+UpdateCenterPluginRef:
+  type: object
+  properties:
+    plugin:
+      type: string
+    version:
+      type: string
 
 UpdateCenterCondition:
   type: object
@@ -3112,6 +3951,11 @@ UpdateCenterGap:
     version:
       type: string
     requiredBy:
+      type: string
+    core:
+      type: string
+      description: Lowest Jenkins core that requests a latest entry. Empty for a pinned version.
+    reason:
       type: string
 
 UpdateCenterPlugins:
@@ -3613,4 +4457,2573 @@ FleetPluginDrilldown:
       type: array
       items:
         $ref: '#/ClusterFanoutStatus'
+  additionalProperties: false
+
+# --- Pipelines schemas (add-pipelines-ui) ---
+
+ChangeRequest:
+  type: object
+  description: >
+    The change request (pull request) a multibranch run builds. Absent
+    for a branch run.
+  required: [id]
+  properties:
+    id:
+      type: string
+      description: The forge's change request number or identifier.
+    title:
+      type: string
+    sourceBranch:
+      type: string
+      description: The branch that carries the change.
+    targetBranch:
+      type: string
+      description: The branch the change merges into.
+    url:
+      type: string
+      description: Web link to the change request on the forge.
+  additionalProperties: false
+
+JobBranchList:
+  type: object
+  description: >
+    GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to
+    ten minutes stale. A hibernated cell keeps its last export.
+  required: [jobPath, truncated, branches, changeRequests, tags]
+  properties:
+    jobPath:
+      type: string
+    observedAt:
+      type: string
+      format: date-time
+      description: When the cell last exported this job. Absent before the first export.
+    indexedAt:
+      type: string
+      format: date-time
+      description: When Jenkins last indexed the multibranch job.
+    indexResult:
+      type: string
+      description: The result of the last Jenkins index.
+    truncated:
+      type: boolean
+      description: True when the cell capped the number of heads it exported.
+    branches:
+      type: array
+      items:
+        $ref: '#/JobBranchHead'
+    changeRequests:
+      type: array
+      description: Sorted by numeric change request id, newest first.
+      items:
+        $ref: '#/JobBranchHead'
+    tags:
+      type: array
+      items:
+        $ref: '#/JobBranchHead'
+    lastScan:
+      $ref: '#/BranchScan'
+  additionalProperties: false
+
+JobBranchHead:
+  type: object
+  description: One branch, change request, or tag of a multibranch job.
+  required: [name, jobPath, orphaned]
+  properties:
+    name:
+      type: string
+    jobPath:
+      type: string
+      description: The head's own job path, which its runs carry.
+    orphaned:
+      type: boolean
+      description: True when Jenkins no longer discovers the head as buildable.
+    revision:
+      type: string
+      description: The last seen SCM revision of the head.
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    lastRun:
+      $ref: '#/RunSummary'
+  additionalProperties: false
+
+ScanMultibranchRequest:
+  type: object
+  description: POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+  properties:
+    cluster:
+      type: string
+      description: >
+        Breaks a tie when the job path lies in more than one surviving
+        tenant.
+  additionalProperties: false
+
+BranchScanResponse:
+  type: object
+  description: 202 response for a scan request. The scan identifier is the lastScan.scanId of the branch inventory.
+  required: [scanId, state]
+  properties:
+    scanId:
+      type: string
+    state:
+      type: string
+      enum: [requested]
+  additionalProperties: false
+
+BranchScan:
+  type: object
+  description: The last requested scan of a multibranch job. Absent until a scan runs.
+  required: [scanId, state, newHeads, changedHeads, orphanedHeads]
+  properties:
+    scanId:
+      type: string
+    state:
+      type: string
+      enum: [running, completed, failed, timeout, refused]
+    actor:
+      type: string
+    requestedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    result:
+      type: string
+    newHeads:
+      type: array
+      items:
+        type: string
+    changedHeads:
+      type: array
+      items:
+        type: string
+    orphanedHeads:
+      type: array
+      items:
+        type: string
+    message:
+      type: string
+  additionalProperties: false
+
+RunSummary:
+  type: object
+  description: One run, condensed for a list or a card.
+  required: [runId, status]
+  properties:
+    runId:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    jobPath:
+      type: string
+    status:
+      type: string
+    result:
+      type: string
+    branch:
+      type: string
+    scmRevision:
+      type: string
+    actor:
+      type: string
+    cause:
+      type: string
+    scmUrl:
+      type: string
+      description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    scmForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts scmUrl. A Forgejo host reads gitea. The field
+        is absent when the forge is unknown.
+    triggerSource:
+      type: string
+      enum: [user, webhook, cron, upstream, replay, restart, scm, other]
+      x-enum-varnames: [User, Webhook, Cron, Upstream, Replay, Restart, Scm, Other]
+      description: >
+        Kind of cause that started the run. Absent when Jenkins reports no cause list.
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    queuedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    durationMs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+RunningRun:
+  type: object
+  description: >
+    One unfinished run for the team home's Running now card. currentStage
+    names the top-level stage in progress. It is absent when no top-level
+    stage is in progress: before the first stage, between two stages, and
+    for a queued run.
+  required: [runId, jobPath, status]
+  properties:
+    runId:
+      type: string
+    jobPath:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    status:
+      type: string
+    currentStage:
+      type: string
+    branch:
+      type: string
+    scmRevision:
+      type: string
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    changeSummary:
+      type: string
+      description: The last commit's short message.
+    queuedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    typicalDurationMs:
+      type: integer
+      format: int64
+      description: The job's usual duration, from its duration trend.
+  additionalProperties: false
+
+PipelineSummary:
+  type: object
+  description: >
+    One job's run-history summary for the Pipelines table. A job that has
+    never run carries no lastBuild.
+  required: [jobPath, health, kind, pending]
+  properties:
+    jobPath:
+      type: string
+    health:
+      type: string
+      enum: [clear, cloudy, rain, unknown]
+      description: >
+        The weather glyph, computed from the last five runs: clear when
+        all passed, cloudy when one or two failed, rain when three or
+        more failed, unknown for a job that has never run.
+    kind:
+      type: string
+      enum: [pipeline, multibranch, unknown]
+      description: >
+        The item kind the tenant's bundle declares. A job the record store
+        alone holds reports unknown. A declared item of any other kind also
+        reports unknown.
+    pending:
+      type: boolean
+      description: >
+        True when every tenant that declares this job reports a complete job
+        list that lacks it. False when a declaring tenant has an unknown
+        inventory, when a declaring tenant holds the job, when the job has a
+        run, and when no tenant declares the job.
+    lastBuild:
+      $ref: '#/RunSummary'
+    durationTrendMs:
+      type: array
+      description: The most recent runs' duration, newest first.
+      items:
+        type: integer
+        format: int64
+    medianQueueWaitMs:
+      type: integer
+      format: int64
+      description: >
+        The median wait between a build's queued moment and its started
+        moment, in milliseconds, over the trailing 30 days. Absent when the
+        job started no build in that window.
+  additionalProperties: false
+
+PipelineRetention:
+  type: object
+  description: The record-store windows that apply to one pipelines team.
+  required: [storeDays, effectiveDays, jobs]
+  properties:
+    storeDays:
+      type: integer
+      description: The store-wide runs window, in days. It caps every other window.
+    tenantDays:
+      type: integer
+      description: The tenant window, in days. Absent when the tenant sets none.
+    effectiveDays:
+      type: integer
+      description: The window a job without a matching rule gets, in days.
+    jobs:
+      type: array
+      items:
+        $ref: '#/PipelineJobRetention'
+      description: The per-job rules, in match order.
+  additionalProperties: false
+
+PipelineJobRetention:
+  type: object
+  description: One per-job window rule of a pipelines team.
+  required: [job, days, effectiveDays]
+  properties:
+    job:
+      type: string
+      description: The folder-relative job glob.
+    days:
+      type: integer
+      description: The window the rule names, in days, before the store cap.
+    effectiveDays:
+      type: integer
+      description: The window the rule gives, in days, after the store cap.
+  additionalProperties: false
+
+PipelineListResponse:
+  type: object
+  description: >
+    GET /pipelines/{team}: the job list, unioned with the catalog's
+    declared jobs, plus the running-now strip.
+  required: [items, runningNow, truncated, tenantFolder, retention]
+  properties:
+    retention:
+      $ref: '#/PipelineRetention'
+    items:
+      type: array
+      items:
+        $ref: '#/PipelineSummary'
+    runningNow:
+      type: array
+      items:
+        $ref: '#/RunningRun'
+    tenantFolder:
+      type: string
+      description: >
+        The Jenkins folder that prefixes every job path in the response.
+        It is the Team name for a placed pipelines tenant. It is the empty
+        string for a controller tenant. The field is always present.
+    truncated:
+      type: boolean
+      description: >
+        True when any tenant's running-now page was full (50 rows), so
+        the strip does not claim completeness.
+  additionalProperties: false
+
+PipelineDefinition:
+  type: object
+  description: >
+    Where a job's pipeline script comes from. The catalog template, when one
+    exists, is reported separately on PipelineJobDetail.template — see
+    PipelineTemplateInfo.
+  required: [source]
+  properties:
+    source:
+      type: string
+      enum: [jenkinsfile, inline, template]
+      description: >
+        jenkinsfile when the script is read from source control, inline
+        when the bundle item carries the script itself, and template when
+        the item's definition names a catalog template (varroaTemplate).
+        A marker-defined multibranch job reads its marker from a
+        repository, so it reports jenkinsfile; its template is on
+        PipelineJobDetail.template.
+    jenkinsfileRepo:
+      type: string
+    jenkinsfileCommit:
+      type: string
+      description: The last build's checked-out commit, from its run record.
+    jenkinsfileForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea.
+        The field is absent when the forge is unknown.
+    profile:
+      type: string
+      description: The version profile in effect for this job's controller.
+    definitionPath:
+      type: string
+      description: >
+        The Jenkinsfile's script path within its own repository, from the
+        job's last run. Present only when source is jenkinsfile and the
+        run recorded one.
+    declaredBy:
+      $ref: '#/JobDeclaredBy'
+  additionalProperties: false
+
+JobDeclaredBy:
+  type: object
+  description: >
+    Which input of the job's composed bundle declared it. Present when one
+    bundle input resolved as the declarer. Absent when the bundle or every
+    candidate input is unresolved.
+  required: [kind, name, bundle]
+  properties:
+    kind:
+      type: string
+      enum: [gitSource, ociSource, itemRef]
+    name:
+      type: string
+      description: >
+        gitSource: the input's repoURL. ociSource: the input's ociRef.
+        itemRef: the CatalogItem name.
+    revision:
+      type: string
+      description: >
+        A git SHA (gitSource), an OCI manifest digest (ociSource), or a
+        CatalogItem content hash (itemRef). Absent when the composed
+        bundle has not resolved this input yet.
+    bundle:
+      $ref: '#/BundleRef'
+    repoURL:
+      type: string
+      description: Present only for kind gitSource.
+    forge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        gitSource only: the forge that hosts repoURL. A Forgejo host reads
+        gitea. The field is absent when the forge is unknown.
+    path:
+      type: string
+      description: The input's sub-path. Absent when the input declares no sub-path.
+    ociRef:
+      type: string
+      description: Present only for kind ociSource.
+    catalogItem:
+      $ref: '#/CatalogItemRef'
+  additionalProperties: false
+
+BundleRef:
+  type: object
+  required: [namespace, name]
+  properties:
+    namespace:
+      type: string
+    name:
+      type: string
+  additionalProperties: false
+
+CatalogItemRef:
+  type: object
+  required: [name, namespace]
+  properties:
+    name:
+      type: string
+    namespace:
+      type: string
+  additionalProperties: false
+
+PipelineTemplateInfo:
+  type: object
+  description: >
+    The resolved catalog template for a job, read from the record store
+    (marker-defined) or the items engine and catalog (items-declared).
+    Absent from PipelineJobDetail for a job with no catalog template.
+
+    For source "marker": name, version, and asOfBuild are absent before
+    the job's first run — markerPath and source are always present.
+    markerRevision is the trusted revision the cell read the marker from,
+    not the branch tip. For source "items": only name, version, and
+    source are set.
+  required: [source]
+  properties:
+    name:
+      type: string
+    version:
+      type: string
+    markerPath:
+      type: string
+    markerRevision:
+      type: string
+    source:
+      type: string
+      enum: [marker, items]
+    asOfBuild:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+PipelineTriggers:
+  type: object
+  properties:
+    push:
+      type: boolean
+    pullRequest:
+      type: boolean
+    webhook:
+      type: boolean
+      description: "True when the job declares a genericTrigger. The token is not returned."
+    schedule:
+      type: string
+    concurrency:
+      type: integer
+  additionalProperties: false
+
+PipelineParameter:
+  type: object
+  description: >
+    One declared build parameter, converted from the items engine's
+    parameter kind into a JSON Schema fragment the frontend's form
+    renders directly.
+  required: [name, kind, schema]
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    kind:
+      type: string
+      enum: [string, boolean, choice, text, password]
+    schema:
+      type: object
+      description: A JSON Schema fragment for this one field.
+    uiWidget:
+      type: string
+      enum: [textarea, password]
+    defaultValue:
+      type: string
+  additionalProperties: false
+
+PipelineJobDetail:
+  type: object
+  description: GET /pipelines/{team}/jobs/{job}.
+  required: [jobPath, kind, pending, health, last30Days, tenantFolder, tenant, dependencies]
+  properties:
+    jobPath:
+      type: string
+    kind:
+      type: string
+      enum: [pipeline, multibranch, unknown]
+      description: >
+        The job's kind. A declared pipeline or multibranch item sets it.
+        Otherwise a branch inventory row marks a multibranch job, and a
+        run marks a pipeline job.
+    pending:
+      type: boolean
+      description: >
+        True when every tenant that declares this job reports a complete job
+        list that lacks it. False when a declaring tenant has an unknown
+        inventory, when a declaring tenant holds the job, when the job has a
+        run, and when no tenant declares the job.
+    health:
+      type: string
+      enum: [clear, cloudy, rain, unknown]
+    tenantFolder:
+      type: string
+      description: >
+        The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty
+        for a root-hosted tenant.
+    tenant:
+      type: string
+      description: >
+        The tenant noun the server authorizes against, from
+        TenantRef.Tenant: a Team name for a Team tenant, or
+        "<namespace>/<controller>" for a synthetic tenant.
+    lastBuild:
+      $ref: '#/RunSummary'
+    durationTrendMs:
+      type: array
+      items:
+        type: integer
+        format: int64
+    definition:
+      $ref: '#/PipelineDefinition'
+    triggers:
+      $ref: '#/PipelineTriggers'
+    parameters:
+      type: array
+      items:
+        $ref: '#/PipelineParameter'
+    template:
+      allOf:
+        - $ref: '#/PipelineTemplateInfo'
+      description: Absent for a job with no catalog template (a Jenkinsfile job).
+    last30Days:
+      allOf:
+        - $ref: '#/PipelineLast30Days'
+      nullable: true
+      description: >
+        Null when the record store could not answer the window query;
+        the rest of the job page still renders.
+    dependencies:
+      $ref: '#/PipelineDependencies'
+    waiting:
+      type: array
+      maxItems: 50
+      items:
+        $ref: '#/RunWaitEntry'
+      description: Queued runs of this job that a concurrency cap holds. Absent when none waits.
+  additionalProperties: false
+
+PipelineDependencies:
+  type: object
+  description: >
+    The job's cross-tenant dependency edges (design D13). Both arrays are
+    empty, never omitted, for a job that declares no cross-tenant trigger
+    and has no subscriber.
+  required: [upstream, downstream]
+  properties:
+    upstream:
+      type: array
+      description: The varroa-upstream trigger rows this job declares.
+      items:
+        $ref: '#/PipelineDependencyEdge'
+    downstream:
+      type: array
+      description: The varroa-upstream rows naming this job as their producer.
+      items:
+        $ref: '#/PipelineDependencyEdge'
+  additionalProperties: false
+
+PipelineDependencyEdge:
+  type: object
+  description: >
+    One cross-tenant dependency edge: a producer tenant and job, the
+    result threshold the edge fires on, and whether the producer's
+    exports currently grant it. A declared edge whose grant is missing
+    is not hidden; it appears with granted false.
+  required: [tenant, job, jobPath, result, granted]
+  properties:
+    tenant:
+      type: string
+      description: The producer tenant's identifier.
+    job:
+      type: string
+      description: The job's name, relative to the other tenant's folder.
+    jobPath:
+      type: string
+      description: >
+        The job's path with its tenant folder. The job page route takes this path.
+    result:
+      type: string
+      description: The result threshold the edge fires on.
+      enum: [SUCCESS, UNSTABLE, FAILURE]
+    granted:
+      type: boolean
+      description: >
+        The grant evaluator's fanout-path verdict, read from the
+        producer's exports.
+    lastRun:
+      description: >
+        The edge's most recent run within the last 30 days. Absent when no
+        such run exists. A run the caller may not read carries its tenant alone.
+      allOf:
+        - $ref: '#/RunLink'
+  additionalProperties: false
+
+PipelineLast30Days:
+  type: object
+  description: The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
+  required: [builds]
+  properties:
+    builds:
+      type: integer
+      format: int64
+      description: Every run created in the window, whatever its status.
+    passRate:
+      type: number
+      format: double
+      nullable: true
+      description: The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.
+    medianDurationMs:
+      type: integer
+      format: int64
+      nullable: true
+      description: The median duration_ms over finished runs. Null when the window holds no finished run.
+    medianQueueWaitMs:
+      type: integer
+      format: int64
+      description: The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.
+    slowestStage:
+      allOf:
+        - $ref: '#/PipelineSlowestStage'
+      nullable: true
+      description: Null when no run in the window carries a finished stage.
+  additionalProperties: false
+
+PipelineSlowestStage:
+  type: object
+  description: The stage with the greatest median duration across the window's runs.
+  required: [name, durationMs]
+  properties:
+    name:
+      type: string
+    durationMs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+RunListResponse:
+  type: object
+  description: GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/RunSummary'
+    nextCursor:
+      type: string
+  additionalProperties: false
+
+# --- Fleet lock schemas (add-fleet-locks-view) ---
+
+FleetLock:
+  type: object
+  description: >
+    One fleet lock row, from a varroa.lock step. tenant and jobPath are
+    always present, whichever tenant the row belongs to. runLink is
+    present only when the reading caller can read that row's own run. A
+    waiting row reports its own waitingSince. A held or a releasing row
+    reports its own acquiredAt and no waitingSince. The row carries no
+    queue position and no derived holder: a consumer groups the rows it
+    already has by name.
+  required: [name, cluster, tenant, jobPath, state, runId]
+  properties:
+    name:
+      type: string
+      description: >
+        The qualified lock name: the owner tenant, a slash, and the bare
+        lock name. A controller tenant holds a slash of its own, so do not
+        split this value to find the owner.
+    cluster:
+      type: string
+      description: The cluster of the run that holds or waits on the lock.
+    tenant:
+      type: string
+      description: The tenant of the run that holds or waits on the lock.
+    jobPath:
+      type: string
+      description: The job path of the run that holds or waits on the lock.
+    state:
+      type: string
+      enum: [waiting, held, releasing]
+    runId:
+      type: string
+    runLink:
+      type: string
+      description: >
+        The run's own page path,
+        /pipelines/{team}/{jobPath}/{runId}, the same link a run search
+        result carries. Absent, not null, when the caller's own grant
+        cannot read the row's own run.
+    waitingSince:
+      type: string
+      format: date-time
+      description: >
+        The time the run began to wait. Present only on a waiting row.
+    acquiredAt:
+      type: string
+      format: date-time
+      description: >
+        The time the run acquired the lock. Present on a held or a
+        releasing row.
+  additionalProperties: false
+
+PipelineTeam:
+  type: object
+  description: >
+    One row of GET /pipelines. cell and cellNamespace are set only on a
+    placed row.
+  required: [name, cluster, placed]
+  properties:
+    name:
+      type: string
+      description: The Team name, which is also its tenant name.
+    cluster:
+      type: string
+      description: >
+        The cluster that holds the tenant's cell. An unplaced local Team
+        names the local cluster. A local Team whose namespaces hold a
+        controller, and which has no spec.pipelines, also names the local
+        cluster.
+    cell:
+      type: string
+      description: The slot-0 cell Controller that holds the tenant.
+    cellNamespace:
+      type: string
+      description: The namespace of that cell Controller.
+    placed:
+      type: boolean
+      description: >
+        True when a cell holds the tenant. A controller-namespace Team
+        answers false.
+  additionalProperties: false
+
+PipelineTeamList:
+  type: object
+  description: >
+    GET /pipelines. The rows are in (name, cluster) order.
+  required: [items, recordStore]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/PipelineTeam'
+    recordStore:
+      type: boolean
+      description: >
+        False when the record store is off or its schema is too old. The
+        list then carries no Team that another cluster holds.
+  additionalProperties: false
+
+FleetLockListResponse:
+  type: object
+  description: >
+    GET /pipelines/{team}/locks and GET /locks. Both routes answer the
+    rows in lock name order. In one name, the holder comes first, and
+    the waiters follow in the order they began to wait.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/FleetLock'
+  additionalProperties: false
+
+FleetLockReleaseRequest:
+  type: object
+  description: >
+    POST /locks/release. name and runId identify the lock row. reason is
+    stored in the audit record, so it is required.
+  required: [name, runId, reason]
+  properties:
+    name:
+      type: string
+      minLength: 1
+      description: The qualified lock name, as the lock reads answer it.
+    runId:
+      type: string
+      minLength: 1
+      description: The run that holds the releasing lock.
+    reason:
+      type: string
+      minLength: 1
+      description: Why the operator releases the lock. The activity row carries it.
+  additionalProperties: false
+
+FleetLockReleaseResponse:
+  type: object
+  description: >
+    The released row. It names the owner of the run that held the lock.
+  required: [name, runId, cluster, tenant, jobPath, state]
+  properties:
+    name:
+      type: string
+    runId:
+      type: string
+    cluster:
+      type: string
+    tenant:
+      type: string
+    jobPath:
+      type: string
+    cellInstance:
+      type: string
+      description: The cell instance that held the lock.
+    state:
+      type: string
+      enum: [released]
+  additionalProperties: false
+
+FleetLockReleaseConflict:
+  type: object
+  description: >
+    The 409 body of POST /locks/release. holderCell is present only when a
+    live pod still runs the lock's holder.
+  required: [error]
+  properties:
+    error:
+      type: string
+      description: Human-readable refusal message.
+    holderCell:
+      $ref: '#/FleetLockHolderCell'
+  additionalProperties: false
+
+FleetLockHolderCell:
+  type: object
+  description: >
+    The cell that still runs a releasing lock's holder. A restart of that
+    cell ends the holder, and the lock then releases.
+  required: [cluster, namespace, name]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    name:
+      type: string
+  additionalProperties: false
+
+CreateRunRequest:
+  type: object
+  description: >
+    POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes
+    the request idempotent: the BFF uses it as the run identifier. A
+    request with no clientToken is not idempotent.
+  properties:
+    clientToken:
+      type: string
+      format: uuid
+    parameters:
+      type: object
+      additionalProperties:
+        type: string
+    cluster:
+      type: string
+      description: >
+        Breaks a tie when the job path lies in more than one surviving
+        tenant.
+  additionalProperties: false
+
+RunActionResponse:
+  type: object
+  description: >
+    202 response for a run request, a rerun, or a replay. The BFF does not wait for
+    the cell's admission decision; the caller polls the run.
+  required: [runId, intentKey, state]
+  properties:
+    runId:
+      type: string
+    intentKey:
+      type: string
+    state:
+      type: string
+      enum: [requested]
+  additionalProperties: false
+
+CancelRunResponse:
+  type: object
+  description: >
+    202 response for a fire-and-forget run action: a cancel, an input
+    proceed, or an input abort. The BFF publishes one command and waits
+    for no result.
+  required: [state]
+  properties:
+    state:
+      type: string
+      enum: [requested]
+  additionalProperties: false
+
+PipelineMarkerValidateRequest:
+  type: object
+  description: POST /pipelines/{team}/markers/validate.
+  required: [marker]
+  properties:
+    marker:
+      type: string
+      description: The marker file's raw text, at most 64 KiB.
+  additionalProperties: false
+
+PipelineMarkerFinding:
+  type: object
+  description: One line of the lint table's SEVERITY, PATH, and MESSAGE columns.
+  required: [severity, message]
+  properties:
+    severity:
+      type: string
+      enum: [error]
+    path:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+PipelineMarkerValidateResponse:
+  type: object
+  description: >
+    findings is empty when the marker resolved against the team's
+    delivered set and its values validated; templateName and
+    templateVersion are then present.
+  required: [findings]
+  properties:
+    findings:
+      type: array
+      items:
+        $ref: '#/PipelineMarkerFinding'
+    templateName:
+      type: string
+    templateVersion:
+      type: string
+  additionalProperties: false
+
+RunStage:
+  type: object
+  required: [stageId, name, status]
+  properties:
+    stageId:
+      type: string
+    parentId:
+      type: string
+    name:
+      type: string
+    nodeType:
+      type: string
+    status:
+      type: string
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    durationMs:
+      type: integer
+      format: int64
+    error:
+      type: string
+  additionalProperties: false
+
+RunInputParameter:
+  type: object
+  description: One parameter an input step declares, read from its definition.
+  required: [name]
+  properties:
+    name:
+      type: string
+      description: The definition's name.
+    type:
+      type: string
+      description: >
+        The Java simple name of the parameter definition, such as
+        StringParameterDefinition or ChoiceParameterDefinition.
+    description:
+      type: string
+      description: The definition's description. Absent when the definition declares none.
+    defaultValue:
+      type: string
+      description: >
+        The definition's default value, rendered as text. Absent when
+        the definition declares none.
+    choices:
+      type: array
+      items:
+        type: string
+      description: The definition's choices. Absent when the definition declares none.
+  additionalProperties: false
+
+RunInput:
+  type: object
+  description: One input step a run waits on, read from the run's stored inputs column.
+  required: [id]
+  properties:
+    id:
+      type: string
+      description: The input step's own identifier. Both input routes address this value.
+    message:
+      type: string
+      description: The message the step shows. Absent when the step declares none.
+    ok:
+      type: string
+      description: The label of the step's proceed control. Absent when the step declares none.
+    submitter:
+      type: string
+      description: >
+        The users and groups the step admits. Absent when the step
+        declares none.
+    submitterParameter:
+      type: string
+      description: >
+        The parameter name that holds the answering user's name. Absent
+        when the step declares none.
+    parameters:
+      type: array
+      items:
+        $ref: '#/RunInputParameter'
+      description: >
+        The step's own parameter definitions, in declaration order.
+        Absent when the step declares none.
+  additionalProperties: false
+
+RunDetail:
+  type: object
+  description: GET /runs/{run}.
+  required: [runId, jobPath, status, tenantFolder, tenant]
+  properties:
+    runId:
+      type: string
+    jobPath:
+      type: string
+    tenantFolder:
+      type: string
+      description: >
+        The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty
+        for a root-hosted tenant.
+    tenant:
+      type: string
+      description: >
+        The tenant noun the server authorizes against: the run row's
+        stored tenant column. A Team name for a Team tenant, or
+        "<namespace>/<controller>" for a synthetic tenant.
+    buildNumber:
+      type: integer
+      format: int64
+    branch:
+      type: string
+    scmRevision:
+      type: string
+    status:
+      type: string
+    result:
+      type: string
+    queuedAt:
+      type: string
+      format: date-time
+    startedAt:
+      type: string
+      format: date-time
+    endedAt:
+      type: string
+      format: date-time
+    durationMs:
+      type: integer
+      format: int64
+    actor:
+      type: string
+    cause:
+      type: string
+    scmUrl:
+      type: string
+      description: Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+    scmForge:
+      type: string
+      enum: [github, gitlab, gitea]
+      description: >
+        The forge that hosts scmUrl. A Forgejo host reads gitea. The field
+        is absent when the forge is unknown.
+    triggerSource:
+      type: string
+      enum: [user, webhook, cron, upstream, replay, restart, scm, other]
+      x-enum-varnames: [User, Webhook, Cron, Upstream, Replay, Restart, Scm, Other]
+      description: >
+        Kind of cause that started the run. Absent when Jenkins reports no cause list.
+    changeRequest:
+      $ref: '#/ChangeRequest'
+    params:
+      type: object
+      additionalProperties:
+        type: string
+    testsTotal:
+      type: integer
+    testsFailed:
+      type: integer
+    testsSkipped:
+      type: integer
+    logFinalized:
+      type: boolean
+      description: LogSummary.finalized, read from the run's payload column.
+    logComplete:
+      type: boolean
+      description: The negation of LogSummary.incomplete.
+    interruptedReason:
+      type: string
+      description: Set only when result is INTERRUPTED.
+    triggerError:
+      type: string
+      description: The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
+    triggerReasonCode:
+      type: string
+      description: >-
+        Why no build exists for the trigger. One of JOB_NOT_FOUND,
+        JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE,
+        CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY,
+        THROTTLED, and NOT_HOME. The first three name a refusal from the
+        controller. TRIGGER_UNREACHABLE names a trigger that reached no
+        Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim
+        followed. CLAIM_ABANDONED names a granted build claim that started no
+        build. The last five name a build claim that the record store refused.
+        NOT_HOME names a replay or a restart whose job home moved to another
+        slot before it claimed. Set only when result is TRIGGER_FAILED.
+    retryRunId:
+      type: string
+      description: An existing retry's run id, when one already exists.
+    source:
+      type: object
+      description: >
+        How the run was defined, read from the run's stored source column.
+        This field is absent until a run.source event arrives.
+      additionalProperties: false
+      properties:
+        definitionPath:
+          type: string
+          description: >
+            The pipeline script path in the run's own repository. A run that a
+            template defines reports no value here.
+        libraries:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              version:
+                type: string
+                description: The version the run loaded. Absent when the library declares none.
+              revision:
+                type: string
+                description: >
+                  The commit the run loaded. Absent when the library loaded
+                  from the cache.
+              repositoryUrl:
+                type: string
+                description: >
+                  The library repository URL. It carries no credentials. The
+                  field is absent when the current library configuration does
+                  not name a repository.
+              repositoryForge:
+                type: string
+                enum: [github, gitlab, gitea]
+                description: >
+                  The forge that hosts repositoryUrl. The field is absent when
+                  the forge is unknown.
+        podTemplates:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              label:
+                type: string
+              image:
+                type: string
+    replayOf:
+      type: string
+      description: >
+        The identifier of the run whose script this build replayed. The
+        field is absent for a build that is not a replay.
+    restartOf:
+      type: string
+      description: >
+        The identifier of the run this build restarted from. The field is
+        absent for a build that is not a restart.
+    restartStage:
+      type: string
+      description: >
+        The stage this restarted build began at. The field is absent for a
+        build that is not a restart.
+    restart:
+      $ref: '#/RunRestart'
+    rejectedSignature:
+      type: string
+      description: >
+        Set only when result is FAILURE and the script sandbox refused a
+        signature.
+    commandRefusal:
+      $ref: '#/RunCommandRefusal'
+    summary:
+      type: string
+      description: >
+        The one-line text the run attached to itself through
+        varroa.summary. The plugin cuts the text at 512 UTF-8 bytes.
+        This field is absent until the run calls varroa.summary.
+    digest:
+      type: object
+      description: >
+        Why a run that did not succeed failed. The server computes this
+        object on every read, from the stored rows and the stored log.
+        The field is absent for a run with no result, for a SUCCESS or
+        TRIGGER_FAILED result, or for a run with no start time. The
+        field is also absent when no part has a value.
+      additionalProperties: false
+      properties:
+        stage:
+          type: string
+          description: >
+            The name of the innermost stage whose status is FAILURE,
+            in stage-start order. A stage or a parallel branch that
+            holds a failed stage is never the answer. A parallel branch
+            shows its branch name. Absent when no stage failed.
+        error:
+          type: string
+          description: >
+            The stored error text of that stage. Absent when no stage
+            failed, and when the stage carries no error.
+        logTail:
+          type: string
+          description: >
+            The last 50 console log lines that carry the attribution of
+            the failed stage or of a stage nested under it. The field
+            falls back to the last 50 lines of the whole log when no
+            log-index entry names one of those stages. The lines carry
+            no ANSI escape sequence. It is absent when the server holds no blob store and
+            when a log-index entry fails to decode. Absent for an INTERRUPTED run.
+        failedTests:
+          type: object
+          description: >
+            The run's aggregate test counts. The field is present only
+            when the run reports at least one failed test.
+          additionalProperties: false
+          required: [failed]
+          properties:
+            failed:
+              type: integer
+            skipped:
+              type: integer
+            total:
+              type: integer
+            cases:
+              type: array
+              description: >
+                The first ten failed cases of the run, in the order the
+                record store answers. A skipped case is not in the list.
+                The field is absent when the run holds no stored case.
+              items:
+                type: object
+                additionalProperties: false
+                required: [suite, className, name, caseKey]
+                properties:
+                  suite:
+                    type: string
+                  className:
+                    type: string
+                  name:
+                    type: string
+                  caseKey:
+                    type: string
+                    description: >
+                      The opaque case key. Do not parse it. Percent-encode
+                      the whole key as one path segment before you use it
+                      as {case} on the case history read.
+    inputs:
+      type: array
+      description: >
+        The input steps the run waits on, read from the run's stored
+        inputs column. This field is absent until a run.input event
+        arrives, and absent for a run that holds no pending input.
+      items:
+        $ref: '#/RunInput'
+    testReport:
+      $ref: '#/RunDetailTestReport'
+    cases:
+      type: array
+      description: >
+        The run's stored failed and skipped test cases, the same entries
+        GET /runs/{run}/tests serves. The field is absent when the run
+        holds no stored case.
+      items:
+        $ref: '#/RunTestCase'
+    stages:
+      type: array
+      items:
+        $ref: '#/RunStage'
+    upstream:
+      $ref: '#/RunLink'
+    downstream:
+      $ref: '#/RunLinkPage'
+    waiting:
+      $ref: '#/RunWait'
+  additionalProperties: false
+
+RunWait:
+  type: object
+  description: >-
+    The concurrency cap that holds a queued run. Absent from a run that no
+    cap holds.
+  required: [kind, max, running, since]
+  properties:
+    kind:
+      type: string
+      enum: [tenant, cell]
+      description: tenant when a tenant limit holds the run; cell when the tenant cap of its cell does.
+    limit:
+      type: string
+      description: The tenant limit's name. Absent for a cell cap.
+    max:
+      type: integer
+      format: int32
+    running:
+      type: integer
+      format: int32
+      description: The builds the cap counted when it last held the run.
+    cell:
+      type: string
+    since:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+RunWaitEntry:
+  type: object
+  description: A waiting run of a job, with its reason.
+  required: [runId, kind, max, running, since]
+  properties:
+    runId:
+      type: string
+    kind:
+      type: string
+      enum: [tenant, cell]
+    limit:
+      type: string
+    max:
+      type: integer
+      format: int32
+    running:
+      type: integer
+      format: int32
+    cell:
+      type: string
+    since:
+      type: string
+      format: date-time
+  additionalProperties: false
+
+RunLink:
+  type: object
+  description: >
+    One run on the far side of a run link: the run that started this
+    run, a run this run started, or a dependency edge's last run. A run
+    the caller may not read carries its tenant alone.
+  required: [tenant]
+  properties:
+    tenant:
+      type: string
+      description: The tenant that holds the run.
+    jobPath:
+      type: string
+      description: The run's job path, qualified with its tenant folder.
+    runId:
+      type: string
+      format: uuid
+      description: The run's identifier. Absent when no run matched.
+    buildNumber:
+      type: integer
+      format: int64
+      description: The build number of the run.
+    status:
+      type: string
+      description: The run's status. Absent on an upstream link.
+    result:
+      type: string
+      description: The run's result, when it has one. Absent on an upstream link.
+  additionalProperties: false
+
+RunLinkPage:
+  type: object
+  description: One page of the runs a run started, newest first.
+  required: [items]
+  properties:
+    items:
+      type: array
+      description: The runs on this page. Never null.
+      items:
+        $ref: '#/RunLink'
+    nextCursor:
+      type: string
+      description: The cursor of the next page. Absent on the last page.
+  additionalProperties: false
+
+RunCommandRefusal:
+  type: object
+  description: >
+    The newest cancel or input answer the Jenkins plugin refused for this
+    run, on GET /runs/{run}. The field is absent when no such refusal
+    exists. A later successful command does not remove it. The notice
+    carries its own time, so a reader compares it with the run state.
+  required: [command, refusedAt]
+  properties:
+    command:
+      type: string
+      enum: [cancel, proceed_input, abort_input]
+      description: The refused command.
+    actor:
+      type: string
+      description: The person or service that sent the command.
+    httpStatus:
+      type: integer
+      description: The HTTP status the plugin answered.
+    error:
+      type: string
+      description: >
+        The refusal text. The mite keeps the title of a Jenkins error
+        page, and the gateway cuts the text at 512 characters.
+    refusedAt:
+      type: string
+      format: date-time
+      description: The time the gateway received the refusal.
+  additionalProperties: false
+
+RunDetailTestReport:
+  type: object
+  description: >
+    The run's stored test report, on GET /runs/{run}. The field is absent
+    when the run holds no stored report. sizeBytes and caseCount are
+    always present, and zero is a valid value.
+  required: [blobKey, sizeBytes, caseCount]
+  properties:
+    blobKey:
+      type: string
+      description: >
+        The blob key of the archived report file. The value is empty when
+        Jenkins stored the file locally.
+    sizeBytes:
+      type: integer
+      format: int64
+      description: The length of the report file in bytes.
+    caseCount:
+      type: integer
+      format: int32
+      description: >
+        The number of cases the report file holds. The file holds every
+        case, including a passed case.
+  additionalProperties: false
+
+RunArtifact:
+  type: object
+  required: [path, sizeBytes, downloadable]
+  properties:
+    path:
+      type: string
+    sizeBytes:
+      type: integer
+      format: int64
+    digest:
+      type: string
+    contentType:
+      type: string
+    downloadable:
+      type: boolean
+      description: >
+        False when the stored blob key is empty (local artifact mode);
+        the download path then answers 409.
+  additionalProperties: false
+
+RunArtifactListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/RunArtifact'
+  additionalProperties: false
+
+RunTestSuite:
+  type: object
+  required: [suite, total, failed, skipped]
+  properties:
+    suite:
+      type: string
+    total:
+      type: integer
+    failed:
+      type: integer
+    skipped:
+      type: integer
+    durationMs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+RunTestCase:
+  type: object
+  description: >
+    One stored test case of a run. The record store holds only failed
+    and skipped cases, at most 500 for each run.
+  required: [suite, className, name, status, caseKey]
+  properties:
+    suite:
+      type: string
+    className:
+      type: string
+    name:
+      type: string
+    status:
+      type: string
+      description: >
+        The reporter's own status name, for example FAILED or REGRESSION.
+        A skipped case carries SKIPPED.
+    durationMs:
+      type: integer
+      format: int64
+      description: The case's duration in milliseconds. Absent when the value is zero.
+    errorDetails:
+      type: string
+      description: >
+        The case's error detail text, cut at 512 bytes. Absent when the
+        case carries no error detail.
+    caseKey:
+      type: string
+      description: >
+        The opaque case key the server makes from the class name and the
+        test name. Do not parse it. Percent-encode the whole key as one
+        path segment before you use it as {case} on
+        GET /pipelines/{team}/jobs/{job}/tests/{case}.
+  additionalProperties: false
+
+RunTestReport:
+  type: object
+  description: >
+    The run's archived test report, on GET /runs/{run}/tests. The field
+    is absent when the run holds no stored report. sizeBytes and
+    caseCount are always present, and zero is a valid value.
+  required: [path, sizeBytes, caseCount, downloadable]
+  properties:
+    path:
+      type: string
+      description: >
+        The archived path of the report file, always .varroa/tests.json.
+        Download the file through GET /runs/{run}/artifacts/{path}.
+    sizeBytes:
+      type: integer
+      format: int64
+      description: The length of the report file in bytes.
+    caseCount:
+      type: integer
+      format: int32
+      description: >
+        The number of cases the report file holds. The file holds every
+        case, including a passed case.
+    downloadable:
+      type: boolean
+      description: >
+        False when the stored blob key is empty, because Jenkins stored
+        the file locally. The download path then answers 409.
+  additionalProperties: false
+
+RunTestTotals:
+  type: object
+  description: >
+    The run's aggregate test counters. Jenkins reports them. They count
+    every suite, including a suite the items list omits.
+  required: [total, failed, skipped]
+  properties:
+    total:
+      type: integer
+    failed:
+      type: integer
+    skipped:
+      type: integer
+  additionalProperties: false
+
+RunTestListResponse:
+  type: object
+  description: >
+    GET /runs/{run}/tests. items holds one row per suite, at most 500, the
+    most failed suites first, then by suite name. items is empty when the
+    run reported no suite. totals holds the run's aggregate counters, and
+    it is absent when the run reported no test result. cases holds the
+    run's stored failed and skipped cases, failed cases first. cases is
+    always present, and an empty array is a valid value.
+  required: [items, cases]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/RunTestSuite'
+    totals:
+      $ref: '#/RunTestTotals'
+    cases:
+      type: array
+      items:
+        $ref: '#/RunTestCase'
+    report:
+      $ref: '#/RunTestReport'
+  additionalProperties: false
+
+RunRestart:
+  type: object
+  description: >
+    GET /runs/{run}/restart. Whether a completed declarative run restarts
+    from a stage. The stages list is always present, and it is empty when
+    the run does not restart.
+  required: [restartable, stages]
+  properties:
+    restartable:
+      type: boolean
+    reason:
+      type: string
+      description: >
+        Why the run does not restart. The field is absent when restartable
+        is true. The value is one of not-terminal, template-defined,
+        not-recorded, not-declarative, disabled, unavailable,
+        no-restartable-stage, or home-moved. The job moved and no restart
+        copy is kept.
+    stages:
+      type: array
+      description: The stages the restart can begin at, in run order.
+      items:
+        type: string
+  additionalProperties: false
+
+RestartRunRequest:
+  type: object
+  description: POST /runs/{run}/restart. The stage the restart begins at.
+  required: [stage]
+  additionalProperties: false
+  properties:
+    stage:
+      type: string
+      description: A stage name from the restart object of the run detail.
+
+RunScript:
+  type: object
+  description: >
+    GET /runs/{run}/script. The run's own Groovy script, read from the
+    build record the run retains in the blob tier. Every field is always
+    present. A run that does not replay answers an empty script and an
+    empty loadedScripts object.
+  required: [script, loadedScripts, definitionKind, replayable, reason]
+  properties:
+    script:
+      type: string
+      description: >
+        The main script of the run's flow execution. The value is empty
+        when replayable is false.
+    loadedScripts:
+      type: object
+      description: >
+        The library scripts the run loaded, as a map of name to script
+        text. A caller cannot edit them, and a replay loads them again
+        from their library. The object is empty when the run loaded no script or when
+        replayable is false.
+      additionalProperties:
+        type: string
+    definitionKind:
+      type: string
+      enum: [template, script]
+      description: >
+        template when the run's stored payload names a pipeline template
+        or a marker file, and script otherwise.
+    replayable:
+      type: boolean
+      description: True only when the run passes every eligibility rule.
+    reason:
+      type: string
+      description: >
+        The name of the first eligibility rule the run fails. The rules
+        run in this order: not-terminal, template-defined,
+        masked-parameter, no-replica, unreadable, not-sandbox, and
+        script-too-large. A replayable run answers the empty string.
+  additionalProperties: false
+
+TestCaseOutcome:
+  type: object
+  description: >
+    One outcome of one test case in one run of the job. A row names its
+    own suite, because two suites can report one class and one name.
+  required: [runId, suite, status, createdAt, runLink]
+  properties:
+    runId:
+      type: string
+    buildNumber:
+      type: integer
+      format: int64
+    suite:
+      type: string
+    status:
+      type: string
+      description: >
+        The reporter's own status name. A skipped case carries SKIPPED.
+    durationMs:
+      type: integer
+      format: int64
+      description: The case's duration in milliseconds. Absent when the case reports no duration.
+    errorDetails:
+      type: string
+      description: >
+        The case's error detail text, cut at 512 bytes. Absent when the
+        case carries no error detail.
+    createdAt:
+      type: string
+      format: date-time
+      description: The creation time of the run.
+    result:
+      type: string
+      description: The run's own result. Absent when the run holds no result.
+    runLink:
+      type: string
+      description: >
+        The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the
+        same link a fleet lock row carries.
+  additionalProperties: false
+
+TestCaseHistoryResponse:
+  type: object
+  description: >
+    GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's
+    recent outcomes, newest first, within the record store retention
+    window. The response holds no rate, no trend, and no flake score.
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/TestCaseOutcome'
+  additionalProperties: false
+
+RunChange:
+  type: object
+  description: One SCM change entry, passed through from the run's changes column.
+  additionalProperties: true
+
+RunChangeListResponse:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/RunChange'
+  additionalProperties: false
+
+BreakGlassRequest:
+  type: object
+  description: Request body for a break-glass grant.
+  required: [reason]
+  properties:
+    reason:
+      type: string
+      description: Required. At most 256 characters. Recorded on the audit event.
+      maxLength: 256
+    ttlSeconds:
+      type: integer
+      description: Token lifetime in seconds. Defaults to 900. Must be between 300 and 3600.
+      minimum: 300
+      maximum: 3600
+  additionalProperties: false
+
+BreakGlassTarget:
+  type: object
+  description: The in-cluster Service a break-glass token reaches.
+  required: [service, namespace, port]
+  properties:
+    service:
+      type: string
+    namespace:
+      type: string
+    port:
+      type: integer
+  additionalProperties: false
+
+BreakGlassResponse:
+  type: object
+  description: A granted break-glass session.
+  required: [token, expiresAt, target, locationUrl]
+  properties:
+    token:
+      type: string
+      description: A short-lived Jenkins user token minted for the caller's own identity.
+    expiresAt:
+      type: string
+      format: date-time
+    target:
+      $ref: '#/BreakGlassTarget'
+    locationUrl:
+      type: string
+      description: The location URL of a headless controller, with a trailing slash. This is the dashboard door URL when the operator has a dashboard origin, and the in-cluster Service URL otherwise.
+  additionalProperties: false
+
+JenkinsLink:
+  type: object
+  description: The Varroa page that a Jenkins item path resolves to.
+  required: [link]
+  properties:
+    link:
+      type: string
+      description: A dashboard path, such as /pipelines/team/job/runId.
+  additionalProperties: false
+
+CellPoolSpec:
+  type: object
+  description: >-
+    A CellPool's configuration (spec.*). profileRef is immutable, because a
+    pool's cells carry the profile label they were created with.
+  required: [profileRef]
+  properties:
+    profileRef:
+      type: string
+      minLength: 1
+      description: The JenkinsVersionProfile the pool's cells run. Immutable.
+    warm:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Target count of free cells the pool keeps ready.
+    maxCells:
+      type: integer
+      format: int32
+      minimum: 0
+      description: >-
+        Cap on the pool's cells, placed cells included. 0 means unlimited.
+    maxTenantsPerCell:
+      type: integer
+      format: int32
+      minimum: 1
+      description: >-
+        Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+    maxRunsPerTenant:
+      type: integer
+      format: int32
+      minimum: 0
+      maximum: 10000
+      description: >-
+        Cap on the builds one tenant runs at once on one cell of the pool.
+        Zero means no cap. Set it on the CellPool object, not through the
+        scale API.
+    unreadyGracePeriod:
+      type: string
+      description: >-
+        How long a pool cell may stay unready before the operator rolls its
+        pod. A Go duration string.
+    cellTemplate:
+      type: object
+      description: >-
+        resources, miteResources, and podOverrides for the cells the pool
+        creates. resources and podOverrides go to the Jenkins container and
+        the pod; miteResources goes to the mite sidecar. The pool exposes no
+        raw strategic-merge overlay.
+      additionalProperties: true
+    libraries:
+      type: array
+      maxItems: 16
+      description: >-
+        Trusted shared libraries that every cell of the pool serves as global
+        libraries. Names are unique.
+      items:
+        $ref: '#/CellPoolLibrary'
+    approvedSignatures:
+      type: array
+      maxItems: 256
+      uniqueItems: true
+      description: >-
+        Script-security signatures that every cell of the pool approves. A
+        cell renders this list with its own bundle list, sorted. Read-only
+        through the API; edit the CellPool with kubectl or GitOps.
+      items:
+        type: string
+        maxLength: 1024
+        pattern: '^(method|staticMethod|new|field|staticField) \S.*$'
+    mail:
+      $ref: '#/CellPoolMail'
+    giteaServers:
+      type: array
+      maxItems: 16
+      description: >-
+        Gitea and Forgejo servers that every cell of the pool declares. Each
+        server has hooks off and no credential. Read-only through the API;
+        edit the CellPool with kubectl or GitOps. Server URLs are unique.
+      items:
+        $ref: '#/CellPoolGiteaServer'
+  additionalProperties: false
+
+CellPoolGiteaServer:
+  type: object
+  description: >-
+    One Gitea or Forgejo server of a pool. The operator renders it with
+    manageHooks false and no credential.
+  required: [serverUrl]
+  properties:
+    serverUrl:
+      type: string
+      minLength: 8
+      maxLength: 2048
+      description: The base URL of the forge.
+    displayName:
+      type: string
+      maxLength: 100
+      description: >-
+        The server name in Jenkins. Unset means the plugin derives it from
+        the URL.
+    aliasUrl:
+      type: string
+      maxLength: 2048
+      description: >-
+        The URL the forge reports in webhook payloads, when it differs from
+        serverUrl.
+  additionalProperties: false
+
+CellPoolMail:
+  type: object
+  description: >-
+    The SMTP setting of a pool. Every cell of the pool renders it for the
+    mailer and email-ext plugins. Read-only through the API; edit the CellPool
+    with kubectl or GitOps. The read carries the login Secret name, never its
+    value.
+  required: [host, from]
+  properties:
+    host:
+      type: string
+      minLength: 1
+      maxLength: 253
+      description: The SMTP server name.
+    port:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 65535
+      description: The SMTP server port. Unset means 587.
+    security:
+      type: string
+      enum: [none, starttls, tls]
+      description: The transport mode. Unset means starttls.
+    from:
+      type: string
+      maxLength: 254
+      description: The sender address of every message.
+    replyTo:
+      type: string
+      maxLength: 254
+      description: The reply-to address of every message.
+    defaultSuffix:
+      type: string
+      maxLength: 254
+      description: The domain that a bare recipient name gets.
+    credentialRef:
+      type: string
+      maxLength: 253
+      description: >-
+        The Secret in the operator namespace that holds the SMTP username and
+        password. The name only; the value is never returned.
+  additionalProperties: false
+
+CellPoolLibrary:
+  type: object
+  description: >-
+    A trusted shared library of a pool. Jenkins runs its code outside the
+    script sandbox. Only the operator declares it.
+  required: [name, remote, defaultVersion]
+  properties:
+    name:
+      type: string
+      maxLength: 63
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+      description: The library name. A pipeline loads the library by this name.
+    remote:
+      type: string
+      maxLength: 2048
+      description: The repository URL of the library. It must not hold a variable token.
+    defaultVersion:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: The branch, tag, or commit a pipeline loads when it names no version.
+    credentialRef:
+      type: string
+      maxLength: 253
+      description: >-
+        The name of the Secret in the operator namespace that holds the login.
+        Required for an ssh remote.
+    implicit:
+      type: boolean
+      description: Loads the library in every job of every cell in the pool.
+    allowVersionOverride:
+      type: boolean
+      description: >-
+        Lets a pipeline load another version of the library. Any user who can
+        push to the library repository then runs trusted code on every cell.
+  additionalProperties: false
+
+CellPoolStatus:
+  type: object
+  description: A CellPool's reported cell and tenant counts.
+  required: [warmCells, placedCells, unreadyCells, freeTenantSlots]
+  properties:
+    observedGeneration:
+      type: integer
+      format: int64
+    warmCells:
+      type: integer
+      format: int32
+      description: Owned cells that hold no tenant.
+    placedCells:
+      type: integer
+      format: int32
+      description: Owned cells that hold at least one tenant.
+    unreadyCells:
+      type: integer
+      format: int32
+      description: Owned cells whose CellReady condition is not True.
+    freeTenantSlots:
+      type: integer
+      format: int32
+      description: >-
+        Spare capacity of the placed cells only. warmCells already reports
+        the empty ones.
+    tenants:
+      type: array
+      items:
+        type: string
+      description: Every tenant on the pool, sorted.
+    conditions:
+      type: array
+      items:
+        $ref: '#/CellPoolCondition'
+  additionalProperties: false
+
+CellPoolCondition:
+  type: object
+  description: >-
+    Status condition for a CellPool. Type PoolReady, with exactly the
+    reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported,
+    BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and
+    SecretsMissing.
+  required: [type, status]
+  properties:
+    type:
+      type: string
+    status:
+      type: string
+    lastTransitionTime:
+      type: string
+      description: ISO 8601 last transition time.
+    reason:
+      type: string
+    message:
+      type: string
+    observedGeneration:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellPool:
+  type: object
+  description: Full cell-pool object returned from get and list operations.
+  required: [cluster, name, spec, status]
+  properties:
+    cluster:
+      type: string
+      description: The cluster that holds the pool. A pool name is unique inside one cluster only.
+    name:
+      type: string
+    spec:
+      $ref: '#/CellPoolSpec'
+    status:
+      $ref: '#/CellPoolStatus'
+  additionalProperties: false
+
+CellPoolScaleRequest:
+  type: object
+  description: >-
+    Request body for PATCH /cellpools/{name}. It declares the four scale
+    dials and nothing else, so the contract itself states that a structural
+    edit is not an API operation.
+  required: [spec]
+  properties:
+    spec:
+      type: object
+      properties:
+        warm:
+          type: integer
+          format: int32
+          minimum: 0
+        maxCells:
+          type: integer
+          format: int32
+          minimum: 0
+        maxTenantsPerCell:
+          type: integer
+          format: int32
+          minimum: 1
+        unreadyGracePeriod:
+          type: string
+      additionalProperties: false
+  additionalProperties: false
+
+CellStatusProjection:
+  type: object
+  description: >-
+    The controller detail's projection of status.cell. It declares twelve
+    properties. It declares no rehydration property: the cell-controllers
+    capability keeps that key inside the operator.
+  properties:
+    tenants:
+      type: array
+      items:
+        type: string
+    warm:
+      type: boolean
+    evacuate:
+      type: boolean
+      description: >-
+        Operator-written state. No API accepts a write to it, so no surface
+        offers an evacuate action.
+    unreadySince:
+      type: string
+      format: date-time
+    rolledAt:
+      type: string
+      format: date-time
+    appliedTenants:
+      type: array
+      description: >-
+        The tenant set of the last apply that passed. A tenant named in
+        tenants and absent here is still rehydrating.
+      items:
+        type: string
+    tenantWarnings:
+      type: array
+      items:
+        $ref: '#/CellTenantWarning'
+    instance:
+      type: string
+    previousInstance:
+      type: string
+    previousInstanceLastSeen:
+      type: string
+      format: date-time
+    pendingSignatures:
+      type: array
+      description: >-
+        The script signatures the sandbox refused in this cell and no
+        operator approved. Carries at most 25 entries.
+      items:
+        $ref: '#/CellPendingSignature'
+    pendingSignaturesTotal:
+      type: integer
+      description: The number of pending signatures. It can exceed the list length.
+  additionalProperties: false
+
+CellPendingSignature:
+  type: object
+  description: One script signature the sandbox refused in a cell.
+  required: [signature]
+  properties:
+    signature:
+      type: string
+    dangerous:
+      type: boolean
+    requesters:
+      type: array
+      description: Up to three tenant jobs that hit this signature, newest first.
+      items:
+        $ref: '#/CellSignatureRequester'
+  additionalProperties: false
+
+CellSignatureRequester:
+  type: object
+  description: One tenant job that requested a refused script signature.
+  required: [jobPath]
+  properties:
+    tenant:
+      type: string
+    jobPath:
+      type: string
+    buildNumber:
+      type: integer
+    runId:
+      type: string
+  additionalProperties: false
+
+CellTenantWarning:
+  type: object
+  description: One non-blocking finding the reconciler recorded about a tenant.
+  required: [tenant, reason, message]
+  properties:
+    tenant:
+      type: string
+    reason:
+      type: string
+    message:
+      type: string
+  additionalProperties: false
+
+CellGrantSubject:
+  type: object
+  description: One subject of a grant.
+  required: [kind, name]
+  properties:
+    kind:
+      type: string
+    name:
+      type: string
+  additionalProperties: false
+
+CellGrant:
+  type: object
+  description: >-
+    One grant that reaches a tenant. The jobs field is absent when the grant
+    narrows nothing. An absent jobs and an empty jobs mean different things,
+    so the field is never an empty array.
+  required: [source, roleRef, subjects, verbs]
+  properties:
+    source:
+      type: string
+      enum: [teamMembership, tenantScopedBinding, clusterWideBinding]
+    binding:
+      type: string
+      description: The VarroaRoleBinding name. Absent for the teamMembership source.
+    roleRef:
+      type: string
+    subjects:
+      type: array
+      items:
+        $ref: '#/CellGrantSubject'
+    verbs:
+      type: array
+      description: The pipelines verbs of the grant's role, never the whole capability set.
+      items:
+        type: string
+    jobs:
+      type: array
+      minItems: 1
+      items:
+        type: string
+  additionalProperties: false
+
+CellTenantGrants:
+  type: object
+  description: >-
+    Every grant that reaches one tenant of a cell, with the tenant's
+    generated Jenkins item role. The item role and its pattern come from
+    the tenant name, so the read opens no JenkinsRole object.
+  required: [tenant, itemRole, itemPattern, truncated, grants]
+  properties:
+    tenant:
+      type: string
+    itemRole:
+      type: string
+    itemPattern:
+      type: string
+    truncated:
+      type: boolean
+      description: True only when the 50-grant cap dropped a grant of this tenant.
+    grants:
+      type: array
+      items:
+        $ref: '#/CellGrant'
+  additionalProperties: false
+
+CellGrants:
+  type: object
+  description: One entry for each tenant of a cell, naming the subjects that may build on it.
+  required: [cluster, namespace, cell, tenants]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    cell:
+      type: string
+    tenants:
+      type: array
+      items:
+        $ref: '#/CellTenantGrants'
+  additionalProperties: false
+
+CellUsageCounts:
+  type: object
+  description: >-
+    The four load counts of one tenant on a cell, or the same four summed
+    over the cell. runningNow carries no time bound, so a build that runs
+    longer than a day still counts. runsLast24h and failedLast24h count
+    inside the fixed 24-hour window. jobs counts distinct job paths. A run
+    whose result is TRIGGER_FAILED counts in no value.
+  required: [runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellTenantUsage:
+  type: object
+  description: One tenant on a cell, with that tenant's role and four counts.
+  required: [tenant, placementGeneration, runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    tenant:
+      type: string
+    role:
+      type: string
+      description: >-
+        That tenant's role on this cell: "slot <n>" for an active member
+        and "standby" for a standby. A standby holds the tenant folder and
+        runs no build, so its running count is zero.
+    agentNamespace:
+      type: string
+      description: >-
+        The namespace that holds the tenant's build agents, as the
+        tenant's own cluster last announced it. Absent when no
+        announcement named one.
+    placementGeneration:
+      type: integer
+      format: int64
+      description: The generation of the tenant's placement row.
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+CellUsage:
+  type: object
+  description: >-
+    One cell's load, tenant by tenant. An absent optional field is absent
+    from the object, never a null and never a zero: queueLength reads as
+    zero only for an empty queue, and a cell in a remote cluster carries
+    no queueLength at all.
+  required: [cluster, namespace, name, windowStart, tenants, totals, maxTenants, freeSlots]
+  properties:
+    cluster:
+      type: string
+    namespace:
+      type: string
+    name:
+      type: string
+    windowStart:
+      type: string
+      format: date-time
+      description: The start of the fixed 24-hour window the counts used.
+    cellPool:
+      type: string
+      description: The cell's varroa.dev/cell-pool label. Absent while no label is set.
+    profile:
+      type: string
+      description: The cell's varroa.dev/cell-profile label.
+    jenkinsVersion:
+      type: string
+    jenkinsHealth:
+      type: string
+    queueLength:
+      type: integer
+      format: int64
+      description: >-
+        The Jenkins queue length from the latest mite heartbeat. Absent for
+        a remote cluster and absent while no heartbeat has arrived.
+    queueLengthAt:
+      type: string
+      format: date-time
+      description: The heartbeat time the queue length came from.
+    tenants:
+      type: array
+      items:
+        $ref: '#/CellTenantUsage'
+    totals:
+      $ref: '#/CellUsageCounts'
+    maxTenants:
+      type: integer
+      format: int32
+      description: >-
+        The effective tenant cap this surface resolves: the cell's own
+        spec.cell.maxTenants when that value is not zero, else the chart
+        value, else ten. It is never a minimum over the tiers.
+    freeSlots:
+      type: integer
+      format: int32
+      description: maxTenants minus the placed tenant count, never below zero.
+  additionalProperties: false
+
+TeamCell:
+  type: object
+  description: >-
+    The tenant's own view of the cell that hosts it. For the states
+    unplaced and notCellHosted every field other than state and reason is
+    absent. The body carries no other tenant's name, job path, run, or
+    count.
+  required: [state, canOpenCell]
+  properties:
+    state:
+      type: string
+      enum: [placed, moving, rehydrating, unplaced, notCellHosted]
+    reason:
+      type: string
+      description: The Team's Placed condition reason, verbatim.
+    cell:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    cellPool:
+      type: string
+    profile:
+      type: string
+    jenkinsVersion:
+      type: string
+    freeSlots:
+      type: integer
+      format: int32
+    queueLength:
+      type: integer
+      format: int64
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
+    otherTenantCount:
+      type: integer
+      format: int32
+      description: >-
+        The number of other tenants on the cell. It is a count, never a
+        list.
+    canOpenCell:
+      type: boolean
+      description: >-
+        True when the caller also holds the controller read grant on the
+        cell. The hint gates no other field of this body.
+    members:
+      type: array
+      items:
+        $ref: '#/TeamCellMember'
+      description: >-
+        One entry for each member of the tenant, ordered by role: active
+        members by ascending slot first, then standbys by cell name. It is
+        absent for unplaced and notCellHosted. Every other field of this
+        body describes the tenant's slot 0.
+  additionalProperties: false
+
+TeamCellMember:
+  type: object
+  description: >-
+    One member of the tenant, with that member's own four load counts. The
+    counts apply the same grant narrowing the top-level counts apply. No
+    entry names another tenant.
+  required: [cell, namespace, cluster, role, runningNow, runsLast24h, failedLast24h, jobs]
+  properties:
+    cell:
+      type: string
+    namespace:
+      type: string
+    cluster:
+      type: string
+    role:
+      type: string
+      description: >-
+        "slot <n>" for an active member and "standby" for a standby.
+    runningNow:
+      type: integer
+      format: int64
+    runsLast24h:
+      type: integer
+      format: int64
+    failedLast24h:
+      type: integer
+      format: int64
+    jobs:
+      type: integer
+      format: int64
   additionalProperties: false

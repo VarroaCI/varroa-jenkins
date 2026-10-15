@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +30,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,11 +38,13 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
+	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/plugininv"
+	"github.com/varroaci/varroa-jenkins/internal/secretredact"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 )
 
@@ -68,16 +73,26 @@ type Config struct {
 	ControllerName string
 	Namespace      string
 	CAPEM          string
+
+	// CellInstance is the pod UID (VARROA_POD_UID). It rides RegisterRequest
+	// and every ClaimRequest, so the gateway's registration state and the
+	// mite's own claims name the same instance.
+	CellInstance string
 }
 
 // Agent is the mite sidecar agent that runs alongside a Jenkins instance.
 // It connects to the Varroa server, streams state, and applies desired-state
 // commands.
 type Agent struct {
-	cfg               Config
-	conn              *grpc.ClientConn
-	client            mitev1.MiteClient
-	stream            mitev1.Mite_CommandStreamClient
+	cfg     Config
+	metrics miteMetrics
+	// conn and client belong to the run loop. Only the run loop reads or
+	// writes them; every other goroutine reaches the gateway through sess.
+	conn   *grpc.ClientConn
+	client mitev1.MiteClient
+	// sess is the live command-stream session, or nil between sessions.
+	// sendMu guards it. Only the run loop replaces it.
+	sess              *miteSession
 	sendMu            sync.Mutex
 	cert              *tls.Certificate
 	certMu            sync.Mutex // guards cert (renewal loop vs. connect())
@@ -89,6 +104,10 @@ type Agent struct {
 	// miteDir is the base directory for mite state markers (convergence hash,
 	// boot-restarted). Defaults to varroaMiteDir; overridable in tests.
 	miteDir string
+
+	// jenkinsHomeDir is the root the rehydration section writes under.
+	// Defaults to jenkinsHome; overridable in tests.
+	jenkinsHomeDir string
 
 	// Cached Jenkins health, updated by the health-probe goroutine and read
 	// by the heartbeat goroutine. Guarded by healthMu because the probe and
@@ -171,6 +190,172 @@ type Agent struct {
 	// pushOnCollect is set by the COLLECT_PLUGIN_INVENTORY command to force an
 	// unconditional push after the next collection.
 	pushOnCollect bool
+
+	// Job-schedule poll/send state (D8). jobScheduleSet is the last
+	// successfully polled set; a failed poll leaves it unchanged.
+	// jobScheduleSetSeq counts successful polls, and
+	// jobScheduleSetEarliest is the earliest cron occurrence of the
+	// cached set. jobScheduleLastSentHash, jobScheduleLastSendTime,
+	// jobScheduleLastSentSeq, and jobScheduleLastSentEarliest track what
+	// was last attached to an outgoing StateSnapshot.
+	// jobScheduleForceSend is set on every stream (re)connect and cleared
+	// by the next attach, so the first snapshot after a reconnect carries
+	// the set even when its hash is unchanged. jobScheduleInterval,
+	// jobScheduleMinInterval, jobScheduleRetryBase, and
+	// jobScheduleResendAfter are the poll cadence bounds, the retry
+	// backoff start, and the send-timer, overridable in tests. Guarded by
+	// jobScheduleMu because the poller and the snapshot goroutines run
+	// concurrently.
+	jobScheduleMu               sync.Mutex
+	jobScheduleSet              *mitev1.JobScheduleSet
+	jobScheduleSetSeq           uint64
+	jobScheduleSetEarliest      time.Time
+	jobScheduleLastSentHash     string
+	jobScheduleLastSendTime     time.Time
+	jobScheduleLastSentSeq      uint64
+	jobScheduleLastSentEarliest time.Time
+	jobScheduleForceSend        bool
+	jobScheduleInterval         time.Duration
+	jobScheduleMinInterval      time.Duration
+	jobScheduleRetryBase        time.Duration
+	jobScheduleResendAfter      time.Duration
+
+	// scriptApprovalSet is the newest pending script-signature set the
+	// plugin answered, carried on every snapshot of a cell. It is nil
+	// before the first successful poll. scriptApprovalInterval is the poll
+	// cadence, overridable in tests. Guarded by scriptApprovalMu.
+	scriptApprovalMu       sync.Mutex
+	scriptApprovalSet      *mitev1.PendingSignatureSet
+	scriptApprovalInterval time.Duration
+
+	// jobScheduleExportOpen is the export gate. It opens after an apply
+	// in this process succeeds for the items section. A convergence
+	// marker on disk also opens it. It never closes again.
+	// jobSchedulePollNow wakes the poller at once when the gate opens.
+	jobScheduleExportOpen atomic.Bool
+	jobSchedulePollNow    chan struct{}
+
+	// Job-branch inventory state. It shares jobScheduleMu and the
+	// export gate. jobBranchSet is the last polled set. The last-sent hash,
+	// the last send time, and the force flag track the send gate.
+	jobBranchSet          *mitev1.JobBranchSet
+	jobBranchLastSentHash string
+	jobBranchLastSendTime time.Time
+	jobBranchForceSend    bool
+	// branchScanFastUntil ends the window in which the poller uses its
+	// minimum interval, so a requested scan reaches the export sooner.
+	branchScanFastUntil time.Time
+
+	// tenantHomes caches the tenant_homes field of the newest applied
+	// desired state. The loopback route GET /v1/homes serves it. The mite
+	// computes no home: the recorder is the only writer of the map and
+	// the operator is the only carrier. Nil before the first apply that
+	// carries the field, which the route answers as an empty list.
+	tenantHomes atomic.Pointer[[]*mitev1.TenantHomes]
+
+	// --- Loopback listener state (D7/D8): the co-located Jenkins plugin
+	// talks to the mite over 127.0.0.1 for build events and run claims.
+
+	// loopbackTokenDir is the directory that holds the loopback bearer
+	// token file. Defaults to loopbackTokenDirDefault; overridable in tests.
+	loopbackTokenDir string
+	// loopbackPort is the explicit listener port. A negative value (the
+	// NewAgent default) means "read MITE_LOOPBACK_PORT, else 9095"; zero
+	// asks the OS for a free port, which tests use to avoid collisions.
+	loopbackPort int
+	// loopbackToken is the random bearer token generated at start.
+	loopbackToken    string
+	loopbackServer   *http.Server
+	loopbackListener net.Listener
+
+	// claimTimeout is the mite's wait budget for a ClaimResponse. Read from
+	// MITE_CLAIM_TIMEOUT_MS at Run() time; overridable directly in tests.
+	claimTimeout time.Duration
+
+	// claimWaiters correlates an in-flight /v1/claim call with the
+	// ClaimResponse that arrives on the command stream.
+	claimWaiters *claimWaiterMap
+
+	// eventRetention holds every forwarded, unacknowledged build event so a
+	// reconnect can replay it. Bounded by VARROA_EVENT_RETAIN_BYTES.
+	eventRetention *eventRetentionStore
+
+	// eventAcks buffers EventAck values read from the stream since the last
+	// /v1/events response, so the plugin can release its spool.
+	eventAcks *ackBuffer
+
+	// logRetention holds every forwarded, unacknowledged console-log chunk
+	// so a reconnect can replay it. Bounded by VARROA_MITE_LOG_RETAIN_BYTES.
+	logRetention *logRetentionStore
+
+	// crossTenantTimeout is the mite's wait budget for a
+	// CrossTenantResponse (VARROA_CROSSTENANT_MITE_TIMEOUT_MS). NewAgent
+	// sets the bare default; startLoopback re-resolves it from the
+	// environment once a.Logger is set, so a malformed value, a clamp, or
+	// a nested-budget warning reaches the real logger.
+	crossTenantTimeout time.Duration
+
+	// triggerReadyWait bounds the Jenkins readiness wait a TRIGGER_BUILD
+	// command runs before its trigger call. A reconnecting cell receives
+	// its queued triggers within one second, before its Jenkins accepts a
+	// call. NewAgent sets triggerReadyWaitDefault.
+	triggerReadyWait time.Duration
+
+	// triggerNotFoundWait bounds the retry of a TRIGGER_BUILD call that
+	// Jenkins answers with 404. The retry lasts while the cell applies the
+	// desired state that creates the job. NewAgent sets
+	// triggerNotFoundWaitDefault.
+	triggerNotFoundWait time.Duration
+
+	// triggerNotFoundRecheck is the interval between two trigger calls
+	// that answer 404 while no desired state is pending. NewAgent sets
+	// triggerNotFoundRecheckDefault.
+	triggerNotFoundRecheck time.Duration
+
+	// itemsAppliedC is the items gate. It closes once, which opens the
+	// gate, when an items apply completed in this Jenkins boot. A trigger
+	// waits for it, because a cell's emptyDir home holds no jobs until
+	// the items apply. The gate never closes again in one process: a
+	// Jenkins container restart keeps the pod's home and its jobs.
+	itemsAppliedInit sync.Once
+	itemsAppliedOnce sync.Once
+	itemsAppliedC    chan struct{}
+
+	// The tenant gate holds the tenants of the newest desired state that
+	// reached the items step or returned converged. A new cell tenant has
+	// no folder until the operator pushes a desired state that holds it,
+	// but the recorder routes its triggers to the cell at once. A trigger
+	// on a cell therefore also waits until its tenant is in this set.
+	// Each apply replaces the set. tenantGateCell is the cell flag of
+	// that desired state; with it false, the tenant gate does not apply.
+	// tenantGateC closes, and is replaced, on each update.
+	tenantGateMu    sync.Mutex
+	tenantGateCell  bool
+	tenantGateNames map[string]bool
+	tenantGateC     chan struct{}
+
+	// crossTenantSeq allocates each cross-tenant request its own numeric
+	// id. The waiter map only needs uniqueness among currently open
+	// requests, never across a restart, so a process-local counter is
+	// enough.
+	crossTenantSeq atomic.Uint64
+
+	// crossTenantWaiters correlates an in-flight cross-tenant loopback
+	// call with the CrossTenantResponse that arrives on the command
+	// stream.
+	crossTenantWaiters *crossTenantWaiterMap
+
+	// runStateAcks holds the gateway's last answer for each run, so the
+	// run-state route can name a refusal reason on that run's next post.
+	runStateAcks *runStateAckStore
+
+	// runStateSeq allocates each run-state fetch its own numeric id. The
+	// waiter map only needs uniqueness among currently open fetches.
+	runStateSeq atomic.Uint64
+
+	// runStateWaiters correlates an in-flight fetch with the
+	// run_state_response messages that arrive on the command stream.
+	runStateWaiters *runStateWaiterMap
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -181,9 +366,43 @@ type identityState struct {
 	isBootstrap    bool
 }
 
-// NewAgent creates a new mite agent with the given configuration.
-func NewAgent(cfg Config) *Agent {
-	return &Agent{cfg: cfg, version: "0.1.0", heartbeatInterval: 15 * time.Second, miteDir: varroaMiteDir, drainMarkerPath: defaultDrainMarkerPath}
+// NewAgent creates a new mite agent with the given configuration. It
+// creates the mite instruments on the "varroa-mite" meter of mp and returns
+// an error when an instrument cannot be created.
+func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
+	metrics, err := newMiteMetrics(mp)
+	if err != nil {
+		return nil, err
+	}
+	return &Agent{
+		cfg:                    cfg,
+		metrics:                metrics,
+		version:                version,
+		heartbeatInterval:      15 * time.Second,
+		jobScheduleInterval:    jobSchedulePollInterval,
+		scriptApprovalInterval: scriptApprovalPollInterval,
+		jobScheduleMinInterval: jobScheduleMinPollInterval,
+		jobScheduleRetryBase:   jobScheduleRetryBackoff,
+		jobScheduleResendAfter: jobScheduleResendInterval,
+		jobSchedulePollNow:     make(chan struct{}, 1),
+		miteDir:                varroaMiteDir,
+		jenkinsHomeDir:         jenkinsHome,
+		drainMarkerPath:        defaultDrainMarkerPath,
+		loopbackTokenDir:       loopbackTokenDirDefault,
+		loopbackPort:           -1, // sentinel: resolve from MITE_LOOPBACK_PORT/default at start
+		claimTimeout:           claimTimeoutFromEnv(),
+		claimWaiters:           newClaimWaiterMap(),
+		eventRetention:         newEventRetentionStore(eventRetainBytesFromEnv()),
+		eventAcks:              newAckBuffer(),
+		logRetention:           newLogRetentionStore(logRetainBytesFromEnv()),
+		crossTenantTimeout:     defaultCrossTenantMiteTimeoutMS * time.Millisecond,
+		triggerReadyWait:       triggerReadyWaitDefault,
+		triggerNotFoundWait:    triggerNotFoundWaitDefault,
+		triggerNotFoundRecheck: triggerNotFoundRecheckDefault,
+		crossTenantWaiters:     newCrossTenantWaiterMap(),
+		runStateAcks:           newRunStateAckStore(),
+		runStateWaiters:        newRunStateWaiterMap(),
+	}, nil
 }
 
 // lastAppliedHashPath returns the convergence-marker path rooted at miteDir.
@@ -255,6 +474,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.writeOperatorStatus(false)
 	a.removeDrainMarker()
 
+	// A failed loopback start (port in use, an unwritable token directory)
+	// does not stop the agent: the gRPC command stream is the mite's primary
+	// duty, and it keeps retrying below regardless.
+	if err := a.startLoopback(ctx); err != nil {
+		a.Logger.Error("loopback listener failed to start; build events and claims are unavailable", "error", err)
+	}
+
 	needsBootstrap := id.isBootstrap
 	backoff := 5 * time.Second
 	const maxBackoff = 2 * time.Minute
@@ -276,16 +502,18 @@ func (a *Agent) Run(ctx context.Context) error {
 		if needsBootstrap {
 			if err := a.register(ctx, id); err != nil {
 				retry := backoff
-				unauthenticated := status.Code(err) == codes.Unauthenticated
+				code := status.Code(err)
+				unauthenticated := code == codes.Unauthenticated || code == codes.PermissionDenied
 				if unauthenticated {
-					// An invalid or expired bootstrap token is remedied
-					// server-side: the operator remints the Secret on every
-					// not-yet-connected reconcile tick and kubelet refreshes
-					// the mounted file within about a minute. Poll on a short
-					// fixed cadence instead of escalating to the network
-					// backoff, and re-read the file so the retry presents the
-					// reminted token rather than replaying the stale one read
-					// at startup.
+					// An invalid, expired, or already-consumed bootstrap
+					// token is remedied server-side: the operator remints the
+					// Secret on every not-yet-connected reconcile tick, and
+					// for a replaced pod, and kubelet refreshes the mounted
+					// file within about a minute. Poll on a short fixed
+					// cadence instead of escalating to the network backoff,
+					// and re-read the file so the retry presents the reminted
+					// token rather than replaying the stale one read at
+					// startup.
 					retry = 30 * time.Second
 				}
 				a.Logger.Warn("register failed, retrying", "error", err, "retry", retry)
@@ -328,6 +556,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.Logger.Info("stream connected")
 		a.writeOperatorStatus(true)
 
+		// Replay every retained build event and log chunk before anything
+		// else uses the new stream, so a reconnect never lets a fresh
+		// forward overtake one from before the disconnect.
+		a.replayRetainedEvents()
+		a.replayRetainedLogChunks()
+
+		// The stream just (re)connected: the next job-schedule attach must
+		// carry the last known set even if its hash is unchanged.
+		a.markStreamReconnected()
 		a.sendStateSnapshot(ctx)
 		a.resendInventoryIfStale(ctx)
 
@@ -338,8 +575,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.startObservabilityProbe(streamCtx)
 		go a.startFingerprintTicker(streamCtx)
 		go a.startActivityPoller(streamCtx)
+		go a.startJobSchedulePoller(streamCtx)
+		go a.startScriptApprovalPoller(streamCtx)
 		go a.startPluginInventoryCollector(streamCtx)
-		go a.startCertRenewalLoop(streamCtx)
+		// The run loop is the only writer of a.sess, so it reads it here
+		// without sendMu.
+		go a.startCertRenewalLoop(streamCtx, a.sess.client)
 		// Wire the reactive refresh path: on session loss + token expiry,
 		// the client triggers a refresh before re-establishing.
 		a.getJenkinsClient().OnTokenExpired = func() {
@@ -348,7 +589,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.processCommands(streamCtx)
 		streamCancel()
 
-		_ = a.conn.Close()
+		a.teardownSession()
 		a.writeOperatorStatus(false)
 
 		// Clear health state so the next heartbeat does not report
@@ -398,12 +639,22 @@ func (a *Agent) loadOrCreateIdentity(ctx context.Context) (*identityState, error
 			a.Logger.Warn("saved mite identity no longer trusted by current CA; discarding and re-bootstrapping")
 			a.discardSavedIdentity()
 		} else {
-			if a.cert.Leaf != nil && time.Now().Before(a.cert.Leaf.NotAfter) {
+			// The leaf names the pod instance the gateway stamps on every
+			// build event. A new pod is a new instance, so a leaf from the
+			// previous pod would mark every completion foreign to the claim:
+			// renew it with the existing keypair, which carries the current
+			// instance, the same way an expired leaf renews.
+			staleInstance := a.cfg.CellInstance != "" && a.cert.Leaf != nil &&
+				ca.CellInstanceFromCert(a.cert.Leaf) != a.cfg.CellInstance
+			if a.cert.Leaf != nil && time.Now().Before(a.cert.Leaf.NotAfter) && !staleInstance {
 				return &identityState{isBootstrap: false}, nil
 			}
-			// Certificate expired - attempt renewal with existing keypair.
+			if staleInstance {
+				a.Logger.Warn("saved mite identity names another pod instance; renewing with the existing keypair")
+			}
+			// Certificate expired or stale: attempt renewal with the existing keypair.
 			if err := a.connect(ctx); err == nil {
-				if err := a.renewWithExistingKeypair(ctx); err == nil {
+				if err := a.renewWithExistingKeypair(ctx, a.client); err == nil {
 					a.saveIdentity()
 					return &identityState{isBootstrap: false}, nil
 				}
@@ -551,14 +802,15 @@ func (a *Agent) saveIdentity() {
 
 // renewWithExistingKeypair attempts certificate renewal using an already
 // authenticated connection.
-func (a *Agent) renewWithExistingKeypair(ctx context.Context) error {
+func (a *Agent) renewWithExistingKeypair(ctx context.Context, client mitev1.MiteClient) error {
 	pub := a.keypair.Public().(ed25519.PublicKey)
 	req := &mitev1.RegisterRequest{
 		ControllerName: a.cfg.ControllerName,
 		Namespace:      a.cfg.Namespace,
 		PublicKey:      []byte(pub),
+		CellInstance:   a.cfg.CellInstance,
 	}
-	resp, err := a.client.Register(ctx, req)
+	resp, err := client.Register(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -573,6 +825,7 @@ func (a *Agent) register(ctx context.Context, id *identityState) error {
 		Namespace:      a.cfg.Namespace,
 		BootstrapToken: id.bootstrapToken,
 		PublicKey:      []byte(id.pubkey),
+		CellInstance:   a.cfg.CellInstance,
 	}
 	resp, err := a.client.Register(ctx, req)
 	if err != nil {
@@ -705,7 +958,73 @@ func (a *Agent) openStream(ctx context.Context) error {
 	if err := stream.Send(hello); err != nil {
 		return err
 	}
-	a.stream = stream
+	a.installSession(&miteSession{stream: stream, conn: a.conn, client: a.client})
+	return nil
+}
+
+// miteSession pairs one command stream with the connection and the client
+// that carry it. A send error on the stream closes this session's own
+// connection, never the connection of a later session.
+type miteSession struct {
+	stream mitev1.Mite_CommandStreamClient
+	conn   *grpc.ClientConn
+	client mitev1.MiteClient
+}
+
+// closeConn closes the session's connection. A nil connection is a no-op.
+func (s *miteSession) closeConn() {
+	if s.conn != nil {
+		_ = s.conn.Close()
+	}
+}
+
+// installSession makes s the live session under sendMu.
+func (a *Agent) installSession(s *miteSession) {
+	a.sendMu.Lock()
+	a.sess = s
+	a.sendMu.Unlock()
+}
+
+// teardownSession ends the session at the end of a run-loop pass. It
+// closes the connection before endSession takes sendMu: a send that flow
+// control stalls holds sendMu, and only the close unblocks it. It clears
+// the session before the next connect, so a late sender gets
+// errStreamNotConnected and never closes a later connection. Call it only
+// from the run loop.
+func (a *Agent) teardownSession() {
+	_ = a.conn.Close()
+	a.endSession()
+}
+
+// endSession clears the live session under sendMu. A send after it returns
+// errStreamNotConnected.
+func (a *Agent) endSession() {
+	a.sendMu.Lock()
+	a.sess = nil
+	a.sendMu.Unlock()
+}
+
+// send sends msg on the live session under sendMu.
+func (a *Agent) send(msg *mitev1.MiteMessage) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	return a.sendLocked(msg)
+}
+
+// sendLocked sends msg on the live session. The caller must hold sendMu.
+// With no live session it returns errStreamNotConnected. On a send error it
+// closes the connection of the session that owns the stream, which
+// unblocks that session's receive loop. It never closes a connection that
+// a later connect installed.
+func (a *Agent) sendLocked(msg *mitev1.MiteMessage) error {
+	s := a.sess
+	if s == nil || s.stream == nil {
+		return errStreamNotConnected
+	}
+	if err := s.stream.Send(msg); err != nil {
+		s.closeConn()
+		return err
+	}
 	return nil
 }
 
@@ -730,14 +1049,14 @@ func (a *Agent) sendStateSnapshot(ctx context.Context) {
 	snap.ItemsHash = itemsHash
 	snap.ActualStateHash = computeStateHash(configHash, pluginsHash, rbacHash, itemsHash)
 	snap.Status = snap.JenkinsHealth
+	a.maybeAttachJobSchedules(snap)
+	a.maybeAttachJobBranches(snap)
+	a.attachPendingSignatures(snap)
 
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("snapshot send failed", "error", err)
 	}
 }
@@ -804,18 +1123,19 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 			snap.LiveDrift = a.liveDrift
 			a.deferMu.Unlock()
 
+			// Fill the job-schedule set only when the send gate opens.
+			a.maybeAttachJobSchedules(snap)
+			a.maybeAttachJobBranches(snap)
+			a.attachPendingSignatures(snap)
+
 			// Send state snapshot (carries health, version, hashes).
 			snapMsg := &mitev1.MiteMessage{
 				Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
 			}
-			a.sendMu.Lock()
-			if err := a.stream.Send(snapMsg); err != nil {
-				a.sendMu.Unlock()
+			if err := a.send(snapMsg); err != nil {
 				a.Logger.Warn("snapshot send failed", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				return
 			}
-			a.sendMu.Unlock()
 
 			// Send heartbeat (carries version + hash for liveness).
 			hb := &mitev1.Heartbeat{
@@ -837,14 +1157,10 @@ func (a *Agent) sendHeartbeats(ctx context.Context) {
 					Heartbeat: hb,
 				},
 			}
-			a.sendMu.Lock()
-			if err := a.stream.Send(hbMsg); err != nil {
-				a.sendMu.Unlock()
+			if err := a.send(hbMsg); err != nil {
 				a.Logger.Warn("heartbeat send failed", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				return
 			}
-			a.sendMu.Unlock()
 		}
 	}
 }
@@ -883,10 +1199,28 @@ type commandWork struct {
 	imperativeCmd   *mitev1.ImperativeCommand
 	ctx             context.Context
 	span            trace.Span
+	// mailbox is the mailbox that queued the command. A waiting trigger
+	// takes a pending desired-state command from it. Nil for a command
+	// that no mailbox queued.
+	mailbox *commandMailbox
 }
 
 const imperativeQueueCap = 16
 const defaultCommandDeadline = 20 * time.Minute
+
+// triggerReadyWaitDefault is the readiness wait of one TRIGGER_BUILD
+// command. It stays below defaultCommandDeadline, so the trigger call
+// still has time after a full wait.
+const triggerReadyWaitDefault = 5 * time.Minute
+
+// triggerNotFoundWaitDefault bounds the retry of a trigger that the plugin
+// refuses with 404. The cell can hold a stale items set for one operator
+// tick plus one apply after the bundle declares the job.
+const triggerNotFoundWaitDefault = 90 * time.Second
+
+// triggerNotFoundRecheckDefault is the interval between two trigger calls
+// while no desired state is pending.
+const triggerNotFoundRecheckDefault = 5 * time.Second
 
 // commandMailbox is a mutex-guarded queue with a single-slot replace-on-arrival
 // desired-state entry (newest-wins) and a bounded FIFO imperative queue.
@@ -897,11 +1231,23 @@ type commandMailbox struct {
 	desired    *commandWork  // replace-on-arrival slot (newest-wins)
 	imperative []commandWork // bounded FIFO
 	signal     chan struct{} // cap 1, non-blocking notify
+	// active holds the identifier of every imperative command that is
+	// queued or running. The stream can deliver a command again while
+	// it still runs, for example after a gateway restart. A redelivery
+	// of an active command is therefore dropped, so it cannot fill the
+	// queue.
+	active map[string]bool
+	// desiredFirst, when set and true, makes take answer the desired slot
+	// before the imperative queue. A trigger that runs before the items
+	// apply finds no job, so the apply goes first while the items gate
+	// is closed.
+	desiredFirst func() bool
 }
 
 func newCommandMailbox() *commandMailbox {
 	return &commandMailbox{
 		signal: make(chan struct{}, 1),
+		active: map[string]bool{},
 	}
 }
 
@@ -916,18 +1262,47 @@ func (mb *commandMailbox) putDesired(w commandWork) {
 	mb.notify()
 }
 
-func (mb *commandMailbox) putImperative(w commandWork) bool {
+// putImperative queues w. It answers duplicate true, and queues nothing,
+// for a command whose identifier is already queued or running. It answers
+// ok false when the queue is full.
+func (mb *commandMailbox) putImperative(w commandWork) (ok, duplicate bool) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
+	var id string
+	if w.imperativeCmd != nil {
+		id = w.imperativeCmd.CommandId
+	}
+	if id != "" && mb.active[id] {
+		return true, true
+	}
 	if len(mb.imperative) >= imperativeQueueCap {
-		return false
+		return false, false
+	}
+	if id != "" {
+		mb.active[id] = true
 	}
 	mb.imperative = append(mb.imperative, w)
 	mb.notify()
-	return true
+	return true, false
+}
+
+// finish releases the identifier of an imperative command that ran, so a
+// later delivery of it runs again.
+func (mb *commandMailbox) finish(w commandWork) {
+	if w.imperativeCmd == nil {
+		return
+	}
+	mb.mu.Lock()
+	delete(mb.active, w.imperativeCmd.CommandId)
+	mb.mu.Unlock()
 }
 
 func (mb *commandMailbox) take() (commandWork, bool) {
+	if mb.desiredFirst != nil && mb.desiredFirst() {
+		if w, ok := mb.takeDesired(); ok {
+			return w, true
+		}
+	}
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	if len(mb.imperative) > 0 {
@@ -943,6 +1318,33 @@ func (mb *commandMailbox) take() (commandWork, bool) {
 	return commandWork{}, false
 }
 
+// takeDesired empties the desired slot and answers its command. It
+// answers false when the slot is empty.
+func (mb *commandMailbox) takeDesired() (commandWork, bool) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.desired == nil {
+		return commandWork{}, false
+	}
+	w := *mb.desired
+	mb.desired = nil
+	return w, true
+}
+
+// restoreDesired puts w back into an empty desired slot and sends no
+// notify. A newer command in the slot wins, and w is dropped.
+func (mb *commandMailbox) restoreDesired(w commandWork) {
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	if mb.desired != nil {
+		if w.span != nil {
+			w.span.End()
+		}
+		return
+	}
+	mb.desired = &w
+}
+
 func (mb *commandMailbox) notify() {
 	select {
 	case mb.signal <- struct{}{}:
@@ -956,13 +1358,34 @@ func (mb *commandMailbox) notify() {
 // are dispatched through a commandMailbox for a single serialized worker goroutine.
 func (a *Agent) processCommands(ctx context.Context) {
 	mb := newCommandMailbox()
+	mb.desiredFirst = func() bool { return !a.itemsApplied() }
+
+	// Stream teardown (context cancellation or a Recv error, both handled by
+	// every return below) releases every open claim waiter, so an HTTP
+	// handler blocked on /v1/claim never leaks a goroutine.
+	defer a.claimWaiters.releaseAll()
+	// The same rule applies to every open cross-tenant waiter (design.md
+	// D2): stream teardown must never leave an HTTP handler blocked on
+	// POST /v1/cross-tenant/*.
+	defer a.crossTenantWaiters.releaseAll()
+
+	// The receive goroutines use the session captured here. They never
+	// read a.sess, which the run loop clears when this function returns.
+	// This function runs on the run-loop goroutine, the only writer of
+	// a.sess, so it reads a.sess without sendMu. It must never take
+	// sendMu: a send that flow control stalls holds it, and the receive
+	// loop must still start.
+	sess := a.sess
+	if sess == nil {
+		return
+	}
 
 	go a.commandWorker(ctx, mb)
 
 	for {
 		ch := make(chan recvResult, 1)
 		go func() {
-			msg, err := a.stream.Recv()
+			msg, err := sess.stream.Recv()
 			ch <- recvResult{msg, err}
 		}()
 
@@ -992,7 +1415,7 @@ func (a *Agent) processCommands(ctx context.Context) {
 					attribute.String("command_id", m.DesiredState.CommandId),
 				),
 			)
-			w := commandWork{desiredStateCmd: m.DesiredState, ctx: cmdCtx, span: span}
+			w := commandWork{desiredStateCmd: m.DesiredState, ctx: cmdCtx, span: span, mailbox: mb}
 			mb.putDesired(w) // never ends session; coalescing is the back-pressure
 
 			// Cache drain timeout so the SAFE_RESTART path reads the latest.
@@ -1010,10 +1433,15 @@ func (a *Agent) processCommands(ctx context.Context) {
 			}
 			a.deferMu.Unlock()
 		case *mitev1.OperatorMessage_Imperative:
-			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx}
-			if !mb.putImperative(w) {
+			w := commandWork{imperativeCmd: m.Imperative, ctx: ctx, mailbox: mb}
+			ok, duplicate := mb.putImperative(w)
+			if !ok {
 				a.Logger.Error("imperative queue full, ending stream session")
 				return
+			}
+			if duplicate {
+				a.Logger.Debug("imperative command already queued or running, dropping the redelivery",
+					"command_id", m.Imperative.CommandId)
 			}
 		case *mitev1.OperatorMessage_TokenGrant:
 			grant := m.TokenGrant
@@ -1029,21 +1457,36 @@ func (a *Agent) processCommands(ctx context.Context) {
 				a.jenkinsTokenMu.Unlock()
 				a.wakeTokenWaiters()
 			}
+		case *mitev1.OperatorMessage_ClaimResponse:
+			a.claimWaiters.resolve(m.ClaimResponse)
+		case *mitev1.OperatorMessage_CrossTenantResponse:
+			a.crossTenantWaiters.resolve(m.CrossTenantResponse)
+		case *mitev1.OperatorMessage_EventAck:
+			a.handleEventAck(ctx, m.EventAck)
+		case *mitev1.OperatorMessage_TailControl:
+			// Runs in its own goroutine: the Jenkins call it makes must
+			// never block this loop from dispatching the next message.
+			go a.handleTailControl(ctx, m.TailControl)
+		case *mitev1.OperatorMessage_LogAck:
+			a.handleLogAck(ctx, m.LogAck)
+		case *mitev1.OperatorMessage_RunStateAck:
+			a.runStateAcks.record(m.RunStateAck)
+		case *mitev1.OperatorMessage_RunStateResponse:
+			a.runStateWaiters.resolve(m.RunStateResponse)
 		case *mitev1.OperatorMessage_ContentRequest:
 			req := m.ContentRequest
 			if req != nil && req.RequestId != "" {
-				resp := &mitev1.ContentResponse{
-					RequestId:  req.RequestId,
-					JcascYaml:  readFileEmpty(filepath.Join(a.miteDir, "last-jcasc.yaml")),
-					ItemsYaml:  readFileEmpty(filepath.Join(a.miteDir, "last-items.yaml")),
-					PluginsTxt: readFileEmpty(filepath.Join(a.miteDir, "last-plugins.txt")),
-				}
-				a.sendMu.Lock()
-				sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
-				a.sendMu.Unlock()
-				if sendErr != nil {
-					a.Logger.Error("send content response failed", "error", sendErr)
-				}
+				resp := buildContentResponse(a.miteDir, req.RequestId)
+				// Send off the run loop: the run loop must never wait for
+				// sendMu, which a send that flow control stalls holds.
+				go func() {
+					sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_ContentResponse{ContentResponse: resp}})
+					// A session that ends before this send is an ordinary
+					// reconnect, not a fault, so it logs nothing.
+					if sendErr != nil && !errors.Is(sendErr, errStreamNotConnected) {
+						a.Logger.Error("send content response failed", "error", sendErr)
+					}
+				}()
 			}
 		}
 	}
@@ -1106,6 +1549,7 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 									}
 									mb.putDesired(w)
 									a.runCommand(ctx, newW)
+									mb.finish(newW)
 									continue workLoop
 								}
 								if newW.desiredStateCmd != nil {
@@ -1129,12 +1573,26 @@ func (a *Agent) commandWorker(ctx context.Context, mb *commandMailbox) {
 			}
 
 			a.runCommand(ctx, w)
+			mb.finish(w)
 		}
 	}
 }
 
 // runCommand executes a single command and sends its result.
 // On send error it closes the connection (unblocks the recv loop).
+// isGenericTriggerPath reports whether a replay path names exactly the generic
+// webhook trigger's invoke endpoint. It accepts one leading slash and one
+// trailing slash, and it drops a query. Any other suffix, such as "invoker",
+// is a different path.
+func isGenericTriggerPath(p string) bool {
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+	return p == hibernation.GenericTriggerPath
+}
+
 func (a *Agent) runCommand(_ context.Context, w commandWork) {
 	deadline := defaultCommandDeadline
 	if w.desiredStateCmd != nil && w.desiredStateCmd.CommandDeadlineSec > 0 {
@@ -1147,6 +1605,9 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 
 	if w.desiredStateCmd != nil {
 		result := a.handleDesiredState(cctx, w.desiredStateCmd)
+		if result.ItemsSuccess {
+			a.openScheduleExport()
+		}
 		if w.span != nil {
 			w.span.End()
 		}
@@ -1170,12 +1631,8 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				},
 			},
 		}
-		a.sendMu.Lock()
-		err := a.stream.Send(resultMsg)
-		a.sendMu.Unlock()
-		if err != nil {
-			a.Logger.Warn("send command result failed, closing connection", "error", err)
-			_ = a.conn.Close()
+		if err := a.send(resultMsg); err != nil {
+			a.Logger.Warn("send command result failed", "error", err)
 			return
 		}
 	} else if w.imperativeCmd != nil {
@@ -1230,12 +1687,24 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 				errStr = fmt.Sprintf("build replay request: %v", reqErr)
 				break
 			}
-			// Apply envelope headers from the original webhook plus the
-			// operator JWT as Bearer auth (D4).
+			// Apply envelope headers from the original webhook.
 			for k, v := range payload.Headers {
 				req.Header.Set(k, v)
 			}
-			req.Header.Set("Authorization", "Bearer "+a.currentJenkinsToken())
+			// Set after the envelope headers, so a forged inbound
+			// X-Varroa-Delivery header cannot survive (design.md D13).
+			// Skipped when the operator sent no delivery id.
+			if payload.DeliveryId != "" {
+				req.Header.Set("X-Varroa-Delivery", payload.DeliveryId)
+			}
+			// The generic trigger reads a Bearer value as the job token
+			// before X-Gitlab-Token. Its own crumb exclusion needs no
+			// credential, so this path sends no Authorization header.
+			if isGenericTriggerPath(payload.Path) {
+				req.Header.Del("Authorization")
+			} else {
+				req.Header.Set("Authorization", "Bearer "+a.currentJenkinsToken())
+			}
 			// 15s timeout for the upstream call.
 			httpClient := &http.Client{Timeout: 15 * time.Second}
 			resp, httpErr := httpClient.Do(req)
@@ -1257,6 +1726,178 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			} else {
 				success = true
 			}
+		case mitev1.CommandTypeTriggerBuild:
+			payload := cmd.TriggerBuild
+			if payload == nil {
+				errStr = "trigger_build payload is nil"
+				break
+			}
+			// A wait that expires reaches no Jenkins, so the result keeps
+			// the status 0 and the gateway reports a retryable failure.
+			if readyErr := a.awaitTriggerReady(cctx, w.mailbox, payload.JobPath); readyErr != nil {
+				errStr = fmt.Sprintf("trigger build %s: %v", payload.JobPath, readyErr)
+				break
+			}
+			triggerStatus, triggerErr := a.triggerUntilJobExists(cctx, w.mailbox, jenkins.TriggerBuildRequest{
+				RunID:      payload.RunId,
+				IntentKey:  payload.IntentKey,
+				JobPath:    payload.JobPath,
+				Parameters: payload.Parameters,
+				Actor:      payload.Actor,
+			})
+			httpStatus = triggerStatus
+			if triggerErr != nil {
+				errStr = triggerErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeCancelBuild:
+			payload := cmd.CancelBuild
+			if payload == nil {
+				errStr = "cancel_build payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			cancelStatus, cancelErr := jenkinsClient.CancelBuild(cctx, jenkins.CancelBuildRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+			})
+			httpStatus = cancelStatus
+			if cancelErr != nil {
+				errStr = cancelErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeProceedInput:
+			payload := cmd.ProceedInput
+			if payload == nil {
+				errStr = "proceed_input payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			proceedStatus, proceedErr := jenkinsClient.ProceedInput(cctx, jenkins.ProceedInputRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+				InputID:     payload.InputId,
+				Parameters:  payload.Parameters,
+				ActingUser:  actingUserOf(payload.ActingUser),
+			})
+			httpStatus = proceedStatus
+			if proceedErr != nil {
+				errStr = proceedErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeAbortInput:
+			payload := cmd.AbortInput
+			if payload == nil {
+				errStr = "abort_input payload is nil"
+				break
+			}
+			jenkinsClient := a.getJenkinsClient()
+			abortStatus, abortErr := jenkinsClient.AbortInput(cctx, jenkins.AbortInputRequest{
+				RunID:       payload.RunId,
+				JobPath:     payload.JobPath,
+				BuildNumber: payload.BuildNumber,
+				InputID:     payload.InputId,
+				ActingUser:  actingUserOf(payload.ActingUser),
+			})
+			httpStatus = abortStatus
+			if abortErr != nil {
+				errStr = abortErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeReplayBuild:
+			payload := cmd.ReplayBuild
+			if payload == nil {
+				errStr = "replay_build payload is nil"
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			jenkinsClient := a.getJenkinsClient()
+			replayStatus, replayErr := jenkinsClient.ReplayBuild(cctx, jenkins.ReplayBuildRequest{
+				RunID:       payload.RunId,
+				IntentKey:   payload.IntentKey,
+				JobPath:     payload.JobPath,
+				SourceRunID: payload.SourceRunId,
+				Script:      payload.Script,
+				Parameters:  payload.Parameters,
+				ActingUser:  acting,
+			})
+			httpStatus = replayStatus
+			if replayErr != nil {
+				errStr = replayErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeScanMultibranch:
+			payload := cmd.ScanMultibranch
+			if payload == nil {
+				errStr = "scan_multibranch payload is nil"
+				break
+			}
+			// A scan takes the items gate alone. It runs on the home member,
+			// so the tenant gate of the job's tenant adds nothing to it.
+			if readyErr := a.awaitScanReady(cctx, w.mailbox); readyErr != nil {
+				errStr = fmt.Sprintf("scan multibranch %s: %v", payload.JobPath, readyErr)
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			scanStatus, scanErr := a.getJenkinsClient().ScanMultibranch(cctx, jenkins.ScanMultibranchRequest{
+				ScanID:     payload.ScanId,
+				JobPath:    payload.JobPath,
+				ActingUser: acting,
+			})
+			httpStatus = scanStatus
+			if scanErr != nil {
+				errStr = scanErr.Error()
+			} else {
+				success = true
+				a.openBranchScanWindow(time.Now())
+			}
+		case mitev1.CommandTypeRestartBuild:
+			payload := cmd.RestartBuild
+			if payload == nil {
+				errStr = "restart_build payload is nil"
+				break
+			}
+			var acting *jenkins.ActingUser
+			if payload.ActingUser != nil {
+				user := actingUserOf(payload.ActingUser)
+				acting = &user
+			}
+			restartStatus, restartErr := a.restartWithRestore(cctx, payload, jenkins.RestartBuildRequest{
+				RunID:             payload.RunId,
+				IntentKey:         payload.IntentKey,
+				JobPath:           payload.JobPath,
+				SourceRunID:       payload.SourceRunId,
+				SourceBuildNumber: payload.SourceBuildNumber,
+				Stage:             payload.Stage,
+				ActingUser:        acting,
+			})
+			httpStatus = restartStatus
+			if restartErr != nil {
+				errStr = restartErr.Error()
+			} else {
+				success = true
+			}
+		case mitev1.CommandTypeResumeBuild:
+			if resumeErr := a.applyResumeBuild(cctx, cmd.ResumeBuild); resumeErr != nil {
+				errStr = resumeErr.Error()
+			} else {
+				success = true
+			}
 		default:
 			errStr = "unknown imperative command type"
 		}
@@ -1264,17 +1905,429 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 			errStr = fmt.Sprintf("command deadline exceeded (%s)", deadline)
 			success = false
 		}
-		a.sendMu.Lock()
-		sendErr := a.stream.Send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{
-			CommandResult: &mitev1.CommandResult{CommandId: cmd.CommandId, Success: success, Error: errStr, Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus},
+		jobPath, runID := imperativeCommandSubject(cmd)
+		a.logImperativeResult(cmd, jobPath, runID, success, errStr, httpStatus)
+		sendErr := a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_CommandResult{
+			CommandResult: &mitev1.CommandResult{
+				CommandId: cmd.CommandId, Success: success, Error: errStr,
+				Deferred: deferred, DeferReason: deferReason, HttpStatus: httpStatus,
+				CommandType: cmd.Type, JobPath: jobPath, RunId: runID,
+				Actor: imperativeCommandActor(cmd),
+			},
 		}})
-		a.sendMu.Unlock()
 		if sendErr != nil {
-			a.Logger.Warn("send imperative result failed, closing connection", "error", sendErr)
-			_ = a.conn.Close()
+			a.Logger.Warn("send imperative result failed", "error", sendErr)
 			return
 		}
 	}
+}
+
+// awaitTriggerReady runs the startup path's readiness check before a
+// TRIGGER_BUILD call, then waits for the items gate and, on a cell, for
+// the tenant gate of the job's tenant. One triggerReadyWait budget bounds
+// every wait. It answers nil at once for a ready Jenkins whose items are
+// applied.
+//
+// The command worker is serial, so the worker cannot run the desired
+// state that opens a gate while this wait holds it. The wait therefore
+// takes a pending desired-state command from mb and runs it inline. While
+// the items gate is closed, the inline apply skips the idle deferral: no
+// build runs on a Jenkins that holds no items yet. Once the items gate is
+// open, builds can run, so the inline apply keeps the idle deferral. A nil
+// mb waits for the gates alone.
+func (a *Agent) awaitTriggerReady(ctx context.Context, mb *commandMailbox, jobPath string) error {
+	return a.awaitRunReady(ctx, mb, jobPath, true)
+}
+
+// awaitScanReady runs the wait of awaitTriggerReady with the items gate
+// alone. A scan names no tenant gate: the job's home member answers it
+// once the items are applied, whatever tenant set the cell holds.
+func (a *Agent) awaitScanReady(ctx context.Context, mb *commandMailbox) error {
+	return a.awaitRunReady(ctx, mb, "", false)
+}
+
+// awaitRunReady is the shared wait. When tenantGate is false, the wait
+// ends at the items gate alone and jobPath is not read.
+func (a *Agent) awaitRunReady(ctx context.Context, mb *commandMailbox, jobPath string, tenantGate bool) error {
+	ready := func() bool {
+		if tenantGate {
+			return a.tenantItemsReady(jobPath)
+		}
+		return a.itemsApplied()
+	}
+	wait := a.triggerReadyWait
+	if wait <= 0 {
+		wait = triggerReadyWaitDefault
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	if err := a.waitForJenkinsWithFreshToken(wctx); err != nil {
+		return fmt.Errorf("jenkins not ready after %s: %w", wait, err)
+	}
+	if !a.itemsApplied() {
+		a.openItemsGateFromMarker(wctx)
+	}
+	if ready() {
+		return nil
+	}
+	tenant := jobTenant(jobPath)
+	if a.itemsApplied() {
+		a.Logger.Info("trigger waits for the tenant items apply",
+			"tenant", tenant, "job_path", jobPath, "budget", wait)
+	} else {
+		a.Logger.Info("trigger waits for the items apply", "job_path", jobPath, "budget", wait)
+	}
+	waitErr := func() error {
+		if a.itemsApplied() {
+			return fmt.Errorf("tenant %s items not applied after %s", tenant, wait)
+		}
+		return fmt.Errorf("items not applied after %s", wait)
+	}
+	var signal <-chan struct{}
+	if mb != nil {
+		signal = mb.signal
+	}
+	recheck := a.heartbeatInterval
+	if recheck <= 0 {
+		recheck = 15 * time.Second
+	}
+	recheckTimer := time.NewTimer(recheck)
+	recheckTimer.Stop()
+	defer recheckTimer.Stop()
+	for {
+		if ready() {
+			return nil
+		}
+		var recheckC <-chan time.Time
+		if mb != nil {
+			if dw, ok := mb.takeDesired(); ok {
+				if a.deferInlineApply(dw) {
+					mb.restoreDesired(dw)
+					recheckTimer.Reset(recheck)
+					recheckC = recheckTimer.C
+				} else {
+					// The trigger budget also bounds the inline apply, so
+					// a stalled apply cannot hold the worker past the
+					// budget. A cut apply reports its deadline, and the
+					// operator pushes the desired state again.
+					if dw.ctx == nil {
+						dw.ctx = ctx
+					}
+					a.runInlineDesired(ctx, wctx, mb, dw)
+					if wctx.Err() != nil {
+						return waitErr()
+					}
+					continue
+				}
+			}
+		}
+		var bootC <-chan struct{}
+		if !a.itemsApplied() {
+			bootC = a.itemsAppliedSignal()
+		}
+		select {
+		case <-bootC:
+		case <-a.tenantGateSignal():
+		case <-signal:
+		case <-recheckC:
+		case <-wctx.Done():
+			if ready() {
+				return nil
+			}
+			return waitErr()
+		}
+	}
+}
+
+// runInlineDesired runs the pending desired state dw on the worker's
+// behalf. The deadline of wctx also bounds the apply.
+func (a *Agent) runInlineDesired(ctx, wctx context.Context, mb *commandMailbox, dw commandWork) {
+	if dw.ctx == nil {
+		dw.ctx = ctx
+	}
+	deadline, _ := wctx.Deadline()
+	var applyCancel context.CancelFunc
+	dw.ctx, applyCancel = context.WithDeadline(dw.ctx, deadline)
+	a.runCommand(ctx, dw)
+	applyCancel()
+	mb.finish(dw)
+}
+
+// triggerUntilJobExists makes a TRIGGER_BUILD call. A 404 means that the
+// job does not exist yet. The listing shows a job once the bundle declares
+// it, one operator tick before the cell holds it. The command worker is
+// serial, so this wait runs the pending desired state inline, the same way
+// awaitRunReady does. The call retries every triggerNotFoundRecheck and
+// after each inline apply, until the job exists or triggerNotFoundWait
+// ends. The last 404 stays, and the caller maps it to JOB_NOT_FOUND.
+// An apply_when idle desired state keeps its idle deferral here too.
+func (a *Agent) triggerUntilJobExists(ctx context.Context, mb *commandMailbox, req jenkins.TriggerBuildRequest) (int, error) {
+	status, err := a.getJenkinsClient().TriggerBuild(ctx, req)
+	if status != http.StatusNotFound {
+		return status, err
+	}
+	wait := a.triggerNotFoundWait
+	if wait <= 0 {
+		wait = triggerNotFoundWaitDefault
+	}
+	recheck := a.triggerNotFoundRecheck
+	if recheck <= 0 {
+		recheck = triggerNotFoundRecheckDefault
+	}
+	wctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	a.Logger.Info("trigger waits for the job to appear", "job_path", req.JobPath, "budget", wait)
+	var signal <-chan struct{}
+	if mb != nil {
+		signal = mb.signal
+	}
+	timer := time.NewTimer(recheck)
+	defer timer.Stop()
+	for {
+		applied := false
+		if mb != nil {
+			if dw, ok := mb.takeDesired(); ok {
+				if a.deferInlineApply(dw) {
+					mb.restoreDesired(dw)
+				} else {
+					a.runInlineDesired(ctx, wctx, mb, dw)
+					applied = true
+				}
+			}
+		}
+		if !applied {
+			select {
+			case <-signal:
+				continue // re-check the mailbox before the next call
+			case <-timer.C:
+				timer.Reset(recheck)
+			case <-wctx.Done():
+				return status, err // the last 404 stays
+			}
+		}
+		if wctx.Err() != nil {
+			return status, err
+		}
+		// ctx, not wctx: the last call is never cut by the wait budget.
+		status, err = a.getJenkinsClient().TriggerBuild(ctx, req)
+		if status != http.StatusNotFound {
+			return status, err
+		}
+	}
+}
+
+// deferInlineApply reports whether a waiting trigger must leave the
+// desired state dw in the mailbox. It answers true for an apply_when
+// idle command while builds run, but only once the items gate is open.
+func (a *Agent) deferInlineApply(dw commandWork) bool {
+	if !a.itemsApplied() || dw.desiredStateCmd == nil || dw.desiredStateCmd.ApplyWhen != "idle" {
+		return false
+	}
+	if a.shouldApplyNow(dw.desiredStateCmd) {
+		a.setDeferState(false, "")
+		return false
+	}
+	_, reason := a.loadDeferState()
+	a.setDeferState(true, reason)
+	return true
+}
+
+// jobTenant answers the tenant a job path names: its first segment. On a
+// cell, each tenant is a top-level folder named after the tenant.
+func jobTenant(jobPath string) string {
+	tenant, _, _ := strings.Cut(strings.Trim(jobPath, "/"), "/")
+	return tenant
+}
+
+// tenantItemsReady reports whether a trigger for jobPath can make its
+// call. The items gate must be open. On a cell, the job's tenant must
+// also be in the tenant set of the newest applied desired state.
+func (a *Agent) tenantItemsReady(jobPath string) bool {
+	if !a.itemsApplied() {
+		return false
+	}
+	a.tenantGateMu.Lock()
+	defer a.tenantGateMu.Unlock()
+	if !a.tenantGateCell {
+		return true
+	}
+	return a.tenantGateNames[jobTenant(jobPath)]
+}
+
+// tenantGateSignal answers the tenant gate channel. It closes at the next
+// update of the tenant set.
+func (a *Agent) tenantGateSignal() <-chan struct{} {
+	a.tenantGateMu.Lock()
+	defer a.tenantGateMu.Unlock()
+	if a.tenantGateC == nil {
+		a.tenantGateC = make(chan struct{})
+	}
+	return a.tenantGateC
+}
+
+// setAppliedTenants replaces the tenant set and wakes every waiter. The
+// set is replaced, not merged, so a tenant that left the cell leaves the
+// set.
+func (a *Agent) setAppliedTenants(cell bool, tenants []string) {
+	names := make(map[string]bool, len(tenants))
+	for _, t := range tenants {
+		if t != "" {
+			names[t] = true
+		}
+	}
+	a.tenantGateMu.Lock()
+	a.tenantGateCell = cell
+	a.tenantGateNames = names
+	old := a.tenantGateC
+	a.tenantGateC = make(chan struct{})
+	a.tenantGateMu.Unlock()
+	if old != nil {
+		close(old)
+	}
+}
+
+// recordAppliedTenants replaces the tenant set with the tenants of cmd.
+func (a *Agent) recordAppliedTenants(cmd *mitev1.DesiredStateCommand) {
+	a.setAppliedTenants(cmd.Cell, tenantNames(cmd))
+}
+
+// tenantNames answers the sorted tenant names of cmd's tenant_homes.
+func tenantNames(cmd *mitev1.DesiredStateCommand) []string {
+	names := make([]string, 0, len(cmd.TenantHomes))
+	for _, h := range cmd.TenantHomes {
+		if h != nil && h.Tenant != "" {
+			names = append(names, h.Tenant)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// itemsAppliedSignal answers the items gate channel. It closes when the
+// gate opens.
+func (a *Agent) itemsAppliedSignal() chan struct{} {
+	a.itemsAppliedInit.Do(func() { a.itemsAppliedC = make(chan struct{}) })
+	return a.itemsAppliedC
+}
+
+// markItemsApplied opens the items gate. Later calls do nothing.
+func (a *Agent) markItemsApplied() {
+	ch := a.itemsAppliedSignal()
+	a.itemsAppliedOnce.Do(func() { close(ch) })
+}
+
+// itemsApplied reports whether the items gate is open.
+func (a *Agent) itemsApplied() bool {
+	select {
+	case <-a.itemsAppliedSignal():
+		return true
+	default:
+		return false
+	}
+}
+
+// openItemsGateFromMarker opens the items gate when the convergence
+// marker's session equals the live Jenkins boot session. The marker is
+// written only after every requested section succeeded, so such a
+// marker proves the items were applied in this boot. Such a marker also
+// restores the tenant gate from its cell and tenants lines.
+func (a *Agent) openItemsGateFromMarker(ctx context.Context) {
+	marker := a.readMarker()
+	if marker.session == "" {
+		return
+	}
+	live, err := a.getJenkinsClient().SessionID(ctx)
+	if err == nil && live == marker.session {
+		a.setAppliedTenants(marker.cell, marker.tenants)
+		a.markItemsApplied()
+	}
+}
+
+// imperativeCommandSubject answers the job path and the run identifier an
+// imperative command names. A command type that names no run answers two
+// empty strings.
+func imperativeCommandSubject(cmd *mitev1.ImperativeCommand) (jobPath, runID string) {
+	switch {
+	case cmd.TriggerBuild != nil:
+		return cmd.TriggerBuild.JobPath, cmd.TriggerBuild.RunId
+	case cmd.CancelBuild != nil:
+		return cmd.CancelBuild.JobPath, cmd.CancelBuild.RunId
+	case cmd.ResumeBuild != nil:
+		return cmd.ResumeBuild.JobPath, cmd.ResumeBuild.RunId
+	case cmd.ProceedInput != nil:
+		return cmd.ProceedInput.JobPath, cmd.ProceedInput.RunId
+	case cmd.AbortInput != nil:
+		return cmd.AbortInput.JobPath, cmd.AbortInput.RunId
+	case cmd.ReplayBuild != nil:
+		return cmd.ReplayBuild.JobPath, cmd.ReplayBuild.RunId
+	case cmd.ScanMultibranch != nil:
+		return cmd.ScanMultibranch.JobPath, ""
+	case cmd.RestartBuild != nil:
+		return cmd.RestartBuild.JobPath, cmd.RestartBuild.RunId
+	case cmd.Target != "":
+		return cmd.Target, ""
+	}
+	return "", ""
+}
+
+// imperativeCommandActor answers the sender of a run command: the trigger's
+// or the cancel's actor, or the acting user's name of an input answer or a
+// replay. Every other command answers an empty actor.
+func imperativeCommandActor(cmd *mitev1.ImperativeCommand) string {
+	switch {
+	case cmd.TriggerBuild != nil:
+		return cmd.TriggerBuild.Actor
+	case cmd.CancelBuild != nil:
+		return cmd.CancelBuild.Actor
+	case cmd.ProceedInput != nil:
+		return actingUserName(cmd.ProceedInput.ActingUser)
+	case cmd.AbortInput != nil:
+		return actingUserName(cmd.AbortInput.ActingUser)
+	case cmd.ReplayBuild != nil:
+		return actingUserName(cmd.ReplayBuild.ActingUser)
+	case cmd.ScanMultibranch != nil:
+		return actingUserName(cmd.ScanMultibranch.ActingUser)
+	case cmd.RestartBuild != nil:
+		return actingUserName(cmd.RestartBuild.ActingUser)
+	}
+	return ""
+}
+
+func actingUserName(user *mitev1.ActingUser) string {
+	if user == nil {
+		return ""
+	}
+	return user.Name
+}
+
+// logImperativeResult logs the outcome of one imperative command: Info on
+// success and Warn on failure. A refused command leaves no other trace on
+// the mite, so this line is the cell-side record of it.
+func (a *Agent) logImperativeResult(cmd *mitev1.ImperativeCommand, jobPath, runID string,
+	success bool, reason string, httpStatus int) {
+	attrs := make([]any, 0, 12)
+	attrs = append(attrs,
+		"kind", cmd.Type.Label(),
+		"command_id", cmd.CommandId,
+		"job_path", jobPath,
+		"run_id", runID,
+	)
+	if success {
+		a.Logger.Info("imperative command succeeded", attrs...)
+		return
+	}
+	attrs = append(attrs, "reason", reason, "http_status", httpStatus)
+	a.Logger.Warn("imperative command failed", attrs...)
+}
+
+// actingUserOf maps an imperative command's acting user onto the Jenkins
+// request value. An absent command value answers an empty user, which the
+// plugin answers with a 400 status.
+func actingUserOf(user *mitev1.ActingUser) jenkins.ActingUser {
+	if user == nil {
+		return jenkins.ActingUser{}
+	}
+	return jenkins.ActingUser{Name: user.Name, Email: user.Email, Groups: user.Groups}
 }
 
 // handleDesiredState applies a desired-state command: JCasC configuration,
@@ -1295,6 +2348,11 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		a.wakeTokenWaiters()
 	}
 
+	// Cache the tenant home map this command carries. The cache is
+	// refreshed before the convergence gate, so a converged push still
+	// delivers a fresh map to the loopback route.
+	a.cacheTenantHomes(cmd)
+
 	// Convergence gate: if the desired state hash matches the last applied
 	// hash and this is not an explicit reload, skip all Jenkins writes.
 	// Token is already cached above so a converged drift push still delivers
@@ -1308,7 +2366,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	// fails (Jenkins down, likely restarting) — fall through and re-apply.
 	if cmd.DesiredStateHash != "" && !cmd.Reload {
 		marker := a.readMarker()
-		if marker.composite == cmd.DesiredStateHash {
+		if marker.composite == cmd.DesiredStateHash && rehydrationConverged(marker, cmd) {
 			live, err := a.getJenkinsClient().SessionID(ctx)
 			switch {
 			case err == nil && marker.session != "" && live == marker.session:
@@ -1317,6 +2375,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				result.PluginsSuccess = true
 				result.RbacSuccess = true
 				result.ItemsSuccess = true
+				result.RehydrationSuccess = true
+				a.recordAppliedTenants(cmd)
+				a.markItemsApplied()
 				return result
 			case err == nil:
 				a.Logger.Info("jenkins boot session changed since last apply — re-applying desired state",
@@ -1400,6 +2461,31 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		}
 	}
 
+	// 4. Apply the rehydration section: write every seeded build record
+	// under JENKINS_HOME. Runs after config/RBAC and before items, so a job
+	// the items section is about to touch is already seeded. See D5.
+	rehydrationApplied := false
+	if cmd.Rehydration != nil {
+		if converged("rehydration") {
+			result.RehydrationSuccess = true
+		} else {
+			applyResult, err := applyRehydrationBundle(a.jenkinsHomeDir, cmd.Rehydration)
+			if err != nil {
+				a.Logger.Error("rehydration apply failed", "error", err)
+				result.RehydrationSuccess = false
+				result.RehydrationError = err.Error()
+			} else {
+				result.RehydrationSuccess = true
+				result.RehydrationDeferredJobs = applyResult.deferredJobs
+				rehydrationApplied = true
+			}
+		}
+	} else {
+		// No rehydration payload requested: trivially converged, matching
+		// the existing rule for an absent items document.
+		result.RehydrationSuccess = true
+	}
+
 	// 5. Apply items configuration. Items authenticate through the same
 	// operator-JWT client as config/rbac/plugins; the declarative CASC boot
 	// apply secures the realm from t=0, so a transient early-boot auth failure
@@ -1423,6 +2509,10 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				if err := os.WriteFile(filepath.Join(a.miteDir, "last-items.yaml"), []byte(cmd.ItemsYaml), 0600); err != nil {
 					a.Logger.Error("store items failed", "error", err)
 				}
+				// The applied items may create jobs. Wake the schedule
+				// poller so the inventory reports them without waiting
+				// for the next interval.
+				a.wakeSchedulePoller()
 			}
 		}
 	} else {
@@ -1432,6 +2522,69 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		// controller_controller.go) and stamps a failed "items" section with no
 		// error message — surfacing as "items: rejected, no message returned".
 		result.ItemsSuccess = true
+	}
+	// 4b. The items apply creates the jobs of a new cell home. A job
+	// deferred before the items apply can take its seed now.
+	if rehydrationApplied && len(result.RehydrationDeferredJobs) > 0 {
+		deferredBefore := len(result.RehydrationDeferredJobs)
+		retry, err := applyRehydrationBundle(a.jenkinsHomeDir, cmd.Rehydration)
+		if err != nil {
+			a.Logger.Error("rehydration retry after items apply failed", "error", err)
+			result.RehydrationSuccess = false
+			result.RehydrationError = err.Error()
+		} else {
+			keep := retry.deferredJobs
+			if result.ItemsSuccess {
+				var orphans []string
+				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs)
+				if len(orphans) > 0 {
+					sample := orphans
+					if len(sample) > 5 {
+						sample = sample[:5]
+					}
+					a.Logger.Info("rehydration dropped records of jobs the items apply did not create",
+						"orphans", len(orphans), "sample", sample)
+				}
+			}
+			a.Logger.Info("rehydration seeded deferred jobs after the items apply",
+				"deferred_before", deferredBefore, "deferred_after", len(keep))
+			result.RehydrationDeferredJobs = keep
+		}
+	}
+
+	// A failed items apply opens the gate too: one broken item must not
+	// hold back the triggers of every other tenant on the cell. The same
+	// rule opens the tenant gate for every tenant of this desired state.
+	a.recordAppliedTenants(cmd)
+	a.markItemsApplied()
+
+	// 6. Reload every item the rehydration section named. Runs after the
+	// items apply, so a job the items section just created adopts its
+	// seeded records. A failed reload fails only the rehydration section;
+	// the items result stands on its own. An item Jenkins no longer holds
+	// is skipped, not failed: the record store keeps runs of a job the
+	// tenant has since removed, and a failure here would fence every
+	// other job of the tenant behind NOT_READY for good.
+	if cmd.Rehydration != nil {
+		var reloadErrs []string
+		for _, itemPath := range cmd.Rehydration.ReloadItems {
+			err := jenkinsClient.ReloadItem(ctx, itemPath)
+			if errors.Is(err, jenkins.ErrItemNotFound) {
+				a.Logger.Info("rehydration item absent, skipping reload", "item", itemPath)
+				continue
+			}
+			if err != nil {
+				a.Logger.Error("rehydration item reload failed", "item", itemPath, "error", err)
+				reloadErrs = append(reloadErrs, err.Error())
+			}
+		}
+		if len(reloadErrs) > 0 {
+			result.RehydrationSuccess = false
+			if result.RehydrationError != "" {
+				result.RehydrationError += "; "
+			}
+			result.RehydrationError += strings.Join(reloadErrs, "; ")
+		}
 	}
 
 	// Record convergence: persist the per-section marker only when all
@@ -1448,10 +2601,17 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				newSections[name] = desired[name]
 			}
 		}
+		// A job still deferred has no seeded record. The marker must not
+		// record the section, or a resend would skip the job's seed.
+		if len(result.RehydrationDeferredJobs) > 0 {
+			delete(newSections, "rehydration")
+		}
 		a.writeMarker(appliedMarker{
 			composite: cmd.DesiredStateHash,
 			session:   appliedSession,
 			sections:  newSections,
+			cell:      cmd.Cell,
+			tenants:   tenantNames(cmd),
 		})
 
 		// Capture a live-drift baseline from a fresh export.
@@ -1565,7 +2725,9 @@ func (a *Agent) applyConfigViaReload(ctx context.Context, client *jenkins.Client
 	// Do NOT preflight with /configuration-as-code/check — it requires
 	// Jenkins.ADMINISTER. The reload below re-parses the written bundle and
 	// fails on a bad config; the rollback path restores last-good. This keeps
-	// the mite's config push within the MANAGE permission tier.
+	// the mite's config push within the MANAGE permission tier. JCasC
+	// answers a failed reload with HTTP 200 and its error page, so the
+	// client's Reload reads the final request path, not the status code.
 
 	// Save last-good copies before overwriting.
 	if cmd.JcascYaml != "" {
@@ -1889,10 +3051,7 @@ func (a *Agent) requestTokenRefresh(ctx context.Context) {
 			TokenRefreshRequest: &mitev1.TokenRefreshRequest{},
 		},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("token refresh request send failed", "error", err)
 		a.removeWaiter(w)
 		return
@@ -1914,9 +3073,14 @@ func (a *Agent) requestTokenRefresh(ctx context.Context) {
 type appliedMarker struct {
 	composite, session string
 	sections           map[string]string // "config"|"rbac"|"items" → hash
+	// cell and tenants restore the tenant gate after a mite restart in
+	// the same Jenkins boot. A marker without a cell line restores no
+	// tenant gate.
+	cell    bool
+	tenants []string
 }
 
-var markerSectionNames = []string{"config", "plugins", "rbac", "items"}
+var markerSectionNames = []string{"config", "plugins", "rbac", "items", "rehydration"}
 
 // readMarker reads the convergence marker file. Backward-compatible: legacy
 // single-line "hash [session]" form parses with sections == nil.
@@ -1952,6 +3116,10 @@ func (a *Agent) readMarker() appliedMarker {
 			m.composite = val
 		case "session":
 			m.session = val
+		case "cell":
+			m.cell = val == "true"
+		case "tenants":
+			m.tenants = strings.Split(val, ",")
 		default:
 			m.sections[key] = val
 		}
@@ -2029,6 +3197,12 @@ func (a *Agent) writeMarker(m appliedMarker) {
 			buf.WriteString(name + " " + h + "\n")
 		}
 	}
+	if m.cell {
+		buf.WriteString("cell true\n")
+		if len(m.tenants) > 0 {
+			buf.WriteString("tenants " + strings.Join(m.tenants, ",") + "\n")
+		}
+	}
 	tmpFile := a.lastAppliedHashPath() + ".tmp"
 	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0600); err != nil {
 		a.Logger.Error("write last-applied-hash tmp failed", "error", err)
@@ -2048,7 +3222,7 @@ func (a *Agent) hasLastAppliedHash() bool {
 // desiredSectionHashes computes per-section content hashes from a command,
 // matching the operator-side computeChangedSections semantics.
 func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string]string {
-	m := make(map[string]string, 4)
+	m := make(map[string]string, 5)
 	if cmd.JcascYaml != "" {
 		m["config"] = sha256hex([]byte(cmd.JcascYaml))
 	}
@@ -2058,12 +3232,21 @@ func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string
 	if cmd.ItemsYaml != "" {
 		m["items"] = sha256hex([]byte(cmd.ItemsYaml))
 	}
+	if cmd.Rehydration != nil {
+		m["rehydration"] = cmd.Rehydration.ContentHash
+	}
 	return m
 }
 
 // allComponentsSucceeded returns true if every component present in the
 // command was applied successfully. Empty (unset) components count as
 // success (they were not requested).
+// rehydrationConverged reports whether the marker already records the
+// rehydration bundle of cmd. A command with no bundle is converged.
+func rehydrationConverged(m appliedMarker, cmd *mitev1.DesiredStateCommand) bool {
+	return cmd.Rehydration == nil || (m.sections != nil && m.sections["rehydration"] == cmd.Rehydration.ContentHash)
+}
+
 func (a *Agent) allComponentsSucceeded(result *mitev1.DesiredStateResult, cmd *mitev1.DesiredStateCommand) bool {
 	if cmd.JcascYaml != "" && !result.ConfigSuccess {
 		return false
@@ -2072,6 +3255,9 @@ func (a *Agent) allComponentsSucceeded(result *mitev1.DesiredStateResult, cmd *m
 		return false
 	}
 	if cmd.ItemsYaml != "" && !result.ItemsSuccess {
+		return false
+	}
+	if cmd.Rehydration != nil && !result.RehydrationSuccess {
 		return false
 	}
 	return true
@@ -2183,11 +3369,9 @@ func (a *Agent) observabilityProbeTick(ctx context.Context) {
 	report.Sources = sources
 	report.Capabilities = capabilities
 
-	a.sendMu.Lock()
-	err := a.stream.Send(&mitev1.MiteMessage{
+	err := a.send(&mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_ObservabilityReport{ObservabilityReport: report},
 	})
-	a.sendMu.Unlock()
 	if err != nil {
 		a.Logger.Warn("observability report send failed", "error", err)
 	}
@@ -2260,7 +3444,10 @@ func shouldRenewCert(notBefore, notAfter time.Time) bool {
 // startCertRenewalLoop proactively renews the mTLS client certificate once it
 // crosses the renewal threshold, so long-running mite processes never rely on
 // a pod restart to pick up a fresh cert before expiry.
-func (a *Agent) startCertRenewalLoop(ctx context.Context) {
+//
+// client is the session's own client. The loop never reads a.client, which
+// the run loop replaces on the next connect.
+func (a *Agent) startCertRenewalLoop(ctx context.Context, client mitev1.MiteClient) {
 	ticker := time.NewTicker(certRenewalCheckInterval)
 	defer ticker.Stop()
 	for {
@@ -2277,7 +3464,7 @@ func (a *Agent) startCertRenewalLoop(ctx context.Context) {
 			if !shouldRenewCert(cert.Leaf.NotBefore, cert.Leaf.NotAfter) {
 				continue
 			}
-			if err := a.renewWithExistingKeypair(ctx); err != nil {
+			if err := a.renewWithExistingKeypair(ctx, client); err != nil {
 				a.Logger.Warn("cert renewal failed, will retry", "error", err)
 				continue
 			}
@@ -2461,14 +3648,31 @@ func sha256hex(data []byte) string {
 }
 
 // computeStateHash combines the config, plugins, RBAC, and items hashes
-// into a single state hash.
+// into a single state hash. A section hash is empty when its file is
+// missing, so each part is framed with its name and length. Without the
+// frame, a missing section would let the next section take its place.
 func computeStateHash(configHash, pluginsHash, rbacHash, itemsHash string) string {
 	h := sha256.New()
-	h.Write([]byte(configHash))
-	h.Write([]byte(pluginsHash))
-	h.Write([]byte(rbacHash))
-	h.Write([]byte(itemsHash))
+	for _, part := range []struct{ name, body string }{
+		{"config", configHash}, {"plugins", pluginsHash}, {"rbac", rbacHash}, {"items", itemsHash},
+	} {
+		fmt.Fprintf(h, "%s:%d:", part.name, len(part.body))
+		_, _ = io.WriteString(h, part.body)
+	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// buildContentResponse answers a ContentRequest from the last-applied files
+// in miteDir. Every credential value is redacted before it leaves the pod,
+// because the answer reaches any caller with controller read access. The
+// files on disk stay unredacted: the convergence hashes read them.
+func buildContentResponse(miteDir, requestID string) *mitev1.ContentResponse {
+	return &mitev1.ContentResponse{
+		RequestId:  requestID,
+		JcascYaml:  secretredact.JCasC(readFileEmpty(filepath.Join(miteDir, "last-jcasc.yaml"))),
+		ItemsYaml:  secretredact.Items(readFileEmpty(filepath.Join(miteDir, "last-items.yaml"))),
+		PluginsTxt: readFileEmpty(filepath.Join(miteDir, "last-plugins.txt")),
+	}
 }
 
 // readFileEmpty reads a file's content, returning "" if the file does not exist,
@@ -2586,10 +3790,7 @@ func (a *Agent) pushInventoryUnlocked(_ context.Context, inv *plugininv.Inventor
 	msg := &mitev1.MiteMessage{
 		Message: &mitev1.MiteMessage_PluginInventory{PluginInventory: pi},
 	}
-	a.sendMu.Lock()
-	err := a.stream.Send(msg)
-	a.sendMu.Unlock()
-	if err != nil {
+	if err := a.send(msg); err != nil {
 		a.Logger.Warn("plugin inventory push failed", "error", err)
 		return
 	}

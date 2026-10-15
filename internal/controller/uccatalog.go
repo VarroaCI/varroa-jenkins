@@ -249,30 +249,57 @@ func inventoryDigest(entries []inventoryEntry) string {
 // inventory alone would make such an edit invisible to the skip gate and
 // leave every derived item stale until the next repair pass.
 func ucSyncDigest(entries []inventoryEntry, skipped []ucSkippedPack, profiles []ucProfile) string {
-	lines := make([]string, 0, 2+len(profiles))
-	lines = append(lines, inventoryDigest(entries))
+	in := ucSyncDigestInput{
+		Inventory: inventoryDigest(entries),
+		Skipped:   make([]string, 0, len(skipped)),
+		Profiles:  make([]ucSyncDigestProfile, 0, len(profiles)),
+	}
 	// skippedPacks decides whether this pass prunes and what warning it
 	// carries, so a pack becoming readable again is a change even when the
 	// readable plugin set happens to be identical.
-	refs := make([]string, 0, len(skipped))
 	for _, sp := range skipped {
-		refs = append(refs, sp.Ref)
+		in.Skipped = append(in.Skipped, sp.Ref)
 	}
-	sort.Strings(refs)
-	lines = append(lines, "skipped:"+strings.Join(refs, ","))
+	sort.Strings(in.Skipped)
 	for _, p := range profiles {
-		locks := make([]string, 0, len(p.Lock))
-		for artifactID, version := range p.Lock {
-			locks = append(locks, artifactID+"="+version)
-		}
-		sort.Strings(locks)
-		lines = append(lines, fmt.Sprintf("%s|%s|%t|%s",
-			p.Name, p.EffectiveCore, p.Eligible, strings.Join(locks, ",")))
+		in.Profiles = append(in.Profiles, ucSyncDigestProfile(p))
 	}
 	// profiles arrives sorted by name from loadUCProfiles; sort again so the
 	// digest cannot depend on that staying true.
-	sort.Strings(lines[2:])
-	return sha256Hex([]byte(strings.Join(lines, "\n")))
+	sort.Slice(in.Profiles, func(i, j int) bool {
+		a, b := in.Profiles[i], in.Profiles[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.EffectiveCore != b.EffectiveCore {
+			return a.EffectiveCore < b.EffectiveCore
+		}
+		return !a.Eligible && b.Eligible
+	})
+	// encoding/json frames every field and sorts every map key, so a ",",
+	// "|", or "=" inside a value cannot shift a field boundary.
+	b, err := json.Marshal(in)
+	if err != nil {
+		// Unreachable for this struct. An empty digest never matches
+		// observedRevision, so the pass derives.
+		return ""
+	}
+	return sha256Hex(b)
+}
+
+// ucSyncDigestInput is the encoded form of every input ucSyncDigest covers.
+type ucSyncDigestInput struct {
+	Inventory string                `json:"inventory"`
+	Skipped   []string              `json:"skipped"`
+	Profiles  []ucSyncDigestProfile `json:"profiles"`
+}
+
+// ucSyncDigestProfile is one profile as ucSyncDigest encodes it.
+type ucSyncDigestProfile struct {
+	Name          string            `json:"name"`
+	EffectiveCore string            `json:"effectiveCore"`
+	Eligible      bool              `json:"eligible"`
+	Lock          map[string]string `json:"lock,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,9 @@
         <source class="jenkins.plugins.git.GitSCMSource" plugin="git">
           <remote>https://github.com/fake-org/c.git</remote>
         </source>
+        <buildStrategies>
+          <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+        </buildStrategies>
       </jenkins.branch.BranchSource>
     </data>
   </sources>

@@ -4,6 +4,7 @@
     operationId: listCatalogSources
     tags: [catalog]
     summary: Lists catalog sources, optionally filtered by namespace.
+    description: A namespace-scoped caller sees objects in its readable namespaces and the operator namespace.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/namespace'
@@ -21,6 +22,8 @@
                   items:
                     $ref: '../components/schemas.yaml#/CatalogSource'
               additionalProperties: false
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
 
@@ -49,12 +52,15 @@
         $ref: '../components/responses.yaml#/BadRequest'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}:
   get:
     operationId: getCatalogSource
     tags: [catalog]
     summary: Gets a catalog source.
+    description: A namespace-scoped caller sees objects in its readable namespaces and the operator namespace.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/ns'
@@ -66,6 +72,8 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/CatalogSource'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
@@ -97,6 +105,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
   delete:
     operationId: deleteCatalogSource
     tags: [catalog]
@@ -112,6 +122,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/catalogsources/{ns}/{name}/sync:
   post:
@@ -144,6 +156,7 @@
     operationId: listCatalogItems
     tags: [catalog]
     summary: Lists catalog items with optional filters.
+    description: A namespace-scoped caller sees objects in its readable namespaces and the operator namespace.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/namespace'
@@ -178,6 +191,8 @@
                 operatorNamespace:
                   type: string
               additionalProperties: false
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
 
@@ -186,6 +201,7 @@
     operationId: getCatalogItem
     tags: [catalog]
     summary: Gets a catalog item.
+    description: A namespace-scoped caller sees objects in its readable namespaces and the operator namespace.
     parameters:
       - $ref: '../components/parameters.yaml#/cluster'
       - $ref: '../components/parameters.yaml#/ns'
@@ -200,6 +216,8 @@
           application/json:
             schema:
               $ref: '../components/schemas.yaml#/CatalogItemDetailResponse'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "404":

@@ -474,6 +474,56 @@ func TestHandleOIDCCallback_HTMLNoTokenDisclosure(t *testing.T) {
 	}
 }
 
+// recordingActivitySink captures published events for assertions.
+type recordingActivitySink struct{ events []activity.Event }
+
+func (r *recordingActivitySink) Publish(e activity.Event) { r.events = append(r.events, e) }
+
+// TestHandleOIDCCallback_PublishesLogin proves a successful callback
+// publishes a "login" event through notifyActivity/ActivityPublisher,
+// closing the defect where the site called a ring's Notify directly and
+// a login never reached the bus.
+func TestHandleOIDCCallback_PublishesLogin(t *testing.T) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingActivitySink{}
+	deps := &Dependencies{
+		OIDCStateSecret:   secret,
+		Logger:            testLoggerOIDC(t),
+		Auth:              &mockOIDCProvider{},
+		ActivityPublisher: sink,
+		SecureCookies:     true,
+	}
+	s := NewServer(deps)
+
+	nonce, _ := newStateNonce()
+	expiry := time.Now().Unix() + 300
+	payload, err := encodeStateCookie(secret, nonce, "/", expiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/callback?code=valid_code&state="+nonce, nil)
+	r.AddCookie(&http.Cookie{Name: stateCookieName, Value: payload})
+	s.HandleOIDCCallback(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("expected 1 published event, got %d: %+v", len(sink.events), sink.events)
+	}
+	if sink.events[0].Type != "login" {
+		t.Errorf("Type = %q, want login", sink.events[0].Type)
+	}
+	if sink.events[0].Source != "user" {
+		t.Errorf("Source = %q, want user", sink.events[0].Source)
+	}
+}
+
 // --- Secure cookie flag tests ---
 
 func TestSecureCookies_DefaultTrue(t *testing.T) {
@@ -499,7 +549,6 @@ func TestSecureCookies_FalseForHTTP(t *testing.T) {
 		OIDCStateSecret: []byte("test-secret-12345678901234567890123456"),
 		Logger:          testLoggerOIDC(t),
 		Auth:            &mockOIDCProvider{},
-		ActivityStore:   activity.New(10),
 		SecureCookies:   false,
 	}
 	s := NewServer(deps)
@@ -708,7 +757,6 @@ func oidcTestServer(t *testing.T) *Server {
 		OIDCStateSecret: secret,
 		Logger:          testLoggerOIDC(t),
 		Auth:            &mockOIDCProvider{},
-		ActivityStore:   activity.New(10),
 		SecureCookies:   true,
 	}
 	return NewServer(deps)
@@ -763,4 +811,25 @@ func (m *mockLocalProvider) Discovery() ([]byte, []byte, bool) {
 func testLoggerOIDC(t *testing.T) *slog.Logger {
 	t.Helper()
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// --- zero-groups check tests ---
+
+func TestHasGroups(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims *auth.Claims
+		want   bool
+	}{
+		{"resolved groups present", &auth.Claims{Groups: []string{"a"}}, true},
+		{"no resolved groups", &auth.Claims{}, false},
+		{"nil groups", &auth.Claims{Groups: nil}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasGroups(tt.claims); got != tt.want {
+				t.Errorf("hasGroups() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

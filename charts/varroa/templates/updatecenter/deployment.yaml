@@ -57,10 +57,7 @@ spec:
         {{- include "varroa.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: varroa-updatecenter
-      {{- with .Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
       {{- with .Values.updateCenter.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

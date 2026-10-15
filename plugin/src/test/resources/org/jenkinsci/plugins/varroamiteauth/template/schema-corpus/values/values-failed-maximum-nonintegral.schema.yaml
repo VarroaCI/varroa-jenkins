@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  ratio:
+    type: number
+    maximum: 2.5
+required:
+- ratio

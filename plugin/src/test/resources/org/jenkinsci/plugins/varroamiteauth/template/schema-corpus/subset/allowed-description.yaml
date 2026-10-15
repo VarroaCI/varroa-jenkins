@@ -1,0 +1,6 @@
+type: object
+additionalProperties: false
+description: An example schema.
+properties:
+  name:
+    type: string

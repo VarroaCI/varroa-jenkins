@@ -266,7 +266,7 @@ func TestStarterContentHasNoVariablesOrPinnedPlugins(t *testing.T) {
 		if strings.TrimSpace(content) == "" {
 			t.Fatalf("%s is empty", name)
 		}
-		for _, v := range findUnresolvedVars(true, bundle.ResolveVars(content, alwaysInjected)) {
+		for _, v := range bundle.RemainingVarRefs(true, bundle.ResolveVars(content, alwaysInjected)) {
 			t.Errorf("%s references %q, which the operator does not inject", name, v)
 		}
 		// The key checks below run on the YAML only. The variable check above
@@ -367,7 +367,7 @@ func TestStarterSeededObjectsCompose(t *testing.T) {
 		t.Fatalf("get bundle: %v", err)
 	}
 
-	composer := bundle.NewComposer(starterItemLookup{store}, nil, t.TempDir(), "", "", "", "varroa-system")
+	composer := bundle.NewComposer(starterItemLookup{store}, nil, t.TempDir(), "varroa-system")
 	res, err := composer.Compose(ctx, "varroa-system", &cb.Spec, nil, nil)
 	if err != nil {
 		t.Fatalf("Compose: %v", err)

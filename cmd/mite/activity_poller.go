@@ -8,26 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
-
-var (
-	activityEventsDropped   metric.Int64Counter
-	activityEventsForwarded metric.Int64Counter
-)
-
-func init() {
-	meter := otel.Meter("varroa-mite")
-	activityEventsDropped, _ = meter.Int64Counter("varroa.mite.activity.events.dropped",
-		metric.WithDescription("Number of events the plugin reported as dropped"),
-	)
-	activityEventsForwarded, _ = meter.Int64Counter("varroa.mite.activity.events.forwarded",
-		metric.WithDescription("Number of Jenkins activity events forwarded to the gateway"),
-	)
-}
 
 // drainResponse is the JSON response from GET /varroa-activity/events.
 type drainResponse struct {
@@ -81,7 +63,7 @@ func (a *Agent) startActivityPoller(ctx context.Context) {
 		}
 
 		if resp.Dropped > 0 {
-			activityEventsDropped.Add(ctx, int64(resp.Dropped))
+			a.metrics.activityEventsDropped.Add(ctx, int64(resp.Dropped))
 			logger.Warn("plugin reported dropped activity events", "count", resp.Dropped)
 		}
 
@@ -112,15 +94,11 @@ func (a *Agent) startActivityPoller(ctx context.Context) {
 				},
 			}
 
-			a.sendMu.Lock()
-			err := a.stream.Send(msg)
-			a.sendMu.Unlock()
-			if err != nil {
+			if err := a.send(msg); err != nil {
 				logger.Warn("activity event send failed, dropping remaining batch", "error", err)
-				_ = a.conn.Close() // wake up processCommands
 				break
 			}
-			activityEventsForwarded.Add(ctx, 1)
+			a.metrics.activityEventsForwarded.Add(ctx, 1)
 		}
 	}
 }

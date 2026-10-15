@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	batchv1 "k8s.io/api/batch/v1"
@@ -43,10 +42,13 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
+	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation/wakeserver"
@@ -69,12 +71,13 @@ func main() {
 	kubeconfigPath := flag.String("kubeconfig", "", "Kubeconfig path (bypasses in-cluster config)")
 	oidcIssuer := flag.String("oidc-issuer", envDefault("VARROA_OIDC_ISSUER", ""), "OIDC issuer URL (for bundle variable injection)")
 	oidcClientID := flag.String("oidc-client-id", envDefault("VARROA_OIDC_CLIENT_ID", "varroa"), "OIDC client ID")
-	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc or local")
-	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local)")
+	authMode := flag.String("auth-mode", envDefault("VARROA_AUTH_MODE", "oidc"), "Auth mode: oidc, local, or ldap")
+	bffURL := flag.String("bff-url", envDefault("VARROA_BFF_URL", ""), "BFF URL (required when auth-mode=local or ldap, or with --local-accounts)")
+	localAccounts := flag.Bool("local-accounts", envBool("VARROA_LOCAL_ACCOUNTS", false), "Accept declared local accounts beside OIDC (auth-mode=oidc only)")
 	oidcClientSecret := flag.String("oidc-client-secret", envDefault("VARROA_OIDC_CLIENT_SECRET", ""), "OIDC client secret")
 	oidcRedirectURL := flag.String("oidc-redirect-url", envDefault("VARROA_OIDC_REDIRECT_URL", ""), "OIDC redirect URL (for Varroa login link)")
 	oidcUserClaim := flag.String("oidc-user-claim", envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), "comma-separated JWT claims for kind:User bindings")
-	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings")
+	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings inside Jenkins")
 	defaultRead := flag.Bool("default-read", false, "Allow any authenticated user to read controllers without explicit binding")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
@@ -105,6 +108,17 @@ func main() {
 	}
 	logger.Info("cluster identity", "cluster", cluster)
 
+	if *localAccounts && (*authMode != "oidc" || *bffURL == "") {
+		logger.Error("--local-accounts needs auth-mode=oidc and --bff-url", "authMode", *authMode)
+		os.Exit(1)
+	}
+
+	controllerIss, err := controllerIssuer(*authMode, *oidcIssuer, *bffURL)
+	if err != nil {
+		logger.Error("invalid auth configuration", "error", err)
+		os.Exit(1)
+	}
+
 	if *authMode == "oidc" && strings.TrimSpace(*oidcClientSecret) == "" {
 		logger.Error("VARROA_OIDC_CLIENT_SECRET must be set when auth mode is oidc (no default is provided)")
 		os.Exit(1)
@@ -123,6 +137,19 @@ func main() {
 			}
 		}
 	}()
+	// Every operator instrument reads this provider. InitTelemetry installs
+	// it above, so read it only after that call.
+	meterProvider := otel.GetMeterProvider()
+	ledgerMetrics, err := newLedgerActionMetrics(meterProvider)
+	if err != nil {
+		logger.Error("failed to create ledger action metrics", "error", err)
+		os.Exit(1)
+	}
+	heartbeatCounter, err := newClusterHeartbeatCounter(meterProvider)
+	if err != nil {
+		logger.Error("failed to create cluster heartbeat counter", "error", err)
+		os.Exit(1)
+	}
 
 	if *busURL == "" {
 		if u := os.Getenv("VARROA_BUS_URL"); u != "" {
@@ -236,8 +263,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer busConn.Close()
-	if err := busConn.RegisterMetrics(otel.Meter("varroa-operator"), "operator"); err != nil {
-		logger.Warn("failed to register bus connected gauge", "error", err)
+	if err := busConn.RegisterMetrics(meterProvider.Meter("varroa-operator"), "operator"); err != nil {
+		logger.Warn("failed to register bus metrics", "error", err)
 	}
 	// JetStream replica count for streams and KV buckets (from the NATS
 	// cluster size, clamped 1..3 by the chart). Streams/KV created below and by
@@ -256,37 +283,32 @@ func main() {
 		logger.Error("failed to ensure KV bucket", "bucket", bus.KVPresenceBucket, "error", err)
 		os.Exit(1)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		logger.Error("failed to ensure KV bucket", "bucket", bus.KVDesiredBucket, "error", err)
-		os.Exit(1)
-	}
 	clustersKV, err := busConn.EnsureKV(bus.KVClustersBucket, bus.ClusterEntryTTL)
 	if err != nil {
 		logger.Error("failed to ensure KV bucket", "bucket", bus.KVClustersBucket, "error", err)
 		os.Exit(1)
 	}
 
-	miteTransport := transport.NewBusTransport(cluster, busConn, snapshotKV, presenceKV, desiredKV)
+	miteTransport := transport.NewBusTransport(cluster, busConn, snapshotKV, presenceKV)
 	miteTransport.Logger = logger
 
 	// --- Bundle resolver ---
-	resolver := bundle.NewResolver("/tmp/varroa-bundles")
+	resolver := bundle.NewResolver(meterProvider, "/tmp/varroa-bundles")
 	resolver.Logger = logger
-	// In local auth mode the BFF is the OIDC issuer — Jenkins pods
-	// discover /.well-known/jwks.json from the BFF to validate user tokens.
-	if *authMode == "local" && *bffURL != "" {
-		resolver.SetOIDCConfig(*bffURL, *oidcClientID, *oidcClientSecret)
-		logger.Info("local auth bundle variables configured", "issuer", *bffURL)
+	if controllerIss != "" {
+		resolver.SetOIDCConfig(controllerIss, *oidcClientID, *oidcClientSecret)
 		resolver.SetOIDCClaims(*oidcUserClaim, *oidcGroupClaim)
-	} else if *oidcIssuer != "" {
-		resolver.SetOIDCConfig(*oidcIssuer, *oidcClientID, *oidcClientSecret)
-		logger.Info("OIDC bundle variables configured", "issuer", *oidcIssuer)
-		resolver.SetOIDCClaims(*oidcUserClaim, *oidcGroupClaim)
+		logger.Info("controller issuer configured", "authMode", *authMode, "issuer", controllerIss)
+	}
+	// Beside OIDC, Jenkins pods also accept local account sessions that the
+	// BFF issues, and discover their keys from the BFF.
+	if *localAccounts {
+		resolver.SetLocalIssuer(*bffURL)
+		logger.Info("local accounts beside OIDC configured", "localIssuer", *bffURL)
 	}
 
 	// Create Composer for composed bundles (catalog-driven).
-	composer := bundle.NewComposer(storeItemLookupAdapter{clientsetClient}, resolver, "/tmp/varroa-composed", *oidcIssuer, *oidcClientID, *oidcClientSecret, operatorNamespace)
+	composer := bundle.NewComposer(storeItemLookupAdapter{clientsetClient}, resolver, "/tmp/varroa-composed", operatorNamespace)
 
 	// Create catalog reconciler for CatalogSource sync and ComposedBundle
 	// status updates. Uses the resolver's GitCloner for authenticated clones.
@@ -294,7 +316,7 @@ func main() {
 	if dir := os.Getenv("VARROA_GIT_CACHE_DIR"); dir != "" {
 		maxRepos := envInt("VARROA_GIT_CACHE_MAX_REPOS", 50)
 		maxSizeMiB := int64(envInt("VARROA_GIT_CACHE_MAX_SIZE_MIB", 2048))
-		cc, err := bundle.NewCloneCache(dir, maxRepos, maxSizeMiB, logger)
+		cc, err := bundle.NewCloneCache(meterProvider, dir, maxRepos, maxSizeMiB, logger)
 		if err != nil {
 			logger.Warn("git clone cache disabled", "dir", dir, "error", err)
 		} else {
@@ -311,6 +333,11 @@ func main() {
 		clientsetClient, clientsetClient, resolver.Cloner(), resolver, cloneCache,
 		"/tmp/varroa-catalogs", logger, operatorNamespace,
 		os.Getenv("VARROA_UPDATE_CENTER_URL"), &http.Client{Timeout: 30 * time.Second})
+	// The BFF reads each composed bundle's content ConfigMap outside the release
+	// namespace, where its ServiceAccount holds no permission. The operator
+	// grants that read per bundle. An empty name means this deployment runs no
+	// BFF, so it writes no grant.
+	catalogReconciler.SetBFFServiceAccount(os.Getenv("VARROA_BFF_SERVICE_ACCOUNT"))
 
 	// Create JenkinsVersionProfile reconciler for plugin set materialization.
 	versionProfileReconciler := controller.NewJenkinsVersionProfileReconciler(clientsetClient, clientsetClient, operatorNamespace, logger)
@@ -408,6 +435,50 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A change of a cell's per-tenant seed answer wakes the Team ticker on
+	// every replica. Only the leader runs that ticker, and it reads the same
+	// answers from its own informer cache.
+	teamWakeCh := make(chan struct{}, 1)
+	if _, err := controllerInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			o, _ := oldObj.(*v1alpha1.Controller)
+			n, _ := newObj.(*v1alpha1.Controller)
+			if o != nil && n != nil && controller.CellSeedStateChanged(o, n) {
+				notifyWake(teamWakeCh)
+			}
+		},
+	}); err != nil {
+		logger.Error("failed to add event handler on controller informer", "error", err)
+		os.Exit(1)
+	}
+
+	// CellPool informer. Its only job is to wake the pool ticker, so a
+	// scale edit takes effect at once rather than after the 60-second
+	// backstop. The channel holds one token and the send never blocks, so
+	// no writer can ever stall on it.
+	cellPoolWakeCh := make(chan struct{}, 1)
+	cellPoolWake := (<-chan struct{})(cellPoolWakeCh)
+	cellPoolGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "cellpools"}
+	cellPoolInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(cellPoolGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(cellPoolGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{}, 0, cache.Indexers{},
+	)
+	if _, err := cellPoolInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(interface{}) { notifyWake(cellPoolWakeCh) },
+		UpdateFunc: func(interface{}, interface{}) { notifyWake(cellPoolWakeCh) },
+		DeleteFunc: func(interface{}) { notifyWake(cellPoolWakeCh) },
+	}); err != nil {
+		logger.Error("failed to add event handler on cell pool informer", "error", err)
+		os.Exit(1)
+	}
+
 	// JenkinsRole informer
 	jenkinsRoleGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "jenkinsroles"}
 	jenkinsRoleInformer := cache.NewSharedIndexInformer(
@@ -465,16 +536,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	userClaims := strings.Split(*oidcUserClaim, ",")
-	groupClaims := strings.Split(*oidcGroupClaim, ",")
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer,
-		*defaultRead, userClaims, groupClaims)
+	userClaims := auth.ParseClaimNames(*oidcUserClaim)
+	// The operator resolves Jenkins assignments, never HTTP capabilities,
+	// and has no Team informer today; a nil teamInformer leaves the
+	// Team-membership tenant path contributing nothing.
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, nil,
+		*defaultRead, userClaims)
 	rbacGen := rbac.NewGenerator(rbacResolver)
 	rbacGen.Logger = logger
 
 	// --- Reconciler ---
-	reconciler := controller.NewReconciler(resolver, clientsetClient, clientsetClient, miteTransport, tokenSigner, rbacGen, composer)
+	reconciler := controller.NewReconciler(meterProvider, resolver, clientsetClient, clientsetClient, miteTransport, tokenSigner, rbacGen, composer)
 	reconciler.SetClusterName(cluster)
+	// A desired-state result that applies a rehydration seed wakes the
+	// owned Controller at once, so the drain applies it without a tick.
+	miteTransport.OnCommandResult = reconciler.NotifyCommandResult
 	reconciler.SetMiteTokenSigner(miteTokenSigner)
 	reconciler.SetCAPEM(string(certAuth.CAPEM()))
 	// Wire the bus-mode token-grant path: a mite's TokenRefreshRequest
@@ -491,17 +567,55 @@ func main() {
 	}
 	reconciler.SetVarroaEndpoint(gatewayEndpoint)
 	reconciler.SetOperatorNamespace(operatorNamespace)
+	// claimGate, blobstoreURL, and artifactSecretBase feed the reconciler,
+	// the team reconciler's pipelines gates, and the warm-pool reconciler's
+	// fill gate, so they are read once here (design D4).
+	claimGate := envDefault("VARROA_CLAIM_GATE", "0")
+	blobstoreURL := os.Getenv("VARROA_BLOBSTORE_URL")
+	artifactSecretBase := os.Getenv("VARROA_ARTIFACT_SECRET")
+	artifactSTS, err := artifactSTSConfigFromEnv(artifactSecretBase)
+	if err != nil {
+		logger.Error("artifact STS configuration", "error", err)
+		os.Exit(1)
+	}
+	reconciler.SetClaimGate(claimGate)
+	reconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
+	reconciler.SetRecordsFunc(controller.NewNATSSyncRecordsRequester(busConn))
+	reconciler.SetHomesFunc(controller.NewNATSSyncHomesRequester(busConn))
+	reconciler.SetBlobstoreURL(blobstoreURL)
+	reconciler.SetArtifactSecretBase(artifactSecretBase)
+	reconciler.SetArtifactSTS(artifactSTS)
+	if raw := os.Getenv("VARROA_CLAIM_TIMEOUT_MS"); raw != "" {
+		if ms, err := strconv.Atoi(raw); err != nil {
+			logger.Warn("VARROA_CLAIM_TIMEOUT_MS: parse error, leaving claim timeouts unset", "value", raw, "error", err)
+		} else {
+			reconciler.SetClaimTimeoutMS(ms)
+		}
+	}
 	reconciler.SetWakeServerPort(int32(*wakePort), wakeEnabled)
 	managedNamespaces := os.Getenv("MANAGED_NAMESPACES")
 	set := tenancy.NewManagedSet(managedNamespaces, operatorNamespace)
 	reconciler.SetTenancy(tenancy.NewClassifier(clientsetClient, set))
 	teamReconciler.SetManagedSet(set)
 	reconciler.SetVarroaRedirectURL(*oidcRedirectURL)
+	cellsConfig := controller.ParseCellsConfigFromEnv(logger)
+	reconciler.SetCellsConfig(cellsConfig)
 	reconciler.Logger = logger
+
+	// --- Pipelines placement pass wiring (design D4): the Team reconciler
+	// needs its own cluster identity, gate values, and cells tunables before
+	// it can place a tenant. A Team with no spec.pipelines never reads any
+	// of these.
+	teamReconciler.SetClusterIdentity(cluster)
+	teamReconciler.SetPipelinesGates(claimGate, blobstoreURL)
+	teamReconciler.SetCellsConfig(cellsConfig)
+	teamReconciler.SetPurgeRequester(controller.NewNATSPurgeRequester(busConn))
+	teamReconciler.SetSyncAnnouncer(controller.NewNATSSyncAnnouncer(busConn))
 
 	// --- Activity publisher (mode-agnostic, publishes to activity.* subjects) ---
 	actPub := activity.NewPublisher(cluster, busConn)
 	reconciler.SetActivityPublisher(actPub)
+	teamReconciler.SetActivityPublisher(actPub)
 
 	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, logger)
 
@@ -608,15 +722,21 @@ func main() {
 		identity = fmt.Sprintf("operator-%d", os.Getpid())
 		logger.Warn("failed to get hostname for shard manager identity", "error", hostErr, "fallback", identity)
 	}
-	sm := sharding.NewShardManager(
+	sm, err := sharding.NewShardManager(
+		meterProvider,
 		clientsetClient.Clientset().CoordinationV1().Leases(operatorNamespace),
 		operatorNamespace,
 		identity,
 		ring,
 		shardSet,
 		reconciler.EnqueueShards,
+		func([]int) { reconciler.ForgetUnowned() },
 		logger,
 	)
+	if err != nil {
+		logger.Error("failed to create shard manager", "error", err)
+		os.Exit(1)
+	}
 	if err := mgr.Add(sm); err != nil {
 		logger.Error("failed to add shard manager", "error", err)
 		os.Exit(1)
@@ -630,7 +750,9 @@ func main() {
 	}
 
 	// Register BFF command subscribers as a leader-elected runnable so only
-	// the active replica processes reconcile/wake/approveRestart requests.
+	// the active replica processes reconcile and wake requests. Approve
+	// restart and approve deletion are served on every replica by
+	// approveRestartRunner and approveDeletionRunner.
 	crud := &controller.CommandCRUD{
 		Client:            clientsetClient,
 		Store:             clientsetClient,
@@ -638,6 +760,7 @@ func main() {
 		ManagedNamespaces: managedNamespaces,
 		Lifecycle:         lifecycleStore,
 		Logger:            logger.With("component", "command_crud"),
+		Controllers:       controller.NewCacheControllerListSource(mgr.GetCache()),
 	}
 	crud.PreflightCheck = func(ctx context.Context, deps controller.PreflightDepsInterface, draft *v1alpha1.Controller, inlineBundle *v1alpha1.ComposedBundleSpec, opts controller.PreflightOptions) []bus.Check {
 		pres := preflight.Run(ctx, deps, draft, inlineBundle, preflight.Options{
@@ -664,6 +787,7 @@ func main() {
 		busConn:        busConn,
 		cluster:        cluster,
 		reconciler:     reconciler,
+		ledgerMetrics:  ledgerMetrics,
 		crud:           crud,
 		configCrud:     configCrud,
 		broodOps:       broodOps,
@@ -677,16 +801,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Approve restart runs on every replica; only the shard owner replies.
+	if err := mgr.Add(&approveRestartRunner{
+		busConn:    busConn,
+		cluster:    cluster,
+		reconciler: reconciler,
+		logger:     logger,
+	}); err != nil {
+		logger.Error("failed to add approve restart runner", "error", err)
+		os.Exit(1)
+	}
+
+	// Approve deletion runs on every replica; only the shard owner replies.
+	if err := mgr.Add(&approveDeletionRunner{
+		busConn:    busConn,
+		cluster:    cluster,
+		reconciler: reconciler,
+		logger:     logger,
+	}); err != nil {
+		logger.Error("failed to add approve deletion runner", "error", err)
+		os.Exit(1)
+	}
+
 	// Register cluster heartbeat runner (leader-elected, 30s tick).
 	hbRunner = &clusterHeartbeatRunner{
-		clusterName: cluster,
-		version:     version,
-		clustersKV:  clustersKV,
-		client:      clientsetClient,
-		store:       clientsetClient,
-		lifecycle:   lifecycleStore,
-		beatNow:     make(chan struct{}, 1),
-		logger:      logger,
+		clusterName:       cluster,
+		version:           version,
+		operatorNamespace: operatorNamespace,
+		clustersKV:        clustersKV,
+		client:            clientsetClient,
+		store:             clientsetClient,
+		lifecycle:         lifecycleStore,
+		beatNow:           make(chan struct{}, 1),
+		logger:            logger,
+		heartbeats:        heartbeatCounter,
 	}
 	if err := mgr.Add(hbRunner); err != nil {
 		logger.Error("failed to add cluster heartbeat runner", "error", err)
@@ -735,6 +883,9 @@ func main() {
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go controllerInformer.Run(ctx.Done())
+	// The cell-pool informer runs on every replica. The channel it feeds is
+	// in-process, so a non-leader replica's informer wakes nothing.
+	go cellPoolInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
 		roleInformer.HasSynced,
 		jenkinsRoleInformer.HasSynced,
@@ -869,7 +1020,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. Team reconciler (30s, immediate).
+	// 3. Team reconciler (30s, immediate). The brood subscriber and the
+	// Controller informer handler above wake it, so a confirmed cell loss
+	// and a new seed answer take effect without waiting for the interval.
+	// The channel holds one token and the send never blocks, so no
+	// publisher can stall on it.
 	if err := mgr.Add(&tickerRunnable{
 		name:      "team",
 		interval:  30 * time.Second,
@@ -877,9 +1032,90 @@ func main() {
 		tick: func(ctx context.Context) {
 			reconcileAllTeams(ctx, clientsetClient, teamReconciler, logger)
 		},
+		wake:   (<-chan struct{})(teamWakeCh),
 		logger: logger,
 	}); err != nil {
 		logger.Error("failed to add team runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 3a. Brood subscriber. A mite stream death reaches the operator in
+	// about 40 seconds, which is faster than any reconcile interval. The
+	// event only removes latency and decides nothing: the Controller
+	// reconcile it enqueues performs the pod read that proves the loss.
+	broodSub, err := startBroodWatch(busConn, cluster, reconciler, teamWakeCh, logger)
+	if err != nil {
+		logger.Error("failed to subscribe to the brood subject", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = broodSub.Unsubscribe() }()
+
+	// 3b. Cell-pool reconciler (60s), sizing and reporting every CellPool
+	// (design D5). It is the only creator of a cell and the only writer of
+	// CellPool.status. It writes no Controller status, so it never races
+	// the Controller reconciler's own status.cell writes. The chart values
+	// below seed a pool the operator creates; they configure no live pool.
+	warmPoolReconciler := &cells.WarmPoolReconciler{
+		Store:             clientsetClient,
+		OperatorNamespace: operatorNamespace,
+		Config: cells.WarmPoolConfig{
+			Enabled:              cellsConfig.WarmPoolEnabled,
+			PerProfile:           cellsConfig.WarmPoolPerProfile,
+			MaxTenantsPerCell:    cellsConfig.MaxTenantsPerCell,
+			UnreadyGracePeriod:   cellsConfig.UnreadyGracePeriod,
+			CellTemplate:         cellsConfig.CellTemplate,
+			ClaimGate:            claimGate,
+			BlobTierS3:           controller.BlobstoreIsS3(blobstoreURL),
+			ArtifactSecretBase:   artifactSecretBase,
+			ArtifactIssuerSecret: artifactSTS.IssuerSecret,
+		},
+		Logger:       logger,
+		Secrets:      clientsetClient,
+		Plugins:      reconciler,
+		SecretWriter: clientsetClient,
+	}
+	if err := mgr.Add(&tickerRunnable{
+		name:     "warm-pool",
+		interval: 60 * time.Second,
+		tick: func(ctx context.Context) {
+			if err := warmPoolReconciler.Reconcile(ctx); err != nil {
+				logger.Warn("cell-pool reconciler tick", "error", err)
+			}
+		},
+		wake:   cellPoolWake,
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add warm-pool runnable", "error", err)
+		os.Exit(1)
+	}
+
+	// 3c. Runner reconciler (60s, immediate, leader-elected — design D2). It
+	// is the only writer of Runner.status; no everyReplica, so it needs the
+	// lease. Each tick reports every cell that hosts a runner and every cell
+	// a runner left, and this closure wakes each one through the Controller
+	// reconciler's own reconcile-event channel so the next desired-state
+	// assembly picks up the change without waiting for that cell's own
+	// periodic tick.
+	runnerReconciler := &runners.Reconciler{
+		Backend:     clientsetClient,
+		Secrets:     clientsetClient,
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+		TokenSigner: miteTokenSigner,
+		Logger:      logger,
+	}
+	if err := mgr.Add(&tickerRunnable{
+		name:      "runner",
+		interval:  60 * time.Second,
+		immediate: true,
+		tick: func(ctx context.Context) {
+			result := runnerReconciler.Tick(ctx)
+			for _, cell := range result.TouchedCells {
+				reconciler.WakeController(cell.Cluster, cell.Namespace, cell.Name)
+			}
+		},
+		logger: logger,
+	}); err != nil {
+		logger.Error("failed to add runner runnable", "error", err)
 		os.Exit(1)
 	}
 
@@ -901,16 +1137,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5–6. Local-only auth reconcilers and bootstrap.
-	if *authMode == "local" {
+	// 5–6. Local account reconcilers and the local-mode admin bootstrap.
+	runLocalReconcilers, bootstrapAdmin := localAuthPlan(*authMode, *localAccounts)
+	if runLocalReconcilers {
 		userRec := controller.NewUserReconciler(clientsetClient, clientsetClient, operatorNamespace)
 		userRec.Logger = logger
+		var userSetup func(ctx context.Context) error
+		if bootstrapAdmin {
+			userSetup = func(ctx context.Context) error {
+				return controller.BootstrapLocalAdmin(ctx, clientsetClient, clientsetClient, operatorNamespace, logger)
+			}
+		}
 		if err := mgr.Add(&tickerRunnable{
 			name:     "user",
 			interval: 15 * time.Second,
-			setup: func(ctx context.Context) error {
-				return controller.BootstrapLocalAdmin(ctx, clientsetClient, clientsetClient, operatorNamespace, logger)
-			},
+			setup:    userSetup,
 			tick: func(ctx context.Context) {
 				if err := userRec.Reconcile(ctx); err != nil {
 					logger.Warn("user reconciler tick", "error", err)
@@ -979,7 +1220,10 @@ func main() {
 
 	// 9. Shard resync safety net (10m, every replica): re-enqueues owned
 	// controllers so a shard acquisition that raced a failed list or full
-	// event channel cannot strand its controllers indefinitely.
+	// event channel cannot strand its controllers indefinitely. It also
+	// forgets the mite of each controller that this replica does not own,
+	// because a reconcile in flight during a shard release can subscribe
+	// to that mite again after the release hook ran.
 	if err := mgr.Add(&tickerRunnable{
 		name:     "shard-resync",
 		interval: 10 * time.Minute,
@@ -988,6 +1232,7 @@ func main() {
 		jitter:       time.Minute,
 		everyReplica: true,
 		tick: func(_ context.Context) {
+			reconciler.ForgetUnowned()
 			reconciler.ResyncOwned()
 		},
 		logger: logger,
@@ -1043,7 +1288,7 @@ func main() {
 }
 
 // operatorCommandRunner subscribes to NATS request-reply subjects for BFF
-// commands (reconcile, nudge, wake, hibernate, approveRestart) and controller
+// commands (reconcile, nudge, wake, hibernate) and controller
 // CRUD operations.
 // It implements manager.LeaderElectionRunnable so only the elected leader
 // processes requests; non-leaders leave the queue group, letting NATS route
@@ -1052,6 +1297,7 @@ type operatorCommandRunner struct {
 	busConn        *bus.Conn
 	cluster        string
 	reconciler     *controller.Reconciler
+	ledgerMetrics  *ledgerActionMetrics
 	crud           *controller.CommandCRUD
 	configCrud     *controller.ConfigCRUD
 	broodOps       *controller.CommandBroodOps
@@ -1129,260 +1375,44 @@ func handleWake(ctx context.Context, logger *slog.Logger, rec hibernationCommand
 func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	const operatorQueue = "operator-workers"
 
-	// reconcileAction wraps a fire-and-forget reconciler call in the shared
-	// ReconcileRequest decode/response envelope.
-	reconcileAction := func(name string, act func(req bus.ReconcileRequest)) func([]byte) []byte {
-		return func(data []byte) []byte {
-			var req bus.ReconcileRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn(name+" request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ReconcileResponse{Error: err.Error()})
-				return resp
-			}
-			act(req)
-			resp, _ := json.Marshal(bus.ReconcileResponse{})
-			return resp
-		}
+	stopResponders, err := serveCommandResponders(r.busConn, operatorQueue, r.commandResponders(ctx), r.logger)
+	if err != nil {
+		return err
 	}
-
-	subscriptions := []struct {
-		name    string
-		subject string
-		handler bus.RequestHandler
-	}{
-		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
-			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
-		})},
-		{"nudge", bus.OperatorNudgeSubject(r.cluster), reconcileAction("nudge", func(req bus.ReconcileRequest) {
-			r.reconciler.WakeController(r.cluster, req.Namespace, req.Name)
-		})},
-		{"hibernate", bus.OperatorHibernateSubject(r.cluster), func(data []byte) []byte {
-			return handleHibernate(ctx, r.logger, r.reconciler, data)
-		}},
-		{"wake", bus.OperatorWakeSubject(r.cluster), func(data []byte) []byte {
-			return handleWake(ctx, r.logger, r.reconciler, data)
-		}},
-		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
-			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
-		})},
-		{"approve restart", bus.OperatorApproveSubject(r.cluster), func(data []byte) []byte {
-			var req bus.ApproveRestartRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn("approve restart request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ApproveRestartResponse{Error: "invalid request"})
-				return resp
-			}
-			if err := r.reconciler.ApproveRestart(context.Background(), r.cluster, req.Namespace, req.Name, req.Action); err != nil {
-				r.logger.Warn("approve restart failed",
-					"controller", req.Namespace+"/"+req.Name,
-					"action", req.Action, "error", err)
-				resp, _ := json.Marshal(bus.ApproveRestartResponse{Error: err.Error()})
-				return resp
-			}
-			resp, _ := json.Marshal(bus.ApproveRestartResponse{})
-			return resp
-		}},
-		{"approve deletion", bus.OperatorApproveDeletionSubject(r.cluster), func(data []byte) []byte {
-			var req bus.ApproveDeletionRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				r.logger.Warn("approve deletion request decode failed", "error", err)
-				resp, _ := json.Marshal(bus.ApproveDeletionResponse{Error: "invalid request"})
-				return resp
-			}
-			if err := r.reconciler.ApproveDeletion(context.Background(), r.cluster, req.Namespace, req.Name, req.Path); err != nil {
-				r.logger.Warn("approve deletion failed",
-					"controller", req.Namespace+"/"+req.Name,
-					"path", req.Path, "error", err)
-				resp, _ := json.Marshal(bus.ApproveDeletionResponse{Error: err.Error()})
-				return resp
-			}
-			resp, _ := json.Marshal(bus.ApproveDeletionResponse{})
-			return resp
-		}},
-		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList},
-		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet},
-		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate},
-		{"controllers.update", bus.OperatorControllersSubject(r.cluster, "update"), r.crud.HandleUpdate},
-		{"controllers.delete", bus.OperatorControllersSubject(r.cluster, "delete"), r.crud.HandleDelete},
-		{"controllers.deletepod", bus.OperatorControllersSubject(r.cluster, "deletepod"), r.crud.HandleDeletePod},
-		{"cluster.drain", bus.OperatorClusterSubject(r.cluster, "drain"), func(data []byte) []byte {
-			var req bus.ClusterDrainRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: "invalid request", Code: bus.CodeInvalid})
-				return resp
-			}
-			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			st, err := r.lifecycle.Load(bctx)
-			if err != nil {
-				r.logger.Warn("cluster.drain: load failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if st.State == bus.ClusterStateActive {
-				if err := r.lifecycle.SetDraining(bctx, req.RequestedBy); err != nil {
-					r.logger.Warn("cluster.drain: set draining failed", "error", err)
-					resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
-					return resp
-				}
-
-				// Count controllers for activity event
-				ctrlCount := 0
-				if ctrls, listErr := crdstore.List[v1alpha1.Controller](bctx, r.crud.Store, "", ""); listErr == nil {
-					ctrlCount = len(ctrls)
-				}
-
-				if r.activity != nil {
-					r.activity.Publish(activity.Event{
-						Type:    "cluster.drain.started",
-						Source:  "operator",
-						Actor:   req.RequestedBy,
-						Message: fmt.Sprintf("cluster drain started (%d controllers)", ctrlCount),
-					})
-				}
-				if r.beatNow != nil {
-					r.beatNow()
-				}
-				resp, _ := json.Marshal(bus.ClusterDrainResponse{State: bus.ClusterStateDraining})
-				return resp
-			}
-
-			// Idempotent: already draining/drained, reply current state with no side effects.
-			resp, _ := json.Marshal(bus.ClusterDrainResponse{State: st.State})
-			return resp
-		}},
-		{"cluster.draincancel", bus.OperatorClusterSubject(r.cluster, "draincancel"), func(data []byte) []byte {
-			var req bus.ClusterDrainCancelRequest
-			if err := json.Unmarshal(data, &req); err != nil {
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: "invalid request", Code: bus.CodeInvalid})
-				return resp
-			}
-			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			st, err := r.lifecycle.Load(bctx)
-			if err != nil {
-				r.logger.Warn("cluster.draincancel: load failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if st.State == bus.ClusterStateActive {
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{
-					Error: "cluster is not draining",
-					Code:  bus.CodeConflict,
-				})
-				return resp
-			}
-
-			// draining or drained → set active
-			if err := r.lifecycle.SetActive(bctx); err != nil {
-				r.logger.Warn("cluster.draincancel: set active failed", "error", err)
-				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
-				return resp
-			}
-
-			if r.activity != nil {
-				r.activity.Publish(activity.Event{
-					Type:    "cluster.drain.canceled",
-					Source:  "operator",
-					Actor:   req.RequestedBy,
-					Message: "cluster drain canceled",
-				})
-			}
-			if r.beatNow != nil {
-				r.beatNow()
-			}
-			resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{State: bus.ClusterStateActive})
-			return resp
-		}},
-		// BroodOps command handlers per design §3 (F2 cross-cluster brood ops).
-		{"broodops.create", bus.OperatorBroodOpsSubject(r.cluster, "create"), r.broodOps.HandleCreate},
-		{"broodops.get", bus.OperatorBroodOpsSubject(r.cluster, "get"), r.broodOps.HandleGet},
-		{"broodops.list", bus.OperatorBroodOpsSubject(r.cluster, "list"), r.broodOps.HandleList},
-		{"broodops.cancel", bus.OperatorBroodOpsSubject(r.cluster, "cancel"), r.broodOps.HandleCancel},
-		{"broodops.suspend", bus.OperatorBroodOpsSubject(r.cluster, "suspend"), r.broodOps.HandleSuspend},
-		{"broodops.preview", bus.OperatorBroodOpsSubject(r.cluster, "preview"), r.broodOps.HandlePreview},
-		// BroodSchedules command handlers.
-		{"broodschedules.create", bus.OperatorBroodSchedulesSubject(r.cluster, "create"), r.broodSchedules.HandleCreate},
-		{"broodschedules.get", bus.OperatorBroodSchedulesSubject(r.cluster, "get"), r.broodSchedules.HandleGet},
-		{"broodschedules.list", bus.OperatorBroodSchedulesSubject(r.cluster, "list"), r.broodSchedules.HandleList},
-		{"broodschedules.delete", bus.OperatorBroodSchedulesSubject(r.cluster, "delete"), r.broodSchedules.HandleDelete},
-		{"broodschedules.suspend", bus.OperatorBroodSchedulesSubject(r.cluster, "suspend"), r.broodSchedules.HandleSuspend},
-		// Config CRUD handlers (add-remote-config-authoring) — 27 subjects.
-		{"bundles.list", bus.OperatorBundlesSubject(r.cluster, "list"), r.configCrud.HandleBundlesList},
-		{"bundles.get", bus.OperatorBundlesSubject(r.cluster, "get"), r.configCrud.HandleBundlesGet},
-		{"bundles.create", bus.OperatorBundlesSubject(r.cluster, "create"), r.configCrud.HandleBundlesCreate},
-		{"bundles.update", bus.OperatorBundlesSubject(r.cluster, "update"), r.configCrud.HandleBundlesUpdate},
-		{"bundles.delete", bus.OperatorBundlesSubject(r.cluster, "delete"), r.configCrud.HandleBundlesDelete},
-		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview},
-		{"bundles.validate", bus.OperatorBundlesSubject(r.cluster, "validate"), r.configCrud.HandleBundlesValidate},
-		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause},
-		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause},
-		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList},
-		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet},
-		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList},
-		{"catalog.sourceget", bus.OperatorCatalogSubject(r.cluster, "sourceget"), r.configCrud.HandleSourcesGet},
-		{"catalog.sourcecreate", bus.OperatorCatalogSubject(r.cluster, "sourcecreate"), r.configCrud.HandleSourcesCreate},
-		{"catalog.sourceupdate", bus.OperatorCatalogSubject(r.cluster, "sourceupdate"), r.configCrud.HandleSourcesUpdate},
-		{"catalog.sourcedelete", bus.OperatorCatalogSubject(r.cluster, "sourcedelete"), r.configCrud.HandleSourcesDelete},
-		{"catalog.sourcesync", bus.OperatorCatalogSubject(r.cluster, "sourcesync"), r.configCrud.HandleSourceSync},
-		{"rbac.rolelist", bus.OperatorRbacSubject(r.cluster, "rolelist"), r.configCrud.HandleRolesList},
-		{"rbac.roleget", bus.OperatorRbacSubject(r.cluster, "roleget"), r.configCrud.HandleRolesGet},
-		{"rbac.rolecreate", bus.OperatorRbacSubject(r.cluster, "rolecreate"), r.configCrud.HandleRolesCreate},
-		{"rbac.roleupdate", bus.OperatorRbacSubject(r.cluster, "roleupdate"), r.configCrud.HandleRolesUpdate},
-		{"rbac.roledelete", bus.OperatorRbacSubject(r.cluster, "roledelete"), r.configCrud.HandleRolesDelete},
-		{"rbac.bindinglist", bus.OperatorRbacSubject(r.cluster, "bindinglist"), r.configCrud.HandleBindingsList},
-		{"rbac.bindingget", bus.OperatorRbacSubject(r.cluster, "bindingget"), r.configCrud.HandleBindingsGet},
-		{"rbac.bindingcreate", bus.OperatorRbacSubject(r.cluster, "bindingcreate"), r.configCrud.HandleBindingsCreate},
-		{"rbac.bindingupdate", bus.OperatorRbacSubject(r.cluster, "bindingupdate"), r.configCrud.HandleBindingsUpdate},
-		{"rbac.bindingdelete", bus.OperatorRbacSubject(r.cluster, "bindingdelete"), r.configCrud.HandleBindingsDelete},
-		{"provisioningdefaults.get", bus.OperatorProvisioningDefaultsSubject(r.cluster, "get"), r.configCrud.HandleProvisioningDefaultsGet},
-		{"provisioningdefaults.update", bus.OperatorProvisioningDefaultsSubject(r.cluster, "update"), r.configCrud.HandleProvisioningDefaultsUpdate},
-		{"versionprofiles.list", bus.OperatorVersionProfilesSubject(r.cluster, "list"), r.configCrud.HandleVersionProfilesList},
-		{"versionprofiles.get", bus.OperatorVersionProfilesSubject(r.cluster, "get"), r.configCrud.HandleVersionProfilesGet},
-		{"versionprofiles.create", bus.OperatorVersionProfilesSubject(r.cluster, "create"), r.configCrud.HandleVersionProfilesCreate},
-		{"versionprofiles.update", bus.OperatorVersionProfilesSubject(r.cluster, "update"), r.configCrud.HandleVersionProfilesUpdate},
-		{"versionprofiles.delete", bus.OperatorVersionProfilesSubject(r.cluster, "delete"), r.configCrud.HandleVersionProfilesDelete},
-		{"versionprofiles.view", bus.OperatorVersionProfilesSubject(r.cluster, "view"), r.configCrud.HandleVersionProfilesView},
-		// Namespace discovery (F4 add-cluster-namespace-discovery).
-		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList},
-	}
-
-	for _, sp := range subscriptions {
-		sub, err := r.busConn.SubscribeRequest(sp.subject, operatorQueue, sp.handler)
-		if err != nil {
-			return fmt.Errorf("subscribe %s: %w", sp.name, err)
-		}
-		defer func(name string) {
-			if err := sub.Unsubscribe(); err != nil {
-				r.logger.Warn("unsubscribe "+name+" failed", "error", err)
-			}
-		}(sp.name)
-	}
+	defer stopResponders()
 
 	// Hibernation wake: the BFF publishes at-most-once on wake.<cluster>.<ns>.<ctrl>
 	// (nil payload; identity is in the subject). It does not fit the request/reply
 	// subscription table above — it is a wildcard fire-and-forget subject whose
-	// handler needs msg.Subject to recover ns/name. Queue-subscribed so a single
+	// handler needs the subject to recover ns/name. Queue-subscribed so a single
 	// leader replica services each wake.
-	wakeHibernateSub, err := r.busConn.QueueSubscribe(bus.WakeSubjectWildcard(r.cluster), operatorQueue,
-		func(msg *nats.Msg) {
-			ns, name, ok := bus.ParseWakeSubject(msg.Subject)
-			if !ok {
-				r.logger.Warn("ignoring malformed wake subject", "subject", msg.Subject)
-				return
-			}
+	wakeHibernateSub, err := subscribeHibernationWake(r.busConn, r.cluster, operatorQueue,
+		func(ns, name string) {
 			r.reconciler.WakeHibernatedController(context.Background(), ns, name)
-		})
+		}, r.logger)
 	if err != nil {
 		return fmt.Errorf("subscribe hibernation wake: %w", err)
 	}
 	defer func() {
 		if err := wakeHibernateSub.Unsubscribe(); err != nil {
 			r.logger.Warn("unsubscribe hibernation wake failed", "error", err)
+		}
+	}()
+
+	// Ledger actions: the recorder publishes at-most-once on
+	// varroa.ledger.actions.<cluster>. Each operator subscribes to the
+	// subject of its own cluster only. The queue group spreads the actions
+	// of one cluster across the replicas of that cluster's operator.
+	ledgerActionSub, err := subscribeLedgerActions(r.busConn, r.cluster, operatorQueue,
+		func(subject string, data []byte) {
+			handleLedgerAction(context.Background(), r.logger, r.ledgerMetrics, subject, r.cluster, r.reconciler, data)
+		})
+	if err != nil {
+		return fmt.Errorf("subscribe ledger actions: %w", err)
+	}
+	defer func() {
+		if err := ledgerActionSub.Unsubscribe(); err != nil {
+			r.logger.Warn("unsubscribe ledger actions failed", "error", err)
 		}
 	}()
 
@@ -1406,6 +1436,22 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	return nil
 }
 
+// subscribeHibernationWake queue-subscribes to the wake subjects of
+// cluster and calls wake with the namespace and name of each well-formed
+// subject. The Listener subscribes again after NATS denies the
+// subscription, so a pod that starts before an authorization reload
+// receives wakes after it.
+func subscribeHibernationWake(conn *bus.Conn, cluster, queue string, wake func(ns, name string), logger *slog.Logger) (*bus.Listener, error) {
+	return conn.Listen(bus.WakeSubjectWildcard(cluster), queue, func(subject string, _ []byte) {
+		ns, name, ok := bus.ParseWakeSubject(subject)
+		if !ok {
+			logger.Warn("ignoring malformed wake subject", "subject", subject)
+			return
+		}
+		wake(ns, name)
+	})
+}
+
 func envDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -1424,6 +1470,33 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// localAuthPlan decides which local account runnables the operator starts.
+// The user and group reconcilers run for local mode and for local accounts
+// beside OIDC. The admin bootstrap runs only in local mode: beside OIDC, a
+// break-glass account exists only when an operator declares it.
+func localAuthPlan(authMode string, localAccounts bool) (reconcilers, bootstrapAdmin bool) {
+	if authMode == "local" {
+		return true, true
+	}
+	return localAccounts && authMode == "oidc", false
+}
+
+// controllerIssuer selects the issuer that Jenkins controllers trust for
+// dashboard sessions. In local and ldap modes the BFF signs the sessions, so
+// the BFF URL is the issuer and the controllers fetch its JWKS. Any other mode
+// uses the configured OIDC issuer, which can be empty.
+func controllerIssuer(authMode, oidcIssuer, bffURL string) (string, error) {
+	switch authMode {
+	case "local", "ldap":
+		if bffURL == "" {
+			return "", fmt.Errorf("auth-mode %s needs --bff-url: the BFF issues the sessions that controllers verify", authMode)
+		}
+		return bffURL, nil
+	default:
+		return oidcIssuer, nil
+	}
 }
 
 func envBool(key string, fallback bool) bool {
@@ -1567,6 +1640,257 @@ func reconcileAllTeams(ctx context.Context, store crdstore.Backend, rec *control
 		if _, err := rec.Reconcile(ctx, req); err != nil {
 			logger.Warn("failed to reconcile Team", "team", t.Name, "error", err)
 		}
+	}
+}
+
+// serialResponder is the limit of a subject whose handler runs one request
+// at a time.
+const serialResponder = 1
+
+// composeConcurrency limits the bundle compose requests that the leader runs
+// at a time on each compose subject. Each subject has its own slots, so the
+// two compose subjects together can run twice this number. A compose can
+// wait a long time on a git clone or an OCI pull. While a slot is free, the
+// next compose starts at once. When every slot is in use, the next compose
+// waits for a free slot.
+const composeConcurrency = 4
+
+// commandResponder is one request-reply subject of the operator command
+// runner. A limit above serialResponder serves the subject through
+// ServeRequestsConcurrently with that number of slots.
+type commandResponder struct {
+	name    string
+	subject string
+	handler bus.RequestHandler
+	limit   int
+}
+
+// serveCommandResponders subscribes every responder in queue and returns a
+// function that stops all of them. On a subscribe error it stops the
+// responders that it already started and returns the error.
+func serveCommandResponders(conn *bus.Conn, queue string, responders []commandResponder, logger *slog.Logger) (func(), error) {
+	started := make([]*bus.Responder, 0, len(responders))
+	names := make([]string, 0, len(responders))
+	stop := func() {
+		for i, sub := range started {
+			if err := sub.Unsubscribe(); err != nil {
+				logger.Warn("unsubscribe "+names[i]+" failed", "error", err)
+			}
+		}
+	}
+	for _, cr := range responders {
+		var (
+			sub *bus.Responder
+			err error
+		)
+		if cr.limit > serialResponder {
+			sub, err = conn.ServeRequestsConcurrently(cr.subject, queue, cr.limit, cr.handler)
+		} else {
+			sub, err = conn.ServeRequests(cr.subject, queue, cr.handler)
+		}
+		if err != nil {
+			stop()
+			return nil, fmt.Errorf("subscribe %s: %w", cr.name, err)
+		}
+		started = append(started, sub)
+		names = append(names, cr.name)
+	}
+	return stop, nil
+}
+
+// commandResponders lists the request-reply subjects that the leader serves
+// in the operator-workers queue group, with the handler and the concurrency
+// limit of each subject. Only the leader runs this runner, so the queue group
+// has one member. A serial subject holds each request until the request
+// before it on that subject ends, for the whole cluster. Give a row a limit
+// above serialResponder only after you make sure that its handler is safe
+// for concurrent calls.
+func (r *operatorCommandRunner) commandResponders(ctx context.Context) []commandResponder {
+	// reconcileAction wraps a fire-and-forget reconciler call in the shared
+	// ReconcileRequest decode/response envelope.
+	reconcileAction := func(name string, act func(req bus.ReconcileRequest)) func([]byte) []byte {
+		return func(data []byte) []byte {
+			var req bus.ReconcileRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				r.logger.Warn(name+" request decode failed", "error", err)
+				resp, _ := json.Marshal(bus.ReconcileResponse{Error: err.Error()})
+				return resp
+			}
+			act(req)
+			resp, _ := json.Marshal(bus.ReconcileResponse{})
+			return resp
+		}
+	}
+
+	return []commandResponder{
+		{"reconcile", bus.OperatorReconcileSubject(r.cluster), reconcileAction("reconcile", func(req bus.ReconcileRequest) {
+			r.reconciler.TriggerReconcile(r.cluster, req.Name, req.Namespace)
+		}), serialResponder},
+		{"nudge", bus.OperatorNudgeSubject(r.cluster), reconcileAction("nudge", func(req bus.ReconcileRequest) {
+			r.reconciler.WakeController(r.cluster, req.Namespace, req.Name)
+		}), serialResponder},
+		{"hibernate", bus.OperatorHibernateSubject(r.cluster), func(data []byte) []byte {
+			return handleHibernate(ctx, r.logger, r.reconciler, data)
+		}, serialResponder},
+		{"wake", bus.OperatorWakeSubject(r.cluster), func(data []byte) []byte {
+			return handleWake(ctx, r.logger, r.reconciler, data)
+		}, serialResponder},
+		{"reprovision", bus.OperatorReprovisionSubject(r.cluster), reconcileAction("reprovision", func(req bus.ReconcileRequest) {
+			r.reconciler.Reprovision(r.cluster, req.Namespace, req.Name)
+		}), serialResponder},
+		{"controllers.list", bus.OperatorControllersSubject(r.cluster, "list"), r.crud.HandleList, serialResponder},
+		{"controllers.get", bus.OperatorControllersSubject(r.cluster, "get"), r.crud.HandleGet, serialResponder},
+		{"controllers.create", bus.OperatorControllersSubject(r.cluster, "create"), r.crud.HandleCreate, serialResponder},
+		{"controllers.update", bus.OperatorControllersSubject(r.cluster, "update"), r.crud.HandleUpdate, serialResponder},
+		{"controllers.delete", bus.OperatorControllersSubject(r.cluster, "delete"), r.crud.HandleDelete, serialResponder},
+		{"controllers.deletepod", bus.OperatorControllersSubject(r.cluster, "deletepod"), r.crud.HandleDeletePod, serialResponder},
+		{"cluster.drain", bus.OperatorClusterSubject(r.cluster, "drain"), func(data []byte) []byte {
+			var req bus.ClusterDrainRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: "invalid request", Code: bus.CodeInvalid})
+				return resp
+			}
+			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			st, err := r.lifecycle.Load(bctx)
+			if err != nil {
+				r.logger.Warn("cluster.drain: load failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if st.State == bus.ClusterStateActive {
+				if err := r.lifecycle.SetDraining(bctx, req.RequestedBy); err != nil {
+					r.logger.Warn("cluster.drain: set draining failed", "error", err)
+					resp, _ := json.Marshal(bus.ClusterDrainResponse{Error: err.Error(), Code: bus.CodeInternal})
+					return resp
+				}
+
+				// Count controllers for activity event
+				ctrlCount := 0
+				if ctrls, listErr := crdstore.List[v1alpha1.Controller](bctx, r.crud.Store, "", ""); listErr == nil {
+					ctrlCount = len(ctrls)
+				}
+
+				if r.activity != nil {
+					r.activity.Publish(activity.Event{
+						Type:    "cluster.drain.started",
+						Source:  "operator",
+						Actor:   req.RequestedBy,
+						Message: fmt.Sprintf("cluster drain started (%d controllers)", ctrlCount),
+					})
+				}
+				if r.beatNow != nil {
+					r.beatNow()
+				}
+				resp, _ := json.Marshal(bus.ClusterDrainResponse{State: bus.ClusterStateDraining})
+				return resp
+			}
+
+			// Idempotent: already draining/drained, reply current state with no side effects.
+			resp, _ := json.Marshal(bus.ClusterDrainResponse{State: st.State})
+			return resp
+		}, serialResponder},
+		{"cluster.draincancel", bus.OperatorClusterSubject(r.cluster, "draincancel"), func(data []byte) []byte {
+			var req bus.ClusterDrainCancelRequest
+			if err := json.Unmarshal(data, &req); err != nil {
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: "invalid request", Code: bus.CodeInvalid})
+				return resp
+			}
+			bctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			st, err := r.lifecycle.Load(bctx)
+			if err != nil {
+				r.logger.Warn("cluster.draincancel: load failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if st.State == bus.ClusterStateActive {
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{
+					Error: "cluster is not draining",
+					Code:  bus.CodeConflict,
+				})
+				return resp
+			}
+
+			// draining or drained → set active
+			if err := r.lifecycle.SetActive(bctx); err != nil {
+				r.logger.Warn("cluster.draincancel: set active failed", "error", err)
+				resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{Error: err.Error(), Code: bus.CodeInternal})
+				return resp
+			}
+
+			if r.activity != nil {
+				r.activity.Publish(activity.Event{
+					Type:    "cluster.drain.canceled",
+					Source:  "operator",
+					Actor:   req.RequestedBy,
+					Message: "cluster drain canceled",
+				})
+			}
+			if r.beatNow != nil {
+				r.beatNow()
+			}
+			resp, _ := json.Marshal(bus.ClusterDrainCancelResponse{State: bus.ClusterStateActive})
+			return resp
+		}, serialResponder},
+		// BroodOps command handlers per design §3 (F2 cross-cluster brood ops).
+		{"broodops.create", bus.OperatorBroodOpsSubject(r.cluster, "create"), r.broodOps.HandleCreate, serialResponder},
+		{"broodops.get", bus.OperatorBroodOpsSubject(r.cluster, "get"), r.broodOps.HandleGet, serialResponder},
+		{"broodops.list", bus.OperatorBroodOpsSubject(r.cluster, "list"), r.broodOps.HandleList, serialResponder},
+		{"broodops.cancel", bus.OperatorBroodOpsSubject(r.cluster, "cancel"), r.broodOps.HandleCancel, serialResponder},
+		{"broodops.suspend", bus.OperatorBroodOpsSubject(r.cluster, "suspend"), r.broodOps.HandleSuspend, serialResponder},
+		{"broodops.preview", bus.OperatorBroodOpsSubject(r.cluster, "preview"), r.broodOps.HandlePreview, serialResponder},
+		// BroodSchedules command handlers.
+		{"broodschedules.create", bus.OperatorBroodSchedulesSubject(r.cluster, "create"), r.broodSchedules.HandleCreate, serialResponder},
+		{"broodschedules.get", bus.OperatorBroodSchedulesSubject(r.cluster, "get"), r.broodSchedules.HandleGet, serialResponder},
+		{"broodschedules.list", bus.OperatorBroodSchedulesSubject(r.cluster, "list"), r.broodSchedules.HandleList, serialResponder},
+		{"broodschedules.delete", bus.OperatorBroodSchedulesSubject(r.cluster, "delete"), r.broodSchedules.HandleDelete, serialResponder},
+		{"broodschedules.suspend", bus.OperatorBroodSchedulesSubject(r.cluster, "suspend"), r.broodSchedules.HandleSuspend, serialResponder},
+		// Config CRUD handlers (bundles, catalog, rbac) — 27 subjects.
+		{"bundles.list", bus.OperatorBundlesSubject(r.cluster, "list"), r.configCrud.HandleBundlesList, serialResponder},
+		{"bundles.get", bus.OperatorBundlesSubject(r.cluster, "get"), r.configCrud.HandleBundlesGet, serialResponder},
+		{"bundles.create", bus.OperatorBundlesSubject(r.cluster, "create"), r.configCrud.HandleBundlesCreate, serialResponder},
+		{"bundles.update", bus.OperatorBundlesSubject(r.cluster, "update"), r.configCrud.HandleBundlesUpdate, serialResponder},
+		{"bundles.delete", bus.OperatorBundlesSubject(r.cluster, "delete"), r.configCrud.HandleBundlesDelete, serialResponder},
+		{"bundles.preview", bus.OperatorBundlesSubject(r.cluster, "preview"), r.configCrud.HandleBundlesPreview, composeConcurrency},
+		{"bundles.pause", bus.OperatorBundlesSubject(r.cluster, "pause"), r.configCrud.HandleBundlesPause, serialResponder},
+		{"bundles.resume", bus.OperatorBundlesSubject(r.cluster, "resume"), r.configCrud.HandleBundlesPause, serialResponder},
+		{"bundles.teamcontent", bus.OperatorBundlesSubject(r.cluster, "teamcontent"), r.configCrud.HandleBundlesTeamContent, serialResponder},
+		{"catalog.itemlist", bus.OperatorCatalogSubject(r.cluster, "itemlist"), r.configCrud.HandleItemsList, serialResponder},
+		{"catalog.itemget", bus.OperatorCatalogSubject(r.cluster, "itemget"), r.configCrud.HandleItemsGet, serialResponder},
+		{"catalog.sourcelist", bus.OperatorCatalogSubject(r.cluster, "sourcelist"), r.configCrud.HandleSourcesList, serialResponder},
+		{"catalog.sourceget", bus.OperatorCatalogSubject(r.cluster, "sourceget"), r.configCrud.HandleSourcesGet, serialResponder},
+		{"catalog.sourcecreate", bus.OperatorCatalogSubject(r.cluster, "sourcecreate"), r.configCrud.HandleSourcesCreate, serialResponder},
+		{"catalog.sourceupdate", bus.OperatorCatalogSubject(r.cluster, "sourceupdate"), r.configCrud.HandleSourcesUpdate, serialResponder},
+		{"catalog.sourcedelete", bus.OperatorCatalogSubject(r.cluster, "sourcedelete"), r.configCrud.HandleSourcesDelete, serialResponder},
+		{"catalog.sourcesync", bus.OperatorCatalogSubject(r.cluster, "sourcesync"), r.configCrud.HandleSourceSync, serialResponder},
+		{"rbac.rolelist", bus.OperatorRbacSubject(r.cluster, "rolelist"), r.configCrud.HandleRolesList, serialResponder},
+		{"rbac.roleget", bus.OperatorRbacSubject(r.cluster, "roleget"), r.configCrud.HandleRolesGet, serialResponder},
+		{"rbac.rolecreate", bus.OperatorRbacSubject(r.cluster, "rolecreate"), r.configCrud.HandleRolesCreate, serialResponder},
+		{"rbac.roleupdate", bus.OperatorRbacSubject(r.cluster, "roleupdate"), r.configCrud.HandleRolesUpdate, serialResponder},
+		{"rbac.roledelete", bus.OperatorRbacSubject(r.cluster, "roledelete"), r.configCrud.HandleRolesDelete, serialResponder},
+		{"rbac.bindinglist", bus.OperatorRbacSubject(r.cluster, "bindinglist"), r.configCrud.HandleBindingsList, serialResponder},
+		{"rbac.bindingget", bus.OperatorRbacSubject(r.cluster, "bindingget"), r.configCrud.HandleBindingsGet, serialResponder},
+		{"rbac.bindingcreate", bus.OperatorRbacSubject(r.cluster, "bindingcreate"), r.configCrud.HandleBindingsCreate, serialResponder},
+		{"rbac.bindingupdate", bus.OperatorRbacSubject(r.cluster, "bindingupdate"), r.configCrud.HandleBindingsUpdate, serialResponder},
+		{"rbac.bindingdelete", bus.OperatorRbacSubject(r.cluster, "bindingdelete"), r.configCrud.HandleBindingsDelete, serialResponder},
+		{"provisioningdefaults.get", bus.OperatorProvisioningDefaultsSubject(r.cluster, "get"), r.configCrud.HandleProvisioningDefaultsGet, serialResponder},
+		{"provisioningdefaults.update", bus.OperatorProvisioningDefaultsSubject(r.cluster, "update"), r.configCrud.HandleProvisioningDefaultsUpdate, serialResponder},
+		{"versionprofiles.list", bus.OperatorVersionProfilesSubject(r.cluster, "list"), r.configCrud.HandleVersionProfilesList, serialResponder},
+		{"versionprofiles.get", bus.OperatorVersionProfilesSubject(r.cluster, "get"), r.configCrud.HandleVersionProfilesGet, serialResponder},
+		{"versionprofiles.create", bus.OperatorVersionProfilesSubject(r.cluster, "create"), r.configCrud.HandleVersionProfilesCreate, serialResponder},
+		{"versionprofiles.update", bus.OperatorVersionProfilesSubject(r.cluster, "update"), r.configCrud.HandleVersionProfilesUpdate, serialResponder},
+		{"versionprofiles.delete", bus.OperatorVersionProfilesSubject(r.cluster, "delete"), r.configCrud.HandleVersionProfilesDelete, serialResponder},
+		{"versionprofiles.view", bus.OperatorVersionProfilesSubject(r.cluster, "view"), r.configCrud.HandleVersionProfilesView, serialResponder},
+		{"cellpools.list", bus.OperatorCellPoolsSubject(r.cluster, "list"), r.configCrud.HandleCellPoolsList, serialResponder},
+		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet, serialResponder},
+		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale, serialResponder},
+		// Namespace discovery (F4 add-cluster-namespace-discovery).
+		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList, serialResponder},
 	}
 }
 

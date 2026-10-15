@@ -49,8 +49,10 @@ spec:
               roleRef:
                 type: string
               scope:
-                description: VarroaRoleBindingScope defines the scope where a binding
-                  applies.
+                description: |-
+                  Scope restricts which namespaces, controllers, or pipelines tenants this
+                  binding applies to. A scope names one dimension: tenants, or
+                  namespaces/controllerSelector, never both.
                 properties:
                   controllerSelector:
                     description: ControllerSelector is an optional label selector
@@ -105,7 +107,49 @@ spec:
                     items:
                       type: string
                     type: array
+                  tenants:
+                    description: Tenants is an optional allow-list of pipelines tenants.
+                    items:
+                      description: TenantScope names one pipelines tenant and the
+                        jobs of it the binding covers.
+                      properties:
+                        jobs:
+                          description: Jobs is an optional list of folder-relative
+                            globs. An absent list covers every job.
+                          items:
+                            maxLength: 512
+                            type: string
+                          maxItems: 64
+                          type: array
+                        name:
+                          description: Name is a Team name.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 64
+                    type: array
                 type: object
+                x-kubernetes-validations:
+                - message: a scope names one dimension
+                  rule: '!has(self.tenants) || (!has(self.namespaces) && !has(self.controllerSelector))'
+                - message: a scope that names no tenant grants nothing
+                  rule: '!has(self.tenants) || size(self.tenants) > 0'
+                - message: a grant that names no tenant grants nothing
+                  rule: '!has(self.tenants) || self.tenants.all(t, size(t.name) >
+                    0)'
+                - message: a tenant name is a Team name
+                  rule: '!has(self.tenants) || self.tenants.all(t, !t.name.contains(''/''))'
+                - message: a grant that matches nothing reads as an oversight
+                  rule: '!has(self.tenants) || self.tenants.all(t, !has(t.jobs) ||
+                    size(t.jobs) > 0)'
+                - message: a grant that matches nothing reads as an oversight
+                  rule: '!has(self.tenants) || self.tenants.all(t, !has(t.jobs) ||
+                    t.jobs.all(j, size(j) > 0))'
+                - message: a pattern is folder relative
+                  rule: '!has(self.tenants) || self.tenants.all(t, !has(t.jobs) ||
+                    t.jobs.all(j, !j.startsWith(''/'')))'
               subjects:
                 items:
                   description: SubjectRef references a subject by kind and name.
@@ -126,7 +170,56 @@ spec:
             - roleRef
             - subjects
             type: object
+          status:
+            description: |-
+              Status reports the federation outcome of the binding on each hive. Only
+              the core BFF federation pass writes it.
+            properties:
+              federation:
+                description: Federation holds one entry for each hive cluster. The
+                  core cluster has no entry.
+                items:
+                  description: BindingFederationStatus is the federation outcome of
+                    a binding on one hive.
+                  properties:
+                    cluster:
+                      description: Cluster is the hive cluster name.
+                      type: string
+                    lastTransitionTime:
+                      description: LastTransitionTime is the time the state, reason,
+                        or message last changed.
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is the human-readable detail for the state.
+                      type: string
+                    reason:
+                      description: Reason is a CamelCase code for the state.
+                      type: string
+                    state:
+                      description: State is federated, skipped, or failed.
+                      enum:
+                      - federated
+                      - skipped
+                      - failed
+                      type: string
+                  required:
+                  - cluster
+                  - lastTransitionTime
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - cluster
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration is the spec generation the federation
+                  entries describe.
+                format: int64
+                type: integer
+            type: object
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}

@@ -11,61 +11,59 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 )
 
-var (
-	miteStreamConnections metric.Int64UpDownCounter
-	miteStreamDisconnects metric.Int64Counter
-	miteWatchFailures     metric.Int64Counter
-)
-
-func init() {
-	meter := otel.Meter("varroa-gateway")
-	// UpDownCounter, not a Gauge: these are +1/-1 deltas. A synchronous gauge
-	// takes last-value, so it would report literally 1 or -1 rather than the
-	// number of active connections.
-	miteStreamConnections, _ = meter.Int64UpDownCounter("varroa.mite.stream.connections",
-		metric.WithDescription("Active mite stream connections"),
-	)
-	miteStreamDisconnects, _ = meter.Int64Counter("varroa.mite.stream.disconnects",
-		metric.WithDescription("Mite stream disconnect count"),
-	)
-	miteWatchFailures, _ = meter.Int64Counter("varroa.mite.watch.failures",
-		metric.WithDescription("Bus watch setup failures per mite connection (bridge is degraded until it succeeds)"),
-	)
+// buildEventPublisher is the seam over the JetStream publish calls the
+// build-event worker uses. *bus.Conn satisfies it; tests substitute a fake
+// so a rejected publish, a retry, and a dropped heartbeat are exercisable
+// without a live NATS server.
+type buildEventPublisher interface {
+	PublishJetStream(subject string, data []byte) (*nats.PubAck, error)
+	PublishJetStreamAsync(subject string, data []byte) (nats.PubAckFuture, error)
 }
 
-// desiredWatcher is the seam over the desired-state KV bucket. *bus.KV
-// satisfies it; tests substitute a fake that fails the Watch() setup call so
-// the retry path is exercisable without a live JetStream.
-type desiredWatcher interface {
-	Watch(key string) (nats.KeyWatcher, error)
+// ledgerRequester is the seam over the core-NATS request-reply call the
+// claim bridge uses. *bus.Conn satisfies it; tests substitute a fake so the
+// granted, timeout, and unparsable-reply paths are exercisable without a
+// live NATS server.
+type ledgerRequester interface {
+	RequestWithContext(ctx context.Context, subject string, data []byte, timeout time.Duration) (*nats.Msg, error)
+}
+
+// pendingImperative is one imperative JetStream message the gateway sent to a
+// mite and still waits on a CommandResult for. token names the connection that
+// received it. The gateway releases a delivery only on the teardown of that
+// same connection, so a superseded stream never naks a command the replacement
+// connection already runs.
+type pendingImperative struct {
+	msg   *nats.Msg
+	token int64
 }
 
 // BusHandler implements StreamHandler by bridging the mite gRPC stream to the
 // NATS bus. It replaces the in-memory Registry for the gateway tier.
 //
-// Command delivery (operator→mite) uses the last-value mite_desired KV bucket:
-// the gateway watches the mite's desired-state key and forwards the current
-// value (on attach) plus every update to the gRPC stream. This means a
-// reconnecting mite receives only the newest desired state, never a replay of
-// stale ones, and there is no per-mite durable consumer to race over.
+// Desired-state delivery (operator→mite) is a core NATS request on
+// bus.MiteDesiredSubject: the gateway that holds the stream forwards each
+// request to the mite and answers the operator after the send succeeds.
+// NATS stores no copy, so a reconnecting mite receives nothing until the
+// operator pushes again on the new connection epoch.
 type BusHandler struct {
 	cluster    string
 	conn       *bus.Conn
+	metrics    gatewayMetrics
 	kv         *bus.KV // snapshot KV
 	presenceKV *bus.KV // presence KV (written on connect/heartbeat, deleted on disconnect)
-	// desiredKV is the desired-state KV (watched and forwarded to the mite).
-	// Nil-valued when the gateway runs without a desired bucket — always
-	// compare with desiredKV == nil, never against a typed nil *bus.KV.
-	desiredKV desiredWatcher
+	// desired is the desired-state request source. Nil when the handler
+	// runs without a bus connection; serveDesiredState then returns at once.
+	desired desiredSource
 
 	activityPub *activity.Publisher // publishes enriched events to activity.* subjects
 
@@ -84,7 +82,10 @@ type BusHandler struct {
 	// pendingAcks holds un-acked imperative JetStream messages, keyed by
 	// controller ("ns/name") then command_id. Scoping by controller ensures a
 	// disconnect only naks that controller's in-flight commands, never another's.
-	pendingAcks map[string]map[string]*nats.Msg
+	// Each entry also carries the connection token that received the message, so
+	// a superseded stream's teardown releases its own deliveries and leaves the
+	// replacement connection's in-flight commands alone.
+	pendingAcks map[string]map[string]pendingImperative
 
 	// replayCmds records which in-flight imperative command_ids are
 	// REPLAY_WEBHOOK, keyed by controller ("ns/name") then command_id. Their
@@ -113,7 +114,7 @@ type BusHandler struct {
 
 	// watchDegraded records which of a controller's bus→stream watches are
 	// currently broken: "ns/name" -> watch kind -> reason. Tracked per kind
-	// because the three watchers are independent — a healthy content
+	// because the watchers are independent — a healthy content
 	// subscription must not clear a broken desired-state watch. Carried into
 	// the presence record so the operator can surface it as a Controller
 	// condition; a retry that keeps failing must not stay invisible.
@@ -127,9 +128,162 @@ type BusHandler struct {
 	// getting its liveness refreshed and staleMiteThreshold never fires.
 	lastHeartbeat map[string]time.Time
 
+	// cellInstances holds the pod unique identifier each controller's mite
+	// presented at registration ("ns/name" -> cell_instance), set by
+	// RecordCellInstance and read by OnBuildEvent. It is not cleared on
+	// OnDisconnect: the identity belongs to the mite's pod, not to one
+	// stream, and survives a reconnect on the same gateway replica.
+	cellInstances map[string]string
+
 	// watchBackoff is the initial retry delay for re-establishing a bus watch.
 	// Zero means defaultWatchBackoff; tests shrink it.
 	watchBackoff time.Duration
+
+	// buildMu guards buildWorkers, kept separate from mu so a build-event
+	// enqueue never contends with the heartbeat/presence path.
+	buildMu      sync.Mutex
+	buildWorkers map[string]*registeredBuildWorker // keyed "ns/name"
+
+	// claimMu guards claimCounts, kept separate from mu for the same reason.
+	claimMu     sync.Mutex
+	claimCounts map[string]int // keyed "ns/name#epoch"
+
+	// crossTenantMu guards crossTenantCounts, kept separate from mu for
+	// the same reason claimMu is.
+	crossTenantMu     sync.Mutex
+	crossTenantCounts map[string]int // keyed "ns/name#epoch"
+
+	// tenantResolver resolves a claim's or a job-schedule row's ledger
+	// tenant and placement generation. Nil means the single-tenant
+	// placeholder.
+	tenantResolver CellTenantResolver
+
+	// scheduleMu guards scheduleRetained and scheduleStreamMissingUntil,
+	// kept separate from mu for the same reason buildMu and claimMu are.
+	scheduleMu sync.Mutex
+	// scheduleRetained holds, per connection ("ns/name"), the job-schedule
+	// set the gateway has not yet published: a set OnSnapshot could not
+	// resolve every row of, or a set whose publish attempt failed.
+	// handleJobSchedules retries it on every snapshot tick until it
+	// publishes, and replaces it when a later snapshot carries a new set.
+	scheduleRetained map[string]*mitev1.JobScheduleSet
+	// scheduleStreamMissingUntil holds, per connection, when the gateway
+	// may next attempt a job.schedules publish after a publish failed. A
+	// snapshot tick before this time skips the attempt entirely, so a
+	// record-store-disabled install produces no round trip per snapshot.
+	scheduleStreamMissingUntil map[string]time.Time
+	// scheduleStreamMissingTTL overrides how long a publish failure
+	// suppresses the next attempt. Zero means
+	// defaultJobScheduleStreamMissingTTL; tests shrink it.
+	scheduleStreamMissingTTL time.Duration
+	// branchRetained holds, per connection ("ns/name"), the multibranch
+	// inventory set that has not yet published as a job.branches
+	// envelope. It shares scheduleMu and the job-schedule TTL.
+	branchRetained map[string]*mitev1.JobBranchSet
+	// branchStreamMissingUntil is the job.branches negative cache, with
+	// the same meaning as scheduleStreamMissingUntil.
+	branchStreamMissingUntil map[string]time.Time
+
+	// recordStoreEnabled reports whether this install configured a record
+	// store, so a builds stream exists to publish onto. cmd/gateway sets it
+	// from the opened blob store, never from VARROA_RECORDSTORE_DSN: the
+	// chart supplies that DSN only in postgres blob mode, and the blob URL
+	// in every mode. The failed-trigger path reads this flag instead of the
+	// schedule path's time-based cache: a cache cannot tell a missing
+	// stream from a transient publish failure, and a failed trigger must
+	// never be acknowledged without its record.
+	recordStoreEnabled bool
+
+	// publisher is the build-event JetStream publish seam. Defaults to
+	// conn; tests substitute a fake.
+	publisher buildEventPublisher
+	// ledger is the claim request-reply seam. Defaults to conn; tests
+	// substitute a fake.
+	ledger ledgerRequester
+	// buildPublishRetryDelay is the starting retry delay for a rejected
+	// build-event publish. Zero means defaultPublishRetryDelay; tests
+	// shrink it.
+	buildPublishRetryDelay time.Duration
+
+	// logStore is the blob store the log writer appends console-log
+	// chunks and index entries to. Nil (the default) makes OnLogChunk a
+	// no-op: the record store is disabled. Wired by SetLogStore.
+	logStore blob.Store
+	// logPendingMaxBytes is the gateway-wide pending budget
+	// (VARROA_GATEWAY_LOG_PENDING_BYTES). <= 0 means the default.
+	logPendingMaxBytes int64
+	// logFinalizeWait is VARROA_RECORDSTORE_LOG_FINALIZE_WAIT, read on
+	// the gateway so the writer heartbeat and the abandon deadline use
+	// the same value the recorder's finalize sweep does. <= 0 means the
+	// default.
+	logFinalizeWait time.Duration
+	// logOwnerRecheckAge overrides logOwnerRecheckAfter when above zero.
+	// Only a test sets it.
+	logOwnerRecheckAge time.Duration
+	// ownerCache is the bounded run-ownership cache OnLogChunk consults
+	// before it writes one byte.
+	ownerCache *ownerCache
+
+	// stateMu guards stateRuns and the gateway-wide run-state pending
+	// counter. It is separate from logMu, so a run-state push never
+	// contends with the console-log append path.
+	stateMu                sync.Mutex
+	stateRuns              map[string]*runStateEntry      // keyed by run_id
+	restartRuns            map[string]*restartSourceEntry // restart copies, keyed by run_id
+	stateTotalPendingBytes int64
+	// stateBudgetCrossedAt is when the gateway-wide run-state pending
+	// bound was first crossed. It grows the busy pause on the log
+	// path's own ladder.
+	stateBudgetCrossedAt time.Time
+
+	// tailMu guards tailLeases and tailErrors, kept separate from mu so a
+	// tail-control push never contends with the heartbeat/presence path.
+	// A terminal condition deletes a run's tailLeases entry outright
+	// rather than leaving it deactivated, so a long-lived gateway holds
+	// no lease past the run it belonged to. A lease timer validates its
+	// control_id and deletes the entry under one unbroken hold of
+	// tailMu (expireTailLeaseIfCurrent), so a renewal can never land in
+	// a window between that validation and the delete and lose the
+	// lease it just renewed. tailErrors holds a kept error
+	// independently of the lease, keyed by run_id, so a cleared lease
+	// still answers the next start request with the reason it failed
+	// (design.md D5); sweepExpiredTailErrors prunes every expired entry
+	// on each start/stop request and lease timer, not only the one
+	// run_id a caller happens to ask about, so a run that never asks
+	// again does not keep its entry forever.
+	tailMu     sync.Mutex
+	tailLeases map[string]*runTailLease
+	tailErrors map[string]tailErrorEntry
+	// tailLeaseTimeout, tailAckTimeout, and tailErrTTL override the
+	// live-tail durations (design.md D5: 90s, 10s, 5m). Zero means the
+	// package default; tests shrink them so a lease or ack timeout test
+	// does not have to wait tens of seconds.
+	tailLeaseTimeout time.Duration
+	tailAckTimeout   time.Duration
+	tailErrTTL       time.Duration
+
+	// imperativeAckWait overrides imperativeAckWaitDefault. Zero means the
+	// default; tests shrink it so a redelivery test runs in seconds.
+	imperativeAckWait time.Duration
+
+	// imperativeProgressEvery overrides the in-progress interval. Zero means
+	// a quarter of the ack wait. It must stay well below the ack wait.
+	imperativeProgressEvery time.Duration
+
+	// logMu guards logRuns and the gateway-wide pending-bytes counter,
+	// kept separate from mu so a log append never contends with the
+	// heartbeat/presence path.
+	logMu                sync.Mutex
+	logRuns              map[string]*runLogState // keyed by run_id
+	logTotalPendingBytes int64
+	// logBudgetCrossedAt is when the gateway-wide pending budget was
+	// first found crossed, zeroed once it drops back under. While the
+	// drain makes no progress, the BUSY pause grows from this moment.
+	logBudgetCrossedAt time.Time
+	// logDrain measures the bytes the drain goroutines free per second.
+	// The gateway-budget BUSY pause is the time this rate needs to free
+	// a refused chunk's bytes.
+	logDrain logDrainMeter
 
 	Logger *slog.Logger
 }
@@ -143,6 +297,13 @@ const (
 	// healthyWatchUptime is how long an established watch must survive before a
 	// later death is treated as a fresh incident rather than a flapping one.
 	healthyWatchUptime = 1 * time.Minute
+
+	// imperativeAckWaitDefault is the ack wait of each per-mite imperative
+	// consumer. The gateway marks each pending command in progress four
+	// times per ack wait, so the ack wait must exceed that heartbeat
+	// interval with margin. The value bounds how long a command that a
+	// crashed gateway held waits before the stream delivers it again.
+	imperativeAckWaitDefault = 60 * time.Second
 )
 
 // Ensure BusHandler implements StreamHandler.
@@ -155,43 +316,66 @@ func (h *BusHandler) log() *slog.Logger {
 	return slog.Default()
 }
 
-// NewBusHandler creates a handler that bridges to the NATS bus.
-// snapshotKV: mite_snapshots. presenceKV: mite_presence. desiredKV: mite_desired.
+// NewBusHandler creates a handler that bridges to the NATS bus. It creates
+// the gateway instruments on the "varroa-gateway" meter of mp and returns an
+// error when an instrument cannot be created.
+// snapshotKV: mite_snapshots. presenceKV: mite_presence.
 // activityPub: publishes enriched activity events (may be nil; if nil, activity
 // events are not published).
-func NewBusHandler(cluster string, conn *bus.Conn, snapshotKV, presenceKV, desiredKV *bus.KV, activityPub *activity.Publisher) *BusHandler {
-	h := &BusHandler{
-		cluster:              cluster,
-		conn:                 conn,
-		kv:                   snapshotKV,
-		presenceKV:           presenceKV,
-		activityPub:          activityPub,
-		cancels:              make(map[string]context.CancelFunc),
-		certExpiry:           make(map[string]time.Time),
-		idleGauges:           make(map[string]string),
-		idleGaugesAt:         make(map[string]time.Time),
-		connectEpoch:         make(map[string]int64),
-		pendingAcks:          make(map[string]map[string]*nats.Msg),
-		replayCmds:           make(map[string]map[string]bool),
-		installedPluginsHash: make(map[string]string),
-		pendingContent:       make(map[string]*nats.Msg),
-		pendingContentNS:     make(map[string]string),
-		pendingContentTime:   make(map[string]time.Time),
-		contentTTL:           15 * time.Second,
-		contentDone:          make(chan struct{}),
-		presenceLocks:        make(map[string]*sync.Mutex),
-		lastHeartbeat:        make(map[string]time.Time),
-		watchDegraded:        make(map[string]map[string]string),
-		miteVersion:          make(map[string]string),
+func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snapshotKV, presenceKV *bus.KV, activityPub *activity.Publisher) (*BusHandler, error) {
+	metrics, err := newGatewayMetrics(mp)
+	if err != nil {
+		return nil, err
 	}
-	// Guard the interface assignment: storing a typed nil *bus.KV would make
-	// h.desiredKV non-nil and send watchDesiredState into a nil-pointer call.
-	if desiredKV != nil {
-		h.desiredKV = desiredKV
+	h := &BusHandler{
+		cluster:                    cluster,
+		conn:                       conn,
+		metrics:                    metrics,
+		kv:                         snapshotKV,
+		presenceKV:                 presenceKV,
+		activityPub:                activityPub,
+		cancels:                    make(map[string]context.CancelFunc),
+		certExpiry:                 make(map[string]time.Time),
+		idleGauges:                 make(map[string]string),
+		idleGaugesAt:               make(map[string]time.Time),
+		connectEpoch:               make(map[string]int64),
+		pendingAcks:                make(map[string]map[string]pendingImperative),
+		replayCmds:                 make(map[string]map[string]bool),
+		installedPluginsHash:       make(map[string]string),
+		pendingContent:             make(map[string]*nats.Msg),
+		pendingContentNS:           make(map[string]string),
+		pendingContentTime:         make(map[string]time.Time),
+		contentTTL:                 15 * time.Second,
+		contentDone:                make(chan struct{}),
+		presenceLocks:              make(map[string]*sync.Mutex),
+		lastHeartbeat:              make(map[string]time.Time),
+		watchDegraded:              make(map[string]map[string]string),
+		miteVersion:                make(map[string]string),
+		scheduleRetained:           make(map[string]*mitev1.JobScheduleSet),
+		scheduleStreamMissingUntil: make(map[string]time.Time),
+		cellInstances:              make(map[string]string),
+		buildWorkers:               make(map[string]*registeredBuildWorker),
+		claimCounts:                make(map[string]int),
+		crossTenantCounts:          make(map[string]int),
+		tenantResolver:             defaultCellTenantResolver{},
+		logRuns:                    make(map[string]*runLogState),
+		stateRuns:                  make(map[string]*runStateEntry),
+		ownerCache:                 newOwnerCache(0),
+		tailLeases:                 make(map[string]*runTailLease),
+		tailErrors:                 make(map[string]tailErrorEntry),
+	}
+	// conn already satisfies both seams structurally; tests override these
+	// two fields directly with a fake.
+	h.publisher = conn
+	h.ledger = conn
+	// Guard the interface assignment: storing a source over a nil conn would
+	// make h.desired non-nil and send serveDesiredState into a nil-pointer call.
+	if conn != nil {
+		h.desired = natsDesiredSource{conn: conn}
 	}
 	// Start the content TTL sweeper goroutine.
 	go h.contentSweeper()
-	return h
+	return h, nil
 }
 
 // Close shuts down the content sweeper goroutine. Must be called before the
@@ -257,13 +441,13 @@ func (h *BusHandler) putPresence(ns, name, version string) {
 	}
 }
 
-// OnConnect caches cert expiry, writes initial presence, and starts the desired-
-// state watch goroutine that forwards commands to the mite stream.
+// OnConnect caches cert expiry, writes initial presence, and starts the
+// desired-state goroutine that forwards commands to the mite stream.
 func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{}, send Sender, _ interface{}) int64 {
 	key := ns + "/" + name
 	h.log().Info("mite connected", "controller", key, "version", version)
 
-	miteStreamConnections.Add(context.Background(), 1)
+	h.metrics.miteStreamConnections.Add(context.Background(), 1)
 
 	ce, _ := certExpiry.(time.Time)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -305,12 +489,19 @@ func (h *BusHandler) OnConnect(name, ns, version string, certExpiry interface{},
 	h.lastHeartbeat[key] = time.Now()
 	h.mu.Unlock()
 
-	go h.watchDesiredState(ctx, ns, name, send)
-	go h.watchImperative(ctx, ns, name, send)
+	// The desired-state subscription opens before the connection is
+	// announced, and presence is written before the connected event. The
+	// operator wakes on that event, reads the new epoch from presence, and
+	// pushes at once. Either step out of order loses that push.
+	desiredInbox := h.subscribeDesired(ns, name)
+	go h.serveDesiredState(ctx, ns, name, send, desiredInbox)
+	go h.watchImperative(ctx, ns, name, epoch, send)
 	go h.watchContent(ctx, ns, name, send)
+	go h.watchTail(ctx, ns, name, send)
+	h.startBuildEventWorker(ctx, ns, name, epoch, send)
 
-	h.publishBroodEvent("connected", ns, name, version)
 	h.putPresence(ns, name, version)
+	h.publishBroodEvent("connected", ns, name, version)
 	return epoch
 }
 
@@ -347,11 +538,28 @@ func (h *BusHandler) OnHeartbeat(name, ns string, hb *mitev1.Heartbeat) {
 	h.putPresence(ns, name, hb.Version)
 }
 
-// OnSnapshot publishes the snapshot to the bus, writes it to KV, refreshes presence.
+// OnSnapshot publishes the snapshot to the bus, writes it to KV, refreshes
+// presence, and bridges the job-schedule set, if any, to the record
+// store. design.md D8 "The gateway": the job-schedule field is stripped
+// from both the mite-inbound fan-out and the snapshot KV before either
+// publish, because those two paths carry one value every heartbeat
+// interval for every controller and a schedule set would multiply their
+// size.
 func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	h.touchLiveness(ns, name)
+
+	schedules := snap.JobSchedules
+	branches := snap.JobBranches
+	fanout := snap
+	if schedules != nil || branches != nil {
+		clone := *snap
+		clone.JobSchedules = nil
+		clone.JobBranches = nil
+		fanout = &clone
+	}
+
 	data, err := json.Marshal(&mitev1.MiteMessage{
-		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: snap},
+		Message: &mitev1.MiteMessage_StateSnapshot{StateSnapshot: fanout},
 	})
 	if err != nil {
 		h.log().Error("marshal snapshot failed", "controller", ns+"/"+name, "error", err)
@@ -359,7 +567,7 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 	}
 	_ = h.conn.Publish(bus.MiteInSubject(h.cluster, ns, name), data)
 
-	snapData, err := json.Marshal(snap)
+	snapData, err := json.Marshal(fanout)
 	if err != nil {
 		h.log().Error("marshal snapshot KV failed", "controller", ns+"/"+name, "error", err)
 		return
@@ -368,6 +576,408 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 
 	h.publishBroodEvent("snapshot", ns, name, snap.JenkinsVersion)
 	h.putPresence(ns, name, snap.JenkinsVersion)
+
+	h.handleJobSchedules(ns, name, schedules)
+	h.handleJobBranches(ns, name, branches)
+}
+
+// SetRecordStoreEnabled declares whether this install configured a record
+// store. cmd/gateway calls it once at startup. An install with no record store
+// publishes no run.trigger_failed envelope at all.
+func (h *BusHandler) SetRecordStoreEnabled(enabled bool) {
+	h.recordStoreEnabled = enabled
+}
+
+// recordCommandOutcome publishes the record of one command result, and
+// reports whether the pending imperative message may be acknowledged.
+//
+// A refused CANCEL_BUILD, input answer, or REPLAY_BUILD logs one Warn line
+// first, with or without a record store, and acknowledges: the caller
+// already holds a 202. With a record store, a refused cancel or input answer
+// then publishes one run.command_refused envelope for its run, and a refused
+// replay publishes one run.trigger_failed envelope for the new run the
+// replay named. These three acknowledge whatever the publish answers: a
+// redelivered command runs the refused call again, and the record is only a
+// notice for the run's reader. With no record store the gateway publishes
+// nothing and acknowledges.
+//
+// A TRIGGER_BUILD result publishes, and ANY publish error blocks the
+// acknowledgement. The stream then redelivers the command, the mite triggers
+// again, and the next result publishes. It consults no time-based cache here:
+// a cache cannot tell a missing stream from a transient failure, so an armed
+// cache would acknowledge the redelivery and lose the record.
+//
+// A RESUME_BUILD result acknowledges whatever the publish answers, which is
+// the opposite rule. A redelivered trigger builds the same job again and costs
+// nothing. A redelivered resume can succeed on its second delivery, while the
+// recorder holds no dispatched resume any more. Only the named target's own
+// heartbeat clears a resume record, so that live build would read INTERRUPTED
+// at the arm window with no cancel behind it. A lost publish instead leaves
+// the run on its resume deadline, which is the path it takes today.
+//
+// Every other command type acknowledges, because it writes no record.
+func (h *BusHandler) recordCommandOutcome(ns, name string, pendingMsg *nats.Msg, result *mitev1.CommandResult) bool {
+	imp := pendingCommand(pendingMsg)
+	if imp == nil {
+		return true
+	}
+	switch imp.Type {
+	case mitev1.CommandTypeCancelBuild:
+		h.logRefusedRunCommand("cancel build command refused", ns, name, result)
+		if p := imp.CancelBuild; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandCancel, p.RunId, p.JobPath, p.Actor, result)
+		}
+		return true
+	case mitev1.CommandTypeProceedInput:
+		h.logRefusedRunCommand("run input command refused", ns, name, result)
+		if p := imp.ProceedInput; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandProceed, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+		}
+		return true
+	case mitev1.CommandTypeAbortInput:
+		h.logRefusedRunCommand("run input command refused", ns, name, result)
+		if p := imp.AbortInput; p != nil && h.shouldRecordRefusal(result) {
+			h.publishCommandRefused(ns, name, refusedCommandAbort, p.RunId, p.JobPath, actingUserName(p.ActingUser), result)
+		}
+		return true
+	case mitev1.CommandTypeScanMultibranch:
+		// A scan writes no record. The plugin tracker reports its own
+		// refusals through the branch inventory.
+		h.logRefusedRunCommand("multibranch scan command refused", ns, name, result)
+		return true
+	case mitev1.CommandTypeReplayBuild:
+		// A refused replay leaves no build. The failure record of the new
+		// run is the only record the run's reader can find.
+		h.logRefusedRunCommand("replay build command refused", ns, name, result)
+		if p := imp.ReplayBuild; p != nil && h.shouldRecordRefusal(result) {
+			h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+				RunId:     p.RunId,
+				IntentKey: p.IntentKey,
+				JobPath:   p.JobPath,
+				Actor:     actingUserName(p.ActingUser),
+			}, result)
+		}
+		return true
+	case mitev1.CommandTypeRestartBuild:
+		// A refused restart leaves no build, as a refused replay leaves none.
+		h.logRefusedRunCommand("restart build command refused", ns, name, result)
+		if p := imp.RestartBuild; p != nil && h.shouldRecordRefusal(result) {
+			// The refusal record decides the acknowledgement: a failed
+			// publish keeps the command pending for a redelivery.
+			return h.publishTriggerFailed(ns, name, &mitev1.TriggerBuildPayload{
+				RunId:     p.RunId,
+				IntentKey: p.IntentKey,
+				JobPath:   p.JobPath,
+				Actor:     actingUserName(p.ActingUser),
+			}, result)
+		}
+		return true
+	}
+	if !h.recordStoreEnabled {
+		return true
+	}
+	switch imp.Type {
+	case mitev1.CommandTypeTriggerBuild:
+		if imp.TriggerBuild == nil {
+			return true
+		}
+		if result.Success {
+			return h.publishTriggerAccepted(ns, name, imp.TriggerBuild, result)
+		}
+		return h.publishTriggerFailed(ns, name, imp.TriggerBuild, result)
+	case mitev1.CommandTypeResumeBuild:
+		// A successful resume publishes nothing. The resumed build proves
+		// itself by its own heartbeat, which the recorder already reads.
+		if !result.Success {
+			h.publishResumeFailed(ns, name, imp.ResumeBuild, result)
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+// logRefusedRunCommand logs one Warn line for a refused run command that
+// writes no record. A success logs nothing.
+func (h *BusHandler) logRefusedRunCommand(msg, ns, name string, result *mitev1.CommandResult) {
+	if result.Success {
+		return
+	}
+	h.log().Warn(msg,
+		"controller", ns+"/"+name,
+		"command_id", result.CommandId,
+		"run_id", result.RunId,
+		"actor", result.Actor,
+		"http_status", result.HttpStatus,
+		"error", result.Error)
+}
+
+// shouldRecordRefusal reports whether a run command result is a refusal the
+// record store must hold.
+func (h *BusHandler) shouldRecordRefusal(result *mitev1.CommandResult) bool {
+	return h.recordStoreEnabled && !result.Success
+}
+
+// actingUserName answers the name of an input answer's or a replay's acting
+// user, or an empty name when the command names none.
+func actingUserName(user *mitev1.ActingUser) string {
+	if user == nil {
+		return ""
+	}
+	return user.Name
+}
+
+// publishCommandRefused publishes one run.command_refused envelope for a
+// cancel or an input answer the plugin refused. It answers nothing: the
+// caller acknowledges the command whatever this publish does. A command that
+// names no run publishes nothing. An unresolved tenant publishes nothing and
+// counts a rejection: a cell must not write a record under a tenant it does
+// not host.
+func (h *BusHandler) publishCommandRefused(ns, name, command, runID, jobPath, actor string, result *mitev1.CommandResult) {
+	key := ns + "/" + name
+	if runID == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("refused run command names no run, publishing no envelope",
+			"controller", key, "command", command)
+		return
+	}
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, jobPath)
+	if tenant == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("refused run command unresolved, publishing no envelope",
+			"controller", key, "command", command, "job_path", jobPath)
+		return
+	}
+
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunCommandRefused,
+		RunID:         runID,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       jobPath,
+		// A run command payload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"command":     command,
+			"actor":       actor,
+			"http_status": result.HttpStatus,
+			"error":       truncateError(result.Error),
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal command refusal envelope failed", "controller", key, "error", err)
+		return
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("command refusal publish failed, the run shows no refusal",
+			"controller", key, "run_id", runID, "error", err)
+		return
+	}
+
+	h.metrics.commandRefusedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("command", command)))
+}
+
+// publishTriggerFailed publishes one run.trigger_failed envelope for a
+// TRIGGER_BUILD command Jenkins refused. It reports whether the pending
+// imperative message may be acknowledged. An unresolved tenant publishes
+// nothing and counts a rejection: a cell must not write a record under a tenant
+// it does not host.
+func (h *BusHandler) publishTriggerFailed(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+	key := ns + "/" + name
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed trigger unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return true
+	}
+
+	reasonCode := reasonCodeForStatus(result.HttpStatus)
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunTriggerFailed,
+		RunID:         payload.RunId,
+		IntentKey:     payload.IntentKey,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A TriggerBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"error":       truncateError(result.Error),
+			"reason_code": reasonCode,
+			"http_status": result.HttpStatus,
+			"actor":       payload.Actor,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal trigger failure envelope failed", "controller", key, "error", err)
+		return true
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("trigger failure publish failed, leaving the command unacknowledged",
+			"controller", key, "error", err)
+		return false
+	}
+
+	h.metrics.triggerFailedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
+	return true
+}
+
+// publishTriggerAccepted publishes one run.trigger_accepted envelope for a
+// TRIGGER_BUILD command Jenkins accepted onto its queue. It reports whether
+// the pending imperative message may be acknowledged. An unresolved tenant
+// publishes nothing and counts a rejection: a cell must not write a record
+// under a tenant it does not host.
+func (h *BusHandler) publishTriggerAccepted(ns, name string, payload *mitev1.TriggerBuildPayload, result *mitev1.CommandResult) bool {
+	key := ns + "/" + name
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("accepted trigger unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return true
+	}
+
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunTriggerAccepted,
+		RunID:         payload.RunId,
+		IntentKey:     payload.IntentKey,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A TriggerBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"http_status": result.HttpStatus,
+			"actor":       payload.Actor,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal trigger acceptance envelope failed", "controller", key, "error", err)
+		return true
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("accepted trigger publish failed, leaving the command unacknowledged",
+			"controller", key, "error", err)
+		return false
+	}
+
+	h.metrics.triggerAcceptedTotal.Add(context.Background(), 1)
+	return true
+}
+
+// publishResumeFailed publishes one run.resume_failed envelope for a
+// RESUME_BUILD command the target could not apply. It answers nothing: the
+// caller acknowledges the command whatever this publish does.
+//
+// The envelope carries the instance the command named, because the recorder's
+// write is guarded by it. A command that names no run and a command that names
+// no instance therefore publish nothing: the recorder could not apply either.
+//
+// An unresolved tenant publishes nothing and counts a rejection, which is the
+// rule both trigger publishers follow: a cell must not write a record under a
+// tenant it does not host.
+func (h *BusHandler) publishResumeFailed(ns, name string, payload *mitev1.ResumeBuildPayload, result *mitev1.CommandResult) {
+	key := ns + "/" + name
+
+	if payload == nil || payload.RunId == "" || payload.Instance == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed resume names no run or no instance, publishing no envelope",
+			"controller", key)
+		return
+	}
+
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, payload.JobPath)
+	if tenant == "" {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("failed resume unresolved, publishing no envelope",
+			"controller", key, "job_path", payload.JobPath)
+		return
+	}
+
+	reasonCode := reasonCodeForResumeError(result.Error)
+	env := ingestEnvelope{
+		SchemaVersion: 1,
+		Kind:          kindRunResumeFailed,
+		RunID:         payload.RunId,
+		Cluster:       h.cluster,
+		Namespace:     ns,
+		Cell:          name,
+		CellInstance:  h.lookupCellInstance(ns, name),
+		Tenant:        tenant,
+		JobPath:       payload.JobPath,
+		// A ResumeBuildPayload carries no timestamp, so the gateway clock
+		// is the only source.
+		OccurredAt: time.Now().UTC(),
+		Payload: map[string]interface{}{
+			"instance":    payload.Instance,
+			"error":       truncateError(result.Error),
+			"reason_code": reasonCode,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		h.log().Error("marshal resume failure envelope failed", "controller", key, "error", err)
+		return
+	}
+
+	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("resume failure publish failed, the run keeps its resume deadline",
+			"controller", key, "run_id", payload.RunId, "error", err)
+		return
+	}
+
+	h.metrics.resumeFailedTotal.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason_code", reasonCode)))
+	h.log().Info("failed resume recorded",
+		"controller", key, "run_id", payload.RunId,
+		"instance", payload.Instance, "reason_code", reasonCode)
+}
+
+// pendingCommand returns the imperative command a pending message carries, or
+// nil when it carries none. The pending message's Data holds the marshaled
+// OperatorMessage, so the gateway decodes it again rather than keeping a second
+// map. One decode serves every command type the outcome switch answers.
+func pendingCommand(msg *nats.Msg) *mitev1.ImperativeCommand {
+	var op mitev1.OperatorMessage
+	if err := json.Unmarshal(msg.Data, &op); err != nil {
+		return nil
+	}
+	return op.GetImperative()
 }
 
 // OnCommandResult publishes the result to the mite inbound subject — or, for a
@@ -375,6 +985,13 @@ func (h *BusHandler) OnSnapshot(name, ns string, snap *mitev1.StateSnapshot) {
 // reconciler's shared command-result buffer. If the result matches a pending
 // imperative command, the JetStream msg is acked so it is not redelivered after
 // a gateway restart.
+//
+// A TRIGGER_BUILD result first publishes one run record: run.trigger_failed
+// for a refused trigger, or run.trigger_accepted for an accepted one. Its
+// pending message waits for that publish, so either outcome's failed publish
+// leaves the stream to redeliver the command. A failed RESUME_BUILD result
+// publishes one run.resume_failed record and acks whatever that publish
+// answers. Every other case acks at once.
 func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResult) {
 	key := ns + "/" + name
 
@@ -384,8 +1001,8 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	var isReplay bool
 	h.mu.Lock()
 	if byCmd := h.pendingAcks[key]; byCmd != nil {
-		if msg, ok := byCmd[result.CommandId]; ok {
-			pendingMsg = msg
+		if pending, ok := byCmd[result.CommandId]; ok {
+			pendingMsg = pending.msg
 			delete(byCmd, result.CommandId)
 			if len(byCmd) == 0 {
 				delete(h.pendingAcks, key)
@@ -403,7 +1020,7 @@ func (h *BusHandler) OnCommandResult(name, ns string, result *mitev1.CommandResu
 	}
 	h.mu.Unlock()
 
-	if pendingMsg != nil {
+	if pendingMsg != nil && h.recordCommandOutcome(ns, name, pendingMsg, result) {
 		_ = pendingMsg.Ack()
 	}
 
@@ -523,18 +1140,85 @@ func (h *BusHandler) IsCurrentConnection(name, ns string, token int64) bool {
 	return !ok || current == token
 }
 
-// OnDisconnect stops the watch goroutine and clears volatile state. The desired
-// KV key is intentionally NOT deleted here — it is the persistent desired state
-// and must survive a mite/gateway reconnect. It is removed only on Controller
-// deletion (operator-side ClearDesired).
+// OnLogChunk is implemented in log_writer.go.
+
+// OnTailAck is implemented in tail.go.
+
+// releasePendingImperatives naks the imperative messages this connection
+// received and never returned a result for, so the stream redelivers them at
+// once. OnDisconnect defers it, which keeps it on the superseded-stream path
+// too: a mite that reconnects before its old stream tears down still needs
+// those commands. A release the superseded check skips leaves the message to
+// wait out the JetStream ack timeout, and an operator sees a trigger vanish
+// for the length of that timeout.
+//
+// The token scope is what makes the early release safe: pendingAcks is keyed by
+// controller, so an unscoped nak from a superseded stream would also redeliver
+// a command the replacement connection already runs. A zero token releases
+// every entry, which matches the "a zero token is current" rule the rest of
+// this handler follows.
+//
+// The bookkeeping moves under h.mu and the naks go out after the unlock. A nak
+// is a buffered publish, but it can still wait on the outbound buffer, and h.mu
+// is on every controller's heartbeat path. Releasing the lock first costs the
+// caller no ordering: the cancel of this connection's pump already ran under
+// h.mu before this call, so every nak still lands after that cancel, and the
+// pump re-reads the cancelled context under h.mu before it files anything.
+func (h *BusHandler) releasePendingImperatives(ns, name string, token int64) {
+	key := ns + "/" + name
+	var release []*nats.Msg
+
+	h.mu.Lock()
+	if byCmd := h.pendingAcks[key]; byCmd != nil {
+		for cmdID, pending := range byCmd {
+			if token != 0 && pending.token != token {
+				continue
+			}
+			release = append(release, pending.msg)
+			delete(byCmd, cmdID)
+			// A redelivered command re-registers its replay flag on the next
+			// dispatch, so drop the stale one.
+			if flags := h.replayCmds[key]; flags != nil {
+				delete(flags, cmdID)
+				if len(flags) == 0 {
+					delete(h.replayCmds, key)
+				}
+			}
+		}
+		if len(byCmd) == 0 {
+			delete(h.pendingAcks, key)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, msg := range release {
+		_ = msg.Nak()
+	}
+}
+
+// OnDisconnect stops the watch goroutines and clears volatile state.
 func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	key := ns + "/" + name
 
 	// A real stream ended either way, so the connection metrics move even when
 	// the teardown below is skipped — otherwise a superseded stream leaves the
 	// active-connection gauge permanently over-counted.
-	miteStreamConnections.Add(context.Background(), -1)
-	miteStreamDisconnects.Add(context.Background(), 1)
+	h.metrics.miteStreamConnections.Add(context.Background(), -1)
+	h.metrics.miteStreamDisconnects.Add(context.Background(), 1)
+
+	// Scoped by token, so this is correct to run even for a superseded
+	// stream's late teardown: it can only ever remove its own epoch's
+	// entries, never a replacement connection's.
+	h.clearBuildWorker(ns, name, token)
+	h.clearClaimSlots(ns, name, token)
+	h.clearCrossTenantSlots(ns, name, token)
+
+	// Deferred, so the nak lands after this stream's watch goroutines are
+	// cancelled — the superseded branch below returns early, and the live
+	// branch cancels further down. A nak issued while this stream's own pump
+	// still runs is fetched straight back by that dying pump, which then only
+	// naks it again.
+	defer h.releasePendingImperatives(ns, name, token)
 
 	// A superseded stream can tear down late — after the mite already
 	// reconnected. Without this check that teardown cancels the *live*
@@ -551,24 +1235,20 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 
 	h.log().Info("mite disconnected", "controller", key)
 
+	// tailMu is independent of h.mu, so this is safe to call while h.mu
+	// is held; it never blocks on anything else in this critical section.
+	h.clearTailLeasesForController(ns, name)
+
+	// stateMu is independent of h.mu too. A disconnect ends every push
+	// this cell had in flight, and without this drop each entry lives
+	// for the whole gateway lifetime.
+	h.dropCellStateEntries(ns, name)
+
 	if cancel, ok := h.cancels[key]; ok {
 		cancel()
 		delete(h.cancels, key)
 	}
 	delete(h.certExpiry, key)
-	// Nak only this controller's pending imperative acks so they can be
-	// redelivered on reconnect — other controllers' in-flight commands are
-	// untouched.
-	if byCmd := h.pendingAcks[key]; byCmd != nil {
-		for cmdID, msg := range byCmd {
-			_ = msg.Nak()
-			delete(byCmd, cmdID)
-		}
-		delete(h.pendingAcks, key)
-	}
-	// Redelivered imperative commands re-register their replay flags on the next
-	// dispatch, so drop this controller's stale replay tracking.
-	delete(h.replayCmds, key)
 	delete(h.idleGauges, key)
 	delete(h.idleGaugesAt, key)
 	delete(h.installedPluginsHash, key)
@@ -622,51 +1302,6 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 	h.publishBroodEvent("disconnected", ns, name, "")
 }
 
-// watchDesiredState watches the mite's desired-state KV key and forwards each
-// value (current value on attach + every update) to the gRPC stream. A failed
-// send is logged but not retried here: the reconciler re-Puts on hash divergence
-// each tick, so a transient failure self-heals on the next reconcile.
-func (h *BusHandler) watchDesiredState(ctx context.Context, ns, name string, send Sender) {
-	if h.desiredKV == nil {
-		return
-	}
-	key := bus.DesiredKey(h.cluster, ns, name)
-	pacer := h.newRebuildPacer()
-	for {
-		w, ok := h.establishDesiredWatch(ctx, ns, name, key)
-		if !ok {
-			return // context cancelled: the mite disconnected
-		}
-		start := time.Now()
-		reconnect := h.pumpDesired(ctx, w, ns, name, send)
-		_ = w.Stop()
-		if !reconnect {
-			return // context cancelled
-		}
-		// The watcher died while the mite is still connected. Without
-		// re-establishing here the connection is starved of desired state for
-		// the rest of the pod's life.
-		h.markWatchDegraded(ctx, ns, name, "desired", "desired-state watch closed unexpectedly")
-		if !pacer.wait(ctx, time.Since(start)) {
-			return
-		}
-	}
-}
-
-// establishDesiredWatch retries the KV watch setup with capped exponential
-// backoff until it succeeds or ctx is cancelled. It never gives up while the
-// mite is connected, so a transient failure cannot starve the connection of
-// every desired-state push. Returns ok=false only when ctx is done.
-func (h *BusHandler) establishDesiredWatch(ctx context.Context, ns, name, key string) (nats.KeyWatcher, bool) {
-	var w nats.KeyWatcher
-	ok := h.retryEstablish(ctx, ns, name, "desired", func() error {
-		var err error
-		w, err = h.desiredKV.Watch(key)
-		return err
-	})
-	return w, ok
-}
-
 // retryEstablish runs setup until it succeeds or ctx is cancelled, backing off
 // exponentially between attempts and marking the controller degraded for as
 // long as it keeps failing. It is the shared guard for every bus→stream
@@ -692,7 +1327,7 @@ func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind str
 		}
 		h.log().Error("bus watch setup failed",
 			"controller", ns+"/"+name, "watch", watchKind, "attempt", attempt, "retryIn", delay, "error", err)
-		miteWatchFailures.Add(ctx, 1, metric.WithAttributes(
+		h.metrics.miteWatchFailures.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("controller", ns+"/"+name),
 			attribute.String("watch", watchKind),
 		))
@@ -705,38 +1340,6 @@ func (h *BusHandler) retryEstablish(ctx context.Context, ns, name, watchKind str
 		}
 		if delay *= 2; delay > maxWatchBackoff {
 			delay = maxWatchBackoff
-		}
-	}
-}
-
-// pumpDesired forwards watcher updates to the mite stream. It returns true when
-// the watcher died and should be re-established, false when ctx was cancelled.
-func (h *BusHandler) pumpDesired(ctx context.Context, w nats.KeyWatcher, ns, name string, send Sender) bool {
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case entry, ok := <-w.Updates():
-			// Channel closed: watcher stopped or server disconnected.
-			if !ok {
-				return true
-			}
-			// nil marks end of the initial replay; skip.
-			if entry == nil {
-				continue
-			}
-			// Only forward Puts; a Delete (Controller removed) clears state.
-			if entry.Operation() != nats.KeyValuePut {
-				continue
-			}
-			var op mitev1.OperatorMessage
-			if err := json.Unmarshal(entry.Value(), &op); err != nil {
-				h.log().Error("unmarshal desired failed", "controller", ns+"/"+name, "error", err)
-				continue
-			}
-			if err := send(&op); err != nil {
-				h.log().Error("send desired to mite failed", "controller", ns+"/"+name, "error", err)
-			}
 		}
 	}
 }
@@ -806,7 +1409,7 @@ func (p *rebuildPacer) wait(ctx context.Context, uptime time.Duration) bool {
 // randomized map iteration. Caller must hold h.mu.
 func degradedReasonLocked(kinds map[string]string) string {
 	var reasons []string
-	for _, kind := range []string{"desired", "imperative", "content"} {
+	for _, kind := range []string{"desired", "imperative", "content", "tail"} {
 		if r, ok := kinds[kind]; ok {
 			reasons = append(reasons, r)
 		}
@@ -872,12 +1475,14 @@ func (h *BusHandler) clearWatchDegraded(ctx context.Context, ns, name, watchKind
 // (e.g. "safe restart") — unlike desired state, they must NOT be replayed
 // on reconnect, so each message is acked only after the mite returns a
 // matching CommandResult.
-func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send Sender) {
+func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, token int64, send Sender) {
 	if h.conn == nil {
 		return
 	}
 	streamName := "varroa"
 	consumer := "imp-" + h.cluster + "-" + ns + "-" + name
+
+	go h.markImperativesInProgress(ctx, ns, name, token)
 
 	// Setup is retried with backoff rather than abandoned on first error: a
 	// permanent return here silently drops every imperative command (safe
@@ -893,10 +1498,16 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 				return fmt.Errorf("ensure imperative stream: %w", err)
 			}
 			// Ensure a durable consumer per mite (idempotent).
+			// EnsureConsumer updates a live durable in place, so a changed
+			// ack wait applies on the next mite connection. MaxDeliver stays
+			// unbounded: a failed run-record publish relies on a repeat, and
+			// the stream's 24-hour MaxAge is the bound.
 			if err := h.conn.EnsureConsumer(streamName, consumer, &nats.ConsumerConfig{
 				Durable:       consumer,
 				FilterSubject: bus.MiteOutSubject(h.cluster, ns, name),
 				AckPolicy:     nats.AckExplicitPolicy,
+				AckWait:       h.imperativeAckWaitOrDefault(),
+				MaxDeliver:    -1,
 			}); err != nil {
 				return fmt.Errorf("ensure imperative consumer: %w", err)
 			}
@@ -911,7 +1522,7 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 			return // context cancelled: the mite disconnected
 		}
 		start := time.Now()
-		if reconnect := h.pumpImperative(ctx, sub, ns, name, send); !reconnect {
+		if reconnect := h.pumpImperative(ctx, sub, ns, name, token, send); !reconnect {
 			_ = sub.Unsubscribe()
 			return
 		}
@@ -927,7 +1538,7 @@ func (h *BusHandler) watchImperative(ctx context.Context, ns, name string, send 
 
 // pumpImperative drains and forwards imperative commands. It returns true when
 // the subscription died and should be rebuilt, false when ctx was cancelled.
-func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription, ns, name string, send Sender) bool {
+func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription, ns, name string, token int64, send Sender) bool {
 	for {
 		select {
 		case <-ctx.Done():
@@ -945,60 +1556,99 @@ func (h *BusHandler) pumpImperative(ctx context.Context, sub *nats.Subscription,
 				return true
 			}
 			for _, m := range msgs {
-				var op mitev1.OperatorMessage
-				if err := json.Unmarshal(m.Data, &op); err != nil {
-					h.log().Error("imperative unmarshal failed", "controller", ns+"/"+name, "error", err)
-					_ = m.Nak()
-					continue
-				}
-				imp := op.GetImperative()
-				if imp == nil {
-					// Non-imperative one-shots also flow on the out subject
-					// (e.g. a TokenGrant answering a mite's refresh request).
-					// They carry no CommandResult correlation, so forward to
-					// the mite and ack immediately — delivery is idempotent
-					// (the mite caches the newest token). Nak on send failure
-					// so a disconnected mite gets the grant on reconnect.
-					if op.GetTokenGrant() != nil {
-						if err := send(&op); err != nil {
-							h.log().Error("send token grant to mite failed", "controller", ns+"/"+name, "error", err)
-							_ = m.Nak()
-							continue
-						}
-					}
-					_ = m.Ack() // not an imperative; ack and skip
-					continue
-				}
-				// Track pending ack (scoped to this controller) — OnCommandResult
-				// will ack it once the mite reports completion.
-				key := ns + "/" + name
-				h.mu.Lock()
-				if h.pendingAcks[key] == nil {
-					h.pendingAcks[key] = make(map[string]*nats.Msg)
-				}
-				h.pendingAcks[key][imp.CommandId] = m
-				if imp.Type == mitev1.CommandTypeReplayWebhook {
-					if h.replayCmds[key] == nil {
-						h.replayCmds[key] = make(map[string]bool)
-					}
-					h.replayCmds[key][imp.CommandId] = true
-				}
-				h.mu.Unlock()
-
-				if err := send(&op); err != nil {
-					h.log().Error("send imperative to mite failed", "controller", ns+"/"+name, "cmdId", imp.CommandId, "error", err)
-					h.mu.Lock()
-					if byCmd := h.pendingAcks[key]; byCmd != nil {
-						delete(byCmd, imp.CommandId)
-						if len(byCmd) == 0 {
-							delete(h.pendingAcks, key)
-						}
-					}
-					h.mu.Unlock()
-					_ = m.Nak()
-				}
+				h.forwardImperative(ctx, m, ns, name, token, send)
 			}
 		}
+	}
+}
+
+// forwardImperative sends one fetched message to the mite and files the ack it
+// waits on.
+//
+// A cancelled context ends the message here, naked and unfiled. The gateway
+// cancels this pump before it naks the connection's pending imperatives, and a
+// nak makes the message available at once, so this pump's outstanding fetch can
+// receive back the very command the disconnect just released. Filing it again
+// would put it under a token no later teardown releases, and sending it would
+// hand it to a stream the mite no longer reads: the gRPC handler still holds an
+// open transport while its deferred OnDisconnect runs, so the send can even
+// succeed. Either way the replacement connection waits out the consumer's ack
+// timeout, which is the failure this pump exists to prevent.
+func (h *BusHandler) forwardImperative(ctx context.Context, m *nats.Msg, ns, name string, token int64, send Sender) {
+	// Fast path only. h.mu is where a cancel becomes visible, so the filing
+	// below re-reads it under that lock.
+	if ctx.Err() != nil {
+		_ = m.Nak()
+		return
+	}
+	var op mitev1.OperatorMessage
+	if err := json.Unmarshal(m.Data, &op); err != nil {
+		// A message that does not decode never decodes. A nak would make
+		// the stream deliver it again at once, for the life of the stream.
+		h.log().Error("imperative unmarshal failed, terminating the message", "controller", ns+"/"+name, "error", err)
+		_ = m.Term()
+		return
+	}
+	imp := op.GetImperative()
+	if imp == nil {
+		// Non-imperative one-shots also flow on the out subject
+		// (e.g. a TokenGrant answering a mite's refresh request).
+		// They carry no CommandResult correlation, so forward to
+		// the mite and ack immediately — delivery is idempotent
+		// (the mite caches the newest token). Nak on send failure
+		// so a disconnected mite gets the grant on reconnect.
+		if op.GetTokenGrant() != nil {
+			if err := send(&op); err != nil {
+				h.log().Error("send token grant to mite failed", "controller", ns+"/"+name, "error", err)
+				_ = m.Nak()
+				return
+			}
+		}
+		_ = m.Ack() // not an imperative; ack and skip
+		return
+	}
+	// Track pending ack (scoped to this controller) — OnCommandResult
+	// will ack it once the mite reports completion.
+	key := ns + "/" + name
+	h.mu.Lock()
+	// OnConnect and OnDisconnect both cancel this pump while they hold h.mu, so
+	// this read is the consistent snapshot the fast path above is not. A
+	// supersede that lands in the gap between the two files the command under a
+	// token no teardown releases, and the replacement then waits out the
+	// consumer's ack timeout. markWatchDegraded reads the context under h.mu for
+	// the same reason.
+	if ctx.Err() != nil {
+		h.mu.Unlock()
+		_ = m.Nak()
+		return
+	}
+	if h.pendingAcks[key] == nil {
+		h.pendingAcks[key] = make(map[string]pendingImperative)
+	}
+	h.pendingAcks[key][imp.CommandId] = pendingImperative{msg: m, token: token}
+	if imp.Type == mitev1.CommandTypeReplayWebhook {
+		if h.replayCmds[key] == nil {
+			h.replayCmds[key] = make(map[string]bool)
+		}
+		h.replayCmds[key][imp.CommandId] = true
+	}
+	h.mu.Unlock()
+
+	if err := send(&op); err != nil {
+		h.log().Error("send imperative to mite failed", "controller", ns+"/"+name, "cmdId", imp.CommandId, "error", err)
+		h.mu.Lock()
+		if byCmd := h.pendingAcks[key]; byCmd != nil {
+			// Only this connection's own delivery is dropped: a
+			// replacement stream may already own the entry.
+			if pending, ok := byCmd[imp.CommandId]; ok && pending.token == token {
+				delete(byCmd, imp.CommandId)
+			}
+			if len(byCmd) == 0 {
+				delete(h.pendingAcks, key)
+			}
+		}
+		h.mu.Unlock()
+		_ = m.Nak()
 	}
 }
 
@@ -1060,37 +1710,52 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 	if h.conn == nil || h.conn.NATSConn() == nil {
 		return
 	}
-	// Retried for the same reason as the desired-state watch: giving up
+	// Retried for the same reason as the desired-state subscription: giving up
 	// after one setup error leaves the mite unable to serve content fetches for
 	// the rest of the connection, with no operator-visible signal.
+	subject := bus.MiteContentSubject(h.cluster, ns, name)
 	pacer := h.newRebuildPacer()
 	for {
-		var sub *nats.Subscription
+		var (
+			sub     *nats.Subscription
+			denied  <-chan struct{}
+			release func()
+		)
 		established := h.retryEstablish(ctx, ns, name, "content", func() error {
 			nc := h.conn.NATSConn()
 			if nc == nil {
 				return errors.New("nats connection unavailable")
 			}
-			s, err := nc.SubscribeSync(bus.MiteContentSubject(h.cluster, ns, name))
+			// The watcher goes first: the server reports a denial only
+			// after Subscribe returns, and only to the error handler.
+			d, rel := h.conn.WatchSubscribeDenied(subject)
+			s, err := nc.SubscribeSync(subject)
 			if err != nil {
+				rel()
 				return fmt.Errorf("content subscribe: %w", err)
 			}
-			sub = s
+			if err := h.conn.ConfirmSubscription(d); err != nil {
+				_ = s.Unsubscribe()
+				rel()
+				return fmt.Errorf("content subscribe %s: %w", subject, err)
+			}
+			sub, denied, release = s, d, rel
 			return nil
 		})
 		if !established {
 			return // context cancelled: the mite disconnected
 		}
 		start := time.Now()
-		if reconnect := h.pumpContent(ctx, sub, ns, name, send); !reconnect {
-			_ = sub.Unsubscribe()
+		cause := h.pumpContent(ctx, sub, denied, ns, name, send)
+		_ = sub.Unsubscribe()
+		release()
+		if cause == nil {
 			return
 		}
 		// The subscription died while the mite is still connected. Returning
 		// here would leave it unable to serve any content fetch for the rest
 		// of the connection, with no signal.
-		_ = sub.Unsubscribe()
-		h.markWatchDegraded(ctx, ns, name, "content", "content subscription lost; rebuilding")
+		h.markWatchDegraded(ctx, ns, name, "content", "content subscription lost; rebuilding: "+cause.Error())
 		if !pacer.wait(ctx, time.Since(start)) {
 			return
 		}
@@ -1098,14 +1763,18 @@ func (h *BusHandler) watchContent(ctx context.Context, ns, name string, send Sen
 }
 
 // pumpContent bridges ContentRequests from the bus to the gRPC stream. It
-// returns true when the subscription died and should be rebuilt, false when
-// ctx was cancelled.
-func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, ns, name string, send Sender) bool {
+// returns the cause when the subscription died and must be rebuilt, and nil
+// when ctx was cancelled. A signal on denied, a server denial of the
+// subscription, is such a death.
+func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, denied <-chan struct{}, ns, name string, send Sender) error {
 	key := ns + "/" + name
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
+		case <-denied:
+			h.log().Error("content subscription denied", "controller", key)
+			return bus.ErrSubscribeDenied
 		default:
 		}
 		msg, err := sub.NextMsg(500 * time.Millisecond)
@@ -1113,11 +1782,10 @@ func (h *BusHandler) pumpContent(ctx context.Context, sub *nats.Subscription, ns
 			if errors.Is(err, nats.ErrTimeout) {
 				continue
 			}
-			if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrBadSubscription) {
-				h.log().Error("content subscription lost", "controller", key, "error", err)
-				return true
-			}
-			continue
+			// Any other error rebuilds the subscription through the pacer.
+			// A retry in place spins on an error that does not clear.
+			h.log().Error("content subscription lost", "controller", key, "error", err)
+			return err
 		}
 		var req mitev1.ContentRequest
 		if err := json.Unmarshal(msg.Data, &req); err != nil {

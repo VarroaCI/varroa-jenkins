@@ -199,6 +199,7 @@ func newCommandCRUDTest(t *testing.T) *commandCRUDTest {
 	crud := &CommandCRUD{
 		Client:            client,
 		Store:             store,
+		Controllers:       NewStoreControllerListSource(store),
 		OperatorNamespace: "varroa-system",
 		ManagedNamespaces: "",
 		Logger:            slog.Default(),
@@ -910,32 +911,169 @@ func TestCommandCRUD_ListStripsManagedFields(t *testing.T) {
 	}
 }
 
-func TestCommandCRUD_ListOverBudget(t *testing.T) {
-	ct := newCommandCRUDTest(t)
-
-	bigAnn := make(map[string]string)
-	for i := 0; i < 100; i++ {
-		bigAnn[fmt.Sprintf("key-%d", i)] = strings.Repeat("x", 2000)
-	}
-	for i := 0; i < 50; i++ {
-		name := fmt.Sprintf("ctrl-%d", i)
+// seedPaddedControllers seeds n Controllers across two namespaces. Each row
+// carries a padding annotation of about 9.5 KB, so a page holds about 90 rows.
+func seedPaddedControllers(ct *commandCRUDTest, n int) {
+	pad := strings.Repeat("x", 9500)
+	for i := 0; i < n; i++ {
+		ns := "team-a"
+		if i%2 == 1 {
+			ns = "team-b"
+		}
 		ct.seedController(&v1alpha1.Controller{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a", Annotations: bigAnn},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        fmt.Sprintf("ctrl-%03d", i),
+				Namespace:   ns,
+				Annotations: map[string]string{"pad": pad},
+			},
+			Spec: v1alpha1.ControllerSpec{Version: "2.0"},
+		})
+	}
+}
+
+// walkControllersList reads every page of a controllers.list walk.
+func walkControllersList(t *testing.T, ct *commandCRUDTest, namespace string) (pages [][]byte, keys []string) {
+	t.Helper()
+	after := ""
+	for i := 0; i < 1000; i++ {
+		raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{Namespace: namespace, After: after}))
+		pages = append(pages, raw)
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal page: %v", err)
+		}
+		if resp.Code != "" {
+			t.Fatalf("page %d: code %q error %q", i, resp.Code, resp.Error)
+		}
+		for _, item := range resp.Items {
+			var cr v1alpha1.Controller
+			if err := json.Unmarshal(item, &cr); err != nil {
+				t.Fatalf("unmarshal item: %v", err)
+			}
+			keys = append(keys, cr.Namespace+"/"+cr.Name)
+		}
+		if resp.Next == "" {
+			return pages, keys
+		}
+		after = resp.Next
+	}
+	t.Fatal("list did not terminate")
+	return nil, nil
+}
+
+func TestCommandCRUD_ListPagesUnderBudget(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 150)
+
+	pages, keys := walkControllersList(t, ct, "")
+	if len(pages) < 2 {
+		t.Fatalf("expected at least 2 pages, got %d", len(pages))
+	}
+	for i, page := range pages {
+		if len(page) > bus.ListPageBudget {
+			t.Fatalf("page %d is %d bytes, over budget %d", i, len(page), bus.ListPageBudget)
+		}
+	}
+	if len(keys) != 150 {
+		t.Fatalf("expected 150 rows across pages, got %d", len(keys))
+	}
+	seen := make(map[string]bool, len(keys))
+	for i, k := range keys {
+		if seen[k] {
+			t.Fatalf("duplicate row %s", k)
+		}
+		seen[k] = true
+		if i > 0 && keys[i-1] >= k {
+			t.Fatalf("rows not in sorted order: %s before %s", keys[i-1], k)
+		}
+	}
+}
+
+func TestCommandCRUD_ListStripsManagedFieldsOnEveryPage(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 150)
+	for _, cr := range ct.client.controllers {
+		cr.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test", Operation: "Update"}}
+	}
+	pages, _ := walkControllersList(t, ct, "")
+	for _, page := range pages {
+		var resp bus.ControllersListResponse
+		if err := json.Unmarshal(page, &resp); err != nil {
+			t.Fatalf("unmarshal page: %v", err)
+		}
+		for _, item := range resp.Items {
+			if strings.Contains(string(item), "managedFields") {
+				t.Fatal("expected managedFields to be stripped on every page")
+			}
+		}
+	}
+}
+
+func TestCommandCRUD_ListAfterSkipsEarlierRows(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	for i := 1; i <= 5; i++ {
+		ct.seedController(&v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("c%d", i), Namespace: "team-a"},
 			Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
 		})
 	}
+	raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{After: "team-a/c2"}))
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Items) != 3 {
+		t.Fatalf("expected rows 3 to 5, got %d items", len(resp.Items))
+	}
+	if resp.Next != "" {
+		t.Fatalf("expected last page, got next %q", resp.Next)
+	}
+	var first v1alpha1.Controller
+	if err := json.Unmarshal(resp.Items[0], &first); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if first.Name != "c3" {
+		t.Fatalf("expected first row c3, got %s", first.Name)
+	}
+}
 
-	req := bus.ControllersListRequest{}
-	resp := ct.crud.HandleList(mustMarshal(t, req))
-	var listResp bus.ControllersListResponse
-	if err := json.Unmarshal(resp, &listResp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+func TestCommandCRUD_ListSingleOversizedRow(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	ct.seedController(&v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "huge",
+			Namespace:   "team-a",
+			Annotations: map[string]string{"pad": strings.Repeat("x", 950*1024)},
+		},
+		Spec: v1alpha1.ControllerSpec{Version: "2.0"},
+	})
+	raw := ct.crud.HandleList(mustMarshal(t, bus.ControllersListRequest{}))
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if listResp.Code != bus.CodeInternal {
-		t.Fatalf("expected code=%q (list too large), got %q", bus.CodeInternal, listResp.Code)
+	if resp.Code != bus.CodeInternal {
+		t.Fatalf("expected code %q, got %q", bus.CodeInternal, resp.Code)
 	}
-	if listResp.Error != "list too large" {
-		t.Fatalf("expected error 'list too large', got %q", listResp.Error)
+	if !strings.Contains(resp.Error, "team-a/huge") {
+		t.Fatalf("expected error to name the row, got %q", resp.Error)
+	}
+}
+
+func TestCommandCRUD_ListNamespaceFilterPages(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	seedPaddedControllers(ct, 200)
+	pages, keys := walkControllersList(t, ct, "team-b")
+	if len(pages) < 2 {
+		t.Fatalf("expected at least 2 pages for team-b, got %d", len(pages))
+	}
+	if len(keys) != 100 {
+		t.Fatalf("expected 100 team-b rows, got %d", len(keys))
+	}
+	for _, k := range keys {
+		if !strings.HasPrefix(k, "team-b/") {
+			t.Fatalf("namespace filter leaked row %s", k)
+		}
 	}
 }
 
@@ -1644,5 +1782,218 @@ func TestCommandCRUD_HandleUpdate_SetHibernatedFailureReturnsInternal(t *testing
 	}
 	if updateResp.Error == "" {
 		t.Fatal("expected non-empty error")
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_RefusesCellRoleChange: a patch that adds,
+// removes, or flips the cell role is refused before any apply. The stored
+// object keeps its cell block.
+func TestCommandCRUD_HandleUpdate_RefusesCellRoleChange(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.CellSpec
+		patch string
+	}{
+		{name: "add cell role to an ordinary controller", seed: nil, patch: `{"spec":{"cell":{"enabled":true}}}`},
+		{name: "remove cell role", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":null}}`},
+		{name: "flip cell role to false", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":{"enabled":false}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{Cell: tt.seed},
+			})
+			before := ct.client.controllers["team-a/ctrl1"].Spec.Cell.DeepCopy()
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Code != bus.CodeInvalid {
+				t.Fatalf("code = %q, want %q (error %q)", updateResp.Code, bus.CodeInvalid, updateResp.Error)
+			}
+			if updateResp.Error != "cell.enabled is immutable" {
+				t.Errorf("error = %q, want %q", updateResp.Error, "cell.enabled is immutable")
+			}
+			if got := ct.client.controllers["team-a/ctrl1"].Spec.Cell; !reflect.DeepEqual(got, before) {
+				t.Errorf("stored cell = %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_RefusesIngressModeChange: the ingress mode
+// stays fixed through a patch that adds, removes, or edits the whole block.
+func TestCommandCRUD_HandleUpdate_RefusesIngressModeChange(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.IngressSpec
+		patch string
+	}{
+		{name: "flip path to subdomain", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "remove path block", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":null}}`},
+		{name: "remove mode key from path block", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"mode":null}}}`},
+		{name: "add path block to a controller with no block", seed: nil, patch: `{"spec":{"ingressSpec":{"mode":"path","host":"varroa.example.com"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: tt.seed},
+			})
+			before := ct.client.controllers["team-a/ctrl1"].Spec.IngressSpec.DeepCopy()
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Code != bus.CodeInvalid {
+				t.Fatalf("code = %q, want %q (error %q)", updateResp.Code, bus.CodeInvalid, updateResp.Error)
+			}
+			if updateResp.Error != "ingressSpec.mode is immutable" {
+				t.Errorf("error = %q, want %q", updateResp.Error, "ingressSpec.mode is immutable")
+			}
+			if got := ct.client.controllers["team-a/ctrl1"].Spec.IngressSpec; !reflect.DeepEqual(got, before) {
+				t.Errorf("stored ingressSpec = %+v, want %+v", got, before)
+			}
+		})
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_AllowsEquivalentIngressMode: a change that
+// keeps the normalized mode (subdomain or path) passes.
+func TestCommandCRUD_HandleUpdate_AllowsEquivalentIngressMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.IngressSpec
+		patch string
+	}{
+		{name: "add block without mode", seed: nil, patch: `{"spec":{"ingressSpec":{"host":"ctrl1.example.com"}}}`},
+		{name: "add block with subdomain mode", seed: nil, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "remove subdomain block", seed: &v1alpha1.IngressSpec{Mode: "subdomain"}, patch: `{"spec":{"ingressSpec":null}}`},
+		{name: "empty mode rewritten to subdomain", seed: &v1alpha1.IngressSpec{Host: "a.example.com"}, patch: `{"spec":{"ingressSpec":{"mode":"subdomain"}}}`},
+		{name: "path block host-only edit", seed: &v1alpha1.IngressSpec{Host: "varroa.example.com", Mode: "path"}, patch: `{"spec":{"ingressSpec":{"ingressClassName":"nginx"}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{IngressSpec: tt.seed},
+			})
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Error != "" {
+				t.Fatalf("error = %q (code %q), want success", updateResp.Error, updateResp.Code)
+			}
+		})
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit: a capacity edit is
+// accepted on a cell and on a block that stores no enabled key.
+func TestCommandCRUD_HandleUpdate_AllowsCellCapacityEdit(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  *v1alpha1.CellSpec
+		patch string
+	}{
+		{name: "cell capacity edit", seed: &v1alpha1.CellSpec{Enabled: true}, patch: `{"spec":{"cell":{"maxTenants":7}}}`},
+		{name: "block without enabled capacity edit", seed: &v1alpha1.CellSpec{MaxTenants: 3}, patch: `{"spec":{"cell":{"maxTenants":4}}}`},
+		{name: "ordinary controller capacity edit", seed: nil, patch: `{"spec":{"cell":{"maxTenants":3}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ct := newCommandCRUDTest(t)
+			ct.seedController(&v1alpha1.Controller{
+				ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+				Spec:       v1alpha1.ControllerSpec{Cell: tt.seed},
+			})
+			resp := ct.crud.HandleUpdate(mustMarshal(t, bus.ControllersUpdateRequest{
+				Namespace: "team-a",
+				Name:      "ctrl1",
+				Patch:     []byte(tt.patch),
+			}))
+			var updateResp bus.ControllersUpdateResponse
+			if err := json.Unmarshal(resp, &updateResp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+			if updateResp.Error != "" {
+				t.Fatalf("error = %q, want none", updateResp.Error)
+			}
+		})
+	}
+}
+
+// stubControllerSource returns fixed rows from ListControllers.
+type stubControllerSource struct {
+	items []*v1alpha1.Controller
+}
+
+func (s stubControllerSource) ListControllers(_ context.Context, _ string) ([]*v1alpha1.Controller, error) {
+	return s.items, nil
+}
+
+func TestCommandCRUD_ListReadsControllerSource(t *testing.T) {
+	src := stubControllerSource{items: []*v1alpha1.Controller{
+		{ObjectMeta: metav1.ObjectMeta{Name: "beta", Namespace: "team-b", ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubectl"}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "alpha", Namespace: "team-a", ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "varroa"}}}},
+	}}
+	crud := &CommandCRUD{Store: crdstore.NewFake(), Controllers: src, Logger: slog.Default()}
+
+	data, _ := json.Marshal(bus.ControllersListRequest{})
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(crud.HandleList(data), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("list error: %s (%s)", resp.Error, resp.Code)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("got %d rows, want 2", len(resp.Items))
+	}
+	wantOrder := []string{"team-a/alpha", "team-b/beta"}
+	for i, raw := range resp.Items {
+		var cr v1alpha1.Controller
+		if err := json.Unmarshal(raw, &cr); err != nil {
+			t.Fatalf("decode row %d: %v", i, err)
+		}
+		key := cr.Namespace + "/" + cr.Name
+		if key != wantOrder[i] {
+			t.Errorf("row %d = %s, want %s", i, key, wantOrder[i])
+		}
+		if cr.ManagedFields != nil {
+			t.Errorf("row %s kept managedFields", key)
+		}
+	}
+}
+
+func TestCommandCRUD_ListWithoutSourceFails(t *testing.T) {
+	crud := &CommandCRUD{Store: crdstore.NewFake(), Logger: slog.Default()}
+	data, _ := json.Marshal(bus.ControllersListRequest{})
+	var resp bus.ControllersListResponse
+	if err := json.Unmarshal(crud.HandleList(data), &resp); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if resp.Code != bus.CodeInternal {
+		t.Fatalf("code = %q, want %q", resp.Code, bus.CodeInternal)
 	}
 }

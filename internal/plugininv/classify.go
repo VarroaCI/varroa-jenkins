@@ -73,7 +73,7 @@ type ClassifiedPlugin struct {
 	DeclaredBy     string   // tier label for class-2, empty otherwise
 	Contributors   []string // bundle inputs for class-2 (empty if not bundle tier or absent)
 	ImpliedBy      []string // expected roots that reach this plugin (classes 4, 5)
-	OptionalEdge   string   // the name of the optional-edge plugin on the path (class 5 only)
+	OptionalEdge   string   // plugin that declares the first optional edge on the path (class 5 only)
 	VersionVerdict string   // ahead/behind/missing for class-2 only
 	Enabled        Tri
 	Detached       Tri
@@ -327,26 +327,39 @@ func Classify(in Inputs) Classification {
 		plugin       string
 		optionalSeen bool
 	}
+	type bfs2Item struct {
+		key          bfs2Key
+		optionalFrom string // plugin that declares the first optional edge on the path (class 5 only)
+	}
 	bfs2Visited := make(map[bfs2Key]bool)
-	queue2 := make([]bfs2Key, 0, len(expected))
+	queue2 := make([]bfs2Item, 0, len(expected))
+	seeds := make([]string, 0, len(expected))
 	for name := range expected {
+		seeds = append(seeds, name)
+	}
+	sort.Strings(seeds) // fixed seed order keeps the recorded OptionalEdge stable across runs
+	for _, name := range seeds {
 		key := bfs2Key{plugin: name, optionalSeen: false}
 		bfs2Visited[key] = true
-		queue2 = append(queue2, key)
+		queue2 = append(queue2, bfs2Item{key: key})
 	}
 
 	for len(queue2) > 0 {
 		cur := queue2[0]
 		queue2 = queue2[1:]
 
-		for _, dep := range adj[cur.plugin] {
+		for _, dep := range adj[cur.key.plugin] {
 			rw, ok := installed[dep.Name]
 			if !ok {
 				continue
 			}
 
-			newOptionalSeen := cur.optionalSeen || dep.Optional
+			newOptionalSeen := cur.key.optionalSeen || dep.Optional
 			nextKey := bfs2Key{plugin: dep.Name, optionalSeen: newOptionalSeen}
+			optionalFrom := cur.optionalFrom
+			if dep.Optional && !cur.key.optionalSeen {
+				optionalFrom = cur.key.plugin
+			}
 
 			if !bfs2Visited[nextKey] {
 				bfs2Visited[nextKey] = true
@@ -362,20 +375,8 @@ func Classify(in Inputs) Classification {
 						Detached: rw.rec.Detached,
 						Bundled:  rw.rec.Bundled,
 					}
-					// Find the optional edge that got us here.
-					// KNOWN LIMITATION: this records the immediate BFS
-					// predecessor, which is the true optional-edge source only
-					// when the optional edge is the LAST hop. For
-					// root --optional--> A --mandatory--> B this sets B's
-					// OptionalEdge to "A", implying A→B was optional when the
-					// optional edge was actually root→A. Left as-is
-					// deliberately: no consumer reads this field yet (transport
-					// .ClassifiedPlugin and the CRD status both drop it), and
-					// changing the traversal to carry the originating optional
-					// edge is a closure-semantics change with nothing to
-					// validate it against. Fix it together with the first
-					// consumer.
-					cp.OptionalEdge = cur.plugin
+					// OptionalEdge names the plugin that declares the first optional edge on the path, not the immediate parent.
+					cp.OptionalEdge = optionalFrom
 					// Record the immediate parent for advisory purposes, but
 					// publish the expected roots reaching this plugin through
 					// the full closure — the optional edge itself is reported
@@ -383,7 +384,7 @@ func Classify(in Inputs) Classification {
 					if declaredParents[dep.Name] == nil {
 						declaredParents[dep.Name] = make(map[string]bool)
 					}
-					declaredParents[dep.Name][cur.plugin] = true
+					declaredParents[dep.Name][cur.key.plugin] = true
 					roots := make([]string, 0, len(anyRoots[dep.Name]))
 					for r := range anyRoots[dep.Name] {
 						roots = append(roots, r)
@@ -394,7 +395,7 @@ func Classify(in Inputs) Classification {
 				}
 
 				// Always traverse through, even if already assigned.
-				queue2 = append(queue2, nextKey)
+				queue2 = append(queue2, bfs2Item{key: nextKey, optionalFrom: optionalFrom})
 			}
 		}
 	}

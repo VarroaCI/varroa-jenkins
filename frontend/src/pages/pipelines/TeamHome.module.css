@@ -1,0 +1,205 @@
+.table { composes: dataTable from "../tables.module.css"; }
+.nameCell { composes: nameCell from "../tables.module.css"; }
+
+.tableScroll { composes: tableScroll from "../tables.module.css"; }
+
+.page {
+  animation: fade 0.3s ease;
+  max-width: 1080px;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page { animation: none; }
+}
+
+/* The pill carries the state as text, in the colour pair the card's own
+   badge uses. A CSS module shares no class name with another file. */
+.cellPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cellPillOk   { composes: cellPill; background: var(--ok-soft);   color: var(--ok-text); }
+.cellPillInfo { composes: cellPill; background: var(--info-soft); color: var(--info-text); }
+.cellPillWarn { composes: cellPill; background: var(--warn-soft); color: var(--warn-text); }
+
+/* The margin keeps the open card clear of the page head above it. */
+.cellDisclosure {
+  margin: 1rem 0 0;
+}
+
+.pageHead {
+  margin-bottom: 1.25rem;
+}
+
+.pageTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pageDesc {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.retention {
+  margin: 0.25rem 0 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.retentionJobs {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 1.5rem 0 0.5rem;
+}
+
+.sectionTitle:first-of-type {
+  margin-top: 0;
+}
+
+.loading, .empty {
+  padding: 2rem 0;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.emptyNote {
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
+}
+
+.truncatedNote {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 0.8125rem;
+}
+
+/* ---- Running now ---- */
+
+.tileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.85rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tileHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.tileJob {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.tileBuild {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.tileStage {
+  font-size: 0.8125rem;
+  color: var(--info-text);
+}
+
+.tileMeta {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+}
+
+.tileCommitMsg {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progressTrack {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.tileTimes {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+/* ---- Runners table ---- */
+
+.dim {
+  color: var(--text-2);
+}
+
+
+/* ---- Locks table ---- */
+
+/* A job path is long and wraps rather than widening the table. */
+.lockJob {
+  overflow-wrap: break-word;
+}
+
+/* The elapsed time is a number that reads in a column. */
+.lockSince {
+  font-variant-numeric: tabular-nums;
+}
+
+.connectedYes {
+  color: var(--ok-text);
+  font-weight: 600;
+}
+
+.connectedNo {
+  color: var(--bad-text);
+}

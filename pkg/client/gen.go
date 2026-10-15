@@ -41,6 +41,27 @@ const (
 	ComponentsSchemasActivityEventSourceUser     ComponentsSchemasActivityEventSource = "user"
 )
 
+// Defines values for ComponentsSchemasBindingFederationStatusState.
+const (
+	ComponentsSchemasBindingFederationStatusStateFailed    ComponentsSchemasBindingFederationStatusState = "failed"
+	ComponentsSchemasBindingFederationStatusStateFederated ComponentsSchemasBindingFederationStatusState = "federated"
+	ComponentsSchemasBindingFederationStatusStateSkipped   ComponentsSchemasBindingFederationStatusState = "skipped"
+)
+
+// Defines values for ComponentsSchemasBranchScanState.
+const (
+	ComponentsSchemasBranchScanStateCompleted ComponentsSchemasBranchScanState = "completed"
+	ComponentsSchemasBranchScanStateFailed    ComponentsSchemasBranchScanState = "failed"
+	ComponentsSchemasBranchScanStateRefused   ComponentsSchemasBranchScanState = "refused"
+	ComponentsSchemasBranchScanStateRunning   ComponentsSchemasBranchScanState = "running"
+	ComponentsSchemasBranchScanStateTimeout   ComponentsSchemasBranchScanState = "timeout"
+)
+
+// Defines values for ComponentsSchemasBranchScanResponseState.
+const (
+	ComponentsSchemasBranchScanResponseStateRequested ComponentsSchemasBranchScanResponseState = "requested"
+)
+
 // Defines values for ComponentsSchemasBroodOperationDetailSpecActionVerb.
 const (
 	ComponentsSchemasBroodOperationDetailSpecActionVerbExecuteGroovy ComponentsSchemasBroodOperationDetailSpecActionVerb = "executeGroovy"
@@ -128,9 +149,14 @@ const (
 
 // Defines values for ComponentsSchemasBroodScheduleSpecConcurrencyPolicy.
 const (
-	Allow   ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Allow"
-	Forbid  ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Forbid"
-	Replace ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Replace"
+	ComponentsSchemasBroodScheduleSpecConcurrencyPolicyAllow   ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Allow"
+	ComponentsSchemasBroodScheduleSpecConcurrencyPolicyForbid  ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Forbid"
+	ComponentsSchemasBroodScheduleSpecConcurrencyPolicyReplace ComponentsSchemasBroodScheduleSpecConcurrencyPolicy = "Replace"
+)
+
+// Defines values for ComponentsSchemasCancelRunResponseState.
+const (
+	ComponentsSchemasCancelRunResponseStateRequested ComponentsSchemasCancelRunResponseState = "requested"
 )
 
 // Defines values for ComponentsSchemasCatalogItemClosureEntryProvenance.
@@ -169,10 +195,24 @@ const (
 
 // Defines values for ComponentsSchemasCatalogVariableType.
 const (
-	Boolean     ComponentsSchemasCatalogVariableType = "boolean"
-	Credentials ComponentsSchemasCatalogVariableType = "credentials"
-	Number      ComponentsSchemasCatalogVariableType = "number"
-	String      ComponentsSchemasCatalogVariableType = "string"
+	ComponentsSchemasCatalogVariableTypeBoolean     ComponentsSchemasCatalogVariableType = "boolean"
+	ComponentsSchemasCatalogVariableTypeCredentials ComponentsSchemasCatalogVariableType = "credentials"
+	ComponentsSchemasCatalogVariableTypeNumber      ComponentsSchemasCatalogVariableType = "number"
+	ComponentsSchemasCatalogVariableTypeString      ComponentsSchemasCatalogVariableType = "string"
+)
+
+// Defines values for ComponentsSchemasCellGrantSource.
+const (
+	ClusterWideBinding  ComponentsSchemasCellGrantSource = "clusterWideBinding"
+	TeamMembership      ComponentsSchemasCellGrantSource = "teamMembership"
+	TenantScopedBinding ComponentsSchemasCellGrantSource = "tenantScopedBinding"
+)
+
+// Defines values for ComponentsSchemasCellPoolMailSecurity.
+const (
+	ComponentsSchemasCellPoolMailSecurityNone     ComponentsSchemasCellPoolMailSecurity = "none"
+	ComponentsSchemasCellPoolMailSecurityStarttls ComponentsSchemasCellPoolMailSecurity = "starttls"
+	ComponentsSchemasCellPoolMailSecurityTls      ComponentsSchemasCellPoolMailSecurity = "tls"
 )
 
 // Defines values for ComponentsSchemasCheckStatus.
@@ -184,9 +224,9 @@ const (
 
 // Defines values for ComponentsSchemasClusterInfoState.
 const (
-	Active   ComponentsSchemasClusterInfoState = "active"
-	Drained  ComponentsSchemasClusterInfoState = "drained"
-	Draining ComponentsSchemasClusterInfoState = "draining"
+	ComponentsSchemasClusterInfoStateActive   ComponentsSchemasClusterInfoState = "active"
+	ComponentsSchemasClusterInfoStateDrained  ComponentsSchemasClusterInfoState = "drained"
+	ComponentsSchemasClusterInfoStateDraining ComponentsSchemasClusterInfoState = "draining"
 )
 
 // Defines values for ComponentsSchemasComposedBundleSpecJcascMergeStrategy.
@@ -208,8 +248,15 @@ const (
 	ApplyFailed      ComponentsSchemasControllerAttentionKind = "applyFailed"
 	BootFailed       ComponentsSchemasControllerAttentionKind = "bootFailed"
 	Failed           ComponentsSchemasControllerAttentionKind = "failed"
+	MiteUnreachable  ComponentsSchemasControllerAttentionKind = "miteUnreachable"
 	PluginRollFailed ComponentsSchemasControllerAttentionKind = "pluginRollFailed"
 	ReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
+)
+
+// Defines values for ComponentsSchemasControllerDetailKind.
+const (
+	ComponentsSchemasControllerDetailKindCell     ComponentsSchemasControllerDetailKind = "cell"
+	ComponentsSchemasControllerDetailKindStateful ComponentsSchemasControllerDetailKind = "stateful"
 )
 
 // Defines values for ComponentsSchemasControllerSpecPowerState.
@@ -217,6 +264,30 @@ const (
 	ComponentsSchemasControllerSpecPowerStateEmpty   ComponentsSchemasControllerSpecPowerState = ""
 	ComponentsSchemasControllerSpecPowerStateRunning ComponentsSchemasControllerSpecPowerState = "Running"
 	ComponentsSchemasControllerSpecPowerStateStopped ComponentsSchemasControllerSpecPowerState = "Stopped"
+)
+
+// Defines values for ComponentsSchemasControllerSummaryKind.
+const (
+	ComponentsSchemasControllerSummaryKindCell     ComponentsSchemasControllerSummaryKind = "cell"
+	ComponentsSchemasControllerSummaryKindStateful ComponentsSchemasControllerSummaryKind = "stateful"
+)
+
+// Defines values for ComponentsSchemasCreateUserRequestPurpose.
+const (
+	ComponentsSchemasCreateUserRequestPurposeBreakGlass ComponentsSchemasCreateUserRequestPurpose = "break-glass"
+	ComponentsSchemasCreateUserRequestPurposeService    ComponentsSchemasCreateUserRequestPurpose = "service"
+)
+
+// Defines values for ComponentsSchemasFleetLockState.
+const (
+	Held      ComponentsSchemasFleetLockState = "held"
+	Releasing ComponentsSchemasFleetLockState = "releasing"
+	Waiting   ComponentsSchemasFleetLockState = "waiting"
+)
+
+// Defines values for ComponentsSchemasFleetLockReleaseResponseState.
+const (
+	Released ComponentsSchemasFleetLockReleaseResponseState = "released"
 )
 
 // Defines values for ComponentsSchemasGroupEntrySource.
@@ -249,9 +320,9 @@ const (
 
 // Defines values for ComponentsSchemasJenkinsScopePropagate.
 const (
-	Children ComponentsSchemasJenkinsScopePropagate = "Children"
-	None     ComponentsSchemasJenkinsScopePropagate = "None"
-	Subtree  ComponentsSchemasJenkinsScopePropagate = "Subtree"
+	ComponentsSchemasJenkinsScopePropagateChildren ComponentsSchemasJenkinsScopePropagate = "Children"
+	ComponentsSchemasJenkinsScopePropagateNone     ComponentsSchemasJenkinsScopePropagate = "None"
+	ComponentsSchemasJenkinsScopePropagateSubtree  ComponentsSchemasJenkinsScopePropagate = "Subtree"
 )
 
 // Defines values for ComponentsSchemasJenkinsScopeType.
@@ -259,6 +330,20 @@ const (
 	Folder  ComponentsSchemasJenkinsScopeType = "Folder"
 	Global  ComponentsSchemasJenkinsScopeType = "Global"
 	Pattern ComponentsSchemasJenkinsScopeType = "Pattern"
+)
+
+// Defines values for ComponentsSchemasJobDeclaredByForge.
+const (
+	ComponentsSchemasJobDeclaredByForgeGitea  ComponentsSchemasJobDeclaredByForge = "gitea"
+	ComponentsSchemasJobDeclaredByForgeGithub ComponentsSchemasJobDeclaredByForge = "github"
+	ComponentsSchemasJobDeclaredByForgeGitlab ComponentsSchemasJobDeclaredByForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasJobDeclaredByKind.
+const (
+	GitSource ComponentsSchemasJobDeclaredByKind = "gitSource"
+	ItemRef   ComponentsSchemasJobDeclaredByKind = "itemRef"
+	OciSource ComponentsSchemasJobDeclaredByKind = "ociSource"
 )
 
 // Defines values for ComponentsSchemasLogEntryLevel.
@@ -283,6 +368,83 @@ const (
 	Never        ComponentsSchemasMiteSpecImagePullPolicy = "Never"
 )
 
+// Defines values for ComponentsSchemasPipelineDefinitionJenkinsfileForge.
+const (
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGitea  ComponentsSchemasPipelineDefinitionJenkinsfileForge = "gitea"
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGithub ComponentsSchemasPipelineDefinitionJenkinsfileForge = "github"
+	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGitlab ComponentsSchemasPipelineDefinitionJenkinsfileForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasPipelineDefinitionSource.
+const (
+	ComponentsSchemasPipelineDefinitionSourceInline      ComponentsSchemasPipelineDefinitionSource = "inline"
+	ComponentsSchemasPipelineDefinitionSourceJenkinsfile ComponentsSchemasPipelineDefinitionSource = "jenkinsfile"
+	ComponentsSchemasPipelineDefinitionSourceTemplate    ComponentsSchemasPipelineDefinitionSource = "template"
+)
+
+// Defines values for ComponentsSchemasPipelineDependencyEdgeResult.
+const (
+	FAILURE  ComponentsSchemasPipelineDependencyEdgeResult = "FAILURE"
+	SUCCESS  ComponentsSchemasPipelineDependencyEdgeResult = "SUCCESS"
+	UNSTABLE ComponentsSchemasPipelineDependencyEdgeResult = "UNSTABLE"
+)
+
+// Defines values for ComponentsSchemasPipelineJobDetailHealth.
+const (
+	ComponentsSchemasPipelineJobDetailHealthClear   ComponentsSchemasPipelineJobDetailHealth = "clear"
+	ComponentsSchemasPipelineJobDetailHealthCloudy  ComponentsSchemasPipelineJobDetailHealth = "cloudy"
+	ComponentsSchemasPipelineJobDetailHealthRain    ComponentsSchemasPipelineJobDetailHealth = "rain"
+	ComponentsSchemasPipelineJobDetailHealthUnknown ComponentsSchemasPipelineJobDetailHealth = "unknown"
+)
+
+// Defines values for ComponentsSchemasPipelineJobDetailKind.
+const (
+	ComponentsSchemasPipelineJobDetailKindMultibranch ComponentsSchemasPipelineJobDetailKind = "multibranch"
+	ComponentsSchemasPipelineJobDetailKindPipeline    ComponentsSchemasPipelineJobDetailKind = "pipeline"
+	ComponentsSchemasPipelineJobDetailKindUnknown     ComponentsSchemasPipelineJobDetailKind = "unknown"
+)
+
+// Defines values for ComponentsSchemasPipelineMarkerFindingSeverity.
+const (
+	ComponentsSchemasPipelineMarkerFindingSeverityError ComponentsSchemasPipelineMarkerFindingSeverity = "error"
+)
+
+// Defines values for ComponentsSchemasPipelineParameterKind.
+const (
+	ComponentsSchemasPipelineParameterKindBoolean  ComponentsSchemasPipelineParameterKind = "boolean"
+	ComponentsSchemasPipelineParameterKindChoice   ComponentsSchemasPipelineParameterKind = "choice"
+	ComponentsSchemasPipelineParameterKindPassword ComponentsSchemasPipelineParameterKind = "password"
+	ComponentsSchemasPipelineParameterKindString   ComponentsSchemasPipelineParameterKind = "string"
+	ComponentsSchemasPipelineParameterKindText     ComponentsSchemasPipelineParameterKind = "text"
+)
+
+// Defines values for ComponentsSchemasPipelineParameterUiWidget.
+const (
+	Password ComponentsSchemasPipelineParameterUiWidget = "password"
+	Textarea ComponentsSchemasPipelineParameterUiWidget = "textarea"
+)
+
+// Defines values for ComponentsSchemasPipelineSummaryHealth.
+const (
+	ComponentsSchemasPipelineSummaryHealthClear   ComponentsSchemasPipelineSummaryHealth = "clear"
+	ComponentsSchemasPipelineSummaryHealthCloudy  ComponentsSchemasPipelineSummaryHealth = "cloudy"
+	ComponentsSchemasPipelineSummaryHealthRain    ComponentsSchemasPipelineSummaryHealth = "rain"
+	ComponentsSchemasPipelineSummaryHealthUnknown ComponentsSchemasPipelineSummaryHealth = "unknown"
+)
+
+// Defines values for ComponentsSchemasPipelineSummaryKind.
+const (
+	Multibranch ComponentsSchemasPipelineSummaryKind = "multibranch"
+	Pipeline    ComponentsSchemasPipelineSummaryKind = "pipeline"
+	Unknown     ComponentsSchemasPipelineSummaryKind = "unknown"
+)
+
+// Defines values for ComponentsSchemasPipelineTemplateInfoSource.
+const (
+	Items  ComponentsSchemasPipelineTemplateInfoSource = "items"
+	Marker ComponentsSchemasPipelineTemplateInfoSource = "marker"
+)
+
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
 	ComponentsSchemasRBACGroupBindingRoleAdmin     ComponentsSchemasRBACGroupBindingRole = "admin"
@@ -291,10 +453,135 @@ const (
 	ComponentsSchemasRBACGroupBindingRoleViewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
 )
 
+// Defines values for ComponentsSchemasRunActionResponseState.
+const (
+	Requested ComponentsSchemasRunActionResponseState = "requested"
+)
+
+// Defines values for ComponentsSchemasRunCommandRefusalCommand.
+const (
+	AbortInput   ComponentsSchemasRunCommandRefusalCommand = "abort_input"
+	Cancel       ComponentsSchemasRunCommandRefusalCommand = "cancel"
+	ProceedInput ComponentsSchemasRunCommandRefusalCommand = "proceed_input"
+)
+
+// Defines values for ComponentsSchemasRunDetailScmForge.
+const (
+	ComponentsSchemasRunDetailScmForgeGitea  ComponentsSchemasRunDetailScmForge = "gitea"
+	ComponentsSchemasRunDetailScmForgeGithub ComponentsSchemasRunDetailScmForge = "github"
+	ComponentsSchemasRunDetailScmForgeGitlab ComponentsSchemasRunDetailScmForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasRunDetailSourceLibrariesRepositoryForge.
+const (
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGitea  ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitea"
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGithub ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "github"
+	ComponentsSchemasRunDetailSourceLibrariesRepositoryForgeGitlab ComponentsSchemasRunDetailSourceLibrariesRepositoryForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasRunDetailTriggerSource.
+const (
+	ComponentsSchemasRunDetailTriggerSourceCron     ComponentsSchemasRunDetailTriggerSource = "cron"
+	ComponentsSchemasRunDetailTriggerSourceOther    ComponentsSchemasRunDetailTriggerSource = "other"
+	ComponentsSchemasRunDetailTriggerSourceReplay   ComponentsSchemasRunDetailTriggerSource = "replay"
+	ComponentsSchemasRunDetailTriggerSourceRestart  ComponentsSchemasRunDetailTriggerSource = "restart"
+	ComponentsSchemasRunDetailTriggerSourceScm      ComponentsSchemasRunDetailTriggerSource = "scm"
+	ComponentsSchemasRunDetailTriggerSourceUpstream ComponentsSchemasRunDetailTriggerSource = "upstream"
+	ComponentsSchemasRunDetailTriggerSourceUser     ComponentsSchemasRunDetailTriggerSource = "user"
+	ComponentsSchemasRunDetailTriggerSourceWebhook  ComponentsSchemasRunDetailTriggerSource = "webhook"
+)
+
+// Defines values for ComponentsSchemasRunScriptDefinitionKind.
+const (
+	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
+	ComponentsSchemasRunScriptDefinitionKindTemplate ComponentsSchemasRunScriptDefinitionKind = "template"
+)
+
+// Defines values for ComponentsSchemasRunSummaryScmForge.
+const (
+	Gitea  ComponentsSchemasRunSummaryScmForge = "gitea"
+	Github ComponentsSchemasRunSummaryScmForge = "github"
+	Gitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
+)
+
+// Defines values for ComponentsSchemasRunSummaryTriggerSource.
+const (
+	ComponentsSchemasRunSummaryTriggerSourceCron     ComponentsSchemasRunSummaryTriggerSource = "cron"
+	ComponentsSchemasRunSummaryTriggerSourceOther    ComponentsSchemasRunSummaryTriggerSource = "other"
+	ComponentsSchemasRunSummaryTriggerSourceReplay   ComponentsSchemasRunSummaryTriggerSource = "replay"
+	ComponentsSchemasRunSummaryTriggerSourceRestart  ComponentsSchemasRunSummaryTriggerSource = "restart"
+	ComponentsSchemasRunSummaryTriggerSourceScm      ComponentsSchemasRunSummaryTriggerSource = "scm"
+	ComponentsSchemasRunSummaryTriggerSourceUpstream ComponentsSchemasRunSummaryTriggerSource = "upstream"
+	ComponentsSchemasRunSummaryTriggerSourceUser     ComponentsSchemasRunSummaryTriggerSource = "user"
+	ComponentsSchemasRunSummaryTriggerSourceWebhook  ComponentsSchemasRunSummaryTriggerSource = "webhook"
+)
+
+// Defines values for ComponentsSchemasRunWaitKind.
+const (
+	ComponentsSchemasRunWaitKindCell   ComponentsSchemasRunWaitKind = "cell"
+	ComponentsSchemasRunWaitKindTenant ComponentsSchemasRunWaitKind = "tenant"
+)
+
+// Defines values for ComponentsSchemasRunWaitEntryKind.
+const (
+	ComponentsSchemasRunWaitEntryKindCell   ComponentsSchemasRunWaitEntryKind = "cell"
+	ComponentsSchemasRunWaitEntryKindTenant ComponentsSchemasRunWaitEntryKind = "tenant"
+)
+
+// Defines values for ComponentsSchemasRunnerSpecLauncher.
+const (
+	Inbound ComponentsSchemasRunnerSpecLauncher = "inbound"
+	Ssh     ComponentsSchemasRunnerSpecLauncher = "ssh"
+)
+
+// Defines values for ComponentsSchemasSearchResultType.
+const (
+	ComponentsSchemasSearchResultTypeActivity    ComponentsSchemasSearchResultType = "activity"
+	ComponentsSchemasSearchResultTypeCatalogitem ComponentsSchemasSearchResultType = "catalogitem"
+	ComponentsSchemasSearchResultTypeController  ComponentsSchemasSearchResultType = "controller"
+	ComponentsSchemasSearchResultTypeGroup       ComponentsSchemasSearchResultType = "group"
+	ComponentsSchemasSearchResultTypeJob         ComponentsSchemasSearchResultType = "job"
+	ComponentsSchemasSearchResultTypeNamespace   ComponentsSchemasSearchResultType = "namespace"
+	ComponentsSchemasSearchResultTypeRun         ComponentsSchemasSearchResultType = "run"
+)
+
 // Defines values for ComponentsSchemasSubjectRefKind.
 const (
 	ComponentsSchemasSubjectRefKindGroup ComponentsSchemasSubjectRefKind = "Group"
 	ComponentsSchemasSubjectRefKindUser  ComponentsSchemasSubjectRefKind = "User"
+)
+
+// Defines values for ComponentsSchemasTeamCellState.
+const (
+	Moving        ComponentsSchemasTeamCellState = "moving"
+	NotCellHosted ComponentsSchemasTeamCellState = "notCellHosted"
+	Placed        ComponentsSchemasTeamCellState = "placed"
+	Rehydrating   ComponentsSchemasTeamCellState = "rehydrating"
+	Unplaced      ComponentsSchemasTeamCellState = "unplaced"
+)
+
+// Defines values for ComponentsSchemasTeamMemberRole.
+const (
+	ComponentsSchemasTeamMemberRoleActive  ComponentsSchemasTeamMemberRole = "active"
+	ComponentsSchemasTeamMemberRoleStandby ComponentsSchemasTeamMemberRole = "standby"
+)
+
+// Defines values for ComponentsSchemasTeamPipelinesConcurrency.
+const (
+	ComponentsSchemasTeamPipelinesConcurrencyAllow            ComponentsSchemasTeamPipelinesConcurrency = "allow"
+	ComponentsSchemasTeamPipelinesConcurrencyCancelInProgress ComponentsSchemasTeamPipelinesConcurrency = "cancelInProgress"
+)
+
+// Defines values for ComponentsSchemasTeamPipelinesCronCatchUp.
+const (
+	None ComponentsSchemasTeamPipelinesCronCatchUp = "none"
+	One  ComponentsSchemasTeamPipelinesCronCatchUp = "one"
+)
+
+// Defines values for ComponentsSchemasTeamPipelinesInterruptedRetry.
+const (
+	Automatic ComponentsSchemasTeamPipelinesInterruptedRetry = "automatic"
+	Manual    ComponentsSchemasTeamPipelinesInterruptedRetry = "manual"
 )
 
 // Defines values for ComponentsSchemasUpdateCenterClosureEntrySource.
@@ -326,11 +613,11 @@ const (
 
 // Defines values for ComponentsSchemasUpdateCenterUploadRejectionError.
 const (
-	ComponentsSchemasUpdateCenterUploadRejectionErrorClosureTooDeep         ComponentsSchemasUpdateCenterUploadRejectionError = "closure-too-deep"
-	ComponentsSchemasUpdateCenterUploadRejectionErrorClosureUnverifiable    ComponentsSchemasUpdateCenterUploadRejectionError = "closure-unverifiable"
-	ComponentsSchemasUpdateCenterUploadRejectionErrorDeclaredSetUnavailable ComponentsSchemasUpdateCenterUploadRejectionError = "declared-set-unavailable"
-	ComponentsSchemasUpdateCenterUploadRejectionErrorMetadataUnavailable    ComponentsSchemasUpdateCenterUploadRejectionError = "metadata-unavailable"
-	ComponentsSchemasUpdateCenterUploadRejectionErrorUnresolvedDependencies ComponentsSchemasUpdateCenterUploadRejectionError = "unresolved-dependencies"
+	ClosureTooDeep         ComponentsSchemasUpdateCenterUploadRejectionError = "closure-too-deep"
+	ClosureUnverifiable    ComponentsSchemasUpdateCenterUploadRejectionError = "closure-unverifiable"
+	DeclaredSetUnavailable ComponentsSchemasUpdateCenterUploadRejectionError = "declared-set-unavailable"
+	MetadataUnavailable    ComponentsSchemasUpdateCenterUploadRejectionError = "metadata-unavailable"
+	UnresolvedDependencies ComponentsSchemasUpdateCenterUploadRejectionError = "unresolved-dependencies"
 )
 
 // Defines values for ComponentsSchemasUpdateCenterUploadWarningCode.
@@ -339,21 +626,33 @@ const (
 	LockTooOld           ComponentsSchemasUpdateCenterUploadWarningCode = "lock-too-old"
 )
 
+// Defines values for ComponentsSchemasUpdateUserRequestPurpose.
+const (
+	ComponentsSchemasUpdateUserRequestPurposeBreakGlass ComponentsSchemasUpdateUserRequestPurpose = "break-glass"
+	ComponentsSchemasUpdateUserRequestPurposeService    ComponentsSchemasUpdateUserRequestPurpose = "service"
+)
+
+// Defines values for ComponentsSchemasUserListEntryPurpose.
+const (
+	BreakGlass ComponentsSchemasUserListEntryPurpose = "break-glass"
+	Service    ComponentsSchemasUserListEntryPurpose = "service"
+)
+
 // Defines values for ListActivityParamsSource.
 const (
-	ListActivityParamsSourceApi      ListActivityParamsSource = "api"
-	ListActivityParamsSourceJenkins  ListActivityParamsSource = "jenkins"
-	ListActivityParamsSourceMcp      ListActivityParamsSource = "mcp"
-	ListActivityParamsSourceMite     ListActivityParamsSource = "mite"
-	ListActivityParamsSourceOperator ListActivityParamsSource = "operator"
-	ListActivityParamsSourceUser     ListActivityParamsSource = "user"
+	Api      ListActivityParamsSource = "api"
+	Jenkins  ListActivityParamsSource = "jenkins"
+	Mcp      ListActivityParamsSource = "mcp"
+	Mite     ListActivityParamsSource = "mite"
+	Operator ListActivityParamsSource = "operator"
+	User     ListActivityParamsSource = "user"
 )
 
 // Defines values for ListActivityParamsSeverity.
 const (
-	Error   ListActivityParamsSeverity = "error"
-	Info    ListActivityParamsSeverity = "info"
-	Warning ListActivityParamsSeverity = "warning"
+	ListActivityParamsSeverityError   ListActivityParamsSeverity = "error"
+	ListActivityParamsSeverityInfo    ListActivityParamsSeverity = "info"
+	ListActivityParamsSeverityWarning ListActivityParamsSeverity = "warning"
 )
 
 // Defines values for ApproveControllerJSONBodyAction.
@@ -365,6 +664,9 @@ const (
 	ApproveControllerJSONBodyActionReload       ApproveControllerJSONBodyAction = "reload"
 	ApproveControllerJSONBodyActionRestart      ApproveControllerJSONBodyAction = "restart"
 )
+
+// ComponentsSchemasAPICapabilitySet Resource-to-verb-to-allowed capability map.
+type ComponentsSchemasAPICapabilitySet map[string]map[string]bool
 
 // ComponentsSchemasAPIRule An API rule defining resource access.
 type ComponentsSchemasAPIRule struct {
@@ -418,6 +720,15 @@ type ComponentsSchemasApplySectionResult struct {
 	Ok    bool    `json:"ok"`
 }
 
+// ComponentsSchemasApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
+type ComponentsSchemasApproveConflict struct {
+	// Changes The sections of the current pending change.
+	Changes *[]string `json:"changes,omitempty"`
+
+	// Error Human-readable error message.
+	Error string `json:"error"`
+}
+
 // ComponentsSchemasBackupSpec Backup configuration (transcribed from v1alpha1.BackupSpec).
 type ComponentsSchemasBackupSpec struct {
 	// Enabled Whether backups are enabled.
@@ -428,6 +739,81 @@ type ComponentsSchemasBackupSpec struct {
 
 	// Schedule Cron expression for the backup schedule.
 	Schedule *string `json:"schedule,omitempty"`
+}
+
+// ComponentsSchemasBindingFederationStatus Federation outcome of a binding on one hive, or a federation fault of a role on one hive.
+type ComponentsSchemasBindingFederationStatus struct {
+	// Cluster Hive cluster name.
+	Cluster string `json:"cluster"`
+
+	// LastTransitionTime Time the state, reason, or message last changed.
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
+
+	// Message Human-readable detail for the state.
+	Message *string `json:"message,omitempty"`
+
+	// Reason CamelCase code for the state. Skipped codes are NoSubjects, TenantScope, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound, NonGlobalJenkinsRole, and ReservedRole. Failed codes are HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed, JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed, StaleJenkinsRoleBindingDeleteFailed, and StaleJenkinsRoleDeleteFailed. StaleJenkinsRoleDeleteFailed occurs only on a VarroaRole. The federated code is Federated.
+	Reason *string                                       `json:"reason,omitempty"`
+	State  ComponentsSchemasBindingFederationStatusState `json:"state"`
+}
+
+// ComponentsSchemasBindingFederationStatusState defines model for ComponentsSchemasBindingFederationStatus.State.
+type ComponentsSchemasBindingFederationStatusState string
+
+// ComponentsSchemasBranchScan The last requested scan of a multibranch job. Absent until a scan runs.
+type ComponentsSchemasBranchScan struct {
+	Actor         *string                          `json:"actor,omitempty"`
+	ChangedHeads  []string                         `json:"changedHeads"`
+	EndedAt       *time.Time                       `json:"endedAt,omitempty"`
+	Message       *string                          `json:"message,omitempty"`
+	NewHeads      []string                         `json:"newHeads"`
+	OrphanedHeads []string                         `json:"orphanedHeads"`
+	RequestedAt   *time.Time                       `json:"requestedAt,omitempty"`
+	Result        *string                          `json:"result,omitempty"`
+	ScanId        string                           `json:"scanId"`
+	State         ComponentsSchemasBranchScanState `json:"state"`
+}
+
+// ComponentsSchemasBranchScanState defines model for ComponentsSchemasBranchScan.State.
+type ComponentsSchemasBranchScanState string
+
+// ComponentsSchemasBranchScanResponse 202 response for a scan request. The scan identifier is the lastScan.scanId of the branch inventory.
+type ComponentsSchemasBranchScanResponse struct {
+	ScanId string                                   `json:"scanId"`
+	State  ComponentsSchemasBranchScanResponseState `json:"state"`
+}
+
+// ComponentsSchemasBranchScanResponseState defines model for ComponentsSchemasBranchScanResponse.State.
+type ComponentsSchemasBranchScanResponseState string
+
+// ComponentsSchemasBreakGlassRequest Request body for a break-glass grant.
+type ComponentsSchemasBreakGlassRequest struct {
+	// Reason Required. At most 256 characters. Recorded on the audit event.
+	Reason string `json:"reason"`
+
+	// TtlSeconds Token lifetime in seconds. Defaults to 900. Must be between 300 and 3600.
+	TtlSeconds *int `json:"ttlSeconds,omitempty"`
+}
+
+// ComponentsSchemasBreakGlassResponse A granted break-glass session.
+type ComponentsSchemasBreakGlassResponse struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// LocationUrl The location URL of a headless controller, with a trailing slash. This is the dashboard door URL when the operator has a dashboard origin, and the in-cluster Service URL otherwise.
+	LocationUrl string `json:"locationUrl"`
+
+	// Target The in-cluster Service a break-glass token reaches.
+	Target ComponentsSchemasBreakGlassTarget `json:"target"`
+
+	// Token A short-lived Jenkins user token minted for the caller's own identity.
+	Token string `json:"token"`
+}
+
+// ComponentsSchemasBreakGlassTarget The in-cluster Service a break-glass token reaches.
+type ComponentsSchemasBreakGlassTarget struct {
+	Namespace string `json:"namespace"`
+	Port      int    `json:"port"`
+	Service   string `json:"service"`
 }
 
 // ComponentsSchemasBroodCreateFailure Error body when zero clusters succeed on create.
@@ -683,6 +1069,20 @@ type ComponentsSchemasBuiltinRoleRef struct {
 	Name           string `json:"name"`
 }
 
+// ComponentsSchemasBundleRef defines model for components_schemas_BundleRef.
+type ComponentsSchemasBundleRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// ComponentsSchemasCancelRunResponse 202 response for a fire-and-forget run action: a cancel, an input proceed, or an input abort. The BFF publishes one command and waits for no result.
+type ComponentsSchemasCancelRunResponse struct {
+	State ComponentsSchemasCancelRunResponseState `json:"state"`
+}
+
+// ComponentsSchemasCancelRunResponseState defines model for ComponentsSchemasCancelRunResponse.State.
+type ComponentsSchemasCancelRunResponseState string
+
 // ComponentsSchemasCatalogItem A CatalogItem CRD.
 type ComponentsSchemasCatalogItem struct {
 	ApiVersion *string `json:"apiVersion,omitempty"`
@@ -739,6 +1139,12 @@ type ComponentsSchemasCatalogItemDetailResponse struct {
 type ComponentsSchemasCatalogItemLockPins struct {
 	Pins    map[string]string `json:"pins"`
 	Profile string            `json:"profile"`
+}
+
+// ComponentsSchemasCatalogItemRef defines model for components_schemas_CatalogItemRef.
+type ComponentsSchemasCatalogItemRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 // ComponentsSchemasCatalogItemSpec Spec for a CatalogItem.
@@ -853,6 +1259,325 @@ type ComponentsSchemasCatalogVariable struct {
 // ComponentsSchemasCatalogVariableType Parameter type. Omitting the field means "string".
 type ComponentsSchemasCatalogVariableType string
 
+// ComponentsSchemasCellGrant One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.
+type ComponentsSchemasCellGrant struct {
+	// Binding The VarroaRoleBinding name. Absent for the teamMembership source.
+	Binding  *string                             `json:"binding,omitempty"`
+	Jobs     *[]string                           `json:"jobs,omitempty"`
+	RoleRef  string                              `json:"roleRef"`
+	Source   ComponentsSchemasCellGrantSource    `json:"source"`
+	Subjects []ComponentsSchemasCellGrantSubject `json:"subjects"`
+
+	// Verbs The pipelines verbs of the grant's role, never the whole capability set.
+	Verbs []string `json:"verbs"`
+}
+
+// ComponentsSchemasCellGrantSource defines model for ComponentsSchemasCellGrant.Source.
+type ComponentsSchemasCellGrantSource string
+
+// ComponentsSchemasCellGrantSubject One subject of a grant.
+type ComponentsSchemasCellGrantSubject struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// ComponentsSchemasCellGrants One entry for each tenant of a cell, naming the subjects that may build on it.
+type ComponentsSchemasCellGrants struct {
+	Cell      string                              `json:"cell"`
+	Cluster   string                              `json:"cluster"`
+	Namespace string                              `json:"namespace"`
+	Tenants   []ComponentsSchemasCellTenantGrants `json:"tenants"`
+}
+
+// ComponentsSchemasCellPendingSignature One script signature the sandbox refused in a cell.
+type ComponentsSchemasCellPendingSignature struct {
+	Dangerous *bool `json:"dangerous,omitempty"`
+
+	// Requesters Up to three tenant jobs that hit this signature, newest first.
+	Requesters *[]ComponentsSchemasCellSignatureRequester `json:"requesters,omitempty"`
+	Signature  string                                     `json:"signature"`
+}
+
+// ComponentsSchemasCellPool Full cell-pool object returned from get and list operations.
+type ComponentsSchemasCellPool struct {
+	// Cluster The cluster that holds the pool. A pool name is unique inside one cluster only.
+	Cluster string `json:"cluster"`
+	Name    string `json:"name"`
+
+	// Spec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
+	Spec ComponentsSchemasCellPoolSpec `json:"spec"`
+
+	// Status A CellPool's reported cell and tenant counts.
+	Status ComponentsSchemasCellPoolStatus `json:"status"`
+}
+
+// ComponentsSchemasCellPoolCondition Status condition for a CellPool. Type PoolReady, with exactly the reasons Ready, CellCapReached, ProfileMissing, RecordStoreUnsupported, BlobTierUnsupported, ArtifactSecretMissing, ArtifactPluginMissing, and SecretsMissing.
+type ComponentsSchemasCellPoolCondition struct {
+	// LastTransitionTime ISO 8601 last transition time.
+	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
+	Message            *string `json:"message,omitempty"`
+	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
+	Reason             *string `json:"reason,omitempty"`
+	Status             string  `json:"status"`
+	Type               string  `json:"type"`
+}
+
+// ComponentsSchemasCellPoolGiteaServer One Gitea or Forgejo server of a pool. The operator renders it with manageHooks false and no credential.
+type ComponentsSchemasCellPoolGiteaServer struct {
+	// AliasUrl The URL the forge reports in webhook payloads, when it differs from serverUrl.
+	AliasUrl *string `json:"aliasUrl,omitempty"`
+
+	// DisplayName The server name in Jenkins. Unset means the plugin derives it from the URL.
+	DisplayName *string `json:"displayName,omitempty"`
+
+	// ServerUrl The base URL of the forge.
+	ServerUrl string `json:"serverUrl"`
+}
+
+// ComponentsSchemasCellPoolLibrary A trusted shared library of a pool. Jenkins runs its code outside the script sandbox. Only the operator declares it.
+type ComponentsSchemasCellPoolLibrary struct {
+	// AllowVersionOverride Lets a pipeline load another version of the library. Any user who can push to the library repository then runs trusted code on every cell.
+	AllowVersionOverride *bool `json:"allowVersionOverride,omitempty"`
+
+	// CredentialRef The name of the Secret in the operator namespace that holds the login. Required for an ssh remote.
+	CredentialRef *string `json:"credentialRef,omitempty"`
+
+	// DefaultVersion The branch, tag, or commit a pipeline loads when it names no version.
+	DefaultVersion string `json:"defaultVersion"`
+
+	// Implicit Loads the library in every job of every cell in the pool.
+	Implicit *bool `json:"implicit,omitempty"`
+
+	// Name The library name. A pipeline loads the library by this name.
+	Name string `json:"name"`
+
+	// Remote The repository URL of the library. It must not hold a variable token.
+	Remote string `json:"remote"`
+}
+
+// ComponentsSchemasCellPoolMail The SMTP setting of a pool. Every cell of the pool renders it for the mailer and email-ext plugins. Read-only through the API; edit the CellPool with kubectl or GitOps. The read carries the login Secret name, never its value.
+type ComponentsSchemasCellPoolMail struct {
+	// CredentialRef The Secret in the operator namespace that holds the SMTP username and password. The name only; the value is never returned.
+	CredentialRef *string `json:"credentialRef,omitempty"`
+
+	// DefaultSuffix The domain that a bare recipient name gets.
+	DefaultSuffix *string `json:"defaultSuffix,omitempty"`
+
+	// From The sender address of every message.
+	From string `json:"from"`
+
+	// Host The SMTP server name.
+	Host string `json:"host"`
+
+	// Port The SMTP server port. Unset means 587.
+	Port *int32 `json:"port,omitempty"`
+
+	// ReplyTo The reply-to address of every message.
+	ReplyTo *string `json:"replyTo,omitempty"`
+
+	// Security The transport mode. Unset means starttls.
+	Security *ComponentsSchemasCellPoolMailSecurity `json:"security,omitempty"`
+}
+
+// ComponentsSchemasCellPoolMailSecurity The transport mode. Unset means starttls.
+type ComponentsSchemasCellPoolMailSecurity string
+
+// ComponentsSchemasCellPoolScaleRequest Request body for PATCH /cellpools/{name}. It declares the four scale dials and nothing else, so the contract itself states that a structural edit is not an API operation.
+type ComponentsSchemasCellPoolScaleRequest struct {
+	Spec struct {
+		MaxCells           *int32  `json:"maxCells,omitempty"`
+		MaxTenantsPerCell  *int32  `json:"maxTenantsPerCell,omitempty"`
+		UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+		Warm               *int32  `json:"warm,omitempty"`
+	} `json:"spec"`
+}
+
+// ComponentsSchemasCellPoolSpec A CellPool's configuration (spec.*). profileRef is immutable, because a pool's cells carry the profile label they were created with.
+type ComponentsSchemasCellPoolSpec struct {
+	// ApprovedSignatures Script-security signatures that every cell of the pool approves. A cell renders this list with its own bundle list, sorted. Read-only through the API; edit the CellPool with kubectl or GitOps.
+	ApprovedSignatures *[]string `json:"approvedSignatures,omitempty"`
+
+	// CellTemplate resources, miteResources, and podOverrides for the cells the pool creates. resources and podOverrides go to the Jenkins container and the pod; miteResources goes to the mite sidecar. The pool exposes no raw strategic-merge overlay.
+	CellTemplate *map[string]interface{} `json:"cellTemplate,omitempty"`
+
+	// GiteaServers Gitea and Forgejo servers that every cell of the pool declares. Each server has hooks off and no credential. Read-only through the API; edit the CellPool with kubectl or GitOps. Server URLs are unique.
+	GiteaServers *[]ComponentsSchemasCellPoolGiteaServer `json:"giteaServers,omitempty"`
+
+	// Libraries Trusted shared libraries that every cell of the pool serves as global libraries. Names are unique.
+	Libraries *[]ComponentsSchemasCellPoolLibrary `json:"libraries,omitempty"`
+
+	// Mail The SMTP setting of a pool. Every cell of the pool renders it for the mailer and email-ext plugins. Read-only through the API; edit the CellPool with kubectl or GitOps. The read carries the login Secret name, never its value.
+	Mail *ComponentsSchemasCellPoolMail `json:"mail,omitempty"`
+
+	// MaxCells Cap on the pool's cells, placed cells included. 0 means unlimited.
+	MaxCells *int32 `json:"maxCells,omitempty"`
+
+	// MaxRunsPerTenant Cap on the builds one tenant runs at once on one cell of the pool. Zero means no cap. Set it on the CellPool object, not through the scale API.
+	MaxRunsPerTenant *int32 `json:"maxRunsPerTenant,omitempty"`
+
+	// MaxTenantsPerCell Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+	MaxTenantsPerCell *int32 `json:"maxTenantsPerCell,omitempty"`
+
+	// ProfileRef The JenkinsVersionProfile the pool's cells run. Immutable.
+	ProfileRef string `json:"profileRef"`
+
+	// UnreadyGracePeriod How long a pool cell may stay unready before the operator rolls its pod. A Go duration string.
+	UnreadyGracePeriod *string `json:"unreadyGracePeriod,omitempty"`
+
+	// Warm Target count of free cells the pool keeps ready.
+	Warm *int32 `json:"warm,omitempty"`
+}
+
+// ComponentsSchemasCellPoolStatus A CellPool's reported cell and tenant counts.
+type ComponentsSchemasCellPoolStatus struct {
+	Conditions *[]ComponentsSchemasCellPoolCondition `json:"conditions,omitempty"`
+
+	// FreeTenantSlots Spare capacity of the placed cells only. warmCells already reports the empty ones.
+	FreeTenantSlots    int32  `json:"freeTenantSlots"`
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+
+	// PlacedCells Owned cells that hold at least one tenant.
+	PlacedCells int32 `json:"placedCells"`
+
+	// Tenants Every tenant on the pool, sorted.
+	Tenants *[]string `json:"tenants,omitempty"`
+
+	// UnreadyCells Owned cells whose CellReady condition is not True.
+	UnreadyCells int32 `json:"unreadyCells"`
+
+	// WarmCells Owned cells that hold no tenant.
+	WarmCells int32 `json:"warmCells"`
+}
+
+// ComponentsSchemasCellSignatureRequester One tenant job that requested a refused script signature.
+type ComponentsSchemasCellSignatureRequester struct {
+	BuildNumber *int    `json:"buildNumber,omitempty"`
+	JobPath     string  `json:"jobPath"`
+	RunId       *string `json:"runId,omitempty"`
+	Tenant      *string `json:"tenant,omitempty"`
+}
+
+// ComponentsSchemasCellSpec Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.
+type ComponentsSchemasCellSpec struct {
+	Enabled    bool   `json:"enabled"`
+	MaxTenants *int32 `json:"maxTenants,omitempty"`
+}
+
+// ComponentsSchemasCellStatusProjection The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+type ComponentsSchemasCellStatusProjection struct {
+	// AppliedTenants The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.
+	AppliedTenants *[]string `json:"appliedTenants,omitempty"`
+
+	// Evacuate Operator-written state. No API accepts a write to it, so no surface offers an evacuate action.
+	Evacuate *bool   `json:"evacuate,omitempty"`
+	Instance *string `json:"instance,omitempty"`
+
+	// PendingSignatures The script signatures the sandbox refused in this cell and no operator approved. Carries at most 25 entries.
+	PendingSignatures *[]ComponentsSchemasCellPendingSignature `json:"pendingSignatures,omitempty"`
+
+	// PendingSignaturesTotal The number of pending signatures. It can exceed the list length.
+	PendingSignaturesTotal   *int                                  `json:"pendingSignaturesTotal,omitempty"`
+	PreviousInstance         *string                               `json:"previousInstance,omitempty"`
+	PreviousInstanceLastSeen *time.Time                            `json:"previousInstanceLastSeen,omitempty"`
+	RolledAt                 *time.Time                            `json:"rolledAt,omitempty"`
+	TenantWarnings           *[]ComponentsSchemasCellTenantWarning `json:"tenantWarnings,omitempty"`
+	Tenants                  *[]string                             `json:"tenants,omitempty"`
+	UnreadySince             *time.Time                            `json:"unreadySince,omitempty"`
+	Warm                     *bool                                 `json:"warm,omitempty"`
+}
+
+// ComponentsSchemasCellTenantGrants Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.
+type ComponentsSchemasCellTenantGrants struct {
+	Grants      []ComponentsSchemasCellGrant `json:"grants"`
+	ItemPattern string                       `json:"itemPattern"`
+	ItemRole    string                       `json:"itemRole"`
+	Tenant      string                       `json:"tenant"`
+
+	// Truncated True only when the 50-grant cap dropped a grant of this tenant.
+	Truncated bool `json:"truncated"`
+}
+
+// ComponentsSchemasCellTenantUsage One tenant on a cell, with that tenant's role and four counts.
+type ComponentsSchemasCellTenantUsage struct {
+	// AgentNamespace The namespace that holds the tenant's build agents, as the tenant's own cluster last announced it. Absent when no announcement named one.
+	AgentNamespace *string `json:"agentNamespace,omitempty"`
+	FailedLast24h  int64   `json:"failedLast24h"`
+	Jobs           int64   `json:"jobs"`
+
+	// PlacementGeneration The generation of the tenant's placement row.
+	PlacementGeneration int64 `json:"placementGeneration"`
+
+	// Role That tenant's role on this cell: "slot <n>" for an active member and "standby" for a standby. A standby holds the tenant folder and runs no build, so its running count is zero.
+	Role        *string `json:"role,omitempty"`
+	RunningNow  int64   `json:"runningNow"`
+	RunsLast24h int64   `json:"runsLast24h"`
+	Tenant      string  `json:"tenant"`
+}
+
+// ComponentsSchemasCellTenantWarning One non-blocking finding the reconciler recorded about a tenant.
+type ComponentsSchemasCellTenantWarning struct {
+	Message string `json:"message"`
+	Reason  string `json:"reason"`
+	Tenant  string `json:"tenant"`
+}
+
+// ComponentsSchemasCellUsage One cell's load, tenant by tenant. An absent optional field is absent from the object, never a null and never a zero: queueLength reads as zero only for an empty queue, and a cell in a remote cluster carries no queueLength at all.
+type ComponentsSchemasCellUsage struct {
+	// CellPool The cell's varroa.dev/cell-pool label. Absent while no label is set.
+	CellPool *string `json:"cellPool,omitempty"`
+	Cluster  string  `json:"cluster"`
+
+	// FreeSlots maxTenants minus the placed tenant count, never below zero.
+	FreeSlots      int32   `json:"freeSlots"`
+	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+
+	// MaxTenants The effective tenant cap this surface resolves: the cell's own spec.cell.maxTenants when that value is not zero, else the chart value, else ten. It is never a minimum over the tiers.
+	MaxTenants int32  `json:"maxTenants"`
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+
+	// Profile The cell's varroa.dev/cell-profile label.
+	Profile *string `json:"profile,omitempty"`
+
+	// QueueLength The Jenkins queue length from the latest mite heartbeat. Absent for a remote cluster and absent while no heartbeat has arrived.
+	QueueLength *int64 `json:"queueLength,omitempty"`
+
+	// QueueLengthAt The heartbeat time the queue length came from.
+	QueueLengthAt *time.Time                         `json:"queueLengthAt,omitempty"`
+	Tenants       []ComponentsSchemasCellTenantUsage `json:"tenants"`
+
+	// Totals The four load counts of one tenant on a cell, or the same four summed over the cell. runningNow carries no time bound, so a build that runs longer than a day still counts. runsLast24h and failedLast24h count inside the fixed 24-hour window. jobs counts distinct job paths. A run whose result is TRIGGER_FAILED counts in no value.
+	Totals ComponentsSchemasCellUsageCounts `json:"totals"`
+
+	// WindowStart The start of the fixed 24-hour window the counts used.
+	WindowStart time.Time `json:"windowStart"`
+}
+
+// ComponentsSchemasCellUsageCounts The four load counts of one tenant on a cell, or the same four summed over the cell. runningNow carries no time bound, so a build that runs longer than a day still counts. runsLast24h and failedLast24h count inside the fixed 24-hour window. jobs counts distinct job paths. A run whose result is TRIGGER_FAILED counts in no value.
+type ComponentsSchemasCellUsageCounts struct {
+	FailedLast24h int64 `json:"failedLast24h"`
+	Jobs          int64 `json:"jobs"`
+	RunningNow    int64 `json:"runningNow"`
+	RunsLast24h   int64 `json:"runsLast24h"`
+}
+
+// ComponentsSchemasChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+type ComponentsSchemasChangeRequest struct {
+	// Id The forge's change request number or identifier.
+	Id string `json:"id"`
+
+	// SourceBranch The branch that carries the change.
+	SourceBranch *string `json:"sourceBranch,omitempty"`
+
+	// TargetBranch The branch the change merges into.
+	TargetBranch *string `json:"targetBranch,omitempty"`
+	Title        *string `json:"title,omitempty"`
+
+	// Url Web link to the change request on the forge.
+	Url *string `json:"url,omitempty"`
+}
+
 // ComponentsSchemasCheck Result of a single preflight validation check.
 type ComponentsSchemasCheck struct {
 	Id      string                       `json:"id"`
@@ -919,14 +1644,17 @@ type ComponentsSchemasClusterInfo struct {
 	ControllerCount int32 `json:"controllerCount"`
 
 	// Core true on exactly one row: the BFF's own cluster
-	Core            bool                              `json:"core"`
-	DrainStartedAt  *time.Time                        `json:"drainStartedAt,omitempty"`
-	Healthy         bool                              `json:"healthy"`
-	K8sVersion      string                            `json:"k8sVersion"`
-	LastHeartbeat   time.Time                         `json:"lastHeartbeat"`
-	Name            string                            `json:"name"`
-	OperatorVersion string                            `json:"operatorVersion"`
-	State           ComponentsSchemasClusterInfoState `json:"state"`
+	Core           bool       `json:"core"`
+	DrainStartedAt *time.Time `json:"drainStartedAt,omitempty"`
+	Healthy        bool       `json:"healthy"`
+	K8sVersion     string     `json:"k8sVersion"`
+	LastHeartbeat  time.Time  `json:"lastHeartbeat"`
+	Name           string     `json:"name"`
+
+	// OperatorNamespace Namespace of the cluster's operator.
+	OperatorNamespace *string                           `json:"operatorNamespace,omitempty"`
+	OperatorVersion   string                            `json:"operatorVersion"`
+	State             ComponentsSchemasClusterInfoState `json:"state"`
 }
 
 // ComponentsSchemasClusterInfoState defines model for ComponentsSchemasClusterInfo.State.
@@ -956,11 +1684,17 @@ type ComponentsSchemasComposedBundlePreview struct {
 	Missing     []string `json:"missing"`
 
 	// PinPreflight Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
-	PinPreflight        ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
-	PluginsYaml         string                              `json:"pluginsYaml"`
-	RbacYaml            string                              `json:"rbacYaml"`
-	UnresolvedVariables []string                            `json:"unresolvedVariables"`
-	Warnings            []string                            `json:"warnings"`
+	PinPreflight ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
+
+	// PipelineTemplates One entry per template the composition delivered, in input order.
+	PipelineTemplates []ComponentsSchemasPipelineTemplateSummary `json:"pipelineTemplates"`
+
+	// PipelineTemplatesYaml The composed pipeline-template content, never resolved by ${var} substitution. Empty for a bundle with no pipeline-template input.
+	PipelineTemplatesYaml string   `json:"pipelineTemplatesYaml"`
+	PluginsYaml           string   `json:"pluginsYaml"`
+	RbacYaml              string   `json:"rbacYaml"`
+	UnresolvedVariables   []string `json:"unresolvedVariables"`
+	Warnings              []string `json:"warnings"`
 }
 
 // ComponentsSchemasComposedBundleRef Reference to a ComposedBundle from a Controller.
@@ -1008,10 +1742,13 @@ type ComponentsSchemasComposedBundleValidateResponse struct {
 	Errors *[]string `json:"errors,omitempty"`
 
 	// PinPreflight Plugin-pin preflight result comparing a composed bundle's pins against the resolved plugin set.
-	PinPreflight        ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
-	UnresolvedVariables []string                            `json:"unresolvedVariables"`
-	Valid               bool                                `json:"valid"`
-	Warnings            *[]string                           `json:"warnings,omitempty"`
+	PinPreflight ComponentsSchemasPinPreflightReport `json:"pinPreflight"`
+
+	// PipelineTemplates One entry per template the composition delivered, in input order.
+	PipelineTemplates   []ComponentsSchemasPipelineTemplateSummary `json:"pipelineTemplates"`
+	UnresolvedVariables []string                                   `json:"unresolvedVariables"`
+	Valid               bool                                       `json:"valid"`
+	Warnings            *[]string                                  `json:"warnings,omitempty"`
 }
 
 // ComponentsSchemasComposedInput A single input to a composed bundle.
@@ -1055,7 +1792,7 @@ type ComponentsSchemasConflictResponse struct {
 	Error string `json:"error"`
 }
 
-// ComponentsSchemasControllerAttention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+// ComponentsSchemasControllerAttention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 type ComponentsSchemasControllerAttention struct {
 	Kind    ComponentsSchemasControllerAttentionKind `json:"kind"`
 	Message *string                                  `json:"message,omitempty"`
@@ -1136,10 +1873,13 @@ type ComponentsSchemasControllerDetail struct {
 	AppliedBundleHash *string                         `json:"appliedBundleHash,omitempty"`
 	ApplyHistory      *[]ComponentsSchemasApplyResult `json:"applyHistory,omitempty"`
 
-	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
-	Attention  *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
-	CertExpiry *string                               `json:"certExpiry,omitempty"`
-	Cluster    string                                `json:"cluster"`
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
+	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
+
+	// Cell The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
+	Cell       *ComponentsSchemasCellStatusProjection `json:"cell,omitempty"`
+	CertExpiry *string                                `json:"certExpiry,omitempty"`
+	Cluster    string                                 `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
@@ -1147,9 +1887,14 @@ type ComponentsSchemasControllerDetail struct {
 	DesiredStateHash  *string                             `json:"desiredStateHash,omitempty"`
 
 	// EffectiveBundle The ComposedBundle a controller is actually using, resolved. Read-only, and deliberately separate from composedBundleRef: that field is the raw spec value the dashboard writes back, so resolving into it would materialize an explicit reference to the starter bundle on the next save.
-	EffectiveBundle  *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
-	Endpoint         string                            `json:"endpoint"`
-	FirstConnectedAt *string                           `json:"firstConnectedAt,omitempty"`
+	EffectiveBundle *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
+
+	// Endpoint External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+	Endpoint         string  `json:"endpoint"`
+	FirstConnectedAt *string `json:"firstConnectedAt,omitempty"`
+
+	// Headless Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string, whatever the controller's Status.Endpoint carries.
+	Headless bool `json:"headless"`
 
 	// Hibernated Whether the controller is currently hibernated (status.hibernated).
 	Hibernated *bool `json:"hibernated,omitempty"`
@@ -1158,6 +1903,9 @@ type ComponentsSchemasControllerDetail struct {
 	HibernatedAt   *string `json:"hibernatedAt,omitempty"`
 	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
 	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+
+	// Kind Mirrors v1alpha1.IsCell. Present for every controller.
+	Kind ComponentsSchemasControllerDetailKind `json:"kind"`
 
 	// LastApplyResult Result of an apply operation with RFC3339 timestamp.
 	LastApplyResult  *ComponentsSchemasApplyResult `json:"lastApplyResult,omitempty"`
@@ -1218,7 +1966,10 @@ type ComponentsSchemasControllerDetail struct {
 	VersionStatus *ComponentsSchemasVersionStatus `json:"versionStatus,omitempty"`
 }
 
-// ComponentsSchemasControllerDiff Diff between incoming bundle content and last-applied content.
+// ComponentsSchemasControllerDetailKind Mirrors v1alpha1.IsCell. Present for every controller.
+type ComponentsSchemasControllerDetailKind string
+
+// ComponentsSchemasControllerDiff Diff between incoming bundle content and last-applied content. The jcasc and items text of both sides is redacted: each secret value shows as the marker "<redacted>". A key that contains password, secret, passphrase, privatekey, or token, and does not end in id, marks every value below it as a secret. Inside a domainCredentials or folderCredentials store, every value is a secret except id, scope, description, username, name, includes, excludes, and schemes. A jcasc value that is one whole ${...} reference to a named entry, a file, or a system property stays visible. Text that does not parse shows as "<redacted: unparseable content>". Every YAML comment is removed. No caller gets an unredacted value, and a rotated secret shows no difference.
 type ComponentsSchemasControllerDiff struct {
 	Applied *struct {
 		Items   *string `json:"items,omitempty"`
@@ -1259,6 +2010,9 @@ type ComponentsSchemasControllerSpec struct {
 	// BackupSpec Backup configuration (transcribed from v1alpha1.BackupSpec).
 	BackupSpec *ComponentsSchemasBackupSpec `json:"backupSpec,omitempty"`
 
+	// Cell Marks a controller as a shared cell that hosts tenant pipelines. enabled is immutable after creation; maxTenants bounds placement.
+	Cell *ComponentsSchemasCellSpec `json:"cell,omitempty"`
+
 	// ClassName References a ControllerClass by name, layering its defaults between ProvisioningDefaults and the Controller's own spec.
 	ClassName *string `json:"className,omitempty"`
 
@@ -1267,6 +2021,9 @@ type ComponentsSchemasControllerSpec struct {
 
 	// Endpoint API endpoint URL for the controller.
 	Endpoint *string `json:"endpoint,omitempty"`
+
+	// Headless Blocks the Jenkins web UI for every non-admin caller. A cell is always headless.
+	Headless *bool `json:"headless,omitempty"`
 
 	// Hibernation Automatic hibernation configuration (transcribed from v1alpha1.HibernationSpec).
 	Hibernation *ComponentsSchemasHibernationSpec `json:"hibernation,omitempty"`
@@ -1321,21 +2078,38 @@ type ComponentsSchemasControllerSpecPowerState string
 type ComponentsSchemasControllerSummary struct {
 	AppliedBundleHash *string `json:"appliedBundleHash,omitempty"`
 
-	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed.
+	// Attention Why the controller needs an operator's attention, if it does. Exactly one kind is reported, chosen by precedence failed > reconcileBlocked > bootFailed > pluginRollFailed > applyFailed > miteUnreachable.
 	Attention *ComponentsSchemasControllerAttention `json:"attention,omitempty"`
-	Cluster   string                                `json:"cluster"`
+
+	// CellPool The controller's varroa.dev/cell-pool label. Absent while no label is set.
+	CellPool *string `json:"cellPool,omitempty"`
+	Cluster  string  `json:"cluster"`
 
 	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
 	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
 
+	// CreatedAt metadata.creationTimestamp, RFC 3339. Present for every controller.
+	CreatedAt time.Time `json:"createdAt"`
+
 	// EffectiveBundle The ComposedBundle a controller is actually using, resolved. Read-only, and deliberately separate from composedBundleRef: that field is the raw spec value the dashboard writes back, so resolving into it would materialize an explicit reference to the starter bundle on the next save.
 	EffectiveBundle *ComponentsSchemasEffectiveBundle `json:"effectiveBundle,omitempty"`
-	Endpoint        string                            `json:"endpoint"`
-	JenkinsHealth   *string                           `json:"jenkinsHealth,omitempty"`
-	JenkinsVersion  *string                           `json:"jenkinsVersion,omitempty"`
+
+	// Endpoint External URL of the controller. A row of another cluster carries that cluster's own status.endpoint, or a URL from an explicit ingress host. It is empty when the host is not known or the controller is headless.
+	Endpoint string `json:"endpoint"`
+
+	// Headless Mirrors v1alpha1.IsHeadless. When true, endpoint is always the empty string, whatever the controller's Status.Endpoint carries.
+	Headless       bool    `json:"headless"`
+	JenkinsHealth  *string `json:"jenkinsHealth,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+
+	// Kind Mirrors v1alpha1.IsCell. Always present, so a client never reads the kind from an absent field.
+	Kind ComponentsSchemasControllerSummaryKind `json:"kind"`
 
 	// LastSeen Last mite heartbeat, RFC3339 UTC. Absent when no mite has reported.
-	LastSeen      *string `json:"lastSeen,omitempty"`
+	LastSeen *string `json:"lastSeen,omitempty"`
+
+	// MaxTenants The same effective cap the cell usage read resolves. Absent for a controller that is not a cell.
+	MaxTenants    *int32  `json:"maxTenants,omitempty"`
 	MiteConnected bool    `json:"miteConnected"`
 	MiteVersion   *string `json:"miteVersion,omitempty"`
 	Name          string  `json:"name"`
@@ -1348,9 +2122,21 @@ type ComponentsSchemasControllerSummary struct {
 	// RoutingMode Either "subdomain" or "path".
 	RoutingMode string `json:"routingMode"`
 
+	// TenantCount The length of status.cell.tenants, never of status.cell.appliedTenants. Absent for a controller that is not a cell.
+	TenantCount *int32 `json:"tenantCount,omitempty"`
+
+	// UnreadySince status.cell.unreadySince, RFC 3339. Absent while the cell is ready.
+	UnreadySince *time.Time `json:"unreadySince,omitempty"`
+
 	// Version Desired Jenkins version (from spec.version).
 	Version *string `json:"version,omitempty"`
+
+	// Warm status.cell.warm. Absent for a controller that is not a cell.
+	Warm *bool `json:"warm,omitempty"`
 }
+
+// ComponentsSchemasControllerSummaryKind Mirrors v1alpha1.IsCell. Always present, so a client never reads the kind from an absent field.
+type ComponentsSchemasControllerSummaryKind string
 
 // ComponentsSchemasCreateBroodRequest Request body to create or preview a brood operation.
 type ComponentsSchemasCreateBroodRequest struct {
@@ -1392,14 +2178,29 @@ type ComponentsSchemasCreateKeyRequest struct {
 	Name *string `json:"name,omitempty"`
 }
 
-// ComponentsSchemasCreateUserRequest Request body for creating a user (admin, local auth only).
+// ComponentsSchemasCreateRunRequest POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
+type ComponentsSchemasCreateRunRequest struct {
+	ClientToken *openapi_types.UUID `json:"clientToken,omitempty"`
+
+	// Cluster Breaks a tie when the job path lies in more than one surviving tenant.
+	Cluster    *string            `json:"cluster,omitempty"`
+	Parameters *map[string]string `json:"parameters,omitempty"`
+}
+
+// ComponentsSchemasCreateUserRequest Request body for creating a local account (admin only).
 type ComponentsSchemasCreateUserRequest struct {
 	DisplayName *string   `json:"displayName,omitempty"`
 	Email       *string   `json:"email,omitempty"`
 	Groups      *[]string `json:"groups,omitempty"`
 	Password    string    `json:"password"`
-	Username    string    `json:"username"`
+
+	// Purpose Required when local accounts run beside OIDC.
+	Purpose  *ComponentsSchemasCreateUserRequestPurpose `json:"purpose,omitempty"`
+	Username string                                     `json:"username"`
 }
+
+// ComponentsSchemasCreateUserRequestPurpose Required when local accounts run beside OIDC.
+type ComponentsSchemasCreateUserRequestPurpose string
 
 // ComponentsSchemasDeployableNamespaces The caller's create-authorized namespaces.
 type ComponentsSchemasDeployableNamespaces struct {
@@ -1433,6 +2234,83 @@ type ComponentsSchemasExecuteGroovyPolicy struct {
 	// Enabled Absent means enabled.
 	Enabled *bool `json:"enabled,omitempty"`
 }
+
+// ComponentsSchemasFleetLock One fleet lock row, from a varroa.lock step. tenant and jobPath are always present, whichever tenant the row belongs to. runLink is present only when the reading caller can read that row's own run. A waiting row reports its own waitingSince. A held or a releasing row reports its own acquiredAt and no waitingSince. The row carries no queue position and no derived holder: a consumer groups the rows it already has by name.
+type ComponentsSchemasFleetLock struct {
+	// AcquiredAt The time the run acquired the lock. Present on a held or a releasing row.
+	AcquiredAt *time.Time `json:"acquiredAt,omitempty"`
+
+	// Cluster The cluster of the run that holds or waits on the lock.
+	Cluster string `json:"cluster"`
+
+	// JobPath The job path of the run that holds or waits on the lock.
+	JobPath string `json:"jobPath"`
+
+	// Name The qualified lock name: the owner tenant, a slash, and the bare lock name. A controller tenant holds a slash of its own, so do not split this value to find the owner.
+	Name  string `json:"name"`
+	RunId string `json:"runId"`
+
+	// RunLink The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a run search result carries. Absent, not null, when the caller's own grant cannot read the row's own run.
+	RunLink *string                         `json:"runLink,omitempty"`
+	State   ComponentsSchemasFleetLockState `json:"state"`
+
+	// Tenant The tenant of the run that holds or waits on the lock.
+	Tenant string `json:"tenant"`
+
+	// WaitingSince The time the run began to wait. Present only on a waiting row.
+	WaitingSince *time.Time `json:"waitingSince,omitempty"`
+}
+
+// ComponentsSchemasFleetLockState defines model for ComponentsSchemasFleetLock.State.
+type ComponentsSchemasFleetLockState string
+
+// ComponentsSchemasFleetLockHolderCell The cell that still runs a releasing lock's holder. A restart of that cell ends the holder, and the lock then releases.
+type ComponentsSchemasFleetLockHolderCell struct {
+	Cluster   string `json:"cluster"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
+// ComponentsSchemasFleetLockListResponse GET /pipelines/{team}/locks and GET /locks. Both routes answer the rows in lock name order. In one name, the holder comes first, and the waiters follow in the order they began to wait.
+type ComponentsSchemasFleetLockListResponse struct {
+	Items []ComponentsSchemasFleetLock `json:"items"`
+}
+
+// ComponentsSchemasFleetLockReleaseConflict The 409 body of POST /locks/release. holderCell is present only when a live pod still runs the lock's holder.
+type ComponentsSchemasFleetLockReleaseConflict struct {
+	// Error Human-readable refusal message.
+	Error string `json:"error"`
+
+	// HolderCell The cell that still runs a releasing lock's holder. A restart of that cell ends the holder, and the lock then releases.
+	HolderCell *ComponentsSchemasFleetLockHolderCell `json:"holderCell,omitempty"`
+}
+
+// ComponentsSchemasFleetLockReleaseRequest POST /locks/release. name and runId identify the lock row. reason is stored in the audit record, so it is required.
+type ComponentsSchemasFleetLockReleaseRequest struct {
+	// Name The qualified lock name, as the lock reads answer it.
+	Name string `json:"name"`
+
+	// Reason Why the operator releases the lock. The activity row carries it.
+	Reason string `json:"reason"`
+
+	// RunId The run that holds the releasing lock.
+	RunId string `json:"runId"`
+}
+
+// ComponentsSchemasFleetLockReleaseResponse The released row. It names the owner of the run that held the lock.
+type ComponentsSchemasFleetLockReleaseResponse struct {
+	// CellInstance The cell instance that held the lock.
+	CellInstance *string                                        `json:"cellInstance,omitempty"`
+	Cluster      string                                         `json:"cluster"`
+	JobPath      string                                         `json:"jobPath"`
+	Name         string                                         `json:"name"`
+	RunId        string                                         `json:"runId"`
+	State        ComponentsSchemasFleetLockReleaseResponseState `json:"state"`
+	Tenant       string                                         `json:"tenant"`
+}
+
+// ComponentsSchemasFleetLockReleaseResponseState defines model for ComponentsSchemasFleetLockReleaseResponse.State.
+type ComponentsSchemasFleetLockReleaseResponseState string
 
 // ComponentsSchemasFleetPluginClassCount defines model for components_schemas_FleetPluginClassCount.
 type ComponentsSchemasFleetPluginClassCount struct {
@@ -1560,8 +2438,11 @@ type ComponentsSchemasIdentitySettings struct {
 	DefaultRead  bool    `json:"defaultRead"`
 
 	// Issuer OIDC issuer URL (present in OIDC mode only).
-	Issuer *string                               `json:"issuer,omitempty"`
-	Mode   ComponentsSchemasIdentitySettingsMode `json:"mode"`
+	Issuer *string `json:"issuer,omitempty"`
+
+	// LocalAccounts True when declared local accounts sign in beside OIDC.
+	LocalAccounts bool                                  `json:"localAccounts"`
+	Mode          ComponentsSchemasIdentitySettingsMode `json:"mode"`
 
 	// Scopes OIDC scopes (present in OIDC mode only).
 	Scopes *[]string `json:"scopes,omitempty"`
@@ -1596,6 +2477,12 @@ type ComponentsSchemasInputSummaryEntry struct {
 	Kind      string  `json:"kind"`
 	Namespace *string `json:"namespace,omitempty"`
 	Type      string  `json:"type"`
+}
+
+// ComponentsSchemasJenkinsLink The Varroa page that a Jenkins item path resolves to.
+type ComponentsSchemasJenkinsLink struct {
+	// Link A dashboard path, such as /pipelines/team/job/runId.
+	Link string `json:"link"`
 }
 
 // ComponentsSchemasJenkinsRole A JenkinsRole CRD (cluster-scoped, data-plane permissions).
@@ -1667,6 +2554,81 @@ type ComponentsSchemasJenkinsVersionProfile struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// ComponentsSchemasJobBranchHead One branch, change request, or tag of a multibranch job.
+type ComponentsSchemasJobBranchHead struct {
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
+	// JobPath The head's own job path, which its runs carry.
+	JobPath string `json:"jobPath"`
+
+	// LastRun One run, condensed for a list or a card.
+	LastRun *ComponentsSchemasRunSummary `json:"lastRun,omitempty"`
+	Name    string                       `json:"name"`
+
+	// Orphaned True when Jenkins no longer discovers the head as buildable.
+	Orphaned bool `json:"orphaned"`
+
+	// Revision The last seen SCM revision of the head.
+	Revision *string `json:"revision,omitempty"`
+}
+
+// ComponentsSchemasJobBranchList GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to ten minutes stale. A hibernated cell keeps its last export.
+type ComponentsSchemasJobBranchList struct {
+	Branches []ComponentsSchemasJobBranchHead `json:"branches"`
+
+	// ChangeRequests Sorted by numeric change request id, newest first.
+	ChangeRequests []ComponentsSchemasJobBranchHead `json:"changeRequests"`
+
+	// IndexResult The result of the last Jenkins index.
+	IndexResult *string `json:"indexResult,omitempty"`
+
+	// IndexedAt When Jenkins last indexed the multibranch job.
+	IndexedAt *time.Time `json:"indexedAt,omitempty"`
+	JobPath   string     `json:"jobPath"`
+
+	// LastScan The last requested scan of a multibranch job. Absent until a scan runs.
+	LastScan *ComponentsSchemasBranchScan `json:"lastScan,omitempty"`
+
+	// ObservedAt When the cell last exported this job. Absent before the first export.
+	ObservedAt *time.Time                       `json:"observedAt,omitempty"`
+	Tags       []ComponentsSchemasJobBranchHead `json:"tags"`
+
+	// Truncated True when the cell capped the number of heads it exported.
+	Truncated bool `json:"truncated"`
+}
+
+// ComponentsSchemasJobDeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
+type ComponentsSchemasJobDeclaredBy struct {
+	Bundle      ComponentsSchemasBundleRef       `json:"bundle"`
+	CatalogItem *ComponentsSchemasCatalogItemRef `json:"catalogItem,omitempty"`
+
+	// Forge gitSource only: the forge that hosts repoURL. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	Forge *ComponentsSchemasJobDeclaredByForge `json:"forge,omitempty"`
+	Kind  ComponentsSchemasJobDeclaredByKind   `json:"kind"`
+
+	// Name gitSource: the input's repoURL. ociSource: the input's ociRef. itemRef: the CatalogItem name.
+	Name string `json:"name"`
+
+	// OciRef Present only for kind ociSource.
+	OciRef *string `json:"ociRef,omitempty"`
+
+	// Path The input's sub-path. Absent when the input declares no sub-path.
+	Path *string `json:"path,omitempty"`
+
+	// RepoURL Present only for kind gitSource.
+	RepoURL *string `json:"repoURL,omitempty"`
+
+	// Revision A git SHA (gitSource), an OCI manifest digest (ociSource), or a CatalogItem content hash (itemRef). Absent when the composed bundle has not resolved this input yet.
+	Revision *string `json:"revision,omitempty"`
+}
+
+// ComponentsSchemasJobDeclaredByForge gitSource only: the forge that hosts repoURL. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasJobDeclaredByForge string
+
+// ComponentsSchemasJobDeclaredByKind defines model for ComponentsSchemasJobDeclaredBy.Kind.
+type ComponentsSchemasJobDeclaredByKind string
+
 // ComponentsSchemasKeyMeta Non-secret metadata for an API key.
 type ComponentsSchemasKeyMeta struct {
 	// Created ISO 8601 creation time.
@@ -1720,6 +2682,7 @@ type ComponentsSchemasLoginResponse struct {
 
 // ComponentsSchemasMe Current user information, enriched from JWT claims and User CRD.
 type ComponentsSchemasMe struct {
+	// AuthMode Source of this session. A local account beside OIDC reports local.
 	AuthMode    ComponentsSchemasMeAuthMode `json:"authMode"`
 	DisplayName *string                     `json:"displayName,omitempty"`
 	Email       string                      `json:"email"`
@@ -1732,10 +2695,13 @@ type ComponentsSchemasMe struct {
 	// Preferences User UI preferences.
 	Preferences       *ComponentsSchemasPreferences `json:"preferences,omitempty"`
 	PreferredUsername *string                       `json:"preferredUsername,omitempty"`
-	Subject           string                        `json:"subject"`
+
+	// SignedInAt Issue time of the session token. Absent for an API key caller.
+	SignedInAt *time.Time `json:"signedInAt,omitempty"`
+	Subject    string     `json:"subject"`
 }
 
-// ComponentsSchemasMeAuthMode defines model for ComponentsSchemasMe.AuthMode.
+// ComponentsSchemasMeAuthMode Source of this session. A local account beside OIDC reports local.
 type ComponentsSchemasMeAuthMode string
 
 // ComponentsSchemasMissingPlugin A composed bundle's plugin pin absent from the resolved plugin set.
@@ -1807,9 +2773,24 @@ type ComponentsSchemasPendingPluginRoll struct {
 
 // ComponentsSchemasPendingRestart Pending restart information.
 type ComponentsSchemasPendingRestart struct {
-	Changes          *[]string `json:"changes,omitempty"`
-	DesiredStateHash string    `json:"desiredStateHash"`
-	DetectedAt       string    `json:"detectedAt"`
+	Changes *[]string `json:"changes,omitempty"`
+
+	// ContentHash Hash of the JCasC, RBAC, and items of the pending change. Send it as expectedContentHash to approve this change only.
+	ContentHash      *string `json:"contentHash,omitempty"`
+	DesiredStateHash string  `json:"desiredStateHash"`
+	DetectedAt       string  `json:"detectedAt"`
+}
+
+// ComponentsSchemasPermissionScopes Scope-aware introspection result for /me/permissions.
+type ComponentsSchemasPermissionScopes struct {
+	// Global Capabilities from cluster-wide (nil-scope) bindings only.
+	Global ComponentsSchemasAPICapabilitySet `json:"global"`
+
+	// Scopes One entry per distinct scoped binding scope.
+	Scopes *[]ComponentsSchemasScopedCapabilities `json:"scopes"`
+
+	// Tenants One entry per pipelines-tenant grant the caller holds. Always an array, never null.
+	Tenants []ComponentsSchemasTenantCapabilities `json:"tenants"`
 }
 
 // ComponentsSchemasPersistenceSpec Persistent volume size/class (transcribed from v1alpha1.PersistenceSpec).
@@ -1832,6 +2813,305 @@ type ComponentsSchemasPinConflict struct {
 type ComponentsSchemasPinPreflightReport struct {
 	Conflicts []ComponentsSchemasPinConflict   `json:"conflicts"`
 	Missing   []ComponentsSchemasMissingPlugin `json:"missing"`
+}
+
+// ComponentsSchemasPipelineDefinition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+type ComponentsSchemasPipelineDefinition struct {
+	// DeclaredBy Which input of the job's composed bundle declared it. Present when one bundle input resolved as the declarer. Absent when the bundle or every candidate input is unresolved.
+	DeclaredBy *ComponentsSchemasJobDeclaredBy `json:"declaredBy,omitempty"`
+
+	// DefinitionPath The Jenkinsfile's script path within its own repository, from the job's last run. Present only when source is jenkinsfile and the run recorded one.
+	DefinitionPath *string `json:"definitionPath,omitempty"`
+
+	// JenkinsfileCommit The last build's checked-out commit, from its run record.
+	JenkinsfileCommit *string `json:"jenkinsfileCommit,omitempty"`
+
+	// JenkinsfileForge The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	JenkinsfileForge *ComponentsSchemasPipelineDefinitionJenkinsfileForge `json:"jenkinsfileForge,omitempty"`
+	JenkinsfileRepo  *string                                              `json:"jenkinsfileRepo,omitempty"`
+
+	// Profile The version profile in effect for this job's controller.
+	Profile *string `json:"profile,omitempty"`
+
+	// Source jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
+	Source ComponentsSchemasPipelineDefinitionSource `json:"source"`
+}
+
+// ComponentsSchemasPipelineDefinitionJenkinsfileForge The forge that hosts jenkinsfileRepo. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasPipelineDefinitionJenkinsfileForge string
+
+// ComponentsSchemasPipelineDefinitionSource jenkinsfile when the script is read from source control, inline when the bundle item carries the script itself, and template when the item's definition names a catalog template (varroaTemplate). A marker-defined multibranch job reads its marker from a repository, so it reports jenkinsfile; its template is on PipelineJobDetail.template.
+type ComponentsSchemasPipelineDefinitionSource string
+
+// ComponentsSchemasPipelineDependencies The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.
+type ComponentsSchemasPipelineDependencies struct {
+	// Downstream The varroa-upstream rows naming this job as their producer.
+	Downstream []ComponentsSchemasPipelineDependencyEdge `json:"downstream"`
+
+	// Upstream The varroa-upstream trigger rows this job declares.
+	Upstream []ComponentsSchemasPipelineDependencyEdge `json:"upstream"`
+}
+
+// ComponentsSchemasPipelineDependencyEdge One cross-tenant dependency edge: a producer tenant and job, the result threshold the edge fires on, and whether the producer's exports currently grant it. A declared edge whose grant is missing is not hidden; it appears with granted false.
+type ComponentsSchemasPipelineDependencyEdge struct {
+	// Granted The grant evaluator's fanout-path verdict, read from the producer's exports.
+	Granted bool `json:"granted"`
+
+	// Job The job's name, relative to the other tenant's folder.
+	Job string `json:"job"`
+
+	// JobPath The job's path with its tenant folder. The job page route takes this path.
+	JobPath string `json:"jobPath"`
+
+	// LastRun The edge's most recent run within the last 30 days. Absent when no such run exists. A run the caller may not read carries its tenant alone.
+	LastRun *ComponentsSchemasRunLink `json:"lastRun,omitempty"`
+
+	// Result The result threshold the edge fires on.
+	Result ComponentsSchemasPipelineDependencyEdgeResult `json:"result"`
+
+	// Tenant The producer tenant's identifier.
+	Tenant string `json:"tenant"`
+}
+
+// ComponentsSchemasPipelineDependencyEdgeResult The result threshold the edge fires on.
+type ComponentsSchemasPipelineDependencyEdgeResult string
+
+// ComponentsSchemasPipelineJobDetail GET /pipelines/{team}/jobs/{job}.
+type ComponentsSchemasPipelineJobDetail struct {
+	// Definition Where a job's pipeline script comes from. The catalog template, when one exists, is reported separately on PipelineJobDetail.template — see PipelineTemplateInfo.
+	Definition *ComponentsSchemasPipelineDefinition `json:"definition,omitempty"`
+
+	// Dependencies The job's cross-tenant dependency edges (design D13). Both arrays are empty, never omitted, for a job that declares no cross-tenant trigger and has no subscriber.
+	Dependencies    ComponentsSchemasPipelineDependencies    `json:"dependencies"`
+	DurationTrendMs *[]int64                                 `json:"durationTrendMs,omitempty"`
+	Health          ComponentsSchemasPipelineJobDetailHealth `json:"health"`
+	JobPath         string                                   `json:"jobPath"`
+
+	// Kind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+	Kind ComponentsSchemasPipelineJobDetailKind `json:"kind"`
+
+	// Last30Days Null when the record store could not answer the window query; the rest of the job page still renders.
+	Last30Days *ComponentsSchemasPipelineLast30Days `json:"last30Days"`
+
+	// LastBuild One run, condensed for a list or a card.
+	LastBuild  *ComponentsSchemasRunSummary          `json:"lastBuild,omitempty"`
+	Parameters *[]ComponentsSchemasPipelineParameter `json:"parameters,omitempty"`
+
+	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
+	Pending bool `json:"pending"`
+
+	// Template Absent for a job with no catalog template (a Jenkinsfile job).
+	Template *ComponentsSchemasPipelineTemplateInfo `json:"template,omitempty"`
+
+	// Tenant The tenant noun the server authorizes against, from TenantRef.Tenant: a Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+	Tenant string `json:"tenant"`
+
+	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+	TenantFolder string                             `json:"tenantFolder"`
+	Triggers     *ComponentsSchemasPipelineTriggers `json:"triggers,omitempty"`
+
+	// Waiting Queued runs of this job that a concurrency cap holds. Absent when none waits.
+	Waiting *[]ComponentsSchemasRunWaitEntry `json:"waiting,omitempty"`
+}
+
+// ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
+type ComponentsSchemasPipelineJobDetailHealth string
+
+// ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+type ComponentsSchemasPipelineJobDetailKind string
+
+// ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines team.
+type ComponentsSchemasPipelineJobRetention struct {
+	// Days The window the rule names, in days, before the store cap.
+	Days int `json:"days"`
+
+	// EffectiveDays The window the rule gives, in days, after the store cap.
+	EffectiveDays int `json:"effectiveDays"`
+
+	// Job The folder-relative job glob.
+	Job string `json:"job"`
+}
+
+// ComponentsSchemasPipelineLast30Days The job's "Last 30 days" card, GET /pipelines/{team}/jobs/{job}.
+type ComponentsSchemasPipelineLast30Days struct {
+	// Builds Every run created in the window, whatever its status.
+	Builds int64 `json:"builds"`
+
+	// MedianDurationMs The median duration_ms over finished runs. Null when the window holds no finished run.
+	MedianDurationMs *int64 `json:"medianDurationMs"`
+
+	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds. Absent when the job started no build in that window.
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
+
+	// PassRate The share of finished runs whose result is SUCCESS. Null when the window holds no finished run.
+	PassRate *float64 `json:"passRate"`
+
+	// SlowestStage Null when no run in the window carries a finished stage.
+	SlowestStage *ComponentsSchemasPipelineSlowestStage `json:"slowestStage"`
+}
+
+// ComponentsSchemasPipelineListResponse GET /pipelines/{team}: the job list, unioned with the catalog's declared jobs, plus the running-now strip.
+type ComponentsSchemasPipelineListResponse struct {
+	Items []ComponentsSchemasPipelineSummary `json:"items"`
+
+	// Retention The record-store windows that apply to one pipelines team.
+	Retention  ComponentsSchemasPipelineRetention `json:"retention"`
+	RunningNow []ComponentsSchemasRunningRun      `json:"runningNow"`
+
+	// TenantFolder The Jenkins folder that prefixes every job path in the response. It is the Team name for a placed pipelines tenant. It is the empty string for a controller tenant. The field is always present.
+	TenantFolder string `json:"tenantFolder"`
+
+	// Truncated True when any tenant's running-now page was full (50 rows), so the strip does not claim completeness.
+	Truncated bool `json:"truncated"`
+}
+
+// ComponentsSchemasPipelineMarkerFinding One line of the lint table's SEVERITY, PATH, and MESSAGE columns.
+type ComponentsSchemasPipelineMarkerFinding struct {
+	Message  string                                         `json:"message"`
+	Path     *string                                        `json:"path,omitempty"`
+	Severity ComponentsSchemasPipelineMarkerFindingSeverity `json:"severity"`
+}
+
+// ComponentsSchemasPipelineMarkerFindingSeverity defines model for ComponentsSchemasPipelineMarkerFinding.Severity.
+type ComponentsSchemasPipelineMarkerFindingSeverity string
+
+// ComponentsSchemasPipelineMarkerValidateRequest POST /pipelines/{team}/markers/validate.
+type ComponentsSchemasPipelineMarkerValidateRequest struct {
+	// Marker The marker file's raw text, at most 64 KiB.
+	Marker string `json:"marker"`
+}
+
+// ComponentsSchemasPipelineMarkerValidateResponse findings is empty when the marker resolved against the team's delivered set and its values validated; templateName and templateVersion are then present.
+type ComponentsSchemasPipelineMarkerValidateResponse struct {
+	Findings        []ComponentsSchemasPipelineMarkerFinding `json:"findings"`
+	TemplateName    *string                                  `json:"templateName,omitempty"`
+	TemplateVersion *string                                  `json:"templateVersion,omitempty"`
+}
+
+// ComponentsSchemasPipelineParameter One declared build parameter, converted from the items engine's parameter kind into a JSON Schema fragment the frontend's form renders directly.
+type ComponentsSchemasPipelineParameter struct {
+	DefaultValue *string                                `json:"defaultValue,omitempty"`
+	Description  *string                                `json:"description,omitempty"`
+	Kind         ComponentsSchemasPipelineParameterKind `json:"kind"`
+	Name         string                                 `json:"name"`
+
+	// Schema A JSON Schema fragment for this one field.
+	Schema   map[string]interface{}                      `json:"schema"`
+	UiWidget *ComponentsSchemasPipelineParameterUiWidget `json:"uiWidget,omitempty"`
+}
+
+// ComponentsSchemasPipelineParameterKind defines model for ComponentsSchemasPipelineParameter.Kind.
+type ComponentsSchemasPipelineParameterKind string
+
+// ComponentsSchemasPipelineParameterUiWidget defines model for ComponentsSchemasPipelineParameter.UiWidget.
+type ComponentsSchemasPipelineParameterUiWidget string
+
+// ComponentsSchemasPipelineRetention The record-store windows that apply to one pipelines team.
+type ComponentsSchemasPipelineRetention struct {
+	// EffectiveDays The window a job without a matching rule gets, in days.
+	EffectiveDays int `json:"effectiveDays"`
+
+	// Jobs The per-job rules, in match order.
+	Jobs []ComponentsSchemasPipelineJobRetention `json:"jobs"`
+
+	// StoreDays The store-wide runs window, in days. It caps every other window.
+	StoreDays int `json:"storeDays"`
+
+	// TenantDays The tenant window, in days. Absent when the tenant sets none.
+	TenantDays *int `json:"tenantDays,omitempty"`
+}
+
+// ComponentsSchemasPipelineSlowestStage The stage with the greatest median duration across the window's runs.
+type ComponentsSchemasPipelineSlowestStage struct {
+	DurationMs int64  `json:"durationMs"`
+	Name       string `json:"name"`
+}
+
+// ComponentsSchemasPipelineSummary One job's run-history summary for the Pipelines table. A job that has never run carries no lastBuild.
+type ComponentsSchemasPipelineSummary struct {
+	// DurationTrendMs The most recent runs' duration, newest first.
+	DurationTrendMs *[]int64 `json:"durationTrendMs,omitempty"`
+
+	// Health The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
+	Health  ComponentsSchemasPipelineSummaryHealth `json:"health"`
+	JobPath string                                 `json:"jobPath"`
+
+	// Kind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+	Kind ComponentsSchemasPipelineSummaryKind `json:"kind"`
+
+	// LastBuild One run, condensed for a list or a card.
+	LastBuild *ComponentsSchemasRunSummary `json:"lastBuild,omitempty"`
+
+	// MedianQueueWaitMs The median wait between a build's queued moment and its started moment, in milliseconds, over the trailing 30 days. Absent when the job started no build in that window.
+	MedianQueueWaitMs *int64 `json:"medianQueueWaitMs,omitempty"`
+
+	// Pending True when every tenant that declares this job reports a complete job list that lacks it. False when a declaring tenant has an unknown inventory, when a declaring tenant holds the job, when the job has a run, and when no tenant declares the job.
+	Pending bool `json:"pending"`
+}
+
+// ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
+type ComponentsSchemasPipelineSummaryHealth string
+
+// ComponentsSchemasPipelineSummaryKind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+type ComponentsSchemasPipelineSummaryKind string
+
+// ComponentsSchemasPipelineTeam One row of GET /pipelines. cell and cellNamespace are set only on a placed row.
+type ComponentsSchemasPipelineTeam struct {
+	// Cell The slot-0 cell Controller that holds the tenant.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace The namespace of that cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Cluster The cluster that holds the tenant's cell. An unplaced local Team names the local cluster. A local Team whose namespaces hold a controller, and which has no spec.pipelines, also names the local cluster.
+	Cluster string `json:"cluster"`
+
+	// Name The Team name, which is also its tenant name.
+	Name string `json:"name"`
+
+	// Placed True when a cell holds the tenant. A controller-namespace Team answers false.
+	Placed bool `json:"placed"`
+}
+
+// ComponentsSchemasPipelineTeamList GET /pipelines. The rows are in (name, cluster) order.
+type ComponentsSchemasPipelineTeamList struct {
+	Items []ComponentsSchemasPipelineTeam `json:"items"`
+
+	// RecordStore False when the record store is off or its schema is too old. The list then carries no Team that another cluster holds.
+	RecordStore bool `json:"recordStore"`
+}
+
+// ComponentsSchemasPipelineTemplateInfo The resolved catalog template for a job, read from the record store (marker-defined) or the items engine and catalog (items-declared). Absent from PipelineJobDetail for a job with no catalog template.
+// For source "marker": name, version, and asOfBuild are absent before the job's first run — markerPath and source are always present. markerRevision is the trusted revision the cell read the marker from, not the branch tip. For source "items": only name, version, and source are set.
+type ComponentsSchemasPipelineTemplateInfo struct {
+	AsOfBuild      *int64                                      `json:"asOfBuild,omitempty"`
+	MarkerPath     *string                                     `json:"markerPath,omitempty"`
+	MarkerRevision *string                                     `json:"markerRevision,omitempty"`
+	Name           *string                                     `json:"name,omitempty"`
+	Source         ComponentsSchemasPipelineTemplateInfoSource `json:"source"`
+	Version        *string                                     `json:"version,omitempty"`
+}
+
+// ComponentsSchemasPipelineTemplateInfoSource defines model for ComponentsSchemasPipelineTemplateInfo.Source.
+type ComponentsSchemasPipelineTemplateInfoSource string
+
+// ComponentsSchemasPipelineTemplateSummary One pipeline-template a composition delivered.
+type ComponentsSchemasPipelineTemplateSummary struct {
+	Description *string `json:"description,omitempty"`
+	DisplayName *string `json:"displayName,omitempty"`
+	Name        string  `json:"name"`
+	Version     string  `json:"version"`
+}
+
+// ComponentsSchemasPipelineTriggers defines model for components_schemas_PipelineTriggers.
+type ComponentsSchemasPipelineTriggers struct {
+	Concurrency *int    `json:"concurrency,omitempty"`
+	PullRequest *bool   `json:"pullRequest,omitempty"`
+	Push        *bool   `json:"push,omitempty"`
+	Schedule    *string `json:"schedule,omitempty"`
+
+	// Webhook True when the job declares a genericTrigger. The token is not returned.
+	Webhook *bool `json:"webhook,omitempty"`
 }
 
 // ComponentsSchemasPluginAdvisory A non-classification finding (e.g. dependencyMinimumUnsatisfied).
@@ -2141,6 +3421,12 @@ type ComponentsSchemasResourceOverlay struct {
 	StatefulSet *string `json:"statefulSet,omitempty"`
 }
 
+// ComponentsSchemasRestartRunRequest POST /runs/{run}/restart. The stage the restart begins at.
+type ComponentsSchemasRestartRunRequest struct {
+	// Stage A stage name from the restart object of the run detail.
+	Stage string `json:"stage"`
+}
+
 // ComponentsSchemasRollout Rollout gate status for a controller.
 type ComponentsSchemasRollout struct {
 	Blocked          bool      `json:"blocked"`
@@ -2159,6 +3445,607 @@ type ComponentsSchemasRotatePartialFailure struct {
 	NewToken string `json:"newToken"`
 }
 
+// ComponentsSchemasRunActionResponse 202 response for a run request, a rerun, or a replay. The BFF does not wait for the cell's admission decision; the caller polls the run.
+type ComponentsSchemasRunActionResponse struct {
+	IntentKey string                                  `json:"intentKey"`
+	RunId     string                                  `json:"runId"`
+	State     ComponentsSchemasRunActionResponseState `json:"state"`
+}
+
+// ComponentsSchemasRunActionResponseState defines model for ComponentsSchemasRunActionResponse.State.
+type ComponentsSchemasRunActionResponseState string
+
+// ComponentsSchemasRunArtifact defines model for components_schemas_RunArtifact.
+type ComponentsSchemasRunArtifact struct {
+	ContentType *string `json:"contentType,omitempty"`
+	Digest      *string `json:"digest,omitempty"`
+
+	// Downloadable False when the stored blob key is empty (local artifact mode); the download path then answers 409.
+	Downloadable bool   `json:"downloadable"`
+	Path         string `json:"path"`
+	SizeBytes    int64  `json:"sizeBytes"`
+}
+
+// ComponentsSchemasRunArtifactListResponse defines model for components_schemas_RunArtifactListResponse.
+type ComponentsSchemasRunArtifactListResponse struct {
+	Items []ComponentsSchemasRunArtifact `json:"items"`
+}
+
+// ComponentsSchemasRunChange One SCM change entry, passed through from the run's changes column.
+type ComponentsSchemasRunChange map[string]interface{}
+
+// ComponentsSchemasRunChangeListResponse defines model for components_schemas_RunChangeListResponse.
+type ComponentsSchemasRunChangeListResponse struct {
+	Items []ComponentsSchemasRunChange `json:"items"`
+}
+
+// ComponentsSchemasRunCommandRefusal The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+type ComponentsSchemasRunCommandRefusal struct {
+	// Actor The person or service that sent the command.
+	Actor *string `json:"actor,omitempty"`
+
+	// Command The refused command.
+	Command ComponentsSchemasRunCommandRefusalCommand `json:"command"`
+
+	// Error The refusal text. The mite keeps the title of a Jenkins error page, and the gateway cuts the text at 512 characters.
+	Error *string `json:"error,omitempty"`
+
+	// HttpStatus The HTTP status the plugin answered.
+	HttpStatus *int `json:"httpStatus,omitempty"`
+
+	// RefusedAt The time the gateway received the refusal.
+	RefusedAt time.Time `json:"refusedAt"`
+}
+
+// ComponentsSchemasRunCommandRefusalCommand The refused command.
+type ComponentsSchemasRunCommandRefusalCommand string
+
+// ComponentsSchemasRunDetail GET /runs/{run}.
+type ComponentsSchemasRunDetail struct {
+	Actor       *string `json:"actor,omitempty"`
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+
+	// Cases The run's stored failed and skipped test cases, the same entries GET /runs/{run}/tests serves. The field is absent when the run holds no stored case.
+	Cases *[]ComponentsSchemasRunTestCase `json:"cases,omitempty"`
+	Cause *string                         `json:"cause,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
+	// CommandRefusal The newest cancel or input answer the Jenkins plugin refused for this run, on GET /runs/{run}. The field is absent when no such refusal exists. A later successful command does not remove it. The notice carries its own time, so a reader compares it with the run state.
+	CommandRefusal *ComponentsSchemasRunCommandRefusal `json:"commandRefusal,omitempty"`
+
+	// Digest Why a run that did not succeed failed. The server computes this object on every read, from the stored rows and the stored log. The field is absent for a run with no result, for a SUCCESS or TRIGGER_FAILED result, or for a run with no start time. The field is also absent when no part has a value.
+	Digest *struct {
+		// Error The stored error text of that stage. Absent when no stage failed, and when the stage carries no error.
+		Error *string `json:"error,omitempty"`
+
+		// FailedTests The run's aggregate test counts. The field is present only when the run reports at least one failed test.
+		FailedTests *struct {
+			// Cases The first ten failed cases of the run, in the order the record store answers. A skipped case is not in the list. The field is absent when the run holds no stored case.
+			Cases *[]struct {
+				// CaseKey The opaque case key. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on the case history read.
+				CaseKey   string `json:"caseKey"`
+				ClassName string `json:"className"`
+				Name      string `json:"name"`
+				Suite     string `json:"suite"`
+			} `json:"cases,omitempty"`
+			Failed  int  `json:"failed"`
+			Skipped *int `json:"skipped,omitempty"`
+			Total   *int `json:"total,omitempty"`
+		} `json:"failedTests,omitempty"`
+
+		// LogTail The last 50 console log lines that carry the attribution of the failed stage or of a stage nested under it. The field falls back to the last 50 lines of the whole log when no log-index entry names one of those stages. The lines carry no ANSI escape sequence. It is absent when the server holds no blob store and when a log-index entry fails to decode. Absent for an INTERRUPTED run.
+		LogTail *string `json:"logTail,omitempty"`
+
+		// Stage The name of the innermost stage whose status is FAILURE, in stage-start order. A stage or a parallel branch that holds a failed stage is never the answer. A parallel branch shows its branch name. Absent when no stage failed.
+		Stage *string `json:"stage,omitempty"`
+	} `json:"digest,omitempty"`
+
+	// Downstream One page of the runs a run started, newest first.
+	Downstream *ComponentsSchemasRunLinkPage `json:"downstream,omitempty"`
+	DurationMs *int64                        `json:"durationMs,omitempty"`
+	EndedAt    *time.Time                    `json:"endedAt,omitempty"`
+
+	// Inputs The input steps the run waits on, read from the run's stored inputs column. This field is absent until a run.input event arrives, and absent for a run that holds no pending input.
+	Inputs *[]ComponentsSchemasRunInput `json:"inputs,omitempty"`
+
+	// InterruptedReason Set only when result is INTERRUPTED.
+	InterruptedReason *string `json:"interruptedReason,omitempty"`
+	JobPath           string  `json:"jobPath"`
+
+	// LogComplete The negation of LogSummary.incomplete.
+	LogComplete *bool `json:"logComplete,omitempty"`
+
+	// LogFinalized LogSummary.finalized, read from the run's payload column.
+	LogFinalized *bool              `json:"logFinalized,omitempty"`
+	Params       *map[string]string `json:"params,omitempty"`
+	QueuedAt     *time.Time         `json:"queuedAt,omitempty"`
+
+	// RejectedSignature Set only when result is FAILURE and the script sandbox refused a signature.
+	RejectedSignature *string `json:"rejectedSignature,omitempty"`
+
+	// ReplayOf The identifier of the run whose script this build replayed. The field is absent for a build that is not a replay.
+	ReplayOf *string `json:"replayOf,omitempty"`
+
+	// Restart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
+	Restart *ComponentsSchemasRunRestart `json:"restart,omitempty"`
+
+	// RestartOf The identifier of the run this build restarted from. The field is absent for a build that is not a restart.
+	RestartOf *string `json:"restartOf,omitempty"`
+
+	// RestartStage The stage this restarted build began at. The field is absent for a build that is not a restart.
+	RestartStage *string `json:"restartStage,omitempty"`
+	Result       *string `json:"result,omitempty"`
+
+	// RetryRunId An existing retry's run id, when one already exists.
+	RetryRunId *string `json:"retryRunId,omitempty"`
+	RunId      string  `json:"runId"`
+
+	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	ScmForge    *ComponentsSchemasRunDetailScmForge `json:"scmForge,omitempty"`
+	ScmRevision *string                             `json:"scmRevision,omitempty"`
+
+	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+	ScmUrl *string `json:"scmUrl,omitempty"`
+
+	// Source How the run was defined, read from the run's stored source column. This field is absent until a run.source event arrives.
+	Source *struct {
+		// DefinitionPath The pipeline script path in the run's own repository. A run that a template defines reports no value here.
+		DefinitionPath *string `json:"definitionPath,omitempty"`
+		Libraries      *[]struct {
+			Name *string `json:"name,omitempty"`
+
+			// RepositoryForge The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+			RepositoryForge *ComponentsSchemasRunDetailSourceLibrariesRepositoryForge `json:"repositoryForge,omitempty"`
+
+			// RepositoryUrl The library repository URL. It carries no credentials. The field is absent when the current library configuration does not name a repository.
+			RepositoryUrl *string `json:"repositoryUrl,omitempty"`
+
+			// Revision The commit the run loaded. Absent when the library loaded from the cache.
+			Revision *string `json:"revision,omitempty"`
+
+			// Version The version the run loaded. Absent when the library declares none.
+			Version *string `json:"version,omitempty"`
+		} `json:"libraries,omitempty"`
+		PodTemplates *[]struct {
+			Image *string `json:"image,omitempty"`
+			Label *string `json:"label,omitempty"`
+			Name  *string `json:"name,omitempty"`
+		} `json:"podTemplates,omitempty"`
+	} `json:"source,omitempty"`
+	Stages    *[]ComponentsSchemasRunStage `json:"stages,omitempty"`
+	StartedAt *time.Time                   `json:"startedAt,omitempty"`
+	Status    string                       `json:"status"`
+
+	// Summary The one-line text the run attached to itself through varroa.summary. The plugin cuts the text at 512 UTF-8 bytes. This field is absent until the run calls varroa.summary.
+	Summary *string `json:"summary,omitempty"`
+
+	// Tenant The tenant noun the server authorizes against: the run row's stored tenant column. A Team name for a Team tenant, or "<namespace>/<controller>" for a synthetic tenant.
+	Tenant string `json:"tenant"`
+
+	// TenantFolder The tenant's Jenkins folder prefix, from TenantRef.Folder. Empty for a root-hosted tenant.
+	TenantFolder string `json:"tenantFolder"`
+
+	// TestReport The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+	TestReport   *ComponentsSchemasRunDetailTestReport `json:"testReport,omitempty"`
+	TestsFailed  *int                                  `json:"testsFailed,omitempty"`
+	TestsSkipped *int                                  `json:"testsSkipped,omitempty"`
+	TestsTotal   *int                                  `json:"testsTotal,omitempty"`
+
+	// TriggerError The error text a refused build trigger reported. Set only when result is TRIGGER_FAILED.
+	TriggerError *string `json:"triggerError,omitempty"`
+
+	// TriggerReasonCode Why no build exists for the trigger. One of JOB_NOT_FOUND, JOB_NOT_BUILDABLE, TRIGGER_REJECTED, TRIGGER_UNREACHABLE, CLAIM_EXPIRED, CLAIM_ABANDONED, FENCED, CROSS_TENANT, INVALID_KEY, THROTTLED, and NOT_HOME. The first three name a refusal from the controller. TRIGGER_UNREACHABLE names a trigger that reached no Jenkins. CLAIM_EXPIRED names an accepted trigger that no build claim followed. CLAIM_ABANDONED names a granted build claim that started no build. The last five name a build claim that the record store refused. NOT_HOME names a replay or a restart whose job home moved to another slot before it claimed. Set only when result is TRIGGER_FAILED.
+	TriggerReasonCode *string `json:"triggerReasonCode,omitempty"`
+
+	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+	TriggerSource *ComponentsSchemasRunDetailTriggerSource `json:"triggerSource,omitempty"`
+
+	// Upstream One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.
+	Upstream *ComponentsSchemasRunLink `json:"upstream,omitempty"`
+
+	// Waiting The concurrency cap that holds a queued run. Absent from a run that no cap holds.
+	Waiting *ComponentsSchemasRunWait `json:"waiting,omitempty"`
+}
+
+// ComponentsSchemasRunDetailScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasRunDetailScmForge string
+
+// ComponentsSchemasRunDetailSourceLibrariesRepositoryForge The forge that hosts repositoryUrl. The field is absent when the forge is unknown.
+type ComponentsSchemasRunDetailSourceLibrariesRepositoryForge string
+
+// ComponentsSchemasRunDetailTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+type ComponentsSchemasRunDetailTriggerSource string
+
+// ComponentsSchemasRunDetailTestReport The run's stored test report, on GET /runs/{run}. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+type ComponentsSchemasRunDetailTestReport struct {
+	// BlobKey The blob key of the archived report file. The value is empty when Jenkins stored the file locally.
+	BlobKey string `json:"blobKey"`
+
+	// CaseCount The number of cases the report file holds. The file holds every case, including a passed case.
+	CaseCount int32 `json:"caseCount"`
+
+	// SizeBytes The length of the report file in bytes.
+	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// ComponentsSchemasRunInput One input step a run waits on, read from the run's stored inputs column.
+type ComponentsSchemasRunInput struct {
+	// Id The input step's own identifier. Both input routes address this value.
+	Id string `json:"id"`
+
+	// Message The message the step shows. Absent when the step declares none.
+	Message *string `json:"message,omitempty"`
+
+	// Ok The label of the step's proceed control. Absent when the step declares none.
+	Ok *string `json:"ok,omitempty"`
+
+	// Parameters The step's own parameter definitions, in declaration order. Absent when the step declares none.
+	Parameters *[]ComponentsSchemasRunInputParameter `json:"parameters,omitempty"`
+
+	// Submitter The users and groups the step admits. Absent when the step declares none.
+	Submitter *string `json:"submitter,omitempty"`
+
+	// SubmitterParameter The parameter name that holds the answering user's name. Absent when the step declares none.
+	SubmitterParameter *string `json:"submitterParameter,omitempty"`
+}
+
+// ComponentsSchemasRunInputParameter One parameter an input step declares, read from its definition.
+type ComponentsSchemasRunInputParameter struct {
+	// Choices The definition's choices. Absent when the definition declares none.
+	Choices *[]string `json:"choices,omitempty"`
+
+	// DefaultValue The definition's default value, rendered as text. Absent when the definition declares none.
+	DefaultValue *string `json:"defaultValue,omitempty"`
+
+	// Description The definition's description. Absent when the definition declares none.
+	Description *string `json:"description,omitempty"`
+
+	// Name The definition's name.
+	Name string `json:"name"`
+
+	// Type The Java simple name of the parameter definition, such as StringParameterDefinition or ChoiceParameterDefinition.
+	Type *string `json:"type,omitempty"`
+}
+
+// ComponentsSchemasRunLink One run on the far side of a run link: the run that started this run, a run this run started, or a dependency edge's last run. A run the caller may not read carries its tenant alone.
+type ComponentsSchemasRunLink struct {
+	// BuildNumber The build number of the run.
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+
+	// JobPath The run's job path, qualified with its tenant folder.
+	JobPath *string `json:"jobPath,omitempty"`
+
+	// Result The run's result, when it has one. Absent on an upstream link.
+	Result *string `json:"result,omitempty"`
+
+	// RunId The run's identifier. Absent when no run matched.
+	RunId *openapi_types.UUID `json:"runId,omitempty"`
+
+	// Status The run's status. Absent on an upstream link.
+	Status *string `json:"status,omitempty"`
+
+	// Tenant The tenant that holds the run.
+	Tenant string `json:"tenant"`
+}
+
+// ComponentsSchemasRunLinkPage One page of the runs a run started, newest first.
+type ComponentsSchemasRunLinkPage struct {
+	// Items The runs on this page. Never null.
+	Items []ComponentsSchemasRunLink `json:"items"`
+
+	// NextCursor The cursor of the next page. Absent on the last page.
+	NextCursor *string `json:"nextCursor,omitempty"`
+}
+
+// ComponentsSchemasRunListResponse GET /pipelines/{team}/jobs/{job}/runs, cross-tenant cursor-merged.
+type ComponentsSchemasRunListResponse struct {
+	Items      []ComponentsSchemasRunSummary `json:"items"`
+	NextCursor *string                       `json:"nextCursor,omitempty"`
+}
+
+// ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
+type ComponentsSchemasRunRestart struct {
+	// Reason Why the run does not restart. The field is absent when restartable is true. The value is one of not-terminal, template-defined, not-recorded, not-declarative, disabled, unavailable, no-restartable-stage, or home-moved. The job moved and no restart copy is kept.
+	Reason      *string `json:"reason,omitempty"`
+	Restartable bool    `json:"restartable"`
+
+	// Stages The stages the restart can begin at, in run order.
+	Stages []string `json:"stages"`
+}
+
+// ComponentsSchemasRunScript GET /runs/{run}/script. The run's own Groovy script, read from the build record the run retains in the blob tier. Every field is always present. A run that does not replay answers an empty script and an empty loadedScripts object.
+type ComponentsSchemasRunScript struct {
+	// DefinitionKind template when the run's stored payload names a pipeline template or a marker file, and script otherwise.
+	DefinitionKind ComponentsSchemasRunScriptDefinitionKind `json:"definitionKind"`
+
+	// LoadedScripts The library scripts the run loaded, as a map of name to script text. A caller cannot edit them, and a replay loads them again from their library. The object is empty when the run loaded no script or when replayable is false.
+	LoadedScripts map[string]string `json:"loadedScripts"`
+
+	// Reason The name of the first eligibility rule the run fails. The rules run in this order: not-terminal, template-defined, masked-parameter, no-replica, unreadable, not-sandbox, and script-too-large. A replayable run answers the empty string.
+	Reason string `json:"reason"`
+
+	// Replayable True only when the run passes every eligibility rule.
+	Replayable bool `json:"replayable"`
+
+	// Script The main script of the run's flow execution. The value is empty when replayable is false.
+	Script string `json:"script"`
+}
+
+// ComponentsSchemasRunScriptDefinitionKind template when the run's stored payload names a pipeline template or a marker file, and script otherwise.
+type ComponentsSchemasRunScriptDefinitionKind string
+
+// ComponentsSchemasRunStage defines model for components_schemas_RunStage.
+type ComponentsSchemasRunStage struct {
+	DurationMs *int64     `json:"durationMs,omitempty"`
+	EndedAt    *time.Time `json:"endedAt,omitempty"`
+	Error      *string    `json:"error,omitempty"`
+	Name       string     `json:"name"`
+	NodeType   *string    `json:"nodeType,omitempty"`
+	ParentId   *string    `json:"parentId,omitempty"`
+	StageId    string     `json:"stageId"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	Status     string     `json:"status"`
+}
+
+// ComponentsSchemasRunSummary One run, condensed for a list or a card.
+type ComponentsSchemasRunSummary struct {
+	Actor       *string `json:"actor,omitempty"`
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+	Cause       *string `json:"cause,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+	DurationMs    *int64                          `json:"durationMs,omitempty"`
+	EndedAt       *time.Time                      `json:"endedAt,omitempty"`
+	JobPath       *string                         `json:"jobPath,omitempty"`
+	QueuedAt      *time.Time                      `json:"queuedAt,omitempty"`
+	Result        *string                         `json:"result,omitempty"`
+	RunId         string                          `json:"runId"`
+
+	// ScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+	ScmForge    *ComponentsSchemasRunSummaryScmForge `json:"scmForge,omitempty"`
+	ScmRevision *string                              `json:"scmRevision,omitempty"`
+
+	// ScmUrl Repository URL of the run, from the SCM source. Absent when Jenkins reports none.
+	ScmUrl    *string    `json:"scmUrl,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    string     `json:"status"`
+
+	// TriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+	TriggerSource *ComponentsSchemasRunSummaryTriggerSource `json:"triggerSource,omitempty"`
+}
+
+// ComponentsSchemasRunSummaryScmForge The forge that hosts scmUrl. A Forgejo host reads gitea. The field is absent when the forge is unknown.
+type ComponentsSchemasRunSummaryScmForge string
+
+// ComponentsSchemasRunSummaryTriggerSource Kind of cause that started the run. Absent when Jenkins reports no cause list.
+type ComponentsSchemasRunSummaryTriggerSource string
+
+// ComponentsSchemasRunTestCase One stored test case of a run. The record store holds only failed and skipped cases, at most 500 for each run.
+type ComponentsSchemasRunTestCase struct {
+	// CaseKey The opaque case key the server makes from the class name and the test name. Do not parse it. Percent-encode the whole key as one path segment before you use it as {case} on GET /pipelines/{team}/jobs/{job}/tests/{case}.
+	CaseKey   string `json:"caseKey"`
+	ClassName string `json:"className"`
+
+	// DurationMs The case's duration in milliseconds. Absent when the value is zero.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+
+	// ErrorDetails The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.
+	ErrorDetails *string `json:"errorDetails,omitempty"`
+	Name         string  `json:"name"`
+
+	// Status The reporter's own status name, for example FAILED or REGRESSION. A skipped case carries SKIPPED.
+	Status string `json:"status"`
+	Suite  string `json:"suite"`
+}
+
+// ComponentsSchemasRunTestListResponse GET /runs/{run}/tests. items holds one row per suite, at most 500, the most failed suites first, then by suite name. items is empty when the run reported no suite. totals holds the run's aggregate counters, and it is absent when the run reported no test result. cases holds the run's stored failed and skipped cases, failed cases first. cases is always present, and an empty array is a valid value.
+type ComponentsSchemasRunTestListResponse struct {
+	Cases []ComponentsSchemasRunTestCase  `json:"cases"`
+	Items []ComponentsSchemasRunTestSuite `json:"items"`
+
+	// Report The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+	Report *ComponentsSchemasRunTestReport `json:"report,omitempty"`
+
+	// Totals The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+	Totals *ComponentsSchemasRunTestTotals `json:"totals,omitempty"`
+}
+
+// ComponentsSchemasRunTestReport The run's archived test report, on GET /runs/{run}/tests. The field is absent when the run holds no stored report. sizeBytes and caseCount are always present, and zero is a valid value.
+type ComponentsSchemasRunTestReport struct {
+	// CaseCount The number of cases the report file holds. The file holds every case, including a passed case.
+	CaseCount int32 `json:"caseCount"`
+
+	// Downloadable False when the stored blob key is empty, because Jenkins stored the file locally. The download path then answers 409.
+	Downloadable bool `json:"downloadable"`
+
+	// Path The archived path of the report file, always .varroa/tests.json. Download the file through GET /runs/{run}/artifacts/{path}.
+	Path string `json:"path"`
+
+	// SizeBytes The length of the report file in bytes.
+	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// ComponentsSchemasRunTestSuite defines model for components_schemas_RunTestSuite.
+type ComponentsSchemasRunTestSuite struct {
+	DurationMs *int64 `json:"durationMs,omitempty"`
+	Failed     int    `json:"failed"`
+	Skipped    int    `json:"skipped"`
+	Suite      string `json:"suite"`
+	Total      int    `json:"total"`
+}
+
+// ComponentsSchemasRunTestTotals The run's aggregate test counters. Jenkins reports them. They count every suite, including a suite the items list omits.
+type ComponentsSchemasRunTestTotals struct {
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
+	Total   int `json:"total"`
+}
+
+// ComponentsSchemasRunWait The concurrency cap that holds a queued run. Absent from a run that no cap holds.
+type ComponentsSchemasRunWait struct {
+	Cell *string `json:"cell,omitempty"`
+
+	// Kind tenant when a tenant limit holds the run; cell when the tenant cap of its cell does.
+	Kind ComponentsSchemasRunWaitKind `json:"kind"`
+
+	// Limit The tenant limit's name. Absent for a cell cap.
+	Limit *string `json:"limit,omitempty"`
+	Max   int32   `json:"max"`
+
+	// Running The builds the cap counted when it last held the run.
+	Running int32     `json:"running"`
+	Since   time.Time `json:"since"`
+}
+
+// ComponentsSchemasRunWaitKind tenant when a tenant limit holds the run; cell when the tenant cap of its cell does.
+type ComponentsSchemasRunWaitKind string
+
+// ComponentsSchemasRunWaitEntry A waiting run of a job, with its reason.
+type ComponentsSchemasRunWaitEntry struct {
+	Cell    *string                           `json:"cell,omitempty"`
+	Kind    ComponentsSchemasRunWaitEntryKind `json:"kind"`
+	Limit   *string                           `json:"limit,omitempty"`
+	Max     int32                             `json:"max"`
+	RunId   string                            `json:"runId"`
+	Running int32                             `json:"running"`
+	Since   time.Time                         `json:"since"`
+}
+
+// ComponentsSchemasRunWaitEntryKind defines model for ComponentsSchemasRunWaitEntry.Kind.
+type ComponentsSchemasRunWaitEntryKind string
+
+// ComponentsSchemasRunnerCondition Status condition for a Runner. Type Ready.
+type ComponentsSchemasRunnerCondition struct {
+	// LastTransitionTime ISO 8601 last transition time.
+	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
+	Message            *string `json:"message,omitempty"`
+	Reason             *string `json:"reason,omitempty"`
+	Status             string  `json:"status"`
+	Type               string  `json:"type"`
+}
+
+// ComponentsSchemasRunnerCreateRequest Request body for POST /runners.
+type ComponentsSchemasRunnerCreateRequest struct {
+	// Name metadata.name. Not generated: the operator names the machine, and the rendered node is <team>-<name>.
+	Name string `json:"name"`
+
+	// Spec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+	Spec ComponentsSchemasRunnerSpec `json:"spec"`
+}
+
+// ComponentsSchemasRunnerEntry Full runner object returned from get/list operations.
+type ComponentsSchemasRunnerEntry struct {
+	Name string `json:"name"`
+
+	// Spec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+	Spec ComponentsSchemasRunnerSpec `json:"spec"`
+
+	// Status A Runner's observed state (status.*). status.token is present only for a caller holding runners:create; the BFF redacts it for every other caller (design D12).
+	Status ComponentsSchemasRunnerStatus `json:"status"`
+}
+
+// ComponentsSchemasRunnerSpec A Runner's mutable configuration (spec.*). team and launcher are immutable after creation.
+type ComponentsSchemasRunnerSpec struct {
+	// CredentialRef Name of a Secret in the Team's agent namespace holding the SSH credential. Required for launcher ssh; forbidden for inbound.
+	CredentialRef *string `json:"credentialRef,omitempty"`
+
+	// Host The SSH target. Required for launcher ssh; forbidden for inbound.
+	Host *string `json:"host,omitempty"`
+
+	// JavaPath An explicit java binary path for the ssh launcher.
+	JavaPath *string `json:"javaPath,omitempty"`
+
+	// Labels Unprefixed label suffixes; the operator prefixes each one with <team>-.
+	Labels *[]string `json:"labels,omitempty"`
+
+	// Launcher Connection direction. Immutable.
+	Launcher ComponentsSchemasRunnerSpecLauncher `json:"launcher"`
+
+	// NumExecutors The node's executor count. Defaults to 1.
+	NumExecutors *int `json:"numExecutors,omitempty"`
+
+	// Port The SSH port. Required for launcher ssh; forbidden for inbound.
+	Port *int `json:"port,omitempty"`
+
+	// RemoteFS The agent work directory on the node.
+	RemoteFS string `json:"remoteFS"`
+
+	// Team The pipelines Team that owns this runner. Immutable.
+	Team string `json:"team"`
+}
+
+// ComponentsSchemasRunnerSpecLauncher Connection direction. Immutable.
+type ComponentsSchemasRunnerSpecLauncher string
+
+// ComponentsSchemasRunnerStatus A Runner's observed state (status.*). status.token is present only for a caller holding runners:create; the BFF redacts it for every other caller (design D12).
+type ComponentsSchemasRunnerStatus struct {
+	// Cell The Controller that hosts this runner's node.
+	Cell          *string                             `json:"cell,omitempty"`
+	CellNamespace *string                             `json:"cellNamespace,omitempty"`
+	Conditions    *[]ComponentsSchemasRunnerCondition `json:"conditions,omitempty"`
+
+	// Connected The last liveness probe result for this runner's node.
+	Connected bool `json:"connected"`
+
+	// LastSeen ISO 8601 time of the last online probe result.
+	LastSeen *string `json:"lastSeen,omitempty"`
+
+	// NodeName The rendered Jenkins node name, <team>-<runner name>.
+	NodeName           *string `json:"nodeName,omitempty"`
+	ObservedGeneration *int64  `json:"observedGeneration,omitempty"`
+
+	// Token The door bearer credential for an inbound runner. Minted once by the operator; never set for an ssh runner.
+	Token *string `json:"token,omitempty"`
+}
+
+// ComponentsSchemasRunningRun One unfinished run for the team home's Running now card. currentStage names the top-level stage in progress. It is absent when no top-level stage is in progress: before the first stage, between two stages, and for a queued run.
+type ComponentsSchemasRunningRun struct {
+	Branch      *string `json:"branch,omitempty"`
+	BuildNumber *int64  `json:"buildNumber,omitempty"`
+
+	// ChangeRequest The change request (pull request) a multibranch run builds. Absent for a branch run.
+	ChangeRequest *ComponentsSchemasChangeRequest `json:"changeRequest,omitempty"`
+
+	// ChangeSummary The last commit's short message.
+	ChangeSummary *string    `json:"changeSummary,omitempty"`
+	CurrentStage  *string    `json:"currentStage,omitempty"`
+	JobPath       string     `json:"jobPath"`
+	QueuedAt      *time.Time `json:"queuedAt,omitempty"`
+	RunId         string     `json:"runId"`
+	ScmRevision   *string    `json:"scmRevision,omitempty"`
+	StartedAt     *time.Time `json:"startedAt,omitempty"`
+	Status        string     `json:"status"`
+
+	// TypicalDurationMs The job's usual duration, from its duration trend.
+	TypicalDurationMs *int64 `json:"typicalDurationMs,omitempty"`
+}
+
+// ComponentsSchemasScanMultibranchRequest POST /pipelines/{team}/jobs/{job}/scan. Every field is optional.
+type ComponentsSchemasScanMultibranchRequest struct {
+	// Cluster Breaks a tie when the job path lies in more than one surviving tenant.
+	Cluster *string `json:"cluster,omitempty"`
+}
+
+// ComponentsSchemasScopedCapabilities The capability set granted by bindings that carry one scope, plus the scope descriptor. Scoped grants are never flattened into the global partition.
+type ComponentsSchemasScopedCapabilities struct {
+	// Capabilities Resource-to-verb-to-allowed capability map.
+	Capabilities ComponentsSchemasAPICapabilitySet `json:"capabilities"`
+
+	// HasControllerSelector True when the scope carries a controller label selector, which the client cannot evaluate.
+	HasControllerSelector bool `json:"hasControllerSelector"`
+
+	// Namespaces The scope's namespace allowlist. Null or empty means the scope is not namespace-bounded.
+	Namespaces *[]string `json:"namespaces"`
+
+	// Tenants The scope's canonicalized pipelines-tenant allowlist. Null or empty means the scope names no tenant.
+	Tenants *[]ComponentsSchemasTenantScope `json:"tenants"`
+}
+
 // ComponentsSchemasSearchResult A single search result entry.
 type ComponentsSchemasSearchResult struct {
 	Cluster     *string `json:"cluster,omitempty"`
@@ -2166,8 +4053,13 @@ type ComponentsSchemasSearchResult struct {
 	Link        string  `json:"link"`
 	Name        string  `json:"name"`
 	Namespace   *string `json:"namespace,omitempty"`
-	Type        string  `json:"type"`
+
+	// Type controller, namespace, group, and catalogitem come from a live Kubernetes read; job, run, and activity come from the record store and are absent when it is not wired.
+	Type ComponentsSchemasSearchResultType `json:"type"`
 }
+
+// ComponentsSchemasSearchResultType controller, namespace, group, and catalogitem come from a live Kubernetes read; job, run, and activity come from the record store and are absent when it is not wired.
+type ComponentsSchemasSearchResultType string
 
 // ComponentsSchemasSizePreset A size preset for provisioning defaults.
 type ComponentsSchemasSizePreset struct {
@@ -2215,6 +4107,63 @@ type ComponentsSchemasSuspendBroodRequest struct {
 	Suspend bool `json:"suspend"`
 }
 
+// ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the states unplaced and notCellHosted every field other than state and reason is absent. The body carries no other tenant's name, job path, run, or count.
+type ComponentsSchemasTeamCell struct {
+	// CanOpenCell True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.
+	CanOpenCell    bool    `json:"canOpenCell"`
+	Cell           *string `json:"cell,omitempty"`
+	CellPool       *string `json:"cellPool,omitempty"`
+	Cluster        *string `json:"cluster,omitempty"`
+	FailedLast24h  *int64  `json:"failedLast24h,omitempty"`
+	FreeSlots      *int32  `json:"freeSlots,omitempty"`
+	JenkinsVersion *string `json:"jenkinsVersion,omitempty"`
+	Jobs           *int64  `json:"jobs,omitempty"`
+
+	// Members One entry for each member of the tenant, ordered by role: active members by ascending slot first, then standbys by cell name. It is absent for unplaced and notCellHosted. Every other field of this body describes the tenant's slot 0.
+	Members   *[]ComponentsSchemasTeamCellMember `json:"members,omitempty"`
+	Namespace *string                            `json:"namespace,omitempty"`
+
+	// OtherTenantCount The number of other tenants on the cell. It is a count, never a list.
+	OtherTenantCount *int32  `json:"otherTenantCount,omitempty"`
+	Profile          *string `json:"profile,omitempty"`
+	QueueLength      *int64  `json:"queueLength,omitempty"`
+
+	// Reason The Team's Placed condition reason, verbatim.
+	Reason      *string                        `json:"reason,omitempty"`
+	RunningNow  *int64                         `json:"runningNow,omitempty"`
+	RunsLast24h *int64                         `json:"runsLast24h,omitempty"`
+	State       ComponentsSchemasTeamCellState `json:"state"`
+}
+
+// ComponentsSchemasTeamCellState defines model for ComponentsSchemasTeamCell.State.
+type ComponentsSchemasTeamCellState string
+
+// ComponentsSchemasTeamCellMember One member of the tenant, with that member's own four load counts. The counts apply the same grant narrowing the top-level counts apply. No entry names another tenant.
+type ComponentsSchemasTeamCellMember struct {
+	Cell          string `json:"cell"`
+	Cluster       string `json:"cluster"`
+	FailedLast24h int64  `json:"failedLast24h"`
+	Jobs          int64  `json:"jobs"`
+	Namespace     string `json:"namespace"`
+
+	// Role "slot <n>" for an active member and "standby" for a standby.
+	Role        string `json:"role"`
+	RunningNow  int64  `json:"runningNow"`
+	RunsLast24h int64  `json:"runsLast24h"`
+}
+
+// ComponentsSchemasTeamConcurrencyLimit A cap on the builds of a named set of jobs that run at once.
+type ComponentsSchemasTeamConcurrencyLimit struct {
+	// Jobs Folder-relative job globs (*, **, ?).
+	Jobs []string `json:"jobs"`
+
+	// Max Number of builds the set runs at one time.
+	Max int32 `json:"max"`
+
+	// Name Name of the limit, a DNS label. The queue and the run views show it.
+	Name string `json:"name"`
+}
+
 // ComponentsSchemasTeamCondition Status condition for a Team.
 type ComponentsSchemasTeamCondition struct {
 	// LastTransitionTime ISO 8601 last transition time.
@@ -2233,21 +4182,195 @@ type ComponentsSchemasTeamEntry struct {
 	DisplayName *string                           `json:"displayName,omitempty"`
 
 	// GroupRef Reference to the managed VarroaRoleBinding group.
-	GroupRef            *string                                `json:"groupRef,omitempty"`
-	Members             *[]string                              `json:"members,omitempty"`
-	Name                string                                 `json:"name"`
-	NamespaceStates     *[]ComponentsSchemasTeamNamespaceState `json:"namespaceStates,omitempty"`
-	Namespaces          []string                               `json:"namespaces"`
-	ObservedGeneration  *int64                                 `json:"observedGeneration,omitempty"`
-	ProvisionNamespaces *bool                                  `json:"provisionNamespaces,omitempty"`
-	RoleRef             *string                                `json:"roleRef,omitempty"`
-	Subjects            *[]ComponentsSchemasSubjectRef         `json:"subjects,omitempty"`
+	GroupRef           *string                                `json:"groupRef,omitempty"`
+	Members            *[]string                              `json:"members,omitempty"`
+	Name               string                                 `json:"name"`
+	NamespaceStates    *[]ComponentsSchemasTeamNamespaceState `json:"namespaceStates,omitempty"`
+	Namespaces         []string                               `json:"namespaces"`
+	ObservedGeneration *int64                                 `json:"observedGeneration,omitempty"`
+
+	// Pipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+	Pipelines *ComponentsSchemasTeamPipelines `json:"pipelines,omitempty"`
+
+	// Placement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
+	Placement           *ComponentsSchemasTeamPlacement `json:"placement,omitempty"`
+	ProvisionNamespaces *bool                           `json:"provisionNamespaces,omitempty"`
+
+	// Rehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.
+	Rehydration *ComponentsSchemasTeamRehydration `json:"rehydration,omitempty"`
+	RoleRef     *string                           `json:"roleRef,omitempty"`
+	Subjects    *[]ComponentsSchemasSubjectRef    `json:"subjects,omitempty"`
 }
+
+// ComponentsSchemasTeamExport One grant a pipelines tenant makes to other tenants: a job pattern or a list of lock patterns, plus the callers allowed to use it. Exactly one of job or locks is set.
+type ComponentsSchemasTeamExport struct {
+	// Callers Team names allowed to use this export.
+	Callers []string `json:"callers"`
+
+	// Job Folder-relative job glob this tenant exports. Exactly one of job or locks is set.
+	Job *string `json:"job,omitempty"`
+
+	// Locks Globs over the bare names of this tenant's own locks. Exactly one of job or locks is set.
+	Locks *[]string `json:"locks,omitempty"`
+}
+
+// ComponentsSchemasTeamJobRetention A run window for the jobs that match a folder-relative glob.
+type ComponentsSchemasTeamJobRetention struct {
+	// Job Folder-relative job glob. It must not start with /.
+	Job string `json:"job"`
+
+	// Runs The job window, in whole days, such as 7d.
+	Runs string `json:"runs"`
+}
+
+// ComponentsSchemasTeamMember One member of a pipelines tenant (status.placement.members). Response-only: the placement pass is its only writer.
+type ComponentsSchemasTeamMember struct {
+	// Applied True when the member's cell reports this tenant applied.
+	Applied *bool `json:"applied,omitempty"`
+
+	// Cell Name of the cell Controller that holds this member.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace Namespace of that cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Role An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
+	Role *ComponentsSchemasTeamMemberRole `json:"role,omitempty"`
+
+	// Slot The slot index. Set only on an active member.
+	Slot *int32 `json:"slot,omitempty"`
+}
+
+// ComponentsSchemasTeamMemberRole An active member holds one slot. A standby holds the folder, holds no slot, and runs no build.
+type ComponentsSchemasTeamMemberRole string
 
 // ComponentsSchemasTeamNamespaceState State of a single namespace for a Team.
 type ComponentsSchemasTeamNamespaceState struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
+}
+
+// ComponentsSchemasTeamNotifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
+type ComponentsSchemasTeamNotifications struct {
+	// Webhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
+	Webhook *ComponentsSchemasTeamWebhook `json:"webhook,omitempty"`
+}
+
+// ComponentsSchemasTeamPipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+type ComponentsSchemasTeamPipelines struct {
+	// AgentNamespace Kubernetes namespace this tenant's agents run in. Must be one of the team's own namespaces. Required when pipelines is set.
+	AgentNamespace string `json:"agentNamespace"`
+
+	// CellPool The CellPool the placement pass selects a cell from. Empty means the profile's default pool: the pool whose name equals profile. A tenant that needs a cell of its own names a pool whose maxTenantsPerCell is 1.
+	CellPool *string `json:"cellPool,omitempty"`
+
+	// ComposedBundleRef Reference to a ComposedBundle from a Controller.
+	ComposedBundleRef *ComponentsSchemasComposedBundleRef `json:"composedBundleRef,omitempty"`
+
+	// Concurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
+	Concurrency *ComponentsSchemasTeamPipelinesConcurrency `json:"concurrency,omitempty"`
+
+	// ConcurrencyLimits Named caps on how many builds of a set of this tenant's jobs run at one time. A build over a limit waits in the queue. A tenant pipelines admin may write this field.
+	ConcurrencyLimits *[]ComponentsSchemasTeamConcurrencyLimit `json:"concurrencyLimits,omitempty"`
+
+	// CronBackstop Turns the backstop cron scheduler on for this tenant. Default true.
+	CronBackstop *bool `json:"cronBackstop,omitempty"`
+
+	// CronCatchUp How many missed cron occurrences the backstop fires on wake. "one" (default) fires the newest missed occurrence. "none" fires nothing.
+	CronCatchUp *ComponentsSchemasTeamPipelinesCronCatchUp `json:"cronCatchUp,omitempty"`
+
+	// CronGrace How long the backstop waits past a missed cron occurrence before it fires. Default 5m, range 1m to 60m.
+	CronGrace *string `json:"cronGrace,omitempty"`
+
+	// Exports Grants of this tenant's jobs and locks to other tenants. An absent list exports nothing.
+	Exports *[]ComponentsSchemasTeamExport `json:"exports,omitempty"`
+
+	// InterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
+	InterruptedRetry *ComponentsSchemasTeamPipelinesInterruptedRetry `json:"interruptedRetry,omitempty"`
+
+	// Members The number of active slots this tenant runs. Each slot holds one cell, and a job runs only on its home slot's holder. Default 1. This field is not spec.members, which lists local usernames.
+	Members *int32 `json:"members,omitempty"`
+
+	// Notifications Outward notifications of a pipelines tenant. The record store posts the completion webhook for each run.
+	Notifications *ComponentsSchemasTeamNotifications `json:"notifications,omitempty"`
+
+	// Profile JenkinsVersionProfile the placement pass resolves a cell against. Required when pipelines is set.
+	Profile string `json:"profile"`
+
+	// RehydrateBuilds How many of a job's newest completed builds the operator seeds when this tenant's cell changes. The newest successful build is always seeded in addition. Default 10.
+	RehydrateBuilds *int32 `json:"rehydrateBuilds,omitempty"`
+
+	// RehydrateDeadline How long the operator keeps retrying a deferred rehydration seed before it stops and reports RehydrationFailed. Default 30m, range 1m to 24h.
+	RehydrateDeadline *string `json:"rehydrateDeadline,omitempty"`
+
+	// Retention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
+	Retention *ComponentsSchemasTeamPipelinesRetention `json:"retention,omitempty"`
+
+	// Standby The number of warm members this tenant keeps. A standby holds the folder and no slot. It takes a slot whose holder dies. Default 0.
+	Standby *int32 `json:"standby,omitempty"`
+}
+
+// ComponentsSchemasTeamPipelinesConcurrency This tenant's job concurrency policy. "allow" (default) runs builds side by side. "cancelInProgress" cancels the running build of the same job path when a new one starts.
+type ComponentsSchemasTeamPipelinesConcurrency string
+
+// ComponentsSchemasTeamPipelinesCronCatchUp How many missed cron occurrences the backstop fires on wake. "one" (default) fires the newest missed occurrence. "none" fires nothing.
+type ComponentsSchemasTeamPipelinesCronCatchUp string
+
+// ComponentsSchemasTeamPipelinesInterruptedRetry Whether an interrupted run retries on its own. "manual" (default) leaves the retry to a user. "automatic" retries once.
+type ComponentsSchemasTeamPipelinesInterruptedRetry string
+
+// ComponentsSchemasTeamPipelinesRetention Record-store windows for this tenant's runs. A job rule replaces the tenant window for the jobs it matches. The store-wide window caps both. Only an operator may set it.
+type ComponentsSchemasTeamPipelinesRetention struct {
+	// Jobs Per-job windows. The first rule whose job glob matches sets the window of that job.
+	Jobs *[]ComponentsSchemasTeamJobRetention `json:"jobs,omitempty"`
+
+	// Runs The tenant window, in whole days, such as 30d. It shortens the store-wide window and never lengthens it.
+	Runs *string `json:"runs,omitempty"`
+}
+
+// ComponentsSchemasTeamPlacement The cell a pipelines tenant is bound to (status.placement). Response-only: the placement pass is its only writer.
+type ComponentsSchemasTeamPlacement struct {
+	// Cell Name of the bound cell Controller.
+	Cell *string `json:"cell,omitempty"`
+
+	// CellNamespace Namespace of the bound cell Controller.
+	CellNamespace *string `json:"cellNamespace,omitempty"`
+
+	// Cluster Cluster the bound cell runs in.
+	Cluster *string `json:"cluster,omitempty"`
+
+	// Generation Increases only when the bound cell changes.
+	Generation *int64 `json:"generation,omitempty"`
+
+	// Members Every member of this tenant. The scalar fields above keep describing slot 0.
+	Members *[]ComponentsSchemasTeamMember `json:"members,omitempty"`
+}
+
+// ComponentsSchemasTeamRehydration A pipelines tenant's build-record rehydration state (status.rehydration). Response-only: TeamReconciler is its only writer.
+type ComponentsSchemasTeamRehydration struct {
+	// Attempts Rehydration retries since the last applied bundle.
+	Attempts *int32 `json:"attempts,omitempty"`
+
+	// CellInstance Cell pod UID this state was built for.
+	CellInstance *string `json:"cellInstance,omitempty"`
+
+	// Deferred Job paths the mite could not seed on the last apply, because the job did not exist yet.
+	Deferred *[]string `json:"deferred,omitempty"`
+
+	// Generation Placement generation this state was built for.
+	Generation *int64 `json:"generation,omitempty"`
+
+	// LastAttempt When the operator last sent a rehydration bundle for this tenant.
+	LastAttempt *time.Time `json:"lastAttempt,omitempty"`
+
+	// Records Number of thin build records the last bundle carried.
+	Records *int32 `json:"records,omitempty"`
+
+	// Truncated True when the last bundle dropped changelogs or older records to fit the byte budget.
+	Truncated *bool `json:"truncated,omitempty"`
+
+	// UnseededJobs Number of jobs no bundle has covered yet.
+	UnseededJobs *int32 `json:"unseededJobs,omitempty"`
 }
 
 // ComponentsSchemasTeamRequest Request body for creating or updating a team.
@@ -2263,6 +4386,9 @@ type ComponentsSchemasTeamRequest struct {
 	// Namespaces Target namespaces for this team.
 	Namespaces []string `json:"namespaces"`
 
+	// Pipelines A Team's pipelines tenancy declaration (spec.pipelines). A Team that sets this becomes a pipelines tenant: one top-level folder on exactly one cell.
+	Pipelines *ComponentsSchemasTeamPipelines `json:"pipelines,omitempty"`
+
 	// ProvisionNamespaces Whether to auto-provision namespaces.
 	ProvisionNamespaces *bool `json:"provisionNamespaces,omitempty"`
 
@@ -2273,6 +4399,24 @@ type ComponentsSchemasTeamRequest struct {
 	Subjects *[]ComponentsSchemasSubjectRef `json:"subjects,omitempty"`
 }
 
+// ComponentsSchemasTeamWebhook A completion webhook. The record store posts a signed JSON payload to url for each run this tenant completes. The signing key lives in the Secret that secretRef names, in the tenant's agent namespace.
+type ComponentsSchemasTeamWebhook struct {
+	// SecretRef The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
+	SecretRef ComponentsSchemasTeamWebhookSecret `json:"secretRef"`
+
+	// Url Receiver endpoint. Starts with https:// or http://. Use https:// for a receiver outside the cluster.
+	Url string `json:"url"`
+}
+
+// ComponentsSchemasTeamWebhookSecret The Secret and data key that hold the HMAC signing key. The key defaults to hmac-key.
+type ComponentsSchemasTeamWebhookSecret struct {
+	// Key Data key that holds the signing key. Default hmac-key.
+	Key *string `json:"key,omitempty"`
+
+	// Name Name of the Secret in the tenant's agent namespace.
+	Name string `json:"name"`
+}
+
 // ComponentsSchemasTemplateCatalogCondition Status condition for catalog/composedbundle resources.
 type ComponentsSchemasTemplateCatalogCondition struct {
 	LastTransitionTime *string `json:"lastTransitionTime,omitempty"`
@@ -2280,6 +4424,55 @@ type ComponentsSchemasTemplateCatalogCondition struct {
 	Reason             *string `json:"reason,omitempty"`
 	Status             string  `json:"status"`
 	Type               string  `json:"type"`
+}
+
+// ComponentsSchemasTenantCapabilities One grant the caller holds on one pipelines tenant. A tenant name may appear in more than one entry, because the caller can hold two grants on it with different job globs; they are never merged.
+type ComponentsSchemasTenantCapabilities struct {
+	// Capabilities Resource-to-verb-to-allowed capability map.
+	Capabilities ComponentsSchemasAPICapabilitySet `json:"capabilities"`
+
+	// Jobs Folder-relative job globs the grant covers. Always an array, never null; an empty array means every job.
+	Jobs   []string `json:"jobs"`
+	Tenant string   `json:"tenant"`
+}
+
+// ComponentsSchemasTenantScope One pipelines tenant name and the folder-relative job globs a binding covers. An absent jobs list covers every job.
+type ComponentsSchemasTenantScope struct {
+	// Jobs Jobs are folder-relative globs. An absent jobs list covers every job.
+	Jobs *[]string `json:"jobs,omitempty"`
+
+	// Name A tenant is a Team name.
+	Name string `json:"name"`
+}
+
+// ComponentsSchemasTestCaseHistoryResponse GET /pipelines/{team}/jobs/{job}/tests/{case}. items holds the case's recent outcomes, newest first, within the record store retention window. The response holds no rate, no trend, and no flake score.
+type ComponentsSchemasTestCaseHistoryResponse struct {
+	Items []ComponentsSchemasTestCaseOutcome `json:"items"`
+}
+
+// ComponentsSchemasTestCaseOutcome One outcome of one test case in one run of the job. A row names its own suite, because two suites can report one class and one name.
+type ComponentsSchemasTestCaseOutcome struct {
+	BuildNumber *int64 `json:"buildNumber,omitempty"`
+
+	// CreatedAt The creation time of the run.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// DurationMs The case's duration in milliseconds. Absent when the case reports no duration.
+	DurationMs *int64 `json:"durationMs,omitempty"`
+
+	// ErrorDetails The case's error detail text, cut at 512 bytes. Absent when the case carries no error detail.
+	ErrorDetails *string `json:"errorDetails,omitempty"`
+
+	// Result The run's own result. Absent when the run holds no result.
+	Result *string `json:"result,omitempty"`
+	RunId  string  `json:"runId"`
+
+	// RunLink The run's own page path, /pipelines/{team}/{jobPath}/{runId}, the same link a fleet lock row carries.
+	RunLink string `json:"runLink"`
+
+	// Status The reporter's own status name. A skipped case carries SKIPPED.
+	Status string `json:"status"`
+	Suite  string `json:"suite"`
 }
 
 // ComponentsSchemasTokenResponse defines model for components_schemas_TokenResponse.
@@ -2327,7 +4520,10 @@ type ComponentsSchemasUpdateCenterCondition struct {
 
 // ComponentsSchemasUpdateCenterGap defines model for components_schemas_UpdateCenterGap.
 type ComponentsSchemasUpdateCenterGap struct {
+	// Core Lowest Jenkins core that requests a latest entry. Empty for a pinned version.
+	Core       *string `json:"core,omitempty"`
 	Plugin     *string `json:"plugin,omitempty"`
+	Reason     *string `json:"reason,omitempty"`
 	RequiredBy *string `json:"requiredBy,omitempty"`
 	Version    *string `json:"version,omitempty"`
 }
@@ -2346,6 +4542,12 @@ type ComponentsSchemasUpdateCenterPlugin struct {
 	Version   *string `json:"version,omitempty"`
 }
 
+// ComponentsSchemasUpdateCenterPluginRef defines model for components_schemas_UpdateCenterPluginRef.
+type ComponentsSchemasUpdateCenterPluginRef struct {
+	Plugin  *string `json:"plugin,omitempty"`
+	Version *string `json:"version,omitempty"`
+}
+
 // ComponentsSchemasUpdateCenterPlugins Update center plugin inventory response.
 type ComponentsSchemasUpdateCenterPlugins struct {
 	Enabled *bool                                  `json:"enabled,omitempty"`
@@ -2356,6 +4558,7 @@ type ComponentsSchemasUpdateCenterPlugins struct {
 type ComponentsSchemasUpdateCenterStatus struct {
 	Conditions         *[]ComponentsSchemasUpdateCenterCondition `json:"conditions,omitempty"`
 	Enabled            *bool                                     `json:"enabled,omitempty"`
+	GapCount           *int                                      `json:"gapCount,omitempty"`
 	Gaps               *[]ComponentsSchemasUpdateCenterGap       `json:"gaps,omitempty"`
 	LastSyncTime       *time.Time                                `json:"lastSyncTime"`
 	Phase              *string                                   `json:"phase,omitempty"`
@@ -2363,6 +4566,12 @@ type ComponentsSchemasUpdateCenterStatus struct {
 	PullThroughEnabled *bool                                     `json:"pullThroughEnabled,omitempty"`
 	StorageType        *string                                   `json:"storageType,omitempty"`
 	StoreBytes         *int64                                    `json:"storeBytes,omitempty"`
+
+	// UnknownDependencies The first 50 stored plugin versions whose dependency list is unknown.
+	UnknownDependencies    *[]ComponentsSchemasUpdateCenterPluginRef `json:"unknownDependencies,omitempty"`
+	UnknownDependencyCount *int                                      `json:"unknownDependencyCount,omitempty"`
+	Unservable             *[]ComponentsSchemasUpdateCenterGap       `json:"unservable,omitempty"`
+	UnservableCount        *int                                      `json:"unservableCount,omitempty"`
 }
 
 // ComponentsSchemasUpdateCenterUnresolvedDependency One rejecting dependency. The foundInStore/foundDeclared/foundUpstream triple is what makes the diff actionable.
@@ -2427,11 +4636,17 @@ type ComponentsSchemasUpdateCenterUploadedPlugin struct {
 	Version string `json:"version"`
 }
 
-// ComponentsSchemasUpdateUserRequest Request body for updating a user's identity fields.
+// ComponentsSchemasUpdateUserRequest Request body for updating a local account's identity fields.
 type ComponentsSchemasUpdateUserRequest struct {
 	DisplayName *string `json:"displayName,omitempty"`
 	Email       *string `json:"email,omitempty"`
+
+	// Purpose Required when local accounts run beside OIDC.
+	Purpose *ComponentsSchemasUpdateUserRequestPurpose `json:"purpose,omitempty"`
 }
+
+// ComponentsSchemasUpdateUserRequestPurpose Required when local accounts run beside OIDC.
+type ComponentsSchemasUpdateUserRequestPurpose string
 
 // ComponentsSchemasUserListEntry Entry for each user in the user list.
 type ComponentsSchemasUserListEntry struct {
@@ -2445,7 +4660,13 @@ type ComponentsSchemasUserListEntry struct {
 	// ManagedBy Source of user management, e.g. "local" or "idp".
 	ManagedBy string `json:"managedBy"`
 	Name      string `json:"name"`
+
+	// Purpose Purpose of a local account beside OIDC. Absent when not set.
+	Purpose *ComponentsSchemasUserListEntryPurpose `json:"purpose,omitempty"`
 }
+
+// ComponentsSchemasUserListEntryPurpose Purpose of a local account beside OIDC. Absent when not set.
+type ComponentsSchemasUserListEntryPurpose string
 
 // ComponentsSchemasVarroaRole A VarroaRole CRD (cluster-scoped, API-level RBAC).
 type ComponentsSchemasVarroaRole struct {
@@ -2457,6 +4678,9 @@ type ComponentsSchemasVarroaRole struct {
 
 	// Spec Spec for a VarroaRole (API-level RBAC).
 	Spec *ComponentsSchemasVarroaRoleSpec `json:"spec,omitempty"`
+
+	// Status Federation faults of the role on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+	Status *ComponentsSchemasVarroaRoleStatus `json:"status,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleBinding A VarroaRoleBinding CRD (cluster-scoped).
@@ -2469,6 +4693,9 @@ type ComponentsSchemasVarroaRoleBinding struct {
 
 	// Spec Spec for a VarroaRoleBinding.
 	Spec *ComponentsSchemasVarroaRoleBindingSpec `json:"spec,omitempty"`
+
+	// Status Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+	Status *ComponentsSchemasVarroaRoleBindingStatus `json:"status,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleBindingScope Scope for a VarroaRoleBinding.
@@ -2476,6 +4703,9 @@ type ComponentsSchemasVarroaRoleBindingScope struct {
 	// ControllerSelector Label selector (metav1.LabelSelector).
 	ControllerSelector *map[string]interface{} `json:"controllerSelector,omitempty"`
 	Namespaces         *[]string               `json:"namespaces,omitempty"`
+
+	// Tenants An allow-list of pipelines tenants. A scope names one dimension; tenants never combines with namespaces or controllerSelector.
+	Tenants *[]ComponentsSchemasTenantScope `json:"tenants,omitempty"`
 }
 
 // ComponentsSchemasVarroaRoleBindingSpec Spec for a VarroaRoleBinding.
@@ -2487,6 +4717,15 @@ type ComponentsSchemasVarroaRoleBindingSpec struct {
 	Subjects []ComponentsSchemasSubjectRef            `json:"subjects"`
 }
 
+// ComponentsSchemasVarroaRoleBindingStatus Federation outcome of the binding on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+type ComponentsSchemasVarroaRoleBindingStatus struct {
+	// Federation One entry for each hive cluster. The core cluster has no entry.
+	Federation *[]ComponentsSchemasBindingFederationStatus `json:"federation,omitempty"`
+
+	// ObservedGeneration Spec generation the federation entries describe.
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+}
+
 // ComponentsSchemasVarroaRoleSpec Spec for a VarroaRole (API-level RBAC).
 type ComponentsSchemasVarroaRoleSpec struct {
 	ApiRules *[]ComponentsSchemasAPIRule `json:"apiRules,omitempty"`
@@ -2496,6 +4735,15 @@ type ComponentsSchemasVarroaRoleSpec struct {
 
 	// JenkinsRoleRef Reference to a JenkinsRole.
 	JenkinsRoleRef *string `json:"jenkinsRoleRef,omitempty"`
+}
+
+// ComponentsSchemasVarroaRoleStatus Federation faults of the role on each hive. The core BFF federation pass writes it. A create or update request cannot set it.
+type ComponentsSchemasVarroaRoleStatus struct {
+	// Federation One entry for each hive where the delete of a stale federated JenkinsRole failed. A hive with no fault has no entry.
+	Federation *[]ComponentsSchemasBindingFederationStatus `json:"federation,omitempty"`
+
+	// ObservedGeneration Spec generation the federation entries describe.
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
 }
 
 // ComponentsSchemasVersionCatalogEntry Entry in the version catalog.
@@ -2561,6 +4809,12 @@ type ComponentsSchemasWarningItem struct {
 	Resource string `json:"resource"`
 }
 
+// ComponentsParametersArtifactPath defines model for components_parameters_artifactPath.
+type ComponentsParametersArtifactPath = string
+
+// ComponentsParametersCase defines model for components_parameters_case.
+type ComponentsParametersCase = string
+
 // ComponentsParametersCluster defines model for components_parameters_cluster.
 type ComponentsParametersCluster = string
 
@@ -2569,6 +4823,12 @@ type ComponentsParametersClusterQuery = string
 
 // ComponentsParametersForce defines model for components_parameters_force.
 type ComponentsParametersForce = bool
+
+// ComponentsParametersInput defines model for components_parameters_input.
+type ComponentsParametersInput = string
+
+// ComponentsParametersJob defines model for components_parameters_job.
+type ComponentsParametersJob = string
 
 // ComponentsParametersName defines model for components_parameters_name.
 type ComponentsParametersName = string
@@ -2581,6 +4841,18 @@ type ComponentsParametersNs = string
 
 // ComponentsParametersPrefix defines model for components_parameters_prefix.
 type ComponentsParametersPrefix = string
+
+// ComponentsParametersRun defines model for components_parameters_run.
+type ComponentsParametersRun = openapi_types.UUID
+
+// ComponentsParametersTeam defines model for components_parameters_team.
+type ComponentsParametersTeam = string
+
+// ComponentsParametersTeamQuery defines model for components_parameters_teamQuery.
+type ComponentsParametersTeamQuery = string
+
+// ComponentsResponsesApproveConflict Refusal of an approval. changes is present when the pending change is not the one the caller approved.
+type ComponentsResponsesApproveConflict = ComponentsSchemasApproveConflict
 
 // ComponentsResponsesBadRequest defines model for components_responses_BadRequest.
 type ComponentsResponsesBadRequest = ComponentsSchemasError
@@ -2686,6 +4958,45 @@ type AuthCallbackParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// ListCellPoolsParams defines parameters for ListCellPools.
+type ListCellPoolsParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// GetCellPoolParams defines parameters for GetCellPool.
+type GetCellPoolParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// PatchCellPoolParams defines parameters for PatchCellPool.
+type PatchCellPoolParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// ListCellUsageParams defines parameters for ListCellUsage.
+type ListCellUsageParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Namespace Namespace filter (optional).
+	Namespace *ComponentsParametersNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+}
+
+// GetCellGrantsParams defines parameters for GetCellGrants.
+type GetCellGrantsParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
+// GetCellUsageParams defines parameters for GetCellUsage.
+type GetCellUsageParams struct {
+	// Cluster Cluster name filter for aggregated list.
+	Cluster *ComponentsParametersClusterQuery `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
+
 // ListCatalogItemsParams defines parameters for ListCatalogItems.
 type ListCatalogItemsParams struct {
 	// Namespace Namespace filter (optional).
@@ -2723,6 +5034,9 @@ type PatchControllerParams struct {
 type ApproveControllerJSONBody struct {
 	// Action The action to approve.
 	Action ApproveControllerJSONBodyAction `json:"action"`
+
+	// ExpectedContentHash The contentHash of the pending change that the caller reviewed. When present, the approval refuses unless the pending change has this hash. A caller that omits it approves the pending change that exists at that moment. Only the reload, restart, approve, and force actions check it; force-restart and plugin-roll ignore it.
+	ExpectedContentHash *string `json:"expectedContentHash,omitempty"`
 }
 
 // ApproveControllerJSONBodyAction defines parameters for ApproveController.
@@ -2731,6 +5045,12 @@ type ApproveControllerJSONBodyAction string
 // ApproveControllerDeletionJSONBody defines parameters for ApproveControllerDeletion.
 type ApproveControllerDeletionJSONBody struct {
 	Path string `json:"path"`
+}
+
+// GetControllerJenkinsLinkParams defines parameters for GetControllerJenkinsLink.
+type GetControllerJenkinsLinkParams struct {
+	// Path The Jenkins item path after the door prefix, without the leading slash.
+	Path string `form:"path" json:"path"`
 }
 
 // GetControllerLogsParams defines parameters for GetControllerLogs.
@@ -2787,6 +5107,68 @@ type ChangeMyPasswordJSONBody struct {
 	OldPassword string `json:"oldPassword"`
 }
 
+// ListRunsParams defines parameters for ListRuns.
+type ListRunsParams struct {
+	Branch *string `form:"branch,omitempty" json:"branch,omitempty"`
+	Result *string `form:"result,omitempty" json:"result,omitempty"`
+	Actor  *string `form:"actor,omitempty" json:"actor,omitempty"`
+	Cause  *string `form:"cause,omitempty" json:"cause,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListJobTestCaseHistoryParams defines parameters for ListJobTestCaseHistory.
+type ListJobTestCaseHistoryParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListRunnersParams defines parameters for ListRunners.
+type ListRunnersParams struct {
+	// Team Team name filter for the runner list.
+	Team *ComponentsParametersTeamQuery `form:"team,omitempty" json:"team,omitempty"`
+}
+
+// PatchRunnerApplicationMergePatchPlusJSONBody defines parameters for PatchRunner.
+type PatchRunnerApplicationMergePatchPlusJSONBody struct {
+	Spec *map[string]interface{} `json:"spec,omitempty"`
+}
+
+// DownloadRunArtifactParams defines parameters for DownloadRunArtifact.
+type DownloadRunArtifactParams struct {
+	// Range Byte range within the artifact.
+	Range *string `json:"Range,omitempty"`
+}
+
+// ListRunDownstreamParams defines parameters for ListRunDownstream.
+type ListRunDownstreamParams struct {
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ProceedRunInputJSONBody defines parameters for ProceedRunInput.
+type ProceedRunInputJSONBody struct {
+	// Parameters Input parameter values, as a map of name to string value. A name the step does not declare is dropped.
+	Parameters *map[string]string `json:"parameters,omitempty"`
+}
+
+// StreamRunLogParams defines parameters for StreamRunLog.
+type StreamRunLogParams struct {
+	// From Byte offset of the first unread byte.
+	From *int64 `form:"from,omitempty" json:"from,omitempty"`
+
+	// FromLine 1-based line number starting at from.
+	FromLine *int `form:"fromLine,omitempty" json:"fromLine,omitempty"`
+
+	// Raw true returns text/plain with no SSE.
+	Raw *bool `form:"raw,omitempty" json:"raw,omitempty"`
+}
+
+// ReplayRunJSONBody defines parameters for ReplayRun.
+type ReplayRunJSONBody struct {
+	// Script The edited main script, at most 262144 UTF-8 bytes. A larger script answers 413. The library scripts load again from their library, so the body holds no library script.
+	Script string `json:"script"`
+}
+
 // SearchParams defines parameters for Search.
 type SearchParams struct {
 	// Q Search query string.
@@ -2795,6 +5177,7 @@ type SearchParams struct {
 
 // CreateStreamTicketJSONBody defines parameters for CreateStreamTicket.
 type CreateStreamTicketJSONBody struct {
+	// Scope The one stream the ticket opens. One of brood, activity, controller:{cluster}/{ns}/{name}, broodop:{ns}/{name}, run:{run_id}, or pipelines:{team}. A ticket opens the stream whose path maps onto the same scope, and no other.
 	Scope string `json:"scope"`
 }
 
@@ -2836,6 +5219,9 @@ type CreateBroodScheduleJSONRequestBody CreateBroodScheduleJSONBody
 // SuspendBroodScheduleJSONRequestBody defines body for SuspendBroodSchedule for application/json ContentType.
 type SuspendBroodScheduleJSONRequestBody SuspendBroodScheduleJSONBody
 
+// PatchCellPoolJSONRequestBody defines body for PatchCellPool for application/json ContentType.
+type PatchCellPoolJSONRequestBody = ComponentsSchemasCellPoolScaleRequest
+
 // CreateCatalogSourceJSONRequestBody defines body for CreateCatalogSource for application/json ContentType.
 type CreateCatalogSourceJSONRequestBody = ComponentsSchemasCatalogSource
 
@@ -2872,6 +5258,9 @@ type ApproveControllerJSONRequestBody ApproveControllerJSONBody
 // ApproveControllerDeletionJSONRequestBody defines body for ApproveControllerDeletion for application/json ContentType.
 type ApproveControllerDeletionJSONRequestBody ApproveControllerDeletionJSONBody
 
+// BreakGlassControllerJSONRequestBody defines body for BreakGlassController for application/json ContentType.
+type BreakGlassControllerJSONRequestBody = ComponentsSchemasBreakGlassRequest
+
 // PreviewControllerJSONRequestBody defines body for PreviewController for application/json ContentType.
 type PreviewControllerJSONRequestBody = ComponentsSchemasPreviewRequest
 
@@ -2902,6 +5291,9 @@ type UpdateVersionProfileJSONRequestBody = ComponentsSchemasJenkinsVersionProfil
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = ComponentsSchemasCreateGroupRequest
 
+// ReleaseFleetLockJSONRequestBody defines body for ReleaseFleetLock for application/json ContentType.
+type ReleaseFleetLockJSONRequestBody = ComponentsSchemasFleetLockReleaseRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = ComponentsSchemasLoginRequest
 
@@ -2917,6 +5309,15 @@ type ChangeMyPasswordJSONRequestBody ChangeMyPasswordJSONBody
 // UpdateMyPreferencesJSONRequestBody defines body for UpdateMyPreferences for application/json ContentType.
 type UpdateMyPreferencesJSONRequestBody = ComponentsSchemasPreferences
 
+// CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
+type CreateRunJSONRequestBody = ComponentsSchemasCreateRunRequest
+
+// ScanMultibranchJSONRequestBody defines body for ScanMultibranch for application/json ContentType.
+type ScanMultibranchJSONRequestBody = ComponentsSchemasScanMultibranchRequest
+
+// ValidatePipelineMarkerJSONRequestBody defines body for ValidatePipelineMarker for application/json ContentType.
+type ValidatePipelineMarkerJSONRequestBody = ComponentsSchemasPipelineMarkerValidateRequest
+
 // CreateVarroaRoleBindingJSONRequestBody defines body for CreateVarroaRoleBinding for application/json ContentType.
 type CreateVarroaRoleBindingJSONRequestBody = ComponentsSchemasVarroaRoleBinding
 
@@ -2928,6 +5329,21 @@ type CreateVarroaRoleJSONRequestBody = ComponentsSchemasVarroaRole
 
 // UpdateVarroaRoleJSONRequestBody defines body for UpdateVarroaRole for application/json ContentType.
 type UpdateVarroaRoleJSONRequestBody = ComponentsSchemasVarroaRole
+
+// CreateRunnerJSONRequestBody defines body for CreateRunner for application/json ContentType.
+type CreateRunnerJSONRequestBody = ComponentsSchemasRunnerCreateRequest
+
+// PatchRunnerApplicationMergePatchPlusJSONRequestBody defines body for PatchRunner for application/merge-patch+json ContentType.
+type PatchRunnerApplicationMergePatchPlusJSONRequestBody PatchRunnerApplicationMergePatchPlusJSONBody
+
+// ProceedRunInputJSONRequestBody defines body for ProceedRunInput for application/json ContentType.
+type ProceedRunInputJSONRequestBody ProceedRunInputJSONBody
+
+// ReplayRunJSONRequestBody defines body for ReplayRun for application/json ContentType.
+type ReplayRunJSONRequestBody ReplayRunJSONBody
+
+// RestartRunJSONRequestBody defines body for RestartRun for application/json ContentType.
+type RestartRunJSONRequestBody = ComponentsSchemasRestartRunRequest
 
 // CreateStreamTicketJSONRequestBody defines body for CreateStreamTicket for application/json ContentType.
 type CreateStreamTicketJSONRequestBody CreateStreamTicketJSONBody
@@ -3514,6 +5930,26 @@ type ClientInterface interface {
 	// AuthCallback request
 	AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListCellPools request
+	ListCellPools(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellPool request
+	GetCellPool(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchCellPoolWithBody request with any body
+	PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchCellPool(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListCellUsage request
+	ListCellUsage(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellGrants request
+	GetCellGrants(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetCellUsage request
+	GetCellUsage(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListClusters request
 	ListClusters(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3622,11 +6058,19 @@ type ClientInterface interface {
 
 	ApproveControllerDeletion(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body ApproveControllerDeletionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// BreakGlassControllerWithBody request with any body
+	BreakGlassControllerWithBody(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	BreakGlassController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body BreakGlassControllerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetControllerDiff request
 	GetControllerDiff(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// HibernateController request
 	HibernateController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetControllerJenkinsLink request
+	GetControllerJenkinsLink(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetControllerLogs request
 	GetControllerLogs(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3756,6 +6200,14 @@ type ClientInterface interface {
 	// GetIdentitySettings request
 	GetIdentitySettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAllFleetLocks request
+	ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseFleetLockWithBody request with any body
+	ReleaseFleetLockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ReleaseFleetLock(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// LoginWithBody request with any body
 	LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3796,6 +6248,48 @@ type ClientInterface interface {
 
 	UpdateMyPreferences(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListPipelineTeams request
+	ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListPipelines request
+	ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTeamCell request
+	GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPipelineJob request
+	GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListJobBranches request
+	ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRuns request
+	ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateRunWithBody request with any body
+	CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ScanMultibranchWithBody request with any body
+	ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListJobTestCaseHistory request
+	ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListTeamFleetLocks request
+	ListTeamFleetLocks(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ValidatePipelineMarkerWithBody request with any body
+	ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamTeamRuns request
+	StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListVarroaRoleBindings request
 	ListVarroaRoleBindings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -3833,6 +6327,76 @@ type ClientInterface interface {
 	UpdateVarroaRoleWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	UpdateVarroaRole(ctx context.Context, name ComponentsParametersName, body UpdateVarroaRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunners request
+	ListRunners(ctx context.Context, params *ListRunnersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateRunnerWithBody request with any body
+	CreateRunnerWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateRunner(ctx context.Context, body CreateRunnerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteRunner request
+	DeleteRunner(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRunner request
+	GetRunner(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchRunnerWithBody request with any body
+	PatchRunnerWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PatchRunnerWithApplicationMergePatchPlusJSONBody(ctx context.Context, name ComponentsParametersName, body PatchRunnerApplicationMergePatchPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRun request
+	GetRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunArtifacts request
+	ListRunArtifacts(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DownloadRunArtifact request
+	DownloadRunArtifact(ctx context.Context, run ComponentsParametersRun, path ComponentsParametersArtifactPath, params *DownloadRunArtifactParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelRun request
+	CancelRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunChanges request
+	ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunDownstream request
+	ListRunDownstream(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AbortRunInput request
+	AbortRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ProceedRunInputWithBody request with any body
+	ProceedRunInputWithBody(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ProceedRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamRunLog request
+	StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReplayRunWithBody request with any body
+	ReplayRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ReplayRun(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RerunRun request
+	RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRunRestart request
+	GetRunRestart(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestartRunWithBody request with any body
+	RestartRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RestartRun(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRunScript request
+	GetRunScript(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunTests request
+	ListRunTests(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// Search request
 	Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4167,6 +6731,90 @@ func (c *Client) ListBuiltinRoles(ctx context.Context, reqEditors ...RequestEdit
 
 func (c *Client) AuthCallback(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAuthCallbackRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListCellPools(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCellPoolsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellPool(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellPoolRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchCellPoolWithBody(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequestWithBody(c.Server, name, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchCellPool(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchCellPoolRequest(c.Server, name, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListCellUsage(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListCellUsageRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellGrants(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellGrantsRequest(c.Server, namespace, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetCellUsage(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCellUsageRequest(c.Server, namespace, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -4657,6 +7305,30 @@ func (c *Client) ApproveControllerDeletion(ctx context.Context, cluster Componen
 	return c.Client.Do(req)
 }
 
+func (c *Client) BreakGlassControllerWithBody(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBreakGlassControllerRequestWithBody(c.Server, cluster, ns, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BreakGlassController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body BreakGlassControllerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBreakGlassControllerRequest(c.Server, cluster, ns, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetControllerDiff(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetControllerDiffRequest(c.Server, cluster, ns, name)
 	if err != nil {
@@ -4671,6 +7343,18 @@ func (c *Client) GetControllerDiff(ctx context.Context, cluster ComponentsParame
 
 func (c *Client) HibernateController(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHibernateControllerRequest(c.Server, cluster, ns, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetControllerJenkinsLink(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetControllerJenkinsLinkRequest(c.Server, cluster, ns, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -5233,6 +7917,42 @@ func (c *Client) GetIdentitySettings(ctx context.Context, reqEditors ...RequestE
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListAllFleetLocks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAllFleetLocksRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReleaseFleetLockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseFleetLockRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReleaseFleetLock(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseFleetLockRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewLoginRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -5413,6 +8133,186 @@ func (c *Client) UpdateMyPreferences(ctx context.Context, body UpdateMyPreferenc
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListPipelineTeams(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelineTeamsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPipelinesRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTeamCellRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPipelineJob(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPipelineJobRequest(c.Server, team, job)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobBranchesRequest(c.Server, team, job)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunsRequest(c.Server, team, job, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRunWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunRequestWithBody(c.Server, team, job, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRun(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunRequest(c.Server, team, job, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScanMultibranchWithBody(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequestWithBody(c.Server, team, job, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ScanMultibranch(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewScanMultibranchRequest(c.Server, team, job, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListJobTestCaseHistory(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobTestCaseHistoryRequest(c.Server, team, job, pCase, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListTeamFleetLocks(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTeamFleetLocksRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidatePipelineMarkerRequestWithBody(c.Server, team, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewValidatePipelineMarkerRequest(c.Server, team, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamTeamRunsRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListVarroaRoleBindings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListVarroaRoleBindingsRequest(c.Server)
 	if err != nil {
@@ -5571,6 +8471,306 @@ func (c *Client) UpdateVarroaRoleWithBody(ctx context.Context, name ComponentsPa
 
 func (c *Client) UpdateVarroaRole(ctx context.Context, name ComponentsParametersName, body UpdateVarroaRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateVarroaRoleRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunners(ctx context.Context, params *ListRunnersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunnersRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRunnerWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunnerRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRunner(ctx context.Context, body CreateRunnerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunnerRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteRunner(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteRunnerRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRunner(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunnerRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchRunnerWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchRunnerRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PatchRunnerWithApplicationMergePatchPlusJSONBody(ctx context.Context, name ComponentsParametersName, body PatchRunnerApplicationMergePatchPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchRunnerRequestWithApplicationMergePatchPlusJSONBody(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunArtifacts(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunArtifactsRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DownloadRunArtifact(ctx context.Context, run ComponentsParametersRun, path ComponentsParametersArtifactPath, params *DownloadRunArtifactParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadRunArtifactRequest(c.Server, run, path, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CancelRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelRunRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunChanges(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunChangesRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunDownstream(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunDownstreamRequest(c.Server, run, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AbortRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAbortRunInputRequest(c.Server, run, input)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProceedRunInputWithBody(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProceedRunInputRequestWithBody(c.Server, run, input, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProceedRunInput(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProceedRunInputRequest(c.Server, run, input, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamRunLogRequest(c.Server, run, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReplayRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplayRunRequestWithBody(c.Server, run, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReplayRun(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReplayRunRequest(c.Server, run, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RerunRun(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRerunRunRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRunRestart(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunRestartRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestartRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartRunRequestWithBody(c.Server, run, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RestartRun(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartRunRequest(c.Server, run, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetRunScript(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRunScriptRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunTests(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunTestsRequest(c.Server, run)
 	if err != nil {
 		return nil, err
 	}
@@ -6849,6 +10049,371 @@ func NewAuthCallbackRequest(server string, params *AuthCallbackParams) (*http.Re
 		if params.Error != nil {
 
 			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "error", runtime.ParamLocationQuery, *params.Error); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListCellPoolsRequest generates requests for ListCellPools
+func NewListCellPoolsRequest(server string, params *ListCellPoolsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellPoolRequest generates requests for GetCellPool
+func NewGetCellPoolRequest(server string, name ComponentsParametersName, params *GetCellPoolParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPatchCellPoolRequest calls the generic PatchCellPool builder with application/json body
+func NewPatchCellPoolRequest(server string, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchCellPoolRequestWithBody(server, name, params, "application/json", bodyReader)
+}
+
+// NewPatchCellPoolRequestWithBody generates requests for PatchCellPool with any type of body
+func NewPatchCellPoolRequestWithBody(server string, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cellpools/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListCellUsageRequest generates requests for ListCellUsage
+func NewListCellUsageRequest(server string, params *ListCellUsageParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/usage")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Namespace != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "namespace", runtime.ParamLocationQuery, *params.Namespace); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellGrantsRequest generates requests for GetCellGrants
+func NewGetCellGrantsRequest(server string, namespace string, name string, params *GetCellGrantsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespace", runtime.ParamLocationPath, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/%s/%s/grants", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetCellUsageRequest generates requests for GetCellUsage
+func NewGetCellUsageRequest(server string, namespace string, name string, params *GetCellUsageParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespace", runtime.ParamLocationPath, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/cells/%s/%s/usage", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cluster != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cluster", runtime.ParamLocationQuery, *params.Cluster); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -8391,6 +11956,67 @@ func NewApproveControllerDeletionRequestWithBody(server string, cluster Componen
 	return req, nil
 }
 
+// NewBreakGlassControllerRequest calls the generic BreakGlassController builder with application/json body
+func NewBreakGlassControllerRequest(server string, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body BreakGlassControllerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewBreakGlassControllerRequestWithBody(server, cluster, ns, name, "application/json", bodyReader)
+}
+
+// NewBreakGlassControllerRequestWithBody generates requests for BreakGlassController with any type of body
+func NewBreakGlassControllerRequestWithBody(server string, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "cluster", runtime.ParamLocationPath, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ns", runtime.ParamLocationPath, ns)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/clusters/%s/controllers/%s/%s/break-glass", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetControllerDiffRequest generates requests for GetControllerDiff
 func NewGetControllerDiffRequest(server string, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName) (*http.Request, error) {
 	var err error
@@ -8480,6 +12106,72 @@ func NewHibernateControllerRequest(server string, cluster ComponentsParametersCl
 	}
 
 	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetControllerJenkinsLinkRequest generates requests for GetControllerJenkinsLink
+func NewGetControllerJenkinsLinkRequest(server string, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "cluster", runtime.ParamLocationPath, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "ns", runtime.ParamLocationPath, ns)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/clusters/%s/controllers/%s/%s/jenkins-link", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "path", runtime.ParamLocationQuery, params.Path); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -10179,6 +13871,73 @@ func NewGetIdentitySettingsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListAllFleetLocksRequest generates requests for ListAllFleetLocks
+func NewListAllFleetLocksRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/locks")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReleaseFleetLockRequest calls the generic ReleaseFleetLock builder with application/json body
+func NewReleaseFleetLockRequest(server string, body ReleaseFleetLockJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseFleetLockRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewReleaseFleetLockRequestWithBody generates requests for ReleaseFleetLock with any type of body
+func NewReleaseFleetLockRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/locks/release")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewLoginRequest calls the generic Login builder with application/json body
 func NewLoginRequest(server string, body LoginJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -10524,6 +14283,619 @@ func NewUpdateMyPreferencesRequestWithBody(server string, contentType string, bo
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListPipelineTeamsRequest generates requests for ListPipelineTeams
+func NewListPipelineTeamsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListPipelinesRequest generates requests for ListPipelines
+func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTeamCellRequest generates requests for GetTeamCell
+func NewGetTeamCellRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/cell", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPipelineJobRequest generates requests for GetPipelineJob
+func NewGetPipelineJobRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListJobBranchesRequest generates requests for ListJobBranches
+func NewListJobBranchesRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/branches", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRunsRequest generates requests for ListRuns
+func NewListRunsRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/runs", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Branch != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "branch", runtime.ParamLocationQuery, *params.Branch); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Result != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "result", runtime.ParamLocationQuery, *params.Result); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Actor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "actor", runtime.ParamLocationQuery, *params.Actor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cause != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cause", runtime.ParamLocationQuery, *params.Cause); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateRunRequest calls the generic CreateRun builder with application/json body
+func NewCreateRunRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateRunRequestWithBody(server, team, job, "application/json", bodyReader)
+}
+
+// NewCreateRunRequestWithBody generates requests for CreateRun with any type of body
+func NewCreateRunRequestWithBody(server string, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/runs", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewScanMultibranchRequest calls the generic ScanMultibranch builder with application/json body
+func NewScanMultibranchRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewScanMultibranchRequestWithBody(server, team, job, "application/json", bodyReader)
+}
+
+// NewScanMultibranchRequestWithBody generates requests for ScanMultibranch with any type of body
+func NewScanMultibranchRequestWithBody(server string, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/scan", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListJobTestCaseHistoryRequest generates requests for ListJobTestCaseHistory
+func NewListJobTestCaseHistoryRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "case", runtime.ParamLocationPath, pCase)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/tests/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListTeamFleetLocksRequest generates requests for ListTeamFleetLocks
+func NewListTeamFleetLocksRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/locks", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewValidatePipelineMarkerRequest calls the generic ValidatePipelineMarker builder with application/json body
+func NewValidatePipelineMarkerRequest(server string, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewValidatePipelineMarkerRequestWithBody(server, team, "application/json", bodyReader)
+}
+
+// NewValidatePipelineMarkerRequestWithBody generates requests for ValidatePipelineMarker with any type of body
+func NewValidatePipelineMarkerRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/markers/validate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStreamTeamRunsRequest generates requests for StreamTeamRuns
+func NewStreamTeamRunsRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/stream", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -10888,6 +15260,887 @@ func NewUpdateVarroaRoleRequestWithBody(server string, name ComponentsParameters
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListRunnersRequest generates requests for ListRunners
+func NewListRunnersRequest(server string, params *ListRunnersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runners")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "team", runtime.ParamLocationQuery, *params.Team); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateRunnerRequest calls the generic CreateRunner builder with application/json body
+func NewCreateRunnerRequest(server string, body CreateRunnerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateRunnerRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateRunnerRequestWithBody generates requests for CreateRunner with any type of body
+func NewCreateRunnerRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runners")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteRunnerRequest generates requests for DeleteRunner
+func NewDeleteRunnerRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runners/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRunnerRequest generates requests for GetRunner
+func NewGetRunnerRequest(server string, name ComponentsParametersName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runners/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPatchRunnerRequestWithApplicationMergePatchPlusJSONBody calls the generic PatchRunner builder with application/merge-patch+json body
+func NewPatchRunnerRequestWithApplicationMergePatchPlusJSONBody(server string, name ComponentsParametersName, body PatchRunnerApplicationMergePatchPlusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchRunnerRequestWithBody(server, name, "application/merge-patch+json", bodyReader)
+}
+
+// NewPatchRunnerRequestWithBody generates requests for PatchRunner with any type of body
+func NewPatchRunnerRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runners/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetRunRequest generates requests for GetRun
+func NewGetRunRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRunArtifactsRequest generates requests for ListRunArtifacts
+func NewListRunArtifactsRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/artifacts", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDownloadRunArtifactRequest generates requests for DownloadRunArtifact
+func NewDownloadRunArtifactRequest(server string, run ComponentsParametersRun, path ComponentsParametersArtifactPath, params *DownloadRunArtifactParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "path", runtime.ParamLocationPath, path)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/artifacts/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Range != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "Range", runtime.ParamLocationHeader, *params.Range)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Range", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCancelRunRequest generates requests for CancelRun
+func NewCancelRunRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/cancel", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRunChangesRequest generates requests for ListRunChanges
+func NewListRunChangesRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/changes", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRunDownstreamRequest generates requests for ListRunDownstream
+func NewListRunDownstreamRequest(server string, run ComponentsParametersRun, params *ListRunDownstreamParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/downstream", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewAbortRunInputRequest generates requests for AbortRunInput
+func NewAbortRunInputRequest(server string, run ComponentsParametersRun, input ComponentsParametersInput) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "input", runtime.ParamLocationPath, input)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/inputs/%s/abort", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewProceedRunInputRequest calls the generic ProceedRunInput builder with application/json body
+func NewProceedRunInputRequest(server string, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewProceedRunInputRequestWithBody(server, run, input, "application/json", bodyReader)
+}
+
+// NewProceedRunInputRequestWithBody generates requests for ProceedRunInput with any type of body
+func NewProceedRunInputRequestWithBody(server string, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "input", runtime.ParamLocationPath, input)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/inputs/%s/proceed", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStreamRunLogRequest generates requests for StreamRunLog
+func NewStreamRunLogRequest(server string, run ComponentsParametersRun, params *StreamRunLogParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/log", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "from", runtime.ParamLocationQuery, *params.From); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.FromLine != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "fromLine", runtime.ParamLocationQuery, *params.FromLine); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Raw != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "raw", runtime.ParamLocationQuery, *params.Raw); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewReplayRunRequest calls the generic ReplayRun builder with application/json body
+func NewReplayRunRequest(server string, run ComponentsParametersRun, body ReplayRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReplayRunRequestWithBody(server, run, "application/json", bodyReader)
+}
+
+// NewReplayRunRequestWithBody generates requests for ReplayRun with any type of body
+func NewReplayRunRequestWithBody(server string, run ComponentsParametersRun, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/replay", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRerunRunRequest generates requests for RerunRun
+func NewRerunRunRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/rerun", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetRunRestartRequest generates requests for GetRunRestart
+func NewGetRunRestartRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/restart", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRestartRunRequest calls the generic RestartRun builder with application/json body
+func NewRestartRunRequest(server string, run ComponentsParametersRun, body RestartRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRestartRunRequestWithBody(server, run, "application/json", bodyReader)
+}
+
+// NewRestartRunRequestWithBody generates requests for RestartRun with any type of body
+func NewRestartRunRequestWithBody(server string, run ComponentsParametersRun, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/restart", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetRunScriptRequest generates requests for GetRunScript
+func NewGetRunScriptRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/script", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRunTestsRequest generates requests for ListRunTests
+func NewListRunTestsRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/tests", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -11809,6 +17062,26 @@ type ClientWithResponsesInterface interface {
 	// AuthCallbackWithResponse request
 	AuthCallbackWithResponse(ctx context.Context, params *AuthCallbackParams, reqEditors ...RequestEditorFn) (*AuthCallbackResponse, error)
 
+	// ListCellPoolsWithResponse request
+	ListCellPoolsWithResponse(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error)
+
+	// GetCellPoolWithResponse request
+	GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error)
+
+	// PatchCellPoolWithBodyWithResponse request with any body
+	PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+
+	PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error)
+
+	// ListCellUsageWithResponse request
+	ListCellUsageWithResponse(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*ListCellUsageResponse, error)
+
+	// GetCellGrantsWithResponse request
+	GetCellGrantsWithResponse(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*GetCellGrantsResponse, error)
+
+	// GetCellUsageWithResponse request
+	GetCellUsageWithResponse(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*GetCellUsageResponse, error)
+
 	// ListClustersWithResponse request
 	ListClustersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListClustersResponse, error)
 
@@ -11917,11 +17190,19 @@ type ClientWithResponsesInterface interface {
 
 	ApproveControllerDeletionWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body ApproveControllerDeletionJSONRequestBody, reqEditors ...RequestEditorFn) (*ApproveControllerDeletionResponse, error)
 
+	// BreakGlassControllerWithBodyWithResponse request with any body
+	BreakGlassControllerWithBodyWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BreakGlassControllerResponse, error)
+
+	BreakGlassControllerWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body BreakGlassControllerJSONRequestBody, reqEditors ...RequestEditorFn) (*BreakGlassControllerResponse, error)
+
 	// GetControllerDiffWithResponse request
 	GetControllerDiffWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetControllerDiffResponse, error)
 
 	// HibernateControllerWithResponse request
 	HibernateControllerWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*HibernateControllerResponse, error)
+
+	// GetControllerJenkinsLinkWithResponse request
+	GetControllerJenkinsLinkWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*GetControllerJenkinsLinkResponse, error)
 
 	// GetControllerLogsWithResponse request
 	GetControllerLogsWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerLogsParams, reqEditors ...RequestEditorFn) (*GetControllerLogsResponse, error)
@@ -12051,6 +17332,14 @@ type ClientWithResponsesInterface interface {
 	// GetIdentitySettingsWithResponse request
 	GetIdentitySettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetIdentitySettingsResponse, error)
 
+	// ListAllFleetLocksWithResponse request
+	ListAllFleetLocksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error)
+
+	// ReleaseFleetLockWithBodyWithResponse request with any body
+	ReleaseFleetLockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error)
+
+	ReleaseFleetLockWithResponse(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error)
+
 	// LoginWithBodyWithResponse request with any body
 	LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error)
 
@@ -12091,6 +17380,48 @@ type ClientWithResponsesInterface interface {
 
 	UpdateMyPreferencesWithResponse(ctx context.Context, body UpdateMyPreferencesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMyPreferencesResponse, error)
 
+	// ListPipelineTeamsWithResponse request
+	ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error)
+
+	// ListPipelinesWithResponse request
+	ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
+
+	// GetTeamCellWithResponse request
+	GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error)
+
+	// GetPipelineJobWithResponse request
+	GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error)
+
+	// ListJobBranchesWithResponse request
+	ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
+
+	// ListRunsWithResponse request
+	ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
+
+	// CreateRunWithBodyWithResponse request with any body
+	CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+
+	CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error)
+
+	// ScanMultibranchWithBodyWithResponse request with any body
+	ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
+
+	ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error)
+
+	// ListJobTestCaseHistoryWithResponse request
+	ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error)
+
+	// ListTeamFleetLocksWithResponse request
+	ListTeamFleetLocksWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListTeamFleetLocksResponse, error)
+
+	// ValidatePipelineMarkerWithBodyWithResponse request with any body
+	ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+
+	ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+
+	// StreamTeamRunsWithResponse request
+	StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error)
+
 	// ListVarroaRoleBindingsWithResponse request
 	ListVarroaRoleBindingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVarroaRoleBindingsResponse, error)
 
@@ -12128,6 +17459,76 @@ type ClientWithResponsesInterface interface {
 	UpdateVarroaRoleWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVarroaRoleResponse, error)
 
 	UpdateVarroaRoleWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateVarroaRoleJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVarroaRoleResponse, error)
+
+	// ListRunnersWithResponse request
+	ListRunnersWithResponse(ctx context.Context, params *ListRunnersParams, reqEditors ...RequestEditorFn) (*ListRunnersResponse, error)
+
+	// CreateRunnerWithBodyWithResponse request with any body
+	CreateRunnerWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunnerResponse, error)
+
+	CreateRunnerWithResponse(ctx context.Context, body CreateRunnerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunnerResponse, error)
+
+	// DeleteRunnerWithResponse request
+	DeleteRunnerWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteRunnerResponse, error)
+
+	// GetRunnerWithResponse request
+	GetRunnerWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetRunnerResponse, error)
+
+	// PatchRunnerWithBodyWithResponse request with any body
+	PatchRunnerWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchRunnerResponse, error)
+
+	PatchRunnerWithApplicationMergePatchPlusJSONBodyWithResponse(ctx context.Context, name ComponentsParametersName, body PatchRunnerApplicationMergePatchPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchRunnerResponse, error)
+
+	// GetRunWithResponse request
+	GetRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunResponse, error)
+
+	// ListRunArtifactsWithResponse request
+	ListRunArtifactsWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunArtifactsResponse, error)
+
+	// DownloadRunArtifactWithResponse request
+	DownloadRunArtifactWithResponse(ctx context.Context, run ComponentsParametersRun, path ComponentsParametersArtifactPath, params *DownloadRunArtifactParams, reqEditors ...RequestEditorFn) (*DownloadRunArtifactResponse, error)
+
+	// CancelRunWithResponse request
+	CancelRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*CancelRunResponse, error)
+
+	// ListRunChangesWithResponse request
+	ListRunChangesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunChangesResponse, error)
+
+	// ListRunDownstreamWithResponse request
+	ListRunDownstreamWithResponse(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*ListRunDownstreamResponse, error)
+
+	// AbortRunInputWithResponse request
+	AbortRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*AbortRunInputResponse, error)
+
+	// ProceedRunInputWithBodyWithResponse request with any body
+	ProceedRunInputWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error)
+
+	ProceedRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error)
+
+	// StreamRunLogWithResponse request
+	StreamRunLogWithResponse(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*StreamRunLogResponse, error)
+
+	// ReplayRunWithBodyWithResponse request with any body
+	ReplayRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error)
+
+	ReplayRunWithResponse(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error)
+
+	// RerunRunWithResponse request
+	RerunRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*RerunRunResponse, error)
+
+	// GetRunRestartWithResponse request
+	GetRunRestartWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunRestartResponse, error)
+
+	// RestartRunWithBodyWithResponse request with any body
+	RestartRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartRunResponse, error)
+
+	RestartRunWithResponse(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartRunResponse, error)
+
+	// GetRunScriptWithResponse request
+	GetRunScriptWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunScriptResponse, error)
+
+	// ListRunTestsWithResponse request
+	ListRunTestsWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunTestsResponse, error)
 
 	// SearchWithResponse request
 	SearchWithResponse(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*SearchResponse, error)
@@ -12215,12 +17616,11 @@ type ListActivityResponse struct {
 		HasMore       bool                             `json:"hasMore"`
 		Items         []ComponentsSchemasActivityEvent `json:"items"`
 		NextCursor    *string                          `json:"nextCursor,omitempty"`
-		RetentionDays *ListActivity200RetentionDays    `json:"retentionDays,omitempty"`
+		RetentionDays *int                             `json:"retentionDays,omitempty"`
 		RetentionMode ListActivity200RetentionMode     `json:"retentionMode"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 }
-type ListActivity200RetentionDays int
 type ListActivity200RetentionMode string
 
 // Status returns HTTPResponse.Status
@@ -12243,7 +17643,8 @@ type GetAuthConfigResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Mode GetAuthConfig200Mode `json:"mode"`
+		LocalAccounts bool                 `json:"localAccounts"`
+		Mode          GetAuthConfig200Mode `json:"mode"`
 	}
 }
 type GetAuthConfig200Mode string
@@ -12474,7 +17875,8 @@ type ListBroodSchedulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasBroodScheduleResponse `json:"items"`
+		Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
+		Items    []ComponentsSchemasBroodScheduleResponse `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
@@ -12649,6 +18051,164 @@ func (r AuthCallbackResponse) StatusCode() int {
 	return 0
 }
 
+type ListCellPoolsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+		Items    []ComponentsSchemasCellPool            `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+	JSON404 *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r ListCellPoolsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListCellPoolsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellPoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellPool
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON502      *ComponentsResponsesClusterUnreachable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellPoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellPoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchCellPoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellPool
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON502      *ComponentsResponsesClusterUnreachable
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchCellPoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchCellPoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListCellUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items []ComponentsSchemasCellUsage `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON503 *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListCellUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListCellUsageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellGrantsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellGrants
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellGrantsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellGrantsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetCellUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasCellUsage
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCellUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCellUsageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListClustersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -12682,6 +18242,7 @@ type ListCatalogItemsResponse struct {
 		OperatorNamespace *string                               `json:"operatorNamespace,omitempty"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -12705,6 +18266,7 @@ type GetCatalogItemResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasCatalogItemDetailResponse
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -12731,6 +18293,7 @@ type ListCatalogSourcesResponse struct {
 		Items []ComponentsSchemasCatalogSource `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -12755,6 +18318,7 @@ type CreateCatalogSourceResponse struct {
 	JSON201      *ComponentsSchemasCatalogSource
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -12778,6 +18342,7 @@ type DeleteCatalogSourceResponse struct {
 	HTTPResponse *http.Response
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -12801,6 +18366,7 @@ type GetCatalogSourceResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasCatalogSource
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -12827,6 +18393,7 @@ type UpdateCatalogSourceResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -12878,6 +18445,7 @@ type ListComposedBundlesResponse struct {
 		Items []ComponentsSchemasComposedBundle `json:"items"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
 }
 
 // Status returns HTTPResponse.Status
@@ -12996,6 +18564,7 @@ type GetComposedBundleResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasComposedBundle
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
 }
 
@@ -13315,7 +18884,7 @@ type ApproveControllerResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
-	JSON409 *ComponentsResponsesConflict
+	JSON409 *ComponentsResponsesApproveConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -13357,6 +18926,34 @@ func (r ApproveControllerDeletionResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ApproveControllerDeletionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type BreakGlassControllerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasBreakGlassResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r BreakGlassControllerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BreakGlassControllerResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13413,6 +19010,34 @@ func (r HibernateControllerResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r HibernateControllerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetControllerJenkinsLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJenkinsLink
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON405      *ComponentsResponsesMethodNotAllowed
+	JSON500      *ComponentsResponsesInternal
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetControllerJenkinsLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetControllerJenkinsLinkResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14350,6 +19975,59 @@ func (r GetIdentitySettingsResponse) StatusCode() int {
 	return 0
 }
 
+type ListAllFleetLocksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetLockListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAllFleetLocksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAllFleetLocksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ReleaseFleetLockResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetLockReleaseResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasFleetLockReleaseConflict
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseFleetLockResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseFleetLockResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type LoginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -14552,7 +20230,7 @@ func (r ChangeMyPasswordResponse) StatusCode() int {
 type GetMyPermissionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *map[string]interface{}
+	JSON200      *ComponentsSchemasPermissionScopes
 	JSON401      *ComponentsResponsesUnauthorized
 }
 
@@ -14589,6 +20267,314 @@ func (r UpdateMyPreferencesResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UpdateMyPreferencesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListPipelineTeamsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelineTeamList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON500      *ComponentsResponsesInternal
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPipelineTeamsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPipelineTeamsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListPipelinesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelineListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasError
+	JSON422      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPipelinesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPipelinesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetTeamCellResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamCell
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTeamCellResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTeamCellResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetPipelineJobResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelineJobDetail
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPipelineJobResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPipelineJobResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListJobBranchesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasJobBranchList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListJobBranchesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListJobBranchesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ScanMultibranchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasBranchScanResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsResponsesConflict
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ScanMultibranchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ScanMultibranchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListJobTestCaseHistoryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTestCaseHistoryResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListJobTestCaseHistoryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListJobTestCaseHistoryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListTeamFleetLocksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasFleetLockListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListTeamFleetLocksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListTeamFleetLocksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ValidatePipelineMarkerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasPipelineMarkerValidateResponse
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ValidatePipelineMarkerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ValidatePipelineMarkerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StreamTeamRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamTeamRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamTeamRunsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14845,11 +20831,530 @@ func (r UpdateVarroaRoleResponse) StatusCode() int {
 	return 0
 }
 
+type ListRunnersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Items []ComponentsSchemasRunnerEntry `json:"items"`
+	}
+	JSON401 *ComponentsResponsesUnauthorized
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunnersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunnersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateRunnerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *struct {
+		Name string `json:"name"`
+	}
+	JSON400 *ComponentsResponsesBadRequest
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateRunnerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateRunnerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteRunnerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteRunnerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteRunnerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRunnerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunnerEntry
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunnerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunnerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PatchRunnerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Name string `json:"name"`
+	}
+	JSON400 *ComponentsResponsesBadRequest
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+	JSON404 *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchRunnerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchRunnerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunDetail
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunArtifactsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunArtifactListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunArtifactsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunArtifactsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DownloadRunArtifactResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON409      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadRunArtifactResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadRunArtifactResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CancelRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasCancelRunResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunChangesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunChangeListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunChangesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunChangesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunDownstreamResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunLinkPage
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunDownstreamResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunDownstreamResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AbortRunInputResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasCancelRunResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r AbortRunInputResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AbortRunInputResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ProceedRunInputResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasCancelRunResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ProceedRunInputResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProceedRunInputResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StreamRunLogResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamRunLogResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamRunLogResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ReplayRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON409      *ComponentsSchemasError
+	JSON413      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ReplayRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReplayRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RerunRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r RerunRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RerunRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRunRestartResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunRestart
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunRestartResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunRestartResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RestartRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasRunActionResponse
+	JSON400      *ComponentsSchemasError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsSchemasError
+	JSON409      *ComponentsSchemasError
+	JSON413      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r RestartRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestartRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetRunScriptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunScript
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRunScriptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRunScriptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunTestsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunTestListResponse
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsSchemasError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunTestsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunTestsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type SearchResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		Items []ComponentsSchemasSearchResult `json:"items"`
+		Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+		Items    []ComponentsSchemasSearchResult        `json:"items"`
 	}
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
@@ -15611,6 +22116,68 @@ func (c *ClientWithResponses) AuthCallbackWithResponse(ctx context.Context, para
 	return ParseAuthCallbackResponse(rsp)
 }
 
+// ListCellPoolsWithResponse request returning *ListCellPoolsResponse
+func (c *ClientWithResponses) ListCellPoolsWithResponse(ctx context.Context, params *ListCellPoolsParams, reqEditors ...RequestEditorFn) (*ListCellPoolsResponse, error) {
+	rsp, err := c.ListCellPools(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListCellPoolsResponse(rsp)
+}
+
+// GetCellPoolWithResponse request returning *GetCellPoolResponse
+func (c *ClientWithResponses) GetCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *GetCellPoolParams, reqEditors ...RequestEditorFn) (*GetCellPoolResponse, error) {
+	rsp, err := c.GetCellPool(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellPoolResponse(rsp)
+}
+
+// PatchCellPoolWithBodyWithResponse request with arbitrary body returning *PatchCellPoolResponse
+func (c *ClientWithResponses) PatchCellPoolWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPoolWithBody(ctx, name, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchCellPoolResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchCellPoolWithResponse(ctx context.Context, name ComponentsParametersName, params *PatchCellPoolParams, body PatchCellPoolJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchCellPoolResponse, error) {
+	rsp, err := c.PatchCellPool(ctx, name, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchCellPoolResponse(rsp)
+}
+
+// ListCellUsageWithResponse request returning *ListCellUsageResponse
+func (c *ClientWithResponses) ListCellUsageWithResponse(ctx context.Context, params *ListCellUsageParams, reqEditors ...RequestEditorFn) (*ListCellUsageResponse, error) {
+	rsp, err := c.ListCellUsage(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListCellUsageResponse(rsp)
+}
+
+// GetCellGrantsWithResponse request returning *GetCellGrantsResponse
+func (c *ClientWithResponses) GetCellGrantsWithResponse(ctx context.Context, namespace string, name string, params *GetCellGrantsParams, reqEditors ...RequestEditorFn) (*GetCellGrantsResponse, error) {
+	rsp, err := c.GetCellGrants(ctx, namespace, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellGrantsResponse(rsp)
+}
+
+// GetCellUsageWithResponse request returning *GetCellUsageResponse
+func (c *ClientWithResponses) GetCellUsageWithResponse(ctx context.Context, namespace string, name string, params *GetCellUsageParams, reqEditors ...RequestEditorFn) (*GetCellUsageResponse, error) {
+	rsp, err := c.GetCellUsage(ctx, namespace, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCellUsageResponse(rsp)
+}
+
 // ListClustersWithResponse request returning *ListClustersResponse
 func (c *ClientWithResponses) ListClustersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListClustersResponse, error) {
 	rsp, err := c.ListClusters(ctx, reqEditors...)
@@ -15959,6 +22526,23 @@ func (c *ClientWithResponses) ApproveControllerDeletionWithResponse(ctx context.
 	return ParseApproveControllerDeletionResponse(rsp)
 }
 
+// BreakGlassControllerWithBodyWithResponse request with arbitrary body returning *BreakGlassControllerResponse
+func (c *ClientWithResponses) BreakGlassControllerWithBodyWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BreakGlassControllerResponse, error) {
+	rsp, err := c.BreakGlassControllerWithBody(ctx, cluster, ns, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBreakGlassControllerResponse(rsp)
+}
+
+func (c *ClientWithResponses) BreakGlassControllerWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, body BreakGlassControllerJSONRequestBody, reqEditors ...RequestEditorFn) (*BreakGlassControllerResponse, error) {
+	rsp, err := c.BreakGlassController(ctx, cluster, ns, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBreakGlassControllerResponse(rsp)
+}
+
 // GetControllerDiffWithResponse request returning *GetControllerDiffResponse
 func (c *ClientWithResponses) GetControllerDiffWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetControllerDiffResponse, error) {
 	rsp, err := c.GetControllerDiff(ctx, cluster, ns, name, reqEditors...)
@@ -15975,6 +22559,15 @@ func (c *ClientWithResponses) HibernateControllerWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseHibernateControllerResponse(rsp)
+}
+
+// GetControllerJenkinsLinkWithResponse request returning *GetControllerJenkinsLinkResponse
+func (c *ClientWithResponses) GetControllerJenkinsLinkWithResponse(ctx context.Context, cluster ComponentsParametersCluster, ns ComponentsParametersNs, name ComponentsParametersName, params *GetControllerJenkinsLinkParams, reqEditors ...RequestEditorFn) (*GetControllerJenkinsLinkResponse, error) {
+	rsp, err := c.GetControllerJenkinsLink(ctx, cluster, ns, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetControllerJenkinsLinkResponse(rsp)
 }
 
 // GetControllerLogsWithResponse request returning *GetControllerLogsResponse
@@ -16381,6 +22974,32 @@ func (c *ClientWithResponses) GetIdentitySettingsWithResponse(ctx context.Contex
 	return ParseGetIdentitySettingsResponse(rsp)
 }
 
+// ListAllFleetLocksWithResponse request returning *ListAllFleetLocksResponse
+func (c *ClientWithResponses) ListAllFleetLocksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAllFleetLocksResponse, error) {
+	rsp, err := c.ListAllFleetLocks(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAllFleetLocksResponse(rsp)
+}
+
+// ReleaseFleetLockWithBodyWithResponse request with arbitrary body returning *ReleaseFleetLockResponse
+func (c *ClientWithResponses) ReleaseFleetLockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error) {
+	rsp, err := c.ReleaseFleetLockWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseFleetLockResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReleaseFleetLockWithResponse(ctx context.Context, body ReleaseFleetLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseFleetLockResponse, error) {
+	rsp, err := c.ReleaseFleetLock(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseFleetLockResponse(rsp)
+}
+
 // LoginWithBodyWithResponse request with arbitrary body returning *LoginResponse
 func (c *ClientWithResponses) LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error) {
 	rsp, err := c.LoginWithBody(ctx, contentType, body, reqEditors...)
@@ -16511,6 +23130,138 @@ func (c *ClientWithResponses) UpdateMyPreferencesWithResponse(ctx context.Contex
 	return ParseUpdateMyPreferencesResponse(rsp)
 }
 
+// ListPipelineTeamsWithResponse request returning *ListPipelineTeamsResponse
+func (c *ClientWithResponses) ListPipelineTeamsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListPipelineTeamsResponse, error) {
+	rsp, err := c.ListPipelineTeams(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPipelineTeamsResponse(rsp)
+}
+
+// ListPipelinesWithResponse request returning *ListPipelinesResponse
+func (c *ClientWithResponses) ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error) {
+	rsp, err := c.ListPipelines(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPipelinesResponse(rsp)
+}
+
+// GetTeamCellWithResponse request returning *GetTeamCellResponse
+func (c *ClientWithResponses) GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error) {
+	rsp, err := c.GetTeamCell(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTeamCellResponse(rsp)
+}
+
+// GetPipelineJobWithResponse request returning *GetPipelineJobResponse
+func (c *ClientWithResponses) GetPipelineJobWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*GetPipelineJobResponse, error) {
+	rsp, err := c.GetPipelineJob(ctx, team, job, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPipelineJobResponse(rsp)
+}
+
+// ListJobBranchesWithResponse request returning *ListJobBranchesResponse
+func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error) {
+	rsp, err := c.ListJobBranches(ctx, team, job, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListJobBranchesResponse(rsp)
+}
+
+// ListRunsWithResponse request returning *ListRunsResponse
+func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
+	rsp, err := c.ListRuns(ctx, team, job, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunsResponse(rsp)
+}
+
+// CreateRunWithBodyWithResponse request with arbitrary body returning *CreateRunResponse
+func (c *ClientWithResponses) CreateRunWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
+	rsp, err := c.CreateRunWithBody(ctx, team, job, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateRunWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body CreateRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunResponse, error) {
+	rsp, err := c.CreateRun(ctx, team, job, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunResponse(rsp)
+}
+
+// ScanMultibranchWithBodyWithResponse request with arbitrary body returning *ScanMultibranchResponse
+func (c *ClientWithResponses) ScanMultibranchWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranchWithBody(ctx, team, job, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScanMultibranchResponse(rsp)
+}
+
+func (c *ClientWithResponses) ScanMultibranchWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, body ScanMultibranchJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanMultibranchResponse, error) {
+	rsp, err := c.ScanMultibranch(ctx, team, job, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseScanMultibranchResponse(rsp)
+}
+
+// ListJobTestCaseHistoryWithResponse request returning *ListJobTestCaseHistoryResponse
+func (c *ClientWithResponses) ListJobTestCaseHistoryWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, pCase ComponentsParametersCase, params *ListJobTestCaseHistoryParams, reqEditors ...RequestEditorFn) (*ListJobTestCaseHistoryResponse, error) {
+	rsp, err := c.ListJobTestCaseHistory(ctx, team, job, pCase, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListJobTestCaseHistoryResponse(rsp)
+}
+
+// ListTeamFleetLocksWithResponse request returning *ListTeamFleetLocksResponse
+func (c *ClientWithResponses) ListTeamFleetLocksWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListTeamFleetLocksResponse, error) {
+	rsp, err := c.ListTeamFleetLocks(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListTeamFleetLocksResponse(rsp)
+}
+
+// ValidatePipelineMarkerWithBodyWithResponse request with arbitrary body returning *ValidatePipelineMarkerResponse
+func (c *ClientWithResponses) ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
+	rsp, err := c.ValidatePipelineMarkerWithBody(ctx, team, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseValidatePipelineMarkerResponse(rsp)
+}
+
+func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error) {
+	rsp, err := c.ValidatePipelineMarker(ctx, team, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseValidatePipelineMarkerResponse(rsp)
+}
+
+// StreamTeamRunsWithResponse request returning *StreamTeamRunsResponse
+func (c *ClientWithResponses) StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error) {
+	rsp, err := c.StreamTeamRuns(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamTeamRunsResponse(rsp)
+}
+
 // ListVarroaRoleBindingsWithResponse request returning *ListVarroaRoleBindingsResponse
 func (c *ClientWithResponses) ListVarroaRoleBindingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVarroaRoleBindingsResponse, error) {
 	rsp, err := c.ListVarroaRoleBindings(ctx, reqEditors...)
@@ -16631,6 +23382,226 @@ func (c *ClientWithResponses) UpdateVarroaRoleWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseUpdateVarroaRoleResponse(rsp)
+}
+
+// ListRunnersWithResponse request returning *ListRunnersResponse
+func (c *ClientWithResponses) ListRunnersWithResponse(ctx context.Context, params *ListRunnersParams, reqEditors ...RequestEditorFn) (*ListRunnersResponse, error) {
+	rsp, err := c.ListRunners(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunnersResponse(rsp)
+}
+
+// CreateRunnerWithBodyWithResponse request with arbitrary body returning *CreateRunnerResponse
+func (c *ClientWithResponses) CreateRunnerWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunnerResponse, error) {
+	rsp, err := c.CreateRunnerWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunnerResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateRunnerWithResponse(ctx context.Context, body CreateRunnerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunnerResponse, error) {
+	rsp, err := c.CreateRunner(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunnerResponse(rsp)
+}
+
+// DeleteRunnerWithResponse request returning *DeleteRunnerResponse
+func (c *ClientWithResponses) DeleteRunnerWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteRunnerResponse, error) {
+	rsp, err := c.DeleteRunner(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteRunnerResponse(rsp)
+}
+
+// GetRunnerWithResponse request returning *GetRunnerResponse
+func (c *ClientWithResponses) GetRunnerWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*GetRunnerResponse, error) {
+	rsp, err := c.GetRunner(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunnerResponse(rsp)
+}
+
+// PatchRunnerWithBodyWithResponse request with arbitrary body returning *PatchRunnerResponse
+func (c *ClientWithResponses) PatchRunnerWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchRunnerResponse, error) {
+	rsp, err := c.PatchRunnerWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchRunnerResponse(rsp)
+}
+
+func (c *ClientWithResponses) PatchRunnerWithApplicationMergePatchPlusJSONBodyWithResponse(ctx context.Context, name ComponentsParametersName, body PatchRunnerApplicationMergePatchPlusJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchRunnerResponse, error) {
+	rsp, err := c.PatchRunnerWithApplicationMergePatchPlusJSONBody(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchRunnerResponse(rsp)
+}
+
+// GetRunWithResponse request returning *GetRunResponse
+func (c *ClientWithResponses) GetRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunResponse, error) {
+	rsp, err := c.GetRun(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunResponse(rsp)
+}
+
+// ListRunArtifactsWithResponse request returning *ListRunArtifactsResponse
+func (c *ClientWithResponses) ListRunArtifactsWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunArtifactsResponse, error) {
+	rsp, err := c.ListRunArtifacts(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunArtifactsResponse(rsp)
+}
+
+// DownloadRunArtifactWithResponse request returning *DownloadRunArtifactResponse
+func (c *ClientWithResponses) DownloadRunArtifactWithResponse(ctx context.Context, run ComponentsParametersRun, path ComponentsParametersArtifactPath, params *DownloadRunArtifactParams, reqEditors ...RequestEditorFn) (*DownloadRunArtifactResponse, error) {
+	rsp, err := c.DownloadRunArtifact(ctx, run, path, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadRunArtifactResponse(rsp)
+}
+
+// CancelRunWithResponse request returning *CancelRunResponse
+func (c *ClientWithResponses) CancelRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*CancelRunResponse, error) {
+	rsp, err := c.CancelRun(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelRunResponse(rsp)
+}
+
+// ListRunChangesWithResponse request returning *ListRunChangesResponse
+func (c *ClientWithResponses) ListRunChangesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunChangesResponse, error) {
+	rsp, err := c.ListRunChanges(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunChangesResponse(rsp)
+}
+
+// ListRunDownstreamWithResponse request returning *ListRunDownstreamResponse
+func (c *ClientWithResponses) ListRunDownstreamWithResponse(ctx context.Context, run ComponentsParametersRun, params *ListRunDownstreamParams, reqEditors ...RequestEditorFn) (*ListRunDownstreamResponse, error) {
+	rsp, err := c.ListRunDownstream(ctx, run, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunDownstreamResponse(rsp)
+}
+
+// AbortRunInputWithResponse request returning *AbortRunInputResponse
+func (c *ClientWithResponses) AbortRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, reqEditors ...RequestEditorFn) (*AbortRunInputResponse, error) {
+	rsp, err := c.AbortRunInput(ctx, run, input, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAbortRunInputResponse(rsp)
+}
+
+// ProceedRunInputWithBodyWithResponse request with arbitrary body returning *ProceedRunInputResponse
+func (c *ClientWithResponses) ProceedRunInputWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error) {
+	rsp, err := c.ProceedRunInputWithBody(ctx, run, input, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProceedRunInputResponse(rsp)
+}
+
+func (c *ClientWithResponses) ProceedRunInputWithResponse(ctx context.Context, run ComponentsParametersRun, input ComponentsParametersInput, body ProceedRunInputJSONRequestBody, reqEditors ...RequestEditorFn) (*ProceedRunInputResponse, error) {
+	rsp, err := c.ProceedRunInput(ctx, run, input, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProceedRunInputResponse(rsp)
+}
+
+// StreamRunLogWithResponse request returning *StreamRunLogResponse
+func (c *ClientWithResponses) StreamRunLogWithResponse(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*StreamRunLogResponse, error) {
+	rsp, err := c.StreamRunLog(ctx, run, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamRunLogResponse(rsp)
+}
+
+// ReplayRunWithBodyWithResponse request with arbitrary body returning *ReplayRunResponse
+func (c *ClientWithResponses) ReplayRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error) {
+	rsp, err := c.ReplayRunWithBody(ctx, run, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplayRunResponse(rsp)
+}
+
+func (c *ClientWithResponses) ReplayRunWithResponse(ctx context.Context, run ComponentsParametersRun, body ReplayRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error) {
+	rsp, err := c.ReplayRun(ctx, run, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReplayRunResponse(rsp)
+}
+
+// RerunRunWithResponse request returning *RerunRunResponse
+func (c *ClientWithResponses) RerunRunWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*RerunRunResponse, error) {
+	rsp, err := c.RerunRun(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRerunRunResponse(rsp)
+}
+
+// GetRunRestartWithResponse request returning *GetRunRestartResponse
+func (c *ClientWithResponses) GetRunRestartWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunRestartResponse, error) {
+	rsp, err := c.GetRunRestart(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunRestartResponse(rsp)
+}
+
+// RestartRunWithBodyWithResponse request with arbitrary body returning *RestartRunResponse
+func (c *ClientWithResponses) RestartRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartRunResponse, error) {
+	rsp, err := c.RestartRunWithBody(ctx, run, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartRunResponse(rsp)
+}
+
+func (c *ClientWithResponses) RestartRunWithResponse(ctx context.Context, run ComponentsParametersRun, body RestartRunJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartRunResponse, error) {
+	rsp, err := c.RestartRun(ctx, run, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartRunResponse(rsp)
+}
+
+// GetRunScriptWithResponse request returning *GetRunScriptResponse
+func (c *ClientWithResponses) GetRunScriptWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*GetRunScriptResponse, error) {
+	rsp, err := c.GetRunScript(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRunScriptResponse(rsp)
+}
+
+// ListRunTestsWithResponse request returning *ListRunTestsResponse
+func (c *ClientWithResponses) ListRunTestsWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunTestsResponse, error) {
+	rsp, err := c.ListRunTests(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunTestsResponse(rsp)
 }
 
 // SearchWithResponse request returning *SearchResponse
@@ -16898,7 +23869,7 @@ func ParseListActivityResponse(rsp *http.Response) (*ListActivityResponse, error
 			HasMore       bool                             `json:"hasMore"`
 			Items         []ComponentsSchemasActivityEvent `json:"items"`
 			NextCursor    *string                          `json:"nextCursor,omitempty"`
-			RetentionDays *ListActivity200RetentionDays    `json:"retentionDays,omitempty"`
+			RetentionDays *int                             `json:"retentionDays,omitempty"`
 			RetentionMode ListActivity200RetentionMode     `json:"retentionMode"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -16934,7 +23905,8 @@ func ParseGetAuthConfigResponse(rsp *http.Response) (*GetAuthConfigResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Mode GetAuthConfig200Mode `json:"mode"`
+			LocalAccounts bool                 `json:"localAccounts"`
+			Mode          GetAuthConfig200Mode `json:"mode"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -17338,7 +24310,8 @@ func ParseListBroodSchedulesResponse(rsp *http.Response) (*ListBroodSchedulesRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasBroodScheduleResponse `json:"items"`
+			Clusters []ComponentsSchemasBroodRunClusterStatus `json:"clusters"`
+			Items    []ComponentsSchemasBroodScheduleResponse `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -17631,6 +24604,314 @@ func ParseAuthCallbackResponse(rsp *http.Response) (*AuthCallbackResponse, error
 	return response, nil
 }
 
+// ParseListCellPoolsResponse parses an HTTP response from a ListCellPoolsWithResponse call
+func ParseListCellPoolsResponse(rsp *http.Response) (*ListCellPoolsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListCellPoolsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+			Items    []ComponentsSchemasCellPool            `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellPoolResponse parses an HTTP response from a GetCellPoolWithResponse call
+func ParseGetCellPoolResponse(rsp *http.Response) (*GetCellPoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellPoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesClusterUnreachable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchCellPoolResponse parses an HTTP response from a PatchCellPoolWithResponse call
+func ParsePatchCellPoolResponse(rsp *http.Response) (*PatchCellPoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchCellPoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellPool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesClusterUnreachable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListCellUsageResponse parses an HTTP response from a ListCellUsageWithResponse call
+func ParseListCellUsageResponse(rsp *http.Response) (*ListCellUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListCellUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items []ComponentsSchemasCellUsage `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellGrantsResponse parses an HTTP response from a GetCellGrantsWithResponse call
+func ParseGetCellGrantsResponse(rsp *http.Response) (*GetCellGrantsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellGrantsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellGrants
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetCellUsageResponse parses an HTTP response from a GetCellUsageWithResponse call
+func ParseGetCellUsageResponse(rsp *http.Response) (*GetCellUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCellUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasCellUsage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListClustersResponse parses an HTTP response from a ListClustersWithResponse call
 func ParseListClustersResponse(rsp *http.Response) (*ListClustersResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -17697,6 +24978,13 @@ func ParseListCatalogItemsResponse(rsp *http.Response) (*ListCatalogItemsRespons
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	}
 
 	return response, nil
@@ -17729,6 +25017,13 @@ func ParseGetCatalogItemResponse(rsp *http.Response) (*GetCatalogItemResponse, e
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound
@@ -17772,6 +25067,13 @@ func ParseListCatalogSourcesResponse(rsp *http.Response) (*ListCatalogSourcesRes
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	}
 
 	return response, nil
@@ -17812,6 +25114,13 @@ func ParseCreateCatalogSourceResponse(rsp *http.Response) (*CreateCatalogSourceR
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -17845,6 +25154,13 @@ func ParseDeleteCatalogSourceResponse(rsp *http.Response) (*DeleteCatalogSourceR
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -17877,6 +25193,13 @@ func ParseGetCatalogSourceResponse(rsp *http.Response) (*GetCatalogSourceRespons
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound
@@ -17931,6 +25254,13 @@ func ParseUpdateCatalogSourceResponse(rsp *http.Response) (*UpdateCatalogSourceR
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -18008,6 +25338,13 @@ func ParseListComposedBundlesResponse(rsp *http.Response) (*ListComposedBundlesR
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	}
 
@@ -18194,6 +25531,13 @@ func ParseGetComposedBundleResponse(rsp *http.Response) (*GetComposedBundleRespo
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ComponentsResponsesNotFound
@@ -18779,7 +26123,7 @@ func ParseApproveControllerResponse(rsp *http.Response) (*ApproveControllerRespo
 		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ComponentsResponsesConflict
+		var dest ComponentsResponsesApproveConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -18841,6 +26185,74 @@ func ParseApproveControllerDeletionResponse(rsp *http.Response) (*ApproveControl
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseBreakGlassControllerResponse parses an HTTP response from a BreakGlassControllerWithResponse call
+func ParseBreakGlassControllerResponse(rsp *http.Response) (*BreakGlassControllerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BreakGlassControllerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasBreakGlassResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -18953,6 +26365,74 @@ func ParseHibernateControllerResponse(rsp *http.Response) (*HibernateControllerR
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetControllerJenkinsLinkResponse parses an HTTP response from a GetControllerJenkinsLinkWithResponse call
+func ParseGetControllerJenkinsLinkResponse(rsp *http.Response) (*GetControllerJenkinsLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetControllerJenkinsLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJenkinsLink
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -20685,6 +28165,121 @@ func ParseGetIdentitySettingsResponse(rsp *http.Response) (*GetIdentitySettingsR
 	return response, nil
 }
 
+// ParseListAllFleetLocksResponse parses an HTTP response from a ListAllFleetLocksWithResponse call
+func ParseListAllFleetLocksResponse(rsp *http.Response) (*ListAllFleetLocksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAllFleetLocksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetLockListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReleaseFleetLockResponse parses an HTTP response from a ReleaseFleetLockWithResponse call
+func ParseReleaseFleetLockResponse(rsp *http.Response) (*ReleaseFleetLockResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseFleetLockResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetLockReleaseResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasFleetLockReleaseConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseLoginResponse parses an HTTP response from a LoginWithResponse call
 func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -21033,7 +28628,7 @@ func ParseGetMyPermissionsResponse(rsp *http.Response) (*GetMyPermissionsRespons
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest ComponentsSchemasPermissionScopes
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -21078,6 +28673,626 @@ func ParseUpdateMyPreferencesResponse(rsp *http.Response) (*UpdateMyPreferencesR
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPipelineTeamsResponse parses an HTTP response from a ListPipelineTeamsWithResponse call
+func ParseListPipelineTeamsResponse(rsp *http.Response) (*ListPipelineTeamsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPipelineTeamsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelineTeamList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ComponentsResponsesInternal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListPipelinesResponse parses an HTTP response from a ListPipelinesWithResponse call
+func ParseListPipelinesResponse(rsp *http.Response) (*ListPipelinesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPipelinesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelineListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTeamCellResponse parses an HTTP response from a GetTeamCellWithResponse call
+func ParseGetTeamCellResponse(rsp *http.Response) (*GetTeamCellResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTeamCellResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamCell
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPipelineJobResponse parses an HTTP response from a GetPipelineJobWithResponse call
+func ParseGetPipelineJobResponse(rsp *http.Response) (*GetPipelineJobResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPipelineJobResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelineJobDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListJobBranchesResponse parses an HTTP response from a ListJobBranchesWithResponse call
+func ParseListJobBranchesResponse(rsp *http.Response) (*ListJobBranchesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListJobBranchesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasJobBranchList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunsResponse parses an HTTP response from a ListRunsWithResponse call
+func ParseListRunsResponse(rsp *http.Response) (*ListRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateRunResponse parses an HTTP response from a CreateRunWithResponse call
+func ParseCreateRunResponse(rsp *http.Response) (*CreateRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseScanMultibranchResponse parses an HTTP response from a ScanMultibranchWithResponse call
+func ParseScanMultibranchResponse(rsp *http.Response) (*ScanMultibranchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ScanMultibranchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasBranchScanResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListJobTestCaseHistoryResponse parses an HTTP response from a ListJobTestCaseHistoryWithResponse call
+func ParseListJobTestCaseHistoryResponse(rsp *http.Response) (*ListJobTestCaseHistoryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListJobTestCaseHistoryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTestCaseHistoryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListTeamFleetLocksResponse parses an HTTP response from a ListTeamFleetLocksWithResponse call
+func ParseListTeamFleetLocksResponse(rsp *http.Response) (*ListTeamFleetLocksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListTeamFleetLocksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasFleetLockListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseValidatePipelineMarkerResponse parses an HTTP response from a ValidatePipelineMarkerWithResponse call
+func ParseValidatePipelineMarkerResponse(rsp *http.Response) (*ValidatePipelineMarkerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ValidatePipelineMarkerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasPipelineMarkerValidateResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamTeamRunsResponse parses an HTTP response from a StreamTeamRunsWithResponse call
+func ParseStreamTeamRunsResponse(rsp *http.Response) (*StreamTeamRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamTeamRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -21530,6 +29745,1036 @@ func ParseUpdateVarroaRoleResponse(rsp *http.Response) (*UpdateVarroaRoleRespons
 	return response, nil
 }
 
+// ParseListRunnersResponse parses an HTTP response from a ListRunnersWithResponse call
+func ParseListRunnersResponse(rsp *http.Response) (*ListRunnersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunnersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Items []ComponentsSchemasRunnerEntry `json:"items"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateRunnerResponse parses an HTTP response from a CreateRunnerWithResponse call
+func ParseCreateRunnerResponse(rsp *http.Response) (*CreateRunnerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateRunnerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteRunnerResponse parses an HTTP response from a DeleteRunnerWithResponse call
+func ParseDeleteRunnerResponse(rsp *http.Response) (*DeleteRunnerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteRunnerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunnerResponse parses an HTTP response from a GetRunnerWithResponse call
+func ParseGetRunnerResponse(rsp *http.Response) (*GetRunnerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunnerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunnerEntry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchRunnerResponse parses an HTTP response from a PatchRunnerWithResponse call
+func ParsePatchRunnerResponse(rsp *http.Response) (*PatchRunnerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchRunnerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunResponse parses an HTTP response from a GetRunWithResponse call
+func ParseGetRunResponse(rsp *http.Response) (*GetRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunArtifactsResponse parses an HTTP response from a ListRunArtifactsWithResponse call
+func ParseListRunArtifactsResponse(rsp *http.Response) (*ListRunArtifactsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunArtifactsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunArtifactListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDownloadRunArtifactResponse parses an HTTP response from a DownloadRunArtifactWithResponse call
+func ParseDownloadRunArtifactResponse(rsp *http.Response) (*DownloadRunArtifactResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadRunArtifactResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelRunResponse parses an HTTP response from a CancelRunWithResponse call
+func ParseCancelRunResponse(rsp *http.Response) (*CancelRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasCancelRunResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunChangesResponse parses an HTTP response from a ListRunChangesWithResponse call
+func ParseListRunChangesResponse(rsp *http.Response) (*ListRunChangesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunChangesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunChangeListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunDownstreamResponse parses an HTTP response from a ListRunDownstreamWithResponse call
+func ParseListRunDownstreamResponse(rsp *http.Response) (*ListRunDownstreamResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunDownstreamResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunLinkPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAbortRunInputResponse parses an HTTP response from a AbortRunInputWithResponse call
+func ParseAbortRunInputResponse(rsp *http.Response) (*AbortRunInputResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AbortRunInputResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasCancelRunResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseProceedRunInputResponse parses an HTTP response from a ProceedRunInputWithResponse call
+func ParseProceedRunInputResponse(rsp *http.Response) (*ProceedRunInputResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProceedRunInputResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasCancelRunResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamRunLogResponse parses an HTTP response from a StreamRunLogWithResponse call
+func ParseStreamRunLogResponse(rsp *http.Response) (*StreamRunLogResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamRunLogResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReplayRunResponse parses an HTTP response from a ReplayRunWithResponse call
+func ParseReplayRunResponse(rsp *http.Response) (*ReplayRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReplayRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRerunRunResponse parses an HTTP response from a RerunRunWithResponse call
+func ParseRerunRunResponse(rsp *http.Response) (*RerunRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RerunRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunRestartResponse parses an HTTP response from a GetRunRestartWithResponse call
+func ParseGetRunRestartResponse(rsp *http.Response) (*GetRunRestartResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunRestartResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunRestart
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestartRunResponse parses an HTTP response from a RestartRunWithResponse call
+func ParseRestartRunResponse(rsp *http.Response) (*RestartRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestartRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasRunActionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRunScriptResponse parses an HTTP response from a GetRunScriptWithResponse call
+func ParseGetRunScriptResponse(rsp *http.Response) (*GetRunScriptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRunScriptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunScript
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunTestsResponse parses an HTTP response from a ListRunTestsWithResponse call
+func ParseListRunTestsResponse(rsp *http.Response) (*ListRunTestsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunTestsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunTestListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseSearchResponse parses an HTTP response from a SearchWithResponse call
 func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -21546,7 +30791,8 @@ func ParseSearchResponse(rsp *http.Response) (*SearchResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Items []ComponentsSchemasSearchResult `json:"items"`
+			Clusters []ComponentsSchemasClusterFanoutStatus `json:"clusters"`
+			Items    []ComponentsSchemasSearchResult        `json:"items"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err

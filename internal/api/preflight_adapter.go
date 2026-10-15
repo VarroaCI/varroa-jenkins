@@ -49,6 +49,11 @@ func (a PreflightStore) DeleteObject(ctx context.Context, gvr schema.GroupVersio
 	return a.Store.DeleteObject(ctx, gvr, ns, name)
 }
 
+// DeleteObjectIfUnchanged implements crdstore.Backend.
+func (a PreflightStore) DeleteObjectIfUnchanged(ctx context.Context, gvr schema.GroupVersionResource, ns, name, uid, resourceVersion string) error {
+	return a.Store.DeleteObjectIfUnchanged(ctx, gvr, ns, name, uid, resourceVersion)
+}
+
 // PatchObjectStatus implements crdstore.Backend.
 func (a PreflightStore) PatchObjectStatus(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, status any) error {
 	return a.Store.PatchObjectStatus(ctx, gvr, ns, name, status)
@@ -57,6 +62,11 @@ func (a PreflightStore) PatchObjectStatus(ctx context.Context, gvr schema.GroupV
 // PatchObjectMeta implements crdstore.Backend.
 func (a PreflightStore) PatchObjectMeta(ctx context.Context, gvr schema.GroupVersionResource, ns, name string, meta map[string]any) error {
 	return a.Store.PatchObjectMeta(ctx, gvr, ns, name, meta)
+}
+
+// PatchObjectMetaAt implements crdstore.Backend.
+func (a PreflightStore) PatchObjectMetaAt(ctx context.Context, gvr schema.GroupVersionResource, ns, name, resourceVersion string, meta map[string]any) (string, error) {
+	return a.Store.PatchObjectMetaAt(ctx, gvr, ns, name, resourceVersion, meta)
 }
 
 // ResourceClient methods needed by preflight

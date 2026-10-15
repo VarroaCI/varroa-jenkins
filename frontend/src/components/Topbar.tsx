@@ -66,6 +66,18 @@ interface Crumb {
   bold: boolean;
 }
 
+// AREA_LABELS names the path segments that capitalisation alone cannot spell.
+const AREA_LABELS: Record<string, string> = { "api-keys": "API keys", "cli-auth": "CLI auth" };
+
+// areaLabel turns one path segment into its crumb text. A segment with
+// no entry in AREA_LABELS becomes its words, with the first letter capitalised.
+function areaLabel(segment: string): string {
+  const mapped = AREA_LABELS[segment];
+  if (mapped !== undefined) return mapped;
+  const words = segment.replace(/-/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function buildCrumbs(pathname: string, match: ReturnType<typeof useMatch>): Crumb[] {
   if (match) {
     return [
@@ -77,6 +89,6 @@ function buildCrumbs(pathname: string, match: ReturnType<typeof useMatch>): Crum
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length === 0) return [{ label: "Dashboard", bold: true }];
 
-  const label = segments[0].charAt(0).toUpperCase() + segments[0].slice(1);
+  const label = areaLabel(segments[0]);
   return [{ label, bold: true }];
 }

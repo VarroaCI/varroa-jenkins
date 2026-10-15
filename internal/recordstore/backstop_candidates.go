@@ -1,0 +1,150 @@
+package recordstore
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// maxBackstopOccurrenceAge is D11's 24-hour bound: the operator's
+// imperative command rides a work-queue stream whose maximum age is 24
+// hours, so an older fire can never reach a controller that is still
+// asleep.
+const maxBackstopOccurrenceAge = 24 * time.Hour
+
+// occurrenceMinuteKey formats occ as D11's occurrence minute: truncated
+// to the minute, in UTC, RFC3339.
+func occurrenceMinuteKey(occ time.Time) string {
+	return occ.UTC().Truncate(time.Minute).Format(time.RFC3339)
+}
+
+// cronIntentKey is D11's ledger key for one job's missed occurrence:
+// cron:<job-path>:<occurrence-minute>. A cell that fires the same
+// occurrence late produces the same key, so the ledger answers
+// duplicate and exactly one build runs.
+func cronIntentKey(jobPath string, occ time.Time) string {
+	return fmt.Sprintf("cron:%s:%s", jobPath, occurrenceMinuteKey(occ))
+}
+
+// isBackstopCandidate applies D11's candidate rules to one exported
+// occurrence of cluster/jobPath: older than grace, not older than 24
+// hours, no cron:<job-path>:<occurrence-minute> intent, no failed run
+// under that key, and no build.scheduled.backstop activity row for the
+// same cluster, job path, and occurrence minute newer than the longer of
+// the grace window and backstopAnswerWait.
+func isBackstopCandidate(ctx context.Context, reader Reader, pool *pgxpool.Pool, cluster, jobPath string, occ, now time.Time, grace time.Duration) (bool, error) {
+	if !occ.Before(now.Add(-grace)) {
+		return false, nil
+	}
+	if occ.Before(now.Add(-maxBackstopOccurrenceAge)) {
+		return false, nil
+	}
+
+	_, found, err := reader.GetIntentByKey(ctx, cronIntentKey(jobPath, occ))
+	if err != nil {
+		return false, fmt.Errorf("get intent by key: %w", err)
+	}
+	if found {
+		return false, nil
+	}
+
+	// An occurrence with a failed fire belongs to the re-fire pass
+	// (selectBackstopRetries), which bounds its attempts and never
+	// re-fires a permanent failure.
+	failed, err := hasTriggerFailure(ctx, pool, cluster, cronIntentKey(jobPath, occ))
+	if err != nil {
+		return false, err
+	}
+	if failed {
+		return false, nil
+	}
+
+	// A fire with no answer yet can still wait on a booting cell, so the
+	// suppression lasts at least backstopAnswerWait, like a re-fire's.
+	logged, err := backstopFireRecentlyLogged(ctx, pool, cluster, jobPath, occurrenceMinuteKey(occ),
+		now.Add(-max(grace, backstopAnswerWait)))
+	if err != nil {
+		return false, err
+	}
+	return !logged, nil
+}
+
+// backstopFireRecentlyLogged reports whether a build.scheduled.backstop
+// activity row for cluster, jobPath, and occurrenceKey exists with ts
+// newer than since. It matches cluster and jobPath, not jobPath alone,
+// because the activity table holds every cluster's rows together and a
+// job path is unique only within its own cluster. jobPath's own leading
+// segment is the tenant, per the cross-tenant-veto convention, so
+// matching jobPath already scopes the match to one tenant; a separate
+// tenant column does not exist on this table. The test is time-bounded
+// on purpose: an action is at-most-once, so a permanent skip would
+// strand a lost fire.
+func backstopFireRecentlyLogged(ctx context.Context, pool *pgxpool.Pool, cluster, jobPath, occurrenceKey string, since time.Time) (bool, error) {
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM varroa.activity
+			WHERE type = 'build.scheduled.backstop' AND cluster = $1 AND item_path = $2 AND reason = $3 AND ts > $4
+		)
+	`, cluster, jobPath, occurrenceKey, since).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("read backstop activity row: %w", err)
+	}
+	return exists, nil
+}
+
+// selectCandidateOccurrences applies isBackstopCandidate to every
+// exported occurrence of one cluster's job schedule row, in the order
+// the plugin exported them.
+func selectCandidateOccurrences(ctx context.Context, reader Reader, pool *pgxpool.Pool, cluster, jobPath string, occurrences []time.Time, now time.Time, grace time.Duration) ([]time.Time, error) {
+	var out []time.Time
+	for _, occ := range occurrences {
+		ok, err := isBackstopCandidate(ctx, reader, pool, cluster, jobPath, occ, now, grace)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, occ)
+		}
+	}
+	return out, nil
+}
+
+// dropSupersededCandidates removes every candidate before the newest
+// occurrence the backstop already fired for cluster/jobPath in the last
+// 24 hours. The fired occurrence itself stays: isBackstopCandidate's
+// time-bounded test decides whether a lost fire runs again. A row keeps passed occurrences, so without this
+// rule each round would fire the next older miss, and cronCatchUp
+// "one" would fire once for every kept miss. The first round already
+// counted those older misses.
+func dropSupersededCandidates(ctx context.Context, pool *pgxpool.Pool, cluster, jobPath string, candidates []time.Time, now time.Time) ([]time.Time, error) {
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+	var newest *string
+	err := pool.QueryRow(ctx, `
+		SELECT max(reason) FROM varroa.activity
+		WHERE type = 'build.scheduled.backstop' AND cluster = $1 AND item_path = $2 AND ts > $3
+	`, cluster, jobPath, now.Add(-maxBackstopOccurrenceAge)).Scan(&newest)
+	if err != nil {
+		return nil, fmt.Errorf("read newest backstop fire: %w", err)
+	}
+	if newest == nil {
+		return candidates, nil
+	}
+	// Every reason fireOne writes is an occurrence minute. A reason that
+	// does not parse supersedes nothing.
+	fired, parseErr := time.Parse(time.RFC3339, *newest)
+	if parseErr != nil {
+		return candidates, nil //nolint:nilerr // an unparsable reason supersedes nothing
+	}
+	out := candidates[:0]
+	for _, occ := range candidates {
+		if !occ.UTC().Truncate(time.Minute).Before(fired) {
+			out = append(out, occ)
+		}
+	}
+	return out, nil
+}

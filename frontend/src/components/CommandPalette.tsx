@@ -1,17 +1,23 @@
-import { useDeferredValue, useState, useEffect, useRef } from "react";
+import { useDeferredValue, useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Folder, Server, UsersRound } from "lucide-react";
+import { Activity, Boxes, Folder, PlayCircle, Server, UsersRound, Workflow } from "lucide-react";
 import { bffFetch } from "../hooks/useApi";
+import type { ClusterFanoutStatus } from "../hooks/useControllers";
 import styles from "./CommandPalette.module.css";
 
 interface SearchResult {
-  type: "controller" | "namespace" | "group" | "catalogitem";
+  type: "controller" | "namespace" | "group" | "catalogitem" | "job" | "run" | "activity";
   cluster?: string;
   name: string;
   namespace?: string;
   description?: string;
   link: string;
+}
+
+interface SearchBody {
+  items: SearchResult[];
+  clusters: ClusterFanoutStatus[];
 }
 
 interface CommandPaletteProps {
@@ -21,8 +27,25 @@ interface CommandPaletteProps {
   onQueryChange?: (query: string) => void;
 }
 
-const categoryLabels = ["Controllers", "Namespaces", "Groups", "Catalog Items"];
-const icons = { controller: Server, namespace: Folder, group: UsersRound, catalogitem: Boxes };
+const categoryLabels = ["Controllers", "Namespaces", "Groups", "Catalog Items", "Jobs", "Runs", "Activity"];
+const groupLabels: Record<SearchResult["type"], string> = {
+  controller: "controllers",
+  namespace: "namespaces",
+  group: "groups",
+  catalogitem: "catalog items",
+  job: "jobs",
+  run: "runs",
+  activity: "activity",
+};
+const icons = {
+  controller: Server,
+  namespace: Folder,
+  group: UsersRound,
+  catalogitem: Boxes,
+  job: Workflow,
+  run: PlayCircle,
+  activity: Activity,
+};
 
 export function CommandPalette(props: CommandPaletteProps) {
   const [localOpen, setLocalOpen] = useState(false);
@@ -50,12 +73,14 @@ export function CommandPalette(props: CommandPaletteProps) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [props.open]);
 
-  const { data: results = [], isLoading, error } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["search", deferredQuery],
-    queryFn: ({ signal }) => bffFetch<{items: SearchResult[]}>(`/search?q=${encodeURIComponent(deferredQuery)}`, { signal }).then(r => r.items),
+    queryFn: ({ signal }) => bffFetch<SearchBody>(`/search?q=${encodeURIComponent(deferredQuery)}`, { signal }),
     enabled: open && deferredQuery.length > 0,
     staleTime: 5_000,
   });
+  const results = useMemo(() => data?.items ?? [], [data]);
+  const failedClusters = useMemo(() => (data?.clusters ?? []).filter((c) => !c.ok), [data]);
 
   useEffect(() => {
     if (open) {
@@ -110,9 +135,14 @@ export function CommandPalette(props: CommandPaletteProps) {
           {!query.trim() && <div className={styles.empty}>Type to search<div>{categoryLabels.join(" · ")}</div></div>}
           {isLoading && <div className={styles.empty}>Searching...</div>}
           {error && <div className={styles.empty} role="alert">Search is unavailable. Try again.</div>}
+          {query.trim() && !isLoading && !error && failedClusters.map((c) => (
+            <div key={c.name} className={styles.notice} role="status">
+              Results from cluster <code>{c.name}</code> may be incomplete: {c.error || "the cluster did not answer"}.
+            </div>
+          ))}
           {Object.entries(byType).map(([type, items]) => (
             <div key={type} className={styles.group}>
-              <div className={styles.groupLabel}>{type}s</div>
+              <div className={styles.groupLabel}>{groupLabels[type as SearchResult["type"]] ?? type}</div>
               {items.map((r) => {
                 const idx = results.indexOf(r);
                 const Icon = icons[r.type];

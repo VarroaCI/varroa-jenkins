@@ -51,6 +51,18 @@ type Provider struct {
 	ttl          time.Duration
 	cookieDomain string
 	limiter      *loginLimiter
+	// besideOIDC is true when local accounts sign in beside a primary
+	// OIDC provider. It prefixes the subject and requires a purpose.
+	besideOIDC bool
+}
+
+// LoginResult is the outcome of a local sign-in. Purpose is set when the
+// named User exists beside OIDC and carries a purpose, also when the
+// sign-in fails, so the caller can audit an attempt on a declared account.
+type LoginResult struct {
+	IDToken   string
+	ExpiresIn int
+	Purpose   v1alpha1.UserPurpose
 }
 
 // New creates a new local Provider.
@@ -66,6 +78,16 @@ func New(signer *signing.Signer, store userStore, ns, issuerURL, clientID string
 		limiter:      newLoginLimiter(),
 	}
 }
+
+// SetBesideOIDC marks the provider as the local account path beside a
+// primary OIDC provider.
+func (p *Provider) SetBesideOIDC(v bool) { p.besideOIDC = v }
+
+// BesideOIDC reports whether the provider runs beside a primary OIDC provider.
+func (p *Provider) BesideOIDC() bool { return p.besideOIDC }
+
+// Issuer returns the issuer URL that local session tokens carry.
+func (p *Provider) Issuer() string { return p.issuerURL }
 
 // --- auth.Provider interface ---
 
@@ -98,10 +120,14 @@ func (p *Provider) Discovery() ([]byte, []byte, bool) {
 // On success it returns a signed RS256 id_token and the lifetime in
 // seconds. On failure it returns ErrInvalidCredentials (same error for
 // unknown user and wrong password — no user enumeration) or
-// ErrRateLimited.
-func (p *Provider) Login(ctx context.Context, username, password string) (idToken string, expiresIn int, err error) {
+// ErrRateLimited. Beside OIDC, a User without a purpose or a User that
+// the IdP provisioned fails with ErrInvalidCredentials.
+func (p *Provider) Login(ctx context.Context, username, password string) (LoginResult, error) {
 	if !p.limiter.Allow(username) {
-		return "", 0, ErrRateLimited
+		return LoginResult{}, ErrRateLimited
+	}
+	if p.besideOIDC && strings.HasPrefix(username, "oidc-") {
+		return LoginResult{}, ErrInvalidCredentials
 	}
 
 	// Fetch the User CRD. A missing user returns the same opaque error as a
@@ -110,33 +136,45 @@ func (p *Provider) Login(ctx context.Context, username, password string) (idToke
 	u, err := p.store.GetUserCRD(ctx, username, p.ns)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", 0, ErrInvalidCredentials
+			return LoginResult{}, ErrInvalidCredentials
 		}
-		return "", 0, fmt.Errorf("get user %s: %w", username, err)
+		return LoginResult{}, fmt.Errorf("get user %s: %w", username, err)
 	}
-	if u == nil || u.Status.Credentials == nil || u.Status.Credentials.PasswordHash == "" {
-		return "", 0, ErrInvalidCredentials
+	if u == nil {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	var res LoginResult
+	subject := username
+	if p.besideOIDC {
+		if u.Spec.Purpose == "" || u.Labels[v1alpha1.LabelManagedBy] == v1alpha1.ManagedByIDP {
+			return LoginResult{}, ErrInvalidCredentials
+		}
+		res.Purpose = u.Spec.Purpose
+		subject = auth.LocalSubjectPrefix + username
+	}
+	if u.Status.Credentials == nil || u.Status.Credentials.PasswordHash == "" {
+		return res, ErrInvalidCredentials
 	}
 
 	// Compare password hash.
 	if err := bcrypt.CompareHashAndPassword([]byte(u.Status.Credentials.PasswordHash), []byte(password)); err != nil {
-		return "", 0, ErrInvalidCredentials
+		return res, ErrInvalidCredentials
 	}
 
-	// Resolve group memberships.
+	// Resolve group memberships. Group members name the bare username.
 	groups, err := p.resolveGroups(ctx, username)
 	if err != nil {
-		return "", 0, fmt.Errorf("resolve groups: %w", err)
+		return res, fmt.Errorf("resolve groups: %w", err)
 	}
 
 	// Build claims and sign.
 	now := time.Now()
 	claims := map[string]any{
 		"iss":                p.issuerURL,
-		"sub":                username,
+		"sub":                subject,
 		"email":              u.Spec.Email,
 		"name":               u.Spec.DisplayName,
-		"preferred_username": username,
+		"preferred_username": subject,
 		"groups":             groups,
 		"iat":                now.Unix(),
 		"exp":                now.Add(p.ttl).Unix(),
@@ -145,7 +183,7 @@ func (p *Provider) Login(ctx context.Context, username, password string) (idToke
 
 	token, err := p.signer.SignJWT(claims)
 	if err != nil {
-		return "", 0, fmt.Errorf("sign jwt: %w", err)
+		return res, fmt.Errorf("sign jwt: %w", err)
 	}
 
 	// Best-effort update last login timestamp.
@@ -155,7 +193,9 @@ func (p *Provider) Login(ctx context.Context, username, password string) (idToke
 	// pre-existing users on their next login).
 	p.ensureLocalLabel(ctx, u)
 
-	return token, int(p.ttl.Seconds()), nil
+	res.IDToken = token
+	res.ExpiresIn = int(p.ttl.Seconds())
+	return res, nil
 }
 
 // resolveGroups returns the names of all groups that include username.
@@ -280,13 +320,17 @@ func (p *Provider) Verify(ctx context.Context, rawToken string) (*auth.Claims, e
 		return nil, ErrExpiredToken
 	}
 
-	return &auth.Claims{
+	claims := &auth.Claims{
 		Subject:           lc.Sub,
 		Email:             lc.Email,
 		Name:              lc.Name,
 		PreferredUsername: lc.PreferredUsername,
 		Groups:            lc.Groups,
-	}, nil
+	}
+	if lc.Iat > 0 {
+		claims.IssuedAt = time.Unix(lc.Iat, 0)
+	}
+	return claims, nil
 }
 
 // --- Password helpers (used by API handlers in Phase 6) ---

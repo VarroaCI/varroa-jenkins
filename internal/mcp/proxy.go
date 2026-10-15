@@ -11,14 +11,26 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// breakGlassReasonMaxChars caps the MCP break-glass reason at the same length
+// as the BFF break-glass grant endpoint. The API rejects a longer reason
+// instead of truncating it, so the stored audit field always matches the
+// caller's text.
+const breakGlassReasonMaxChars = 256
+
+// pipelinesToolsHint names the tools an MCP caller should use instead of the
+// Jenkins UI on a headless controller.
+const pipelinesToolsHint = "use run_pipeline, list_runs, get_run, or get_run_log instead"
 
 func registerProxyTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listJenkinsCtlrsTool := mcp.NewTool("list_jenkins_controllers",
@@ -46,6 +58,10 @@ func registerProxyTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		mcp.WithObject("params",
 			mcp.Description("JSON-RPC params payload"),
 		),
+		mcp.WithString("reason",
+			mcp.Description("Reason for the call. Required, and capped at 256 characters, "+
+				"only when the target controller is headless."),
+		),
 	)
 	addTool(mcpServer, kindProxy, callJenkinsToolTool, handleCallJenkinsTool(deps))
 }
@@ -54,7 +70,7 @@ func handleListJenkinsControllers(deps *api.Dependencies) func(ctx context.Conte
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		namespace, _ := getArgs(req)["namespace"].(string)
 
-		controllers, err := crdstore.List[v1alpha1.Controller](ctx, deps.Store, namespace, "")
+		controllers, err := deps.LocalControllers(ctx, namespace)
 		if err != nil {
 			return mcp.NewToolResultError("failed to list controllers: " + err.Error()), nil
 		}
@@ -125,6 +141,32 @@ func handleCallJenkinsTool(deps *api.Dependencies) func(ctx context.Context, req
 			return mcp.NewToolResultError("controller not found: " + err.Error()), nil
 		}
 
+		if v1alpha1.IsHeadless(cr) {
+			reason, _ := getArgs(req)["reason"].(string)
+			switch {
+			case !deps.Authorizer.CanBreakGlass(claims, namespace, name):
+				return mcp.NewToolResultError("access denied: controller is headless; " +
+					pipelinesToolsHint + ", or hold the controllers/break-glass permission"), nil
+			case reason == "":
+				return mcp.NewToolResultError("reason is required for a headless controller; " +
+					pipelinesToolsHint + ", or supply a reason to request a break-glass grant"), nil
+			case utf8.RuneCountInString(reason) > breakGlassReasonMaxChars:
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"reason must be at most %d characters; "+pipelinesToolsHint, breakGlassReasonMaxChars)), nil
+			case deps.ActivityPublisher == nil:
+				return mcp.NewToolResultError("break-glass auditing is unavailable; " + pipelinesToolsHint), nil
+			}
+			emitActivity(deps, claims, activity.Event{
+				Type:       "controller.breakglass.granted",
+				Severity:   "warning",
+				Namespace:  namespace,
+				Controller: name,
+				Reason:     reason,
+				Message: fmt.Sprintf("break-glass grant issued to %s via the MCP proxy: %s",
+					api.ActorFrom(claims), reason),
+			})
+		}
+
 		if !cr.Status.MiteStatus.Connected {
 			return mcp.NewToolResultError("controller is not reachable: mite not connected"), nil
 		}
@@ -136,7 +178,7 @@ func handleCallJenkinsTool(deps *api.Dependencies) func(ctx context.Context, req
 			return mcp.NewToolResultError("failed to mint per-caller identity: " + err.Error()), nil
 		}
 
-		targetURL := buildJenkinsServiceURL(cr)
+		targetURL := api.BuildJenkinsServiceURL(cr)
 		result, err := callJenkinsMCP(ctx, targetURL, method, params, token)
 		if err != nil {
 			return mcp.NewToolResultError("Jenkins MCP call failed: " + err.Error()), nil
@@ -313,15 +355,6 @@ func decodeMCPEventStream(body io.Reader) (interface{}, error) {
 		return result, nil
 	}
 	return nil, fmt.Errorf("no JSON-RPC response in event stream")
-}
-
-func buildJenkinsServiceURL(cr *v1alpha1.Controller) string {
-	uid := string(cr.UID)
-	if len(uid) > 8 {
-		uid = uid[:8]
-	}
-	prefix := cr.Name + "-" + uid
-	return fmt.Sprintf("http://%s-svc.%s.svc.cluster.local:8080", prefix, cr.Namespace)
 }
 
 func buildJSONRPCEnvelope(method string, params interface{}) ([]byte, error) {

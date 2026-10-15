@@ -1,0 +1,22 @@
+items:
+  - kind: multibranch
+    name: multibranch-gitea-source
+    displayName: "Multibranch Gitea Source"
+    description: "Multibranch pipeline with a Gitea source"
+    sourcesList:
+      - branchSource:
+          source:
+            gitea:
+              serverUrl: https://git.fake-forge.example
+              repoOwner: fake-org
+              repository: fake-repo
+              credentialsId: gitea-cred
+              traits:
+                - giteaBranchDiscovery:
+                    strategyId: 3
+                - giteaForkDiscovery:
+                    strategyId: 1
+                    trust: nobody
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile

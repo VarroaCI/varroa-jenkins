@@ -91,7 +91,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	// --- Step 2: Phase A — download + verify (no store writes) ---
-	resolvedPlugins, unreadableManifests, err := downloadAndVerify(cmd.Context(), downloadURLBase, resolved)
+	resolvedPlugins, unreadableManifests, err := downloadAndVerify(cmd.Context(), downloadURLBase, jenkinsVersion, resolved)
 	if err != nil {
 		return err
 	}
@@ -323,10 +323,14 @@ func resolveFromPluginsFile(path string, _ string) ([]resolvedEntry, string, err
 // 84-plugin profile export must not fail wholesale because one upstream
 // artifact has an odd manifest — the derived annotations are omitted, a warning
 // is logged, and the plugin is named in the command's output.
-func downloadAndVerify(ctx context.Context, downloadURLBase string, entries []resolvedEntry) ([]oci.ResolvedPlugin, []string, error) {
+func downloadAndVerify(ctx context.Context, downloadURLBase, jenkinsVersion string, entries []resolvedEntry) ([]oci.ResolvedPlugin, []string, error) {
 	// One resolver per run: its sources are computed once and its per-source
 	// cache makes each metadata document a single fetch, not one per plugin.
 	resolver := newExportResolver(downloadURLBase, entries)
+	entries, err := resolveLatestPins(ctx, resolver, jenkinsVersion, entries)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	resolved := make([]oci.ResolvedPlugin, 0, len(entries))
 	var unreadable []string
@@ -342,6 +346,44 @@ func downloadAndVerify(ctx context.Context, downloadURLBase string, entries []re
 		resolved = append(resolved, dp.plugin)
 	}
 	return resolved, unreadable, nil
+}
+
+// resolveLatestPins replaces every latest entry with a concrete version before
+// any download. A pack never carries the word latest: its lock hash and its
+// checksum both need one release. The core that filters the choice is the
+// entry's own ResolveVersion, else the profile's Jenkins version. Offline
+// mode passes no core, so the newest listed version wins.
+func resolveLatestPins(ctx context.Context, resolver *ucmeta.Resolver, jenkinsVersion string, entries []resolvedEntry) ([]resolvedEntry, error) {
+	out := make([]resolvedEntry, len(entries))
+	for i, e := range entries {
+		out[i] = e
+		if !ucmeta.IsLatest(e.Version) {
+			continue
+		}
+		core := e.ResolveVersion
+		if core == "" {
+			core = jenkinsVersion
+		}
+		a := resolver.ResolveLatestForCore(ctx, e.Name, core)
+		if a.Outcome != ucmeta.Resolved || a.Version == "" {
+			return nil, latestPinError(e.Name, core, a.Outcome)
+		}
+		fmt.Fprintf(os.Stderr, "resolved %s@latest to %s\n", e.Name, a.Version)
+		out[i].Version = a.Version
+	}
+	return out, nil
+}
+
+// latestPinError names the reason a latest pin could not resolve.
+func latestPinError(name, core string, outcome ucmeta.Outcome) error {
+	switch {
+	case outcome == ucmeta.SourcesDegraded:
+		return fmt.Errorf("resolve %s@latest: an update-center metadata source could not be read; retry or pin an exact version", name)
+	case core != "":
+		return fmt.Errorf("resolve %s@latest: no update-center metadata source lists a version that runs on Jenkins %s; pin an exact version", name, core)
+	default:
+		return fmt.Errorf("resolve %s@latest: no update-center metadata source lists the plugin; pin an exact version", name)
+	}
 }
 
 // userAgentRoundTripper stamps a User-Agent on every request it forwards.

@@ -1,0 +1,137 @@
+.nameCell { composes: nameCell from "../tables.module.css"; }
+
+/*
+ * --depth is the node's folder-relative depth. The row sets it with an
+ * inline style; this declaration is both the fallback for a row that sets
+ * none and the local declaration the style-integrity ratchet resolves.
+ * Depth is carried by the padding and the chevron position alone: a
+ * coloured border-left as a depth cue is not used.
+ */
+.row {
+  --depth: 0;
+}
+
+.pipelineCell {
+  padding-left: calc(12px + var(--depth) * 18px) !important;
+}
+
+.nodeLine {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.disclosure:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.chevron {
+  transition: transform 150ms ease-out;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.nodeName {
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+/* The branch name breaks at its separators, so the column stays narrow. */
+.branchCell {
+  overflow-wrap: break-word;
+}
+
+.counts {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.running {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--info-text);
+  white-space: nowrap;
+}
+
+/*
+ * The full job path is announced but not drawn, so a screen-reader user
+ * does not have to infer depth from indentation.
+ */
+.hiddenPath {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.healthCell {
+  display: flex;
+  align-items: center;
+}
+
+.healthClear { color: var(--ok-text); }
+.healthCloudy { color: var(--warn-text); }
+.healthRain { color: var(--bad-text); }
+
+.durationCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sparkline {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.lastDuration {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.dim {
+  color: var(--text-2);
+}
+
+.pendingBadge {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--info-soft);
+  color: var(--info-text);
+  white-space: nowrap;
+}

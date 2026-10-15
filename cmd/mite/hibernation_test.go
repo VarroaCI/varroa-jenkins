@@ -34,13 +34,13 @@ func TestHeartbeatOmitsIdleBeforeFirstPoll(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -86,7 +86,7 @@ func TestGaugesMatchFixture(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     srv.URL,
@@ -145,13 +145,13 @@ func TestHeartbeatIncludesIdleAfterPoll(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.heartbeatInterval = 30 * time.Millisecond
 
 	gauges := &mitev1.IdleGauges{
@@ -239,13 +239,13 @@ func TestReplayWebhook200(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -282,6 +282,120 @@ func TestReplayWebhook200(t *testing.T) {
 	}
 }
 
+// TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery asserts task
+// 11.2b: the mite sets X-Varroa-Delivery from payload.DeliveryId after it
+// copies the envelope's own headers, so a forged inbound X-Varroa-Delivery
+// header inside payload.Headers cannot survive the replay.
+func TestReplayWebhookSetsDeliveryHeaderAfterOverwritingForgery(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var gotDelivery string
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotDelivery = r.Header.Get("X-Varroa-Delivery")
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path: "github-webhook/",
+			// A forged inbound header under the same name the buffered
+			// envelope carries. It must not survive.
+			Headers:    map[string]string{"X-Varroa-Delivery": "forged"},
+			Body:       []byte("payload-body"),
+			DeliveryId: "github:8f2c-real",
+		},
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+
+	result := captured.Load()
+	if result == nil || !result.Success {
+		t.Fatalf("expected a successful replay, got %+v", result)
+	}
+	if gotDelivery != "github:8f2c-real" {
+		t.Errorf("X-Varroa-Delivery = %q, want the overwrite github:8f2c-real, not the forged value", gotDelivery)
+	}
+}
+
+// TestReplayWebhookSkipsDeliveryHeaderWhenEmpty asserts task 11.2b's other
+// half: an empty payload.DeliveryId sets no X-Varroa-Delivery header at
+// all.
+func TestReplayWebhookSkipsDeliveryHeaderWhenEmpty(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var sawHeader bool
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, sawHeader = r.Header["X-Varroa-Delivery"]
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path: "github-webhook/",
+			Body: []byte("payload-body"),
+			// DeliveryId left empty.
+		},
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+
+	result := captured.Load()
+	if result == nil || !result.Success {
+		t.Fatalf("expected a successful replay, got %+v", result)
+	}
+	if sawHeader {
+		t.Error("X-Varroa-Delivery header was set despite an empty delivery id")
+	}
+}
+
 // TestReplayWebhookAllowlist verifies that the handler checks the path
 // allowlist: allowlisted paths proceed, non-allowlisted paths are
 // rejected without any HTTP call.
@@ -295,6 +409,7 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 		{name: "github-webhook slash", path: "github-webhook/", wantOK: true},
 		{name: "generic-webhook-trigger invoke", path: "generic-webhook-trigger/invoke", wantOK: true},
 		{name: "github-webhook with suffix", path: "github-webhook/something", wantOK: true},
+		{name: "gitea-webhook post", path: "gitea-webhook/post", wantOK: true},
 		{name: "arbitrary path", path: "anything-else", wantOK: false, wantErr: "not allowlisted"},
 		{name: "path traversal", path: "../etc/passwd", wantOK: false, wantErr: "not allowlisted"},
 		{name: "empty path", path: "", wantOK: false, wantErr: "not allowlisted"},
@@ -302,13 +417,13 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream, captured := testReplayStream(t)
-			agent := NewAgent(Config{
+			agent := mustNewAgent(t, Config{
 				ControllerName: "test",
 				Namespace:      "ns",
 				JenkinsURL:     "http://localhost:1",
 			})
 			agent.Logger = slog.Default()
-			agent.stream = stream
+			setTestStream(agent, stream)
 			// Token is required for allowlisted paths to avoid
 			// connection-refused masking the allowlist check.
 			agent.jenkinsTokenMu.Lock()
@@ -364,13 +479,13 @@ func TestReplayWebhookAllowlist(t *testing.T) {
 // is not listening, the handler returns a failure result without panicking.
 func TestReplayWebhookConnectionRefused(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	agent.jenkinsTokenMu.Lock()
 	agent.jenkinsToken = "test-token"
 	agent.jenkinsTokenMu.Unlock()
@@ -408,13 +523,13 @@ func TestReplayWebhookConnectionRefused(t *testing.T) {
 // a nil ReplayWebhook payload returns a failure result (not a crash).
 func TestReplayWebhookNilPayload(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 
 	cmd := &mitev1.ImperativeCommand{
 		CommandId:     replayCmdID,
@@ -444,13 +559,13 @@ func TestReplayWebhookNilPayload(t *testing.T) {
 // message about allowlist appears, not a connection error).
 func TestReplayWebhookNonAllowlistedRefusedWithoutHTTP(t *testing.T) {
 	stream, captured := testReplayStream(t)
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		JenkinsURL:     "http://localhost:1",
 	})
 	agent.Logger = slog.Default()
-	agent.stream = stream
+	setTestStream(agent, stream)
 	// No token set — if the handler tried an HTTP call it would get
 	// connection refused. But the allowlist check should reject first.
 
@@ -481,5 +596,123 @@ func TestReplayWebhookNonAllowlistedRefusedWithoutHTTP(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "not allowlisted") {
 		t.Errorf("error should say 'not allowlisted', got: %q", result.Error)
+	}
+}
+
+// TestIsGenericTriggerPath asserts that only the exact invoke path, with at
+// most one leading or trailing slash and no query, selects the no-Bearer
+// replay. Prefix matches such as "invoker" keep the Bearer.
+func TestIsGenericTriggerPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"generic-webhook-trigger/invoke", true},
+		{"/generic-webhook-trigger/invoke", true},
+		{"generic-webhook-trigger/invoke/", true},
+		{"generic-webhook-trigger/invoke?token=t", true},
+		{"generic-webhook-trigger/invoker", false},
+		{"generic-webhook-trigger/invoke/extra", false},
+		{"generic-webhook-trigger/invoke//", false},
+		{"github-webhook/", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isGenericTriggerPath(tt.path); got != tt.want {
+			t.Errorf("isGenericTriggerPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// replayGenericTrigger replays a generic-webhook-trigger payload to a stub
+// upstream on localhost:8080 and returns the headers and query Jenkins saw.
+// It skips the test when the port is busy.
+func replayGenericTrigger(t *testing.T, headers map[string]string) (http.Header, string, *mitev1.CommandResult) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("skipping: localhost:8080 not available:", err)
+	}
+	var gotHeader http.Header
+	var gotQuery string
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotHeader = r.Header.Clone()
+			gotQuery = r.URL.RawQuery
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { srv.Close() })
+	time.Sleep(10 * time.Millisecond)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{
+		ControllerName: "test",
+		Namespace:      "ns",
+		JenkinsURL:     "http://localhost:1",
+	})
+	agent.Logger = slog.Default()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+
+	cmd := &mitev1.ImperativeCommand{
+		CommandId: replayCmdID,
+		Type:      mitev1.CommandTypeReplayWebhook,
+		ReplayWebhook: &mitev1.ReplayWebhookPayload{
+			Path:       "generic-webhook-trigger/invoke",
+			Query:      "",
+			Headers:    headers,
+			Body:       []byte("payload-body"),
+			DeliveryId: "delivery-gitlab",
+		},
+	}
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: cmd,
+		ctx:           context.Background(),
+	})
+	return gotHeader, gotQuery, captured.Load()
+}
+
+// TestReplayWebhookGenericTriggerOmitsBearer asserts that a GitLab replay on
+// the generic trigger path carries X-Gitlab-Token and no Authorization
+// header. The trigger would otherwise read the operator JWT as the job token.
+func TestReplayWebhookGenericTriggerOmitsBearer(t *testing.T) {
+	gotHeader, gotQuery, result := replayGenericTrigger(t, map[string]string{
+		"X-Gitlab-Event": "Push Hook",
+		"X-Gitlab-Token": "deploy-token",
+	})
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if !result.Success {
+		t.Errorf("expected success for upstream 200, got error: %s", result.Error)
+	}
+	if v, ok := gotHeader["Authorization"]; ok {
+		t.Errorf("Authorization must be absent on the generic trigger path, got %q", v)
+	}
+	if got := gotHeader.Get("X-Gitlab-Token"); got != "deploy-token" {
+		t.Errorf("X-Gitlab-Token = %q, want deploy-token", got)
+	}
+	if gotQuery != "" {
+		t.Errorf("RawQuery = %q, want empty", gotQuery)
+	}
+}
+
+// TestReplayWebhookGenericTriggerDropsEnvelopeAuthorization asserts that an
+// Authorization header a forge sent in the envelope does not reach Jenkins on
+// the generic trigger path.
+func TestReplayWebhookGenericTriggerDropsEnvelopeAuthorization(t *testing.T) {
+	gotHeader, _, result := replayGenericTrigger(t, map[string]string{
+		"Authorization":  "Bearer forged",
+		"X-Gitlab-Token": "deploy-token",
+	})
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if v, ok := gotHeader["Authorization"]; ok {
+		t.Errorf("forged Authorization must not reach Jenkins, got %q", v)
 	}
 }

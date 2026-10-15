@@ -4,6 +4,7 @@ import { listRoleBindings, deleteRoleBinding } from "../api/client";
 import type { VarroaRoleBinding } from "../types";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { FederationSummary } from "../components/FederationStatus";
 import { useAuth } from "../context/AuthContext";
 import { canDoGlobal } from "../hooks/usePermissions";
 import styles from "./RoleBindings.module.css";
@@ -29,6 +30,11 @@ function formatScope(binding: VarroaRoleBinding): string {
       .map(([k, v]) => `${k}=${v}`)
       .join(",");
     if (labels) parts.push(`sel:${labels}`);
+  }
+  // A tenant-scoped binding is narrowed, so it never reads as cluster-wide.
+  for (const tenant of scope.tenants ?? []) {
+    const jobs = tenant.jobs && tenant.jobs.length > 0 ? ` jobs:${tenant.jobs.join(",")}` : "";
+    parts.push(`tenant:${tenant.name}${jobs}`);
   }
   return parts.length > 0 ? parts.join(" ") : "Cluster-wide";
 }
@@ -139,6 +145,7 @@ export default function RoleBindings() {
             <span>Subjects</span>
             <span>Role Ref</span>
             <span>Scope</span>
+            <span>Hive federation</span>
             <span />
           </div>
           {filtered.map((binding) => (
@@ -147,6 +154,7 @@ export default function RoleBindings() {
               <span className={styles.cellMuted}>{formatSubjects(binding)}</span>
               <span>{binding.spec.roleRef}</span>
               <span className={styles.cellMuted}>{formatScope(binding)}</span>
+              <span><FederationSummary status={binding.status} /></span>
               <div className={styles.actions}>
                 {canDoGlobal(permissions, "rolebindings", "update") && (
                   <Button

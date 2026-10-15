@@ -15,9 +15,24 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["varroaroles", "varroarolebindings", "jenkinsroles", "jenkinsrolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The RBAC federation pass reports each binding's per-hive outcome, and a
+  # failed delete of a stale federated JenkinsRole on each owner VarroaRole.
+  - apiGroups: ["varroa.dev"]
+    resources: ["varroarolebindings/status", "varroaroles/status"]
+    verbs: ["get", "patch", "update"]
   - apiGroups: ["varroa.dev"]
     resources: ["teams", "teams/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # BFF serves the runner CRUD surface and keeps the door's token index from a
+  # Runner watch.
+  - apiGroups: ["varroa.dev"]
+    resources: ["runners"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The BFF serves the cell-pool read and scale surface. It never creates or
+  # deletes a pool, so it holds neither verb.
+  - apiGroups: ["varroa.dev"]
+    resources: ["cellpools"]
+    verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["varroa.dev"]
     resources: ["podtemplates"]
     verbs: ["get", "list", "watch"]
@@ -56,9 +71,6 @@ rules:
   - apiGroups: ["varroa.dev"]
     resources: ["users", "users/status", "groups"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["varroa.dev"]
-    resources: ["buildmetrics"]
-    verbs: ["get", "list", "watch"]
   # Brood operations: BFF creates runs, toggles suspend, cancels (delete), and
   # stamps status.startedBy after create.
   - apiGroups: ["varroa.dev"]

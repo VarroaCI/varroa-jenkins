@@ -23,9 +23,10 @@ func (s *Server) HandleIdentitySettings(w http.ResponseWriter, r *http.Request) 
 
 	cfg := s.deps.IdentityConfig
 	resp := map[string]interface{}{
-		"mode":         cfg.Mode,
-		"cookieDomain": cfg.CookieDomain,
-		"defaultRead":  cfg.DefaultRead,
+		"mode":          cfg.Mode,
+		"cookieDomain":  cfg.CookieDomain,
+		"defaultRead":   cfg.DefaultRead,
+		"localAccounts": cfg.LocalAccounts,
 	}
 
 	if cfg.Mode == string(auth.AuthModeOIDC) {

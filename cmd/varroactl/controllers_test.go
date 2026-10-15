@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -862,5 +863,35 @@ func TestController_Edit_ClusterDevCluster(t *testing.T) {
 	}
 	if !patchRequested {
 		t.Error("expected PATCH request")
+	}
+}
+
+func TestController_GetList_WarnsOnFailedCluster(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{},
+			"clusters": []map[string]any{
+				{"name": "core", "ok": true},
+				{"name": "member-b", "ok": false, "error": "cluster unreachable"},
+			},
+		})
+	})
+	defer srv.Close()
+
+	var stderr bytes.Buffer
+	root := newRootCmd()
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"get", "controllers"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "warning: cluster member-b: cluster unreachable; its controllers are not listed"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+	if strings.Contains(stderr.String(), "cluster core") {
+		t.Fatalf("healthy cluster must not warn: %q", stderr.String())
 	}
 }

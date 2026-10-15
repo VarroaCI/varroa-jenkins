@@ -1,0 +1,8 @@
+type: object
+additionalProperties: false
+properties:
+  goVersion:
+    type: string
+    enum:
+    - '1.23'
+    - '1.24'

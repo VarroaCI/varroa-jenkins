@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -310,7 +311,12 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 	signal.Notify(sigCh, os.Interrupt)
 
 	go func() { _ = srv.Serve(ln) }()
-	defer func() { _ = srv.Close() }()
+	// Shutdown lets the callback handler finish its page before the server stops.
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
 
 	select {
 	case r := <-ch:
@@ -322,6 +328,8 @@ func loginBrowser(cmd *cobra.Command, serverFlag string) error {
 		return fmt.Errorf("timed out waiting for browser login; URL:\n  %s\nOn headless machines use: varroactl login --api-key", loginURL)
 	case <-sigCh:
 		return fmt.Errorf("interrupted")
+	case <-cmd.Context().Done():
+		return fmt.Errorf("login cancelled: %w", cmd.Context().Err())
 	}
 }
 
@@ -357,7 +365,7 @@ func loginWithUsername(cmd *cobra.Command, username string) error {
 	if authCfg.HTTPResponse.StatusCode >= 400 {
 		return fmt.Errorf("unable to determine auth mode")
 	}
-	if authCfg.JSON200 != nil && authCfg.JSON200.Mode == "oidc" {
+	if authCfg.JSON200 != nil && authCfg.JSON200.Mode == "oidc" && !authCfg.JSON200.LocalAccounts {
 		return fmt.Errorf("server uses OIDC; run \"varroactl login\" for the browser flow")
 	}
 

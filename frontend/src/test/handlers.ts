@@ -157,7 +157,7 @@ export function createHandlers(overrides?: {
 
     // Update Center
     http.get(`${BASE}/updatecenter`, () =>
-      HttpResponse.json(overrides?.updateCenterStatus ?? { enabled: false, conditions: [], gaps: [], lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false })),
+      HttpResponse.json(overrides?.updateCenterStatus ?? { enabled: false, conditions: [], gaps: [], unknownDependencies: [], unknownDependencyCount: 0, lastSyncTime: null, phase: "", pluginCount: 0, storeBytes: 0, storageType: "", pullThroughEnabled: false })),
     http.get(`${BASE}/updatecenter/plugins`, () =>
       HttpResponse.json(overrides?.updateCenterPlugins ?? { enabled: false, plugins: [] })),
 

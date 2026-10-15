@@ -149,9 +149,23 @@ ensure_coredns() {
 }
 
 # ---------------------------------------------------------------------------
+# record store postgres (D12: recordStore.postgres.mode=external)
+# ---------------------------------------------------------------------------
+ensure_postgres() {
+  log "applying localdev Postgres (recordStore.postgres.mode=external)"
+  K create namespace "$NS" --dry-run=client -o yaml | K apply -f - >/dev/null
+  K apply -f "$MANIFEST_DIR/postgres.yaml" >/dev/null
+  wait_for "varroa-localdev-postgres statefulset rollout" 60 5 \
+    bash -c "kubectl --context $CTX -n $NS rollout status statefulset/varroa-localdev-postgres --timeout=5s" \
+    || die "localdev postgres did not become ready"
+}
+
+# ---------------------------------------------------------------------------
 # images
 # ---------------------------------------------------------------------------
 image_id12() { docker image inspect --format '{{.Id}}' "$1" | cut -d: -f2 | cut -c1-12; }
+
+POSTGRES_IMAGE="postgres:16.15"
 
 build_images() {
   log "building backend image (operator/gateway/bff/mite + plugin HPI)"
@@ -171,6 +185,22 @@ build_images() {
     "varroa-localdev-git:$GIT_TAG" --name "$CLUSTER"
   MITE_IMAGE="docker.io/library/varroa-jenkins:$BACKEND_TAG"
   GIT_IMAGE="docker.io/library/varroa-localdev-git:$GIT_TAG"
+
+  if docker image inspect "$POSTGRES_IMAGE" >/dev/null 2>&1; then
+    log "reusing cached $POSTGRES_IMAGE"
+  elif [[ "${LOCALDEV_OFFLINE:-}" == "1" ]]; then
+    die "postgres image $POSTGRES_IMAGE is not in the local Docker cache (LOCALDEV_OFFLINE=1 skips the pull)"
+  else
+    log "pulling $POSTGRES_IMAGE"
+    docker pull --platform linux/amd64 "$POSTGRES_IMAGE" >/dev/null
+  fi
+  # A pulled image is a multi-platform manifest list. `kind load docker-image`
+  # imports it with --all-platforms and fails on the platforms Docker never
+  # pulled, so the load goes through a platform-filtered archive and a plain
+  # ctr import on the node.
+  log "loading $POSTGRES_IMAGE into kind"
+  docker save --platform linux/amd64 "$POSTGRES_IMAGE" \
+    | docker exec -i "$CLUSTER-control-plane" ctr --namespace=k8s.io images import --snapshotter=overlayfs - >/dev/null
 }
 
 helm_deploy() {
@@ -199,8 +229,15 @@ helm_deploy() {
     --set updateCenter.image.repository=varroa-jenkins \
     --set updateCenter.image.tag="$BACKEND_TAG" \
     --set updateCenter.importToken=localdev-import-token \
+    --set recordStore.enabled=true \
+    --set recordStore.postgres.mode=external \
+    --set recordStore.postgres.external.existingSecret=varroa-localdev-postgres \
+    --set recordStore.postgres.external.dsnKey=dsn \
+    --set recordStore.blobs.mode=postgres \
+    --set recorder.image.repository=varroa-jenkins \
+    --set recorder.image.tag="$BACKEND_TAG" \
     ${LOCALDEV_OFFLINE:+--set updateCenter.pullThrough.enabled=false} >/dev/null
-  for d in "$RELEASE-varroa-operator" "$RELEASE-varroa-gateway" "$RELEASE-varroa-bff" "$RELEASE-frontend" "$RELEASE-updatecenter"; do
+  for d in "$RELEASE-varroa-operator" "$RELEASE-varroa-gateway" "$RELEASE-varroa-bff" "$RELEASE-frontend" "$RELEASE-updatecenter" "varroa-recorder"; do
     wait_for "deployment $d rollout" 60 5 \
       bash -c "kubectl --context $CTX -n $NS rollout status deployment/$d --timeout=5s" \
       || die "deployment $d did not become ready (kubectl --context $CTX -n $NS describe deploy $d)"
@@ -357,6 +394,7 @@ phase_up() {
   ensure_certs
   ensure_coredns
   build_images
+  ensure_postgres
   helm_deploy
   seed_updatecenter
   if [[ "${LOCALDEV_OFFLINE:-}" == "1" ]] && [[ "${LOCALDEV_SKIP_CONTROLLER:-0}" != "1" ]]; then

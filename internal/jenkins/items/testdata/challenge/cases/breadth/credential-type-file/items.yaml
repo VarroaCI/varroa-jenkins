@@ -1,0 +1,15 @@
+items:
+  - kind: folder
+    name: credential-type-file
+    displayName: "Folder with a file credential"
+    description: "Folder with a file credential"
+    properties:
+      - folderCredentialsProperty:
+          folderCredentials:
+            - credentials:
+                - file:
+                    id: kubeconfig
+                    scope: GLOBAL
+                    description: "Cluster kubeconfig"
+                    fileName: kubeconfig
+                    secretBytes: RklYVFVSRS1GSUxF

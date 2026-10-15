@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nats-io/nats.go"
-
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 )
@@ -44,8 +42,9 @@ func NewBusFanout(conn *bus.Conn) *BusFanout {
 // Start subscribes to the bus subjects and begins fanning out events to
 // local subscribers. It blocks until ctx is cancelled.
 func (bf *BusFanout) Start(ctx context.Context) error {
-	// Subscribe to brood events.
-	broodSub, err := bf.conn.SubscribeData(bus.BroodWildcard, func(data []byte) {
+	// Each Listener subscribes again after NATS denies its subscription,
+	// at start or on an authorization reload.
+	broodSub, err := bf.conn.Listen(bus.BroodWildcard, "", func(_ string, data []byte) {
 		bf.deliverBusEvent("brood", data)
 	})
 	if err != nil {
@@ -53,12 +52,9 @@ func (bf *BusFanout) Start(ctx context.Context) error {
 	}
 	defer func() { _ = broodSub.Unsubscribe() }()
 
-	// Subscribe to activity events on the hierarchical subject family.
-	// Use Subscribe (with *nats.Msg) so we can read the subject tokens
-	// to derive the routing key, rather than parsing from the payload.
-	activitySub, err := bf.conn.Subscribe(bus.ActivityWildcard, func(msg *nats.Msg) {
-		bf.deliverActivityEvent(msg.Subject, msg.Data)
-	})
+	// The activity routing key comes from the subject tokens, not from the
+	// payload.
+	activitySub, err := bf.conn.Listen(bus.ActivityWildcard, "", bf.deliverActivityEvent)
 	if err != nil {
 		return err
 	}

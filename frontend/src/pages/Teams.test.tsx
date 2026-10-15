@@ -89,6 +89,31 @@ describe("Teams", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/access/teams/create");
   });
 
+  it("shows exports with their kind and callers, and a dash when there are none", async () => {
+    mockListTeams.mockResolvedValue([
+      team1,
+      {
+        ...team2,
+        pipelines: {
+          profile: "lts",
+          agentNamespace: "ns1",
+          exports: [
+            { job: "release/*", callers: ["payments", "search"] },
+            { locks: ["deploy-prod"], callers: ["alpha"] },
+          ],
+        },
+      },
+    ]);
+    renderWithProviders(<Teams />);
+    await waitFor(() => {
+      expect(screen.getByText("beta-team")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/job:/)).toBeInTheDocument();
+    expect(screen.getByText(/release\/\* → payments, search/)).toBeInTheDocument();
+    expect(screen.getByText(/locks:/)).toBeInTheDocument();
+    expect(screen.getByText(/deploy-prod → alpha/)).toBeInTheDocument();
+  });
+
   it("can delete a team", async () => {
     mockDeleteTeam.mockResolvedValue(undefined);
     renderWithProviders(<Teams />);
@@ -109,5 +134,13 @@ describe("Teams", () => {
     await waitFor(() => {
       expect(mockDeleteTeam).toHaveBeenCalledWith("alpha-team");
     });
+  });
+
+  it("wraps the team table in a horizontal scroll container", async () => {
+    mockListTeams.mockResolvedValue([team1, team2]);
+    renderWithProviders(<Teams />);
+
+    await screen.findByText("alpha-team");
+    expect(screen.getByRole("table").parentElement?.className).toMatch(/tableWrap/);
   });
 });

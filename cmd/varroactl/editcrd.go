@@ -30,16 +30,19 @@ var runEditorC3 = func(path string) error {
 	return cmd.Run()
 }
 
-// editLoop implements the full-replace edit flow (design §3.8).
+// editLoop implements the edit flow (design §3.8).
 //
 // fetch is called to get the current document. It must return the full
 // server representation (incl. status, metadata fields).
 //
 // Before presenting to the editor, status and selected metadata fields
 // (managedFields, resourceVersion, uid, generation, creationTimestamp)
-// are stripped. After the user edits, the file is re-parsed and if
-// changed, put is called with the full edited document.
-func editLoop(fetch func() (map[string]any, error), put func(doc map[string]any) error, kind, name string) error {
+// are stripped. After the user edits, the file is re-parsed and if changed,
+// put is called with the stripped fetched document and the edited document.
+// A noun with no patch callback sends put's second argument as a
+// full-replace PUT and ignores the first; a noun with a patch callback
+// computes the merge patch between the two and sends that instead.
+func editLoop(fetch func() (map[string]any, error), put func(orig, mod map[string]any) error, kind, name string) error {
 	doc, err := fetch()
 	if err != nil {
 		return err
@@ -96,8 +99,9 @@ func editLoop(fetch func() (map[string]any, error), put func(doc map[string]any)
 		return nil
 	}
 
-	// Send PUT
-	if err := put(mod); err != nil {
+	// Send the change: a full-replace PUT, or a merge patch when the noun
+	// supplies a patch callback (put decides which).
+	if err := put(doc, mod); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		_, _ = fmt.Fprintf(os.Stderr, "Edits saved to %s\n", tmpPath)
 		return fmt.Errorf("edit failed")

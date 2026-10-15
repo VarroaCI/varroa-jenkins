@@ -58,7 +58,7 @@ func TestCreateStatefulSet_CascHashAnnotation_Deterministic(t *testing.T) {
 	c, dyn := newFakeStsClient()
 	spec := baseCascHashSpec("test-casc-det", "deadbeef")
 
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace("ns").Get(context.Background(), "test-casc-det", metav1.GetOptions{})
@@ -72,7 +72,7 @@ func TestCreateStatefulSet_CascHashAnnotation_Deterministic(t *testing.T) {
 
 	// Re-apply the same spec (CreateOrUpdate semantics: Create returns
 	// AlreadyExists and CreateStatefulSet falls back to Update).
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, err = dyn.Resource(stsGVR).Namespace("ns").Get(context.Background(), "test-casc-det", metav1.GetOptions{})
@@ -93,10 +93,10 @@ func TestCreateStatefulSet_CascHashAnnotation_ChangesWithContent(t *testing.T) {
 	c, dyn := newFakeStsClient()
 	name := "test-casc-change"
 
-	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec(name, "hash-v1")); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec(name, "hash-v1"), noStatefulSetFence); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec(name, "hash-v2")); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), baseCascHashSpec(name, "hash-v2"), noStatefulSetFence); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
@@ -132,7 +132,7 @@ spec:
 `,
 	}
 
-	if err := c.CreateStatefulSet(context.Background(), spec); err != nil {
+	if err := c.CreateStatefulSet(context.Background(), spec, noStatefulSetFence); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	got, err := dyn.Resource(stsGVR).Namespace("ns").Get(context.Background(), "test-casc-overlay", metav1.GetOptions{})

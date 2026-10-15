@@ -2,6 +2,7 @@ package updatecenter
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -50,9 +51,23 @@ type testPlugin struct {
 	hpiBytes []byte
 }
 
-// newPluginBytes returns deterministic .hpi content for tests.
+// newPluginBytes returns deterministic .hpi content for tests. It is a real
+// plugin archive, so the metadata document can read its manifest. It panics on
+// error because it has no *testing.T.
 func newPluginBytes(name, version string) []byte {
-	return []byte(fmt.Sprintf("fake-hpi-content-for-%s-%s", name, version))
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintf(w, "Manifest-Version: 1.0\r\nShort-Name: %s\r\nPlugin-Version: %s\r\n\r\n", name, version); err != nil {
+		panic(err)
+	}
+	if err := zw.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
 // seedPluginPack builds and pushes a plugin pack to store.
@@ -220,8 +235,15 @@ func TestMetadata_ActualJSON(t *testing.T) {
 		t.Errorf("expected Content-Type application/json, got %s", ct)
 	}
 
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"dependencies":[]`)) {
+		t.Errorf("plugin with no dependencies must serve an empty array, body: %s", raw)
+	}
 	var uc updateCenterJSON
-	if err := json.NewDecoder(resp.Body).Decode(&uc); err != nil {
+	if err := json.Unmarshal(raw, &uc); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 
@@ -634,6 +656,68 @@ func TestImport_ValidTarGz(t *testing.T) {
 	// Verify the plugin is now in the service's store.
 	if digest := ts.server.findPluginDigest(context.Background(), "imported-p", "3.0.0"); digest == "" {
 		t.Fatal("imported plugin not found in store after import")
+	}
+}
+
+// postImportExpectRejected posts tarGz to /api/v1/import and checks for a 400
+// whose error body contains wantSubstr.
+func postImportExpectRejected(t *testing.T, ts *testServer, tarGz []byte, wantSubstr string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, ts.baseURL+"/api/v1/import", bytes.NewReader(tarGz))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer correct-token")
+	req.Header.Set("Content-Type", "application/gzip")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(body["error"], wantSubstr) {
+		t.Errorf("error %q does not contain %q", body["error"], wantSubstr)
+	}
+}
+
+func TestImport_RejectsLatestVersion(t *testing.T) {
+	for _, v := range []string{"latest", "LATEST", " latest "} {
+		t.Run(strings.TrimSpace(v), func(t *testing.T) {
+			store := newTestStore(t)
+			ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+			tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+				{name: "foo", version: v, hpiBytes: newPluginBytes("foo", "1.0.0")},
+			})
+			postImportExpectRejected(t, ts, tarGz, "foo")
+
+			if digest := ts.server.findPluginDigest(context.Background(), "foo", v); digest != "" {
+				t.Errorf("rejected plugin was stored with digest %q", digest)
+			}
+		})
+	}
+}
+
+func TestImport_LatestRejectsWholePack(t *testing.T) {
+	store := newTestStore(t)
+	ts := newTestServer(t, store, WithImportToken("correct-token"))
+
+	tarGz := buildImportTarball(t, "import-pack:v1", []testPlugin{
+		{name: "good", version: "1.0.0", hpiBytes: newPluginBytes("good", "1.0.0")},
+		{name: "foo", version: "LATEST", hpiBytes: newPluginBytes("foo", "1.0.0")},
+	})
+	postImportExpectRejected(t, ts, tarGz, "foo")
+
+	if digest := ts.server.findPluginDigest(context.Background(), "good", "1.0.0"); digest != "" {
+		t.Errorf("valid plugin from a rejected pack was stored with digest %q", digest)
 	}
 }
 

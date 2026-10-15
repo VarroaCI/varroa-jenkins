@@ -1,4 +1,7 @@
 {{- if and .Values.updateCenter.enabled (not (include "varroa.isHive" .)) }}
+{{- if and .Values.updateCenter.pullThrough.prefetch (not .Values.updateCenter.pullThrough.enabled) }}
+{{- fail "updateCenter.pullThrough.prefetch requires updateCenter.pullThrough.enabled" }}
+{{- end }}
 apiVersion: varroa.dev/v1alpha1
 kind: UpdateCenter
 metadata:
@@ -29,6 +32,9 @@ spec:
     enabled: true
     upstreamURL: {{ .Values.updateCenter.pullThrough.upstreamURL | quote }}
     downloadURL: {{ .Values.updateCenter.pullThrough.downloadURL | quote }}
+    {{- if .Values.updateCenter.pullThrough.prefetch }}
+    prefetch: true
+    {{- end }}
   {{- end }}
   {{- if or .Values.updateCenter.seed.refs .Values.updateCenter.seed.secretRef }}
   seed:

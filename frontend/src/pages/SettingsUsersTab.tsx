@@ -5,7 +5,7 @@ import {
   adminListUserApiKeys, adminRevokeApiKey,
   listRoleBindings, listJenkinsRoleBindings,
   listGroups, createGroup,
-  type UserEntry, type GroupEntry,
+  type UserEntry, type GroupEntry, type AccountPurpose,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { Card } from "../components/Card";
@@ -36,8 +36,9 @@ async function applyMembership(groups: GroupEntry[], username: string, desired: 
 }
 
 export default function SettingsUsersTab() {
-  const { authMode } = useAuth();
-  const isLocal = authMode === "local";
+  const { authMode, localAccounts } = useAuth();
+  // Local accounts exist in local mode and beside OIDC.
+  const isLocal = authMode === "local" || localAccounts === true;
   const { data: users, isLoading, error } = useQuery({
     queryKey: ["admin-users"],
     queryFn: listUsers,
@@ -58,6 +59,7 @@ export default function SettingsUsersTab() {
         <p className={styles.muted}>
           {users?.length || 0} user{users?.length !== 1 ? "s" : ""}
           {!isLocal && " · read-only directory (OIDC mode)"}
+          {localAccounts && " · identity provider users are read-only; local accounts need a purpose"}
         </p>
         {isLocal && <Button onClick={() => setShowCreate(true)}>+ New User</Button>}
       </div>
@@ -65,6 +67,7 @@ export default function SettingsUsersTab() {
       {showCreate && isLocal && (
         <CreateUserForm
           groups={groups || []}
+          requirePurpose={localAccounts === true}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); qc.invalidateQueries({ queryKey: ["admin-users"] }); qc.invalidateQueries({ queryKey: ["admin-groups"] }); }}
         />
@@ -82,65 +85,67 @@ export default function SettingsUsersTab() {
         />
       )}
 
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Name</th><th>Email</th><th>Display Name</th><th>Groups</th><th>Last Login</th><th>Managed By</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {users?.map((u) => (
-            <tr key={u.name}>
-              <td>
-                <Button variant="ghost" size="sm" className={`${styles.linkBtn} ${styles.profileVersion}`} onClick={() => setSelectedUser(selectedUser?.name === u.name ? null : u)}>
-                  {u.name}
-                </Button>
-              </td>
-              <td>{u.email || "—"}</td><td>{u.displayName || "—"}</td><td>{u.groups?.join(", ") || "—"}</td><td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td><td>{u.managedBy}</td>
-              <td>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`${styles.linkBtn} ${styles.dangerLink}`}
-                  onClick={async () => {
-                    setDeleteTarget(u);
-                    try {
-                      const vrbs = await listRoleBindings();
-                      // Intentionally core-scoped: this is an advisory preview of
-                      // bindings affected by deleting a user on the core-only user-
-                      // management page. User identity and VarroaRoleBindings are
-                      // core-side concepts, so no cluster selector belongs here.
-                      const jrbs = await listJenkinsRoleBindings("core");
-                      // Advisory preview: match by the identifiers a binding can
-                      // reference (name/email). Display name is not an identifier.
-                      const ids = new Set([u.name, u.email].filter(Boolean) as string[]);
-                      const removed: string[] = [];
-                      const empty: string[] = [];
-                      for (const rb of vrbs.items) {
-                        const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
-                        if (hasUser) {
-                          removed.push(`VarroaRoleBinding: ${rb.metadata.name}`);
-                          if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`VarroaRoleBinding: ${rb.metadata.name}`);
-                        }
-                      }
-                      for (const rb of jrbs.items) {
-                        const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
-                        if (hasUser) {
-                          removed.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
-                          if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
-                        }
-                      }
-                      setDeletePreview({ removedFrom: removed, empty });
-                    } catch { setDeletePreview(null); }
-                  }}
-                >
-                  Delete
-                </Button>
-              </td>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Name</th><th>Email</th><th>Display Name</th><th>Groups</th><th>Last Login</th><th>Managed By</th><th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {users?.map((u) => (
+              <tr key={u.name}>
+                <td>
+                  <Button variant="ghost" size="sm" className={`${styles.linkBtn} ${styles.profileVersion}`} onClick={() => setSelectedUser(selectedUser?.name === u.name ? null : u)}>
+                    {u.name}
+                  </Button>
+                </td>
+                <td>{u.email || "—"}</td><td>{u.displayName || "—"}</td><td>{u.groups?.join(", ") || "—"}</td><td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td><td>{u.purpose ? `${u.managedBy} · ${u.purpose}` : u.managedBy}</td>
+                <td>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`${styles.linkBtn} ${styles.dangerLink}`}
+                    onClick={async () => {
+                      setDeleteTarget(u);
+                      try {
+                        const vrbs = await listRoleBindings();
+                        // Intentionally core-scoped: this is an advisory preview of
+                        // bindings affected by deleting a user on the core-only user-
+                        // management page. User identity and VarroaRoleBindings are
+                        // core-side concepts, so no cluster selector belongs here.
+                        const jrbs = await listJenkinsRoleBindings("core");
+                        // Advisory preview: match by the identifiers a binding can
+                        // reference (name/email). Display name is not an identifier.
+                        const ids = new Set([u.name, u.email].filter(Boolean) as string[]);
+                        const removed: string[] = [];
+                        const empty: string[] = [];
+                        for (const rb of vrbs.items) {
+                          const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
+                          if (hasUser) {
+                            removed.push(`VarroaRoleBinding: ${rb.metadata.name}`);
+                            if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`VarroaRoleBinding: ${rb.metadata.name}`);
+                          }
+                        }
+                        for (const rb of jrbs.items) {
+                          const hasUser = rb.spec.subjects?.some((s) => s.kind === "User" && ids.has(s.name));
+                          if (hasUser) {
+                            removed.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
+                            if ((rb.spec.subjects?.length || 0) <= 1) empty.push(`JenkinsRoleBinding: ${rb.metadata.name}`);
+                          }
+                        }
+                        setDeletePreview({ removedFrom: removed, empty });
+                      } catch { setDeletePreview(null); }
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {users?.length === 0 && (
         <p className={styles.noResults}>No users found.</p>
@@ -148,12 +153,13 @@ export default function SettingsUsersTab() {
 
       {selectedUser && (
         <div className={styles.userDetails}>
-          {isLocal && (
+          {isLocal && selectedUser.managedBy === "local" && (
             <div className={styles.editPanel}>
               <EditUserForm
                 key={selectedUser.name}
                 user={selectedUser}
                 groups={groups || []}
+                requirePurpose={localAccounts === true}
                 onSaved={() => qc.invalidateQueries({ queryKey: ["admin-users"] })}
               />
             </div>
@@ -161,7 +167,7 @@ export default function SettingsUsersTab() {
           <Card title={`API Keys — ${selectedUser.name}`}>
             <PerUserApiKeys user={selectedUser.name} />
           </Card>
-          {isLocal && (
+          {isLocal && selectedUser.managedBy === "local" && (
             <div className={styles.stack12}>
               <ResetPasswordForm user={selectedUser.name} />
             </div>
@@ -190,7 +196,29 @@ function GroupCheckboxes({ groups, selected, onToggle }: { groups: GroupEntry[];
 
 // ---- Create User Form ----
 
-function CreateUserForm({ groups, onClose, onCreated }: { groups: GroupEntry[]; onClose: () => void; onCreated: () => void }) {
+// ---- Purpose selector (local accounts beside OIDC) ----
+
+function PurposeSelect({ value, onChange }: { value: AccountPurpose | ""; onChange: (v: AccountPurpose | "") => void }) {
+  return (
+    <div className={styles.formGroup}>
+      <label className={styles.formLabel} htmlFor="account-purpose">Purpose</label>
+      <select
+        id="account-purpose"
+        className={styles.formInput}
+        value={value}
+        onChange={(e) => onChange(e.target.value as AccountPurpose | "")}
+        required
+      >
+        <option value="" disabled>Select a purpose</option>
+        <option value="service">Service — automation and tests</option>
+        <option value="break-glass">Break-glass — sign-in when the identity provider fails</option>
+      </select>
+    </div>
+  );
+}
+
+function CreateUserForm({ groups, requirePurpose, onClose, onCreated }: { groups: GroupEntry[]; requirePurpose: boolean; onClose: () => void; onCreated: () => void }) {
+  const [purpose, setPurpose] = useState<AccountPurpose | "">("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -200,7 +228,7 @@ function CreateUserForm({ groups, onClose, onCreated }: { groups: GroupEntry[]; 
 
   const mutation = useMutation({
     mutationFn: async () => {
-      await createUser({ username, email, displayName, password });
+      await createUser({ username, email, displayName, password, purpose: purpose || undefined });
       // Apply initial group memberships via create-then-patch.
       const failed = await applyMembership(groups, username, selected);
       if (failed.length > 0) throw new Error(`User created, but failed to add to groups: ${failed.join(", ")}`);
@@ -235,6 +263,7 @@ function CreateUserForm({ groups, onClose, onCreated }: { groups: GroupEntry[]; 
             <label className={styles.formLabel}>Password</label>
             <input className={styles.formInput} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min 8 characters" required />
           </div>
+          {requirePurpose && <PurposeSelect value={purpose} onChange={setPurpose} />}
           <div className={styles.formGroup}>
             <label className={styles.formLabel}>Groups</label>
             <GroupCheckboxes groups={groups} selected={selected} onToggle={toggle} />
@@ -252,7 +281,8 @@ function CreateUserForm({ groups, onClose, onCreated }: { groups: GroupEntry[]; 
 
 // ---- Edit User Form (display name, email, group membership) ----
 
-function EditUserForm({ user, groups, onSaved }: { user: UserEntry; groups: GroupEntry[]; onSaved: () => void }) {
+function EditUserForm({ user, groups, requirePurpose, onSaved }: { user: UserEntry; groups: GroupEntry[]; requirePurpose: boolean; onSaved: () => void }) {
+  const [purpose, setPurpose] = useState<AccountPurpose | "">(user.purpose || "");
   const [email, setEmail] = useState(user.email || "");
   const [displayName, setDisplayName] = useState(user.displayName || "");
   const [selected, setSelected] = useState<Set<string>>(new Set(user.groups || []));
@@ -261,7 +291,7 @@ function EditUserForm({ user, groups, onSaved }: { user: UserEntry; groups: Grou
 
   const mutation = useMutation({
     mutationFn: async () => {
-      await updateUser(user.name, { email, displayName });
+      await updateUser(user.name, { email, displayName, purpose: purpose || undefined });
       const failed = await applyMembership(groups, user.name, selected);
       if (failed.length > 0) throw new Error(`Saved, but these groups failed: ${failed.join(", ")}`);
     },
@@ -286,6 +316,7 @@ function EditUserForm({ user, groups, onSaved }: { user: UserEntry; groups: Grou
           <label className={styles.formLabel}>Display Name</label>
           <input className={styles.formInput} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </div>
+        {requirePurpose && <PurposeSelect value={purpose} onChange={setPurpose} />}
         <div className={styles.formGroup}>
           <label className={styles.formLabel}>Groups</label>
           <GroupCheckboxes groups={groups} selected={selected} onToggle={toggle} />

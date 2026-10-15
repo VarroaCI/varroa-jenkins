@@ -109,6 +109,28 @@ var expectedToolKinds = map[string]toolKind{
 	// Jenkins MCP proxy
 	"list_jenkins_controllers": kindRead,
 	"call_jenkins_tool":        kindProxy,
+
+	// Pipelines
+	"run_pipeline":       kindAction,
+	"list_runs":          kindRead,
+	"get_run":            kindRead,
+	"get_run_log":        kindRead,
+	"list_job_branches":  kindRead,
+	"list_fleet_locks":   kindRead,
+	"release_fleet_lock": kindDelete,
+	"proceed_run_input":  kindAction,
+	"abort_run_input":    kindAction,
+	"replay_run":         kindAction,
+	"scan_multibranch":   kindAction,
+	"restart_run":        kindAction,
+
+	// Cell pools
+	"list_cell_pools":  kindRead,
+	"get_cell_pool":    kindRead,
+	"update_cell_pool": kindUpdatePartial,
+
+	// Cells
+	"get_cell_usage": kindRead,
 }
 
 // listedTool is the subset of a tools/list entry this test cares about.

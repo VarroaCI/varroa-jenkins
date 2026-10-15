@@ -44,17 +44,21 @@
       - $ref: '../components/parameters.yaml#/namespace'
     responses:
       "200":
-        description: Brood schedule list.
+        description: Brood schedule list with fan-out status.
         content:
           application/json:
             schema:
               type: object
-              required: [items]
+              required: [items, clusters]
               properties:
                 items:
                   type: array
                   items:
                     $ref: '../components/schemas.yaml#/BroodScheduleResponse'
+                clusters:
+                  type: array
+                  items:
+                    $ref: '../components/schemas.yaml#/BroodRunClusterStatus'
               additionalProperties: false
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'

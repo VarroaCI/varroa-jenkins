@@ -1,0 +1,26 @@
+# CEL cases for charts/varroa/crds/varroa.dev_jenkinsrolebindings.yaml.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: JenkinsRoleBinding
+  metadata:
+    name: binding-a
+  spec:
+    roleRef: developer
+    subjects:
+      - kind: Group
+        name: team-a
+    jenkinsScope:
+      type: item
+cases:
+  - name: controller scope with tenants refused
+    rule: |-
+      !has(self.tenants)
+    field: spec.controllerScope
+    new: {spec: {controllerScope: {tenants: [{name: team-a}]}}}
+    want: reject
+  - name: controller scope with namespaces accepted
+    rule: |-
+      !has(self.tenants)
+    field: spec.controllerScope
+    new: {spec: {controllerScope: {namespaces: [ns-a]}}}
+    want: accept

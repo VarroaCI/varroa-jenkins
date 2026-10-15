@@ -1,0 +1,90 @@
+package recordstore
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+)
+
+// claimQueueGroup is the NATS queue group the recorder's claim responder
+// joins, so more than one recorder replica shares the subscription.
+const claimQueueGroup = "recorder"
+
+// ClaimBudget bounds one claim's database work. It must stay below the
+// gateway's ledger timeout, so the recorder answers before the gateway
+// gives up and the plugin reads a structured reply.
+const ClaimBudget = 3500 * time.Millisecond
+
+// RegisterClaimResponder subscribes ledger to bus.LedgerClaimSubject with
+// queue group "recorder". metrics may be nil. The returned Responder subscribes
+// again after a denial and stops when unsubscribed.
+func RegisterClaimResponder(conn *bus.Conn, ledger *Ledger, metrics *ClaimMetrics, logger *slog.Logger) (*bus.Responder, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	handler := func(data []byte) []byte {
+		return handleClaim(logger, ledger, metrics, data)
+	}
+	return conn.ServeRequests(bus.LedgerClaimSubject, claimQueueGroup, handler)
+}
+
+// handleClaim decodes a ClaimRequest, runs it against ledger, and encodes
+// the ClaimResponse. A body the decoder rejects answers vetoed with
+// reason_code=INVALID_KEY, because a request the recorder cannot read
+// carries no valid key either. Every veto counts once in metrics. A
+// permanent veto of a Varroa-dispatched run also marks that run
+// TRIGGER_FAILED before the reply (markVetoedRun). A body the decoder
+// rejects names no run, so it marks nothing.
+func handleClaim(logger *slog.Logger, ledger *Ledger, metrics *ClaimMetrics, data []byte) []byte {
+	var req ClaimRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("claim request decode failed", "error", err)
+		metrics.addVeto(context.Background(), ReasonInvalidKey)
+		resp, _ := json.Marshal(ClaimResponse{
+			Decision:   DecisionVetoed,
+			ReasonCode: ReasonInvalidKey,
+			Message:    "malformed claim request",
+		})
+		return resp
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), ClaimBudget)
+	defer cancel()
+
+	resp := ledger.Claim(ctx, req)
+	if req.StartMark {
+		metrics.addStartMark(ctx, resp.Decision)
+	}
+	if resp.Decision == DecisionVetoed {
+		metrics.addVeto(ctx, resp.ReasonCode)
+		// The line names the run, the job, and the cell, so an operator
+		// can find the refused build. It leaves out the params digest,
+		// the actor, and the cause, so the log never carries the payload.
+		logger.Info("claim refused",
+			"reason_code", resp.ReasonCode,
+			"tenant", req.Tenant,
+			"run_id", req.RunID,
+			"job_path", req.JobPath,
+			"cell", req.Cell,
+			"message", resp.Message)
+		// A failed mark never changes the answer: the plugin acts on the
+		// veto either way, and the claim-expiry sweep still ends the run.
+		marked, err := ledger.markVetoedRun(ctx, req, resp)
+		switch {
+		case err != nil:
+			logger.Warn("vetoed run mark failed", "run_id", req.RunID, "reason_code", resp.ReasonCode, "error", err)
+		case marked:
+			metrics.addVetoMarked(ctx, resp.ReasonCode)
+			logger.Info("vetoed run marked", "run_id", req.RunID, "reason_code", resp.ReasonCode)
+		}
+	}
+	out, err := json.Marshal(resp)
+	if err != nil {
+		logger.Error("claim response encode failed", "error", err)
+		out, _ = json.Marshal(ClaimResponse{Code: CodeInternal, Error: "encode claim response"})
+	}
+	return out
+}

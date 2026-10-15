@@ -1,0 +1,13 @@
+# The image installs its own dependencies with npm ci. A local tree must not
+# reach the build context: a stale node_modules would replace the installed
+# packages, and a local dist or coverage tree only slows the copy.
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.env
+.env.*
+.design-sync
+.ds-sync
+ds-bundle
+*.log

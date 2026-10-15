@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/varroaci/varroa-jenkins/internal/oci"
 )
 
@@ -40,7 +42,7 @@ variables:
 	writeFile(t, bundleDir, "rbac.yaml", "roles:\n  admin:\n    permissions:\n    - Overall/Administer")
 	writeFile(t, bundleDir, "vars.yaml", "namespace: default\ncluster: prod")
 
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	mat, err := r.materializeDir(bundleDir)
 	if err != nil {
 		t.Fatalf("materializeDir error: %v", err)
@@ -202,7 +204,7 @@ items:
 	}
 	_ = gzr.Close()
 
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	mat, err := r.materializeDir(cloneDir)
 	if err != nil {
 		t.Fatalf("materializeDir after OCI extract: %v", err)
@@ -355,7 +357,7 @@ variables:
 `)
 	writeFile(t, bundleDir, "jenkins.yaml", "jenkins: {}")
 
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	_, err := r.materializeDir(bundleDir)
 	if err == nil {
 		t.Fatal("expected error for variables symlink escape, got nil")
@@ -373,7 +375,7 @@ jcasc:
 `)
 	_ = commit("jenkins.yaml", "jenkins: {}")
 
-	r := NewResolver(t.TempDir())
+	r := NewResolver(noop.NewMeterProvider(), t.TempDir())
 	r.cloner.AllowLocalTransportForTest()
 
 	cloneDir := t.TempDir()

@@ -39,7 +39,8 @@ func composedBundleDeps(t *testing.T) *api.Dependencies {
 			},
 		},
 	})
-	return &api.Dependencies{Client: &stubClient{}, Store: store}
+	return &api.Dependencies{
+		Authorizer: adminTestAuthorizer(), Client: &stubClient{}, Store: store}
 }
 
 // listComposedBundlesResult calls list_composed_bundles and returns the decoded
@@ -1093,4 +1094,73 @@ func TestCreateComposedBundle_EmptyInputsRejected(t *testing.T) {
 	if _, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), store, "cb-empty", "ns"); err == nil {
 		t.Error("a rejected create must not persist the bundle")
 	}
+}
+
+func scopedBundleObject(ns, name string) *v1alpha1.ComposedBundle {
+	return &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec:       v1alpha1.ComposedBundleSpec{DisplayName: name},
+	}
+}
+
+func scopedBundleInputs() []interface{} {
+	return []interface{}{map[string]interface{}{"itemRef": map[string]interface{}{"name": "item-1"}}}
+}
+
+func TestMCPListComposedBundles_ScopedDeveloperFiltered(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps, scopedBundleObject("team-a", "a"), scopedBundleObject("team-b", "b"), scopedBundleObject("varroa-system", "starter"))
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "list_composed_bundles", map[string]interface{}{})
+	requireNamespaces(t, listedNamespaces(t, tr), "team-a", "varroa-system")
+}
+
+func TestMCPGetComposedBundle_ScopedDeveloperOtherNamespaceDenied(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"read"}}})
+	seedConfig(t, deps, scopedBundleObject("team-b", "b"))
+	tr := callToolAs(t, deps, mcpScopedDevClaims, "get_composed_bundle", map[string]interface{}{"namespace": "team-b", "name": "b"})
+	requireAccessDenied(t, tr)
+}
+
+func TestMCPCreateComposedBundle_ScopedDeveloper(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"create"}}})
+	own := callToolAs(t, deps, mcpScopedDevClaims, "create_composed_bundle", map[string]interface{}{
+		"namespace": "team-a", "name": "own", "inputs": scopedBundleInputs(),
+	})
+	if own.IsError {
+		t.Fatalf("create in own namespace: unexpected error: %v", own.Content)
+	}
+	other := callToolAs(t, deps, mcpScopedDevClaims, "create_composed_bundle", map[string]interface{}{
+		"namespace": "team-b", "name": "other", "inputs": scopedBundleInputs(),
+	})
+	requireAccessDenied(t, other)
+}
+
+func TestMCPUpdateComposedBundle_ScopedDeveloper(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"update"}}})
+	seedConfig(t, deps, scopedBundleObject("team-a", "own"), scopedBundleObject("team-b", "other"))
+	own := callToolAs(t, deps, mcpScopedDevClaims, "update_composed_bundle", map[string]interface{}{
+		"namespace": "team-a", "name": "own", "inputs": scopedBundleInputs(),
+	})
+	if own.IsError {
+		t.Fatalf("update in own namespace: unexpected error: %v", own.Content)
+	}
+	other := callToolAs(t, deps, mcpScopedDevClaims, "update_composed_bundle", map[string]interface{}{
+		"namespace": "team-b", "name": "other", "inputs": scopedBundleInputs(),
+	})
+	requireAccessDenied(t, other)
+}
+
+func TestMCPDeleteComposedBundle_ScopedDeveloper(t *testing.T) {
+	deps := scopedConfigDeps([]v1alpha1.APIRule{{Resources: []string{"composedbundles"}, Verbs: []string{"delete"}}})
+	seedConfig(t, deps, scopedBundleObject("team-a", "own"), scopedBundleObject("team-b", "other"))
+	own := callToolAs(t, deps, mcpScopedDevClaims, "delete_composed_bundle", map[string]interface{}{
+		"namespace": "team-a", "name": "own",
+	})
+	if own.IsError {
+		t.Fatalf("delete in own namespace: unexpected error: %v", own.Content)
+	}
+	other := callToolAs(t, deps, mcpScopedDevClaims, "delete_composed_bundle", map[string]interface{}{
+		"namespace": "team-b", "name": "other",
+	})
+	requireAccessDenied(t, other)
 }

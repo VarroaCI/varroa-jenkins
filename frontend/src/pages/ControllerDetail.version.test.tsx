@@ -22,6 +22,7 @@ vi.mock("../api/client", async () => {
     listClusters: vi.fn(),
     updateController: (...args: unknown[]) => mockUpdateController(...args),
     ControllerConflictError: actual.ControllerConflictError,
+    pendingChangeChanged: actual.pendingChangeChanged,
     getProvisioningConfig: vi.fn(() => Promise.resolve({ versions: catalog })),
     getVersionProfiles: () => mockGetVersionProfiles(),
     parsePreflightChecks: actual.parsePreflightChecks,

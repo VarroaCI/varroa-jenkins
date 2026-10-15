@@ -28,6 +28,7 @@ const (
 	AttentionBootFailed       = "bootFailed"
 	AttentionPluginRollFailed = "pluginRollFailed"
 	AttentionApplyFailed      = "applyFailed"
+	AttentionMiteUnreachable  = "miteUnreachable"
 )
 
 // buildAttentionJSON reports at most one reason a controller needs an
@@ -82,6 +83,12 @@ func buildAttentionJSON(cr *v1alpha1.Controller) *AttentionJSON {
 			a.Since = &s
 		}
 		return a
+	}
+	for i := range cr.Status.Conditions {
+		c := &cr.Status.Conditions[i]
+		if c.Type == v1alpha1.ConditionMiteConnected && c.Status == metav1.ConditionFalse && c.Reason == v1alpha1.ReasonStreamLost {
+			return fromCond(AttentionMiteUnreachable, c, nil)
+		}
 	}
 	return nil
 }

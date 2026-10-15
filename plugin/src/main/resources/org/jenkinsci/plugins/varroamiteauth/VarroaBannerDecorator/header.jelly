@@ -9,6 +9,7 @@
             data-user-email="${it.currentUserEmail}"
             data-user-groups="${it.currentUserGroups}"
             data-user-role="${it.currentUserRole}"
+            data-headless="${it.headless}"
             data-root-url="${rootURL}"
             data-crumb-field="${it.crumbFieldName}"
             data-crumb-value="${it.crumbValue}"></script>

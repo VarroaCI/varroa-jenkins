@@ -1,0 +1,5 @@
+type: object
+additionalProperties: false
+properties:
+  nvidia.com/gpu:
+    type: string

@@ -616,23 +616,6 @@ func TestHandleSourcesListGetDelete(t *testing.T) {
 // Tests for Task 2.3: items, roles, bindings
 // ---------------------------------------------------------------------------
 
-func TestHandleItemsList_OperatorNamespace(t *testing.T) {
-	fc := newFakeClient()
-	fc.items["ns-a/item1"] = &v1alpha1.CatalogItem{ObjectMeta: metav1.ObjectMeta{Name: "item1", Namespace: "ns-a"}}
-	cr, crStore := newTestConfigCRUD(fc, "op-ns", nil)
-	_ = crStore
-
-	resp := cr.HandleItemsList(jsonMarshal(t, bus.ConfigListRequest{Namespace: "ns-a"}))
-	var listResp bus.ConfigListResponse
-	jsonUnmarshal(t, resp, &listResp)
-	if listResp.OperatorNamespace != "op-ns" {
-		t.Errorf("expected operatorNamespace %q, got %q", "op-ns", listResp.OperatorNamespace)
-	}
-	if len(listResp.Items) != 1 {
-		t.Errorf("expected 1 item, got %d", len(listResp.Items))
-	}
-}
-
 func TestProjectCatalogItemSummary(t *testing.T) {
 	item := &v1alpha1.CatalogItem{
 		ObjectMeta: metav1.ObjectMeta{Name: "item1", Namespace: "ns-a"},
@@ -884,6 +867,44 @@ func TestHandleBindingsCreateConflict(t *testing.T) {
 	}
 }
 
+// An API server validation failure is the caller's fault, so a create answers
+// CodeInvalid and not CodeInternal.
+func TestHandleRBACCreateInvalidAnswersCodeInvalid(t *testing.T) {
+	invalid := func(kind string) error {
+		return apierrors.NewInvalid(schema.GroupKind{Group: "varroa.dev", Kind: kind}, "x", nil)
+	}
+
+	t.Run("binding", func(t *testing.T) {
+		cr, crStore := newTestConfigCRUD(newFakeClient(), "", nil)
+		gvr, err := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding]()
+		if err != nil {
+			t.Fatal(err)
+		}
+		crStore.FailNext("create", gvr, invalid("JenkinsRoleBinding"))
+		obj, _ := json.Marshal(v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "jrb1"}})
+		var appResp bus.ConfigApplyResponse
+		jsonUnmarshal(t, cr.HandleBindingsCreate(jsonMarshal(t, bus.ConfigApplyRequest{Name: "jrb1", Object: obj})), &appResp)
+		if appResp.Code != bus.CodeInvalid {
+			t.Errorf("binding create code = %q, want %q", appResp.Code, bus.CodeInvalid)
+		}
+	})
+
+	t.Run("role", func(t *testing.T) {
+		cr, crStore := newTestConfigCRUD(newFakeClient(), "", nil)
+		gvr, err := crdstore.GVRFor[v1alpha1.JenkinsRole]()
+		if err != nil {
+			t.Fatal(err)
+		}
+		crStore.FailNext("create", gvr, invalid("JenkinsRole"))
+		obj, _ := json.Marshal(v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "jr1"}})
+		var appResp bus.ConfigApplyResponse
+		jsonUnmarshal(t, cr.HandleRolesCreate(jsonMarshal(t, bus.ConfigApplyRequest{Name: "jr1", Object: obj})), &appResp)
+		if appResp.Code != bus.CodeInvalid {
+			t.Errorf("role create code = %q, want %q", appResp.Code, bus.CodeInvalid)
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Tests for Task 2.5: pause/resume/sync
 // ---------------------------------------------------------------------------
@@ -970,7 +991,7 @@ func TestHandleBundlesPreviewInvalidJSON(t *testing.T) {
 func TestHandleBundlesPreview_OCIAuthError(t *testing.T) {
 	fc := newFakeClient()
 	// Create a minimal composer (with no resolver — OCI source will find it missing).
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1021,7 +1042,7 @@ func TestComposeBundle_GitSecretRefHostNotAllowed(t *testing.T) {
 	// Composer needs to be non-nil (composeBundle calls c.Composer.Compose),
 	// but the host check fires in resolveComposedBundleGitAuth before the
 	// composer reaches the git input.
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1070,7 +1091,7 @@ func TestComposeBundle_PinPreflight(t *testing.T) {
 			Content: "plugins:\n  - artifactId: git\n    version: 999.999\n",
 		},
 	}
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1114,7 +1135,7 @@ func TestComposeBundle_PinPreflightAllClear(t *testing.T) {
 			Content: "plugins:\n  - artifactId: git\n    version: 5.10.1\n",
 		},
 	}
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 
@@ -1148,7 +1169,7 @@ func TestComposeBundle_GitSecretRefAnnotationsErrorFailsClosed(t *testing.T) {
 		"password": []byte("s3cret"),
 	}
 	fc.secretAnnotationsErr = errors.New("api server unavailable")
-	composer := bundle.NewComposer(fc, nil, t.TempDir(), "", "", "", "")
+	composer := bundle.NewComposer(fc, nil, t.TempDir(), "")
 	cr, crStore := newTestConfigCRUD(fc, "", composer)
 	_ = crStore
 

@@ -41,6 +41,7 @@ vi.mock("../api/client", async () => {
   return {
     updateController: vi.fn(),
     ControllerConflictError: actual.ControllerConflictError,
+    pendingChangeChanged: actual.pendingChangeChanged,
     BFF_BASE: "/api/v1",
     approveRestart: vi.fn(),
     reprovisionController: vi.fn(),

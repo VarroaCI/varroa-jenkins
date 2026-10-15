@@ -1,0 +1,91 @@
+# Localdev Postgres for recordStore.postgres.mode=external (D12). A single
+# replica on kind's ephemeral local storage, not a CloudNativePG Cluster —
+# `recordStore.postgres.mode=cnpg` needs the CloudNativePG operator, which
+# localdev does not install.
+#
+# The Secret's `dsn` key matches what `recordStore.postgres.external.dsnKey`
+# names in helm_deploy's --set flags. Both the recorder and the BFF read it
+# from the release namespace, because recordStore.blobs.mode=postgres puts
+# VARROA_RECORDSTORE_DSN on every reader too.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: varroa-localdev-postgres
+  namespace: varroa-system
+type: Opaque
+stringData:
+  dsn: "postgres://varroa:varroa@varroa-localdev-postgres.varroa-system.svc:5432/varroa?sslmode=disable"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: varroa-localdev-postgres
+  namespace: varroa-system
+  labels:
+    app: varroa-localdev-postgres
+spec:
+  clusterIP: None
+  selector:
+    app: varroa-localdev-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: varroa-localdev-postgres
+  namespace: varroa-system
+  labels:
+    app: varroa-localdev-postgres
+spec:
+  serviceName: varroa-localdev-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: varroa-localdev-postgres
+  template:
+    metadata:
+      labels:
+        app: varroa-localdev-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: varroa
+            - name: POSTGRES_PASSWORD
+              value: varroa
+            - name: POSTGRES_DB
+              value: varroa
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "varroa"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "varroa"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            # subPath keeps PGDATA at the volume root out of the mount, so a
+            # fresh kind local-path volume with a stray lost+found entry
+            # never trips postgres's empty-directory check.
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

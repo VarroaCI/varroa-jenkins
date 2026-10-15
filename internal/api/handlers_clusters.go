@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -111,6 +112,7 @@ var controllerRoutes = map[string]controllerRoute{
 	"wake":             {http.MethodPost, (*Server).handleWake},
 	"approve":          {http.MethodPost, (*Server).handleApproveRestart},
 	"approve-deletion": {http.MethodPost, (*Server).handleApproveDeletion},
+	"break-glass":      {http.MethodPost, (*Server).handleBreakGlass},
 	"reprovision":      {http.MethodPost, (*Server).handleReprovision},
 	"restart":          {http.MethodPost, (*Server).handleRestartController},
 	"preview":          {http.MethodPost, (*Server).handlePreviewController},
@@ -119,6 +121,7 @@ var controllerRoutes = map[string]controllerRoute{
 	"events":           {http.MethodGet, (*Server).handleControllerEvents},
 	"mite/stream":      {"", (*Server).handleMiteStreamSSE},
 	"plugins":          {http.MethodGet, (*Server).handleControllerPlugins},
+	"jenkins-link":     {http.MethodGet, (*Server).handleControllerJenkinsLink},
 }
 
 // configDispatchRoutes maps the second segment of a cluster-scoped config path
@@ -197,6 +200,42 @@ func (s *Server) handleClusterDispatch(w http.ResponseWriter, r *http.Request) {
 
 // dispatchControllers dispatches cluster-scoped controller paths.
 // segments does NOT include the cluster name or the "controllers" segment.
+// configOperatorNamespace returns the operator namespace of cluster for the
+// config read gate. The local cluster uses the BFF value. A healthy member
+// uses the value of its own heartbeat. An unhealthy, unknown, or silent
+// member returns "", and the gate then grants no operator-namespace exemption.
+func (s *Server) configOperatorNamespace(ctx context.Context, cluster string) string {
+	if s.deps.Brood == nil || cluster == s.deps.Brood.LocalCluster() {
+		return s.deps.OperatorNamespace
+	}
+	clusters, err := s.deps.Brood.Clusters(ctx)
+	if err != nil {
+		s.deps.Logger.Warn("config read scope: list clusters failed", "cluster", cluster, "error", err)
+		return ""
+	}
+	return clusterOperatorNamespace(clusters, cluster, s.deps.Brood.LocalCluster(), s.deps.OperatorNamespace)
+}
+
+// clusterOperatorNamespace picks the operator namespace of cluster from a
+// cluster list. The local cluster uses localNS. A healthy member uses the
+// namespace in its heartbeat. An unhealthy member, or one absent from the
+// list, returns "". Brood.Clusters keeps entries after their TTL expires,
+// so Healthy must be checked.
+func clusterOperatorNamespace(clusters []ClusterInfo, cluster, local, localNS string) string {
+	if cluster == local {
+		return localNS
+	}
+	for _, c := range clusters {
+		if c.Name == cluster {
+			if !c.Healthy {
+				return ""
+			}
+			return c.OperatorNamespace
+		}
+	}
+	return ""
+}
+
 func (s *Server) dispatchControllers(w http.ResponseWriter, r *http.Request, cluster string, segments []string) {
 	if len(segments) == 0 {
 		if r.Method != http.MethodGet {
@@ -455,6 +494,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "composedbundles", s.configOperatorNamespace(r.Context(), cluster)))
 		s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		return
 	}
@@ -504,12 +544,17 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 		if pinPreflight.Missing == nil {
 			pinPreflight.Missing = []bus.MissingPlugin{}
 		}
+		pipelineTemplates := preview.PipelineTemplates
+		if pipelineTemplates == nil {
+			pipelineTemplates = []bus.PipelineTemplateSummary{}
+		}
 		resp := map[string]interface{}{
 			"valid":               valid,
 			"errors":              errs,
 			"warnings":            warns,
 			"unresolvedVariables": uvars,
 			"pinPreflight":        pinPreflight,
+			"pipelineTemplates":   pipelineTemplates,
 		}
 		s.writeJSON(w, http.StatusOK, resp)
 		return
@@ -684,12 +729,17 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 				return
 			}
 			valid := len(preview.Errors) == 0 && len(preview.Missing) == 0
+			pipelineTemplates := preview.PipelineTemplates
+			if pipelineTemplates == nil {
+				pipelineTemplates = []bus.PipelineTemplateSummary{}
+			}
 			resp := map[string]interface{}{
 				"valid":               valid,
 				"errors":              preview.Errors,
 				"warnings":            preview.Warnings,
 				"unresolvedVariables": preview.UnresolvedVariables,
 				"pinPreflight":        preview.PinPreflight,
+				"pipelineTemplates":   pipelineTemplates,
 			}
 			s.writeJSON(w, http.StatusOK, resp)
 			return
@@ -702,7 +752,7 @@ func (s *Server) dispatchComposedBundles(w http.ResponseWriter, r *http.Request,
 
 		switch r.Method {
 		case http.MethodGet:
-			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadComposedBundles(claims) {
+			if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "composedbundles", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 				s.writeJSONError(w, http.StatusForbidden, "forbidden")
 				return
 			}
@@ -801,15 +851,17 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 			Source: r.URL.Query().Get("source"),
 			Q:      r.URL.Query().Get("q"),
 		}
-		items, operatorNs, err := s.deps.ConfigBrood.ListCatalogItems(r.Context(), cluster, ns, filter)
+		items, err := s.deps.ConfigBrood.ListCatalogItems(r.Context(), cluster, ns, filter)
 		if err != nil {
 			s.deps.Logger.Error("list catalog items failed", "cluster", cluster, "namespace", ns, "error", err)
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
+		opNS := s.configOperatorNamespace(r.Context(), cluster)
+		items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogitems", opNS))
 		resp := map[string]interface{}{
 			"items":             items,
-			"operatorNamespace": operatorNs,
+			"operatorNamespace": opNS,
 		}
 		s.writeJSON(w, http.StatusOK, resp)
 		return
@@ -831,7 +883,7 @@ func (s *Server) dispatchCatalogItems(w http.ResponseWriter, r *http.Request, cl
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadCatalogItems(claims) {
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogitems", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -873,6 +925,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 				writeConfigBroodError(w, err, cluster)
 				return
 			}
+			items = filterConfigByNamespace(items, s.deps.Authorizer.ConfigReadFilter(claims, "catalogsources", s.configOperatorNamespace(r.Context(), cluster)))
 			s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
 		case http.MethodPost:
 			ns := r.URL.Query().Get("namespace")
@@ -880,34 +933,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 				s.writeJSONError(w, http.StatusBadRequest, "namespace query parameter required")
 				return
 			}
-			if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
-				s.writeJSONError(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			var src v1alpha1.CatalogSource
-			if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
-				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
-				return
-			}
-			src.Namespace = ns
-			src.APIVersion = "varroa.dev/v1alpha1"
-			src.Kind = "CatalogSource"
-			obj, _ := json.Marshal(src)
-			item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
-			if err != nil {
-				writeConfigBroodError(w, err, cluster)
-				return
-			}
-			var created v1alpha1.CatalogSource
-			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:      "catalogsource.created",
-				Actor:     ActorFrom(claims),
-				Namespace: ns,
-				Cluster:   cluster,
-				Message:   "CatalogSource " + src.Name + " created in " + ns,
-			})
-			s.writeJSON(w, http.StatusCreated, created)
+			s.createCatalogSource(w, r, claims, cluster, ns)
 		default:
 			s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -918,34 +944,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 	if len(segments) == 1 && segments[0] != "" {
 		ns := segments[0]
 		if r.Method == http.MethodPost {
-			if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
-				s.writeJSONError(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			var src v1alpha1.CatalogSource
-			if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
-				s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
-				return
-			}
-			src.Namespace = ns
-			src.APIVersion = "varroa.dev/v1alpha1"
-			src.Kind = "CatalogSource"
-			obj, _ := json.Marshal(src)
-			item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
-			if err != nil {
-				writeConfigBroodError(w, err, cluster)
-				return
-			}
-			var created v1alpha1.CatalogSource
-			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:      "catalogsource.created",
-				Actor:     ActorFrom(claims),
-				Namespace: ns,
-				Cluster:   cluster,
-				Message:   "CatalogSource " + src.Name + " created in " + ns,
-			})
-			s.writeJSON(w, http.StatusCreated, created)
+			s.createCatalogSource(w, r, claims, cluster, ns)
 			return
 		}
 		if r.Method == http.MethodGet {
@@ -993,7 +992,7 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.deps.Authorizer.CanManageCatalogSources(claims, "read") {
+		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanReadConfigInNamespace(claims, "catalogsources", ns, s.configOperatorNamespace(r.Context(), cluster)) {
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -1008,6 +1007,10 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 	case http.MethodPut:
 		if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "update", ns) {
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			s.writeJSONError(w, http.StatusConflict, err.Error())
 			return
 		}
 		var src v1alpha1.CatalogSource
@@ -1040,6 +1043,10 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 			s.writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		if err := v1alpha1.CheckCatalogSourceWritable(name); err != nil {
+			s.writeJSONError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if err := s.deps.ConfigBrood.DeleteCatalogSource(r.Context(), cluster, ns, name); err != nil {
 			writeConfigBroodError(w, err, cluster)
 			return
@@ -1055,6 +1062,43 @@ func (s *Server) dispatchCatalogSources(w http.ResponseWriter, r *http.Request, 
 	default:
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// createCatalogSource creates a CatalogSource in ns from the request body. The
+// reserved-name guard runs after the authorization check and before the brood call.
+func (s *Server) createCatalogSource(w http.ResponseWriter, r *http.Request, claims *auth.Claims, cluster, ns string) {
+	if !s.deps.Authorizer.CanManageCatalogSourcesInNamespace(claims, "create", ns) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var src v1alpha1.CatalogSource
+	if err := json.NewDecoder(r.Body).Decode(&src); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := v1alpha1.CheckCatalogSourceWritable(src.Name); err != nil {
+		s.writeJSONError(w, http.StatusConflict, err.Error())
+		return
+	}
+	src.Namespace = ns
+	src.APIVersion = "varroa.dev/v1alpha1"
+	src.Kind = "CatalogSource"
+	obj, _ := json.Marshal(src)
+	item, err := s.deps.ConfigBrood.CreateCatalogSource(r.Context(), cluster, ns, src.Name, obj)
+	if err != nil {
+		writeConfigBroodError(w, err, cluster)
+		return
+	}
+	var created v1alpha1.CatalogSource
+	_ = json.Unmarshal(item, &created)
+	s.notifyActivity(activity.Event{
+		Type:      "catalogsource.created",
+		Actor:     ActorFrom(claims),
+		Namespace: ns,
+		Cluster:   cluster,
+		Message:   "CatalogSource " + src.Name + " created in " + ns,
+	})
+	s.writeJSON(w, http.StatusCreated, created)
 }
 
 // dispatchJenkinsRoles handles /clusters/{cluster}/jenkinsroles[...]
@@ -1457,4 +1501,29 @@ func (s *Server) handleControllerPlugins(w http.ResponseWriter, r *http.Request,
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// filterConfigByNamespace keeps the raw items whose namespace keep allows.
+// A CR carries metadata.namespace; a catalog item summary carries namespace.
+func filterConfigByNamespace(items []json.RawMessage, keep func(string) bool) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(items))
+	for _, raw := range items {
+		var probe struct {
+			Namespace string `json:"namespace"`
+			Metadata  struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(raw, &probe) != nil {
+			continue
+		}
+		ns := probe.Metadata.Namespace
+		if ns == "" {
+			ns = probe.Namespace
+		}
+		if keep(ns) {
+			out = append(out, raw)
+		}
+	}
+	return out
 }

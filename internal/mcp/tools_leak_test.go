@@ -24,9 +24,9 @@ const (
 	testPassword     = "plaintext-that-must-never-ship"
 )
 
-// adminDeps builds Dependencies whose caller is a global admin, seeded with a
-// hibernated Controller and a User carrying credentials.
-func adminDeps() *api.Dependencies {
+// adminTestAuthorizer returns an Authorizer whose caller holds every verb
+// on every resource, cluster-wide.
+func adminTestAuthorizer() *api.Authorizer {
 	roles := []*v1alpha1.VarroaRole{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "admin"},
@@ -44,7 +44,12 @@ func adminDeps() *api.Dependencies {
 			},
 		},
 	}
+	return api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false)
+}
 
+// adminDeps builds Dependencies whose caller is a global admin, seeded with a
+// hibernated Controller and a User carrying credentials.
+func adminDeps() *api.Dependencies {
 	store := crdstore.NewFake()
 	crdstore.MustSeed(store, &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{
@@ -69,7 +74,7 @@ func adminDeps() *api.Dependencies {
 
 	return &api.Dependencies{
 		Client:     &stubClient{},
-		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		Authorizer: adminTestAuthorizer(),
 		Store:      store,
 	}
 }

@@ -694,4 +694,83 @@ public class VarroaSecurityRealmTest {
         assertFalse("vk_ Bearer must never authenticate as the mite: " + body,
                 body.contains("\"varroa-mite\""));
     }
+
+    // ---- local accounts beside OIDC ----
+
+    /** A validator double that returns fixed claims and records each call. */
+    private static final class FixedValidator extends JWTValidator {
+        final Map<String, Object> claims;
+        int calls;
+
+        FixedValidator(String issuer, Map<String, Object> claims) {
+            super(issuer, "varroa");
+            this.claims = claims;
+        }
+
+        @Override
+        public Map<String, Object> validate(String token) {
+            calls++;
+            return claims;
+        }
+    }
+
+    private static String tokenWithIssuer(String iss) {
+        String payload = "{\"iss\":\"" + iss + "\"}";
+        return "e30." + java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".c2ln";
+    }
+
+    private static Map<String, Object> claimsFor(String sub) {
+        Map<String, Object> c = new HashMap<>();
+        c.put("sub", sub);
+        c.put("preferred_username", sub);
+        return c;
+    }
+
+    @Test
+    public void localIssuerTokenAccepted() {
+        VarroaSecurityRealm realm = new VarroaSecurityRealm();
+        FixedValidator oidc = new FixedValidator("https://dex.example", claimsFor("alice"));
+        FixedValidator local = new FixedValidator("https://varroa.example", claimsFor("local:rescue"));
+        realm.setJwtValidatorForTest(oidc);
+        realm.setLocalJwtValidatorForTest(local);
+
+        Map<String, Object> got = realm.validateSession(tokenWithIssuer("https://varroa.example/"));
+        assertNotNull("a local issuer token must reach the local validator", got);
+        assertEquals("local:rescue", got.get("sub"));
+        assertEquals(1, local.calls);
+        assertEquals(0, oidc.calls);
+    }
+
+    @Test
+    public void oidcTokenWithLocalPrefixRejected() {
+        VarroaSecurityRealm realm = new VarroaSecurityRealm();
+        realm.setJwtValidatorForTest(new FixedValidator("https://dex.example", claimsFor("local:rescue")));
+        realm.setLocalJwtValidatorForTest(new FixedValidator("https://varroa.example", claimsFor("x")));
+        assertNull("an IdP token must never carry the local: prefix",
+                realm.validateSession(tokenWithIssuer("https://dex.example")));
+    }
+
+    @Test
+    public void unknownIssuerGoesToOidcValidator() {
+        VarroaSecurityRealm realm = new VarroaSecurityRealm();
+        FixedValidator oidc = new FixedValidator("https://dex.example", null);
+        FixedValidator local = new FixedValidator("https://varroa.example", claimsFor("local:rescue"));
+        realm.setJwtValidatorForTest(oidc);
+        realm.setLocalJwtValidatorForTest(local);
+        assertNull(realm.validateSession(tokenWithIssuer("https://evil.example")));
+        assertEquals(1, oidc.calls);
+        assertEquals(0, local.calls);
+    }
+
+    @Test
+    public void emptyLocalIssuerDisablesSecondValidator() {
+        VarroaSecurityRealm realm = new VarroaSecurityRealm();
+        realm.setLocalIssuer("");
+        if (System.getenv("VARROA_LOCAL_ISSUER") == null || System.getenv("VARROA_LOCAL_ISSUER").isEmpty()) {
+            assertNull("an empty local issuer turns local sessions off", realm.getLocalIssuer());
+        }
+        realm.setLocalIssuer("https://varroa.example/");
+        assertEquals("https://varroa.example", realm.getLocalIssuer());
+    }
 }

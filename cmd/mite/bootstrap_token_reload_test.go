@@ -17,7 +17,7 @@ func TestReadBootstrapToken_ObservesFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent := NewAgent(Config{
+	agent := mustNewAgent(t, Config{
 		ControllerName: "test",
 		Namespace:      "ns",
 		BootstrapFile:  tokenFile,

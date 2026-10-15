@@ -23,6 +23,7 @@ not require update-center pull-through.
 Destinations without an explicit OCI tag receive a floating profile tag and a
 content-addressed tag containing the lock hash. An explicit tag writes only that tag.
 Export fails when a plugin checksum cannot be resolved or verified.
+A plugin at `latest`, or with no version in `--plugins-file`, resolves to a concrete version before download. For a profile, the newest version that the profile's core runs is used. In offline mode, the newest listed version is used. Export fails when no metadata source lists a usable version.
 
 ## Export one addon
 
@@ -56,6 +57,10 @@ varroactl import \
   --to uc://update-center.example.com
 ```
 
+The update center rejects a pack that holds a plugin at `latest` or with no
+version. The error names the plugin. Export the pack again with a concrete
+version.
+
 Use `--registry-config` for registry credentials. Restrict `--insecure` to
 trusted development networks.
 
@@ -69,7 +74,8 @@ trusted development networks.
 
 Consumers reject missing or unknown pack kinds, checksum mismatches, and
 malformed structured annotations. Dependency versions in addon metadata are
-minimums, not exact pins.
+minimums, not exact pins. An empty dependency list is written as `[]`. A missing
+dependencies annotation means the list is unknown, not empty.
 
 See [update center operations](../operations/update-center.md) for seeding and
 pull-through behavior.

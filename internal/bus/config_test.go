@@ -17,7 +17,6 @@ func TestOperatorBundlesSubject(t *testing.T) {
 		{"my-cluster", "update", "operator.my-cluster.bundles.update"},
 		{"my-cluster", "delete", "operator.my-cluster.bundles.delete"},
 		{"my-cluster", "preview", "operator.my-cluster.bundles.preview"},
-		{"my-cluster", "validate", "operator.my-cluster.bundles.validate"},
 		{"my-cluster", "pause", "operator.my-cluster.bundles.pause"},
 		{"my-cluster", "resume", "operator.my-cluster.bundles.resume"},
 	}
@@ -77,13 +76,13 @@ func TestOperatorRbacSubject(t *testing.T) {
 	}
 }
 
-// TestAll27Subjects verifies that the union of all three subject builders
-// produces exactly 27 subjects for a sample cluster.
-func TestAll27Subjects(t *testing.T) {
+// TestAll26Subjects verifies that the union of all three subject builders
+// produces exactly 26 subjects for a sample cluster.
+func TestAll26Subjects(t *testing.T) {
 	cluster := "dev-cluster"
 	got := make(map[string]bool)
 
-	bundleVerbs := []string{"list", "get", "create", "update", "delete", "preview", "validate", "pause", "resume"}
+	bundleVerbs := []string{"list", "get", "create", "update", "delete", "preview", "pause", "resume"}
 	for _, v := range bundleVerbs {
 		got[OperatorBundlesSubject(cluster, v)] = true
 	}
@@ -98,8 +97,8 @@ func TestAll27Subjects(t *testing.T) {
 		got[OperatorRbacSubject(cluster, v)] = true
 	}
 
-	if len(got) != 27 {
-		t.Errorf("expected 27 unique subjects, got %d", len(got))
+	if len(got) != 26 {
+		t.Errorf("expected 26 unique subjects, got %d", len(got))
 	}
 
 	want := map[string]bool{
@@ -109,7 +108,6 @@ func TestAll27Subjects(t *testing.T) {
 		"operator.dev-cluster.bundles.update":       true,
 		"operator.dev-cluster.bundles.delete":       true,
 		"operator.dev-cluster.bundles.preview":      true,
-		"operator.dev-cluster.bundles.validate":     true,
 		"operator.dev-cluster.bundles.pause":        true,
 		"operator.dev-cluster.bundles.resume":       true,
 		"operator.dev-cluster.catalog.itemlist":     true,
@@ -159,12 +157,11 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 		t.Errorf("ConfigListRequest round-trip: got Namespace=%q", got.Namespace)
 	}
 
-	// ConfigListResponse with operator namespace
+	// ConfigListResponse with an error code
 	resp := ConfigListResponse{
-		Items:             []json.RawMessage{json.RawMessage(`{"a":1}`)},
-		OperatorNamespace: "op-ns",
-		Code:              CodeNotFound,
-		Error:             "not found",
+		Items: []json.RawMessage{json.RawMessage(`{"a":1}`)},
+		Code:  CodeNotFound,
+		Error: "not found",
 	}
 	data, err = json.Marshal(resp)
 	if err != nil {
@@ -176,9 +173,6 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 	}
 	if len(gotResp.Items) != 1 {
 		t.Errorf("ConfigListResponse.Items: got %d, want 1", len(gotResp.Items))
-	}
-	if gotResp.OperatorNamespace != "op-ns" {
-		t.Errorf("ConfigListResponse.OperatorNamespace: got %q", gotResp.OperatorNamespace)
 	}
 	if gotResp.Code != CodeNotFound {
 		t.Errorf("ConfigListResponse.Code: got %q", gotResp.Code)
@@ -335,5 +329,14 @@ func TestConfigPayloadRoundTrips(t *testing.T) {
 	}
 	if gotSyncResp.Code != CodeInternal {
 		t.Errorf("CatalogSyncResponse.Code: got %q", gotSyncResp.Code)
+	}
+}
+
+func TestOperatorCellPoolsSubject(t *testing.T) {
+	for _, verb := range []string{"list", "get", "scale"} {
+		want := "operator.member-c.cellpools." + verb
+		if got := OperatorCellPoolsSubject("member-c", verb); got != want {
+			t.Errorf("OperatorCellPoolsSubject(member-c, %q) = %q, want %q", verb, got, want)
+		}
 	}
 }

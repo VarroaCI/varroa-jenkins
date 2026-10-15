@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -87,6 +89,16 @@ type Conn struct {
 	// VARROA_JETSTREAM_REPLICAS env at process startup. A zero value means
 	// "unset" and is treated as 1 by Replicas().
 	replicas int
+
+	// permissionViolations counts every permission violation the server
+	// reports on this connection. The error handler can fire before
+	// RegisterMetrics runs, so the count lives here and the counter reads it.
+	permissionViolations atomic.Int64
+
+	// denied holds the watchers of a subscription denial. The server
+	// reports a denial only to the error handler, so the handler fans it
+	// out to the holder of the subscription.
+	denied deniedWatchers
 }
 
 // clampReplicas clamps a JetStream replica count to a sane floor of 1.
@@ -160,6 +172,19 @@ func Connect(url string, cfg ...Config) (*Conn, error) {
 			}
 		}),
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
+			// A denied core publish returns no error to the caller. The
+			// server reports it only here, so this is the one place it can
+			// become visible.
+			if errors.Is(err, nats.ErrPermissionViolation) {
+				c.permissionViolations.Add(1)
+				if c.logger != nil {
+					c.logger.Error("nats permission violation", "error", err)
+				}
+				if isSubscribeDenial(err) {
+					c.denied.notify(err)
+				}
+				return
+			}
 			if c.logger == nil {
 				return
 			}
@@ -298,8 +323,20 @@ func (c *Conn) Connected() bool {
 }
 
 // RegisterMetrics exports varroa.bus.connected (1 while connected, 0
-// otherwise) on the given meter, tagged with the calling component.
+// otherwise) and varroa.bus.permission_violations on the given meter,
+// tagged with the calling component.
 func (c *Conn) RegisterMetrics(meter metric.Meter, component string) error {
+	attrs := metric.WithAttributes(attribute.String("component", component))
+	if _, err := meter.Int64ObservableCounter(
+		"varroa.bus.permission_violations",
+		metric.WithDescription("Publish or subscribe operations the NATS server denied on this connection"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			obs.Observe(c.permissionViolations.Load(), attrs)
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
 	_, err := meter.Int64ObservableGauge(
 		"varroa.bus.connected",
 		metric.WithDescription("1 while the NATS bus connection is established, 0 otherwise"),
@@ -308,7 +345,7 @@ func (c *Conn) RegisterMetrics(meter metric.Meter, component string) error {
 			if c.Connected() {
 				v = 1
 			}
-			obs.Observe(v, metric.WithAttributes(attribute.String("component", component)))
+			obs.Observe(v, attrs)
 			return nil
 		}),
 	)
@@ -343,25 +380,28 @@ func (c *Conn) Request(subject string, data []byte, timeout time.Duration) (*nat
 	return c.nc.Request(subject, data, timeout)
 }
 
-// RequestWithContext sends a request and waits for a response, respecting
-// context cancellation. If the context is cancelled before a response arrives,
-// RequestWithContext returns the context error.
+// RequestWithContext sends a request and waits for one reply. The wait ends at the first of timeout or the end of ctx. An ended ctx removes the pending reply and returns ctx.Err(). The end of timeout returns nats.ErrTimeout, as Request does.
 func (c *Conn) RequestWithContext(ctx context.Context, subject string, data []byte, timeout time.Duration) (*nats.Msg, error) {
-	type result struct {
-		msg *nats.Msg
-		err error
+	rctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	msg, err := c.nc.RequestWithContext(rctx, subject, data)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return nil, nats.ErrTimeout
 	}
-	ch := make(chan result, 1)
-	go func() {
-		msg, err := c.nc.Request(subject, data, timeout)
-		ch <- result{msg, err}
-	}()
-	select {
-	case r := <-ch:
-		return r.msg, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return msg, err
+}
+
+// IsNoReply reports whether a request error means that no subscriber
+// answered: the server found no responder, or the wait ran out.
+func IsNoReply(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout)
+}
+
+// IsNoResponder reports whether a request error means that no subscriber
+// received the request at all. A timeout is not such an error: the
+// responder can have received the request and acted on it.
+func IsNoResponder(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders)
 }
 
 // DataHandler is a simplified subscription callback that receives only
@@ -412,6 +452,38 @@ func (c *Conn) SubscribeRequest(subject, queue string, handler RequestHandler) (
 		if resp != nil {
 			_ = msg.Respond(resp)
 		}
+	}
+	var (
+		natsSub *nats.Subscription
+		err     error
+	)
+	if queue != "" {
+		natsSub, err = c.nc.QueueSubscribe(subject, queue, cb)
+	} else {
+		natsSub, err = c.nc.Subscribe(subject, cb)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Sub{natsSub: natsSub}, nil
+}
+
+// subscribeRequestConcurrently subscribes like SubscribeRequest, but runs
+// each handler call in its own goroutine. A call takes one slot of slots
+// and holds it until the handler returns. The callback blocks while every
+// slot is in use, so delivery then waits as it does for SubscribeRequest.
+// nats.go gives each subscription its own delivery goroutine, so the block
+// holds only this subscription. A handler call can still run after
+// Unsubscribe returns, and it replies on the open connection.
+func (c *Conn) subscribeRequestConcurrently(subject, queue string, slots chan struct{}, handler RequestHandler) (*Sub, error) {
+	cb := func(msg *nats.Msg) {
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots }()
+			if resp := handler(msg.Data); resp != nil {
+				_ = msg.Respond(resp)
+			}
+		}()
 	}
 	var (
 		natsSub *nats.Subscription

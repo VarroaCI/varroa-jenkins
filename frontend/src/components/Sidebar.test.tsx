@@ -134,7 +134,7 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Brood Schedules")).not.toBeInTheDocument();
   });
 
-  it("renders all 9 nav rows when every permission is held", () => {
+  it("renders all 11 nav rows when every permission is held", () => {
     vi.mocked(usePermissions).mockReturnValue({
       data: { global: { "*": { "*": true } }, scopes: [] },
       isLoading: false,
@@ -163,9 +163,11 @@ describe("Sidebar", () => {
     } as unknown as ReturnType<typeof usePermissions>);
 
     renderSidebar("/");
-    // Exactly the 9 rows
+    // Exactly the 11 rows
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Pipelines")).toBeInTheDocument();
     expect(screen.getByText("Controllers")).toBeInTheDocument();
+    expect(screen.getByText("Cells")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText("Clusters")).toBeInTheDocument();
     expect(screen.getByText("Activity")).toBeInTheDocument();
@@ -173,6 +175,11 @@ describe("Sidebar", () => {
     expect(screen.getByText("Schedules")).toBeInTheDocument();
     expect(screen.getByText("Catalog")).toBeInTheDocument();
     expect(screen.getByText("Admin & access")).toBeInTheDocument();
+
+    // Pipelines sits between Dashboard and Controllers in Operate
+    const pipelinesLink = screen.getByRole("link", { name: "Pipelines" });
+    expect(pipelinesLink).toHaveAttribute("href", "/pipelines");
+    expect(pipelinesLink.querySelector("svg")).toBeInTheDocument();
 
     // Retired sidebar rows are all absent
     const retired = [
@@ -185,6 +192,56 @@ describe("Sidebar", () => {
     for (const label of retired) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
+  });
+
+  describe("pipelines gate", () => {
+    function mockPermissions(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
+      vi.mocked(usePermissions).mockReturnValue({
+        data,
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+        status: "success",
+        isPending: false,
+        dataUpdatedAt: 0,
+        errorUpdatedAt: 0,
+        failureCount: 0,
+        failureReason: null,
+        errorUpdateCount: 0,
+        isFetched: true,
+        isFetchedAfterMount: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPaused: false,
+        isRefetching: false,
+        isStale: false,
+        isInitialLoading: false,
+        isLoadingError: false,
+        isRefetchError: false,
+        fetchStatus: "idle",
+        promise: Promise.resolve(undefined),
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof usePermissions>);
+    }
+
+    // The gate reads grants only — it never calls the pipelines API, so a
+    // caller it admits sees the row whether that API is healthy or answers
+    // 503. A non-empty `tenants` partition alone is enough to admit.
+    it("shows Pipelines for a caller the gate admits, independent of the pipelines API's own state", () => {
+      mockPermissions({
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      renderSidebar("/");
+      expect(screen.getByRole("link", { name: "Pipelines" })).toBeInTheDocument();
+    });
+
+    it("hides Pipelines for a caller the gate refuses", () => {
+      mockPermissions({ global: {}, scopes: [], tenants: [] });
+      renderSidebar("/");
+      expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
+    });
   });
 
   describe("door visibility", () => {
@@ -732,6 +789,71 @@ describe("Sidebar", () => {
       const flyoutEl = container.querySelector('div[aria-hidden="true"]');
       expect(flyoutEl).toBeInTheDocument();
       expect(flyoutEl!.textContent).toBe("Dashboard");
+    });
+  });
+
+  describe("cells gate", () => {
+    function mockPerms(data: { global: object; scopes: unknown[]; tenants?: unknown[] }) {
+      vi.mocked(usePermissions).mockReturnValue({
+        data,
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+        status: "success",
+        isPending: false,
+        dataUpdatedAt: 0,
+        errorUpdatedAt: 0,
+        failureCount: 0,
+        failureReason: null,
+        errorUpdateCount: 0,
+        isFetched: true,
+        isFetchedAfterMount: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPaused: false,
+        isRefetching: false,
+        isStale: false,
+        isInitialLoading: false,
+        isLoadingError: false,
+        isRefetchError: false,
+        fetchStatus: "idle",
+        promise: Promise.resolve(undefined),
+        refetch: vi.fn(),
+      } as unknown as ReturnType<typeof usePermissions>);
+    }
+
+    it("renders eleven rows for a full-permission caller", () => {
+      mockPerms({
+        global: { "*": { "*": true } },
+        scopes: [],
+        tenants: [{ tenant: "team-a", jobs: [], capabilities: { pipelines: { read: true } } }],
+      });
+      renderSidebar("/");
+      const labels = [
+        "Dashboard", "Pipelines", "Controllers", "Cells", "Plugins", "Clusters",
+        "Activity", "Operations", "Schedules", "Catalog", "Admin & access",
+      ];
+      for (const label of labels) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+      expect(screen.getByRole("link", { name: "Cells" })).toHaveAttribute("href", "/cells");
+    });
+
+    it("hides the Cells row for a caller with no cluster-wide cellpools:read", () => {
+      mockPerms({ global: { controllers: { read: true } }, scopes: [], tenants: [] });
+      renderSidebar("/");
+      expect(screen.queryByText("Cells")).not.toBeInTheDocument();
+      expect(screen.getByText("Controllers")).toBeInTheDocument();
+    });
+
+    it("hides the Cells row for a namespace-scoped grant", () => {
+      mockPerms({
+        global: {},
+        scopes: [{ namespaces: ["ns-a"], capabilities: { cellpools: { read: true } } }],
+        tenants: [],
+      });
+      renderSidebar("/");
+      expect(screen.queryByText("Cells")).not.toBeInTheDocument();
     });
   });
 });

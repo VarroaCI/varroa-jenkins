@@ -68,12 +68,8 @@ func TestBusHandler_OnJenkinsActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 
-	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil)
+	handler := mustNewBusHandler(t, busConn, snapshotKV, presenceKV)
 	handler.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	t.Cleanup(handler.Close)
 
@@ -206,6 +202,26 @@ type recordingHandler struct {
 	jenkinsActivityName   string
 	jenkinsActivityNS     string
 	jenkinsActivityEvt    *mitev1.JenkinsActivityEvent
+
+	// logChunkCh and tailAckCh carry every OnLogChunk/OnTailAck call, so a
+	// test driving the real gRPC dispatch can wait on them instead of
+	// racing a plain field against the server's read-loop goroutine.
+	logChunkCh chan recordedLogChunk
+	tailAckCh  chan recordedTailAck
+}
+
+// recordedLogChunk is one OnLogChunk call captured by recordingHandler.
+type recordedLogChunk struct {
+	name  string
+	ns    string
+	chunk *mitev1.LogChunk
+}
+
+// recordedTailAck is one OnTailAck call captured by recordingHandler.
+type recordedTailAck struct {
+	name string
+	ns   string
+	ack  *mitev1.TailAck
 }
 
 func (r *recordingHandler) OnConnect(_, _, _ string, _ interface{}, _ Sender, _ interface{}) int64 {
@@ -228,6 +244,26 @@ func (r *recordingHandler) IsCurrentConnection(_, _ string, _ int64) bool {
 	return !r.superseded.Load()
 }
 func (r *recordingHandler) OnDisconnect(_, _ string, _ int64) {}
+func (r *recordingHandler) OnBuildEvent(_, _ string, _ int64, _ *mitev1.BuildEvent) error {
+	return nil
+}
+func (r *recordingHandler) OnClaimRequest(_, _ string, _ int64, _ *mitev1.ClaimRequest, _ Sender) {}
+func (r *recordingHandler) OnLogChunk(name, ns string, chunk *mitev1.LogChunk) {
+	if r.logChunkCh != nil {
+		r.logChunkCh <- recordedLogChunk{name: name, ns: ns, chunk: chunk}
+	}
+}
+func (r *recordingHandler) OnTailAck(name, ns string, ack *mitev1.TailAck) {
+	if r.tailAckCh != nil {
+		r.tailAckCh <- recordedTailAck{name: name, ns: ns, ack: ack}
+	}
+}
+func (r *recordingHandler) OnCrossTenantRequest(_, _ string, _ int64, _ *mitev1.CrossTenantRequest, _ Sender) {
+}
+
+func (r *recordingHandler) OnRunStateChunk(_, _ string, _ *mitev1.RunStateChunk) {}
+
+func (r *recordingHandler) OnRunStateRequest(_, _ string, _ *mitev1.RunStateRequest, _ Sender) {}
 
 // Ensure recordingHandler implements StreamHandler.
 var _ StreamHandler = (*recordingHandler)(nil)
@@ -271,12 +307,8 @@ func TestJenkinsActivity_AntiSpoof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure presence kv: %v", err)
 	}
-	desiredKV, err := busConn.EnsureKV(bus.KVDesiredBucket, 0)
-	if err != nil {
-		t.Fatalf("ensure desired kv: %v", err)
-	}
 
-	handler := NewBusHandler(bus.DefaultCluster, busConn, snapshotKV, presenceKV, desiredKV, nil)
+	handler := mustNewBusHandler(t, busConn, snapshotKV, presenceKV)
 	handler.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	t.Cleanup(handler.Close)
 

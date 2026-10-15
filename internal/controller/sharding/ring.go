@@ -7,10 +7,8 @@
 package sharding
 
 import (
-	"fmt"
 	"hash/fnv"
 	"sort"
-	"sync"
 )
 
 const (
@@ -75,64 +73,4 @@ func (r *Ring) Assign(replicas []string) *Assignment {
 		a.Shards[rep] = append(a.Shards[rep], s)
 	}
 	return a
-}
-
-// ShardSet is a thread-safe set of held shard numbers.
-type ShardSet struct {
-	mu   sync.RWMutex
-	held map[int]bool
-}
-
-// NewShardSet creates an empty shard set.
-func NewShardSet() *ShardSet {
-	return &ShardSet{held: make(map[int]bool)}
-}
-
-// Add marks a shard as held.
-func (s *ShardSet) Add(shard int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.held[shard] = true
-}
-
-// Remove marks a shard as released.
-func (s *ShardSet) Remove(shard int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.held, shard)
-}
-
-// Held returns true if the shard is currently held.
-func (s *ShardSet) Held(shard int) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.held[shard]
-}
-
-// Owns returns true if the given key maps to a held shard.
-func (s *ShardSet) Owns(ring *Ring, key string) bool {
-	return s.Held(ring.ShardFor(key))
-}
-
-// OwnsController is a convenience that checks ownership by namespace+name.
-func (s *ShardSet) OwnsController(ring *Ring, ns, name string) bool {
-	return s.Owns(ring, fmt.Sprintf("%s/%s", ns, name))
-}
-
-// Count returns the number of held shards.
-func (s *ShardSet) Count() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.held)
-}
-
-// Shards returns a copy of all held shard numbers.
-func (s *ShardSet) Shards() []int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]int, 0, len(s.held))
-	for shard := range s.held {
-		out = append(out, shard)
-	}
-	return out
 }

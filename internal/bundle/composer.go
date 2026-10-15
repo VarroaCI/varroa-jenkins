@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/bundle/pipelinetemplate"
 )
 
 // ItemLookup fetches CatalogItem CRDs for the composer.
@@ -26,21 +27,15 @@ type Composer struct {
 	lookup            ItemLookup
 	resolver          *Resolver
 	workDir           string
-	oidcIssuer        string
-	oidcClientID      string
-	oidcClientSecret  string
 	operatorNamespace string
 }
 
 // NewComposer creates a new Composer.
-func NewComposer(lookup ItemLookup, resolver *Resolver, workDir string, oidcIssuer, oidcClientID, oidcClientSecret string, operatorNamespace string) *Composer {
+func NewComposer(lookup ItemLookup, resolver *Resolver, workDir, operatorNamespace string) *Composer {
 	return &Composer{
 		lookup:            lookup,
 		resolver:          resolver,
 		workDir:           workDir,
-		oidcIssuer:        oidcIssuer,
-		oidcClientID:      oidcClientID,
-		oidcClientSecret:  oidcClientSecret,
 		operatorNamespace: operatorNamespace,
 	}
 }
@@ -104,11 +99,25 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 		"rbac":        {},
 	}
 
+	// itemSources names the source of each entry in groups["item"], in the
+	// same order. composeItems uses it to name a dropped top-level key.
+	var itemSources []string
+
 	// Raw variables from all sources. Precedence (lowest to highest):
 	// 1. Item defaults — fill unset keys only
 	// 2. Spec-wide variables — override defaults
 	// 3. Per-ref variables — override everything (highest user precedence)
 	rawVars := make(Variables)
+
+	// pipelineTemplates collects the templates the bundle's pipeline-template
+	// inputs carry, in input order (design D5, D7). ptSeen de-duplicates by
+	// name+version: identical content is a harmless duplicate, differing
+	// content is an identity collision naming both itemRefs.
+	var pipelineTemplates []pipelinetemplate.Document
+	ptSeen := make(map[string]struct {
+		refName string
+		content string
+	})
 
 	// Apply spec-wide variables first so per-ref can override them.
 	for k, v := range spec.Variables {
@@ -174,10 +183,31 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 				continue
 			}
 			if groupKey == "pipeline-template" {
-				// pipeline-template is an item-schema content tag, not a distinct
-				// output format — route it into the same items.yaml merge as
-				// plain "item" content.
-				groupKey = "item"
+				// pipeline-template content is a PipelineTemplate document
+				// (design D2). It composes into its own template set, never
+				// into ItemsYAML, and never resolves a ${var} placeholder —
+				// so it skips the CatalogVariable merging below.
+				doc, err := pipelinetemplate.ParseDocument([]byte(item.Status.Content))
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf(
+						"itemRef %q: pipeline-template content failed to parse: %v", ref.Name, err))
+					continue
+				}
+				key := doc.Metadata.Name + "@" + doc.Spec.Version
+				if prior, exists := ptSeen[key]; exists {
+					if prior.content != item.Status.Content {
+						result.Errors = append(result.Errors, fmt.Sprintf(
+							"pipeline-template %q and %q both declare name %q version %q with different content",
+							prior.refName, ref.Name, doc.Metadata.Name, doc.Spec.Version))
+					}
+					continue
+				}
+				ptSeen[key] = struct {
+					refName string
+					content string
+				}{refName: ref.Name, content: item.Status.Content}
+				pipelineTemplates = append(pipelineTemplates, *doc)
+				continue
 			}
 			if _, ok := groups[groupKey]; ok {
 				content := item.Status.Content
@@ -194,6 +224,13 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 				}
 				if strings.TrimSpace(content) != "" {
 					groups[groupKey] = append(groups[groupKey], content)
+					if groupKey == "item" {
+						refName := ref.Name
+						if ref.Namespace != "" {
+							refName = ref.Namespace + "/" + ref.Name
+						}
+						itemSources = append(itemSources, fmt.Sprintf("itemRef %q", refName))
+					}
 				}
 			}
 
@@ -253,6 +290,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 			}
 			if mat.ItemsYAML != "" {
 				groups["item"] = append(groups["item"], mat.ItemsYAML)
+				itemSources = append(itemSources, fmt.Sprintf("git input[%d] (%s)", i, gs.RepoURL))
 			}
 			if mat.RbacYAML != "" {
 				groups["rbac"] = append(groups["rbac"], mat.RbacYAML)
@@ -303,6 +341,7 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 			}
 			if mat.ItemsYAML != "" {
 				groups["item"] = append(groups["item"], mat.ItemsYAML)
+				itemSources = append(itemSources, fmt.Sprintf("OCI input[%d] (%s)", i, ocs.Ref))
 			}
 			if mat.RbacYAML != "" {
 				groups["rbac"] = append(groups["rbac"], mat.RbacYAML)
@@ -347,14 +386,28 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 	pluginsYAML, pluginWarnings := composePlugins(groups["plugin"])
 	result.Warnings = append(result.Warnings, pluginWarnings...)
 
-	itemsYAML, err := composeItems(groups["item"])
+	itemsYAML, droppedItemKeys, err := composeItems(groups["item"], itemSources)
 	if err != nil {
 		return nil, fmt.Errorf("compose items: %w", err)
+	}
+	for _, d := range droppedItemKeys {
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"item manifest from %s: top-level key %q is dropped; a composed bundle keeps only \"items\"", d.Source, d.Key))
 	}
 	rbacYAML, err := composeRbac(groups["rbac"])
 	if err != nil {
 		return nil, fmt.Errorf("compose rbac: %w", err)
 	}
+	pipelineTemplatesYAML, err := composePipelineTemplates(pipelineTemplates)
+	if err != nil {
+		return nil, fmt.Errorf("compose pipeline templates: %w", err)
+	}
+
+	// An items-declared definition.varroaTemplate is fully visible at
+	// composition time (design D10), unlike a marker: validate its values
+	// against the resolved template's schema now, rather than waiting for
+	// L3 at run start.
+	result.Errors = append(result.Errors, validateItemTemplateValues(itemsYAML, pipelineTemplates)...)
 
 	// NOTE: varroa_* auto-vars are NOT injected here. They are injected at
 	// controller resolve time via ResolveVars.
@@ -368,15 +421,17 @@ func (c *Composer) Compose(ctx context.Context, ns string, spec *v1alpha1.Compos
 
 	// Step 5: Build MaterializedBundle (unresolved).
 	result.Materialized = &MaterializedBundle{
-		JenkinsYAML: jenkinsYAML,
-		PluginsYAML: pluginsYAML,
-		ItemsYAML:   itemsYAML,
-		RbacYAML:    rbacYAML,
-		Variables:   rawVars,
+		JenkinsYAML:           jenkinsYAML,
+		PluginsYAML:           pluginsYAML,
+		ItemsYAML:             itemsYAML,
+		RbacYAML:              rbacYAML,
+		Variables:             rawVars,
+		PipelineTemplatesYAML: pipelineTemplatesYAML,
+		DroppedItemKeys:       droppedItemKeys,
 	}
 
 	// Step 6: Compute hash over unresolved content + raw vars.
-	result.ResolvedHash = computeResolvedHash(jenkinsYAML, pluginsYAML, itemsYAML, rbacYAML, rawVars)
+	result.ResolvedHash = computeResolvedHash(jenkinsYAML, pluginsYAML, itemsYAML, rbacYAML, pipelineTemplatesYAML, rawVars)
 
 	// Step 6: BundleYAML preview — concatenate all sections with "---\n" separators.
 	var bundleParts []string
@@ -529,6 +584,102 @@ func injectPodTemplatesIntoJCasC(jcascYAML string, contents []string) (string, e
 	return string(out), nil
 }
 
+// InjectRunnerNodes appends runner nodes to jenkins.nodes in an
+// already-merged jcasc document (design D3). A map merge cannot be used:
+// mergeMaps replaces a list on conflict, so it would delete every node the
+// cell bundle declares. Exported because the caller is package controller,
+// not package bundle: runner nodes are per-cell data the Controller
+// reconciler assembles per desired-state push, not content the composer
+// bakes into the shared ComposedBundle ConfigMap.
+//
+// It always writes jenkins.nodes, as an empty list when the document
+// declares none and nodes is empty: JCasC replaces the node list it is
+// given, so an explicit empty list is what drops the runner nodes of a
+// tenant that left the cell, and an absent key would leave them behind.
+// It rejects a node whose name collides with one the document already
+// declares.
+func InjectRunnerNodes(jcascYAML string, nodes []any) (string, error) {
+	var doc map[string]any
+	if strings.TrimSpace(jcascYAML) != "" {
+		if err := yaml.Unmarshal([]byte(jcascYAML), &doc); err != nil {
+			return "", fmt.Errorf("parse jcasc for runner node injection: %w", err)
+		}
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+
+	var jenkins map[string]any
+	if raw, exists := doc["jenkins"]; exists {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("jcasc: \"jenkins\" key is not a map (got %T)", raw)
+		}
+		jenkins = m
+	}
+	if jenkins == nil {
+		jenkins = map[string]any{}
+		doc["jenkins"] = jenkins
+	}
+
+	var existingNodes []any
+	if raw, exists := jenkins["nodes"]; exists {
+		n, ok := raw.([]any)
+		if !ok {
+			return "", fmt.Errorf("jcasc: \"jenkins.nodes\" is not a list (got %T)", raw)
+		}
+		existingNodes = n
+	}
+
+	existingNames := make(map[string]bool, len(existingNodes))
+	for _, n := range existingNodes {
+		if name, ok := permanentNodeName(n); ok {
+			existingNames[name] = true
+		}
+	}
+
+	for _, n := range nodes {
+		name, ok := permanentNodeName(n)
+		if !ok {
+			continue
+		}
+		if existingNames[name] {
+			return "", fmt.Errorf("jcasc: node %q collides with a node the bundle already declares", name)
+		}
+		existingNames[name] = true
+	}
+
+	merged := make([]any, 0, len(existingNodes)+len(nodes))
+	merged = append(merged, existingNodes...)
+	merged = append(merged, nodes...)
+	jenkins["nodes"] = merged
+
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal jcasc after runner node injection: %w", err)
+	}
+	return string(out), nil
+}
+
+// permanentNodeName reads the name field off a jenkins.nodes entry shaped
+// {permanent: {name: ...}}, the only node shape this package renders or
+// expects to find already declared by a bundle.
+func permanentNodeName(entry any) (string, bool) {
+	m, ok := entry.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	permanent, ok := m["permanent"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	name, ok := permanent["name"].(string)
+	if !ok || name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // splitEmbeddedPlugins separates a top-level `plugins:` block out of a jcasc
 // item's content so it can be routed to the plugin set rather than leaking
 // into jenkins.yaml. This lets a single jcasc catalog item ship the plugin its
@@ -612,27 +763,62 @@ func composePlugins(yamls []string) (string, []string) {
 	return string(out), warnings
 }
 
-// composeItems concatenates item YAML content under a single items key.
-func composeItems(yamls []string) (string, error) {
+// composeItems concatenates item YAML content under a single items key. It
+// also returns each top-level key other than items that a fragment declares
+// and the composer drops. sources[i] names the source of yamls[i].
+func composeItems(yamls []string, sources []string) (string, []DroppedItemKey, error) {
 	var items []map[string]any
+	var dropped []DroppedItemKey
 	for i, y := range yamls {
 		if strings.TrimSpace(y) == "" {
 			continue
 		}
+		source := sources[i]
+		dropped = append(dropped, droppedTopLevelKeys(y, source)...)
 		var wrapper struct {
 			Items []map[string]any `yaml:"items"`
 		}
 		if err := yaml.Unmarshal([]byte(y), &wrapper); err != nil {
-			return "", fmt.Errorf("input %d: %w", i, err)
+			return "", nil, fmt.Errorf("%s: %w", source, err)
 		}
 		items = append(items, wrapper.Items...)
 	}
 
 	if len(items) == 0 {
-		return "", nil
+		return "", dropped, nil
 	}
 	out, _ := yaml.Marshal(map[string]any{"items": items})
-	return string(out), nil
+	return string(out), dropped, nil
+}
+
+// droppedTopLevelKeys lists the top-level mapping keys of one item fragment
+// other than items and a merge key, in document order. A fragment that does
+// not parse as a mapping gives nothing; the wrapper unmarshal reports it.
+func droppedTopLevelKeys(y, source string) []DroppedItemKey {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(y), &doc); err != nil || len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	var out []DroppedItemKey
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := root.Content[i].Value
+		if key == "items" || isMergeKeyNode(root.Content[i]) {
+			continue
+		}
+		out = append(out, DroppedItemKey{Source: source, Key: key})
+	}
+	return out
+}
+
+// isMergeKeyNode reports whether k is a YAML merge key, by the same test as
+// yaml.v3. A quoted "<<" is an ordinary key.
+func isMergeKeyNode(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.Value == "<<" &&
+		(k.Tag == "" || k.Tag == "!" || k.ShortTag() == "!!merge")
 }
 
 // composeRbac merges RBAC YAML content under a single roles key.
@@ -660,14 +846,104 @@ func composeRbac(yamls []string) (string, error) {
 	return string(out), nil
 }
 
+// composePipelineTemplates serializes the delivered pipeline-template
+// documents under a single templates key, in input order (design D7). The
+// caller has already resolved the identity-collision rule from D5, so docs
+// carries no duplicate name+version pair.
+func composePipelineTemplates(docs []pipelinetemplate.Document) (string, error) {
+	if len(docs) == 0 {
+		return "", nil
+	}
+	out, err := yaml.Marshal(struct {
+		Templates []pipelinetemplate.Document `yaml:"templates"`
+	}{Templates: docs})
+	if err != nil {
+		return "", fmt.Errorf("marshal pipeline templates: %w", err)
+	}
+	return string(out), nil
+}
+
+// validateItemTemplateValues finds every items-declared
+// definition.varroaTemplate in itemsYAML, at any nesting depth under a
+// folder, and validates its values against the schema of the template it
+// resolves to in delivered (design D10). A template an items-declared
+// definition cannot resolve, or whose values fail the schema, is a
+// composition error — unlike a marker, an items-declared template is
+// fully visible at composition time, so this check need not wait for L3
+// at run start.
+func validateItemTemplateValues(itemsYAML string, delivered []pipelinetemplate.Document) []string {
+	if strings.TrimSpace(itemsYAML) == "" {
+		return nil
+	}
+	var wrapper struct {
+		Items []map[string]any `yaml:"items"`
+	}
+	if err := yaml.Unmarshal([]byte(itemsYAML), &wrapper); err != nil {
+		// Malformed itemsYAML is already reported by composeItems' caller.
+		return nil
+	}
+	return validateItemTemplateValuesAt(wrapper.Items, "", delivered)
+}
+
+// validateItemTemplateValuesAt validates every item in items and recurses
+// into each item's own nested items list, so a pipeline declared inside a
+// folder gets the same check as a root-level one. path is the parent
+// item's full path, empty at the top level.
+func validateItemTemplateValuesAt(items []map[string]any, path string, delivered []pipelinetemplate.Document) []string {
+	var errs []string
+	for _, it := range items {
+		itemName, _ := it["name"].(string)
+		itemPath := itemName
+		if path != "" {
+			itemPath = path + "/" + itemName
+		}
+
+		if def, ok := it["definition"].(map[string]any); ok {
+			if vt, ok := def["varroaTemplate"].(map[string]any); ok {
+				name, _ := vt["template"].(string)
+				constraint, _ := vt["templateVersion"].(string)
+				values, _ := vt["values"].(map[string]any)
+
+				doc, err := pipelinetemplate.ResolveTemplate(delivered, name, constraint)
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("item %q: definition.varroaTemplate: %v", itemPath, err))
+				} else {
+					_, findings, err := pipelinetemplate.ValidateValues(doc.Spec.Parameters, values)
+					if err != nil {
+						errs = append(errs, fmt.Sprintf(
+							"item %q: definition.varroaTemplate %q: validate values: %v", itemPath, name, err))
+					}
+					for _, f := range findings {
+						errs = append(errs, fmt.Sprintf("item %q: definition.varroaTemplate %q: %s", itemPath, name, f.String()))
+					}
+				}
+			}
+		}
+
+		nested, ok := it["items"].([]any)
+		if !ok {
+			continue
+		}
+		nestedMaps := make([]map[string]any, 0, len(nested))
+		for _, n := range nested {
+			if m, ok := n.(map[string]any); ok {
+				nestedMaps = append(nestedMaps, m)
+			}
+		}
+		errs = append(errs, validateItemTemplateValuesAt(nestedMaps, itemPath, delivered)...)
+	}
+	return errs
+}
+
 // computeResolvedHash computes a SHA256 hash over the concatenation of all
 // YAML strings and the sorted key=value variable pairs.
-func computeResolvedHash(jenkins, plugins, items, rbac string, vars Variables) string {
+func computeResolvedHash(jenkins, plugins, items, rbac, pipelineTemplates string, vars Variables) string {
 	h := sha256.New()
 	h.Write([]byte(jenkins))
 	h.Write([]byte(plugins))
 	h.Write([]byte(items))
 	h.Write([]byte(rbac))
+	h.Write([]byte(pipelineTemplates))
 
 	// Sort variable keys for deterministic ordering.
 	keys := make([]string, 0, len(vars))

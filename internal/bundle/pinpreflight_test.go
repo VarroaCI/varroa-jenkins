@@ -85,3 +85,22 @@ func TestCheckPluginPins_MalformedYAML(t *testing.T) {
 		t.Fatalf("expected zero-value report on error, got %+v", report)
 	}
 }
+
+func TestCheckPluginPins_LatestVariantsNeverConflict(t *testing.T) {
+	// Each spelling asks for the newest version, so none may conflict with a
+	// resolved set that pins the same artifact.
+	set := []pluginlock.PluginEntry{{ArtifactID: "git", Version: "2.0.0"}}
+	for _, v := range []string{"latest", "LATEST", " latest ", ""} {
+		pluginsYAML := "plugins:\n  - artifactId: git\n    version: \"" + v + "\"\n"
+		report, err := CheckPluginPins(pluginsYAML, set)
+		if err != nil {
+			t.Fatalf("version %q: unexpected error: %v", v, err)
+		}
+		if len(report.Conflicts) != 0 {
+			t.Errorf("version %q: expected no conflicts, got %+v", v, report.Conflicts)
+		}
+		if len(report.Missing) != 0 {
+			t.Errorf("version %q: expected no missing entries, got %+v", v, report.Missing)
+		}
+	}
+}

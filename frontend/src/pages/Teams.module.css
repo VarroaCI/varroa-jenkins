@@ -1,5 +1,6 @@
 .nameCell { composes: nameCell from "./tables.module.css"; }
 .table { composes: dataTable from "./tables.module.css"; }
+.tableWrap { composes: tableScroll from "./tables.module.css"; }
 
 .teamsPage {
 }
@@ -164,4 +165,34 @@
   display: flex;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+
+.exportsList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+.exportKind {
+  color: var(--text-2);
+}
+
+/* The member list names every cell of a tenant, one line each. A tenant
+   with one member reads as one line. */
+.memberList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memberList li {
+  white-space: nowrap;
+}
+
+.placementCell {
+  white-space: nowrap;
 }

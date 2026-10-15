@@ -1,10 +1,12 @@
 package sharding
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -12,10 +14,52 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
+
+// releaseDrainWait and releaseCancelWait limit how long a rebalance pass
+// waits for the work on the shards that it releases. Their sum must stay at
+// or under half the rebalance interval. The pass renews its leases before
+// the wait, so the next pass then starts on time and no renewal is late.
+const (
+	releaseDrainWait  = 4 * time.Second
+	releaseCancelWait = 1 * time.Second
+)
+
+// shutdownDrainWait, shutdownCancelWait, and shutdownReleaseTimeout limit the
+// shutdown release. Their sum must stay under the 30-second graceful shutdown
+// timeout of the controller-runtime manager.
+const (
+	shutdownDrainWait      = 10 * time.Second
+	shutdownCancelWait     = 2 * time.Second
+	shutdownReleaseTimeout = 2 * time.Second
+)
+
+// heldLeaseMargin is how long before the lease expiry a replica drops a shard
+// that it could not confirm. Other replicas judge the expiry by their own wall
+// clock, and a cancel needs time to stop a send that is in flight. The margin
+// gives that time. The revoke deadline is the lease duration minus this
+// margin: 25 seconds of the 30-second lease. A pass renews each due shard
+// before each claim and after the last claim. A healthy replica therefore
+// renews a shard at most about 20 seconds after its last renewal. The presence
+// write and the two List calls come before the renewals, and add to that age.
+// The deadline must stay above 20 seconds, and the margin must stay at or under
+// 5 seconds. A lease call that runs near its timeout can still carry a held
+// shard past the deadline. The sweep then drops that shard.
+const heldLeaseMargin = 5 * time.Second
+
+// staleSweepInterval is the period of the sweep that revokes unconfirmed
+// shards. The sweep runs apart from the rebalance pass, because one pass can
+// wait longer than the margin: each lease call can take up to leaseCallTimeout,
+// and a pass can wait in the release drain.
+const staleSweepInterval = 1 * time.Second
+
+// leaseCallTimeout limits each lease API call of the shard manager. It is below
+// the 25 s revoke deadline, so a hung call ends before the deadline. A shorter
+// bound would drop every shard on a slow apiserver. It is a context per call:
+// watches share rest.Config, so rest.Config.Timeout must stay unset.
+const leaseCallTimeout = 20 * time.Second
 
 // ShardManager claims per-shard Kubernetes Leases so operator replicas divide
 // Controller CRs among themselves (active/active). It runs on every replica.
@@ -26,20 +70,44 @@ type ShardManager struct {
 	ring       *Ring
 	held       *ShardSet          // shared with the Reconciler (read side)
 	onAcquired func(shards []int) // Reconciler.EnqueueShards; called outside the CAS loop
+	// onReleased receives each group of revoked or released shards. A pass
+	// calls it at most twice. It calls it before its claims with the shards
+	// that the pass dropped, after the release waited for their work. It calls
+	// it after its claims with the shards whose renewal failed during the
+	// claims. A shard dropped during the claims is not claimed again in the
+	// same pass. The stale sweep calls it with the shards that it revokes, and
+	// can do so while a pass runs. The shutdown release does not call it.
+	onReleased func(shards []int)
 	logger     *slog.Logger
 
 	interval      time.Duration    // rebalance period, default 10s
 	leaseDuration int32            // seconds, default 30
 	clock         func() time.Time // test seam
 
+	// The drain waits. A zero value selects the matching constant. Tests
+	// set short values.
+	drainWait          time.Duration
+	cancelWait         time.Duration
+	shutdownDrainWait  time.Duration
+	shutdownCancelWait time.Duration
+	// sweepInterval is the stale sweep period. A zero value selects
+	// staleSweepInterval.
+	sweepInterval time.Duration
+
+	// callTimeout limits each lease API call. A zero value selects
+	// leaseCallTimeout.
+	callTimeout time.Duration
+
 	// metrics
 	shardsHeld metric.Int64ObservableGauge
 	handoffs   metric.Int64Counter
 }
 
-// NewShardManager creates a new ShardManager.
-func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, identity string,
-	ring *Ring, held *ShardSet, onAcquired func([]int), logger *slog.Logger) *ShardManager {
+// NewShardManager creates a new ShardManager. It creates the shard
+// instruments on the "varroa-operator" meter of mp and returns an error when
+// an instrument cannot be created.
+func NewShardManager(mp metric.MeterProvider, leases coordinationv1client.LeaseInterface, namespace, identity string,
+	ring *Ring, held *ShardSet, onAcquired, onReleased func([]int), logger *slog.Logger) (*ShardManager, error) {
 	m := &ShardManager{
 		leases:        leases,
 		namespace:     namespace,
@@ -47,14 +115,14 @@ func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, iden
 		ring:          ring,
 		held:          held,
 		onAcquired:    onAcquired,
+		onReleased:    onReleased,
 		logger:        logger,
 		interval:      10 * time.Second,
 		leaseDuration: 30,
 		clock:         time.Now,
 	}
 
-	// Register metrics.
-	meter := otel.Meter("varroa-operator")
+	meter := mp.Meter("varroa-operator")
 
 	shardsHeld, err := meter.Int64ObservableGauge(
 		"varroa.operator.shards.held",
@@ -65,26 +133,24 @@ func NewShardManager(leases coordinationv1client.LeaseInterface, namespace, iden
 		}),
 	)
 	if err != nil {
-		logger.Warn("failed to register shards-held gauge", "error", err)
-	} else {
-		m.shardsHeld = shardsHeld
+		return nil, fmt.Errorf("create shards-held gauge: %w", err)
 	}
+	m.shardsHeld = shardsHeld
 
 	handoffs, err := meter.Int64Counter(
 		"varroa.operator.shard.handoffs",
 		metric.WithDescription("Number of shard handoff transitions"),
 	)
 	if err != nil {
-		logger.Warn("failed to register shard handoffs counter", "error", err)
-	} else {
-		m.handoffs = handoffs
+		return nil, fmt.Errorf("create shard handoffs counter: %w", err)
 	}
+	m.handoffs = handoffs
 
-	return m
+	return m, nil
 }
 
-// addHandoff records a handoff transition; nil-safe so a failed metric
-// registration can never panic the rebalance loop.
+// addHandoff records a handoff transition. A manager that a test builds
+// without NewShardManager has no counter, so addHandoff accepts a nil counter.
 func (m *ShardManager) addHandoff(ctx context.Context, direction string) {
 	if m.handoffs == nil {
 		return
@@ -100,6 +166,13 @@ func (m *ShardManager) NeedLeaderElection() bool { return false }
 func (m *ShardManager) Start(ctx context.Context) error {
 	m.logger.Info("shard manager starting", "identity", m.identity, "shardCount", m.ring.Shards())
 
+	var sweep sync.WaitGroup
+	sweep.Add(1)
+	go func() {
+		defer sweep.Done()
+		m.sweepLoop(ctx)
+	}()
+
 	// Run initial rebalance immediately.
 	m.rebalance(ctx)
 
@@ -109,8 +182,13 @@ func (m *ShardManager) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			// The sweep must stop before the release, so it does not revoke
+			// shards while the release drains them.
+			sweep.Wait()
 			m.logger.Info("shard manager shutting down, releasing all shards")
-			releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			releaseCtx, cancel := context.WithTimeout(context.Background(),
+				orDefault(m.shutdownDrainWait, shutdownDrainWait)+
+					orDefault(m.shutdownCancelWait, shutdownCancelWait)+shutdownReleaseTimeout)
 			defer cancel()
 			m.releaseAll(releaseCtx)
 			return nil
@@ -118,6 +196,133 @@ func (m *ShardManager) Start(ctx context.Context) error {
 			m.rebalance(ctx)
 		}
 	}
+}
+
+// sweepLoop revokes unconfirmed shards until ctx ends.
+func (m *ShardManager) sweepLoop(ctx context.Context) {
+	ticker := time.NewTicker(orDefault(m.sweepInterval, staleSweepInterval))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.revokeUnconfirmed(ctx)
+		}
+	}
+}
+
+// confirmDeadline is the longest time that a held shard can go without a
+// confirmed lease write.
+func (m *ShardManager) confirmDeadline() time.Duration {
+	return time.Duration(m.leaseDuration)*time.Second - heldLeaseMargin
+}
+
+// revokeUnconfirmed revokes every held shard whose last confirmed lease write
+// started confirmDeadline or more ago. Another replica can claim such a shard
+// soon, so the work on it is cancelled at once, without a wait. It calls
+// onReleased once with the revoked shards. That can run at the same time as a
+// rebalance pass: the hook reads the held set when it runs, and a shard that
+// a pass claims again is enqueued again through onAcquired.
+func (m *ShardManager) revokeUnconfirmed(ctx context.Context) {
+	revoked := m.held.RevokeStale(m.clock(), m.confirmDeadline())
+	if len(revoked) == 0 {
+		return
+	}
+	m.logger.Warn("dropping shards whose leases were not confirmed before the deadline",
+		"shards", revoked, "deadline", m.confirmDeadline())
+	for range revoked {
+		m.addHandoff(ctx, "released")
+	}
+	if m.onReleased != nil {
+		m.onReleased(revoked)
+	}
+}
+
+// revokeInPass revokes a shard in a rebalance pass and records the release.
+// It records nothing when the stale sweep already dropped the shard, so one
+// release is reported once.
+func (m *ShardManager) revokeInPass(ctx context.Context, shard int, released *[]int) {
+	if m.held.Revoke(shard) {
+		*released = append(*released, shard)
+		m.addHandoff(ctx, "released")
+	}
+}
+
+// renewalDue returns true when a held lease has two rebalance intervals or
+// less of validity left. A lease without a renew time is due.
+func (m *ShardManager) renewalDue(lease *coordinationv1.Lease, now time.Time) bool {
+	if lease.Spec.RenewTime == nil {
+		return true
+	}
+	remaining := lease.Spec.RenewTime.Add(time.Duration(m.leaseDuration) * time.Second).Sub(now)
+	return remaining <= 2*m.interval
+}
+
+// renewDue renews every held shard that is due, oldest renewal first. A shard
+// that the stale sweep drops before its turn is skipped. A failed or late
+// renewal revokes the shard and records it in released.
+//
+// Every write that confirms a shard stores its response in leases. A second
+// renewal in one pass must carry the new resourceVersion.
+func (m *ShardManager) renewDue(ctx context.Context, leases map[int]*coordinationv1.Lease, released *[]int) {
+	now := m.clock()
+	due := make([]int, 0)
+	for _, shard := range m.held.Shards() {
+		lease, ok := leases[shard]
+		if !ok || !isLeaseHeldBy(lease, m.identity) || !m.renewalDue(lease, now) {
+			continue
+		}
+		due = append(due, shard)
+	}
+	slices.SortFunc(due, func(a, b int) int {
+		if c := compareRenewTime(leases[a], leases[b]); c != 0 {
+			return c
+		}
+		return cmp.Compare(a, b)
+	})
+	for _, shard := range due {
+		if !m.held.Held(shard) {
+			continue
+		}
+		m.renewShard(ctx, shard, leases, released)
+	}
+}
+
+// compareRenewTime orders two leases by renew time. A lease without a renew
+// time sorts first.
+func compareRenewTime(a, b *coordinationv1.Lease) int {
+	switch {
+	case a.Spec.RenewTime == nil && b.Spec.RenewTime == nil:
+		return 0
+	case a.Spec.RenewTime == nil:
+		return -1
+	case b.Spec.RenewTime == nil:
+		return 1
+	}
+	return a.Spec.RenewTime.Compare(b.Spec.RenewTime.Time)
+}
+
+// renewShard renews one held shard. It writes the lease that leases holds for
+// the shard, and a confirming response replaces that entry.
+func (m *ShardManager) renewShard(ctx context.Context, shard int, leases map[int]*coordinationv1.Lease, released *[]int) {
+	updatedLease := leases[shard].DeepCopy()
+	start := m.clock()
+	updatedLease.Spec.RenewTime = &metav1.MicroTime{Time: start}
+	updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
+	got, err := m.updateLease(ctx, updatedLease)
+	if err != nil {
+		m.revokeInPass(ctx, shard, released)
+		return
+	}
+	// A renewal whose response came after the deadline does not prove
+	// that the lease is still ours: another replica can have claimed it.
+	if m.clock().Sub(start) >= m.confirmDeadline() {
+		m.revokeInPass(ctx, shard, released)
+		return
+	}
+	leases[shard] = got
+	m.held.Confirm(shard, start)
 }
 
 // rebalance implements the rebalance algorithm from design §1.2.
@@ -128,11 +333,10 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	m.upsertPresence(ctx)
 
 	// Step 2: List presence leases to discover live replicas.
-	replicaLeases, err := m.leases.List(ctx, metav1.ListOptions{
-		LabelSelector: "varroa.dev/lease=replica",
-	})
+	replicaLeases, err := m.listLeases(ctx, "replica")
 	if err != nil {
 		logger.Warn("failed to list replica presence leases", "error", err)
+		m.revokeUnconfirmed(ctx)
 		return
 	}
 
@@ -160,11 +364,10 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 	}
 
 	// Step 4: List shard ownership leases.
-	shardLeases, err := m.leases.List(ctx, metav1.ListOptions{
-		LabelSelector: "varroa.dev/lease=shard",
-	})
+	shardLeases, err := m.listLeases(ctx, "shard")
 	if err != nil {
 		logger.Warn("failed to list shard leases", "error", err)
+		m.revokeUnconfirmed(ctx)
 		return
 	}
 	shardLeaseMap := make(map[int]*coordinationv1.Lease, len(shardLeases.Items))
@@ -176,79 +379,102 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		}
 	}
 
-	// Step 5: Renew held shards — drop any where we lost the lock.
+	// Step 5: Check the held shards. Drop any where we lost the lock. Another
+	// replica can hold such a lease already, so Revoke cancels the work on
+	// the shard at once. A wait cannot keep that shard exclusive. Then renew
+	// the shards that are due.
+	released := make([]int, 0)
 	for _, shard := range m.held.Shards() {
 		lease, exists := shardLeaseMap[shard]
 		if !exists {
-			m.held.Remove(shard)
-			m.addHandoff(ctx, "released")
+			m.revokeInPass(ctx, shard, &released)
 			continue
 		}
 		holder := lease.Spec.HolderIdentity
 		if holder == nil || *holder != m.identity {
-			m.held.Remove(shard)
-			m.addHandoff(ctx, "released")
-			continue
-		}
-		// Skip the apiserver write while the lease is still fresh: renewal is
-		// only needed once the remaining validity drops under two rebalance
-		// intervals (halves the steady-state write rate at the default 30s
-		// duration / 10s interval).
-		if lease.Spec.RenewTime != nil {
-			remaining := lease.Spec.RenewTime.Add(time.Duration(m.leaseDuration) * time.Second).Sub(m.clock())
-			if remaining > 2*m.interval {
-				continue
-			}
-		}
-		// Try to renew our lease.
-		updatedLease := lease.DeepCopy()
-		now := m.clock()
-		updatedLease.Spec.RenewTime = &metav1.MicroTime{Time: now}
-		updatedLease.Spec.LeaseDurationSeconds = &m.leaseDuration
-		if _, err := m.leases.Update(ctx, updatedLease, metav1.UpdateOptions{}); err != nil {
-			m.held.Remove(shard)
-			m.addHandoff(ctx, "released")
-			continue
+			m.revokeInPass(ctx, shard, &released)
 		}
 	}
+	m.renewDue(ctx, shardLeaseMap, &released)
 
-	// Step 6: Release shards we hold but no longer desire.
+	// Step 6: Release shards we hold but no longer desire. The lease is
+	// still ours, so the work on these shards may end first. The release
+	// of a lease waits for that work, so the next holder never writes at
+	// the same time as this replica.
+	undesired := make([]int, 0)
 	for _, shard := range m.held.Shards() {
-		if desired[shard] {
+		if !desired[shard] {
+			undesired = append(undesired, shard)
+		}
+	}
+	// The stale sweep can drop an undesired shard before the drain. The sweep
+	// reported that shard and left its lease to expire, so the pass skips it.
+	dropped := make([]int, 0)
+	busy := make(map[int]bool)
+	if len(undesired) > 0 {
+		var stillBusy []int
+		dropped, stillBusy = m.held.DrainHeld(undesired,
+			orDefault(m.drainWait, releaseDrainWait), orDefault(m.cancelWait, releaseCancelWait))
+		for _, shard := range stillBusy {
+			busy[shard] = true
+		}
+	}
+	for _, shard := range dropped {
+		released = append(released, shard)
+		m.addHandoff(ctx, "released")
+		if busy[shard] {
+			logger.Warn("work on the shard still runs after the cancel; the lease must expire", "shard", shard)
 			continue
 		}
-		m.held.Remove(shard)
-		// Release the lease.
 		lease, exists := shardLeaseMap[shard]
 		if !exists {
 			// Lease already gone; nothing to release.
-			m.addHandoff(ctx, "released")
 			continue
 		}
+		// Each release spends a lease call. Renew the due shards before it,
+		// so a slow release does not carry a retained shard past its deadline.
+		m.renewDue(ctx, shardLeaseMap, &released)
 		m.releaseLease(ctx, lease)
-		m.addHandoff(ctx, "released")
 	}
 
-	// Step 7: Acquire desired but not held shards.
+	// Notify on released shards before any claim. The hook then sees a
+	// dropped shard as not held, even when step 7 claims it again.
+	if len(released) > 0 && m.onReleased != nil {
+		m.onReleased(released)
+	}
+
+	// Step 7: Acquire desired but not held shards. The pass renews the due
+	// held shards before each claim and after the last claim, so a long claim
+	// phase does not delay a renewal past the deadline.
 	newly := make([]int, 0)
+	claimReleased := make([]int, 0)
 	for shard := range desired {
-		if m.held.Held(shard) {
+		if m.held.Held(shard) || slices.Contains(claimReleased, shard) {
 			continue
 		}
 		lease, exists := shardLeaseMap[shard]
-		claimable := !exists || isLeaseReleased(lease) || isLeaseExpired(lease, now, m.leaseDuration)
+		// A lease that this replica still holds is claimable too: a stale
+		// sweep can drop a shard whose lease stays ours. The Update below
+		// carries the listed resourceVersion, so a write by another replica
+		// after the List makes it fail.
+		claimable := !exists || isLeaseReleased(lease) || isLeaseHeldBy(lease, m.identity) ||
+			isLeaseExpired(lease, now, m.leaseDuration)
 		if !claimable {
 			continue
 		}
+		m.renewDue(ctx, shardLeaseMap, &claimReleased)
 
 		leaseName := fmt.Sprintf("varroa-shard-%d.varroa.dev", shard)
 		now := m.clock()
 
+		var got *coordinationv1.Lease
+		var err error
 		if exists {
 			// Try to update the existing lease.
 			updatedLease := lease.DeepCopy()
 			updatedLease.Spec = m.heldLeaseSpec(now, true)
-			if _, err := m.leases.Update(ctx, updatedLease, metav1.UpdateOptions{}); err != nil {
+			got, err = m.updateLease(ctx, updatedLease)
+			if err != nil {
 				if apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -259,7 +485,8 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 		} else {
 			// Create a new lease.
 			newLease := m.buildLease(leaseName, "shard", now, true)
-			if _, err := m.leases.Create(ctx, newLease, metav1.CreateOptions{}); err != nil {
+			got, err = m.createLease(ctx, newLease)
+			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					// Lost the race, retry next pass.
 					continue
@@ -269,10 +496,29 @@ func (m *ShardManager) rebalance(ctx context.Context) {
 			}
 		}
 
+		// A claim whose response came after the deadline can hold an expired
+		// lease that another replica claimed in between. Do not hold it.
+		if m.clock().Sub(now) >= m.confirmDeadline() {
+			logger.Warn("shard claim confirmed after the deadline; not holding the shard", "shard", shard)
+			continue
+		}
 		m.held.Add(shard)
+		m.held.Confirm(shard, now)
+		shardLeaseMap[shard] = got
 		newly = append(newly, shard)
 		m.addHandoff(ctx, "acquired")
 	}
+
+	// Renew the due shards after the last claim. Then report the shards whose
+	// renewal failed during the claims. A shard in that group is not held, so
+	// it is removed from newly before onAcquired runs.
+	m.renewDue(ctx, shardLeaseMap, &claimReleased)
+	if len(claimReleased) > 0 && m.onReleased != nil {
+		m.onReleased(claimReleased)
+	}
+	newly = slices.DeleteFunc(newly, func(shard int) bool {
+		return slices.Contains(claimReleased, shard)
+	})
 
 	// Step 8: Notify on newly acquired shards.
 	if len(newly) > 0 && m.onAcquired != nil {
@@ -318,7 +564,7 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 	now := m.clock()
 
 	lease := m.buildLease(leaseName, "replica", now, false)
-	_, err := m.leases.Create(ctx, lease, metav1.CreateOptions{})
+	_, err := m.createLease(ctx, lease)
 	if err == nil {
 		return
 	}
@@ -328,13 +574,13 @@ func (m *ShardManager) upsertPresence(ctx context.Context) {
 	}
 
 	// Lease exists; update it.
-	existing, err := m.leases.Get(ctx, leaseName, metav1.GetOptions{})
+	existing, err := m.getLease(ctx, leaseName)
 	if err != nil {
 		m.logger.Warn("failed to get presence lease for update", "lease", leaseName, "error", err)
 		return
 	}
 	existing.Spec = m.heldLeaseSpec(now, false)
-	if _, err := m.leases.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+	if _, err := m.updateLease(ctx, existing); err != nil {
 		m.logger.Warn("failed to update presence lease", "lease", leaseName, "error", err)
 	}
 }
@@ -356,7 +602,7 @@ func (m *ShardManager) releasedSpec(l *coordinationv1.Lease) {
 func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.Lease) {
 	updated := lease.DeepCopy()
 	m.releasedSpec(updated)
-	_, err := m.leases.Update(ctx, updated, metav1.UpdateOptions{})
+	_, err := m.updateLease(ctx, updated)
 	if err == nil {
 		return
 	}
@@ -364,7 +610,7 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 		m.logger.Warn("failed to release shard lease, will expire", "lease", lease.Name, "error", err)
 		return
 	}
-	fresh, getErr := m.leases.Get(ctx, lease.Name, metav1.GetOptions{})
+	fresh, getErr := m.getLease(ctx, lease.Name)
 	if getErr != nil {
 		m.logger.Debug("shard lease release retry get failed, will expire", "lease", lease.Name, "error", getErr)
 		return
@@ -374,18 +620,29 @@ func (m *ShardManager) releaseLease(ctx context.Context, lease *coordinationv1.L
 		return
 	}
 	m.releasedSpec(fresh)
-	if _, err := m.leases.Update(ctx, fresh, metav1.UpdateOptions{}); err != nil {
+	if _, err := m.updateLease(ctx, fresh); err != nil {
 		m.logger.Debug("shard lease release retry failed, will expire", "lease", lease.Name, "error", err)
 	}
 }
 
-// releaseAll releases all held shards and deletes the presence lease.
+// releaseAll waits for the work on all held shards, releases the shards, and
+// deletes the presence lease. It keeps the lease of a shard whose work still
+// runs after the cancel, so that lease expires.
 func (m *ShardManager) releaseAll(ctx context.Context) {
-	for _, shard := range m.held.Shards() {
-		m.held.Remove(shard)
+	shards := m.held.Shards()
+	busy := make(map[int]bool)
+	for _, shard := range m.held.Drain(shards,
+		orDefault(m.shutdownDrainWait, shutdownDrainWait), orDefault(m.shutdownCancelWait, shutdownCancelWait)) {
+		busy[shard] = true
+	}
+	for _, shard := range shards {
+		if busy[shard] {
+			m.logger.Warn("work on the shard still runs after the cancel; the lease must expire", "shard", shard)
+			continue
+		}
 		leaseName := fmt.Sprintf("varroa-shard-%d.varroa.dev", shard)
 		// Try to release by setting empty holderIdentity.
-		existing, err := m.leases.Get(ctx, leaseName, metav1.GetOptions{})
+		existing, err := m.getLease(ctx, leaseName)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				m.logger.Warn("failed to get shard lease for release", "lease", leaseName, "error", err)
@@ -397,11 +654,62 @@ func (m *ShardManager) releaseAll(ctx context.Context) {
 
 	// Delete presence lease.
 	presenceName := "varroa-replica-" + m.identity + ".varroa.dev"
-	if err := m.leases.Delete(ctx, presenceName, metav1.DeleteOptions{}); err != nil {
+	if err := m.deleteLease(ctx, presenceName); err != nil {
 		if !apierrors.IsNotFound(err) {
 			m.logger.Warn("failed to delete presence lease on shutdown", "lease", presenceName, "error", err)
 		}
 	}
+}
+
+// callCtx returns a context for one lease API call. The call ends at the
+// lease call timeout, or earlier when ctx ends.
+func (m *ShardManager) callCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, orDefault(m.callTimeout, leaseCallTimeout))
+}
+
+// listLeases lists the leases of one role under the lease call timeout.
+func (m *ShardManager) listLeases(ctx context.Context, role string) (*coordinationv1.LeaseList, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.List(ctx, metav1.ListOptions{LabelSelector: "varroa.dev/lease=" + role})
+}
+
+// getLease gets one lease under the lease call timeout.
+func (m *ShardManager) getLease(ctx context.Context, name string) (*coordinationv1.Lease, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Get(ctx, name, metav1.GetOptions{})
+}
+
+// createLease creates one lease under the lease call timeout. It returns the
+// stored lease.
+func (m *ShardManager) createLease(ctx context.Context, lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Create(ctx, lease, metav1.CreateOptions{})
+}
+
+// updateLease updates one lease under the lease call timeout. It returns the
+// stored lease.
+func (m *ShardManager) updateLease(ctx context.Context, lease *coordinationv1.Lease) (*coordinationv1.Lease, error) {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Update(ctx, lease, metav1.UpdateOptions{})
+}
+
+// deleteLease deletes one lease under the lease call timeout.
+func (m *ShardManager) deleteLease(ctx context.Context, name string) error {
+	ctx, cancel := m.callCtx(ctx)
+	defer cancel()
+	return m.leases.Delete(ctx, name, metav1.DeleteOptions{})
+}
+
+// orDefault returns d, or def when d is zero.
+func orDefault(d, def time.Duration) time.Duration {
+	if d == 0 {
+		return def
+	}
+	return d
 }
 
 // isLeaseExpired returns true if the lease has expired (renewTime + duration < now).
@@ -411,6 +719,11 @@ func isLeaseExpired(lease *coordinationv1.Lease, now time.Time, durationSec int3
 	}
 	expiry := lease.Spec.RenewTime.Add(time.Duration(durationSec) * time.Second)
 	return now.After(expiry)
+}
+
+// isLeaseHeldBy returns true if identity holds the lease.
+func isLeaseHeldBy(lease *coordinationv1.Lease, identity string) bool {
+	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == identity
 }
 
 // isLeaseReleased returns true if the lease has no holder identity.

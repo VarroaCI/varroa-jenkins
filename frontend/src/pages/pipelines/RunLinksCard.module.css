@@ -1,0 +1,28 @@
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.kv dt {
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.kv dd {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text);
+  text-align: right;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.state {
+  color: var(--text-2);
+}

@@ -1,0 +1,12 @@
+unclassified:
+  varroaPipelineTemplates:
+    templates:
+      - name: "go-service"
+        version: "2.1.3"
+        folder: ""
+        parameters: |
+          type: object
+          additionalProperties: false
+        uiSchema: |
+          ui:order: ["*"]
+        jenkinsfile: "pipeline { agent any }"

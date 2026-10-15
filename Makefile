@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -22,8 +22,9 @@ build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-operator ./cmd/operator/
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-gateway ./cmd/gateway/
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-bff ./cmd/bff/
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-mite ./cmd/mite/
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/varroa-updatecenter ./cmd/updatecenter/
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-mite ./cmd/mite/
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-updatecenter ./cmd/updatecenter/
+	CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(shell git rev-parse --short HEAD)" -o bin/varroa-recorder ./cmd/recorder/
 
 build-cli:
 	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" -o bin/varroactl ./cmd/varroactl
@@ -70,6 +71,32 @@ check-crds:
 
 check-comments:
 	go run ./hack/checkcomments .
+
+# Runs the public and site export leak gates into a scratch directory.
+# The exports gate the HEAD commit, not the working tree: commit first.
+export-gate:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; rc=0; \
+	hack/export-public.sh "$$tmp/public" || rc=1; \
+	hack/export-site.sh "$$tmp/site" || rc=1; \
+	exit $$rc
+
+# Runs every chart golden test. The NATS subchart must be fetched first:
+# helm dependency build charts/varroa.
+# The tests expect the release namespace "default". HELM_NAMESPACE pins it,
+# because helm in a pod otherwise takes the pod's own namespace.
+chart-test:
+	@test -n "$$(ls charts/varroa/charts/nats-*.tgz 2>/dev/null)" || \
+		{ echo "chart-test: run 'helm dependency build charts/varroa' first" >&2; exit 1; }
+	@failed=""; \
+	for t in charts/varroa/tests/test-*.sh; do \
+		echo "=== $$t"; \
+		HELM_NAMESPACE=default bash "$$t" || failed="$$failed $$t"; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		for t in $$failed; do echo "FAILED: $$t"; done; \
+		exit 1; \
+	fi; \
+	echo "chart-test: all tests passed"
 
 generate-proto:
 	go generate ./internal/mite/proto/mitev1/

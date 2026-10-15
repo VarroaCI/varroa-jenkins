@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -16,14 +17,19 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore"
+	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
 // Dependencies holds the shared dependencies for API handlers.
 type Dependencies struct {
-	Client       controller.ResourceClient
-	Store        crdstore.Backend // generic CRD store
-	CRClient     client.Client    // controller-runtime client for read-only CRD operations
+	Client controller.ResourceClient
+	Store  crdstore.Backend // generic CRD store
+	// Controllers serves local Controller lists from the BFF informer cache.
+	// Nil lists through Store. Use LocalControllers, not this field, to read.
+	Controllers  ControllerLister
+	CRClient     client.Client // controller-runtime client for read-only CRD operations
 	Authorizer   *Authorizer
 	MiteRegistry transport.Transport
 	Auth         auth.Provider
@@ -31,18 +37,21 @@ type Dependencies struct {
 	// JenkinsTokenSigner is used by the MCP proxy to mint per-caller Jenkins tokens; nil when the mite signing key is unavailable.
 	JenkinsTokenSigner *mitesrv.MiteTokenSigner
 
-	// Local is set in local auth mode; nil otherwise.
+	// Local is set in local auth mode and when local accounts run beside
+	// OIDC; nil otherwise.
 	Local *local.Provider
 	// LDAP is set in ldap auth mode; nil otherwise.
-	LDAP              *ldap.Provider
-	KeyVerifier       *apikey.Verifier
-	TicketIssuer      *auth.TicketIssuer
-	Broadcaster       sse.EventSource
+	LDAP         *ldap.Provider
+	KeyVerifier  *apikey.Verifier
+	TicketIssuer *auth.TicketIssuer
+	Broadcaster  sse.EventSource
+	// RunFanout carries live run notifications to the team run stream. It is
+	// nil in tests that do not exercise that stream.
+	RunFanout         sse.RunEventSource
 	LogBuffer         *logbuffer.LogBuffer
 	Logger            *slog.Logger
 	OperatorNamespace string
 	ManagedNamespaces string // raw MANAGED_NAMESPACES value; "" ⇒ cluster-wide mode
-	ActivityStore     *activity.Store
 	ActivityPublisher activity.EventSink
 	Backfill          activity.Backfill
 	Reconciler        controller.ReconcilerAPI
@@ -103,6 +112,42 @@ type Dependencies struct {
 	// candidate promotion. May be nil in tests that don't exercise
 	// promotion.
 	VersionProfileReconciler *controller.JenkinsVersionProfileReconciler
+
+	// FleetLockReleaser asks the recorder to force-release a releasing
+	// fleet lock. Nil when the record store is off, so the release route
+	// answers 503.
+	FleetLockReleaser FleetLockReleaser
+
+	// RecordStore reads build records the recorder wrote. Nil when
+	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
+	// check for nil before use.
+	RecordStore recordstore.Reader
+
+	// RecordStoreRunRetention is the store-wide runs window, from
+	// VARROA_RETENTION_RUNS. It caps every tenant and job window. Zero
+	// means the 365d default.
+	RecordStoreRunRetention time.Duration
+
+	// BlobStore reads a run's console log and artifact bytes. Nil when
+	// VARROA_BLOBSTORE_URL is unset, so a handler on the log or artifact
+	// path must check for nil before use.
+	BlobStore blob.Store
+
+	// TenantResolver maps a pipelines {team} URL segment onto record-store
+	// tenants. Nil in tests that do not exercise the pipelines surface.
+	TenantResolver TenantResolver
+
+	// RunnerTokenIndex resolves a runner door token to its Runner name
+	// (design D7). Rebuilt from the BFF's own Runner watch. Nil in tests
+	// that do not exercise the agent WebSocket door; the door answers 401
+	// for every token when it is nil.
+	RunnerTokenIndex *RunnerTokenIndex
+
+	// CellMaxTenants is the chart's cells.maxTenantsPerCell value, from
+	// VARROA_CELLS_MAX_TENANTS. It is the second tier of the effective
+	// tenant cap the cell usage reads report. Zero when the variable is
+	// missing or is not a whole number.
+	CellMaxTenants int
 }
 
 // IdentityConfig holds the identity/OIDC configuration surfaced to the admin
@@ -114,4 +159,7 @@ type IdentityConfig struct {
 	Scopes       []string // OIDC scopes
 	CookieDomain string   // cookie domain for varroa_token
 	DefaultRead  bool     // global default-read flag
+	// LocalAccounts is true when declared local accounts sign in beside a
+	// primary OIDC provider.
+	LocalAccounts bool
 }

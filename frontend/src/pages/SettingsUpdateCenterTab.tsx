@@ -281,10 +281,75 @@ export default function SettingsUpdateCenterTab() {
         </>
       )}
 
-      {/* Gaps table */}
-      {status.gaps.length > 0 && (
+      {/* Unservable table: plugins the update center cannot serve at all */}
+      {(status.unservable ?? []).length > 0 && (
         <>
-          <h3 className={styles.sectionTitle}>Plugin gaps</h3>
+          <h3 className={styles.sectionTitle}>Plugins the update center cannot serve</h3>
+          <div className={styles.profileTableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Plugin</th><th>Version</th><th>Required by</th><th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.unservable.map((g, i) => (
+                  <tr key={i}>
+                    <td><span className={`${styles.tableBadge} ${styles.eol}`}>{g.plugin}</span></td>
+                    <td>{g.version}{g.core ? ` (core ${g.core})` : ""}</td>
+                    <td>{g.requiredBy}</td>
+                    <td>{unservableReasonLabel(g.reason)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {status.unservableCount > status.unservable.length && (
+            <p className={styles.smallMuted}>
+              showing {status.unservable.length} of {status.unservableCount}
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Unknown-dependency table: informational, does not gate readiness */}
+      {(status.unknownDependencies ?? []).length > 0 && (
+        <>
+          <h3 className={styles.sectionTitle}>Plugins with an unknown dependency list</h3>
+          <div className={styles.profileTableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Plugin</th><th>Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.unknownDependencies.map((p, i) => (
+                  <tr key={i}>
+                    <td><span className={`${styles.tableBadge} ${styles.eol}`}>{p.plugin}</span></td>
+                    <td>{p.version}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {status.unknownDependencyCount > status.unknownDependencies.length && (
+            <p className={styles.smallMuted}>
+              showing {status.unknownDependencies.length} of {status.unknownDependencyCount}
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Not-yet-stored table: informational while pull-through can fetch them */}
+      {(status.gaps ?? []).length > 0 && (
+        <>
+          <h3 className={styles.sectionTitle}>Plugins not yet stored</h3>
+          <p className={styles.smallMuted}>
+            {status.pullThroughEnabled
+              ? "Pull-through fetches these on demand."
+              : "Seed these before an air-gapped cutover."}
+          </p>
           <div className={styles.profileTableWrap}>
             <table className={styles.table}>
               <thead>
@@ -296,13 +361,18 @@ export default function SettingsUpdateCenterTab() {
                 {status.gaps.map((g, i) => (
                   <tr key={i}>
                     <td><span className={`${styles.tableBadge} ${styles.eol}`}>{g.plugin}</span></td>
-                    <td>{g.version}</td>
+                    <td>{g.version}{g.core ? ` (core ${g.core})` : ""}</td>
                     <td>{g.requiredBy}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {status.gapCount > status.gaps.length && (
+            <p className={styles.smallMuted}>
+              showing {status.gaps.length} of {status.gapCount}
+            </p>
+          )}
         </>
       )}
 
@@ -369,4 +439,18 @@ function toRejectionView(e: unknown): UploadRejectionView {
     };
   }
   return { code: "upload failed", message: e instanceof Error ? e.message : String(e), unresolved: [] };
+}
+
+/** Plain-language label for an unservable reason code from the update center. */
+function unservableReasonLabel(reason?: string): string {
+  switch (reason) {
+    case "NotListed":
+      return "No source lists this version";
+    case "ArchiveDisabled":
+      return "Aged pin; archive checksum fallback is disabled";
+    case "PullThroughDisabled":
+      return "Not stored, and pull-through is disabled";
+    default:
+      return reason ?? "";
+  }
 }

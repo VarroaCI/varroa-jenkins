@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import CatalogItemDetail from "./CatalogItemDetail";
 
@@ -235,5 +235,134 @@ describe("CatalogItemDetail", () => {
         expect(backLink.closest("a")).toHaveAttribute("href", "/catalog?cluster=core");
       });
     });
+  });
+});
+
+describe("CatalogItemDetail — pipeline-template item", () => {
+  const templateYaml = [
+    "apiVersion: varroa.dev/v1",
+    "kind: PipelineTemplate",
+    "metadata:",
+    "  name: go-service",
+    "  displayName: Go Service",
+    "  description: Standard Go microservice pipeline.",
+    "spec:",
+    '  version: "2.1.0"',
+    "  parameters:",
+    "    $schema: https://json-schema.org/draft/2020-12/schema",
+    "    type: object",
+    "    additionalProperties: false",
+    "    properties:",
+    "      goVersion:",
+    "        type: string",
+    "        title: Go version",
+    '        enum: ["1.22", "1.23", "1.24"]',
+    '        default: "1.24"',
+    "    required:",
+    "      - goVersion",
+    "  uiSchema:",
+    "    goVersion:",
+    "      ui:widget: select",
+    "  jenkinsfile: |",
+    "    pipeline { agent any }",
+    "",
+  ].join("\n");
+
+  const pipelineTemplateItem = () =>
+    catalogItem("go-service-template", {
+      spec: {
+        sourceRef: "test-source",
+        type: "pipeline-template",
+        displayName: "Go Service Template",
+        path: "pipeline-templates/go-service.yaml",
+      },
+      status: { valid: true, content: templateYaml },
+    });
+
+  beforeEach(() => {
+    mockGetCatalogItem.mockReset();
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+  });
+
+  it("renders the template header from the document's metadata and spec", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Template")).toBeInTheDocument();
+      expect(screen.getByText("Go Service")).toBeInTheDocument();
+      expect(screen.getByText("2.1.0")).toBeInTheDocument();
+      expect(screen.getByText("Standard Go microservice pipeline.")).toBeInTheDocument();
+    });
+  });
+
+  it("renders no generic Content section for a pipeline-template item", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Template")).toBeInTheDocument());
+    expect(screen.queryByText("Content")).not.toBeInTheDocument();
+  });
+
+  it("renders a live form built from spec.parameters and spec.uiSchema", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Go version")).toBeInTheDocument());
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+  });
+
+  it("renders the generated marker YAML naming the template and version", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(/template: go-service/)).toBeInTheDocument());
+    expect(screen.getByText(/templateVersion: 2\.1\.0/)).toBeInTheDocument();
+  });
+
+  it("updates the generated marker YAML as the form changes", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "1.23" } });
+
+    await waitFor(() => expect(screen.getByText(/goVersion: "?1\.23"?/)).toBeInTheDocument());
+  });
+
+  it("copies the generated marker YAML to the clipboard", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(pipelineTemplateItem()));
+    let resolveWrite: () => void = () => {};
+    const writeText = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      }),
+    );
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(/template: go-service/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("template: go-service"));
+
+    // The label reverts to "Copy" 1500 ms after the write resolves. The test
+    // resolves the write inside act and reads the label in the same tick, so
+    // a stalled runner cannot move the check past that window.
+    await act(async () => {
+      resolveWrite();
+    });
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("shows an error banner when the template content does not parse", async () => {
+    mockGetCatalogItem.mockResolvedValue(detailResponse(
+      catalogItem("broken-template", {
+        spec: { sourceRef: "test-source", type: "pipeline-template", path: "pipeline-templates/broken.yaml" },
+        status: { valid: false, content: "not: [valid" },
+      }),
+    ));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Unable to read the template document.")).toBeInTheDocument());
   });
 });

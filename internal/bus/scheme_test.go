@@ -3,7 +3,6 @@ package bus
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestBusScheme(t *testing.T) {
@@ -34,14 +33,23 @@ func TestBusScheme(t *testing.T) {
 		{"kv snapshot", SnapshotKey("core", "team-a", "foo"), "core/team-a/foo"},
 		{"kv obs", ObservabilityKey("core", "team-a", "foo"), "obs/core/team-a/foo"},
 		{"kv presence", PresenceKey("core", "team-a", "foo"), "core/team-a/foo"},
-		{"kv desired", DesiredKey("core", "team-a", "foo"), "core/team-a/foo"},
+		{"mite desired", MiteDesiredSubject("core", "team-a", "foo"), "mite.core.team-a.foo.desired"},
 		{"varroa stream", StreamConfig("varroa").Subjects[0], "mite.*.*.*.out"},
-		{"activity stream", ActivityStreamConfig("varroa_activity", time.Hour, 1, 1).Subjects[0], "activity.>"},
+		{"activity stream", ActivityStreamConfig("varroa_activity").Subjects[0], "activity.>"},
 		{"webhook", WebhookSubject("core", "team-a", "foo"), "webhook.core.team-a.foo"},
+		{"webhook tenant", WebhookTenantSubject("core", "payments"), "webhook.core.tenant.payments"},
 		{"wake", WakeSubject("core", "team-a", "foo"), "wake.core.team-a.foo"},
 		{"wake wildcard", WakeSubjectWildcard("dev-cluster"), "wake.dev-cluster.>"},
 		{"webhook result", WebhookResultSubject("core", "team-a", "foo"), "whreply.core.team-a.foo"},
 		{"webhook result wildcard", WebhookResultWildcard("core"), "whreply.core.>"},
+		{"ledger action", LedgerActionSubject("core"), "varroa.ledger.actions.core"},
+		{"build", BuildSubject("core", "team-a", "cell-1"), "builds.core.team-a.cell-1"},
+		{"builds wildcard", BuildsWildcard, "builds.>"},
+		{"builds stream name", BuildsStreamName, "varroa_builds"},
+		{"log", LogSubject("core", "team-a", "cell-1", "run-1"), "logs.core.team-a.cell-1.run-1"},
+		{"tail", TailSubject("core", "team-a", "cell-1"), "varroa.tail.core.team-a.cell-1"},
+		{"run notify", RunNotifySubject("core", "team-a/foo"), "runs.core.team-a/foo"},
+		{"run notify wildcard", RunNotifyWildcard, "runs.>"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
