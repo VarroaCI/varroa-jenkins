@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -24,8 +26,16 @@ const tenantCredentialTestNamespace = "payments-ns"
 // varroa.dev/tenant-credential Secret carries.
 func seedTenantCredentialSecret(t *testing.T, client *testClient, name string, annotations map[string]string, data map[string][]byte) {
 	t.Helper()
+	seedTenantCredentialSecretIn(t, client, tenantCredentialTestNamespace, name, annotations, data)
+}
+
+// seedTenantCredentialSecretIn is seedTenantCredentialSecret for a Secret in
+// namespace. The fixture keys data by name only, so a name must be unique
+// across namespaces.
+func seedTenantCredentialSecretIn(t *testing.T, client *testClient, namespace, name string, annotations map[string]string, data map[string][]byte) {
+	t.Helper()
 	client.labeledSecrets = append(client.labeledSecrets, labeledSecretFixture{
-		name: name, namespace: tenantCredentialTestNamespace,
+		name: name, namespace: namespace,
 		labels: map[string]string{"varroa.dev/tenant-credential": "true"},
 	})
 	if client.secretAnnotations == nil {
@@ -911,5 +921,120 @@ func TestProjectTenantCredentials_GitHubAppSkipped(t *testing.T) {
 				t.Errorf("expected no projected credential, got %+v", creds)
 			}
 		})
+	}
+}
+
+// budgetTestFile returns a secretFile credential of 3000 zero
+// bytes.
+func budgetTestFile(id string) items.FolderCredential {
+	return items.FolderCredential{File: &items.FileCredential{
+		ID: id, Scope: "GLOBAL", FileName: id + ".bin",
+		SecretBytes: base64.StdEncoding.EncodeToString(make([]byte, 3000)),
+	}}
+}
+
+// budgetTestText returns a small secretText credential.
+func budgetTestText(id string) items.FolderCredential {
+	return items.FolderCredential{SecretText: &items.SecretTextCredential{ID: id, Scope: "GLOBAL", Secret: "s"}}
+}
+
+// budgetTestProp wraps creds in one folder-credentials entry.
+func budgetTestProp(creds ...items.FolderCredential) *items.FolderCredentialsProperty {
+	return &items.FolderCredentialsProperty{FolderCredentials: []items.FolderCredentialEntry{{Credentials: creds}}}
+}
+
+// budgetTestIDs lists the credential IDs of prop in order.
+func budgetTestIDs(prop *items.FolderCredentialsProperty) []string {
+	var ids []string
+	for _, e := range prop.FolderCredentials {
+		for _, c := range e.Credentials {
+			id, _ := folderCredentialIDKind(c)
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func budgetTestSize(t *testing.T, c items.FolderCredential) int {
+	t.Helper()
+	n, err := credentialWireBytes(c)
+	if err != nil {
+		t.Fatalf("credentialWireBytes: %v", err)
+	}
+	return n
+}
+
+func TestCredentialWireBytes_SecretFileCountsBase64(t *testing.T) {
+	n := budgetTestSize(t, budgetTestFile("f"))
+	if want := base64.StdEncoding.EncodedLen(3000); n < want {
+		t.Errorf("expected at least %d wire bytes for a 3000-byte file, got %d", want, n)
+	}
+}
+
+func TestCellCredentialBudget_SkipsTheCredentialThatCrossesAndKeepsLaterOnesThatFit(t *testing.T) {
+	a, b, c := budgetTestFile("a"), budgetTestFile("b"), budgetTestText("c")
+	sizeA, sizeC := budgetTestSize(t, a), budgetTestSize(t, c)
+	budget := newCellCredentialBudget(sizeA + sizeC)
+	prop := budgetTestProp(a, b, c)
+
+	charged, warnings := budget.trim("payments", prop)
+
+	if got := budgetTestIDs(prop); !slices.Equal(got, []string{"a", "c"}) {
+		t.Fatalf("expected a and c kept, got %v", got)
+	}
+	if charged != sizeA+sizeC {
+		t.Errorf("expected %d bytes charged, got %d", sizeA+sizeC, charged)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected one warning, got %+v", warnings)
+	}
+	w := warnings[0]
+	if w.Reason != v1alpha1.TeamReasonCredentialSkipped || w.Tenant != "payments" || !strings.Contains(w.Message, `"b"`) {
+		t.Errorf("expected a CredentialSkipped warning for payments naming b, got %+v", w)
+	}
+}
+
+func TestCellCredentialBudget_ExactFitIsKept(t *testing.T) {
+	a := budgetTestFile("a")
+	budget := newCellCredentialBudget(budgetTestSize(t, a))
+	prop := budgetTestProp(a)
+
+	_, warnings := budget.trim("payments", prop)
+
+	if got := budgetTestIDs(prop); !slices.Equal(got, []string{"a"}) {
+		t.Errorf("expected a kept at an exact fit, got %v", got)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warning, got %+v", warnings)
+	}
+}
+
+func TestCellCredentialBudget_AllSkippedLeavesNoEntry(t *testing.T) {
+	budget := newCellCredentialBudget(0)
+	prop := budgetTestProp(budgetTestFile("a"))
+
+	_, warnings := budget.trim("payments", prop)
+
+	if prop.FolderCredentials != nil {
+		t.Errorf("expected no folder-credentials entry, got %+v", prop.FolderCredentials)
+	}
+	if len(warnings) != 1 {
+		t.Errorf("expected one warning, got %+v", warnings)
+	}
+}
+
+func TestCellCredentialBudget_RefundReturnsCapacity(t *testing.T) {
+	a, b := budgetTestFile("a"), budgetTestFile("b")
+	size := budgetTestSize(t, a)
+	budget := newCellCredentialBudget(size)
+
+	charged, _ := budget.trim("held", budgetTestProp(a))
+	budget.refund(charged)
+	if budget.used != 0 {
+		t.Fatalf("expected 0 bytes used after refund, got %d", budget.used)
+	}
+	prop := budgetTestProp(b)
+	if _, warnings := budget.trim("payments", prop); len(warnings) != 0 {
+		t.Errorf("expected b to fit after the refund, got %+v", warnings)
 	}
 }

@@ -1486,3 +1486,143 @@ func TestAssembleCellContent_UnparseableDroppedItemKeysHoldsTenant(t *testing.T)
 		t.Errorf("expected the bad tenant held, got %+v", state.Warnings)
 	}
 }
+
+// seedBigSecretFiles seeds n tenant secretFile Secrets of 64 KiB each in
+// team's agent namespace. Their IDs are "<team>-f<i>".
+func seedBigSecretFiles(t *testing.T, client *testClient, team string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("%s-f%d", team, i)
+		seedTenantCredentialSecretIn(t, client, team+"-ns", id,
+			map[string]string{"varroa.dev/credential-id": id, "varroa.dev/credential-kind": "secretFile"},
+			map[string][]byte{"file": make([]byte, maxBinaryCredentialBytes)})
+	}
+}
+
+// carriedCredentialIDs lists the IDs of the credentials state carries for
+// folder, in order.
+func carriedCredentialIDs(state assembleCellState, folder string) []string {
+	var ids []string
+	for _, cf := range state.FolderCredentials {
+		if cf.Folder != folder {
+			continue
+		}
+		for _, e := range cf.Entries {
+			for _, c := range e.Credentials {
+				id, _ := folderCredentialIDKind(c)
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// carriedWireBytes sums the wire bytes of every credential state carries.
+func carriedWireBytes(t *testing.T, state assembleCellState) int {
+	t.Helper()
+	total := 0
+	for _, cf := range state.FolderCredentials {
+		for _, e := range cf.Entries {
+			for _, c := range e.Credentials {
+				total += budgetTestSize(t, c)
+			}
+		}
+	}
+	return total
+}
+
+func TestAssembleCellContent_CredentialBudgetSkipsInTenantNameOrder(t *testing.T) {
+	client := newTestClient()
+	cr := cellControllerFixture()
+	beta, alpha := pipelinesTeam("beta"), pipelinesTeam("alpha")
+	seedTenantBundleContent(client, beta, "beta-bundle", nil)
+	seedTenantBundleContent(client, alpha, "alpha-bundle", nil)
+	seedBigSecretFiles(t, client, "beta", 4)
+	seedBigSecretFiles(t, client, "alpha", 4)
+	rec := newTestReconciler(client)
+
+	run := func() assembleCellState {
+		state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{beta, alpha}, nil, "")
+		if err != nil {
+			t.Fatalf("assembleCellContent: %v", err)
+		}
+		return state
+	}
+	state := run()
+
+	if got := carriedCredentialIDs(state, "alpha"); len(got) != 4 {
+		t.Fatalf("expected all four of alpha's credentials carried, got %v", got)
+	}
+	betaKept := carriedCredentialIDs(state, "beta")
+	skipped := tenantWarningsFor(state.Warnings, "beta", string(v1alpha1.TeamReasonCredentialSkipped))
+	if len(betaKept) == 0 || len(betaKept) == 4 {
+		t.Fatalf("expected beta to keep some but not all credentials, kept %v", betaKept)
+	}
+	if len(skipped) != 4-len(betaKept) {
+		t.Errorf("expected %d CredentialSkipped warnings for beta, got %v", 4-len(betaKept), skipped)
+	}
+	if total := carriedWireBytes(t, state); total > cellCredentialBudgetBytes {
+		t.Errorf("carried %d wire bytes, over the %d-byte budget", total, cellCredentialBudgetBytes)
+	}
+	if again := carriedCredentialIDs(run(), "beta"); !slices.Equal(again, betaKept) {
+		t.Errorf("expected the same beta skips on a second run, got %v then %v", betaKept, again)
+	}
+}
+
+func TestAssembleCellContent_CredentialBudgetSkipHoldsTenantWhoseLibraryNamesIt(t *testing.T) {
+	client := newTestClient()
+	cr := cellControllerFixture()
+	alpha := pipelinesTeam("alpha")
+	seedTenantBundleContent(client, alpha, "alpha-bundle", nil)
+	// Six 64 KiB files: the budget carries five and skips the sixth.
+	seedBigSecretFiles(t, client, "alpha", 6)
+
+	zeta := pipelinesTeam("zeta")
+	seedTenantBundle(client, zeta, "zeta-bundle", libraryTenantItemsYAML)
+	seedTenantCredentialSecretIn(t, client, "zeta-ns", "gitlab-lib-file",
+		map[string]string{"varroa.dev/credential-id": "gitlab-lib", "varroa.dev/credential-kind": "secretFile"},
+		map[string][]byte{"file": make([]byte, maxBinaryCredentialBytes)})
+
+	rec := newTestReconciler(client)
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{zeta, alpha}, libraryCoreSet, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	// Alpha's five carried files leave too little budget for zeta's file.
+	if got := carriedCredentialIDs(state, "alpha"); len(got) != 5 {
+		t.Fatalf("expected alpha to carry five files and use the budget, got %v", got)
+	}
+	if got := tenantWarningsFor(state.Warnings, "zeta", string(v1alpha1.TeamReasonCredentialSkipped)); len(got) != 0 {
+		t.Errorf("expected no skip warning for a held tenant, got %v", got)
+	}
+	msg := heldMessage(state.Warnings, "zeta")
+	if !strings.Contains(msg, "gitlab-lib") {
+		t.Fatalf("expected zeta held naming gitlab-lib, got %q", msg)
+	}
+}
+
+func TestAssembleCellContent_HeldTenantRefundsCredentialBudget(t *testing.T) {
+	client := newTestClient()
+	cr := cellControllerFixture()
+	// alpha's library names a credential that no Secret carries, so alpha
+	// is held after its credentials are charged to the budget.
+	alpha := pipelinesTeam("alpha")
+	seedTenantBundle(client, alpha, "alpha-bundle", libraryTenantItemsYAML)
+	seedBigSecretFiles(t, client, "alpha", 6)
+
+	zeta := pipelinesTeam("zeta")
+	seedTenantBundleContent(client, zeta, "zeta-bundle", nil)
+	seedBigSecretFiles(t, client, "zeta", 5)
+
+	rec := newTestReconciler(client)
+	state, err := rec.assembleCellContent(context.Background(), cr, []*v1alpha1.Team{alpha, zeta}, libraryCoreSet, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if msg := heldMessage(state.Warnings, "alpha"); msg == "" {
+		t.Fatalf("expected alpha held by its library check")
+	}
+	if got := carriedCredentialIDs(state, "zeta"); len(got) != 5 {
+		t.Errorf("expected all five of zeta's credentials after alpha's refund, got %v", got)
+	}
+}

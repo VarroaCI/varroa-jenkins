@@ -1149,8 +1149,14 @@ sections describe.
     `file` credential), `certificate` (a PKCS#12 `certificate`), and
     `githubApp` (a `GitHubAppCredentials` with a PKCS#8 key). A
     `secretFile`, `certificate`, or `githubApp` value over 64 KiB is
-    skipped, because the desired state is one NATS request with a 1 MiB
-    limit.)
+    skipped (`maxBinaryCredentialBytes`, raw bytes). The projected
+    credentials of one cell share `cellCredentialBudgetBytes`: 512 KiB,
+    measured as wire bytes after base64 encoding. It is the 1 MiB NATS
+    `max_payload` minus `rehydrate.BundleBudgetBytes` minus a 256 KiB
+    reserve. Tenants are taken in name order; each credential that does
+    not fit is skipped, and the scan continues. A carried tenant gets a
+    `CredentialSkipped` warning. A tenant held by its library check
+    returns its bytes to the budget and reports `ItemsHeld`.)
   - `cells_config.go`'s `ParseCellsConfigFromEnv` reads the operator's eight
     cell-related environment variables into `CellsConfig` (warm-pool
     enable/per-profile, `MaxTenantsPerCell`, `UnreadyGracePeriod`,

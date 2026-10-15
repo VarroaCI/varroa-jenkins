@@ -8,7 +8,6 @@ A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an 
 pod roll loses local state and mite identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
 `spec.cell.enabled` cannot change after creation; patches fail with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell.
-`spec.cell.maxTenants` can; it caps tenants.
 
 A cell has no ingress host. Tenants use the
 [tenant webhook door](webhooks.md).
@@ -19,7 +18,7 @@ Six limitations apply:
 - `powerState: Stopped` on a cell destroys every in-flight build.
 - Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
 - A rehydrated run shows no stage view, culprit list, or test detail.
-- The role-strategy screen shows a tenant's service identity as unknown until its first build.
+- The role-strategy screen shows an unknown service identity until the first build.
 - An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
   the tenant's [`items.yaml`](../config/items.md) bundle does.
 
@@ -49,8 +48,6 @@ spec:
     maxTenants: 10
 ```
 
-Apply it and wait for `Connected`.
-
 **Verify:**
 
 ```bash
@@ -62,7 +59,7 @@ Expect `"status":"True","reason":"Connected"`.
 
 ## Pools
 
-A `CellPool` sizes its cells. `maxRunsPerTenant` caps a tenant's builds per cell. Zero means none. An auto-created pool
+A `CellPool` sizes its cells. `maxRunsPerTenant` caps a tenant's builds per cell. An auto-created pool
 takes its template from `cells.cellTemplate`. See [Cell pools](cell-pools.md),
 [Cell views](cell-views.md).
 
@@ -114,9 +111,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
     leaves the fragment; the tenant's other templates stay;
   - the bundle is missing or not built.
 
-  The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A first-time held tenant has no
-  folder until fixed. Pipelines pages declare no job for a held folder; run history shows.
-  The pages read the hold from the cell, so a change shows after the next cell reconcile.
+  The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A new held tenant has no
+  folder until fixed. Held folders show no job.
 - **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
   read, and replay permissions to the service identity.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
@@ -156,7 +152,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   Varroa skips a `Secret` with a missing key, an unknown kind, or a duplicate id, and records
   it in `TenantWarnings`. It also skips `secretFile`, `certificate`, or `githubApp`
-  values over 64 KiB, and a keystore that is not binary PKCS#12. A value reaches Jenkins as written, `${`
+  values over 64 KiB, and a keystore that is not binary PKCS#12. The projected credentials of one cell share a 512 KiB budget. Varroa serves tenants by name and skips a credential that does not fit, with a `TenantWarnings` entry. A library that names a skipped credential holds the folder (`ItemsHeld`). A value reaches Jenkins as written, `${`
   included. The controller diff drops comments and shows each credential as
   `<redacted>`, so a rotation shows no change. A GitHub deploy key:
 

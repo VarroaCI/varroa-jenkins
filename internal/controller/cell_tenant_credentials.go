@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/controller/rehydrate"
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
 )
 
@@ -30,12 +33,103 @@ const (
 	credentialKindCertificate      = "certificate"
 	credentialKindGitHubApp        = "githubApp"
 
-	// maxBinaryCredentialBytes caps a secretFile, certificate, or githubApp
-	// privateKey value. The cell desired state travels as one NATS request
-	// with a 1 MiB limit, so one large file must not block the push for
-	// every tenant.
+	// maxBinaryCredentialBytes caps one secretFile, certificate, or githubApp
+	// privateKey value, measured as raw bytes. The cell budget
+	// (cellCredentialBudgetBytes) bounds the sum over one cell.
 	maxBinaryCredentialBytes = 64 * 1024
+
+	// desiredStateMaxBytes is the NATS max_payload. The cell desired state
+	// travels as one core NATS request, and the chart does not raise the
+	// server default.
+	desiredStateMaxBytes = 1024 * 1024
+	// cellDesiredStateReserveBytes is the part of one request kept for the
+	// JCasC, RBAC, and items documents and the small fields.
+	cellDesiredStateReserveBytes = 256 * 1024
+	// cellCredentialBudgetBytes bounds the projected tenant credentials of
+	// one cell, measured as they travel in the request.
+	cellCredentialBudgetBytes = desiredStateMaxBytes - rehydrate.BundleBudgetBytes - cellDesiredStateReserveBytes
 )
+
+// cellCredentialBudget tracks the wire bytes of the projected tenant
+// credentials of one cell. A credential that does not fit is skipped, and
+// the scan continues, so a later smaller credential can still fit.
+type cellCredentialBudget struct {
+	limit, used int
+}
+
+func newCellCredentialBudget(limit int) *cellCredentialBudget {
+	return &cellCredentialBudget{limit: limit}
+}
+
+// credentialIndentBytes is the allowance for each YAML line of a credential
+// in the final items document. The credential sits several levels deep
+// there, so every line gains indentation that this form does not carry.
+const credentialIndentBytes = 16
+
+// credentialWireBytes returns the length of one credential as it travels:
+// its YAML form, JSON-encoded as a string inside the command, plus an
+// indentation allowance per line. Base64 encoding of binary values and
+// JSON escapes are both counted.
+func credentialWireBytes(c items.FolderCredential) (int, error) {
+	out, err := yaml.Marshal(c)
+	if err != nil {
+		return 0, err
+	}
+	wire, err := json.Marshal(string(out))
+	if err != nil {
+		return 0, err
+	}
+	return len(wire) + credentialIndentBytes*bytes.Count(out, []byte{'\n'}), nil
+}
+
+// trim keeps the credentials of prop that fit in the remaining budget, in
+// their projected order, and charges their bytes. It skips the rest and
+// returns one CredentialSkipped warning for each skipped credential. An
+// entry left empty is removed, and prop.FolderCredentials is nil when no
+// entry remains. It returns the bytes it charged.
+func (b *cellCredentialBudget) trim(tenant string, prop *items.FolderCredentialsProperty) (charged int, warnings []v1alpha1.TenantWarning) {
+	if prop == nil {
+		return 0, nil
+	}
+	var entries []items.FolderCredentialEntry
+	for _, entry := range prop.FolderCredentials {
+		var kept []items.FolderCredential
+		for _, c := range entry.Credentials {
+			id, _ := folderCredentialIDKind(c)
+			size, err := credentialWireBytes(c)
+			switch {
+			case err != nil:
+				warnings = append(warnings, v1alpha1.TenantWarning{
+					Tenant:  tenant,
+					Reason:  v1alpha1.TeamReasonCredentialSkipped,
+					Message: fmt.Sprintf("credential %q skipped: it cannot be measured: %v", id, err),
+				})
+			case b.used+size > b.limit:
+				warnings = append(warnings, v1alpha1.TenantWarning{
+					Tenant:  tenant,
+					Reason:  v1alpha1.TeamReasonCredentialSkipped,
+					Message: fmt.Sprintf("credential %q skipped: its %d bytes do not fit in the %d-byte credential budget of the cell", id, size, b.limit),
+				})
+			default:
+				b.used += size
+				charged += size
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) > 0 {
+			entry.Credentials = kept
+			entries = append(entries, entry)
+		}
+	}
+	prop.FolderCredentials = entries
+	return charged, warnings
+}
+
+// refund returns n bytes to the budget. The caller uses it when a tenant
+// is held and its credentials are not carried.
+func (b *cellCredentialBudget) refund(n int) {
+	b.used -= n
+}
 
 // projectTenantCredentials lists agentNamespace's tenant-credential Secrets
 // and appends each as a folder-credentials entry on folder, with scope
