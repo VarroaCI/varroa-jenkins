@@ -16,7 +16,7 @@ verb. `/pipelines` lists only the teams that hold pipelines you can read, includ
 teams. A team with no pipelines and no controllers in its namespaces does not show. It opens your
 only team automatically. With more than one, pick one.
 
-A team on a member cluster shows its definition, parameters, and declared jobs. Varroa reads them from the member at each request.
+A team on a member cluster shows its definition, parameters, declared jobs, source input, and version profile. Varroa reads them from the member at each request.
 
 ## Your cell card
 

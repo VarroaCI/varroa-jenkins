@@ -220,7 +220,7 @@ func TestResolveDeclaredInput_ItemRefWinsOverEarlierGitSource(t *testing.T) {
 	b := newBundleBuilder("team-ns").
 		addGitSource(definitionGitRepo, definitionGitPath, "sha-git").
 		addItemRef("items-a", "sha-item")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil {
 		t.Fatal("a matching itemRef input must resolve, got nil")
 	}
@@ -252,7 +252,7 @@ func TestResolveDeclaredInput_NonMatchingItemRefFallsThroughToGitSource(t *testi
 	b := newBundleBuilder("team-ns").
 		addItemRef("items-a", "sha-item").
 		addGitSource(definitionGitRepo, definitionGitPath, "sha-git")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-b")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-b")
 	if got == nil {
 		t.Fatal("a non-matching itemRef must fall through to the gitSource input, got nil")
 	}
@@ -274,7 +274,7 @@ func TestResolveDeclaredInput_OCISourceOnly(t *testing.T) {
 	srv := definitionTestServer(newFakeResourceClient())
 	b := newBundleBuilder("team-ns").
 		addOCISource("ghcr.io/acme/bundle:v1", definitionGitPath, "sha256:abc")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil {
 		t.Fatal("a bundle with one ociSource input must resolve, got nil")
 	}
@@ -296,7 +296,7 @@ func TestResolveDeclaredInput_FirstGitSourceWins(t *testing.T) {
 	b := newBundleBuilder("team-ns").
 		addGitSource("https://github.com/acme/first", "one", "sha-1").
 		addGitSource("https://github.com/acme/second", "two", "sha-2")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil {
 		t.Fatal("a bundle with gitSource inputs must resolve, got nil")
 	}
@@ -316,7 +316,7 @@ func TestResolveDeclaredInput_CatalogItemNotFoundContinues(t *testing.T) {
 	b := newBundleBuilder("team-ns").
 		addItemRef("items-gone", "sha-gone").
 		addItemRef("items-b", "sha-b")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil {
 		t.Fatal("a NotFound itemRef must continue to the next candidate, got nil")
 	}
@@ -342,7 +342,7 @@ func TestResolveDeclaredInput_TransientReadErrorIsTerminal(t *testing.T) {
 	b := newBundleBuilder("team-ns").
 		addItemRef("items-a", "sha-item").
 		addGitSource(definitionGitRepo, definitionGitPath, "sha-git")
-	if got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a"); got != nil {
+	if got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a"); got != nil {
 		t.Fatalf("declaredBy = %+v, want nil: a transient read error must not let a gitSource answer", got)
 	}
 }
@@ -356,7 +356,7 @@ func TestResolveDeclaredInput_MissingRevisionSentinelLeavesRevisionAbsent(t *tes
 
 	b := newBundleBuilder("team-ns").
 		addItemRef("items-a", controller.ItemMissingRevision)
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil || got.Kind != "itemRef" {
 		t.Fatalf("declaredBy = %+v, want the resolved itemRef input", got)
 	}
@@ -388,7 +388,7 @@ func TestResolveDeclaredInput_UnresolvedInputSummaryIsSkipped(t *testing.T) {
 			srv := definitionTestServer(client)
 
 			b := tc.build(newBundleBuilder("team-ns"))
-			got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+			got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 			if got == nil {
 				t.Fatal("an unresolved itemRef must not end the resolution, got nil")
 			}
@@ -417,7 +417,7 @@ func TestResolveDeclaredInput_OnlyUnresolvedItemRefResolvesNothing(t *testing.T)
 			srv := definitionTestServer(client)
 
 			b := tc.build(newBundleBuilder("team-ns"))
-			if got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a"); got != nil {
+			if got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a"); got != nil {
 				t.Fatalf("declaredBy = %+v, want nil for a bundle with no resolved input", got)
 			}
 		})
@@ -435,7 +435,7 @@ func TestResolveDeclaredInput_MalformedCatalogItemContentIsNonMatching(t *testin
 	b := newBundleBuilder("team-ns").
 		addItemRef("items-a", "sha-item").
 		addGitSource(definitionGitRepo, definitionGitPath, "sha-git")
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{}, "acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{}, "acme/app-a")
 	if got == nil {
 		t.Fatal("a malformed candidate must leave the gitSource fallback intact, got nil")
 	}
@@ -463,7 +463,7 @@ func TestResolveDeclaredInput_DeclaredRootIsCleared(t *testing.T) {
 			srv := definitionTestServer(client)
 
 			b := newBundleBuilder("team-ns").addItemRef("items-a", "sha-item")
-			got := srv.resolveDeclaredInput(context.Background(), b.cb, TenantRef{Folder: tc.folder}, tc.jobPath)
+			got := srv.resolveDeclaredInput(context.Background(), "", b.cb, TenantRef{Folder: tc.folder}, tc.jobPath)
 			if got == nil {
 				t.Fatal("a candidate that declares its own root must still match, got nil")
 			}
@@ -485,14 +485,14 @@ func TestResolveDeclaredInput_PlacedTeamFolderReRoot(t *testing.T) {
 	// the catalog's.
 	b := newBundleBuilder("cells-ns").addItemRef("items-a", "sha-item")
 	ref := TenantRef{Folder: "team-a"}
-	got := srv.resolveDeclaredInput(context.Background(), b.cb, ref, "team-a/acme/app-a")
+	got := srv.resolveDeclaredInput(context.Background(), "", b.cb, ref, "team-a/acme/app-a")
 	if got == nil {
 		t.Fatal("a placed Team's candidate must match in the re-rooted path space, got nil")
 	}
 	if got.Kind != "itemRef" || got.Name != "items-a" {
 		t.Fatalf("declaredBy = %+v, want the itemRef candidate", got)
 	}
-	if got := srv.resolveDeclaredInput(context.Background(), b.cb, ref, "acme/app-a"); got != nil {
+	if got := srv.resolveDeclaredInput(context.Background(), "", b.cb, ref, "acme/app-a"); got != nil {
 		t.Fatalf("declaredBy = %+v, want nil: a placed Team never matches an unprefixed path", got)
 	}
 }

@@ -492,6 +492,9 @@ federation, activity persistence, and SSE fanout.
   `ConfigBrood.GetTeamBundleContent` on `operator.<cluster>.bundles.teamcontent`.
   That read is live, with the same strict parse. A member NotFound yields no
   definition.
+  The job detail reads the itemRef CatalogItem for `declaredBy` through `ConfigBrood.GetCatalogItem`, on that member.
+  It reads the cell for `profile` through `Brood.Get`, on that member.
+  A failed member cell read leaves `profile` empty and keeps the definition.
 - **Pipeline template resolution** (`pipelines_definition.go`) — the job detail's
   `template` row (`buildPipelineTemplateInfo`) picks one of three sources, never
   guessing: an items-declared job (`definition.varroaTemplate`) resolves its

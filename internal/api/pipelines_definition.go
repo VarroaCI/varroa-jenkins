@@ -125,25 +125,36 @@ func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v
 // cannot be found: a tenant with no catalog template still serves
 // record-derived data alone.
 func (s *Server) teamPipelineBundleContent(ctx context.Context, ref TenantRef) (*v1alpha1.ComposedBundle, map[string]string, bool, error) {
+	cb, cm, held, _, err := s.teamPipelineBundleSource(ctx, ref)
+	return cb, cm, held, err
+}
+
+// teamPipelineBundleSource is teamPipelineBundleContent with one more
+// value. The fourth value names the cluster that holds the Team. It is
+// empty when the local store holds the Team, and ref.Cluster when the
+// member path ran. holder names the cluster that holds cb, so its
+// CatalogItems and its cell are read on that cluster.
+func (s *Server) teamPipelineBundleSource(ctx context.Context, ref TenantRef) (*v1alpha1.ComposedBundle, map[string]string, bool, string, error) {
 	if ref.Team == "" {
-		return nil, nil, false, nil
+		return nil, nil, false, "", nil
 	}
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, ref.Team, "")
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			if !s.isLocalCluster(ref.Cluster) {
-				return s.memberTeamBundleContent(ctx, ref)
+				cb, cm, held, err := s.memberTeamBundleContent(ctx, ref)
+				return cb, cm, held, ref.Cluster, err
 			}
-			return nil, nil, false, nil
+			return nil, nil, false, "", nil
 		}
-		return nil, nil, false, err
+		return nil, nil, false, "", err
 	}
 	if team.Spec.Pipelines == nil || team.Spec.Pipelines.ComposedBundleRef == nil {
-		return nil, nil, false, nil
+		return nil, nil, false, "", nil
 	}
 	bundleRef := team.Spec.Pipelines.ComposedBundleRef
 	cb, cm, err := s.composedBundleContent(ctx, bundleRef.Name, bundleRef.Namespace)
-	return cb, cm, false, err
+	return cb, cm, false, "", err
 }
 
 // memberTeamBundleContent reads a Team that only a member cluster holds,
@@ -162,10 +173,29 @@ func (s *Server) memberTeamBundleContent(ctx context.Context, ref TenantRef) (*v
 }
 
 // tenantController returns ref's controller, or nil when it does not
-// exist. A read error other than not-found is returned.
-func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, error) {
+// exist. A non-empty holder names the cluster that holds the Team (see
+// teamPipelineBundleSource), and the cell is read from that cluster
+// through Brood.Get. A member read that fails with an error other than
+// not-found is logged and answers nil, so the definition keeps its other
+// fields. A local read error is returned.
+func (s *Server) tenantController(ctx context.Context, ref TenantRef, holder string) (*v1alpha1.Controller, error) {
 	if ref.Controller == "" {
 		return nil, nil
+	}
+	if holder != "" {
+		if s.deps.Brood == nil {
+			return nil, nil
+		}
+		cr, err := s.deps.Brood.Get(ctx, holder, ref.Namespace, ref.Controller)
+		if err == nil {
+			return cr, nil
+		}
+		var be *BroodError
+		if k8serrors.IsNotFound(err) || (errors.As(err, &be) && be.Code == bus.CodeNotFound) {
+			return nil, nil
+		}
+		s.deps.Logger.Warn("member cell read failed", "cluster", holder, "cell", ref.Controller, "error", err)
+		return nil, nil //nolint:nilerr // the failed read is logged above; the definition keeps its other fields
 	}
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, s.deps.Store, ref.Controller, ref.Namespace)
 	if err != nil {
@@ -191,34 +221,48 @@ func (s *Server) tenantController(ctx context.Context, ref TenantRef) (*v1alpha1
 // nil manifest, with no error, when the controller, the bundle, or an
 // items.yaml key cannot be found, or when the manifest fails to parse: a
 // tenant with no declared item still serves record-derived data alone.
+// tenantItemManifest also returns the cluster that holds the Team.
 func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *v1alpha1.ComposedBundle, *items.Manifest, error) {
+	cr, cb, _, manifest, err := s.tenantItemManifest(ctx, ref)
+	return cr, cb, manifest, err
+}
+
+// tenantItemManifest is controllerItemManifest with one more value: the
+// cluster that holds the Team (see teamPipelineBundleSource). It is empty
+// for a local Team and for a synthetic single-controller tenant.
+func (s *Server) tenantItemManifest(ctx context.Context, ref TenantRef) (*v1alpha1.Controller, *v1alpha1.ComposedBundle, string, *items.Manifest, error) {
 	var (
-		cr   *v1alpha1.Controller
-		cb   *v1alpha1.ComposedBundle
-		cm   map[string]string
-		held bool
-		err  error
+		cr     *v1alpha1.Controller
+		cb     *v1alpha1.ComposedBundle
+		cm     map[string]string
+		held   bool
+		holder string
+		err    error
 	)
 	if ref.Folder != "" {
-		// A placed Team never reads the cell's bundle; the controller is
-		// fetched for its version and for the cell's hold on the Team.
-		cr, err = s.tenantController(ctx, ref)
+		// A placed Team never reads the cell's bundle. The cell is read
+		// on the cluster that holds the Team, for its version and for the
+		// cell's hold on the Team.
+		cb, cm, held, holder, err = s.teamPipelineBundleSource(ctx, ref)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, cb, holder, nil, err
 		}
-		cb, cm, held, err = s.teamPipelineBundleContent(ctx, ref)
+		cr, err = s.tenantController(ctx, ref, holder)
+		if err != nil {
+			return nil, cb, holder, nil, err
+		}
 	} else {
 		cr, cb, cm, err = s.controllerBundleContent(ctx, ref)
 	}
 	if err != nil {
-		return cr, cb, nil, err
+		return cr, cb, holder, nil, err
 	}
 	if cm == nil {
-		return cr, cb, nil, nil
+		return cr, cb, holder, nil, nil
 	}
 	content, ok := cm["items.yaml"]
 	if !ok || content == "" {
-		return cr, cb, nil, nil
+		return cr, cb, holder, nil, nil
 	}
 	if ref.Folder != "" {
 		// A member-placed Team reports its hold through the teamcontent
@@ -229,7 +273,7 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 		}
 		if held {
 			s.deps.Logger.Debug("the cell holds the tenant; declaring no job", "team", ref.Team)
-			return cr, cb, nil, nil
+			return cr, cb, holder, nil, nil
 		}
 		manifest, err := bundle.TenantItemsManifest(ref.Folder, cm)
 		if err == nil {
@@ -243,18 +287,18 @@ func (s *Server) controllerItemManifest(ctx context.Context, ref TenantRef) (*v1
 			// read declares no job. The cell runs the same checks and
 			// records the same fault as a hold.
 			s.deps.Logger.Debug("tenant items fail a cell check; declaring no job", "team", ref.Team, "error", err)
-			return cr, cb, nil, nil //nolint:nilerr // the failed check is logged above; the read declares no job
+			return cr, cb, holder, nil, nil //nolint:nilerr // the failed check is logged above; the read declares no job
 		}
-		return cr, cb, manifest, nil
+		return cr, cb, holder, manifest, nil
 	}
 	manifest, err := items.Parse(content)
 	if err != nil {
 		// An items.yaml that fails to parse leaves the pipeline surface
 		// without a definition rather than failing the read: the
 		// bundle-validation gate is the place that rejects a bad manifest.
-		return cr, cb, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
+		return cr, cb, holder, nil, nil //nolint:nilerr // best-effort enrichment, see comment above
 	}
-	return cr, cb, manifest, nil
+	return cr, cb, holder, manifest, nil
 }
 
 // controllerPipelineTemplates reads and parses the composed bundle
@@ -316,13 +360,44 @@ func (s *Server) markerContainerPath(ctx context.Context, ref TenantRef, jobPath
 	return "", false
 }
 
+// catalogItemOn reads the CatalogItem name in ns on cluster. An empty
+// cluster reads the local store. A not-found item answers nil with no error.
+func (s *Server) catalogItemOn(ctx context.Context, cluster, ns, name string) (*v1alpha1.CatalogItem, error) {
+	if cluster == "" {
+		ci, err := crdstore.Get[v1alpha1.CatalogItem](ctx, s.deps.Store, name, ns)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return ci, nil
+	}
+	if s.deps.ConfigBrood == nil {
+		return nil, nil
+	}
+	raw, err := s.deps.ConfigBrood.GetCatalogItem(ctx, cluster, ns, name)
+	if err != nil {
+		var be *BroodError
+		if errors.As(err, &be) && be.Code == bus.CodeNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var ci v1alpha1.CatalogItem
+	if err := json.Unmarshal(raw, &ci); err != nil {
+		return nil, fmt.Errorf("decode member catalog item: %w", err)
+	}
+	return &ci, nil
+}
+
 // findDeclaredItem returns the item declaring jobPath, from ref's
 // controller's composed bundle, and reports whether one was found. It
 // also returns the bundle input that declared the item. It resolves that
 // input only when the item's definition renders, so an item with no
 // definition carries no provenance.
 func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath string) (*v1alpha1.Controller, *items.Item, *declaredByJSON, error) {
-	cr, cb, manifest, err := s.controllerItemManifest(ctx, ref)
+	cr, cb, holder, manifest, err := s.tenantItemManifest(ctx, ref)
 	if err != nil || manifest == nil {
 		return cr, nil, nil, err
 	}
@@ -331,7 +406,7 @@ func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath st
 			item := ip.Item
 			var declaredBy *declaredByJSON
 			if buildPipelineDefinition(&item) != nil {
-				declaredBy = s.resolveDeclaredInput(ctx, cb, ref, jobPath)
+				declaredBy = s.resolveDeclaredInput(ctx, holder, cb, ref, jobPath)
 			}
 			return cr, &item, declaredBy, nil
 		}
@@ -346,7 +421,7 @@ func (s *Server) findDeclaredItem(ctx context.Context, ref TenantRef, jobPath st
 // cb.Spec.Inputs, already in memory on the fetched cb, plus a bounded
 // number of CatalogItem reads for itemRef candidates. Returns nil when
 // cb is nil (bundle not found) or when no input resolves.
-func (s *Server) resolveDeclaredInput(ctx context.Context, cb *v1alpha1.ComposedBundle, ref TenantRef, jobPath string) *declaredByJSON {
+func (s *Server) resolveDeclaredInput(ctx context.Context, holder string, cb *v1alpha1.ComposedBundle, ref TenantRef, jobPath string) *declaredByJSON {
 	if cb == nil {
 		return nil
 	}
@@ -365,16 +440,16 @@ func (s *Server) resolveDeclaredInput(ctx context.Context, cb *v1alpha1.Composed
 			// so it cannot be the declarer.
 			continue
 		}
-		catalogItem, err := crdstore.Get[v1alpha1.CatalogItem](ctx, s.deps.Store, input.ItemRef.Name, summary.Namespace)
+		catalogItem, err := s.catalogItemOn(ctx, holder, summary.Namespace, input.ItemRef.Name)
 		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				continue // deleted since the last reconcile: not this one
-			}
 			// A transient read error is terminal for the whole
 			// resolution: it must never let step 2 name a git/OCI input
 			// in this itemRef's place.
-			s.deps.Logger.Warn("declared-input itemRef read failed", "jobPath", jobPath, "item", input.ItemRef.Name, "error", err)
+			s.deps.Logger.Warn("declared-input itemRef read failed", "jobPath", jobPath, "cluster", holder, "item", input.ItemRef.Name, "error", err)
 			return nil
+		}
+		if catalogItem == nil {
+			continue // deleted since the last reconcile: not this one
 		}
 		if catalogItem.Spec.Type != v1alpha1.CatalogItemItem {
 			continue
