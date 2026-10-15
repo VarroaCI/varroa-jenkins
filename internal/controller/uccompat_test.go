@@ -40,7 +40,7 @@ func TestCompat_CoreTooOld(t *testing.T) {
 	if got := verdictFor(t, compat, "old").Verdict; got != verdictCoreTooOld {
 		t.Fatalf("verdict = %q, want core-too-old", got)
 	}
-	cond := compatWarning(compat)
+	cond := compatWarning(compat, nil)
 	if cond.Status != metav1.ConditionTrue || cond.Reason != verdictCoreTooOld {
 		t.Errorf("CompatWarning = %+v", cond)
 	}
@@ -205,7 +205,7 @@ func TestCompat_UnknownWhenCoreCannotBeJudged(t *testing.T) {
 			if got := verdictFor(t, compat, "p").Verdict; got != verdictUnknown {
 				t.Fatalf("verdict = %q, want unknown", got)
 			}
-			if cond := compatWarning(compat); cond.Status == metav1.ConditionTrue {
+			if cond := compatWarning(compat, nil); cond.Status == metav1.ConditionTrue {
 				t.Errorf("unknown must not raise CompatWarning: %+v", cond)
 			}
 		})
@@ -237,7 +237,7 @@ func TestCompat_ZeroProfiles(t *testing.T) {
 	if len(compat) != 0 {
 		t.Fatalf("expected empty compat, got %+v", compat)
 	}
-	cond := compatWarning(compat)
+	cond := compatWarning(compat, nil)
 	if cond.Status != metav1.ConditionUnknown || cond.Reason != "NoProfiles" {
 		t.Fatalf("CompatWarning = %+v, want Unknown/NoProfiles", cond)
 	}
@@ -251,7 +251,7 @@ func TestCompat_WarningCapsOffendersAtThree(t *testing.T) {
 		{Profile: "p4", Verdict: verdictLockTooOld},
 		{Profile: "p5", Verdict: verdictCompatible},
 	}
-	cond := compatWarning(compat)
+	cond := compatWarning(compat, nil)
 	if cond.Status != metav1.ConditionTrue || cond.Reason != verdictCoreTooOld {
 		t.Fatalf("cond = %+v", cond)
 	}
@@ -370,8 +370,12 @@ func TestCompat_UnknownDependencyListYieldsUnknown(t *testing.T) {
 	if !strings.Contains(got.Message, "leaf@1.0") {
 		t.Errorf("message %q does not name leaf@1.0", got.Message)
 	}
-	if cond := compatWarning(compat); cond.Status == metav1.ConditionTrue {
+	cond := compatWarning(compat, cl.UnknownDeps)
+	if cond.Status == metav1.ConditionTrue {
 		t.Errorf("unknown must not raise CompatWarning: %+v", cond)
+	}
+	if !strings.Contains(cond.Message, "leaf@1.0") {
+		t.Errorf("CompatWarning message %q does not name leaf@1.0", cond.Message)
 	}
 }
 

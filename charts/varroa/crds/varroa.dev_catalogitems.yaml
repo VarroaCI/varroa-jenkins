@@ -161,7 +161,8 @@ spec:
               compat:
                 description: |-
                   Compat carries one advisory verdict per JenkinsVersionProfile. Verdicts
-                  never set Valid=false and never block selection or provisioning.
+                  never set Valid=false and never block selection or provisioning. An
+                  incomplete closure does set Valid=false, and stores no content.
                 items:
                   description: |-
                     CatalogItemCompat is one profile's advisory compatibility verdict for a
@@ -192,7 +193,8 @@ spec:
                   type: object
                 type: array
               conditions:
-                description: Conditions carries CompatWarning for derived items.
+                description: Conditions carries CompatWarning and ClosureComplete
+                  for derived items.
                 items:
                   description: TemplateCatalogCondition is a generic status condition
                     for catalogs and composed bundles.

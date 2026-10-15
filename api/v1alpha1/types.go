@@ -2511,11 +2511,12 @@ type CatalogItemStatus struct {
 	Closure []CatalogItemClosureEntry `json:"closure,omitempty"`
 
 	// Compat carries one advisory verdict per JenkinsVersionProfile. Verdicts
-	// never set Valid=false and never block selection or provisioning.
+	// never set Valid=false and never block selection or provisioning. An
+	// incomplete closure does set Valid=false, and stores no content.
 	// +optional
 	Compat []CatalogItemCompat `json:"compat,omitempty"`
 
-	// Conditions carries CompatWarning for derived items.
+	// Conditions carries CompatWarning and ClosureComplete for derived items.
 	// +optional
 	Conditions []TemplateCatalogCondition `json:"conditions,omitempty"`
 }
