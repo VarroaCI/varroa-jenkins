@@ -173,6 +173,7 @@ never lasts longer than the run record. After the copy expires, a restart needs 
 the job's current cell.
 
 A restart of a build whose job moved, or whose cell pod rolled, restores the copy before it runs.
+A restart after a pod roll replaces the rehydrated build record with the kept copy.
 When no complete copy exists, and the job moved, the restart is refused with `home-moved`.
 
 A restarted stage can use `unstash` only when the job keeps its stashes. A preserved stash survives

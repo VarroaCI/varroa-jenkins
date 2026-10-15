@@ -1048,15 +1048,25 @@ func (a *Agent) restoreRestartSource(ctx context.Context, payload *mitev1.Restar
 	// An earlier attempt may have moved the copy into place and then failed
 	// at the reload or the load. Such a directory holds every copy file at
 	// its declared size, and the restore then only repeats the reload and
-	// the load. Any other directory is refused, because it may hold a build
-	// this copy did not write.
+	// the load. A directory without workflow-completed/ is a rehydration
+	// stub, so the copy replaces it. A directory with workflow-completed/
+	// holds a completed flow graph this copy did not write, so it is refused.
 	restored := false
 	if info, err := os.Stat(buildDir); err == nil {
 		if !info.IsDir() {
 			return fmt.Errorf("the build path %s is not a directory", buildDir)
 		}
 		if err := checkRestartSourceFilesPresent(buildDir, prefix, payload.SourceFiles); err != nil {
-			return fmt.Errorf("the build directory %s already exists and does not hold the copy: %w", buildDir, err)
+			completed, flowErr := flowGraphCompleted(buildDir)
+			if flowErr != nil {
+				return fmt.Errorf("check the flow graph of the build directory %s: %w", buildDir, flowErr)
+			}
+			if completed {
+				return fmt.Errorf("the build directory %s already exists, does not hold the copy, and holds a completed flow graph (workflow-completed/): %w", buildDir, err)
+			}
+			if err := a.replaceRestartStub(ctx, home, buildDir, prefix, payload); err != nil {
+				return err
+			}
 		}
 		restored = true
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -1124,6 +1134,46 @@ func (a *Agent) stageRestartSource(ctx context.Context, home, buildDir, prefix s
 		return fmt.Errorf("move the restored build into place: %w", err)
 	}
 	return nil
+}
+
+// replaceRestartStub moves a rehydration stub aside, stages the copy into
+// its place, and then removes the stub. The move is a rename in the builds
+// directory, so the swap happens on one filesystem. If the staging fails,
+// the stub moves back, so the build directory is unchanged. A failed removal
+// of the stub is logged, because the restore has already succeeded.
+func (a *Agent) replaceRestartStub(ctx context.Context, home, buildDir, prefix string, payload *mitev1.RestartBuildPayload) error {
+	aside := fmt.Sprintf("%s.varroa-replaced-%d", buildDir, time.Now().UnixNano())
+	if err := os.Rename(buildDir, aside); err != nil {
+		return fmt.Errorf("move the rehydrated build stub aside: %w", err)
+	}
+	if err := a.stageRestartSource(ctx, home, buildDir, prefix, payload); err != nil {
+		if rerr := os.Rename(aside, buildDir); rerr != nil {
+			a.Logger.Warn("failed to return the rehydrated build stub", "from", aside, "to", buildDir, "error", rerr)
+		}
+		return err
+	}
+	if err := os.RemoveAll(aside); err != nil {
+		a.Logger.Warn("failed to remove the replaced build stub", "path", aside, "error", err)
+	}
+	return nil
+}
+
+// flowGraphCompleted reports whether buildDir holds a workflow-completed
+// directory. A build that finished its flow graph holds one, and a
+// rehydration stub does not. Any error other than a missing entry is
+// returned, because the directory may then hold a completed build.
+func flowGraphCompleted(buildDir string) (bool, error) {
+	info, err := os.Stat(filepath.Join(buildDir, "workflow-completed"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("the flow graph marker %s is not a directory", filepath.Join(buildDir, "workflow-completed"))
+	}
+	return true, nil
 }
 
 // checkRestartSourceFilesPresent reports whether buildDir holds every copy

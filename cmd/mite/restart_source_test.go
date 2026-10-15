@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,7 +71,7 @@ func restartTestAgent(t *testing.T, jenkinsURL, home string) *Agent {
 // overwrites a build directory that already exists.
 func TestRestoreRestartSourceRefusesExistingBuild(t *testing.T) {
 	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds", "7"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds", "7", "workflow-completed"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	agent := restartTestAgent(t, "http://127.0.0.1:1", home)
@@ -79,8 +80,8 @@ func TestRestoreRestartSourceRefusesExistingBuild(t *testing.T) {
 		SourceFiles: []*mitev1.RestartSourceFile{{Relpath: "jobs/team-a/jobs/app/builds/7/build.xml", Bytes: 10}},
 	}
 	err := agent.restoreRestartSource(context.Background(), payload)
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("restore over an existing build = %v, want an already-exists refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "completed flow graph") {
+		t.Fatalf("restore over a completed build = %v, want a refusal that names the completed flow graph", err)
 	}
 }
 
@@ -140,9 +141,9 @@ func TestRestartWithRestoreRetriesOnlyOnSourceMissing(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			// The build directory exists, so a restore refuses before any fetch.
+			// The build directory holds a completed flow graph, so a restore refuses before any fetch.
 			home := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds", "7"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds", "7", "workflow-completed"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			agent := restartTestAgent(t, srv.URL, home)
@@ -189,5 +190,82 @@ func TestRestoreRestartSourceRepeatsReloadWhenCopyPresent(t *testing.T) {
 	err := agent.restoreRestartSource(context.Background(), payload)
 	if err == nil || !strings.Contains(err.Error(), "reload") {
 		t.Fatalf("restore with the copy in place = %v, want a failure at the reload", err)
+	}
+}
+
+// TestRestoreRestartSourceReplacesRehydratedStub proves a restore replaces a
+// rehydration stub, a build directory with no workflow-completed/, with the
+// copy. The reload answers 409 on the test server, so the restore stops there
+// after the swap. The stub must not remain under a moved-aside name.
+func TestRestoreRestartSourceReplacesRehydratedStub(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			_, _ = w.Write([]byte(`{"crumbRequestField":"Jenkins-Crumb","crumb":"test"}`))
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	buildDir := filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds", "7")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "build.xml"), []byte(strings.Repeat("s", 632)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := restartTestAgent(t, srv.URL, home)
+	agent.Logger = slog.Default()
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, []byte("0123456789")))
+	payload := &mitev1.RestartBuildPayload{
+		RunId: "new", JobPath: "team-a/app", SourceRunId: "src", SourceBuildNumber: 7,
+		SourceFiles: []*mitev1.RestartSourceFile{{Relpath: "jobs/team-a/jobs/app/builds/7/build.xml", Bytes: 10}},
+	}
+	err := agent.restoreRestartSource(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "reload") {
+		t.Fatalf("restore over a stub = %v, want a failure at the reload after the swap", err)
+	}
+	got, err := os.ReadFile(filepath.Join(buildDir, "build.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "0123456789" {
+		t.Fatalf("build.xml = %q, want the copy", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(home, "jobs", "team-a", "jobs", "app", "builds"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".varroa-replaced-") {
+			t.Fatalf("a moved-aside stub remains: %s", e.Name())
+		}
+	}
+}
+
+// TestFlowGraphCompletedReturnsStatErrors proves a stat failure other than a
+// missing entry reaches the caller. A regular file in place of the build
+// directory makes the stat fail with ENOTDIR.
+func TestFlowGraphCompletedReturnsStatErrors(t *testing.T) {
+	dir := t.TempDir()
+	if done, err := flowGraphCompleted(filepath.Join(dir, "absent")); done || err != nil {
+		t.Fatalf("a missing build directory = (%v, %v), want (false, nil)", done, err)
+	}
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := flowGraphCompleted(file); err == nil {
+		t.Fatal("a stat failure must reach the caller")
+	}
+	marker := filepath.Join(dir, "build")
+	if err := os.MkdirAll(marker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(marker, "workflow-completed"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := flowGraphCompleted(marker); err == nil {
+		t.Fatal("a workflow-completed entry that is not a directory must be refused")
 	}
 }
