@@ -73,7 +73,7 @@ check-comments:
 	go run ./hack/checkcomments .
 
 # Runs the public and site export leak gates into a scratch directory.
-# The export scripts need a clean tree: they copy working-tree content.
+# The exports gate the HEAD commit, not the working tree: commit first.
 export-gate:
 	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; rc=0; \
 	hack/export-public.sh "$$tmp/public" || rc=1; \
