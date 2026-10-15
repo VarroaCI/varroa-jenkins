@@ -125,7 +125,11 @@ reading each package's entry point):
   `legacySCM` with a gitSCM block. `defaultVersion` is written through.
   `Item.Validate` (`validateFolderLibraries`) refuses a malformed library
   before any renderer runs. `LibraryConfiguration.RequiredPlugins` and
-  `CredentialRefs` feed the controller's plugin and credential checks.
+  `CredentialRefs` feed the controller's plugin and credential checks. A
+  `multibranch` item's `orphanedItemStrategy` renders `DefaultOrphanedItemStrategy`
+  with `pruneDeadBranches` on; a zero or absent limit renders `-1`, and
+  `Item.Validate` (`validateOrphanedItemStrategy`) rejects the key on another kind
+  and a negative limit.
   `configxml.go` also injects a fixed skip-initial-build `buildStrategies`
   element onto every `multibranch` item and `organizationFolder` item, so a
   branch scan starts no build; the element needs plugin

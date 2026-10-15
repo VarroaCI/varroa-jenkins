@@ -1084,7 +1084,9 @@ type WorkflowBranchProjectFactory struct {
 	ScriptPath string `yaml:"scriptPath"`
 }
 
-// OrphanedStrategy for handling deleted branches in multibranch pipelines.
+// OrphanedStrategy sets how long Jenkins keeps the job of a dead branch. It
+// renders as DefaultOrphanedItemStrategy with dead-branch pruning on. A zero
+// limit means no limit on that axis.
 type OrphanedStrategy struct {
 	DaysToKeep int `yaml:"daysToKeep,omitempty"`
 	NumToKeep  int `yaml:"numToKeep,omitempty"`
@@ -1142,6 +1144,9 @@ func (i *Item) Validate() error {
 		return err
 	}
 	if err := validateFolderLibraries(*i); err != nil {
+		return err
+	}
+	if err := validateOrphanedItemStrategy(*i); err != nil {
 		return err
 	}
 	switch i.Kind {
@@ -1366,6 +1371,26 @@ func EffectiveGiteaTraits(t []GiteaTrait) []GiteaTrait {
 		{GiteaPullRequestDiscovery: &GiteaStrategyTrait{StrategyID: 1}},
 		{GiteaForkDiscovery: &GiteaForkTrait{StrategyID: 1, Trust: "contributors"}},
 	}
+}
+
+// validateOrphanedItemStrategy accepts the key only on a multibranch item and
+// refuses a negative limit. Jenkins does not normalize a negative limit read
+// from XML.
+func validateOrphanedItemStrategy(i Item) error {
+	s := i.OrphanedItemStrategy
+	if s == nil {
+		return nil
+	}
+	if i.Kind != "multibranch" {
+		return fmt.Errorf("item %q: orphanedItemStrategy applies only to kind=multibranch", i.Name)
+	}
+	if s.DaysToKeep < 0 {
+		return fmt.Errorf("item %q: orphanedItemStrategy.daysToKeep must be 0 or greater", i.Name)
+	}
+	if s.NumToKeep < 0 {
+		return fmt.Errorf("item %q: orphanedItemStrategy.numToKeep must be 0 or greater", i.Name)
+	}
+	return nil
 }
 
 // validateFolderLibraries checks every folder library of an item before any

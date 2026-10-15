@@ -1,5 +1,5 @@
 cases:
-  # Breadth (27, supported)
+  # Breadth (30, supported)
   - name: freestyle-scm-extensions
     tier: breadth
     status: supported
@@ -43,6 +43,9 @@ cases:
     tier: breadth
     status: supported
   - name: multibranch-gitea-source
+    tier: breadth
+    status: supported
+  - name: multibranch-orphaned-strategy
     tier: breadth
     status: supported
   - name: orgfolder-github-navigator

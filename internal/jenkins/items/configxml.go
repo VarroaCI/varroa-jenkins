@@ -793,12 +793,47 @@ func pipelineConfigXML(item Item) xmlConfig {
 // ---- Multibranch ----
 
 type multibranchXML struct {
-	XMLName     xml.Name          `xml:"org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject"`
-	Plugin      string            `xml:"plugin,attr"`
-	DisplayName string            `xml:"displayName,omitempty"`
-	Description string            `xml:"description,omitempty"`
-	Sources     *branchSourcesXML `xml:"sources"`
-	Factory     *mbFactoryXML     `xml:"factory"`
+	XMLName              xml.Name                 `xml:"org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject"`
+	Plugin               string                   `xml:"plugin,attr"`
+	DisplayName          string                   `xml:"displayName,omitempty"`
+	Description          string                   `xml:"description,omitempty"`
+	OrphanedItemStrategy *orphanedItemStrategyXML `xml:"orphanedItemStrategy,omitempty"`
+	Sources              *branchSourcesXML        `xml:"sources"`
+	Factory              *mbFactoryXML            `xml:"factory"`
+}
+
+// orphanedItemStrategyXML renders the dead-branch pruning policy of a
+// multibranch project. Pruning is always on when the element is present.
+type orphanedItemStrategyXML struct {
+	Class             string `xml:"class,attr"`
+	Plugin            string `xml:"plugin,attr"`
+	PruneDeadBranches bool   `xml:"pruneDeadBranches"`
+	DaysToKeep        int    `xml:"daysToKeep"`
+	NumToKeep         int    `xml:"numToKeep"`
+}
+
+// orphanedItemStrategyFor returns nil when the item declares no strategy,
+// so the element is omitted and Jenkins keeps its default.
+func orphanedItemStrategyFor(s *OrphanedStrategy) *orphanedItemStrategyXML {
+	if s == nil {
+		return nil
+	}
+	return &orphanedItemStrategyXML{
+		Class:             "com.cloudbees.hudson.plugins.folder.computed.DefaultOrphanedItemStrategy",
+		Plugin:            "cloudbees-folder",
+		PruneDeadBranches: true,
+		DaysToKeep:        orphanLimit(s.DaysToKeep),
+		NumToKeep:         orphanLimit(s.NumToKeep),
+	}
+}
+
+// orphanLimit maps a zero or absent limit to -1. Jenkins reads -1 as no
+// limit on that axis, and it normalizes a zero limit to -1 the same way.
+func orphanLimit(n int) int {
+	if n <= 0 {
+		return -1
+	}
+	return n
 }
 
 type branchSourcesXML struct {
@@ -964,9 +999,10 @@ type mbFactoryXML struct {
 
 func multibranchConfigXML(item Item) xmlConfig {
 	m := &multibranchXML{
-		Plugin:      "workflow-multibranch",
-		DisplayName: item.DisplayName,
-		Description: item.Description,
+		Plugin:               "workflow-multibranch",
+		DisplayName:          item.DisplayName,
+		Description:          item.Description,
+		OrphanedItemStrategy: orphanedItemStrategyFor(item.OrphanedItemStrategy),
 	}
 	// Build Sources struct once before the loop
 	m.Sources = &branchSourcesXML{

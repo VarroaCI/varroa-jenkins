@@ -26,6 +26,30 @@ A `JenkinsVersionProfile` that replaces the default plugin set must still pin
 `basic-branch-build-strategies`. The operator refuses a manifest declaring either kind
 when the plugin set omits it.
 
+## Prune dead branches
+
+A `multibranch` item sets how long Jenkins keeps the job of a deleted branch or a closed
+pull request. Use `orphanedItemStrategy`:
+
+```yaml
+items:
+  - kind: multibranch
+    name: payments-web
+    orphanedItemStrategy:
+      daysToKeep: 7
+      numToKeep: 5
+    sourcesList: ...
+```
+
+- `daysToKeep` keeps a dead branch job for this number of days after its last build.
+- `numToKeep` keeps at most this number of dead branch jobs.
+- Omit a limit or set it to `0` for no limit on that axis.
+- A negative value rejects the item.
+
+When you omit `orphanedItemStrategy`, Jenkins deletes the job of a dead branch at the next
+scan. When you set it, Varroa always turns dead-branch pruning on. Only a `multibranch`
+item accepts the key.
+
 ## Define a pipeline
 
 ```yaml

@@ -1,0 +1,17 @@
+items:
+  - kind: multibranch
+    name: multibranch-orphaned-strategy
+    displayName: "Multibranch Orphaned Strategy"
+    description: "Multibranch pipeline with an orphaned item strategy"
+    sourcesList:
+      - branchSource:
+          source:
+            git:
+              remote: https://github.com/fake-org/multibranch-orphan.git
+              credentialsId: git-cred
+    orphanedItemStrategy:
+      daysToKeep: 7
+      numToKeep: 5
+    projectFactory:
+      workflowBranchProjectFactory:
+        scriptPath: Jenkinsfile
