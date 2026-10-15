@@ -40,6 +40,9 @@ type assembleCellState struct {
 // jenkins.yaml with the cell bundle's own pipeline templates in it; a
 // tenant fragment must load against it.
 //
+// All projected credentials of the cell share one byte budget. Tenants are
+// taken in name order, so the same inputs skip the same credentials.
+//
 // Each non-draining tenant's items pass every check on their own. A tenant
 // that fails one is held: its folder is absent from the merged items and
 // named in the manifest's retain list, so the mite keeps the folder as it
@@ -73,7 +76,11 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		}
 	}
 
-	for _, team := range teams {
+	ordered := slices.Clone(teams)
+	slices.SortFunc(ordered, func(a, b *v1alpha1.Team) int { return strings.Compare(a.Name, b.Name) })
+	budget := newCellCredentialBudget(cellCredentialBudgetBytes)
+
+	for _, team := range ordered {
 		if team.Spec.Pipelines == nil {
 			// A Team can carry a stale entry in status.cell.tenants for one
 			// tick after spec.pipelines is cleared; teardown is what
@@ -137,11 +144,15 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 				projected := &items.Item{Kind: folder.Kind, Name: folder.Name}
 				warnings = append(warnings, r.projectTenantCredentials(ctx, team.Name, agentNamespace, projected)...)
 				prop := folderCredentialsPropertyOf(projected)
+				charged, budgetWarnings := budget.trim(team.Name, prop)
 				// A library names a credential that its folder cannot see.
-				// That tenant is held, and none of its content is carried.
+				// That tenant is held, and none of its content is carried,
+				// so its bytes return to the budget and its skips go unreported.
 				if err := checkFolderLibraryCredentials(rerooted, prop.FolderCredentials); err != nil {
+					budget.refund(charged)
 					hold(team.Name, err)
 				} else {
+					warnings = append(warnings, budgetWarnings...)
 					if len(prop.FolderCredentials) > 0 {
 						folderCrd = append(folderCrd, bundle.CellFolderCredentials{Folder: folder.Name, Entries: prop.FolderCredentials})
 					}
