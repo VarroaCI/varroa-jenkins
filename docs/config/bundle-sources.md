@@ -38,6 +38,7 @@ jcascMergeStrategy: errorOnConflict
 | `jcascMergeStrategy` | `errorOnConflict` or `override` |
 
 Item removal does not come from `bundle.yaml`. See [Control removal](items.md#control-removal).
+Varroa ignores any top-level `bundle.yaml` key that it does not declare, such as `itemRemoveStrategy` or `rbacRemoveStrategy`.
 
 Use [plugin pinning](plugin-pinning.md) and [jobs and items](items.md) for those
 file formats. Configure authorization through

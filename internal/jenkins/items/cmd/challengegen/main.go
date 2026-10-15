@@ -21,18 +21,13 @@ type manifest struct {
 }
 
 type bundleYAML struct {
-	ID                 string             `yaml:"id"`
-	APIVersion         string             `yaml:"apiVersion"`
-	Version            string             `yaml:"version"`
-	Description        string             `yaml:"description"`
-	ItemRemoveStrategy bundleItemStrategy `yaml:"itemRemoveStrategy"`
-	JCasc              []string           `yaml:"jcasc"`
-	Plugins            []string           `yaml:"plugins"`
-	Items              []string           `yaml:"items"`
-}
-
-type bundleItemStrategy struct {
-	Items string `yaml:"items"`
+	ID          string   `yaml:"id"`
+	APIVersion  string   `yaml:"apiVersion"`
+	Version     string   `yaml:"version"`
+	Description string   `yaml:"description"`
+	JCasc       []string `yaml:"jcasc"`
+	Plugins     []string `yaml:"plugins"`
+	Items       []string `yaml:"items"`
 }
 
 type pluginEntry struct {
@@ -100,14 +95,13 @@ func main() {
 
 	// Write bundle.yaml.
 	bundle := bundleYAML{
-		ID:                 "bundle-challenge",
-		APIVersion:         "2",
-		Version:            "1",
-		Description:        "Generated challenge corpus bundle (items-challenge-corpus)",
-		ItemRemoveStrategy: bundleItemStrategy{Items: "none"},
-		JCasc:              []string{"jenkins.yaml"},
-		Plugins:            []string{"plugins.yaml"},
-		Items:              []string{"items.yaml"},
+		ID:          "bundle-challenge",
+		APIVersion:  "2",
+		Version:     "1",
+		Description: "Generated challenge corpus bundle (items-challenge-corpus)",
+		JCasc:       []string{"jenkins.yaml"},
+		Plugins:     []string{"plugins.yaml"},
+		Items:       []string{"items.yaml"},
 	}
 	bundleData, err := yaml.Marshal(bundle)
 	if err != nil {

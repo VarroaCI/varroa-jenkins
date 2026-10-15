@@ -108,6 +108,26 @@ jcasc: []
 	}
 }
 
+func TestParseManifestIgnoresUndeclaredKeys(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := `id: "test"
+version: "1"
+apiVersion: "1"
+jcasc:
+  - "jenkins.yaml"
+itemRemoveStrategy:
+  items: remove-all
+rbacRemoveStrategy: delete
+`
+	writeFile(t, dir, "bundle.yaml", manifest)
+	writeFile(t, dir, "jenkins.yaml", "jenkins:\n  systemMessage: hello")
+
+	if _, err := ParseManifest(dir); err != nil {
+		t.Fatalf("ParseManifest: undeclared keys must not fail the parse: %v", err)
+	}
+}
+
 func TestParseManifestInvalidFieldValues(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -125,29 +145,6 @@ apiVersion: "1"
 jcasc:
   - "jenkins.yaml"
 jcascMergeStrategy: "merge"
-`},
-		{"bad itemRemoveStrategy.items", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-itemRemoveStrategy:
-  items: "delete-all"
-`},
-		{"bad itemRemoveStrategy.rbac", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-itemRemoveStrategy:
-  rbac: "delete"
-`},
-		{"bad rbacRemoveStrategy", `id: "test"
-version: "1"
-apiVersion: "1"
-jcasc:
-  - "jenkins.yaml"
-rbacRemoveStrategy: "delete"
 `},
 	}
 

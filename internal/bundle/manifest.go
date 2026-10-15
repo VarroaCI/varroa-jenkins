@@ -12,27 +12,18 @@ import (
 // Manifest represents a bundle.yaml file as defined by the CloudBees
 // Configuration as Code bundle specification.
 type Manifest struct {
-	ID                  string              `yaml:"id"`
-	Version             string              `yaml:"version"`
-	APIVersion          string              `yaml:"apiVersion"`
-	Description         string              `yaml:"description,omitempty"`
-	Parent              string              `yaml:"parent,omitempty"`
-	AvailabilityPattern string              `yaml:"availabilityPattern,omitempty"`
-	Jcasc               []string            `yaml:"jcasc"`
-	JcascMergeStrategy  string              `yaml:"jcascMergeStrategy,omitempty"`
-	Plugins             []string            `yaml:"plugins,omitempty"`
-	Items               []string            `yaml:"items,omitempty"`
-	Rbac                []string            `yaml:"rbac,omitempty"`
-	Variables           []string            `yaml:"variables,omitempty"`
-	ItemRemoveStrategy  *ItemRemoveStrategy `yaml:"itemRemoveStrategy,omitempty"`
-	RbacRemoveStrategy  string              `yaml:"rbacRemoveStrategy,omitempty"`
-}
-
-// ItemRemoveStrategy defines how existing items and RBAC assignments are
-// handled when applying an items.yaml manifest.
-type ItemRemoveStrategy struct {
-	Items string `yaml:"items,omitempty"`
-	Rbac  string `yaml:"rbac,omitempty"`
+	ID                  string   `yaml:"id"`
+	Version             string   `yaml:"version"`
+	APIVersion          string   `yaml:"apiVersion"`
+	Description         string   `yaml:"description,omitempty"`
+	Parent              string   `yaml:"parent,omitempty"`
+	AvailabilityPattern string   `yaml:"availabilityPattern,omitempty"`
+	Jcasc               []string `yaml:"jcasc"`
+	JcascMergeStrategy  string   `yaml:"jcascMergeStrategy,omitempty"`
+	Plugins             []string `yaml:"plugins,omitempty"`
+	Items               []string `yaml:"items,omitempty"`
+	Rbac                []string `yaml:"rbac,omitempty"`
+	Variables           []string `yaml:"variables,omitempty"`
 }
 
 // ParseManifest reads and validates a bundle.yaml file from bundleDir.
@@ -85,25 +76,6 @@ func (m *Manifest) validate(bundleDir string) error {
 		m.JcascMergeStrategy != "errorOnConflict" &&
 		m.JcascMergeStrategy != "override" {
 		return fmt.Errorf("bundle.yaml: jcascMergeStrategy must be \"errorOnConflict\" or \"override\", got %q", m.JcascMergeStrategy)
-	}
-
-	// itemRemoveStrategy.items
-	if m.ItemRemoveStrategy != nil {
-		items := m.ItemRemoveStrategy.Items
-		if items != "" && items != "none" && items != "sync" && items != "remove-supported" && items != "remove-all" {
-			return fmt.Errorf("bundle.yaml: itemRemoveStrategy.items must be one of \"none\", \"sync\", \"remove-supported\", \"remove-all\", got %q", items)
-		}
-		rbac := m.ItemRemoveStrategy.Rbac
-		if rbac != "" && rbac != "sync" && rbac != "update" {
-			return fmt.Errorf("bundle.yaml: itemRemoveStrategy.rbac must be \"sync\" or \"update\", got %q", rbac)
-		}
-	}
-
-	// rbacRemoveStrategy
-	if m.RbacRemoveStrategy != "" &&
-		m.RbacRemoveStrategy != "sync" &&
-		m.RbacRemoveStrategy != "update" {
-		return fmt.Errorf("bundle.yaml: rbacRemoveStrategy must be \"sync\" or \"update\", got %q", m.RbacRemoveStrategy)
 	}
 
 	// Validate all referenced files exist
