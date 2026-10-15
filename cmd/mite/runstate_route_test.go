@@ -173,6 +173,10 @@ func TestHandleRunState_RestartSourceForwardsFlagAndCounts(t *testing.T) {
 	var sent *mitev1.RunStateChunk
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetRunStateChunk()
+		agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+			RunId: sent.RunId, Relpath: sent.Relpath, StateGen: sent.StateGen, Seq: sent.Seq,
+			Status: ackStatusStored, RestartSource: true,
+		})
 		return nil
 	}})
 
@@ -233,6 +237,7 @@ func TestHandleRunState_RestartSourceBadFlagIs400(t *testing.T) {
 
 func TestRunStateAckStore_MeshRefusalDoesNotBlockRestartSource(t *testing.T) {
 	agent := newRunStateTestAgent(t)
+	ackingStream(agent, ackStatusStored, "")
 	agent.runStateAcks.record(&mitev1.RunStateAck{RunId: "run-1", Status: ackStatusRejected, Reason: stateReasonStateCap})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")

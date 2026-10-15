@@ -177,8 +177,8 @@ final class RestartSourcePusher {
     /**
      * Copies one run's files to the gateway. Every chunk of every file goes
      * out through the sender. A refusal that is not permanent is retried
-     * until the copy's deadline. The copy counts as kept only when every
-     * file is stored.
+     * until the copy's deadline. The copy counts as kept only when the
+     * gateway answered STORED for every chunk of every file.
      */
     static void copy(Path rootDir, String jobPath, long number, String runId, String url) {
         try {
@@ -210,9 +210,11 @@ final class RestartSourcePusher {
                 return;
             }
             String prefix = RunStatePusher.buildRelPathPrefix(jobPath, number);
-            // A refusal arrives on a later post, so an incomplete answer may
-            // belong to an earlier file. The whole copy posts again. The
-            // gateway answers STORED for every file it already holds.
+            // Each post's answer is the gateway's own answer for that chunk,
+            // including the last chunk of the last file. An incomplete answer
+            // still makes the whole copy post again, because it may belong to
+            // an earlier file. The gateway answers STORED for every file it
+            // already holds.
             boolean again = true;
             while (again) {
                 again = false;

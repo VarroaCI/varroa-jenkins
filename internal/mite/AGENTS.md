@@ -502,7 +502,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   it, so `observeGrant` never replaces the entry. The invalidation only
   forces a re-read of the recorder and sets no owner. Answers ride
   `OperatorMessage.run_state_ack`, which mirrors `LogAck`; the mite records
-  the answer and raises its own `503` on that run's next post.
+  the answer and raises its own `503` on that run's next post. For mesh chunks
+  only. A copy ack carries `seq`, and the mite answers the copy's own post with
+  it. The gateway publishes the `run.state` envelope before the `STORED` ack.
   The mesh path drops a terminal run's entry and answers `STORED` for
   each later chunk. **The restart copy is the exception.** It arrives
   after the run is terminal, so `onRestartSourceChunk` (`run_state_restart.go`)

@@ -57,6 +57,11 @@ const (
 	// /v1/run-state body, matching every other loopback route.
 	runStateChunkMaxBytes = 1 << 20 // 1 MiB
 
+	// restartAckWait bounds how long a restart-copy chunk waits for its
+	// RunStateAck before the route answers 503 ack-timeout. It must stay
+	// below the plugin's 5 s loopback read timeout.
+	restartAckWait = 4 * time.Second
+
 	// runStateFetchTimeout bounds the wait for one file's responses. The
 	// resume command's own deadline bounds the whole sequence.
 	runStateFetchTimeout = 30 * time.Second
@@ -211,18 +216,23 @@ func (s *runStateAckStore) take(runID string, restart bool) (runStateRefusal, bo
 	}
 }
 
-// Gateway refusal reasons the mite forwards verbatim. The set is the
-// whole set the loopback route may name.
+// Gateway refusal reasons the mite forwards verbatim, plus the one reason
+// the mite itself names: ack-timeout, when a restart-copy chunk gets no
+// RunStateAck in time. The set is the whole set the loopback route may
+// name.
 const (
 	stateReasonStateCap   = "state-cap"
 	stateReasonForeignRun = "foreign-run"
 	stateReasonBudgetFull = "gateway-budget-full"
+	stateReasonAckTimeout = "ack-timeout"
 )
 
 // handleRunState serves POST /v1/run-state. It answers 202 after a
 // successful forward, 400 for malformed metadata, 401 for a bad bearer,
 // 413 for a body over the chunk cap, and 503 when no stream is open or
-// when the gateway refused this run's last post.
+// when the gateway refused this run's last post. A restart-copy chunk
+// answers only after its own RunStateAck arrives, so the plugin sees the
+// gateway's answer for that chunk. A mesh chunk answers 202 at once.
 func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -265,12 +275,76 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if chunk.RestartSource {
+		a.forwardRestartSourceChunk(r.Context(), w, chunk)
+		return
+	}
+
 	if err := a.sendRunStateChunkLocked(chunk); err != nil {
 		a.logForwardFailure(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// forwardRestartSourceChunk sends one restart-copy chunk and answers the
+// plugin with the gateway's own answer for that chunk. It waits for the
+// RunStateAck of the chunk, up to restartAckWait. A STORED ack answers 202.
+// A BUSY or REJECTED ack answers 503 with the gateway's reason. A wait that
+// ends without an ack answers 503 ack-timeout, and the plugin retries.
+func (a *Agent) forwardRestartSourceChunk(ctx context.Context, w http.ResponseWriter, chunk *mitev1.RunStateChunk) {
+	key := restartAckWaitKey(chunk.RunId, chunk.Relpath, chunk.Seq)
+	ch, ok := a.restartAckWaiters.register(key)
+	if !ok {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	if err := a.sendRunStateChunkLocked(chunk); err != nil {
+		a.restartAckWaiters.cancel(key, ch)
+		a.logForwardFailure(err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	timer := time.NewTimer(a.restartAckWaitOrDefault())
+	defer timer.Stop()
+	var ack *mitev1.RunStateAck
+	select {
+	case ack = <-ch:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	if ack == nil {
+		ack = a.restartAckWaiters.cancel(key, ch)
+	}
+	if ack == nil {
+		w.Header().Set(hdrStateReason, stateReasonAckTimeout)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	switch ack.Status {
+	case ackStatusStored:
+		w.WriteHeader(http.StatusAccepted)
+	case ackStatusBusy:
+		pause := ack.PauseMs
+		if pause <= 0 {
+			pause = defaultLogBusyPauseMS
+		}
+		w.Header().Set(hdrStateReason, ack.Reason)
+		w.Header().Set(hdrPauseMs, strconv.Itoa(pause))
+		w.WriteHeader(http.StatusServiceUnavailable)
+	default:
+		// A permanent refusal also stays in the ack store, so the copy's
+		// later posts are refused without a send. A transient one does not,
+		// because the plugin's retry of the same chunk must reach the gateway.
+		if ack.Reason == stateReasonStateCap || ack.Reason == stateReasonForeignRun {
+			a.runStateAcks.record(ack)
+		}
+		w.Header().Set(hdrStateReason, ack.Reason)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
 }
 
 // parseRunStateHeaders reads the nine X-Varroa-* headers the route
@@ -350,6 +424,85 @@ func parseRunStateHeaders(h http.Header) (*mitev1.RunStateChunk, bool) {
 // the shared send lock.
 func (a *Agent) sendRunStateChunkLocked(chunk *mitev1.RunStateChunk) error {
 	return a.send(&mitev1.MiteMessage{Message: &mitev1.MiteMessage_RunStateChunk{RunStateChunk: chunk}})
+}
+
+// --- restartAckWaiterMap ---
+
+// restartAckWaitKey names the waiter of one restart-copy chunk. The gateway
+// echoes the run id, the relpath and the seq in each ack.
+func restartAckWaitKey(runID, relpath string, seq int64) string {
+	return runID + "\x00" + relpath + "\x00" + strconv.FormatInt(seq, 10)
+}
+
+// restartAckWaiterMap correlates a restart-copy chunk's HTTP post with the
+// RunStateAck of that chunk. Each waiter holds one buffered slot.
+type restartAckWaiterMap struct {
+	mu      sync.Mutex
+	waiters map[string]chan *mitev1.RunStateAck
+}
+
+func newRestartAckWaiterMap() *restartAckWaiterMap {
+	return &restartAckWaiterMap{waiters: make(map[string]chan *mitev1.RunStateAck)}
+}
+
+// register adds a waiter for key. It returns ok=false with no waiter added
+// when the map is at its cap.
+func (m *restartAckWaiterMap) register(key string) (chan *mitev1.RunStateAck, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.waiters) >= maxRunStateWaiters {
+		return nil, false
+	}
+	ch := make(chan *mitev1.RunStateAck, 1)
+	m.waiters[key] = ch
+	return ch, true
+}
+
+// resolve delivers ack to its waiter and removes the entry. It returns
+// false for a mesh ack, and for an ack with no open waiter, such as a late
+// answer after a timeout. The send happens under the lock, so cancel sees
+// a delivered ack.
+func (m *restartAckWaiterMap) resolve(ack *mitev1.RunStateAck) bool {
+	if ack == nil || !ack.RestartSource {
+		return false
+	}
+	key := restartAckWaitKey(ack.RunId, ack.Relpath, ack.Seq)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ch, ok := m.waiters[key]
+	if !ok {
+		return false
+	}
+	delete(m.waiters, key)
+	ch <- ack
+	return true
+}
+
+// cancel removes the waiter ch for key. It returns the ack that was already
+// delivered to ch, or nil when none was. A nil return means no ack arrived.
+func (m *restartAckWaiterMap) cancel(key string, ch chan *mitev1.RunStateAck) *mitev1.RunStateAck {
+	m.mu.Lock()
+	if cur, ok := m.waiters[key]; ok && cur == ch {
+		delete(m.waiters, key)
+	}
+	m.mu.Unlock()
+	select {
+	case ack := <-ch:
+		return ack
+	default:
+		return nil
+	}
+}
+
+// releaseAll closes every open waiter and empties the map. A closed waiter
+// reads nil, which answers ack-timeout. Called on stream teardown.
+func (m *restartAckWaiterMap) releaseAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, ch := range m.waiters {
+		close(ch)
+		delete(m.waiters, key)
+	}
 }
 
 // --- runStateWaiterMap ---

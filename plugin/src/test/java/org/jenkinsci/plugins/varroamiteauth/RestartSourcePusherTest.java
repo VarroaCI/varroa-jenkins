@@ -235,6 +235,20 @@ public class RestartSourcePusherTest {
     }
 
     @Test
+    public void finalChunkRefusalCountsDropped() throws IOException {
+        write("build.xml", "abc");
+        write("workflow-completed/x.xml", "de");
+        sender.answers.add(RunStatePusher.RunStateSender.Answer.accepted());
+        sender.answers.add(RunStatePusher.RunStateSender.Answer.refused(503, "malformed", 0));
+
+        RestartSourcePusher.copy(root(), JOB, BUILD, "run-1", URL);
+
+        assertEquals(2, sender.records.size());
+        assertEquals(0L, counter(PluginCounters.RESTART_SOURCE_KEPT));
+        assertEquals(1L, counter(PluginCounters.RESTART_SOURCE_DROPPED));
+    }
+
+    @Test
     public void incompleteRestartsFile() throws IOException {
         write("workflow-completed/big.bin", new byte[RunStatePusher.CHUNK_BYTES + 5]);
         sender.answers.add(RunStatePusher.RunStateSender.Answer.accepted());

@@ -356,6 +356,23 @@ type Agent struct {
 	// runStateWaiters correlates an in-flight fetch with the
 	// run_state_response messages that arrive on the command stream.
 	runStateWaiters *runStateWaiterMap
+
+	// restartAckWaiters correlates a restart-copy chunk's post with its
+	// RunStateAck. Mesh acks never reach it.
+	restartAckWaiters *restartAckWaiterMap
+
+	// restartAckWaitOverride replaces restartAckWait in tests. Zero means
+	// the default.
+	restartAckWaitOverride time.Duration
+}
+
+// restartAckWaitOrDefault returns how long a restart-copy chunk waits for
+// its ack.
+func (a *Agent) restartAckWaitOrDefault() time.Duration {
+	if a.restartAckWaitOverride > 0 {
+		return a.restartAckWaitOverride
+	}
+	return restartAckWait
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -402,6 +419,7 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
 		runStateAcks:           newRunStateAckStore(),
 		runStateWaiters:        newRunStateWaiterMap(),
+		restartAckWaiters:      newRestartAckWaiterMap(),
 	}, nil
 }
 
@@ -1368,6 +1386,8 @@ func (a *Agent) processCommands(ctx context.Context) {
 	// D2): stream teardown must never leave an HTTP handler blocked on
 	// POST /v1/cross-tenant/*.
 	defer a.crossTenantWaiters.releaseAll()
+	// A restart-copy post waiting for its ack answers ack-timeout at once.
+	defer a.restartAckWaiters.releaseAll()
 
 	// The receive goroutines use the session captured here. They never
 	// read a.sess, which the run loop clears when this function returns.
@@ -1470,7 +1490,9 @@ func (a *Agent) processCommands(ctx context.Context) {
 		case *mitev1.OperatorMessage_LogAck:
 			a.handleLogAck(ctx, m.LogAck)
 		case *mitev1.OperatorMessage_RunStateAck:
-			a.runStateAcks.record(m.RunStateAck)
+			if !a.restartAckWaiters.resolve(m.RunStateAck) {
+				a.runStateAcks.record(m.RunStateAck)
+			}
 		case *mitev1.OperatorMessage_RunStateResponse:
 			a.runStateWaiters.resolve(m.RunStateResponse)
 		case *mitev1.OperatorMessage_ContentRequest:

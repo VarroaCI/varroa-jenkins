@@ -141,10 +141,12 @@ func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStat
 		))
 	}
 
-	h.sendRunStateAckKind(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS, true)
+	// The envelope goes out before the ack. A STORED ack tells the mite
+	// the file is durable, so the recorder must already hold its envelope.
 	if outcome.stored {
 		h.publishRestartSourceFile(ns, name, chunk, outcome.bytes)
 	}
+	h.sendRunStateAckKind(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS, true)
 }
 
 // rejectRestartSource answers one refusal of a restart-copy chunk. A

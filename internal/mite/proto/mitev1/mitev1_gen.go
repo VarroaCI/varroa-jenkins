@@ -1291,6 +1291,7 @@ type RunStateAck struct {
 	Reason        string `json:"reason,omitempty"`
 	PauseMs       int    `json:"pause_ms,omitempty"`
 	RestartSource bool   `json:"restart_source,omitempty"`
+	Seq           int64  `json:"seq,omitempty"`
 }
 
 type RunStateChunk struct {
