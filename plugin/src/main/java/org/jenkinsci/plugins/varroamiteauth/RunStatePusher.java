@@ -106,6 +106,7 @@ public final class RunStatePusher {
     static final String REASON_STATE_CAP = "state-cap";
     static final String REASON_FOREIGN_RUN = "foreign-run";
     static final String REASON_BUDGET_FULL = "gateway-budget-full";
+    static final String REASON_TENANT_UNRESOLVED = "tenant-unresolved";
     static final String REASON_INCOMPLETE = "incomplete";
     static final String REASON_MALFORMED = "malformed";
 
@@ -794,7 +795,7 @@ public final class RunStatePusher {
             PluginCounters.increment(PluginCounters.RUN_STATE_PUSHED);
             return true;
         }
-        if (REASON_BUDGET_FULL.equals(answer.reason)) {
+        if (busyReason(answer.reason)) {
             sleepQuietly(answer.pauseMillis > 0 ? answer.pauseMillis : 1000L);
             return false;
         }
@@ -825,6 +826,11 @@ public final class RunStatePusher {
         // all reach here. The record stays on disk, and the next window
         // replays it before it posts the current set.
         return false;
+    }
+
+    /** Reports whether a refusal reason names a busy window: keep the record and wait the pause. */
+    static boolean busyReason(String reason) {
+        return REASON_BUDGET_FULL.equals(reason) || REASON_TENANT_UNRESOLVED.equals(reason);
     }
 
     /**

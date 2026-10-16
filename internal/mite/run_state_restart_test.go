@@ -379,8 +379,8 @@ func TestOnRunStateChunk_RestartSourceUnresolvedTenantBusyThenForeignRun(t *test
 	relpath := restartTestBuildPath + "build.xml"
 
 	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
-	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull || !ack.RestartSource {
-		t.Fatalf("first ack = %+v, want a BUSY restart-copy ack", ack)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonTenantUnresolved || !ack.RestartSource {
+		t.Fatalf("first ack = %+v, want a BUSY tenant-unresolved restart-copy ack", ack)
 	}
 
 	if restartObjectExists(t, h, runID, relpath) {

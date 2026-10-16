@@ -678,7 +678,7 @@ the root AGENTS.md greenfield rule.
   with the rule `VarroaLogStorageFactory.parseActivationUrl` applies. A refusal
   reason decides what happens next: `state-cap` and `foreign-run` stop the
   build's pushes, `incomplete` and `malformed` drop the record and keep
-  pushing, and `gateway-budget-full` waits the named pause. A mite answer of
+  pushing, and `gateway-budget-full` and `tenant-unresolved` wait the named pause. A mite answer of
   4xx, other than 401, 403, 408, 409, or 429, drops the record with a WARNING
   line and keeps pushing. A zero-byte file is not posted, because the mite and
   the gateway both refuse it. Every other answer, and every transport failure,

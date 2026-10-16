@@ -52,6 +52,9 @@ const (
 	stateReasonStateCap   = "state-cap"
 	stateReasonIncomplete = "incomplete"
 	stateReasonBudgetFull = "gateway-budget-full"
+	// stateReasonTenantUnresolved is the busy answer inside the
+	// unresolved-tenant grace. The run's tenant may still resolve.
+	stateReasonTenantUnresolved = "tenant-unresolved"
 )
 
 // runStateBuffer holds the chunks of one file of one push generation,
@@ -465,8 +468,8 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	// answers every retry as a redelivery, so a lost envelope would never
 	// publish again. A failed publish answers BUSY, and the plugin posts
 	// the file again. The object write is idempotent under its key.
-	// An unresolved tenant answers BUSY inside runStateTenantGrace and
-	// foreign-run after it.
+	// An unresolved tenant answers BUSY tenant-unresolved inside
+	// runStateTenantGrace and foreign-run after it.
 	if err := h.publishRunStateOutcome(ns, name, chunk, outcome); err != nil {
 		if errors.Is(err, errRunStateTenantUnresolved) {
 			return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "run-state", ns, name, chunk)
@@ -546,9 +549,9 @@ const (
 )
 
 // runStateTenantGrace bounds how long a run whose tenant does not resolve
-// answers BUSY. The resolver caches a placement for cellTenantResolveTTL,
-// so two lifetimes let a placement change reach the cache and let one
-// failed read retry. Past the grace the run is refused as foreign-run,
+// answers BUSY with stateReasonTenantUnresolved. The resolver caches a
+// placement for cellTenantResolveTTL, so two lifetimes let a placement
+// change reach the cache and let one failed read retry. Past the grace the run is refused as foreign-run,
 // because the cell does not host its tenant.
 const runStateTenantGrace = 2 * cellTenantResolveTTL
 
@@ -587,15 +590,15 @@ func (h *BusHandler) runStateTenantMissing(ns, name, jobPath string) bool {
 
 // unresolvedTenantOutcomeLocked answers a stored file whose tenant does
 // not resolve. The first observation starts the grace clock in since.
-// Inside the grace the answer is BUSY, so a placement race or a failed
-// read heals on a retry. Past it the answer is REJECTED foreign-run,
+// Inside the grace the answer is BUSY with stateReasonTenantUnresolved,
+// so a placement race or a failed read heals on a retry. Past it the answer is REJECTED foreign-run,
 // which the pusher acknowledges and stops on. Caller must hold h.stateMu.
 func unresolvedTenantOutcomeLocked(since *time.Time, now time.Time) runStateOutcome {
 	if since.IsZero() {
 		*since = now
 	}
 	if now.Sub(*since) < runStateTenantGrace {
-		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonTenantUnresolved, pauseMS: stateBudgetPauseMinMS}
 	}
 	return runStateOutcome{status: stateAckStatusRejected, reason: stateReasonForeignRun}
 }

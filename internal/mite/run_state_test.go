@@ -1146,8 +1146,8 @@ func TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy(t *testing.T) {
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 
 	acks := runStateAcksFrom(sender)
-	if len(acks) != 1 || acks[0].Status != stateAckStatusBusy || acks[0].Reason != stateReasonBudgetFull {
-		t.Fatalf("acks = %+v, want one BUSY gateway-budget-full ack", acks)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusBusy || acks[0].Reason != stateReasonTenantUnresolved {
+		t.Fatalf("acks = %+v, want one BUSY tenant-unresolved ack", acks)
 	}
 	if got := pub.publishedCount(); got != 0 {
 		t.Fatalf("published %d envelopes, want none", got)
@@ -1164,5 +1164,45 @@ func TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "run-state outcome unresolved, publishing no envelope") {
 		t.Fatalf("log = %q, want the unresolved warning", logs.String())
+	}
+}
+
+// TestOnRunStateChunk_GatewayBoundAnswersBudgetFull proves the
+// gateway-wide pending bound keeps its own reason, not the tenant one.
+func TestOnRunStateChunk_GatewayBoundAnswersBudgetFull(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	h.logPendingMaxBytes = 1 // no chunk fits the gateway-wide bound
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, "jobs/team/builds/1/program.dat", 1, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull || ack.PauseMs <= 0 {
+		t.Fatalf("ack = %+v, want BUSY gateway-budget-full with a pause", ack)
+	}
+}
+
+// TestUnresolvedTenantOutcome_ReasonIsTenantUnresolved pins the busy
+// reason inside the grace and the refusal after it.
+func TestUnresolvedTenantOutcome_ReasonIsTenantUnresolved(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name  string
+		since time.Time
+		want  runStateOutcome
+	}{
+		{"fresh", time.Time{}, runStateOutcome{status: stateAckStatusBusy, reason: stateReasonTenantUnresolved, pauseMS: stateBudgetPauseMinMS}},
+		{"inside grace", now.Add(-(runStateTenantGrace - time.Second)), runStateOutcome{status: stateAckStatusBusy, reason: stateReasonTenantUnresolved, pauseMS: stateBudgetPauseMinMS}},
+		{"past grace", now.Add(-(runStateTenantGrace + time.Second)), runStateOutcome{status: stateAckStatusRejected, reason: stateReasonForeignRun}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			since := tc.since
+			got := unresolvedTenantOutcomeLocked(&since, now)
+			if got != tc.want {
+				t.Fatalf("outcome = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

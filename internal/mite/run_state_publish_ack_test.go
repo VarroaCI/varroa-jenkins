@@ -192,8 +192,8 @@ func TestOnRunStateChunk_UnresolvedTenantPastGraceAnswersForeignRun(t *testing.T
 
 	const relpath = "jobs/team/builds/1/build.xml"
 	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 1, []byte("hello")))
-	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull {
-		t.Fatalf("first ack = %+v, want BUSY gateway-budget-full", ack)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonTenantUnresolved {
+		t.Fatalf("first ack = %+v, want BUSY tenant-unresolved", ack)
 	}
 
 	h.stateMu.Lock()

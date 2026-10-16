@@ -434,7 +434,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   the last step: files alone leave nothing for a cancel to stop. `runStateAckStore` records the gateway's `RunStateAck` per run, so
   the route answers `503` with `X-Varroa-State-Reason` on that run's next
   post; `state-cap` and `foreign-run` are permanent, and
-  `gateway-budget-full` names a pause instead. That `503` carries
+  `gateway-budget-full` and `tenant-unresolved` name a pause instead. That `503` carries
   `X-Varroa-Pause-Ms` with the time left in the busy window, the same
   header and meaning as the log route.
 
