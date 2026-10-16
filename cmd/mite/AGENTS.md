@@ -178,7 +178,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   `POST /v1/log` (`handleLog`) reads nine `X-Varroa-*` headers
   (`parseLogChunkHeaders`) plus the raw body, stamps the cell's own pod
   identity onto `LogChunk.cell_instance` (the plugin never sends one), and
-  forwards it as `MiteMessage.log_chunk`. `POST /v1/run-state`
+  forwards it as `MiteMessage.log_chunk`. A 400 or 413 log refusal carries
+  one plain-text line in its body, which the plugin logs when it drops the
+  chunk. `POST /v1/run-state`
   (`handleRunState`, `runstate.go`) reads nine `X-Varroa-*` headers plus a
   raw gzip body, stamps the same pod identity, and forwards it as
   `MiteMessage.run_state_chunk`. The tenth header is the pusher epoch,

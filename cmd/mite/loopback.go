@@ -787,7 +787,8 @@ func writeCrossTenantFailure(w http.ResponseWriter, status int, requestID *uint6
 // 400 for malformed metadata, 401 for a bad bearer, 413 for a body over
 // the mite's own chunk cap, and 503 when no stream is open, when the
 // retained buffer is at its bound, or while a BUSY pause window is open
-// for this run. Only the pause-window 503 carries hdrPauseMs.
+// for this run. Only the pause-window 503 carries hdrPauseMs. Each 400
+// and 413 refusal carries one plain-text line in its body.
 func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -800,7 +801,7 @@ func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 
 	chunk, ok := parseLogChunkHeaders(r.Header)
 	if !ok {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "malformed log headers", http.StatusBadRequest)
 		return
 	}
 	// The mite is cluster-unaware, but it is cell-aware: it stamps its own
@@ -810,12 +811,12 @@ func (a *Agent) handleLog(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, logChunkMaxBytes+1))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "unreadable log body", http.StatusBadRequest)
 		return
 	}
 	if len(body) > logChunkMaxBytes {
 		w.Header().Set(hdrLogMaxChunkBytes, strconv.Itoa(logChunkMaxBytes))
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		http.Error(w, "log chunk over the cap", http.StatusRequestEntityTooLarge)
 		return
 	}
 	chunk.Data = body
