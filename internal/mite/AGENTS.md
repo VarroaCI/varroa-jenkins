@@ -502,9 +502,14 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   it, so `observeGrant` never replaces the entry. The invalidation only
   forces a re-read of the recorder and sets no owner. Answers ride
   `OperatorMessage.run_state_ack`, which mirrors `LogAck`; the mite records
-  the answer and raises its own `503` on that run's next post. For mesh chunks
-  only. A copy ack carries `seq`, and the mite answers the copy's own post with
-  it. The gateway publishes the `run.state` envelope before the `STORED` ack. A failed publish answers `BUSY`, and the file stays out of the copy's stored set.
+  the answer and raises its own `503` on that run's next post. For non-final
+  mesh chunks only. A copy ack carries `seq`, and the mite answers the copy's own
+  post with it.
+  The gateway publishes the `run.state` envelope before it records the push and before the `STORED` ack, on both paths.
+  A failed publish, or an unresolved tenant, answers `BUSY` `gateway-budget-full`.
+  The mesh path records no push for that file, so the plugin's retry is not a redelivery.
+  The copy path keeps the file out of its stored set.
+  A state-cap refusal publishes its envelope before the `REJECTED` ack, and the ack holds whatever the publish answers.
   The mesh path drops a terminal run's entry and answers `STORED` for
   each later chunk. **The restart copy is the exception.** It arrives
   after the run is terminal, so `onRestartSourceChunk` (`run_state_restart.go`)

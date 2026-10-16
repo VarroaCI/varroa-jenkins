@@ -186,8 +186,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   headers mark a restart-copy chunk: `X-Varroa-Restart-Source: 1`, plus
   `X-Varroa-Copy-Files` and `X-Varroa-Copy-Bytes`, which both name the whole
   copy and are required with the flag. A copy chunk holds its HTTP answer until
-  its `RunStateAck` arrives (`restartAckWaiterMap`, derived by `restartAckWaitFor` from `claimTimeout`: budget minus 500 ms, at least half, at most 9 s; reason `ack-timeout`);
-  a mesh chunk still answers 202 at once. The ack store (`runStateAckStore`)
+  its `RunStateAck` arrives (`runStateAckWaiterMap`, derived by `runStateAckWaitFor` from `claimTimeout`: budget minus 500 ms, at least half, at most 9 s; reason `ack-timeout`);
+  the final chunk of a mesh file waits the same way, and a non-final mesh chunk still answers 202 at once. The ack store (`runStateAckStore`)
   keys each refusal by run and kind (`runStateAckKey`), so a copy refusal never
   blocks a mesh post. Every request carries
   `Authorization: Bearer <token>`, checked

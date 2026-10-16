@@ -1692,7 +1692,7 @@ func TestLogClaimWaitClamp(t *testing.T) {
 }
 
 func TestClaimWaitAndRestartAckWaitShareTheCap(t *testing.T) {
-	if restartAckWaitCap != loopbackWaitCap {
-		t.Fatalf("restartAckWaitCap = %v, want loopbackWaitCap %v", restartAckWaitCap, loopbackWaitCap)
+	if runStateAckWaitCap != loopbackWaitCap {
+		t.Fatalf("runStateAckWaitCap = %v, want loopbackWaitCap %v", runStateAckWaitCap, loopbackWaitCap)
 	}
 }

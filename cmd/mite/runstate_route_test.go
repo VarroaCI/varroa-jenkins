@@ -49,8 +49,23 @@ func newRunStateTestAgent(t *testing.T) *Agent {
 	agent := mustNewAgent(t, Config{CellInstance: "pod-uid-7"})
 	agent.Logger = slog.Default()
 	agent.loopbackToken = runStateTestToken
-	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
+	setTestStream(agent, &concurrentSendStream{sendFn: storeRunStateChunkSend(agent)})
 	return agent
+}
+
+// storeRunStateChunkSend answers every forwarded run-state chunk STORED, as
+// the gateway does. An acked chunk waits for its own ack, so a stream that
+// never answers would time the route out.
+func storeRunStateChunkSend(agent *Agent) func(*mitev1.MiteMessage) error {
+	return func(m *mitev1.MiteMessage) error {
+		if c := m.GetRunStateChunk(); c != nil {
+			agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
+				RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
+				Status: ackStatusStored, RestartSource: c.RestartSource,
+			})
+		}
+		return nil
+	}
 }
 
 // --- 9.2a: the /v1/run-state route ---
@@ -138,7 +153,7 @@ func TestHandleRunState_ForwardsMiteOwnCellInstance(t *testing.T) {
 	var sent *mitev1.RunStateChunk
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetRunStateChunk()
-		return nil
+		return storeRunStateChunkSend(agent)(m)
 	}})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello")
@@ -173,7 +188,7 @@ func TestHandleRunState_RestartSourceForwardsFlagAndCounts(t *testing.T) {
 	var sent *mitev1.RunStateChunk
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sent = m.GetRunStateChunk()
-		agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
 			RunId: sent.RunId, Relpath: sent.Relpath, StateGen: sent.StateGen, Seq: sent.Seq,
 			Status: ackStatusStored, RestartSource: true,
 		})

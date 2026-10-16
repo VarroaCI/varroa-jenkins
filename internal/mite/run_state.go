@@ -201,8 +201,10 @@ func (h *BusHandler) dropCellStateEntries(ns, name string) {
 
 // OnRunStateChunk implements StreamHandler for one run-state chunk a
 // mite forwards. It applies D6's six ordered steps and answers one
-// RunStateAck. It publishes one run.state envelope for each outcome the
-// recorder must record.
+// RunStateAck. A stored file publishes its run.state envelope before
+// the push is recorded and before the STORED ack. A failed publish
+// answers BUSY. A state-cap refusal publishes its envelope before the
+// REJECTED ack, whatever the publish answers.
 func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChunk) {
 	if h.logStore == nil {
 		return
@@ -260,15 +262,19 @@ func (h *BusHandler) OnRunStateChunk(name, ns string, chunk *mitev1.RunStateChun
 		if err != nil || rawTotal != complete.objectSize {
 			outcome = runStateOutcome{status: stateAckStatusRejected, reason: stateReasonMalformed}
 		} else {
-			outcome = h.storeRunStateObject(ctx, e, chunk, body, outcome)
+			outcome = h.storeRunStateObject(ctx, ns, name, e, chunk, body, outcome)
 		}
 	}
 	if outcome.status == stateAckStatusRejected {
 		h.metrics.runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", outcome.reason)))
 	}
 
+	// The cap envelope goes out before the refusal. The refusal holds
+	// whatever the publish answers.
+	if outcome.status == stateAckStatusRejected && outcome.reason == stateReasonStateCap {
+		_ = h.publishRunStateOutcome(ns, name, chunk, outcome)
+	}
 	h.sendRunStateAck(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS)
-	h.publishRunStateOutcome(ns, name, chunk, outcome)
 }
 
 // validRunStateRelpath reports whether relpath is usable as a key
@@ -415,7 +421,7 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 //
 // The retired-epoch test below is an optimization alone. It skips a
 // write this replica already knows is superseded.
-func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, chunk *mitev1.RunStateChunk, body []byte, outcome runStateOutcome) runStateOutcome {
+func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e *runStateEntry, chunk *mitev1.RunStateChunk, body []byte, outcome runStateOutcome) runStateOutcome {
 	e.writeMu.Lock()
 	defer e.writeMu.Unlock()
 
@@ -439,6 +445,14 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, e *runStateEntry, 
 	}
 	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
 		h.log().Warn("run-state object write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
+	}
+
+	// The envelope publishes before the push is recorded. A recorded push
+	// answers every retry as a redelivery, so a lost envelope would never
+	// publish again. A failed publish answers BUSY, and the plugin posts
+	// the file again. The object write is idempotent under its key.
+	if err := h.publishRunStateOutcome(ns, name, chunk, outcome); err != nil {
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
 
@@ -529,9 +543,6 @@ func (h *BusHandler) stateBudgetPauseMSLocked() int {
 func (h *BusHandler) rejectRunState(ctx context.Context, ns, name string, chunk *mitev1.RunStateChunk, reason string) {
 	h.metrics.runStateRejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 	h.sendRunStateAck(ns, name, chunk, stateAckStatusRejected, reason, 0)
-	if reason == stateReasonStateCap {
-		h.publishRunStateOutcome(ns, name, chunk, runStateOutcome{status: stateAckStatusRejected, reason: reason})
-	}
 }
 
 // sendRunStateAck answers one RunStateAck on the cell's current
@@ -561,17 +572,18 @@ func (h *BusHandler) sendRunStateAckKind(ns, name string, chunk *mitev1.RunState
 	}
 }
 
-// publishRunStateOutcome publishes one run.state envelope. A stored file
-// carries the path, the whole object's inflated size, the sequence, the
-// push generation, and the pusher epoch. The epoch is part of the object
-// key, so the record cannot name the object without it.
+// publishRunStateOutcome publishes one run.state envelope and returns the
+// publish error. A stored file carries the path, the whole object's
+// inflated size, the sequence, the push generation, and the pusher epoch.
+// The epoch is part of the object key, so the record cannot name the
+// object without it.
 // A cap refusal carries the reason alone, although
 // no object was written: that envelope is the only carrier of
 // mesh.cap_warned_at, which is an operator's one signal that the cap
 // tripped.
-func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunStateChunk, outcome runStateOutcome) {
+func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunStateChunk, outcome runStateOutcome) error {
 	if h.publisher == nil {
-		return
+		return nil
 	}
 	var payload map[string]interface{}
 	switch {
@@ -586,10 +598,10 @@ func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunSt
 	case outcome.reason == stateReasonStateCap:
 		payload = map[string]interface{}{"rejected_reason": stateReasonStateCap}
 	default:
-		return
+		return nil
 	}
 
-	_ = h.publishRunStateEnvelope(ns, name, chunk, payload)
+	return h.publishRunStateEnvelope(ns, name, chunk, payload)
 }
 
 // publishRunStateEnvelope publishes one run.state envelope for chunk with

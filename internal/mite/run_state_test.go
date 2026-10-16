@@ -652,7 +652,7 @@ func TestStoreRunStateObject_ARetiredWriteIsDropped(t *testing.T) {
 
 	chunk := oneChunk(runID, relpath, 1, []byte("stale"))
 	chunk.PusherEpoch = 100
-	out := h.storeRunStateObject(context.Background(), e, chunk, []byte("stale"),
+	out := h.storeRunStateObject(context.Background(), "ns1", "cell1", e, chunk, []byte("stale"),
 		runStateOutcome{stored: true, relpath: relpath, bytes: 5, stateGen: 1})
 
 	if out.stored {
@@ -1121,11 +1121,12 @@ func TestOnRunStateChunk_EmptyJobPathWarnsAndStillPublishes(t *testing.T) {
 	}
 }
 
-// TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope proves a
-// chunk with no job path still stores its file and still earns its ack,
-// while a resolver that derives the tenant from the path answers no
-// tenant, so no envelope publishes. The log holds both warnings.
-func TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope(t *testing.T) {
+// TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy proves a chunk whose
+// job path resolves to no tenant is not stored. The envelope publishes
+// before the push is recorded, so the unresolved tenant answers BUSY, and
+// the plugin posts the file again. No envelope publishes, and the log
+// holds both warnings.
+func TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy(t *testing.T) {
 	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
 	runID := newTestRunID()
@@ -1145,18 +1146,18 @@ func TestOnRunStateChunk_EmptyJobPathOnACellPublishesNoEnvelope(t *testing.T) {
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 
 	acks := runStateAcksFrom(sender)
-	if len(acks) != 1 || acks[0].Status != stateAckStatusStored {
-		t.Fatalf("acks = %+v, want one STORED ack", acks)
-	}
-	if acks[0].Seq != chunk.Seq {
-		t.Fatalf("mesh ack seq = %d, want the chunk seq %d", acks[0].Seq, chunk.Seq)
-	}
-	if _, err := h.logStore.NewRangeReader(context.Background(),
-		blob.RunStateKey(runID, oneChunkEpoch, 1, relpath), 0, -1); err != nil {
-		t.Fatalf("expected the file stored, NewRangeReader error = %v", err)
+	if len(acks) != 1 || acks[0].Status != stateAckStatusBusy || acks[0].Reason != stateReasonBudgetFull {
+		t.Fatalf("acks = %+v, want one BUSY gateway-budget-full ack", acks)
 	}
 	if got := pub.publishedCount(); got != 0 {
 		t.Fatalf("published %d envelopes, want none", got)
+	}
+	h.stateMu.Lock()
+	e := h.stateRuns[runID]
+	recorded := e != nil && e.completed[relpath] != (storedPush{})
+	h.stateMu.Unlock()
+	if recorded {
+		t.Fatalf("the unresolved push was recorded, want it left for the retry")
 	}
 	if !strings.Contains(logs.String(), "run-state chunk carries no job path") {
 		t.Fatalf("log = %q, want the empty-job-path warning", logs.String())

@@ -9,21 +9,27 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// ackingStream answers every restart-copy chunk with an ack of the given
-// status, as the gateway does. The ack resolves before the send returns, so
-// the waiter is already registered. A mesh chunk gets no ack.
+// ackingStream answers every acked chunk, a restart-copy chunk or the final
+// chunk of a mesh file, with an ack of the given status, as the gateway
+// does. The ack resolves before the send returns, so the waiter is already
+// registered.
 func ackingStream(agent *Agent, status, reason string) {
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		c := m.GetRunStateChunk()
-		if c == nil || !c.RestartSource {
+		if c == nil {
 			return nil
 		}
-		agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
 			RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
-			Status: status, Reason: reason, RestartSource: true,
+			Status: status, Reason: reason, RestartSource: c.RestartSource,
 		})
 		return nil
 	}})
+}
+
+// mesh final-chunk tests post a single-chunk mesh file, seq 0 of total 1.
+func meshFinalChunkRequest() *http.Request {
+	return newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
 }
 
 func TestHandleRunState_RestartSourceWaitsForStoredAck(t *testing.T) {
@@ -32,7 +38,7 @@ func TestHandleRunState_RestartSourceWaitsForStoredAck(t *testing.T) {
 		c := m.GetRunStateChunk()
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+			agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
 				RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
 				Status: ackStatusStored, RestartSource: true,
 			})
@@ -78,7 +84,7 @@ func TestHandleRunState_RestartSourceStateCapIsSticky(t *testing.T) {
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		sends++
 		c := m.GetRunStateChunk()
-		agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
 			RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
 			Status: ackStatusRejected, Reason: stateReasonStateCap, RestartSource: true,
 		})
@@ -106,7 +112,7 @@ func TestHandleRunState_RestartSourceBusyCarriesPause(t *testing.T) {
 	agent := newRunStateTestAgent(t)
 	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
 		c := m.GetRunStateChunk()
-		agent.restartAckWaiters.resolve(&mitev1.RunStateAck{
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
 			RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
 			Status: ackStatusBusy, Reason: stateReasonBudgetFull, PauseMs: 1500, RestartSource: true,
 		})
@@ -130,7 +136,7 @@ func TestHandleRunState_RestartSourceBusyCarriesPause(t *testing.T) {
 
 func TestHandleRunState_RestartSourceAckTimeoutIs503(t *testing.T) {
 	agent := newRunStateTestAgent(t)
-	agent.restartAckWaitOverride = 50 * time.Millisecond
+	agent.runStateAckWaitOverride = 50 * time.Millisecond
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
@@ -143,9 +149,9 @@ func TestHandleRunState_RestartSourceAckTimeoutIs503(t *testing.T) {
 	if got := rec.Header().Get(hdrStateReason); got != stateReasonAckTimeout {
 		t.Fatalf("reason = %q, want ack-timeout", got)
 	}
-	agent.restartAckWaiters.mu.Lock()
-	n := len(agent.restartAckWaiters.waiters)
-	agent.restartAckWaiters.mu.Unlock()
+	agent.runStateAckWaiters.mu.Lock()
+	n := len(agent.runStateAckWaiters.waiters)
+	agent.runStateAckWaiters.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("%d waiters left after the timeout", n)
 	}
@@ -153,7 +159,7 @@ func TestHandleRunState_RestartSourceAckTimeoutIs503(t *testing.T) {
 
 func TestHandleRunState_RestartSourceLateAckGoesToStore(t *testing.T) {
 	agent := newRunStateTestAgent(t)
-	agent.restartAckWaitOverride = 50 * time.Millisecond
+	agent.runStateAckWaitOverride = 50 * time.Millisecond
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
 	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "hello")
@@ -165,7 +171,7 @@ func TestHandleRunState_RestartSourceLateAckGoesToStore(t *testing.T) {
 		RunId: "run-1", Relpath: "jobs/team/builds/1/build.xml", StateGen: 1, Seq: 0,
 		Status: ackStatusRejected, Reason: "malformed", RestartSource: true,
 	}
-	if agent.restartAckWaiters.resolve(late) {
+	if agent.runStateAckWaiters.resolve(late) {
 		t.Fatal("a late ack matched a waiter that already timed out")
 	}
 	agent.runStateAcks.record(late)
@@ -174,12 +180,13 @@ func TestHandleRunState_RestartSourceLateAckGoesToStore(t *testing.T) {
 	}
 }
 
-func TestHandleRunState_MeshChunkStillAnswersAtOnce(t *testing.T) {
+func TestHandleRunState_MeshNonFinalChunkAnswersAtOnce(t *testing.T) {
 	agent := newRunStateTestAgent(t)
-	agent.restartAckWaitOverride = 10 * time.Second
+	agent.runStateAckWaitOverride = 10 * time.Second
 	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
 
-	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello")
+	// Seq 0 of total 2 is not the file's final chunk, so it gets no wait.
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 2, 5, 5, "hello")
 	rec := httptest.NewRecorder()
 	start := time.Now()
 	agent.handleRunState(rec, req)
@@ -187,13 +194,83 @@ func TestHandleRunState_MeshChunkStillAnswersAtOnce(t *testing.T) {
 		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("a mesh chunk waited %v for an ack", elapsed)
+		t.Fatalf("a non-final mesh chunk waited %v for an ack", elapsed)
+	}
+}
+
+func TestHandleRunState_MeshFinalChunkWaitsForStoredAck(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		c := m.GetRunStateChunk()
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
+				RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
+				Status: ackStatusStored,
+			})
+		}()
+		return nil
+	}})
+
+	rec := httptest.NewRecorder()
+	start := time.Now()
+	agent.handleRunState(rec, meshFinalChunkRequest())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 after the stored ack, got %d", rec.Code)
+	}
+	if elapsed := time.Since(start); elapsed < 90*time.Millisecond {
+		t.Fatalf("answered in %v, before the ack arrived", elapsed)
+	}
+}
+
+func TestHandleRunState_MeshFinalChunkBusyCarriesPause(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		c := m.GetRunStateChunk()
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
+			RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
+			Status: ackStatusBusy, Reason: stateReasonBudgetFull, PauseMs: 1500,
+		})
+		return nil
+	}})
+
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, meshFinalChunkRequest())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	if got := rec.Header().Get(hdrStateReason); got != stateReasonBudgetFull {
+		t.Fatalf("reason = %q, want gateway-budget-full", got)
+	}
+	if got := rec.Header().Get(hdrPauseMs); got != "1500" {
+		t.Fatalf("pause header = %q, want 1500", got)
+	}
+}
+
+func TestHandleRunState_MeshFinalChunkAckTimeoutIs503(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	agent.runStateAckWaitOverride = 50 * time.Millisecond
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
+
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, meshFinalChunkRequest())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	if got := rec.Header().Get(hdrStateReason); got != stateReasonAckTimeout {
+		t.Fatalf("reason = %q, want ack-timeout", got)
+	}
+	agent.runStateAckWaiters.mu.Lock()
+	n := len(agent.runStateAckWaiters.waiters)
+	agent.runStateAckWaiters.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d waiters left after the timeout", n)
 	}
 }
 
 func TestRestartAckWaiterMap_ResolveMatchesSeq(t *testing.T) {
-	m := newRestartAckWaiterMap()
-	key := restartAckWaitKey("run-1", "jobs/x", 2)
+	m := newRunStateAckWaiterMap()
+	key := runStateAckWaitKey("run-1", "jobs/x", 2, true)
 	ch, ok := m.register(key)
 	if !ok {
 		t.Fatal("register refused under the cap")
@@ -212,9 +289,27 @@ func TestRestartAckWaiterMap_ResolveMatchesSeq(t *testing.T) {
 	}
 }
 
+func TestRunStateAckWaiterMap_MeshWaiterResolvesMeshAck(t *testing.T) {
+	m := newRunStateAckWaiterMap()
+	key := runStateAckWaitKey("run-1", "jobs/x", 2, false)
+	ch, ok := m.register(key)
+	if !ok {
+		t.Fatal("register refused under the cap")
+	}
+	if m.resolve(&mitev1.RunStateAck{RunId: "run-1", Relpath: "jobs/x", Seq: 2, RestartSource: true}) {
+		t.Fatal("a restart ack resolved a mesh waiter")
+	}
+	if !m.resolve(&mitev1.RunStateAck{RunId: "run-1", Relpath: "jobs/x", Seq: 2, Status: ackStatusStored}) {
+		t.Fatal("the matching mesh ack did not resolve the waiter")
+	}
+	if got := <-ch; got.Status != ackStatusStored {
+		t.Fatalf("delivered status = %q", got.Status)
+	}
+}
+
 func TestRestartAckWaiterMap_ReleaseAll(t *testing.T) {
-	m := newRestartAckWaiterMap()
-	key := restartAckWaitKey("run-1", "jobs/x", 0)
+	m := newRunStateAckWaiterMap()
+	key := runStateAckWaitKey("run-1", "jobs/x", 0, true)
 	ch, _ := m.register(key)
 	m.releaseAll()
 	if ack := m.cancel(key, ch); ack != nil {
@@ -246,8 +341,8 @@ func TestRestartAckWaitFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := restartAckWaitFor(tc.claimTimeout); got != tc.want {
-				t.Fatalf("restartAckWaitFor(%v) = %v, want %v", tc.claimTimeout, got, tc.want)
+			if got := runStateAckWaitFor(tc.claimTimeout); got != tc.want {
+				t.Fatalf("runStateAckWaitFor(%v) = %v, want %v", tc.claimTimeout, got, tc.want)
 			}
 		})
 	}
@@ -255,12 +350,12 @@ func TestRestartAckWaitFor(t *testing.T) {
 
 func TestRestartAckWaitFor_NestsInsideBudget(t *testing.T) {
 	for budget := 100 * time.Millisecond; budget <= 30*time.Second; budget += 50 * time.Millisecond {
-		w := restartAckWaitFor(budget)
+		w := runStateAckWaitFor(budget)
 		if w <= 0 || w >= budget {
-			t.Fatalf("restartAckWaitFor(%v) = %v, want a wait inside the budget", budget, w)
+			t.Fatalf("runStateAckWaitFor(%v) = %v, want a wait inside the budget", budget, w)
 		}
-		if w > restartAckWaitCap {
-			t.Fatalf("restartAckWaitFor(%v) = %v, above the cap %v", budget, w, restartAckWaitCap)
+		if w > runStateAckWaitCap {
+			t.Fatalf("runStateAckWaitFor(%v) = %v, above the cap %v", budget, w, runStateAckWaitCap)
 		}
 	}
 }
@@ -268,11 +363,11 @@ func TestRestartAckWaitFor_NestsInsideBudget(t *testing.T) {
 func TestRestartAckWaitOrDefault_DerivesFromClaimTimeout(t *testing.T) {
 	agent := newRunStateTestAgent(t)
 	agent.claimTimeout = 2 * time.Second
-	if got := agent.restartAckWaitOrDefault(); got != 1500*time.Millisecond {
-		t.Fatalf("restartAckWaitOrDefault() = %v, want 1.5s", got)
+	if got := agent.runStateAckWaitOrDefault(); got != 1500*time.Millisecond {
+		t.Fatalf("runStateAckWaitOrDefault() = %v, want 1.5s", got)
 	}
-	agent.restartAckWaitOverride = 50 * time.Millisecond
-	if got := agent.restartAckWaitOrDefault(); got != 50*time.Millisecond {
-		t.Fatalf("restartAckWaitOrDefault() with override = %v, want 50ms", got)
+	agent.runStateAckWaitOverride = 50 * time.Millisecond
+	if got := agent.runStateAckWaitOrDefault(); got != 50*time.Millisecond {
+		t.Fatalf("runStateAckWaitOrDefault() with override = %v, want 50ms", got)
 	}
 }
