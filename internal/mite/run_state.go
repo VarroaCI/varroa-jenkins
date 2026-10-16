@@ -96,6 +96,10 @@ type runStateEntry struct {
 	// fetched records that this run has already served one state fetch,
 	// so the owner-cache invalidation runs on the first fetch alone.
 	fetched bool
+	// tenantUnresolvedSince is when a stored file of this run first found
+	// no tenant. A resolved publish clears it. It is read and written
+	// under h.stateMu.
+	tenantUnresolvedSince time.Time
 	// writeMu keeps two writes of one key apart. A whole-object replace
 	// is not atomic on the object tier: it deletes the key and then
 	// writes part 0. A redelivery repeats a push that this replica is
@@ -437,6 +441,10 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 		return runStateOutcome{status: stateAckStatusStored}
 	}
 
+	if h.runStateTenantMissing(ns, name, chunk.JobPath) {
+		return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "run-state", ns, name, chunk)
+	}
+
 	key := blob.RunStateKey(chunk.RunId, chunk.PusherEpoch, outcome.stateGen, chunk.Relpath)
 	opts := blob.ObjectOptions{
 		ObjectClass: runStateObjectClass,
@@ -452,7 +460,12 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	// answers every retry as a redelivery, so a lost envelope would never
 	// publish again. A failed publish answers BUSY, and the plugin posts
 	// the file again. The object write is idempotent under its key.
+	// An unresolved tenant answers BUSY inside runStateTenantGrace and
+	// foreign-run after it.
 	if err := h.publishRunStateOutcome(ns, name, chunk, outcome); err != nil {
+		if errors.Is(err, errRunStateTenantUnresolved) {
+			return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "run-state", ns, name, chunk)
+		}
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
 
@@ -460,6 +473,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	e.storedTotal += outcome.bytes - e.storedSizes[chunk.Relpath]
 	e.storedSizes[chunk.Relpath] = outcome.bytes
 	e.completed[chunk.Relpath] = storedPush{epoch: chunk.PusherEpoch, gen: outcome.stateGen}
+	e.tenantUnresolvedSince = time.Time{}
 	h.stateMu.Unlock()
 
 	h.metrics.runStateBytes.Add(ctx, outcome.bytes)
@@ -525,6 +539,61 @@ const (
 	stateBudgetPauseMinMS = 1000
 	stateBudgetPauseMaxMS = 8000
 )
+
+// runStateTenantGrace bounds how long a run whose tenant does not resolve
+// answers BUSY. The resolver caches a placement for cellTenantResolveTTL,
+// so two lifetimes let a placement change reach the cache and let one
+// failed read retry. Past the grace the run is refused as foreign-run,
+// because the cell does not host its tenant.
+const runStateTenantGrace = 2 * cellTenantResolveTTL
+
+// unresolvedTenantGrace answers a file whose tenant does not resolve. It
+// takes the grace outcome under h.stateMu and logs a refusal. what names
+// the path in the log line. Callers hold no lock.
+func (h *BusHandler) unresolvedTenantGrace(since *time.Time, what, ns, name string, chunk *mitev1.RunStateChunk) runStateOutcome {
+	h.stateMu.Lock()
+	o := unresolvedTenantOutcomeLocked(since, time.Now())
+	h.stateMu.Unlock()
+	if o.status == stateAckStatusRejected {
+		h.log().Warn(what+" tenant unresolved past the grace, refusing",
+			"run_id", chunk.RunId, "controller", ns+"/"+name, "job_path", chunk.JobPath)
+	}
+	return o
+}
+
+// runStateTenantMissing reports whether the tenant of a chunk does not
+// resolve. It runs before any write, so a refused file leaves no object
+// behind. A handler with no publisher writes without a tenant check.
+func (h *BusHandler) runStateTenantMissing(ns, name, jobPath string) bool {
+	if h.publisher == nil {
+		return false
+	}
+	if jobPath == "" {
+		h.log().Warn("run-state chunk carries no job path", "controller", ns+"/"+name)
+	}
+	tenant, _ := h.resolver().ResolveJobTenant(h.cluster, ns, name, jobPath)
+	if tenant == "" {
+		h.log().Warn("run-state outcome unresolved, publishing no envelope",
+			"controller", ns+"/"+name, "job_path", jobPath)
+		return true
+	}
+	return false
+}
+
+// unresolvedTenantOutcomeLocked answers a stored file whose tenant does
+// not resolve. The first observation starts the grace clock in since.
+// Inside the grace the answer is BUSY, so a placement race or a failed
+// read heals on a retry. Past it the answer is REJECTED foreign-run,
+// which the pusher acknowledges and stops on. Caller must hold h.stateMu.
+func unresolvedTenantOutcomeLocked(since *time.Time, now time.Time) runStateOutcome {
+	if since.IsZero() {
+		*since = now
+	}
+	if now.Sub(*since) < runStateTenantGrace {
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
+	}
+	return runStateOutcome{status: stateAckStatusRejected, reason: stateReasonForeignRun}
+}
 
 // stateBudgetPauseMSLocked computes the busy pause for the gateway-wide
 // run-state bound. Caller must hold h.stateMu.

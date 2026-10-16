@@ -3,6 +3,7 @@ package mite
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,10 @@ type restartSourceEntry struct {
 	stored      map[string]int64
 	storedTotal int64
 	touched     time.Time
+	// tenantUnresolvedSince is when a file of this copy first found no
+	// tenant. A resolved publish clears it. It is read and written under
+	// h.stateMu.
+	tenantUnresolvedSince time.Time
 	// writeMu keeps two writes of one key apart. It is never taken under
 	// h.stateMu.
 	writeMu sync.Mutex
@@ -270,6 +275,10 @@ func (h *BusHandler) storeRestartSourceObject(ctx context.Context, ns, name stri
 	e.writeMu.Lock()
 	defer e.writeMu.Unlock()
 
+	if h.runStateTenantMissing(ns, name, chunk.JobPath) {
+		return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "restart copy", ns, name, chunk)
+	}
+
 	opts := blob.ObjectOptions{
 		ObjectClass: runStateObjectClass,
 		ContentType: runStateContentType,
@@ -285,11 +294,15 @@ func (h *BusHandler) storeRestartSourceObject(ctx context.Context, ns, name stri
 	// ack tells the mite that the recorder holds the file. A failed publish
 	// answers BUSY, and the plugin posts the file again.
 	if err := h.publishRestartSourceFile(ns, name, chunk, int64(len(body))); err != nil {
+		if errors.Is(err, errRunStateTenantUnresolved) {
+			return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "restart copy", ns, name, chunk)
+		}
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
 
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
+	e.tenantUnresolvedSince = time.Time{}
 	if h.restartRuns[chunk.RunId] == e {
 		if _, done := e.stored[chunk.Relpath]; !done {
 			e.stored[chunk.Relpath] = int64(len(body))

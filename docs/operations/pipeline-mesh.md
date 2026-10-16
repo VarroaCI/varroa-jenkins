@@ -62,3 +62,5 @@ reads the push the recorder recorded. A late push cannot overwrite a newer one, 
 pod writes it.
 
 The plugin keeps each file until the gateway stores it and records it. A failed record holds the file, and the plugin sends it again.
+
+When the gateway cannot find the tenant of a run, it answers busy and the plugin sends the file again. After 60 seconds it refuses the run as `foreign-run`. The run then stops replicating its state, and a later resume takes the ordinary path. The same rule applies to the restart copy.

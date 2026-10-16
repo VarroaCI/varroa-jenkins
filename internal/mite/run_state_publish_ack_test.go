@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -173,5 +174,105 @@ func TestOnRunStateChunk_StateCapEnvelopeBeforeRefusal(t *testing.T) {
 	h2.OnRunStateChunk("cell1", "ns1", capped)
 	if ack := lastRunStateAck(t, sender2); ack.Status != stateAckStatusRejected || ack.Reason != stateReasonStateCap {
 		t.Fatalf("ack after a failed publish = %+v, want REJECTED state-cap", ack)
+	}
+}
+
+// TestOnRunStateChunk_UnresolvedTenantPastGraceAnswersForeignRun proves an
+// unresolved tenant answers BUSY inside the grace and REJECTED foreign-run
+// after it. The refusal publishes no envelope and records no push.
+func TestOnRunStateChunk_UnresolvedTenantPastGraceAnswersForeignRun(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	pub := &fakePublisher{}
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	const relpath = "jobs/team/builds/1/build.xml"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 1, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull {
+		t.Fatalf("first ack = %+v, want BUSY gateway-budget-full", ack)
+	}
+
+	h.stateMu.Lock()
+	h.stateRuns[runID].tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 2, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected || ack.Reason != stateReasonForeignRun {
+		t.Fatalf("ack past the grace = %+v, want REJECTED foreign-run", ack)
+	}
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("published %d envelopes, want none", got)
+	}
+	h.stateMu.Lock()
+	recorded := h.stateRuns[runID].completed[relpath] != (storedPush{})
+	h.stateMu.Unlock()
+	if recorded {
+		t.Fatal("the refused push was recorded")
+	}
+}
+
+// TestOnRunStateChunk_UnresolvedTenantHealsInsideGrace proves a tenant that
+// resolves on a retry inside the grace stores the file, and the grace clock
+// clears.
+func TestOnRunStateChunk_UnresolvedTenantHealsInsideGrace(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	pub := &fakePublisher{}
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	const relpath = "jobs/team/builds/1/build.xml"
+	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+	h.stateMu.Lock()
+	started := !h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	h.stateMu.Unlock()
+	if !started {
+		t.Fatal("the first unresolved observation did not start the grace clock")
+	}
+
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
+		t.Fatalf("retry ack = %+v, want STORED", ack)
+	}
+	if got := pub.publishedCount(); got != 1 {
+		t.Fatalf("published %d envelopes, want 1", got)
+	}
+	h.stateMu.Lock()
+	cleared := h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	h.stateMu.Unlock()
+	if !cleared {
+		t.Fatal("a resolved publish did not clear the grace clock")
+	}
+}
+
+// TestOnRunStateChunk_PublishFailureNeverStartsTenantGrace proves a failed
+// publish keeps BUSY with no grace clock. A transient cause never reaches
+// the foreign-run refusal.
+func TestOnRunStateChunk_PublishFailureNeverStartsTenantGrace(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = &fakePublisher{syncFailLeft: 1, syncErr: errors.New("nats unavailable")}
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, "jobs/team/builds/1/build.xml", 1, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull {
+		t.Fatalf("ack = %+v, want BUSY gateway-budget-full", ack)
+	}
+	h.stateMu.Lock()
+	started := !h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	h.stateMu.Unlock()
+	if started {
+		t.Fatal("a publish failure started the tenant grace clock")
 	}
 }
