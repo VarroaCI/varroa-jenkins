@@ -208,6 +208,23 @@ public class RestartSourcePusherTest {
     }
 
     @Test
+    public void tenantUnresolvedRetriesSameChunk() throws IOException {
+        write("build.xml", "abc");
+        write("workflow-completed/x.xml", "de");
+        sender.answers.add(RunStatePusher.RunStateSender.Answer.refused("tenant-unresolved", 0));
+
+        RestartSourcePusher.copy(root(), JOB, BUILD, "run-1", URL);
+
+        // build.xml posts twice (the refusal, then the retry), then the second file posts once.
+        assertEquals(3, sender.records.size());
+        assertEquals(PREFIX + "build.xml", sender.records.get(0).getString("relpath"));
+        assertEquals(0L, sender.records.get(0).getLong("seq"));
+        assertEquals(PREFIX + "build.xml", sender.records.get(1).getString("relpath"));
+        assertEquals(0L, sender.records.get(1).getLong("seq"));
+        assertEquals(1L, counter(PluginCounters.RESTART_SOURCE_KEPT));
+    }
+
+    @Test
     public void zeroByteFilesAreLeftOutOfTheCopy() throws IOException {
         write("build.xml", "abc");
         write("workflow-completed/empty.xml", "");

@@ -247,6 +247,30 @@ func TestHandleRunState_MeshFinalChunkBusyCarriesPause(t *testing.T) {
 	}
 }
 
+func TestHandleRunState_MeshFinalChunkTenantUnresolvedCarriesPause(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	setTestStream(agent, &concurrentSendStream{sendFn: func(m *mitev1.MiteMessage) error {
+		c := m.GetRunStateChunk()
+		agent.runStateAckWaiters.resolve(&mitev1.RunStateAck{
+			RunId: c.RunId, Relpath: c.Relpath, StateGen: c.StateGen, Seq: c.Seq,
+			Status: ackStatusBusy, Reason: stateReasonTenantUnresolved, PauseMs: 1500,
+		})
+		return nil
+	}})
+
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, meshFinalChunkRequest())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+	if got := rec.Header().Get(hdrStateReason); got != stateReasonTenantUnresolved {
+		t.Fatalf("reason = %q, want tenant-unresolved", got)
+	}
+	if got := rec.Header().Get(hdrPauseMs); got != "1500" {
+		t.Fatalf("pause header = %q, want 1500", got)
+	}
+}
+
 func TestHandleRunState_MeshFinalChunkAckTimeoutIs503(t *testing.T) {
 	agent := newRunStateTestAgent(t)
 	agent.runStateAckWaitOverride = 50 * time.Millisecond

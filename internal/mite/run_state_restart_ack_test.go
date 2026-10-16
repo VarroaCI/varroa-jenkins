@@ -186,8 +186,8 @@ func TestRestartSourceUnresolvedTenantAnswersBusy(t *testing.T) {
 
 	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, int64(len(data)), data))
 
-	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusBusy {
-		t.Fatalf("ack status %v, want BUSY", got.Status)
+	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusBusy || got.Reason != stateReasonTenantUnresolved {
+		t.Fatalf("ack = %+v, want BUSY tenant-unresolved", got)
 	}
 	if len(pub.published) != 0 {
 		t.Fatalf("published %d envelopes for an unresolved tenant, want 0", len(pub.published))

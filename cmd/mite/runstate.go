@@ -229,7 +229,10 @@ const (
 	stateReasonStateCap   = "state-cap"
 	stateReasonForeignRun = "foreign-run"
 	stateReasonBudgetFull = "gateway-budget-full"
-	stateReasonAckTimeout = "ack-timeout"
+	// stateReasonTenantUnresolved is the gateway's busy answer inside the
+	// unresolved-tenant grace.
+	stateReasonTenantUnresolved = "tenant-unresolved"
+	stateReasonAckTimeout       = "ack-timeout"
 )
 
 // handleRunState serves POST /v1/run-state. It answers 202 after a
@@ -238,7 +241,8 @@ const (
 // when the gateway refused this run's last post. A restart-copy chunk, and
 // the final chunk of a mesh file, answer only after their own RunStateAck
 // arrives, so the plugin sees the gateway's answer for that chunk. A
-// non-final mesh chunk answers 202 at once.
+// non-final mesh chunk answers 202 at once. A busy answer, gateway-budget-full
+// or tenant-unresolved, carries X-Varroa-Pause-Ms.
 func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	entry := time.Now()
 	if r.Method != http.MethodPost {
@@ -273,7 +277,7 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 
 	if refusal, refused := a.runStateAcks.take(chunk.RunId, chunk.RestartSource); refused {
 		w.Header().Set(hdrStateReason, refusal.reason)
-		if refusal.reason == stateReasonBudgetFull {
+		if !refusal.until.IsZero() {
 			if left := pauseLeftMS(refusal.until, time.Now()); left > 0 {
 				w.Header().Set(hdrPauseMs, strconv.Itoa(left))
 			}

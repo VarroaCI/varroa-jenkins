@@ -199,6 +199,36 @@ public class RunStatePusherTest {
     }
 
     @Test
+    public void aTenantUnresolvedAnswerDoesNotStopThePushes() throws Exception {
+        Path rootDir = tmp.newFolder("run-tu").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+
+        FakeSender sender = new FakeSender();
+        sender.answerOnce(RunStatePusher.RunStateSender.Answer.refused(RunStatePusher.REASON_TENANT_UNRESOLVED, 5));
+        RunSpool spool = newSpool("spool-tu");
+        RunStatePusher pusher = newPusher(rootDir, sender, spool);
+
+        pusher.runWindow();
+
+        assertFalse("a tenant-unresolved answer must not stop the run's pushes",
+                pusher.stoppedForTesting());
+        assertEquals(1, sender.postCount());
+        assertEquals("the unacknowledged record stays spooled for a retry",
+                1, spool.readRunStateOrdered(RUN_ID).size());
+    }
+
+    @Test
+    public void busyReasonNamesBothBusyAnswers() {
+        assertTrue(RunStatePusher.busyReason(RunStatePusher.REASON_BUDGET_FULL));
+        assertTrue(RunStatePusher.busyReason(RunStatePusher.REASON_TENANT_UNRESOLVED));
+        assertFalse(RunStatePusher.busyReason(RunStatePusher.REASON_STATE_CAP));
+        assertFalse(RunStatePusher.busyReason(RunStatePusher.REASON_FOREIGN_RUN));
+        assertFalse(RunStatePusher.busyReason(RunStatePusher.REASON_INCOMPLETE));
+        assertFalse(RunStatePusher.busyReason(RunStatePusher.REASON_MALFORMED));
+        assertFalse(RunStatePusher.busyReason(null));
+    }
+
+    @Test
     public void aPostThatThrowsLeavesTheBuildRunningAndEmitsNoBuildEvent() throws Exception {
         Path rootDir = tmp.newFolder("run-f").toPath();
         Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");

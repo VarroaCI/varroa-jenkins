@@ -171,6 +171,33 @@ func TestHandleRunState_BusyPauseHeaderReportsTimeLeft(t *testing.T) {
 	}
 }
 
+func TestHandleRunState_TenantUnresolvedPauseHeaderReportsTimeLeft(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	agent.runStateAcks.record(&mitev1.RunStateAck{
+		RunId: "run-1", Status: ackStatusBusy, Reason: stateReasonTenantUnresolved, PauseMs: 3000,
+	})
+	// Move the window end back, so the time left differs from pause_ms.
+	agent.runStateAcks.mu.Lock()
+	r := agent.runStateAcks.refusals["run-1"]
+	r.until = time.Now().Add(1200 * time.Millisecond)
+	agent.runStateAcks.refusals["run-1"] = r
+	agent.runStateAcks.mu.Unlock()
+
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, newRunStateRequest("run-1", "jobs/team/builds/1/program.dat", 1, 1, 0, 1, 5, 5, "hello"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 inside the busy window, got %d", rec.Code)
+	}
+	left, err := strconv.Atoi(rec.Header().Get(hdrPauseMs))
+	if err != nil {
+		t.Fatalf("%s = %q: %v", hdrPauseMs, rec.Header().Get(hdrPauseMs), err)
+	}
+	if left < 1100 || left > 1200 {
+		t.Errorf("%s = %d, want the time left in the window, not pause_ms", hdrPauseMs, left)
+	}
+}
+
 // TestHandleRunState_ForwardsMiteOwnCellInstance proves the route stamps
 // the mite's own cell instance onto the forwarded chunk, regardless of
 // any value a caller might have sent. The route reads no cell-instance
