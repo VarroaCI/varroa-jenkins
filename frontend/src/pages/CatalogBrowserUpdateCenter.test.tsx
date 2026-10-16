@@ -158,4 +158,14 @@ describe("CatalogBrowser — update center group", () => {
     await user.click(addButton);
     expect(screen.getByText(/Added/)).toBeInTheDocument();
   });
+
+  it("an invalid derived item disables selection", () => {
+    renderWith([
+      ucItem("acme-widget", "1.2.0", { valid: false, message: "closure incomplete: bar@2.0" }),
+    ]);
+
+    const addButton = screen.getByRole("button", { name: /Add to bundle/ });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveAttribute("title", "closure incomplete: bar@2.0");
+  });
 });

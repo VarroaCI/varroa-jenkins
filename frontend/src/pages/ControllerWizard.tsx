@@ -1403,7 +1403,13 @@ export default function ControllerWizard() {
                               <div
                                 key={`${ci.namespace}/${ci.name}`}
                                 className={styles.pickerItem}
-                                onClick={() => addComposeInput(ci)}
+                                title={ci.valid ? undefined : ci.message || "This item is invalid."}
+                                aria-disabled={!ci.valid}
+                                onClick={() => {
+                                  // An invalid item fails composition; the picker must not stage it.
+                                  if (!ci.valid) return;
+                                  addComposeInput(ci);
+                                }}
                               >
                                 {ci.displayName || ci.name}
                                 <span className={styles.nsBadge}>{ci.namespace}</span>{" "}

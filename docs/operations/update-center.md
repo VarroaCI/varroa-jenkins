@@ -84,7 +84,7 @@ The Jenkins plugin installer reads these entries for the `latest` version of a p
 
 A plugin whose manifest cannot be read is left out of the metadata document. The service logs a warning. The plugin stays downloadable at its explicit version. The operator reports these plugins in `status.unknownDependencies`. See [Check readiness](#check-readiness). A slow blob store can delay a manifest read. The inventory waits at most 15 seconds for these reads, reports a plugin whose read is not complete as unknown, and lists it on the next pass.
 
-A derived catalog item is invalid while its closure holds a plugin version whose dependency list is unknown. Its `status.message` and its `ClosureComplete` condition name each unread version. A `ComposedBundle` that selects the item fails to compose and keeps its last good content. Store the plugin again from a pack that carries the `dev.varroa.plugin.dependencies` annotation. The item becomes valid on the next catalog sync. A manifest read that runs past the 15-second wait also makes the item invalid for that pass.
+A derived catalog item is invalid while its closure holds a plugin version whose dependency list is unknown. Its `status.message` and its `ClosureComplete` condition name each unread version. A `ComposedBundle` that selects the item fails to compose and keeps its last good content. Store the plugin again from a pack that carries the `dev.varroa.plugin.dependencies` annotation. The item becomes valid on the next catalog sync. A manifest read that runs past the 15-second wait also makes the item invalid for that pass. The catalog browser disables **+ Add to bundle** for an invalid item and shows the item's `status.message` as the hint.
 
 ## Check readiness
 

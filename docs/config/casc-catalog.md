@@ -132,6 +132,8 @@ An unqualified item resolves in the bundle namespace, then the operator
 namespace. Set `itemRef.namespace` for an exact namespace. Pin reviewed content
 with `pinnedContentHash: <status.contentHash>`.
 
+The catalog browser disables **+ Add to bundle** for an invalid item and shows the item's `status.message` as the hint.
+
 ## Verify synchronization
 
 ```bash
