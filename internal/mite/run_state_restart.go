@@ -191,6 +191,9 @@ func (h *BusHandler) bufferRestartSourceChunk(ns, name string, chunk *mitev1.Run
 		return runStateOutcome{status: stateAckStatusStored}, e, nil
 	case chunk.PusherEpoch > e.epoch:
 		// A newer process posts the copy again, so the older copy resets.
+		// The tenant grace clock stays. An unresolved tenant is a property
+		// of the run's placement, not of the pusher process, and a reset
+		// would let a restart loop extend the grace without bound.
 		h.dropRestartBuffersLocked(e)
 		e.epoch = chunk.PusherEpoch
 		e.copyFiles = chunk.CopyFiles

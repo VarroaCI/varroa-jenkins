@@ -326,6 +326,11 @@ func (h *BusHandler) bufferRunStateChunk(e *runStateEntry, chunk *mitev1.RunStat
 		// never complete. They are dropped here rather than at the end
 		// of the run, so their bytes leave the gateway-wide bound at
 		// once.
+		//
+		// The tenant grace clock stays. An unresolved tenant is a
+		// property of the run's placement, not of the pusher process,
+		// and a reset would let a restart loop extend the grace without
+		// bound.
 		h.retireEpochBuffersLocked(e, chunk.PusherEpoch)
 		e.newestEpoch = chunk.PusherEpoch
 	}

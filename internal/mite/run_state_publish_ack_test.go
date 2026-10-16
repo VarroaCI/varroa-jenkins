@@ -276,3 +276,54 @@ func TestOnRunStateChunk_PublishFailureNeverStartsTenantGrace(t *testing.T) {
 		t.Fatal("a publish failure started the tenant grace clock")
 	}
 }
+
+// TestBufferRunStateChunk_NewerEpochKeepsUnresolvedClock proves a newer
+// pushing process keeps the run's tenant grace clock on the mesh path. A
+// run whose tenant stayed unresolved past the grace is refused on the new
+// process's first file.
+func TestBufferRunStateChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	const relpath = "jobs/team/builds/1/build.xml"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 1, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+	h.stateMu.Lock()
+	since := h.stateRuns[runID].tenantUnresolvedSince
+	h.stateMu.Unlock()
+	if since.IsZero() {
+		t.Fatal("the first unresolved answer did not start the grace clock")
+	}
+
+	newer := oneChunk(runID, relpath, 1, []byte("hello"))
+	newer.PusherEpoch = oneChunkEpoch + 1
+	h.OnRunStateChunk("cell1", "ns1", newer)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("newer-epoch ack inside the grace = %+v, want BUSY", ack)
+	}
+	h.stateMu.Lock()
+	e := h.stateRuns[runID]
+	epoch, kept := e.newestEpoch, e.tenantUnresolvedSince
+	e.tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+	if epoch != oneChunkEpoch+1 {
+		t.Fatalf("newest epoch = %d, want %d", epoch, oneChunkEpoch+1)
+	}
+	if !kept.Equal(since) {
+		t.Fatalf("grace clock after a newer epoch = %v, want %v", kept, since)
+	}
+
+	newest := oneChunk(runID, relpath, 1, []byte("hello"))
+	newest.PusherEpoch = oneChunkEpoch + 2
+	h.OnRunStateChunk("cell1", "ns1", newest)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected {
+		t.Fatalf("newer-epoch ack past the grace = %+v, want REJECTED", ack)
+	}
+}
