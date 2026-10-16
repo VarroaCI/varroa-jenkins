@@ -235,6 +235,18 @@ public class RestartSourcePusherTest {
     }
 
     @Test
+    public void aMite400StopsTheCopy() throws IOException {
+        write("build.xml", "abc");
+        write("workflow-completed/x.xml", "de");
+        sender.answers.add(RunStatePusher.RunStateSender.Answer.refused(400, null, 0, null));
+
+        RestartSourcePusher.copy(root(), JOB, BUILD, "run-1", URL);
+
+        assertEquals("a permanent 400 ends the copy at its first chunk", 1, sender.records.size());
+        assertEquals(1L, counter(PluginCounters.RESTART_SOURCE_DROPPED));
+    }
+
+    @Test
     public void finalChunkRefusalCountsDropped() throws IOException {
         write("build.xml", "abc");
         write("workflow-completed/x.xml", "de");

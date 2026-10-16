@@ -281,6 +281,10 @@ final class RestartSourcePusher {
                 dropped(runId, "the gateway refused a chunk: " + reason);
                 return Push.STOP;
             }
+            if (RunStatePusher.permanentStatus(answer.status)) {
+                dropped(runId, "the gateway refused a chunk: " + describe(answer));
+                return Push.STOP;
+            }
             long wait = answer.pauseMillis > 0 ? answer.pauseMillis : backoff;
             if (clock.getAsLong() + wait > deadline) {
                 dropped(runId, "the copy missed its deadline; last answer " + describe(answer));

@@ -717,6 +717,11 @@ public final class RunStatePusher {
             LOGGER.log(Level.FINE, "RunStatePusher: could not read " + absolute, e);
             return true;
         }
+        // The mite and the gateway both refuse an empty object. The file
+        // writes no marker, so a later non-empty write still pushes.
+        if (content.length == 0) {
+            return true;
+        }
 
         long total = Math.max(1L, (content.length + CHUNK_BYTES - 1L) / CHUNK_BYTES);
         for (long seq = 0; seq < total; seq++) {
@@ -772,10 +777,12 @@ public final class RunStatePusher {
      * <p>Only an answer a retry cannot change drops the record. A
      * permanent refusal drops it and stops every further push for the
      * build. A refusal of the pushed bytes themselves drops it, because
-     * the next window sends a whole set instead. Every other answer, and
-     * every transport failure, keeps the record for a later window: a
-     * loopback outage, a timeout, and a closed stream are all states
-     * that pass.
+     * the next window sends a whole set instead. A 4xx answer other than
+     * 401, 403, 408, 409, or 429 drops the record with a WARNING line and
+     * keeps the window going: the same bytes get the same answer. Every
+     * other answer, and every transport failure, keeps the record for a
+     * later window: a loopback outage, a timeout, and a closed stream are
+     * all states that pass.
      */
     private boolean postSpooled(long spoolId, JSONObject record) {
         if (stopped.get()) {
@@ -804,10 +811,31 @@ public final class RunStatePusher {
             PluginCounters.increment(PluginCounters.RUN_STATE_REFUSED);
             return true;
         }
+        if (permanentStatus(answer.status)) {
+            spool.acknowledgeRunState(runId, spoolId);
+            PluginCounters.increment(PluginCounters.RUN_STATE_REFUSED);
+            LOGGER.log(Level.WARNING,
+                    "RunStatePusher: run {0} drops run-state record {1} ({2}): the mite answered {3}: {4}",
+                    new Object[] {runId, record.optString("relpath"),
+                        "seq " + record.optLong("seq") + "/" + record.optLong("total"),
+                        answer.status, answer.body != null ? answer.body : ""});
+            return true;
+        }
         // A transport failure, a timeout, and a 503 that names no reason
         // all reach here. The record stays on disk, and the next window
         // replays it before it posts the current set.
         return false;
+    }
+
+    /**
+     * Reports whether a mite status is a permanent refusal of the bytes
+     * posted. Every 4xx is permanent except the statuses that name a state
+     * which can pass: 401 and 403 (a token or an access state), 408 (a
+     * timeout), 409 (a conflict), and 429 (a rate limit).
+     */
+    static boolean permanentStatus(int status) {
+        return status >= 400 && status < 500 && status != 401 && status != 403
+                && status != 408 && status != 409 && status != 429;
     }
 
     private static void sleepQuietly(long millis) {
@@ -881,24 +909,31 @@ public final class RunStatePusher {
             final int status;
             final String reason;
             final long pauseMillis;
+            /** The first bytes of the answer body as UTF-8, or null when the answer had none. */
+            final String body;
 
-            Answer(boolean accepted, int status, String reason, long pauseMillis) {
+            Answer(boolean accepted, int status, String reason, long pauseMillis, String body) {
                 this.accepted = accepted;
                 this.status = status;
                 this.reason = reason;
                 this.pauseMillis = pauseMillis;
+                this.body = body;
             }
 
             static Answer accepted() {
-                return new Answer(true, 202, null, 0);
+                return new Answer(true, 202, null, 0, null);
             }
 
             static Answer refused(String reason, long pauseMillis) {
-                return new Answer(false, 0, reason, pauseMillis);
+                return new Answer(false, 0, reason, pauseMillis, null);
             }
 
             static Answer refused(int status, String reason, long pauseMillis) {
-                return new Answer(false, status, reason, pauseMillis);
+                return new Answer(false, status, reason, pauseMillis, null);
+            }
+
+            static Answer refused(int status, String reason, long pauseMillis, String body) {
+                return new Answer(false, status, reason, pauseMillis, body);
             }
         }
     }
@@ -915,8 +950,11 @@ public final class RunStatePusher {
             if (answer.statusCode == 202) {
                 return Answer.accepted();
             }
-            String reason = answer.reason != null ? answer.reason : "transport";
-            return Answer.refused(answer.statusCode, reason, answer.pauseMillis);
+            // A null reason with a status is an answer the mite gave without a
+            // state reason. Only an answer that never arrived is a transport failure.
+            String reason = answer.reason != null ? answer.reason
+                    : (answer.statusCode == 0 ? "transport" : null);
+            return Answer.refused(answer.statusCode, reason, answer.pauseMillis, answer.body);
         }
     }
 
