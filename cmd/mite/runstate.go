@@ -57,10 +57,15 @@ const (
 	// /v1/run-state body, matching every other loopback route.
 	runStateChunkMaxBytes = 1 << 20 // 1 MiB
 
-	// restartAckWait bounds how long a restart-copy chunk waits for its
-	// RunStateAck before the route answers 503 ack-timeout. It must stay
-	// below the plugin's 5 s loopback read timeout.
-	restartAckWait = 4 * time.Second
+	// restartAckWaitMargin is the gap kept between a restart-copy ack wait
+	// and the claim budget. The operator sets the plugin's read budget
+	// 500 ms above the mite's claim budget. The wait must stay inside the
+	// plugin's read budget, so it leaves this margin.
+	restartAckWaitMargin = 500 * time.Millisecond
+
+	// restartAckWaitCap bounds the restart-copy ack wait under the
+	// loopback listener's write timeout, whatever the claim budget is.
+	restartAckWaitCap = loopbackWriteTimeout - time.Second
 
 	// runStateFetchTimeout bounds the wait for one file's responses. The
 	// resume command's own deadline bounds the whole sequence.
@@ -288,9 +293,27 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// restartAckWaitFor returns how long a restart-copy chunk waits for its
+// ack, derived from the mite's claim budget. The wait is the budget minus
+// restartAckWaitMargin, never under half the budget, and never above
+// restartAckWaitCap. A budget of zero or less uses the default budget.
+func restartAckWaitFor(claimTimeout time.Duration) time.Duration {
+	if claimTimeout <= 0 {
+		claimTimeout = defaultClaimTimeoutMS * time.Millisecond
+	}
+	w := claimTimeout - restartAckWaitMargin
+	if w < claimTimeout/2 {
+		w = claimTimeout / 2
+	}
+	if w > restartAckWaitCap {
+		w = restartAckWaitCap
+	}
+	return w
+}
+
 // forwardRestartSourceChunk sends one restart-copy chunk and answers the
 // plugin with the gateway's own answer for that chunk. It waits for the
-// RunStateAck of the chunk, up to restartAckWait. A STORED ack answers 202.
+// RunStateAck of the chunk, up to restartAckWaitFor. A STORED ack answers 202.
 // A BUSY or REJECTED ack answers 503 with the gateway's reason. A wait that
 // ends without an ack answers 503 ack-timeout, and the plugin retries.
 func (a *Agent) forwardRestartSourceChunk(ctx context.Context, w http.ResponseWriter, chunk *mitev1.RunStateChunk) {
