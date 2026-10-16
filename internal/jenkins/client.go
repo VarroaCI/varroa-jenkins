@@ -1038,11 +1038,17 @@ func (c *Client) UpdateItemConfig(ctx context.Context, itemPath, configXML strin
 	return nil
 }
 
-// ReloadItem reloads one item's config.xml from disk through the per-item
-// reload route. That route needs only Item.CONFIGURE, unlike the global
-// /reload route, which needs Jenkins.ADMINISTER.
+// ReloadItem reloads one job's config.xml from disk through the plugin's
+// /varroa-run/reload-item route. The route runs the job's load as SYSTEM.
+// Jenkins denies Item.CONFIGURE on a branch project of a multibranch job to
+// every caller except SYSTEM, so the core /reload route always answers 403
+// for such a job.
 func (c *Client) ReloadItem(ctx context.Context, itemPath string) error {
-	resp, err := c.do(ctx, http.MethodPost, "/"+jobPath(itemPath)+"/reload", nil, "")
+	payload, err := json.Marshal(map[string]string{"jobPath": itemPath})
+	if err != nil {
+		return fmt.Errorf("reload item %s: marshal request: %w", itemPath, err)
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/varroa-run/reload-item", bytes.NewReader(payload), "application/json")
 	if err != nil {
 		return fmt.Errorf("reload item %s: %w", itemPath, err)
 	}

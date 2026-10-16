@@ -1314,6 +1314,76 @@ public class VarroaRunTriggerAction implements RootAction {
         }
     }
 
+    /**
+     * Reloads one job from its {@code config.xml} on disk, so Jenkins adopts
+     * the state the mite wrote there: the next build number and the
+     * build directories.
+     *
+     * <p>The job runs its own {@code load()} as {@code SYSTEM}. A branch
+     * project of a multibranch job denies {@code Item.CONFIGURE} to every
+     * caller except {@code SYSTEM} (the {@code BranchJobProperty} ACL), and
+     * the core {@code /reload} route checks that permission. So that route
+     * always answers {@code 403} for a branch project, and the mite can
+     * reach the reload through this route alone.
+     *
+     * <p>Answers {@code 405} for a method other than {@code POST},
+     * {@code 403} without the mite authority, {@code 400} for a body that
+     * names no job, {@code 404} when the job does not exist, {@code 500}
+     * when the load fails, and {@code 200} with {@code {"reloaded": true}}
+     * on success.
+     */
+    @WebMethod(name = "reload-item")
+    public void doReloadItem(StaplerRequest2 req, StaplerResponse2 rsp) {
+        try {
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                PlainTextRefusal.refuse(rsp, 405, "Method Not Allowed: only POST is served");
+                return;
+            }
+            if (!isMitePrincipal()) {
+                PlainTextRefusal.refuse(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+                return;
+            }
+
+            JSONObject body;
+            try {
+                body = readBody(req);
+            } catch (Exception e) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: body does not decode");
+                return;
+            }
+
+            String jobPath = body.optString("jobPath", "");
+            if (jobPath.isEmpty()) {
+                PlainTextRefusal.refuse(rsp, 400, "Bad Request: the body names no job");
+                return;
+            }
+
+            Job<?, ?> job = Jenkins.get().getItemByFullName(jobPath, Job.class);
+            if (job == null) {
+                PlainTextRefusal.refuse(rsp, 404, "Not Found: no job " + jobPath);
+                return;
+            }
+
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+                job.load();
+            }
+            Jenkins.get().rebuildDependencyGraphAsync();
+
+            JSONObject answer = new JSONObject();
+            answer.put("reloaded", true);
+            rsp.setStatus(200);
+            rsp.setContentType("application/json");
+            rsp.getWriter().write(answer.toString());
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "VarroaRunTriggerAction.doReloadItem caught exception", e);
+            try {
+                PlainTextRefusal.refuse(rsp, 500, "Internal server error");
+            } catch (IOException ignored) {
+                // Best-effort error response.
+            }
+        }
+    }
+
     /** Writes the load route's own answer. */
     private static void writeLoadAnswer(StaplerResponse2 rsp, boolean building, boolean registered)
             throws IOException {

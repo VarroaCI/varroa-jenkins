@@ -11,6 +11,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/controller/rehydrate"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // maxUnseededPaths bounds CellRehydrationEntry.Unseeded. It must equal the MaxItems marker on that field.
@@ -53,14 +54,18 @@ func preSendEntry(tenant, bundleID string, generation int64, cellInstance string
 	}
 }
 
+// deadlineExceededPrefix opens the Error of a give-up entry. A reload
+// failure never opens its Error with this prefix.
+const deadlineExceededPrefix = "rehydration deadline exceeded"
+
 // deadlineExceededMessage names the still-deferred jobs in the
 // RehydrationFailed message a give-up entry carries (design D13's
 // scenario "the message names the job").
 func deadlineExceededMessage(deferred []string) string {
 	if len(deferred) == 0 {
-		return "rehydration deadline exceeded"
+		return deadlineExceededPrefix
 	}
-	return fmt.Sprintf("rehydration deadline exceeded with %d job(s) still deferred: %s",
+	return fmt.Sprintf(deadlineExceededPrefix+" with %d job(s) still deferred: %s",
 		len(deferred), strings.Join(deferred, ", "))
 }
 
@@ -88,7 +93,8 @@ func deadlineEntry(tenant string, generation int64, cellInstance string, deferre
 // carryAppliedSeed keeps the applied flag, the deferred list, and the
 // unseeded list of an existing entry for the same generation and cell
 // instance. The seed of an earlier apply stays on the cell while a resend
-// is outstanding. The Error of the existing entry is not carried.
+// is outstanding. The Error of the existing entry is not carried here;
+// carryRehydrationError carries it.
 func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
 	if existing == nil || !existing.Applied ||
 		existing.Generation != next.Generation || existing.CellInstance != next.CellInstance {
@@ -97,6 +103,17 @@ func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.Cel
 	next.Applied = true
 	next.Deferred = append([]string(nil), existing.Deferred...)
 	next.Unseeded = append([]string(nil), existing.Unseeded...)
+	return next
+}
+
+// carryRehydrationError keeps the Error of an existing entry for the same
+// generation and cell instance. A resend keeps the failure of the last
+// result, so the status shows it until a later result clears it.
+func carryRehydrationError(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
+	if existing == nil || existing.Generation != next.Generation || existing.CellInstance != next.CellInstance {
+		return next
+	}
+	next.Error = existing.Error
 	return next
 }
 
@@ -121,7 +138,7 @@ func seedAnswerOf(e *v1alpha1.CellRehydrationEntry) seedAnswer {
 	switch {
 	case !e.Applied:
 		return seedAnswer{pending: pending}
-	case e.Error != "":
+	case e.Error != "" && strings.HasPrefix(e.Error, deadlineExceededPrefix):
 		return seedAnswer{instance: e.CellInstance}
 	case int(e.UnseededJobs) > len(e.Unseeded):
 		return seedAnswer{pending: pending}
@@ -255,7 +272,14 @@ func withoutPaths(paths, drop []string) []string {
 // flag is derived from success and the error only. A successful apply
 // removes the tenant's covered job paths from its unseeded list, because
 // the mite now holds their number seeds. A failed apply keeps the list.
-func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID string, success bool, rehydrationError string, deferredByTenant, coveredByTenant map[string][]string, now time.Time) []v1alpha1.CellRehydrationEntry {
+//
+// A failed reload of one of a tenant's jobs sets that tenant's Error and
+// keeps Applied: the seed is on the cell, so the tenant builds, and a resend
+// reloads the job until a result clears the Error. The reload failures of
+// other tenants never reach this tenant's Error.
+// A reload failure does not keep the covered paths: the seed writes ran
+// before the reloads, so the mite holds every number seed.
+func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID string, success bool, rehydrationError string, deferredByTenant, coveredByTenant map[string][]string, reloadFailedByTenant map[string][]*mitev1.RehydrationReloadFailure, now time.Time) []v1alpha1.CellRehydrationEntry {
 	out := make([]v1alpha1.CellRehydrationEntry, len(entries))
 	at := metav1.NewTime(now)
 	for i, e := range entries {
@@ -266,12 +290,54 @@ func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID s
 		tenantDeferred := deferredByTenant[e.Tenant]
 		e.Deferred = tenantDeferred
 		e.Error = rehydrationError
+		// A job whose reload failed keeps its seed unconfirmed: it stays in
+		// the unseeded list, so the next push resends it and reloads it. A
+		// later result that does not name the job cannot clear the failure.
+		reloadFailed := map[string]bool{}
+		if failures := reloadFailedByTenant[e.Tenant]; len(failures) > 0 {
+			messages := make([]string, 0, len(failures))
+			for _, f := range failures {
+				reloadFailed[f.Item] = true
+				messages = append(messages, "reload "+f.Item+": "+f.Error)
+			}
+			msg := strings.Join(messages, "; ")
+			if e.Error != "" {
+				msg = e.Error + "; " + msg
+			}
+			e.Error = msg
+		}
 		e.Applied = success && rehydrationError == ""
 		if e.Applied {
-			e.Unseeded = withoutPaths(e.Unseeded, coveredByTenant[e.Tenant])
+			var covered []string
+			for _, p := range coveredByTenant[e.Tenant] {
+				if !reloadFailed[p] {
+					covered = append(covered, p)
+				}
+			}
+			e.Unseeded = withoutPaths(e.Unseeded, covered)
 		}
 		e.At = &at
 		out[i] = e
+	}
+	return out
+}
+
+// partitionReloadFailuresByTenant attributes each reload failure to the
+// tenant that owns its item, by the same prefix rule as
+// partitionJobPathsByTenant. Each message names the item and its error. An
+// item that matches no tenant is dropped.
+func partitionReloadFailuresByTenant(failures []*mitev1.RehydrationReloadFailure, tenants []string) map[string][]*mitev1.RehydrationReloadFailure {
+	out := make(map[string][]*mitev1.RehydrationReloadFailure, len(tenants))
+	for _, f := range failures {
+		if f == nil {
+			continue
+		}
+		for _, tenant := range tenants {
+			if f.Item == tenant || strings.HasPrefix(f.Item, tenant+"/") {
+				out[tenant] = append(out[tenant], f)
+				break
+			}
+		}
 	}
 	return out
 }

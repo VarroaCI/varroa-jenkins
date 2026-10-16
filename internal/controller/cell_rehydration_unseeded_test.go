@@ -241,3 +241,17 @@ func TestNumberSeededJobs_ResetsOnCellInstanceChange(t *testing.T) {
 		t.Fatalf("after commit on uid-2: want only team-a/y, got %v", got)
 	}
 }
+
+// TestNumberSeededJobs_ReloadFailedJobIsNotConfirmed pins that a job whose
+// reload failed stays unconfirmed in the number cache, so a later block
+// cannot advance past it.
+func TestNumberSeededJobs_ReloadFailedJobIsNotConfirmed(t *testing.T) {
+	rec := newTestReconciler(newTestClient())
+	const key = "cells-ns/cell-a"
+
+	rec.commitNumberOnlyProgress(key, "uid-1", []string{"team-a/x", "team-a/y"}, true, "", []string{"team-a/x"})
+	got := rec.numberSeededJobsCopy(key, "uid-1")
+	if got["team-a/x"] || !got["team-a/y"] {
+		t.Fatalf("want only team-a/y confirmed, got %v", got)
+	}
+}

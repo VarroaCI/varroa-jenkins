@@ -277,8 +277,7 @@ keeping `currentBuild.previousBuild` and the build-number sequence correct.
 Each seed carries the job's next build number, its newest successful build, and up to
 `rehydrateBuilds` further builds, newest first, with parameters and changesets. A multibranch
 child seeds only after branch indexing creates it; the operator retries until then or until
-`rehydrateDeadline` passes. The mite seeds a job that the same push creates after the items
-apply, so a roll needs no second push. The mite drops the records of a job that the catalog deleted.
+`rehydrateDeadline` passes. The mite seeds a job that the same push creates, so a roll needs no second push. The mite drops the records of a deleted job.
 
 `Team.spec.pipelines` settings for rehydration and the ledger:
 
@@ -299,7 +298,7 @@ apply, so a roll needs no second push. The mite drops the records of a job that 
 | `TenantRehydrated` | True | Every selected seed reached the cell. | None. |
 | `RehydrationPending` | False | A bundle is outstanding, or a job is deferred. Only deferred jobs and jobs with no number seed wait. Above 256 such jobs for a tenant, or past a cell-wide size limit, the largest tenants wait whole. | Wait; the operator resends after a result or a timeout. |
 | `RehydrationTruncated` | False | Seeds exceed one bundle. Only jobs with no build number wait. Above 256 such jobs, the whole tenant waits. | Wait; number-only bundles cover every job before full records resume. |
-| `RehydrationFailed` | False | The mite rejected the bundle, or `rehydrateDeadline` passed. Past the deadline, the deferred jobs build with no seeded history. | Read the message. A bundle that never applied needs a fresh generation: move the tenant or roll the cell. |
+| `RehydrationFailed` | False | The mite rejected the bundle, could not reload a job, or `rehydrateDeadline` passed. Past the deadline, the deferred jobs build with no seeded history. | Read the message. A bundle that never applied needs a fresh generation: move the tenant or roll the cell. |
 
 A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`; the
 claimer retries. The operator applies a rehydration result and announces the seed within

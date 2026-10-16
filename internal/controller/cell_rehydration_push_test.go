@@ -488,3 +488,56 @@ func TestReconcileConnected_FailedBuildKeepsTheKeptStamp(t *testing.T) {
 		t.Fatalf("team-a entry = %+v, want the kept push's result applied", e)
 	}
 }
+
+// TestReconcileConnected_FailedResultErrorSurvivesTheResend pins that the
+// Error of a failed result stays on the tenant's entry when the tick resends
+// the bundle. The status shows the failure until a later result clears it.
+func TestReconcileConnected_FailedResultErrorSurvivesTheResend(t *testing.T) {
+	rec, tr, cr := newRehydrationCell(t, "cell-error-survives", oneJobRecords, nil)
+	tr.results = []*mitev1.CommandResult{rehydrationResult(cr, tr.last.CommandId, false, "boom")}
+
+	tick(t, rec, cr)
+	if tr.last.Rehydration == nil {
+		t.Fatal("the resend carries no rehydration bundle")
+	}
+	if got := entryFor(t, cr, "team-a").Error; got != "boom" {
+		t.Errorf("entry Error = %q after the resend, want boom", got)
+	}
+}
+
+// TestReconcileConnected_ReloadFailureReleasesItsTenant pins that a failed
+// reload of a tenant's job keeps the tenant's seed applied, so the tenant
+// builds, and that the resend keeps the reload failure on its entry.
+func TestReconcileConnected_ReloadFailureReleasesItsTenant(t *testing.T) {
+	rec, tr, cr := newRehydrationCell(t, "cell-reload-failure", oneJobRecords, nil)
+	tr.results = []*mitev1.CommandResult{{
+		CommandId: tr.last.CommandId,
+		Result: &mitev1.CommandResult_DesiredState{DesiredState: &mitev1.DesiredStateResult{
+			AppliedHash:        cr.Status.DesiredStateHash,
+			ConfigSuccess:      true,
+			ItemsSuccess:       true,
+			RehydrationSuccess: true,
+			RehydrationReloadFailures: []*mitev1.RehydrationReloadFailure{
+				{Item: "team-a/build", Error: "HTTP 403"},
+			},
+		}},
+	}}
+
+	tick(t, rec, cr)
+	e := entryFor(t, cr, "team-a")
+	if !e.Applied {
+		t.Fatalf("entry = %+v, want Applied after a reload failure", e)
+	}
+	if !strings.Contains(e.Error, "team-a/build") {
+		t.Errorf("entry Error = %q, want the failed item", e.Error)
+	}
+	if got := seedAnswerOf(&e); got.instance != e.CellInstance {
+		t.Errorf("seed answer = %+v, want instance %q so the tenant builds", got, e.CellInstance)
+	}
+	if tr.last.Rehydration == nil {
+		t.Fatal("the resend carries no rehydration bundle")
+	}
+	if got := entryFor(t, cr, "team-a").Error; !strings.Contains(got, "team-a/build") {
+		t.Errorf("entry Error = %q after the resend, want the failed item", got)
+	}
+}

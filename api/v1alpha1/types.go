@@ -804,8 +804,9 @@ type CellRehydrationEntry struct {
 	// +kubebuilder:validation:MaxItems=256
 	// +optional
 	Unseeded []string `json:"unseeded,omitempty"`
-	// Error is the whole-bundle rehydration failure the mite reported, or
-	// empty.
+	// Error is the rehydration failure the mite reported for this tenant: a
+	// whole-bundle failure, or a failed reload of one of the tenant's jobs.
+	// Empty when none.
 	// +optional
 	Error string `json:"error,omitempty"`
 	// At is when the controller reconciler last wrote this entry.

@@ -22,6 +22,7 @@ import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.model.Item;
 import hudson.model.ParametersAction;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Queue;
@@ -47,12 +48,15 @@ import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.Rule;
 import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.MockFolder;
 import org.jvnet.hudson.test.TestBuilder;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+
+import jenkins.model.Jenkins;
 
 import net.sf.json.JSONObject;
 
@@ -409,7 +413,7 @@ public class VarroaRunTriggerActionTest {
     }
 
     @Test
-    public void theEndpointExposesOnlyItsNineRoutes() {
+    public void theEndpointExposesOnlyItsTenRoutes() {
         int doMethods = 0;
         for (java.lang.reflect.Method m : VarroaRunTriggerAction.class.getDeclaredMethods()) {
             if (m.getName().startsWith("do") && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
@@ -419,10 +423,10 @@ public class VarroaRunTriggerActionTest {
                                 || m.getName().equals("doAdoptNode") || m.getName().equals("doLoadBuild")
                                 || m.getName().equals("doProceedInput") || m.getName().equals("doAbortInput")
                                 || m.getName().equals("doReplay") || m.getName().equals("doRestart")
-                                || m.getName().equals("doScan"));
+                                || m.getName().equals("doScan") || m.getName().equals("doReloadItem"));
             }
         }
-        assertEquals(9, doMethods);
+        assertEquals(10, doMethods);
     }
 
     // ---- D13 adopt-node route ----
@@ -479,6 +483,87 @@ public class VarroaRunTriggerActionTest {
             action.doAdoptNode(req, rsp);
 
             RefusalAssert.assertRefusedContaining(rsp, 400, "no usable node");
+        }
+    }
+
+    // ---- The reload-item route ----
+
+    @Test
+    public void reloadItemUnauthorizedCallerGets403() throws Exception {
+        try (ACLContext ctx = ACL.as2(new UsernamePasswordAuthenticationToken(
+                "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"pipe\"}");
+            StaplerResponse2 rsp = RefusalAssert.capturing();
+
+            action.doReloadItem(req, rsp);
+
+            RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+        }
+    }
+
+    @Test
+    public void reloadItemWithNoJobGets400() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"\"}");
+            StaplerResponse2 rsp = RefusalAssert.capturing();
+
+            action.doReloadItem(req, rsp);
+
+            RefusalAssert.assertRefusedContaining(rsp, 400, "names no job");
+        }
+    }
+
+    @Test
+    public void reloadItemOfAnUnknownJobGets404() throws Exception {
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"no-such-job\"}");
+            StaplerResponse2 rsp = RefusalAssert.capturing();
+
+            action.doReloadItem(req, rsp);
+
+            RefusalAssert.assertRefusedContaining(rsp, 404, "no-such-job");
+        }
+    }
+
+    @Test
+    public void reloadItemAdoptsANextBuildNumberWrittenOnDisk() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("reload-next-number");
+        java.nio.file.Files.writeString(p.getRootDir().toPath().resolve("nextBuildNumber"), "42");
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"reload-next-number\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            when(rsp.getWriter()).thenReturn(new java.io.PrintWriter(new StringWriter()));
+
+            action.doReloadItem(req, rsp);
+
+            verify(rsp).setStatus(200);
+        }
+        assertEquals(42, p.getNextBuildNumber());
+    }
+
+    @Test
+    public void reloadItemRunsAsSystemWithoutConfigure() throws Exception {
+        // A branch project of a multibranch job denies Item.CONFIGURE to
+        // every caller except SYSTEM. This grant gives the mite no
+        // CONFIGURE, so the route must reach the reload as SYSTEM.
+        j.createFreeStyleProject("reload-as-system");
+        MockAuthorizationStrategy auth = new MockAuthorizationStrategy();
+        auth.grant(Jenkins.READ).everywhere().to("mite");
+        auth.grant(Item.READ).everywhere().to("mite");
+        j.jenkins.setAuthorizationStrategy(auth);
+        try (ACLContext ctx = asMite()) {
+            VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+            StaplerRequest2 req = requestWithBody("{\"jobPath\":\"reload-as-system\"}");
+            StaplerResponse2 rsp = mock(StaplerResponse2.class);
+            when(rsp.getWriter()).thenReturn(new java.io.PrintWriter(new StringWriter()));
+
+            action.doReloadItem(req, rsp);
+
+            verify(rsp).setStatus(200);
         }
     }
 
@@ -684,7 +769,7 @@ public class VarroaRunTriggerActionTest {
         // Stapler derives a URL token from the method name and writes no
         // dash, so a route of more than one word needs @WebMethod. The
         // mite posts these names and nothing else.
-        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build", "replay")) {
+        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build", "reload-item", "replay")) {
             assertNotEquals("route " + route + " is not served at that name",
                     404, postToRoute(route));
         }

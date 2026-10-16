@@ -10,6 +10,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 var rehydrationTestNow = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -188,7 +189,7 @@ func TestApplyRehydrationResult_OnlyMatchingCommandUpdated(t *testing.T) {
 		{Tenant: "team-a", CommandID: "cmd-1"},
 		{Tenant: "team-b", CommandID: "cmd-old"},
 	}
-	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, nil, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, nil, nil, rehydrationTestNow)
 	if !out[0].Applied {
 		t.Fatalf("expected the matching entry updated, got %+v", out[0])
 	}
@@ -206,7 +207,7 @@ func TestApplyRehydrationResult_ThreeTenantsOneCommand(t *testing.T) {
 		{Tenant: "team-b", CommandID: "cmd-1"},
 		{Tenant: "team-c", CommandID: "cmd-1"},
 	}
-	out := applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, nil, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, nil, nil, rehydrationTestNow)
 	for _, e := range out {
 		if e.Applied || e.Error != "mite rejected a path" {
 			t.Fatalf("expected every entry of the command to carry the whole-bundle error, got %+v", e)
@@ -220,7 +221,7 @@ func TestApplyRehydrationResult_PerTenantDeferred(t *testing.T) {
 		{Tenant: "team-b", CommandID: "cmd-1"},
 	}
 	deferred := map[string][]string{"team-a": {"team-a/job-x"}}
-	out := applyRehydrationResult(entries, "cmd-1", true, "", deferred, nil, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", true, "", deferred, nil, nil, rehydrationTestNow)
 	if len(out[0].Deferred) != 1 || !out[0].Applied {
 		t.Fatalf("expected team-a applied with its deferred job, got %+v", out[0])
 	}
@@ -325,11 +326,11 @@ func TestApplyRehydrationResult_DropsCoveredUnseededPaths(t *testing.T) {
 		{Tenant: "team-a", CommandID: "cmd-1", Unseeded: []string{"team-a/b", "team-a/c"}},
 	}
 	covered := map[string][]string{"team-a": {"team-a/b"}}
-	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, covered, rehydrationTestNow)
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, covered, nil, rehydrationTestNow)
 	if !slices.Equal(out[0].Unseeded, []string{"team-a/c"}) || !out[0].Applied {
 		t.Fatalf("successful apply: want unseeded [team-a/c] and applied, got %+v", out[0])
 	}
-	out = applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, covered, rehydrationTestNow)
+	out = applyRehydrationResult(entries, "cmd-1", false, "mite rejected a path", nil, covered, nil, rehydrationTestNow)
 	if !slices.Equal(out[0].Unseeded, []string{"team-a/b", "team-a/c"}) || out[0].Applied {
 		t.Fatalf("failed apply: want the unseeded list kept and not applied, got %+v", out[0])
 	}
@@ -434,5 +435,119 @@ func TestPartitionJobPathsByTenant(t *testing.T) {
 	out := partitionJobPathsByTenant([]string{"team-a/job-x", "team-b/job-y", "team-a/job-z"}, []string{"team-a", "team-b"})
 	if len(out["team-a"]) != 2 || len(out["team-b"]) != 1 {
 		t.Fatalf("expected 2 team-a and 1 team-b deferred jobs, got %+v", out)
+	}
+}
+
+// TestApplyRehydrationResult_ReloadFailureMarksOnlyItsTenant pins that a
+// failed reload of one tenant's job sets that tenant's Error alone. The
+// tenant keeps Applied, so its seed answers its cell instance.
+func TestApplyRehydrationResult_ReloadFailureMarksOnlyItsTenant(t *testing.T) {
+	entries := []v1alpha1.CellRehydrationEntry{
+		{Tenant: "team-a", CommandID: "cmd-1"},
+		{Tenant: "team-b", CommandID: "cmd-1"},
+	}
+	failed := map[string][]*mitev1.RehydrationReloadFailure{
+		"team-a": {{Item: "team-a/mb/main", Error: "HTTP 403"}},
+	}
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, nil, failed, rehydrationTestNow)
+
+	if !out[0].Applied || !strings.Contains(out[0].Error, "team-a/mb/main") {
+		t.Errorf("team-a = %+v, want Applied with the reload failure", out[0])
+	}
+	if !out[1].Applied || out[1].Error != "" {
+		t.Errorf("team-b = %+v, want Applied with no error", out[1])
+	}
+}
+
+// TestPartitionReloadFailuresByTenant pins the prefix attribution of reload
+// failures: a tenant owns its own path and the paths under its folder, and
+// a path that matches no tenant is dropped.
+func TestPartitionReloadFailuresByTenant(t *testing.T) {
+	failures := []*mitev1.RehydrationReloadFailure{
+		{Item: "team-a", Error: "x"},
+		{Item: "team-a/build", Error: "y"},
+		{Item: "team-bb/build", Error: "z"},
+		{Item: "other/job", Error: "w"},
+	}
+	out := partitionReloadFailuresByTenant(failures, []string{"team-a", "team-b"})
+
+	items := make([]string, 0, len(out["team-a"]))
+	for _, f := range out["team-a"] {
+		items = append(items, f.Item)
+	}
+	if want := []string{"team-a", "team-a/build"}; !slices.Equal(items, want) {
+		t.Errorf("team-a items = %v, want %v", items, want)
+	}
+	if _, ok := out["team-b"]; ok {
+		t.Errorf("team-b = %v, want no failures: team-bb is not under team-b", out["team-b"])
+	}
+	if len(out) != 1 {
+		t.Errorf("tenants = %v, want only team-a", out)
+	}
+}
+
+// TestCarryRehydrationError pins that a resend keeps the Error of the entry
+// it replaces, only for the same generation and cell instance.
+func TestCarryRehydrationError(t *testing.T) {
+	next := v1alpha1.CellRehydrationEntry{Tenant: "team-a", Generation: 1, CellInstance: "i1"}
+	existing := &v1alpha1.CellRehydrationEntry{Tenant: "team-a", Generation: 1, CellInstance: "i1", Error: "boom"}
+
+	if got := carryRehydrationError(next, existing); got.Error != "boom" {
+		t.Errorf("same placement: Error = %q, want boom", got.Error)
+	}
+	other := &v1alpha1.CellRehydrationEntry{Tenant: "team-a", Generation: 2, CellInstance: "i1", Error: "boom"}
+	if got := carryRehydrationError(next, other); got.Error != "" {
+		t.Errorf("another generation: Error = %q, want none", got.Error)
+	}
+	moved := &v1alpha1.CellRehydrationEntry{Tenant: "team-a", Generation: 1, CellInstance: "i2", Error: "boom"}
+	if got := carryRehydrationError(next, moved); got.Error != "" {
+		t.Errorf("another cell instance: Error = %q, want none", got.Error)
+	}
+	if got := carryRehydrationError(next, nil); got.Error != "" {
+		t.Errorf("nil existing: Error = %q, want none", got.Error)
+	}
+}
+
+// TestSeedAnswerOf_ReloadFailureKeepsThePendingJobs pins that a failed reload
+// releases the tenant's instance but keeps its still-deferred jobs waiting.
+// Only a deadline give-up releases the pending jobs.
+func TestSeedAnswerOf_ReloadFailureKeepsThePendingJobs(t *testing.T) {
+	e := v1alpha1.CellRehydrationEntry{
+		Tenant: "team-a", CellInstance: "i1", Applied: true,
+		Error: "reload team-a/build: HTTP 403", Deferred: []string{"team-a/new"},
+	}
+	got := seedAnswerOf(&e)
+	if got.instance != "i1" {
+		t.Errorf("instance = %q, want i1", got.instance)
+	}
+	if !slices.Contains(got.pending, "team-a/new") {
+		t.Errorf("pending = %v, want the deferred job to keep waiting", got.pending)
+	}
+
+	gaveUp := e
+	gaveUp.Error = deadlineExceededMessage([]string{"team-a/new"})
+	if got := seedAnswerOf(&gaveUp); len(got.pending) != 0 {
+		t.Errorf("released give-up pending = %v, want none", got.pending)
+	}
+}
+
+// TestApplyRehydrationResult_ReloadFailedJobStaysUnseeded pins that a job
+// whose reload failed stays unseeded after a successful apply that covers it.
+// A later result therefore resends the job and reloads it.
+func TestApplyRehydrationResult_ReloadFailedJobStaysUnseeded(t *testing.T) {
+	entries := []v1alpha1.CellRehydrationEntry{
+		{Tenant: "team-a", CommandID: "cmd-1", Unseeded: []string{"team-a/mb/main", "team-a/other"}},
+	}
+	covered := map[string][]string{"team-a": {"team-a/mb/main", "team-a/other"}}
+	failed := map[string][]*mitev1.RehydrationReloadFailure{
+		"team-a": {{Item: "team-a/mb/main", Error: "HTTP 403"}},
+	}
+	out := applyRehydrationResult(entries, "cmd-1", true, "", nil, covered, failed, rehydrationTestNow)
+
+	if !slices.Contains(out[0].Unseeded, "team-a/mb/main") {
+		t.Errorf("unseeded = %v, want the reload-failed job still listed", out[0].Unseeded)
+	}
+	if slices.Contains(out[0].Unseeded, "team-a/other") {
+		t.Errorf("unseeded = %v, want the successfully reloaded job removed", out[0].Unseeded)
 	}
 }

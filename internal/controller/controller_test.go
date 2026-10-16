@@ -3592,6 +3592,10 @@ func TestNotifyCommandResult(t *testing.T) {
 			RehydrationSuccess: true, RehydrationDeferredJobs: []string{"team/job"}}), 0},
 		{"owned rehydration error", "owned", desired(&mitev1.DesiredStateResult{
 			RehydrationError: "boom"}), 0},
+		{"owned reload failure", "owned", desired(&mitev1.DesiredStateResult{
+			RehydrationSuccess: true,
+			RehydrationReloadFailures: []*mitev1.RehydrationReloadFailure{
+				{Item: "team/job", Error: "HTTP 403"}}}), 0},
 		{"owned seed not applied", "owned", desired(&mitev1.DesiredStateResult{}), 0},
 		{"owned no desired state", "owned", &mitev1.CommandResult{}, 0},
 		{"foreign applied seed", foreign, desired(&mitev1.DesiredStateResult{RehydrationSuccess: true}), 0},

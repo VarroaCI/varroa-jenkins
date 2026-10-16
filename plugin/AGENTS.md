@@ -544,6 +544,10 @@ the root AGENTS.md greenfield rule.
   already holds, and otherwise loads `nodes/<name>/config.xml` with
   `Jenkins.XSTREAM` and adds it. Jenkins reads `nodes/` at boot only, so a
   resumed build needs this route to find the agent it was running on.
+  `POST /varroa-run/reload-item` takes `{jobPath}` and runs `Job#load()` as
+  SYSTEM, so a branch project of a multibranch job reloads too: its `BranchJobProperty`
+  ACL denies `Item.CONFIGURE` to every caller except SYSTEM, and the core `/reload`
+  route checks that permission. It answers 404 for an unknown job.
   `POST /varroa-run/load-build` takes `{jobPath, buildNumber}` and reads
   `Job#getBuildByNumber`, which is the load: Jenkins loads builds on
   demand, and a job reload loads no build. The run's own load resumes

@@ -50,7 +50,7 @@ func answerRehydration(rec *Reconciler, cr *v1alpha1.Controller, commandID strin
 		tenants = append(tenants, e.Tenant)
 	}
 	cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, id, success, rehydrationErr,
-		map[string][]string{}, partitionJobPathsByTenant(match.CoveredJobPaths, tenants), now)
+		map[string][]string{}, partitionJobPathsByTenant(match.CoveredJobPaths, tenants), nil, now)
 	rec.commitNumberOnlyProgress(cellKey, match.CellInstance, match.NumberOnlyJobPaths, success, rehydrationErr, nil)
 }
 

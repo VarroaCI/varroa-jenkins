@@ -4230,8 +4230,9 @@ spec:
                           type: array
                         error:
                           description: |-
-                            Error is the whole-bundle rehydration failure the mite reported, or
-                            empty.
+                            Error is the rehydration failure the mite reported for this tenant: a
+                            whole-bundle failure, or a failed reload of one of the tenant's jobs.
+                            Empty when none.
                           type: string
                         generation:
                           description: Generation is the placement generation this

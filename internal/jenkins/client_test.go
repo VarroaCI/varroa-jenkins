@@ -964,7 +964,7 @@ func TestScriptConsoleOnce_RespectsContextDeadlineBeyond30s(t *testing.T) {
 // TestReloadItem asserts ReloadItem posts to the per-item reload route, not
 // the global admin-gated /reload route.
 func TestReloadItem(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotType, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/crumbIssuer/api/json" {
 			w.Header().Set("Content-Type", "application/json")
@@ -973,6 +973,9 @@ func TestReloadItem(t *testing.T) {
 		}
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		gotType = r.Header.Get("Content-Type")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
@@ -984,8 +987,37 @@ func TestReloadItem(t *testing.T) {
 	if gotMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", gotMethod)
 	}
-	if gotPath != "/job/team/job/pipeline/reload" {
-		t.Errorf("path = %q, want /job/team/job/pipeline/reload", gotPath)
+	if gotPath != "/varroa-run/reload-item" {
+		t.Errorf("path = %q, want /varroa-run/reload-item", gotPath)
+	}
+	if gotType != "application/json" {
+		t.Errorf("content type = %q, want application/json", gotType)
+	}
+	if gotBody != `{"jobPath":"team/pipeline"}` {
+		t.Errorf("body = %q, want the job path", gotBody)
+	}
+}
+
+// TestReloadItemForbiddenIsAnError asserts a 403 from the reload route is an
+// error that is not ErrItemNotFound: the job exists, and the reload failed.
+func TestReloadItemForbiddenIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClient(srv.URL, "user", "token")
+	err := c.ReloadItem(context.Background(), "team/pipeline")
+	if err == nil {
+		t.Fatal("expected error for 403 response")
+	}
+	if errors.Is(err, ErrItemNotFound) {
+		t.Errorf("a 403 must not read as ErrItemNotFound: %v", err)
 	}
 }
 

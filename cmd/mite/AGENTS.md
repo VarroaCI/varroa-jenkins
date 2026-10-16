@@ -322,7 +322,12 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   desired-state section, alongside `config`, `rbac`, and `items`: it runs
   after config/RBAC and before items, so a job the items section is about to
   touch is already seeded, and reloads every `ReloadItems` path after the
-  items apply completes. `checkRehydrationPath` accepts only the
+  items apply completes. Each reload posts `{jobPath}` to
+  `POST /varroa-run/reload-item`, because Jenkins denies the core `/reload`
+  route to every caller except SYSTEM on a branch project. A failed reload
+  goes to `rehydration_reload_failures`. It fails no section, and the marker
+  omits the `rehydration` section, so a resend reloads the item again.
+  `checkRehydrationPath` accepts only the
   `jobs/<seg>/.../builds/<n>/{build.xml,changelog0.xml,program.dat}`,
   `jobs/<seg>/.../builds/<n>/workflow/<m>.xml`,
   `jobs/<seg>/.../nextBuildNumber`, and `nodes/<seg>/config.xml` path

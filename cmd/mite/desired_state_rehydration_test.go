@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +59,7 @@ func TestRehydrationRunsBetweenConfigAndItemsThenReloads(t *testing.T) {
 			order = append(order, "items")
 			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
-		case strings.HasSuffix(r.URL.Path, "/reload"):
+		case r.URL.Path == reloadItemRoute:
 			mu.Lock()
 			order = append(order, "reload")
 			mu.Unlock()
@@ -115,10 +116,22 @@ func TestRehydrationRunsBetweenConfigAndItemsThenReloads(t *testing.T) {
 	}
 }
 
-// TestRehydrationFailedReloadLeavesItemsSuccessful verifies a failed
-// per-item reload fails only the rehydration section: the items result
-// stands on its own.
-func TestRehydrationFailedReloadLeavesItemsSuccessful(t *testing.T) {
+// reloadItemRoute is the plugin route a mite reload posts to.
+const reloadItemRoute = "/varroa-run/reload-item"
+
+// reloadItemJobPath returns the job path a reload-item request names.
+func reloadItemJobPath(r *http.Request) string {
+	var body struct {
+		JobPath string `json:"jobPath"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	return body.JobPath
+}
+
+// TestRehydrationFailedReloadIsReportedPerItem verifies a failed per-item
+// reload fails no section: the rehydration section stays successful, the
+// items result stands, and the failure names its item.
+func TestRehydrationFailedReloadIsReportedPerItem(t *testing.T) {
 	home := t.TempDir()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,8 +141,8 @@ func TestRehydrationFailedReloadLeavesItemsSuccessful(t *testing.T) {
 			fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/reload") {
-			w.WriteHeader(http.StatusInternalServerError)
+		if r.URL.Path == reloadItemRoute && reloadItemJobPath(r) == "team-a/build" {
+			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -145,7 +158,7 @@ func TestRehydrationFailedReloadLeavesItemsSuccessful(t *testing.T) {
 		MiteJenkinsTokenExp: 9999999999,
 		Rehydration: &mitev1.RehydrationBundle{
 			ContentHash: "content-1",
-			ReloadItems: []string{"missing-item"},
+			ReloadItems: []string{"team-a/build", "team-b/build"},
 		},
 	}
 
@@ -154,11 +167,92 @@ func TestRehydrationFailedReloadLeavesItemsSuccessful(t *testing.T) {
 	if !res.ItemsSuccess {
 		t.Errorf("expected the items result to stay successful, got %+v", res)
 	}
-	if res.RehydrationSuccess {
-		t.Error("expected rehydration to report failure after a failed reload")
+	if !res.RehydrationSuccess {
+		t.Errorf("expected rehydration to stay successful after a failed reload, got %+v", res)
 	}
-	if res.RehydrationError == "" {
-		t.Error("expected a rehydration error message for the failed reload")
+	if res.RehydrationError != "" {
+		t.Errorf("RehydrationError = %q, want empty: a reload failure is per item", res.RehydrationError)
+	}
+	if len(res.RehydrationReloadFailures) != 1 {
+		t.Fatalf("RehydrationReloadFailures = %v, want one failure", res.RehydrationReloadFailures)
+	}
+	failure := res.RehydrationReloadFailures[0]
+	if failure.Item != "team-a/build" {
+		t.Errorf("failure item = %q, want team-a/build", failure.Item)
+	}
+	if !strings.Contains(failure.Error, "HTTP 403") {
+		t.Errorf("failure error = %q, want the HTTP 403 text", failure.Error)
+	}
+}
+
+// TestRehydrationReloadFailureKeepsTheSectionOutOfTheMarker verifies a
+// failed reload keeps the rehydration section out of the applied marker, so
+// a resend reloads the item again without repeating the JCasC reload.
+func TestRehydrationReloadFailureKeepsTheSectionOutOfTheMarker(t *testing.T) {
+	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
+	home := t.TempDir()
+
+	var mu sync.Mutex
+	cascReloads, itemReloads := 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Jenkins-Session", "sess-1")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/crumbIssuer"):
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+		case r.URL.Path == "/configuration-as-code/reload":
+			mu.Lock()
+			cascReloads++
+			mu.Unlock()
+			http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
+		case r.URL.Path == reloadItemRoute:
+			mu.Lock()
+			itemReloads++
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-1",
+		JcascYaml:           "jenkins: {}",
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+		Rehydration: &mitev1.RehydrationBundle{
+			ContentHash: "content-1",
+			ReloadItems: []string{"team-a/build"},
+		},
+	}
+
+	first := agent.handleDesiredState(context.Background(), cmd)
+	if len(first.RehydrationReloadFailures) != 1 {
+		t.Fatalf("first push: RehydrationReloadFailures = %v, want one failure", first.RehydrationReloadFailures)
+	}
+	if _, ok := agent.readMarker().sections["rehydration"]; ok {
+		t.Error("the marker records the rehydration section after a failed reload")
+	}
+	mu.Lock()
+	reloadsAfterFirst := itemReloads
+	mu.Unlock()
+
+	second := agent.handleDesiredState(context.Background(), cmd)
+	if len(second.RehydrationReloadFailures) != 1 {
+		t.Fatalf("second push: RehydrationReloadFailures = %v, want one failure", second.RehydrationReloadFailures)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if itemReloads <= reloadsAfterFirst {
+		t.Errorf("item reloads = %d after the resend, want more than %d: a resend must reload again", itemReloads, reloadsAfterFirst)
+	}
+	if cascReloads != 1 {
+		t.Errorf("JCasC reloads = %d, want 1: a resend must not repeat the JCasC reload", cascReloads)
 	}
 }
 
@@ -325,7 +419,7 @@ func TestRehydrationSeedsJobsTheItemsApplyCreates(t *testing.T) {
 			order = append(order, "items")
 			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
-		case strings.HasSuffix(r.URL.Path, "/reload"):
+		case r.URL.Path == reloadItemRoute:
 			mu.Lock()
 			order = append(order, "reload")
 			mu.Unlock()
@@ -536,7 +630,7 @@ func TestRehydrationAbsentItemIsSkipped(t *testing.T) {
 			fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
 		case r.URL.Path == "/configuration-as-code/reload":
 			http.Redirect(w, r, "/configuration-as-code/", http.StatusFound)
-		case strings.HasSuffix(r.URL.Path, "/reload"):
+		case r.URL.Path == reloadItemRoute:
 			w.WriteHeader(http.StatusNotFound)
 		default:
 			w.WriteHeader(http.StatusOK)
