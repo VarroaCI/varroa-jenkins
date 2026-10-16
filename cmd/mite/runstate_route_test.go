@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -81,6 +84,28 @@ func TestHandleRunState_MissingHeaderIs400(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for a missing run id header, got %d", rec.Code)
 	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "malformed run-state headers" {
+		t.Errorf("body = %q, want %q", got, "malformed run-state headers")
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", got)
+	}
+}
+
+func TestHandleRunState_UnreadableBodyIs400(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+
+	req := newRunStateRequest("run-1", "jobs/team/builds/1/build.xml", 1, 1, 0, 1, 5, 5, "")
+	req.Body = io.NopCloser(iotest.ErrReader(errors.New("read failed")))
+	rec := httptest.NewRecorder()
+	agent.handleRunState(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an unreadable body, got %d", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "unreadable run-state body" {
+		t.Errorf("body = %q, want %q", got, "unreadable run-state body")
+	}
 }
 
 func TestHandleRunState_Oversized413CarriesMaxChunkHeader(t *testing.T) {
@@ -97,6 +122,9 @@ func TestHandleRunState_Oversized413CarriesMaxChunkHeader(t *testing.T) {
 	}
 	if got := rec.Header().Get(hdrLogMaxChunkBytes); got != strconv.Itoa(runStateChunkMaxBytes) {
 		t.Errorf("%s = %q, want %d", hdrLogMaxChunkBytes, got, runStateChunkMaxBytes)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "run-state chunk over the cap" {
+		t.Errorf("body = %q, want %q", got, "run-state chunk over the cap")
 	}
 }
 
