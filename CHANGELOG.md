@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.4.0...v0.4.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **catalog:** invalidate a derived item whose closure is incomplete ([b562e6b](https://github.com/VarroaCI/varroa-jenkins/commit/b562e6bcdc378661147d4e224a5c785c69479af3))
+* **cells:** cap projected tenant credentials per cell ([87e47eb](https://github.com/VarroaCI/varroa-jenkins/commit/87e47eb089486a2817d31f836c99effbe33d48fd))
+* **controller:** check every member cell for a tenant hold ([948bcdc](https://github.com/VarroaCI/varroa-jenkins/commit/948bcdce23065ba680b6818bbd934f371f1a8a93))
+* **controller:** fold tenant warnings from every member cell ([abc766e](https://github.com/VarroaCI/varroa-jenkins/commit/abc766e96e60091c37de2a816015664eb3c8b521))
+* **controller:** mark a rehydration give-up with a flag ([3184cc3](https://github.com/VarroaCI/varroa-jenkins/commit/3184cc36402af104a7db67a2d08c9fcec39e6830))
+* **frontend:** disable Add to bundle for an invalid catalog item ([16034fc](https://github.com/VarroaCI/varroa-jenkins/commit/16034fc6c6cfb553b884a59e94e79b09e6d14346))
+* **mite:** answer BUSY when a restart-copy envelope publish fails ([c3b66d5](https://github.com/VarroaCI/varroa-jenkins/commit/c3b66d521c4285af432a3e251c391034c1933681))
+* **mite:** answer the unresolved-tenant grace as tenant-unresolved ([3f1cc9f](https://github.com/VarroaCI/varroa-jenkins/commit/3f1cc9fadbc6ec3873e7b006a6838ed347cbd945))
+* **mite:** cap the claim wait under the loopback write timeout ([35bcec0](https://github.com/VarroaCI/varroa-jenkins/commit/35bcec06534cd1c3e0008cbc6485a601dc6382d1))
+* **mite:** cap the cross-tenant wait one second inside the write timeout ([bde1923](https://github.com/VarroaCI/varroa-jenkins/commit/bde192313a40245a4153ba224f1640b8acaf1303))
+* **mite:** carry a plain-text body on 400 and 413 log refusals ([70df680](https://github.com/VarroaCI/varroa-jenkins/commit/70df6800d0090d11e9cd930b26c1d3e92519a502))
+* **mite:** count loopback waits from handler entry ([6f1d670](https://github.com/VarroaCI/varroa-jenkins/commit/6f1d67056881df4e94748117d278939ede808c08))
+* **mite:** derive the restart-copy ack wait from the claim budget ([20c2d17](https://github.com/VarroaCI/varroa-jenkins/commit/20c2d170351c9a04feedbd0addfdf9af7ed4cdff))
+* **mite:** hold restart-copy answers until the ack arrives ([73dcfcf](https://github.com/VarroaCI/varroa-jenkins/commit/73dcfcfab73b74b592c4b8125986dbf64b5eb299))
+* **mite:** publish a mesh run.state envelope before its ack ([73be627](https://github.com/VarroaCI/varroa-jenkins/commit/73be6275bf9d02457768ccd3a3da3ac269929681))
+* **mite:** refuse an unresolved run.state tenant after a grace ([125dc72](https://github.com/VarroaCI/varroa-jenkins/commit/125dc7245c2acf127dddc9bdcc01855a15c5d525))
+* **mite:** reload a branch job through the plugin and keep one failure per tenant ([1c38a88](https://github.com/VarroaCI/varroa-jenkins/commit/1c38a88197418e1c3f32f2d9e0ed73c4489808b7))
+* **mite:** send a body with run-state 400 and 413 refusals ([6dcfc5e](https://github.com/VarroaCI/varroa-jenkins/commit/6dcfc5eb4d38bef7ce7e726ab964f383ced98d2a))
+* **plugin:** drop a run-state record the mite refuses with a 4xx ([0b89712](https://github.com/VarroaCI/varroa-jenkins/commit/0b897128cb55b1fc977763fd8dc3786d2ebc4f73))
+
 ## [0.4.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.3.0...v0.4.0) (2026-10-15)
 
 
