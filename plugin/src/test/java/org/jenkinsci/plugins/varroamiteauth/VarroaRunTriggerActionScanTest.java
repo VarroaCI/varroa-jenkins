@@ -1,6 +1,7 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +15,7 @@ import java.io.StringWriter;
 import java.util.List;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
+import net.sf.json.JSONNull;
 import net.sf.json.JSONObject;
 import org.junit.Rule;
 import org.junit.Test;
@@ -98,6 +100,24 @@ public class VarroaRunTriggerActionScanTest {
         JSONObject row = (JSONObject) VarroaBranchScans.lastScanJson(mb.getFullName());
         assertEquals("refused", row.getString("state"));
         assertEquals("scan-403", row.getString("scanId"));
+    }
+
+    @Test
+    public void aCallerWithoutTheMiteAuthorityAnswers403AndRecordsNoScan() throws Exception {
+        j.jenkins.setNumExecutors(0);
+        WorkflowMultiBranchProject mb = j.jenkins.createProject(WorkflowMultiBranchProject.class, "scan-no-mite");
+        VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+        StringWriter out = new StringWriter();
+        StaplerResponse2 rsp = RefusalAssert.capturing(out);
+
+        try (ACLContext ignored = ACL.as2(new UsernamePasswordAuthenticationToken(
+                "bob", "", List.of(new SimpleGrantedAuthority("ROLE:varroa:developer"))))) {
+            action.doScan(scanRequest(body("scan-no-mite", mb.getFullName(), "ada")), rsp);
+        }
+
+        RefusalAssert.assertRefused(rsp, 403, "Forbidden: requires ROLE:varroa:system-mite authority");
+        // lastScanJson answers JSONNull, not Java null, when no scan is recorded.
+        assertTrue(VarroaBranchScans.lastScanJson(mb.getFullName()) instanceof JSONNull);
     }
 
     @Test

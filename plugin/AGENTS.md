@@ -519,8 +519,8 @@ the root AGENTS.md greenfield rule.
   body. Never call `sendError` on these routes: Jenkins then renders its full HTML
   error page and keeps the message only in the page title. Tests assert a refusal
   through `RefusalAssert`, which also asserts that no `sendError` call occurred.
-- **Run trigger endpoint** (the mite's local call for a manual build trigger, a cancel,
-  the two input-approval commands, and a replay; D3, D4, D8, D10, D11, run-trigger-endpoint):
+- **Run trigger endpoint** (the mite's local calls on the ten routes the
+  run-trigger-endpoint spec lists):
   `VarroaRunTriggerAction.java`, a protected
   `RootAction` at `/varroa-run`, requires `ROLE:varroa:system-mite`. `POST
   /varroa-run/trigger` reads `runId`, `intentKey`, `jobPath`, `parameters`, and
