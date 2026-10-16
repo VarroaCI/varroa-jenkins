@@ -5,6 +5,8 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -587,14 +589,16 @@ func (h *BusHandler) publishRunStateOutcome(ns, name string, chunk *mitev1.RunSt
 		return
 	}
 
-	h.publishRunStateEnvelope(ns, name, chunk, payload)
+	_ = h.publishRunStateEnvelope(ns, name, chunk, payload)
 }
 
 // publishRunStateEnvelope publishes one run.state envelope for chunk with
-// the given payload. It publishes nothing when the tenant does not resolve.
-func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunStateChunk, payload map[string]interface{}) {
+// the given payload. It returns an error when the tenant does not resolve,
+// the envelope does not marshal, or the publish fails. A handler with no
+// publisher publishes nothing and returns nil.
+func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunStateChunk, payload map[string]interface{}) error {
 	if h.publisher == nil {
-		return
+		return nil
 	}
 	if chunk.JobPath == "" {
 		// A cell derives the tenant from the first path segment, so no
@@ -609,7 +613,7 @@ func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunS
 	if tenant == "" {
 		h.log().Warn("run-state outcome unresolved, publishing no envelope",
 			"controller", ns+"/"+name, "job_path", chunk.JobPath)
-		return
+		return errRunStateTenantUnresolved
 	}
 
 	env := ingestEnvelope{
@@ -628,12 +632,18 @@ func (h *BusHandler) publishRunStateEnvelope(ns, name string, chunk *mitev1.RunS
 	data, err := json.Marshal(env)
 	if err != nil {
 		h.log().Error("marshal run.state envelope failed", "run_id", chunk.RunId, "error", err)
-		return
+		return fmt.Errorf("marshal run.state envelope: %w", err)
 	}
 	if _, err := h.publisher.PublishJetStream(bus.BuildSubject(h.cluster, ns, name), data); err != nil {
 		h.log().Warn("run.state publish failed", "run_id", chunk.RunId, "error", err)
+		return fmt.Errorf("publish run.state envelope: %w", err)
 	}
+	return nil
 }
+
+// errRunStateTenantUnresolved reports an envelope whose job path resolves
+// to no tenant. The recorder cannot file such an envelope.
+var errRunStateTenantUnresolved = errors.New("run.state tenant unresolved")
 
 // OnRunStateRequest implements StreamHandler for a mite that fetches one
 // stored file under a resume command. It answers one or more

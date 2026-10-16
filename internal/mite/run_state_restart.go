@@ -131,7 +131,7 @@ func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStat
 		if err != nil || rawTotal != complete.objectSize {
 			outcome = runStateOutcome{status: stateAckStatusRejected, reason: stateReasonMalformed}
 		} else {
-			outcome = h.storeRestartSourceObject(ctx, e, chunk, body)
+			outcome = h.storeRestartSourceObject(ctx, ns, name, e, chunk, body)
 		}
 	}
 	if outcome.status == stateAckStatusRejected {
@@ -141,11 +141,6 @@ func (h *BusHandler) onRestartSourceChunk(name, ns string, chunk *mitev1.RunStat
 		))
 	}
 
-	// The envelope goes out before the ack. A STORED ack tells the mite
-	// the file is durable, so the recorder must already hold its envelope.
-	if outcome.stored {
-		h.publishRestartSourceFile(ns, name, chunk, outcome.bytes)
-	}
 	h.sendRunStateAckKind(ns, name, chunk, outcome.status, outcome.reason, outcome.pauseMS, true)
 }
 
@@ -268,9 +263,10 @@ func (h *BusHandler) bufferRestartSourceChunk(ns, name string, chunk *mitev1.Run
 	return runStateOutcome{stored: true, relpath: chunk.Relpath, bytes: b.objectSize, seq: chunk.Seq}, e, b
 }
 
-// storeRestartSourceObject writes one whole file of the copy and records
-// it on the entry. The entry is deleted once every declared file is stored.
-func (h *BusHandler) storeRestartSourceObject(ctx context.Context, e *restartSourceEntry, chunk *mitev1.RunStateChunk, body []byte) runStateOutcome {
+// storeRestartSourceObject writes one whole file of the copy, publishes its
+// envelope, and records it on the entry. The entry is deleted once every
+// declared file is stored.
+func (h *BusHandler) storeRestartSourceObject(ctx context.Context, ns, name string, e *restartSourceEntry, chunk *mitev1.RunStateChunk, body []byte) runStateOutcome {
 	e.writeMu.Lock()
 	defer e.writeMu.Unlock()
 
@@ -282,6 +278,13 @@ func (h *BusHandler) storeRestartSourceObject(ctx context.Context, e *restartSou
 	key := blob.RestartSourceKey(chunk.RunId, chunk.Relpath)
 	if err := h.logStore.Replace(ctx, key, bytes.NewReader(body), opts); err != nil {
 		h.log().Warn("restart copy write failed", "run_id", chunk.RunId, "relpath", chunk.Relpath, "error", err)
+		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
+	}
+
+	// The envelope publishes before the file enters the stored set. A STORED
+	// ack tells the mite that the recorder holds the file. A failed publish
+	// answers BUSY, and the plugin posts the file again.
+	if err := h.publishRestartSourceFile(ns, name, chunk, int64(len(body))); err != nil {
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
 
@@ -301,9 +304,9 @@ func (h *BusHandler) storeRestartSourceObject(ctx context.Context, e *restartSou
 }
 
 // publishRestartSourceFile publishes the run.state envelope of one stored
-// file of the copy.
-func (h *BusHandler) publishRestartSourceFile(ns, name string, chunk *mitev1.RunStateChunk, size int64) {
-	h.publishRunStateEnvelope(ns, name, chunk, map[string]interface{}{
+// file of the copy. It returns the publish error.
+func (h *BusHandler) publishRestartSourceFile(ns, name string, chunk *mitev1.RunStateChunk, size int64) error {
+	return h.publishRunStateEnvelope(ns, name, chunk, map[string]interface{}{
 		"relpath":        chunk.Relpath,
 		"bytes":          size,
 		"pusher_epoch":   chunk.PusherEpoch,

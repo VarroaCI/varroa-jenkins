@@ -504,7 +504,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   `OperatorMessage.run_state_ack`, which mirrors `LogAck`; the mite records
   the answer and raises its own `503` on that run's next post. For mesh chunks
   only. A copy ack carries `seq`, and the mite answers the copy's own post with
-  it. The gateway publishes the `run.state` envelope before the `STORED` ack.
+  it. The gateway publishes the `run.state` envelope before the `STORED` ack. A failed publish answers `BUSY`, and the file stays out of the copy's stored set.
   The mesh path drops a terminal run's entry and answers `STORED` for
   each later chunk. **The restart copy is the exception.** It arrives
   after the run is terminal, so `onRestartSourceChunk` (`run_state_restart.go`)

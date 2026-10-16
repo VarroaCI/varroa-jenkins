@@ -175,7 +175,7 @@ the job's current cell.
 A restart of a build whose job moved, or whose cell pod rolled, restores the copy before it runs.
 A restart after a pod roll replaces the rehydrated build record with the kept copy.
 When no complete copy exists, and the job moved, the restart is refused with `home-moved`.
-The plugin counts a copy in `varroa_plugin_restart_source_kept` only after the gateway stores every file.
+The plugin counts a copy in `varroa_plugin_restart_source_kept` only after the gateway stores every file and publishes its record.
 A refused copy counts in `varroa_plugin_restart_source_dropped`.
 
 A restarted stage can use `unstash` only when the job keeps its stashes. A preserved stash survives
