@@ -374,7 +374,7 @@ the root AGENTS.md greenfield rule.
   intent key. `MiteLoopbackClient.java` gained one method per cross-tenant kind, a
   `forCrossTenant()` factory reading `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` (default
   1000) and `VARROA_CROSSTENANT_READ_TIMEOUT_MS` (default 10000, warns once at or below
-  the mite hop's 9500 ms default); `VarroaCrossTenantReply.java` parses a reply into a
+  the mite hop's 9000 ms default); `VarroaCrossTenantReply.java` parses a reply into a
   failure code or fields, mapping a transport failure to the same `UNAVAILABLE` code a
   structured reply carries, with the transport error text as its message. Every step
   failure reads `<step>: <code>: <text>` through `describe()`, and every veto reads

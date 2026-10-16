@@ -232,7 +232,7 @@ public class MiteLoopbackClientTest {
 
     @Test
     public void readTimeoutWarnsAtExactlyTheMiteHopsDefault() throws Exception {
-        List<String> captured = captureWarnings(() -> MiteLoopbackClient.crossTenantReadTimeoutMillis("9500"));
+        List<String> captured = captureWarnings(() -> MiteLoopbackClient.crossTenantReadTimeoutMillis("9000"));
         assertEquals(1, captured.size());
     }
 
@@ -240,6 +240,8 @@ public class MiteLoopbackClientTest {
     public void readTimeoutDoesNotWarnAboveTheMiteHopsDefault() throws Exception {
         List<String> captured = captureWarnings(() -> MiteLoopbackClient.crossTenantReadTimeoutMillis("10000"));
         assertEquals(0, captured.size());
+        List<String> justAbove = captureWarnings(() -> MiteLoopbackClient.crossTenantReadTimeoutMillis("9500"));
+        assertEquals(0, justAbove.size());
     }
 
     private static List<String> captureWarnings(Runnable action) {

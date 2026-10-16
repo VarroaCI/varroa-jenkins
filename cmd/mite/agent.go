@@ -291,8 +291,8 @@ type Agent struct {
 	// crossTenantTimeout is the mite's wait budget for a
 	// CrossTenantResponse (VARROA_CROSSTENANT_MITE_TIMEOUT_MS). NewAgent
 	// sets the bare default; startLoopback re-resolves it from the
-	// environment once a.Logger is set, so a malformed value, a clamp, or
-	// a nested-budget warning reaches the real logger.
+	// environment once a.Logger is set, so a malformed value or a clamp
+	// reaches the real logger.
 	crossTenantTimeout time.Duration
 
 	// triggerReadyWait bounds the Jenkins readiness wait a TRIGGER_BUILD

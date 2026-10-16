@@ -90,17 +90,7 @@ const (
 	// 64-entry cap by definition, not by coincidence.
 	maxCrossTenantWaiters = maxClaimWaiters
 
-	defaultCrossTenantMiteTimeoutMS = 9500
-	// crossTenantMiteTimeoutCapMS is the highest value
-	// VARROA_CROSSTENANT_MITE_TIMEOUT_MS may resolve to. The listener's
-	// write timeout is 10 seconds, so a longer wait would lose the
-	// response on the socket.
-	crossTenantMiteTimeoutCapMS = 10000
-	// crossTenantPluginReadTimeoutDefaultMS is
-	// VARROA_CROSSTENANT_READ_TIMEOUT_MS's own default. The mite cannot
-	// read the plugin's environment, so the nesting check compares
-	// against this default rather than the plugin's actual value.
-	crossTenantPluginReadTimeoutDefaultMS = 10000
+	defaultCrossTenantMiteTimeoutMS = 9000
 )
 
 // crossTenantRouteKinds names the kinds each cross-tenant route accepts
@@ -193,14 +183,11 @@ func logClaimWaitClamp(logger *slog.Logger, claimTimeout time.Duration) {
 
 // crossTenantMiteTimeoutFromEnv resolves VARROA_CROSSTENANT_MITE_TIMEOUT_MS
 // (design.md D14, mite-loopback-api spec). An absent variable keeps the
-// 9500ms default. A value that is not a whole number is refused: the
+// 9000ms default. A value that is not a whole number is refused: the
 // default stays in force and logger logs one WARNING. A resolved value
-// above 10 seconds is clamped to 10 seconds, because the listener's write
-// timeout is 10 seconds, and logger logs one WARNING for the clamp. The
-// mite cannot read the plugin's own VARROA_CROSSTENANT_READ_TIMEOUT_MS, so
-// the nesting check compares the resolved value against that variable's
-// 10-second default: a value at or above it logs one further WARNING and
-// still serves, because the mite cannot prove which side is misconfigured.
+// above loopbackWaitCap (9 seconds) is clamped to it, and logger logs one
+// WARNING for the clamp. The listener's write timeout is 10 seconds, so the
+// wait ends one second before the reply would lose the write deadline.
 func crossTenantMiteTimeoutFromEnv(logger *slog.Logger) time.Duration {
 	ms := defaultCrossTenantMiteTimeoutMS
 	if raw := os.Getenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS"); raw != "" {
@@ -212,14 +199,10 @@ func crossTenantMiteTimeoutFromEnv(logger *slog.Logger) time.Duration {
 			ms = n
 		}
 	}
-	if ms > crossTenantMiteTimeoutCapMS {
-		logger.Warn("VARROA_CROSSTENANT_MITE_TIMEOUT_MS exceeds the loopback listener's write timeout, clamping",
-			"value_ms", ms, "clamped_ms", crossTenantMiteTimeoutCapMS)
-		ms = crossTenantMiteTimeoutCapMS
-	}
-	if ms >= crossTenantPluginReadTimeoutDefaultMS {
-		logger.Warn("the mite cross-tenant wait is at least as long as the plugin read budget's default; each budget must stay shorter than the budget outside it",
-			"mite_timeout_ms", ms, "plugin_read_timeout_default_ms", crossTenantPluginReadTimeoutDefaultMS)
+	if capMS := int(loopbackWaitCap.Milliseconds()); ms > capMS {
+		logger.Warn("VARROA_CROSSTENANT_MITE_TIMEOUT_MS exceeds the loopback wait cap, clamping",
+			"value_ms", ms, "clamped_ms", capMS)
+		ms = capMS
 	}
 	return time.Duration(ms) * time.Millisecond
 }
