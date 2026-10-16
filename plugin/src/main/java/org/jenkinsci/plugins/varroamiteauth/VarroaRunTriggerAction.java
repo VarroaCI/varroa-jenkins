@@ -55,9 +55,10 @@ import org.kohsuke.stapler.WebMethod;
 import org.springframework.security.core.GrantedAuthority;
 
 /**
- * Protected {@link RootAction} at {@code /varroa-run}, the mite's local call for a
- * manual build trigger, a manual build cancel, the two input-approval commands, and
- * a replay with an edited script (D3, D4, D8, D10, D11, run-trigger-endpoint).
+ * Protected {@link RootAction} at {@code /varroa-run}. It serves the mite's local calls
+ * on ten routes: {@code trigger}, {@code cancel}, {@code adopt-node}, {@code load-build},
+ * {@code proceed-input}, {@code abort-input}, {@code replay}, {@code scan}, {@code restart},
+ * and {@code reload-item}. The run-trigger-endpoint specification lists the same routes.
  *
  * <p>Requires the authority {@code ROLE:varroa:system-mite}, the same check {@link
  * ActivityEndpoint} performs. Only the mite calls these routes, over the Jenkins
@@ -96,6 +97,16 @@ import org.springframework.security.core.GrantedAuthority;
  * longer on this cell, when the job's home moved off this cell, and when the stage
  * is not restartable. The route name holds one word, so it carries no {@link
  * WebMethod}.
+ *
+ * <p>{@code POST /varroa-run/scan} starts one branch scan of a multibranch project as
+ * the acting user and records the result. The route name holds one word, so it carries
+ * no {@link WebMethod}.
+ *
+ * <p>{@code POST /varroa-run/adopt-node} adopts one agent node from its configuration
+ * file, so a build that resumed on this process finds the agent it ran on.
+ *
+ * <p>{@code POST /varroa-run/reload-item} reloads one job from its configuration file on
+ * disk, so Jenkins adopts the state the mite wrote there.
  */
 @Extension
 public class VarroaRunTriggerAction implements RootAction {

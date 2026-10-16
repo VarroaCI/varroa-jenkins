@@ -768,8 +768,11 @@ public class VarroaRunTriggerActionTest {
     public void everyRouteIsServedAtTheNameItsCallersUse() throws Exception {
         // Stapler derives a URL token from the method name and writes no
         // dash, so a route of more than one word needs @WebMethod. The
-        // mite posts these names and nothing else.
-        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build", "reload-item", "replay")) {
+        // mite posts these names and nothing else. The caller holds no mite
+        // authority, so a served route refuses it, and an unknown name
+        // answers 404. Any status other than 404 shows Stapler mapped the name.
+        for (String route : List.of("trigger", "cancel", "adopt-node", "load-build", "proceed-input",
+                "abort-input", "replay", "scan", "restart", "reload-item")) {
             assertNotEquals("route " + route + " is not served at that name",
                     404, postToRoute(route));
         }
