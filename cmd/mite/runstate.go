@@ -252,7 +252,7 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 
 	chunk, ok := parseRunStateHeaders(r.Header)
 	if !ok {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "malformed run-state headers", http.StatusBadRequest)
 		return
 	}
 	// The mite stamps its own pod identity, so a cell cannot claim
@@ -261,12 +261,12 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, runStateChunkMaxBytes+1))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "unreadable run-state body", http.StatusBadRequest)
 		return
 	}
 	if len(body) > runStateChunkMaxBytes {
 		w.Header().Set(hdrLogMaxChunkBytes, strconv.Itoa(runStateChunkMaxBytes))
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		http.Error(w, "run-state chunk over the cap", http.StatusRequestEntityTooLarge)
 		return
 	}
 	chunk.GzipContent = body
