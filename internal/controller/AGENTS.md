@@ -481,8 +481,9 @@ sections describe.
   `bus.BundleComposePreview.PipelineTemplates`.
 - **Team bundle content reply.** `config_crud_teambundle.go` answers
   `bundles.teamcontent` for a member-placed Team's pipeline read. It returns the
-  bundle, four content keys (never `jenkins.yaml`), and `held`. `held` is read from
-  the Team's slot-0 cell `status.cell.tenantWarnings` through `v1alpha1.CellHoldsTenant`.
+  bundle, four content keys (never `jenkins.yaml`), and `held`. `held` comes from
+  `TeamHeld` (`team_held.go`), which checks `status.cell.tenantWarnings` of every member
+  cell in `v1alpha1.PlacementCells` order through `v1alpha1.CellHoldsTenant`.
 - **plugins-init reports on its termination log.** `pluginsInitScript`
   (`clientset_client.go`) writes one marker line that `plugininit_report.go`
   parses, so the format is a contract:

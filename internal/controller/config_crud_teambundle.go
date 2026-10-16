@@ -28,24 +28,6 @@ var teamBundleContentKeys = []string{
 	bundle.DroppedItemKeysConfigMapKey,
 }
 
-// teamHeld reports whether the Team's slot-0 cell holds the Team. It
-// returns false, with no error, when the Team has no placement or the
-// cell does not exist.
-func (c *ConfigCRUD) teamHeld(ctx context.Context, team *v1alpha1.Team) (bool, error) {
-	p := team.Status.Placement
-	if p == nil || p.Cell == "" {
-		return false, nil
-	}
-	cell, err := crdstore.Get[v1alpha1.Controller](ctx, c.Store, p.Cell, p.CellNamespace)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return v1alpha1.CellHoldsTenant(cell, team.Name), nil
-}
-
 // HandleBundlesTeamContent handles operator.<cluster>.bundles.teamcontent.
 // It reads the Team, its pipelines bundle ref, the ComposedBundle, and the
 // bundle's content ConfigMap from this cluster's own store.
@@ -62,9 +44,9 @@ func (c *ConfigCRUD) HandleBundlesTeamContent(data []byte) []byte {
 	if err != nil {
 		return c.configReply(bus.TeamBundleContentResponse{Code: k8sConfigErrToCode(err), Error: err.Error()})
 	}
-	// The hold is read on every reply, so Held always reports the cell's
-	// state for the Team, whether or not a bundle or its content exists.
-	held, err := c.teamHeld(ctx, team)
+	// The hold is read on every reply, so Held always reports the state of
+	// every member cell for the Team, whether or not a bundle or its content exists.
+	held, err := TeamHeld(ctx, c.Store, team)
 	if err != nil {
 		c.Logger.Error("get team cell failed", "team", req.Team, "error", err)
 		return c.configReply(bus.TeamBundleContentResponse{Code: bus.CodeInternal, Error: err.Error()})

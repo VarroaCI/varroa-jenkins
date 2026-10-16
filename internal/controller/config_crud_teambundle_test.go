@@ -224,3 +224,77 @@ func TestHandleBundlesTeamContent_OversizeReplyIsRefused(t *testing.T) {
 		t.Fatalf("reply code = %q bundle = %d bytes, want code %q and no bundle", resp.Code, len(resp.Bundle), bus.CodeInternal)
 	}
 }
+
+// placedTeamMembersHoldFixture places the Team on cell-1 with the given
+// placement members, and seeds one Controller per cells entry.
+func placedTeamMembersHoldFixture(t *testing.T, members []v1alpha1.TeamMemberStatus, cells map[string]*v1alpha1.CellStatus) *ConfigCRUD {
+	t.Helper()
+	cc := teamBundleFixture(t, "payments-content", nil)
+	st := cc.Store.(*crdstore.Fake)
+	team, err := crdstore.Get[v1alpha1.Team](context.Background(), st, "payments", "")
+	if err != nil {
+		t.Fatalf("get team: %v", err)
+	}
+	team.Status.Placement = &v1alpha1.TeamPlacementStatus{Cell: "cell-1", CellNamespace: "test-ns", Members: members}
+	if err := crdstore.Update(context.Background(), st, team); err != nil {
+		t.Fatalf("place team: %v", err)
+	}
+	for name, cs := range cells {
+		crdstore.MustSeed(st, &v1alpha1.Controller{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "test-ns"},
+			Status:     v1alpha1.ControllerStatus{Cell: cs},
+		})
+	}
+	return cc
+}
+
+func TestHandleBundlesTeamContent_HeldOnNonSlotZeroMemberAnswersHeld(t *testing.T) {
+	slot1 := int32(1)
+	cc := placedTeamMembersHoldFixture(t,
+		[]v1alpha1.TeamMemberStatus{{Cell: "cell-2", CellNamespace: "test-ns", Slot: &slot1}},
+		map[string]*v1alpha1.CellStatus{
+			"cell-1": {},
+			"cell-2": itemsHeldStatus("payments"),
+		})
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Code != "" {
+		t.Fatalf("code = %q (%s), want none", resp.Code, resp.Error)
+	}
+	if !resp.Held {
+		t.Fatal("held = false, want true: the active member cell records an ItemsHeld hold")
+	}
+}
+
+func TestHandleBundlesTeamContent_HeldOnStandbyMemberAnswersHeld(t *testing.T) {
+	cc := placedTeamMembersHoldFixture(t,
+		[]v1alpha1.TeamMemberStatus{{Cell: "cell-3", CellNamespace: "test-ns"}},
+		map[string]*v1alpha1.CellStatus{
+			"cell-1": {},
+			"cell-3": itemsHeldStatus("payments"),
+		})
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if !resp.Held {
+		t.Fatal("held = false, want true: the standby member cell records an ItemsHeld hold")
+	}
+}
+
+func TestHandleBundlesTeamContent_NoMemberHoldAnswersNotHeld(t *testing.T) {
+	slot1 := int32(1)
+	cc := placedTeamMembersHoldFixture(t,
+		[]v1alpha1.TeamMemberStatus{
+			{Cell: "cell-2", CellNamespace: "test-ns", Slot: &slot1},
+			{Cell: "cell-3", CellNamespace: "test-ns"},
+		},
+		map[string]*v1alpha1.CellStatus{
+			"cell-1": {},
+			"cell-2": {},
+			"cell-3": itemsHeldStatus("other-tenant"),
+		})
+	req, _ := json.Marshal(bus.TeamBundleContentRequest{Team: "payments"})
+	resp := decodeTeamContent(t, cc.HandleBundlesTeamContent(req))
+	if resp.Held {
+		t.Fatal("held = true, want false: no member cell holds payments")
+	}
+}

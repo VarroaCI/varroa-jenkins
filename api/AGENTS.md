@@ -69,8 +69,10 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   transition rule skips an add or a remove of the block. Both reads are `has()`-guarded.
   `CommandCRUD.HandleUpdate` mirrors the rule through `v1alpha1.IsCell`.
 
-  `cell.go` `CellHoldsTenant` is the "cell holds tenant" read for the BFF pipelines
-  read and the `bundles.teamcontent` reply. The cell's `heldTenants` scan
+  `cell.go` `CellHoldsTenant` is the per-cell "cell holds tenant" read. `cell.go`
+  `PlacementCells` is the member reading order for the hold and warning reads: the
+  condition fold and `controller.TeamHeld` (the `bundles.teamcontent` reply and the BFF
+  local read). The member list views (`orderedTeamMembers`, `memberCellRefs`) keep their own order. The cell's `heldTenants` scan
   (`cell_items_assembly.go`) repeats the same rule for the cell's own drain; change
   both together.
 

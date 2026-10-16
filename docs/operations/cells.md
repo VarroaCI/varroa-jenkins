@@ -112,7 +112,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   - the bundle is missing or not built.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A new held tenant has no
-  folder until fixed. Held folders show no job.
+  folder until fixed. A folder held on any member cell shows no job.
 - **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.

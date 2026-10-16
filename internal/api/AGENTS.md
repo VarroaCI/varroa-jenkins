@@ -479,9 +479,9 @@ federation, activity persistence, and SSE fanout.
   (`teamPipelineBundleContent`) and runs `bundle.TenantItemsManifest` (dropped-key,
   strict-parse, re-root, and `lint.CellRules` checks, as the cell does), then the
   template lint (`bundle.LintTenantTemplates`). A manifest the cell holds yields no
-  definition. The read also declares no job while `v1alpha1.CellHoldsTenant` is true
-  for the slot-0 cell. For a local Team that is the fetched `cr`. For a member Team it
-  is the `held` value of `GetTeamBundleContent`. The plugin-set, template fragment, and
+  definition. The read also declares no job while a member cell of the Team holds it.
+  For a local Team, `teamPipelineBundleSource` computes `held` through `controller.TeamHeld`
+  over every member cell. For a member Team it is the `held` value of `GetTeamBundleContent`. The plugin-set, template fragment, and
   credential checks run only on the cell, and the read follows them through that hold.
   The cell's bundle holds the cell's
   own items and never a tenant job, so reading it lists the starter bundle's
