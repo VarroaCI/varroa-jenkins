@@ -361,8 +361,8 @@ type Agent struct {
 	// RunStateAck. Mesh acks never reach it.
 	restartAckWaiters *restartAckWaiterMap
 
-	// restartAckWaitOverride replaces restartAckWait in tests. Zero means
-	// the default.
+	// restartAckWaitOverride replaces the derived restart-copy ack wait
+	// in tests. Zero means the wait derives from claimTimeout.
 	restartAckWaitOverride time.Duration
 }
 
@@ -372,7 +372,7 @@ func (a *Agent) restartAckWaitOrDefault() time.Duration {
 	if a.restartAckWaitOverride > 0 {
 		return a.restartAckWaitOverride
 	}
-	return restartAckWait
+	return restartAckWaitFor(a.claimTimeout)
 }
 
 // identityState represents the agent's identity state during the bootstrap

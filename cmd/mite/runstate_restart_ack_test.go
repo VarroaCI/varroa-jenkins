@@ -230,3 +230,49 @@ func TestRestartAckWaiterMap_ReleaseAll(t *testing.T) {
 		t.Fatal("releaseAll left waiters in the map")
 	}
 }
+
+func TestRestartAckWaitFor(t *testing.T) {
+	cases := []struct {
+		name         string
+		claimTimeout time.Duration
+		want         time.Duration
+	}{
+		{"default budget", 4500 * time.Millisecond, 4000 * time.Millisecond},
+		{"operator budget 5s", 5500 * time.Millisecond, 5000 * time.Millisecond},
+		{"small budget keeps half", 1000 * time.Millisecond, 500 * time.Millisecond},
+		{"margin below half is raised to half", 800 * time.Millisecond, 400 * time.Millisecond},
+		{"large budget capped", 20 * time.Second, 9 * time.Second},
+		{"zero uses default budget", 0, 4000 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := restartAckWaitFor(tc.claimTimeout); got != tc.want {
+				t.Fatalf("restartAckWaitFor(%v) = %v, want %v", tc.claimTimeout, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRestartAckWaitFor_NestsInsideBudget(t *testing.T) {
+	for budget := 100 * time.Millisecond; budget <= 30*time.Second; budget += 50 * time.Millisecond {
+		w := restartAckWaitFor(budget)
+		if w <= 0 || w >= budget {
+			t.Fatalf("restartAckWaitFor(%v) = %v, want a wait inside the budget", budget, w)
+		}
+		if w > restartAckWaitCap {
+			t.Fatalf("restartAckWaitFor(%v) = %v, above the cap %v", budget, w, restartAckWaitCap)
+		}
+	}
+}
+
+func TestRestartAckWaitOrDefault_DerivesFromClaimTimeout(t *testing.T) {
+	agent := newRunStateTestAgent(t)
+	agent.claimTimeout = 2 * time.Second
+	if got := agent.restartAckWaitOrDefault(); got != 1500*time.Millisecond {
+		t.Fatalf("restartAckWaitOrDefault() = %v, want 1.5s", got)
+	}
+	agent.restartAckWaitOverride = 50 * time.Millisecond
+	if got := agent.restartAckWaitOrDefault(); got != 50*time.Millisecond {
+		t.Fatalf("restartAckWaitOrDefault() with override = %v, want 50ms", got)
+	}
+}
