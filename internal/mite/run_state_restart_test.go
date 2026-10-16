@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
@@ -363,5 +364,69 @@ func TestOnRunStateChunk_RestartSourceRetriedSequenceRefundsItsBytes(t *testing.
 	h.stateMu.Unlock()
 	if pending != int64(len(gz0)) {
 		t.Fatalf("pending bytes after a retry = %d, want one copy of %d", pending, len(gz0))
+	}
+}
+
+// TestOnRunStateChunk_RestartSourceUnresolvedTenantBusyThenForeignRun proves
+// an unresolved tenant answers the restart copy BUSY inside the grace and
+// REJECTED foreign-run after it. The file is not stored.
+func TestOnRunStateChunk_RestartSourceUnresolvedTenantBusyThenForeignRun(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+	relpath := restartTestBuildPath + "build.xml"
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy || ack.Reason != stateReasonBudgetFull || !ack.RestartSource {
+		t.Fatalf("first ack = %+v, want a BUSY restart-copy ack", ack)
+	}
+
+	if restartObjectExists(t, h, runID, relpath) {
+		t.Fatal("a withheld copy wrote an object before the tenant resolved")
+	}
+
+	h.stateMu.Lock()
+	h.restartRuns[runID].tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected || ack.Reason != stateReasonForeignRun || !ack.RestartSource {
+		t.Fatalf("ack past the grace = %+v, want a REJECTED foreign-run restart-copy ack", ack)
+	}
+	h.stateMu.Lock()
+	_, stored := h.restartRuns[runID].stored[relpath]
+	h.stateMu.Unlock()
+	if stored {
+		t.Fatal("a refused copy entered the stored set")
+	}
+}
+
+// TestOnRunStateChunk_RestartSourceTenantGraceClearsOnPublish proves a
+// resolved publish of a restart-copy file clears its grace clock.
+func TestOnRunStateChunk_RestartSourceTenantGraceClearsOnPublish(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+	relpath := restartTestBuildPath + "build.xml"
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, 2, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, 2, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
+		t.Fatalf("retry ack = %+v, want STORED", ack)
+	}
+	h.stateMu.Lock()
+	cleared := h.restartRuns[runID].tenantUnresolvedSince.IsZero()
+	h.stateMu.Unlock()
+	if !cleared {
+		t.Fatal("a resolved publish did not clear the restart grace clock")
 	}
 }

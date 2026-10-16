@@ -1123,9 +1123,9 @@ func TestOnRunStateChunk_EmptyJobPathWarnsAndStillPublishes(t *testing.T) {
 
 // TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy proves a chunk whose
 // job path resolves to no tenant is not stored. The envelope publishes
-// before the push is recorded, so the unresolved tenant answers BUSY, and
-// the plugin posts the file again. No envelope publishes, and the log
-// holds both warnings.
+// before the push is recorded. The first unresolved observation answers
+// BUSY, and the plugin posts the file again inside the tenant grace. No
+// envelope publishes, and the log holds both warnings.
 func TestOnRunStateChunk_EmptyJobPathOnACellAnswersBusy(t *testing.T) {
 	sender := &recordingSender{}
 	owner := newFakeOwnerRequester()
