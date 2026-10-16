@@ -39,8 +39,9 @@ const (
 	loopbackWriteTimeout      = 10 * time.Second
 	loopbackShutdownTimeout   = 5 * time.Second
 
-	// loopbackWaitCap bounds each handler wait that holds a loopback answer.
-	// The wait must end before the write timeout of the listener stops the reply.
+	// loopbackWaitCap bounds each handler wait that holds a loopback answer,
+	// counted from handler entry. The write deadline of the listener starts
+	// when the request headers are read, so the wait must end before it.
 	loopbackWaitCap = loopbackWriteTimeout - time.Second
 
 	maxClaimWaiters       = 64
@@ -159,9 +160,9 @@ func claimTimeoutFromEnv() time.Duration {
 	return time.Duration(envOrInt("MITE_CLAIM_TIMEOUT_MS", defaultClaimTimeoutMS)) * time.Millisecond
 }
 
-// claimWaitFor returns how long /v1/claim waits for a ClaimResponse. The wait
-// is the claim budget and never more than loopbackWaitCap. A budget of zero
-// or less uses the default budget.
+// claimWaitFor returns the full wait for a ClaimResponse: the claim budget,
+// never more than loopbackWaitCap. A budget of zero or less uses the default
+// budget. The handler counts this wait from its entry through loopbackWaitLeft.
 func claimWaitFor(claimTimeout time.Duration) time.Duration {
 	if claimTimeout <= 0 {
 		claimTimeout = defaultClaimTimeoutMS * time.Millisecond
@@ -170,6 +171,21 @@ func claimWaitFor(claimTimeout time.Duration) time.Duration {
 		return loopbackWaitCap
 	}
 	return claimTimeout
+}
+
+// loopbackWaitLeft returns how long a loopback handler may still wait for a
+// stream reply. The listener's write deadline starts before the handler
+// runs, so the wait counts from entry: it is want, capped at
+// loopbackWaitCap, minus the time since entry, and never below zero.
+func loopbackWaitLeft(entry, now time.Time, want time.Duration) time.Duration {
+	if want > loopbackWaitCap {
+		want = loopbackWaitCap
+	}
+	left := want - now.Sub(entry)
+	if left < 0 {
+		return 0
+	}
+	return left
 }
 
 // logClaimWaitClamp logs one WARNING when the claim budget is above
@@ -595,6 +611,7 @@ func writeDecodeStatus(w http.ResponseWriter, err error) {
 
 // handleClaim serves POST /v1/claim.
 func (a *Agent) handleClaim(w http.ResponseWriter, r *http.Request) {
+	entry := time.Now()
 	ctx := r.Context()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -635,7 +652,7 @@ func (a *Agent) handleClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timer := time.NewTimer(claimWaitFor(a.claimTimeout))
+	timer := time.NewTimer(loopbackWaitLeft(entry, time.Now(), claimWaitFor(a.claimTimeout)))
 	defer timer.Stop()
 
 	select {
@@ -677,8 +694,9 @@ func (a *Agent) crossTenantHandler(route string) http.HandlerFunc {
 // decode or whose kind is outside allowedKinds, 401 for a wrong bearer,
 // 413 for a body over the shared 1 MiB cap, 429 above the 64-waiter cap,
 // 503 when the command stream is down, and 504 after the mite's wait
-// budget elapses with no reply.
+// budget, counted from handler entry, elapses with no reply.
 func (a *Agent) handleCrossTenant(w http.ResponseWriter, r *http.Request, allowedKinds map[string]bool) {
+	entry := time.Now()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -721,7 +739,7 @@ func (a *Agent) handleCrossTenant(w http.ResponseWriter, r *http.Request, allowe
 		return
 	}
 
-	timer := time.NewTimer(a.crossTenantTimeout)
+	timer := time.NewTimer(loopbackWaitLeft(entry, time.Now(), a.crossTenantTimeout))
 	defer timer.Stop()
 
 	select {
