@@ -224,12 +224,16 @@ type BusHandler struct {
 	// before it writes one byte.
 	ownerCache *ownerCache
 
-	// stateMu guards stateRuns and the gateway-wide run-state pending
-	// counter. It is separate from logMu, so a run-state push never
-	// contends with the console-log append path.
-	stateMu                sync.Mutex
-	stateRuns              map[string]*runStateEntry      // keyed by run_id
-	restartRuns            map[string]*restartSourceEntry // restart copies, keyed by run_id
+	// stateMu guards stateRuns, restartRuns, tenantGrace, and the
+	// gateway-wide run-state pending counter. It is separate from logMu,
+	// so a run-state push never contends with the console-log append path.
+	stateMu     sync.Mutex
+	stateRuns   map[string]*runStateEntry      // keyed by run_id
+	restartRuns map[string]*restartSourceEntry // restart copies, keyed by run_id
+	// tenantGrace holds the unresolved-tenant grace clock of each run and
+	// each restart copy. It outlives the run-state entries: a mite
+	// reconnect drops the entries, and the clock must not restart.
+	tenantGrace            map[tenantGraceKey]time.Time
 	stateTotalPendingBytes int64
 	// stateBudgetCrossedAt is when the gateway-wide run-state pending
 	// bound was first crossed. It grows the busy pause on the log
@@ -360,6 +364,7 @@ func NewBusHandler(mp metric.MeterProvider, cluster string, conn *bus.Conn, snap
 		tenantResolver:             defaultCellTenantResolver{},
 		logRuns:                    make(map[string]*runLogState),
 		stateRuns:                  make(map[string]*runStateEntry),
+		tenantGrace:                make(map[tenantGraceKey]time.Time),
 		ownerCache:                 newOwnerCache(0),
 		tailLeases:                 make(map[string]*runTailLease),
 		tailErrors:                 make(map[string]tailErrorEntry),
@@ -1241,7 +1246,8 @@ func (h *BusHandler) OnDisconnect(name, ns string, token int64) {
 
 	// stateMu is independent of h.mu too. A disconnect ends every push
 	// this cell had in flight, and without this drop each entry lives
-	// for the whole gateway lifetime.
+	// for the whole gateway lifetime. The tenant grace clocks stay. They
+	// belong to the run, not to the connection.
 	h.dropCellStateEntries(ns, name)
 
 	if cancel, ok := h.cancels[key]; ok {

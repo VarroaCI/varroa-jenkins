@@ -388,7 +388,7 @@ func TestOnRunStateChunk_RestartSourceUnresolvedTenantBusyThenForeignRun(t *test
 	}
 
 	h.stateMu.Lock()
-	h.restartRuns[runID].tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.tenantGrace[tenantGraceKey{runID: runID, restart: true}] = time.Now().Add(-(runStateTenantGrace + time.Second))
 	h.stateMu.Unlock()
 
 	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
@@ -424,7 +424,8 @@ func TestOnRunStateChunk_RestartSourceTenantGraceClearsOnPublish(t *testing.T) {
 		t.Fatalf("retry ack = %+v, want STORED", ack)
 	}
 	h.stateMu.Lock()
-	cleared := h.restartRuns[runID].tenantUnresolvedSince.IsZero()
+	_, present := h.tenantGrace[tenantGraceKey{runID: runID, restart: true}]
+	cleared := !present
 	h.stateMu.Unlock()
 	if !cleared {
 		t.Fatal("a resolved publish did not clear the restart grace clock")
@@ -448,7 +449,7 @@ func TestBufferRestartSourceChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 		t.Fatalf("first ack = %+v, want BUSY", ack)
 	}
 	h.stateMu.Lock()
-	since := h.restartRuns[runID].tenantUnresolvedSince
+	since := h.tenantGrace[tenantGraceKey{runID: runID, restart: true}]
 	h.stateMu.Unlock()
 	if since.IsZero() {
 		t.Fatal("the first unresolved answer did not start the grace clock")
@@ -459,9 +460,8 @@ func TestBufferRestartSourceChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 		t.Fatalf("re-post ack inside the grace = %+v, want BUSY", ack)
 	}
 	h.stateMu.Lock()
-	e := h.restartRuns[runID]
-	epoch, kept := e.epoch, e.tenantUnresolvedSince
-	e.tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	epoch, kept := h.restartRuns[runID].epoch, h.tenantGrace[tenantGraceKey{runID: runID, restart: true}]
+	h.tenantGrace[tenantGraceKey{runID: runID, restart: true}] = time.Now().Add(-(runStateTenantGrace + time.Second))
 	h.stateMu.Unlock()
 	if epoch != 200 {
 		t.Fatalf("copy epoch = %d, want 200", epoch)
@@ -473,5 +473,43 @@ func TestBufferRestartSourceChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 300, 1, 1, []byte("x")))
 	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected {
 		t.Fatalf("re-post ack past the grace = %+v, want REJECTED", ack)
+	}
+}
+
+// TestDropCellStateEntries_KeepsRestartTenantGraceClock proves a mite
+// reconnect drops a restart copy's entry but keeps its grace clock.
+func TestDropCellStateEntries_KeepsRestartTenantGraceClock(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+	relpath := restartTestBuildPath + "build.xml"
+	restartKey := tenantGraceKey{runID: runID, restart: true}
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+
+	h.dropCellStateEntries("ns1", "cell1")
+	h.stateMu.Lock()
+	_, entryKept := h.restartRuns[runID]
+	_, clockKept := h.tenantGrace[restartKey]
+	h.stateMu.Unlock()
+	if entryKept {
+		t.Fatal("the reconnect kept the restart copy entry")
+	}
+	if !clockKept {
+		t.Fatal("the reconnect dropped the restart copy's grace clock")
+	}
+
+	h.stateMu.Lock()
+	h.tenantGrace[restartKey] = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected || !ack.RestartSource {
+		t.Fatalf("ack after the reconnect past the grace = %+v, want a REJECTED restart-copy ack", ack)
 	}
 }

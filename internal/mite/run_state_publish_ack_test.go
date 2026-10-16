@@ -197,7 +197,7 @@ func TestOnRunStateChunk_UnresolvedTenantPastGraceAnswersForeignRun(t *testing.T
 	}
 
 	h.stateMu.Lock()
-	h.stateRuns[runID].tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.tenantGrace[tenantGraceKey{runID: runID}] = time.Now().Add(-(runStateTenantGrace + time.Second))
 	h.stateMu.Unlock()
 
 	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 2, []byte("hello")))
@@ -232,7 +232,7 @@ func TestOnRunStateChunk_UnresolvedTenantHealsInsideGrace(t *testing.T) {
 	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
 	h.OnRunStateChunk("cell1", "ns1", chunk)
 	h.stateMu.Lock()
-	started := !h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	_, started := h.tenantGrace[tenantGraceKey{runID: runID}]
 	h.stateMu.Unlock()
 	if !started {
 		t.Fatal("the first unresolved observation did not start the grace clock")
@@ -247,7 +247,8 @@ func TestOnRunStateChunk_UnresolvedTenantHealsInsideGrace(t *testing.T) {
 		t.Fatalf("published %d envelopes, want 1", got)
 	}
 	h.stateMu.Lock()
-	cleared := h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	_, present := h.tenantGrace[tenantGraceKey{runID: runID}]
+	cleared := !present
 	h.stateMu.Unlock()
 	if !cleared {
 		t.Fatal("a resolved publish did not clear the grace clock")
@@ -270,7 +271,7 @@ func TestOnRunStateChunk_PublishFailureNeverStartsTenantGrace(t *testing.T) {
 		t.Fatalf("ack = %+v, want BUSY gateway-budget-full", ack)
 	}
 	h.stateMu.Lock()
-	started := !h.stateRuns[runID].tenantUnresolvedSince.IsZero()
+	_, started := h.tenantGrace[tenantGraceKey{runID: runID}]
 	h.stateMu.Unlock()
 	if started {
 		t.Fatal("a publish failure started the tenant grace clock")
@@ -296,7 +297,7 @@ func TestBufferRunStateChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 		t.Fatalf("first ack = %+v, want BUSY", ack)
 	}
 	h.stateMu.Lock()
-	since := h.stateRuns[runID].tenantUnresolvedSince
+	since := h.tenantGrace[tenantGraceKey{runID: runID}]
 	h.stateMu.Unlock()
 	if since.IsZero() {
 		t.Fatal("the first unresolved answer did not start the grace clock")
@@ -309,9 +310,8 @@ func TestBufferRunStateChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 		t.Fatalf("newer-epoch ack inside the grace = %+v, want BUSY", ack)
 	}
 	h.stateMu.Lock()
-	e := h.stateRuns[runID]
-	epoch, kept := e.newestEpoch, e.tenantUnresolvedSince
-	e.tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	epoch, kept := h.stateRuns[runID].newestEpoch, h.tenantGrace[tenantGraceKey{runID: runID}]
+	h.tenantGrace[tenantGraceKey{runID: runID}] = time.Now().Add(-(runStateTenantGrace + time.Second))
 	h.stateMu.Unlock()
 	if epoch != oneChunkEpoch+1 {
 		t.Fatalf("newest epoch = %d, want %d", epoch, oneChunkEpoch+1)
@@ -325,5 +325,149 @@ func TestBufferRunStateChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
 	h.OnRunStateChunk("cell1", "ns1", newest)
 	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected {
 		t.Fatalf("newer-epoch ack past the grace = %+v, want REJECTED", ack)
+	}
+}
+
+// TestDropCellStateEntries_KeepsMeshTenantGraceClock proves a mite
+// reconnect drops the run's entry but keeps its grace clock. A reconnect
+// must not restart the grace.
+func TestDropCellStateEntries_KeepsMeshTenantGraceClock(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	pub := &fakePublisher{}
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	const relpath = "jobs/team/builds/1/build.xml"
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 1, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+
+	h.dropCellStateEntries("ns1", "cell1")
+	h.stateMu.Lock()
+	_, entryKept := h.stateRuns[runID]
+	_, clockKept := h.tenantGrace[tenantGraceKey{runID: runID}]
+	h.stateMu.Unlock()
+	if entryKept {
+		t.Fatal("the reconnect kept the run-state entry")
+	}
+	if !clockKept {
+		t.Fatal("the reconnect dropped the mesh grace clock")
+	}
+
+	h.stateMu.Lock()
+	h.tenantGrace[tenantGraceKey{runID: runID}] = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, relpath, 2, []byte("hello")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected {
+		t.Fatalf("ack after the reconnect past the grace = %+v, want REJECTED", ack)
+	}
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("published %d envelopes, want none", got)
+	}
+}
+
+// TestOnRunStateChunk_TenantResolvedAfterReconnectClearsGrace proves a
+// tenant that resolves after a reconnect stores the file and clears the
+// grace clock.
+func TestOnRunStateChunk_TenantResolvedAfterReconnectClearsGrace(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	pub := &fakePublisher{}
+	h.publisher = pub
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	const relpath = "jobs/team/builds/1/build.xml"
+	chunk := oneChunk(runID, relpath, 1, []byte("hello"))
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+	h.dropCellStateEntries("ns1", "cell1")
+
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{"team/pipeline": {tenant: "team"}}})
+	h.OnRunStateChunk("cell1", "ns1", chunk)
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusStored {
+		t.Fatalf("ack after the tenant resolved = %+v, want STORED", ack)
+	}
+	h.stateMu.Lock()
+	_, present := h.tenantGrace[tenantGraceKey{runID: runID}]
+	h.stateMu.Unlock()
+	if present {
+		t.Fatal("a resolved publish after a reconnect kept the grace clock")
+	}
+}
+
+// TestDropStateEntry_ClearsMeshTenantGraceClock proves a terminal drop
+// clears the run's mesh clock and leaves the restart copy's clock.
+func TestDropStateEntry_ClearsMeshTenantGraceClock(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	runID := newTestRunID()
+	owner.setAnswer(runID, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(runID, "jobs/team/builds/1/build.xml", 1, []byte("hello")))
+	restartKey := tenantGraceKey{runID: runID, restart: true}
+	h.stateMu.Lock()
+	h.tenantGrace[restartKey] = time.Now()
+	h.stateMu.Unlock()
+
+	h.dropStateEntry(runID)
+	h.stateMu.Lock()
+	_, meshKept := h.tenantGrace[tenantGraceKey{runID: runID}]
+	_, restartKept := h.tenantGrace[restartKey]
+	h.stateMu.Unlock()
+	if meshKept {
+		t.Fatal("the terminal drop kept the mesh grace clock")
+	}
+	if !restartKept {
+		t.Fatal("the terminal drop cleared the restart copy's grace clock")
+	}
+}
+
+// TestUnresolvedTenantGrace_SweepsOldClocks proves a clock older than the
+// retention bound is swept on the next grace answer, and a fresh clock is
+// kept.
+func TestUnresolvedTenantGrace_SweepsOldClocks(t *testing.T) {
+	sender := &recordingSender{}
+	owner := newFakeOwnerRequester()
+	newRun := newTestRunID()
+	owner.setAnswer(newRun, ownerLookupResponse{Found: true, Cluster: "core", Namespace: "ns1", Cell: "cell1", Instance: "inst1"})
+	h := newRunStateTestHandler(t, owner, sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+
+	now := time.Now()
+	oldKey := tenantGraceKey{runID: "old"}
+	freshKey := tenantGraceKey{runID: "fresh"}
+	h.stateMu.Lock()
+	h.tenantGrace = map[tenantGraceKey]time.Time{}
+	h.tenantGrace[oldKey] = now.Add(-(tenantGraceRetain + time.Second))
+	h.tenantGrace[freshKey] = now.Add(-time.Second)
+	h.stateMu.Unlock()
+
+	h.OnRunStateChunk("cell1", "ns1", oneChunk(newRun, "jobs/team/builds/1/build.xml", 1, []byte("hello")))
+
+	h.stateMu.Lock()
+	_, oldKept := h.tenantGrace[oldKey]
+	_, freshKept := h.tenantGrace[freshKey]
+	_, newKept := h.tenantGrace[tenantGraceKey{runID: newRun}]
+	h.stateMu.Unlock()
+	if oldKept {
+		t.Fatal("the sweep kept a clock older than the retention bound")
+	}
+	if !freshKept {
+		t.Fatal("the sweep dropped a fresh clock")
+	}
+	if !newKept {
+		t.Fatal("the new run's clock was not recorded")
 	}
 }
