@@ -678,9 +678,12 @@ the root AGENTS.md greenfield rule.
   with the rule `VarroaLogStorageFactory.parseActivationUrl` applies. A refusal
   reason decides what happens next: `state-cap` and `foreign-run` stop the
   build's pushes, `incomplete` and `malformed` drop the record and keep
-  pushing, and `gateway-budget-full` waits the named pause. Every other
-  answer, and every transport failure, **keeps** the spooled record for a
-  later window: only an answer a retry cannot change may drop it. The
+  pushing, and `gateway-budget-full` waits the named pause. A mite answer of
+  4xx, other than 401, 403, 408, 409, or 429, drops the record with a WARNING
+  line and keeps pushing. A zero-byte file is not posted, because the mite and
+  the gateway both refuse it. Every other answer, and every transport failure,
+  **keeps** the spooled record for a later window: only an answer a retry cannot
+  change may drop it. The
   replay runs before the generation increments, and a record is dropped
   only when the spool holds a newer generation of the same path: a
   counter that moved is not supersession. A window that cannot drain the
@@ -721,7 +724,7 @@ the root AGENTS.md greenfield rule.
   `copy_bytes`. Counters: `varroa_plugin_restart_source_kept` and
   `varroa_plugin_restart_source_dropped`. Kept means the gateway answered
   `STORED` for every chunk of every file. A refused chunk, including the last
-  one, counts as dropped.
+  one, counts as dropped. A permanent 4xx stops the copy at once.
   Every post carries `PUSHER_EPOCH`, the JVM start time, which names this
   Jenkins process to the gateway: the push generation counts inside one
   process and starts again after a restart. A flow

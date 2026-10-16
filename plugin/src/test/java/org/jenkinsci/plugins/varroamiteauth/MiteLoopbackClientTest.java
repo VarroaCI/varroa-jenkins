@@ -271,4 +271,69 @@ public class MiteLoopbackClientTest {
         }
         return captured;
     }
+
+    @Test
+    public void postRunStateCarriesTheReasonlessStatusAndTheFirst200BytesOfTheBody() throws Exception {
+        String longBody = "x".repeat(300);
+        server.createContext("/v1/run-state", exchange -> {
+            exchange.getRequestBody().transferTo(java.io.OutputStream.nullOutputStream());
+            byte[] out = longBody.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400, out.length);
+            try (java.io.OutputStream os = exchange.getResponseBody()) {
+                os.write(out);
+            }
+            exchange.close();
+        });
+
+        JSONObject record = new JSONObject();
+        record.put("run_id", "run-1");
+        record.put("job_path", "alpha/job1");
+        record.put("build_number", 7L);
+        record.put("relpath", "build.xml");
+        record.put("state_gen", 1L);
+        record.put("seq", 0L);
+        record.put("total", 1L);
+        record.put("raw_size", 3L);
+        record.put("object_size", 3L);
+        record.put("pusher_epoch", 1L);
+
+        MiteLoopbackClient.RunStateAnswer answer = client().postRunState(
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1/run-state", record, new byte[] {1, 2, 3});
+
+        assertEquals(400, answer.statusCode);
+        assertEquals(null, answer.reason);
+        assertEquals(MiteLoopbackClient.BODY_PREFIX_BYTES, answer.body.length());
+    }
+
+    @Test
+    public void runStateBodyPrefixDropsAMultiByteSequenceCutByTheLimit() throws Exception {
+        // 199 ASCII bytes, then two-byte characters: the 200-byte cut lands inside one.
+        String body = "a".repeat(199) + "\u00e9".repeat(5);
+        server.createContext("/v1/run-state", exchange -> {
+            exchange.getRequestBody().transferTo(java.io.OutputStream.nullOutputStream());
+            byte[] out = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400, out.length);
+            try (java.io.OutputStream os = exchange.getResponseBody()) {
+                os.write(out);
+            }
+            exchange.close();
+        });
+
+        JSONObject record = new JSONObject();
+        record.put("run_id", "run-1");
+        record.put("job_path", "alpha/job1");
+        record.put("build_number", 7L);
+        record.put("relpath", "build.xml");
+        record.put("state_gen", 1L);
+        record.put("seq", 0L);
+        record.put("total", 1L);
+        record.put("raw_size", 3L);
+        record.put("object_size", 3L);
+        record.put("pusher_epoch", 1L);
+
+        MiteLoopbackClient.RunStateAnswer answer = client().postRunState(
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1/run-state", record, new byte[] {1, 2, 3});
+
+        assertEquals("a".repeat(199), answer.body);
+    }
 }

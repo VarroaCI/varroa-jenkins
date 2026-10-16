@@ -37,6 +37,9 @@ public class MiteLoopbackClient {
     /** Read budget (D6): 5 s by default, overridden by {@code VARROA_CLAIM_TIMEOUT_MS}. */
     private static final long DEFAULT_READ_TIMEOUT_MILLIS = 5000L;
 
+    /** The most body bytes a run-state answer keeps for its log line. */
+    static final int BODY_PREFIX_BYTES = 200;
+
     /** Cross-tenant connect budget (D14): 1 s by default. */
     private static final long DEFAULT_CROSSTENANT_CONNECT_TIMEOUT_MILLIS = 1000L;
 
@@ -237,15 +240,30 @@ public class MiteLoopbackClient {
             String reason = resp.headers().firstValue("X-Varroa-State-Reason").orElse(null);
             long pause = resp.headers().firstValue("X-Varroa-Pause-Ms")
                     .map(MiteLoopbackClient::parseLongOrZero).orElse(0L);
-            return new RunStateAnswer(resp.statusCode(), reason, pause);
+            return new RunStateAnswer(resp.statusCode(), reason, pause, bodyPrefix(resp.body()));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOGGER.log(Level.FINE, "MiteLoopbackClient: interrupted posting a run-state chunk", e);
-            return new RunStateAnswer(0, null, 0);
+            return new RunStateAnswer(0, null, 0, null);
         } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.FINE, "MiteLoopbackClient: failed to post a run-state chunk", e);
-            return new RunStateAnswer(0, null, 0);
+            return new RunStateAnswer(0, null, 0, null);
         }
+    }
+
+    /** The first {@value #BODY_PREFIX_BYTES} bytes of an answer body as UTF-8, or null when it has none. */
+    private static String bodyPrefix(byte[] body) {
+        if (body == null || body.length == 0) {
+            return null;
+        }
+        int end = Math.min(BODY_PREFIX_BYTES, body.length);
+        // A cut inside a multi-byte sequence drops that partial sequence.
+        if (end < body.length) {
+            while (end > 0 && (body[end] & 0xC0) == 0x80) {
+                end--;
+            }
+        }
+        return new String(body, 0, end, StandardCharsets.UTF_8);
     }
 
     private static long parseLongOrZero(String raw) {
@@ -256,16 +274,19 @@ public class MiteLoopbackClient {
         }
     }
 
-    /** One run-state post's outcome: a status code and the mite's reason. */
+    /** One run-state post's outcome: a status code, the mite's reason, and the start of its body. */
     public static final class RunStateAnswer {
         public final int statusCode;
         public final String reason;
         public final long pauseMillis;
+        /** The first bytes of the answer body as UTF-8, or null when the answer had none. */
+        public final String body;
 
-        public RunStateAnswer(int statusCode, String reason, long pauseMillis) {
+        public RunStateAnswer(int statusCode, String reason, long pauseMillis, String body) {
             this.statusCode = statusCode;
             this.reason = reason;
             this.pauseMillis = pauseMillis;
+            this.body = body;
         }
     }
 

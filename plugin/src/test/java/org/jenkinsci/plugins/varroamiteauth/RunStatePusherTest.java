@@ -807,6 +807,142 @@ public class RunStatePusherTest {
         assertEquals("the built-in node is never a resumable agent", 0, nodePosts(sender).size());
     }
 
+    @Test
+    public void aMite400DropsTheRecordAndTheWindowContinues() throws Exception {
+        Path rootDir = tmp.newFolder("run-400").toPath();
+        Path workflow = Files.createDirectories(rootDir.resolve("workflow"));
+        Files.writeString(workflow.resolve("1.xml"), "<flow/>");
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+        Files.writeString(rootDir.resolve(RunStatePusher.BUILD_XML), "<build/>");
+
+        FakeSender sender = new FakeSender();
+        sender.answerOnce(RunStatePusher.RunStateSender.Answer.refused(400, null, 0, "malformed run-state headers"));
+        RunSpool spool = newSpool("spool-400");
+        RunStatePusher pusher = newPusher(rootDir, sender, spool);
+
+        Logger logger = Logger.getLogger(RunStatePusher.class.getName());
+        Level originalLevel = logger.getLevel();
+        TestLogHandler handler = new TestLogHandler();
+        handler.setLevel(Level.ALL);
+        logger.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        try {
+            pusher.runWindow();
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(originalLevel);
+        }
+
+        assertEquals("the window keeps posting the remaining files", 3, sender.postCount());
+        assertTrue("the spool must drop the refused record", spool.readRunStateOrdered(RUN_ID).isEmpty());
+        assertFalse("a permanent 4xx must not stop the run's pushes", pusher.stoppedForTesting());
+        assertEquals("a permanent 4xx must not back off the window",
+                RunStatePusher.WINDOW_MILLIS, pusher.retryDelayForTesting());
+        assertTrue("the window must re-arm for the next generation", pusher.refreshArmedForTesting());
+
+        List<LogRecord> warnings = handler.records.stream()
+                .filter(r -> r.getLevel() == Level.WARNING).collect(java.util.stream.Collectors.toList());
+        assertEquals("the drop must log exactly one WARNING line", 1, warnings.size());
+        String message = new java.util.logging.SimpleFormatter().formatMessage(warnings.get(0));
+        assertTrue(message, message.contains(RUN_ID));
+        assertTrue(message, message.contains("workflow/1.xml"));
+        assertTrue(message, message.contains("400"));
+        assertTrue(message, message.contains("malformed run-state headers"));
+    }
+
+    @Test
+    public void aKeptRecordThatGetsA400OnReplayIsDroppedAndTheWindowContinues() throws Exception {
+        Path rootDir = tmp.newFolder("run-400-replay").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+
+        FakeSender sender = new FakeSender();
+        RunSpool spool = newSpool("spool-400-replay");
+        RunStatePusher pusher = newPusher(rootDir, sender, spool);
+
+        sender.alwaysAnswer(RunStatePusher.RunStateSender.Answer.refused("transport", 0));
+        pusher.runWindow();
+        assertEquals("the transport failure keeps its record", 1, spool.readRunStateOrdered(RUN_ID).size());
+
+        sender.clear();
+        sender.answerOnce(RunStatePusher.RunStateSender.Answer.refused(400, null, 0, null));
+        sender.alwaysAnswer(RunStatePusher.RunStateSender.Answer.accepted());
+        pusher.runWindow();
+
+        assertTrue("the window must go on after the replayed record's 400", sender.postCount() > 0);
+        assertTrue("the refused replay must leave the spool", spool.readRunStateOrdered(RUN_ID).isEmpty());
+    }
+
+    @Test
+    public void aMite401KeepsTheRecordAndStopsTheWindow() throws Exception {
+        Path rootDir = tmp.newFolder("run-401").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+        Files.writeString(rootDir.resolve(RunStatePusher.BUILD_XML), "<build/>");
+
+        FakeSender sender = new FakeSender();
+        sender.alwaysAnswer(RunStatePusher.RunStateSender.Answer.refused(401, null, 0, null));
+        RunSpool spool = newSpool("spool-401");
+        RunStatePusher pusher = newPusher(rootDir, sender, spool);
+
+        pusher.runWindow();
+        assertEquals("a 401 stops the window at its first record", 1, sender.postCount());
+        assertEquals("a 401 keeps the record", 1, spool.readRunStateOrdered(RUN_ID).size());
+        assertFalse("a 401 is not a state cap", pusher.stoppedForTesting());
+
+        sender.clear();
+        sender.alwaysAnswer(RunStatePusher.RunStateSender.Answer.accepted());
+        pusher.runWindow();
+        assertTrue("the kept record is posted again", sender.postCount() >= 1);
+        assertTrue("the accepted replay drains the spool", spool.readRunStateOrdered(RUN_ID).isEmpty());
+    }
+
+    @Test
+    public void a503WithNoReasonKeepsTheRecord() throws Exception {
+        Path rootDir = tmp.newFolder("run-503").toPath();
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+
+        FakeSender sender = new FakeSender();
+        sender.alwaysAnswer(RunStatePusher.RunStateSender.Answer.refused(503, null, 0, null));
+        RunSpool spool = newSpool("spool-503");
+        RunStatePusher pusher = newPusher(rootDir, sender, spool);
+
+        pusher.runWindow();
+        assertEquals("a 5xx with no reason keeps the record", 1, spool.readRunStateOrdered(RUN_ID).size());
+        assertFalse(pusher.stoppedForTesting());
+    }
+
+    @Test
+    public void permanentStatusClassifiesMiteAnswers() {
+        for (int status : new int[] {400, 404, 405, 413, 414, 422, 431}) {
+            assertTrue("status " + status + " is permanent", RunStatePusher.permanentStatus(status));
+        }
+        for (int status : new int[] {0, 200, 202, 401, 403, 408, 409, 429, 500, 503}) {
+            assertFalse("status " + status + " is not permanent", RunStatePusher.permanentStatus(status));
+        }
+    }
+
+    @Test
+    public void aZeroByteFileIsNotPosted() throws Exception {
+        Path rootDir = tmp.newFolder("run-zero").toPath();
+        Path workflow = Files.createDirectories(rootDir.resolve("workflow"));
+        Files.writeString(rootDir.resolve(RunStatePusher.PROGRAM_DAT), "program-bytes");
+        Path empty = workflow.resolve("2.xml");
+        Files.write(empty, new byte[0]);
+
+        FakeSender sender = new FakeSender();
+        RunStatePusher pusher = newPusher(rootDir, sender, newSpool("spool-zero"));
+
+        pusher.runWindow();
+        assertEquals("only the non-empty file is posted", 1, sender.postCount());
+        assertTrue(sender.posts().get(0).getString("relpath").endsWith(RunStatePusher.PROGRAM_DAT));
+
+        // A later non-empty write must still push: the empty file wrote no marker.
+        Files.writeString(empty, "<flow/>");
+        sender.clear();
+        pusher.runWindow();
+        assertTrue("the rewritten file must be posted in the next window", sender.posts().stream()
+                .anyMatch(r -> r.getString("relpath").endsWith("workflow/2.xml")));
+    }
+
     private static final class FakeSender implements RunStatePusher.RunStateSender {
 
         private final List<JSONObject> posts = new CopyOnWriteArrayList<>();
