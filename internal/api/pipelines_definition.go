@@ -118,9 +118,8 @@ func (s *Server) controllerBundleContent(ctx context.Context, ref TenantRef) (*v
 // its content ConfigMap, named by Team.spec.pipelines.composedBundleRef.
 // A Team that the local store does not hold, and that ref.Cluster names
 // as a member, is read live from that member, and the member reports
-// whether its cell holds the Team. A local Team always returns held false:
-// the local hold comes from the cell object that controllerItemManifest
-// fetches. It returns a nil bundle and a nil map, with no error, when the
+// whether any of its member cells holds the Team. A local Team reports the
+// same hold through controller.TeamHeld. It returns a nil bundle and a nil map, with no error, when the
 // Team, its pipelines spec, its bundle ref, or the bundle's ConfigMap
 // cannot be found: a tenant with no catalog template still serves
 // record-derived data alone.
@@ -154,7 +153,11 @@ func (s *Server) teamPipelineBundleSource(ctx context.Context, ref TenantRef) (*
 	}
 	bundleRef := team.Spec.Pipelines.ComposedBundleRef
 	cb, cm, err := s.composedBundleContent(ctx, bundleRef.Name, bundleRef.Namespace)
-	return cb, cm, false, "", err
+	if err != nil || cm == nil || !s.isLocalCluster(ref.Cluster) {
+		return cb, cm, false, "", err
+	}
+	held, err := controller.TeamHeld(ctx, s.deps.Store, team)
+	return cb, cm, held, "", err
 }
 
 // memberTeamBundleContent reads a Team that only a member cluster holds,
@@ -212,7 +215,8 @@ func (s *Server) tenantController(ctx context.Context, ref TenantRef, holder str
 // It runs bundle.TenantItemsManifest (the dropped-key, strict-parse,
 // re-root, and cell-lint checks) and the template lint, as the cell does.
 // It declares no job when either check fails, or when the tenant's cell
-// records an ItemsHeld hold for the tenant (v1alpha1.CellHoldsTenant). The
+// records an ItemsHeld hold for the tenant on any member cell (see
+// controller.TeamHeld). The
 // plugin-set, template fragment, and credential checks run only on the
 // cell, and the read follows them through that hold. The gate
 // is ref.Folder, so a placed Team with no local controller is covered. A synthetic
@@ -265,12 +269,9 @@ func (s *Server) tenantItemManifest(ctx context.Context, ref TenantRef) (*v1alph
 		return cr, cb, holder, nil, nil
 	}
 	if ref.Folder != "" {
-		// A member-placed Team reports its hold through the teamcontent
-		// reply. A local Team reads the hold from its cell. The isLocalCluster
-		// guard stops a same-named local Controller from answering for a member cell.
-		if s.isLocalCluster(ref.Cluster) && v1alpha1.CellHoldsTenant(cr, ref.Team) {
-			held = true
-		}
+		// The hold comes from teamPipelineBundleSource: for a local Team
+		// through controller.TeamHeld, for a member Team through the
+		// teamcontent reply.
 		if held {
 			s.deps.Logger.Debug("the cell holds the tenant; declaring no job", "team", ref.Team)
 			return cr, cb, holder, nil, nil

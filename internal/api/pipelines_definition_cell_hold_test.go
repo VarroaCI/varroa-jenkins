@@ -4,8 +4,11 @@ import (
 	"context"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
@@ -308,5 +311,79 @@ func TestListPipelines_PlacedTeamCellHoldDeclaresNoJob(t *testing.T) {
 	resp := listPipelinesFor(t, srv, "payments")
 	if got := kindOf(t, resp, "payments/job"); got != "unknown" {
 		t.Fatalf("kind = %q, want unknown: the held tenant declares no job", got)
+	}
+}
+
+// newPlacedTeamMembersFixture places payments with an active slot-1 member on
+// cell-2 and a standby member on cell-3, both in test-ns, and cell-1 as slot 0.
+func newPlacedTeamMembersFixture(t *testing.T) *fakeResourceClient {
+	t.Helper()
+	client := newPlacedTeamFixture(t)
+	client.controllers["cell-2"] = &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell-2", Namespace: "test-ns"}}
+	client.controllers["cell-3"] = &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "cell-3", Namespace: "test-ns"}}
+	team, err := crdstore.Get[v1alpha1.Team](context.Background(), client.crdStore, "payments", "")
+	if err != nil {
+		t.Fatalf("get team: %v", err)
+	}
+	slot1 := int32(1)
+	team.Status.Placement.Members = []v1alpha1.TeamMemberStatus{
+		{Cell: "cell-1", CellNamespace: "test-ns", Slot: new(int32)},
+		{Cell: "cell-2", CellNamespace: "test-ns", Slot: &slot1},
+		{Cell: "cell-3", CellNamespace: "test-ns"},
+	}
+	if err := crdstore.Update(context.Background(), client.crdStore, team); err != nil {
+		t.Fatalf("place team members: %v", err)
+	}
+	return client
+}
+
+// TestControllerItemManifest_PlacedTeamHeldOnNonSlotZeroMemberGivesNoManifest
+// asserts a hold on an active member cell other than slot 0 gives no manifest.
+func TestControllerItemManifest_PlacedTeamHeldOnNonSlotZeroMemberGivesNoManifest(t *testing.T) {
+	client := newPlacedTeamMembersFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-2"].Status.Cell = itemsHeldOn("payments")
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: a member cell holds the tenant", manifest)
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamHeldOnStandbyMemberGivesNoManifest
+// asserts a hold on a standby member cell gives no manifest.
+func TestControllerItemManifest_PlacedTeamHeldOnStandbyMemberGivesNoManifest(t *testing.T) {
+	client := newPlacedTeamMembersFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-3"].Status.Cell = itemsHeldOn("payments")
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest != nil {
+		t.Fatalf("manifest = %+v, want nil: a standby cell holds the tenant", manifest)
+	}
+}
+
+// TestControllerItemManifest_PlacedTeamNoMemberHoldKeepsManifest asserts no
+// hold on any member cell keeps the manifest.
+func TestControllerItemManifest_PlacedTeamNoMemberHoldKeepsManifest(t *testing.T) {
+	client := newPlacedTeamMembersFixture(t)
+	client.configMaps["payments-content"] = map[string]string{"items.yaml": tenantCleanItems}
+	client.controllers["cell-2"].Status.Cell = itemsHeldOn("other")
+	srv := definitionTestServer(client)
+
+	_, _, manifest, err := srv.controllerItemManifest(context.Background(), placedHoldRef)
+	if err != nil {
+		t.Fatalf("controllerItemManifest: %v", err)
+	}
+	if manifest == nil {
+		t.Fatal("manifest = nil, want the payments definition")
 	}
 }

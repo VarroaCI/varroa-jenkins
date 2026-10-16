@@ -1162,42 +1162,6 @@ type foldedWarning struct {
 	cells []string
 }
 
-// orderedMemberCells lists the cells a tenant holds in reading order: the
-// scalar slot-0 cell first, then the active members by slot, then the
-// standby members by cell key. A cell appears once.
-func orderedMemberCells(placement *v1alpha1.TeamPlacementStatus) []struct{ namespace, name string } {
-	var out []struct{ namespace, name string }
-	seen := map[string]bool{}
-	add := func(namespace, name string) {
-		key := teamCellKey(namespace, name)
-		if name == "" || seen[key] {
-			return
-		}
-		seen[key] = true
-		out = append(out, struct{ namespace, name string }{namespace, name})
-	}
-	add(placement.CellNamespace, placement.Cell)
-	var active, standby []v1alpha1.TeamMemberStatus
-	for _, m := range placement.Members {
-		if m.Slot != nil {
-			active = append(active, m)
-		} else {
-			standby = append(standby, m)
-		}
-	}
-	sort.SliceStable(active, func(i, j int) bool { return *active[i].Slot < *active[j].Slot })
-	sort.SliceStable(standby, func(i, j int) bool {
-		return teamCellKey(standby[i].CellNamespace, standby[i].Cell) < teamCellKey(standby[j].CellNamespace, standby[j].Cell)
-	})
-	for _, m := range active {
-		add(m.CellNamespace, m.Cell)
-	}
-	for _, m := range standby {
-		add(m.CellNamespace, m.Cell)
-	}
-	return out
-}
-
 // setTenantWarningsCondition folds the status.cell.tenantWarnings entries
 // that name this Team, from every member cell (active and standby), into
 // the Team's TenantWarnings condition (task 6.14, design D4). Each distinct
@@ -1214,8 +1178,8 @@ func (r *TeamReconciler) setTenantWarningsCondition(status *v1alpha1.TeamStatus,
 	var folded []foldedWarning
 	index := map[string]int{}
 	contributing := map[string]bool{}
-	for _, ref := range orderedMemberCells(status.Placement) {
-		cell := cellsByKey[teamCellKey(ref.namespace, ref.name)]
+	for _, ref := range v1alpha1.PlacementCells(status.Placement) {
+		cell := cellsByKey[teamCellKey(ref.Namespace, ref.Name)]
 		if cell == nil || cell.Status.Cell == nil {
 			continue
 		}
@@ -1223,7 +1187,7 @@ func (r *TeamReconciler) setTenantWarningsCondition(status *v1alpha1.TeamStatus,
 			if w.Tenant != team.Name {
 				continue
 			}
-			contributing[teamCellKey(ref.namespace, ref.name)] = true
+			contributing[teamCellKey(ref.Namespace, ref.Name)] = true
 			key := w.Reason + "\x00" + w.Message
 			i, ok := index[key]
 			if !ok {
@@ -1231,7 +1195,7 @@ func (r *TeamReconciler) setTenantWarningsCondition(status *v1alpha1.TeamStatus,
 				index[key] = i
 				folded = append(folded, foldedWarning{w: w})
 			}
-			cellKey := teamCellKey(ref.namespace, ref.name)
+			cellKey := teamCellKey(ref.Namespace, ref.Name)
 			if !slices.Contains(folded[i].cells, cellKey) {
 				folded[i].cells = append(folded[i].cells, cellKey)
 			}
