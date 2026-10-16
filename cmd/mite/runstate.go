@@ -63,9 +63,9 @@ const (
 	// plugin's read budget, so it leaves this margin.
 	restartAckWaitMargin = 500 * time.Millisecond
 
-	// restartAckWaitCap bounds the restart-copy ack wait under the
-	// loopback listener's write timeout, whatever the claim budget is.
-	restartAckWaitCap = loopbackWriteTimeout - time.Second
+	// restartAckWaitCap bounds the restart-copy ack wait. It is loopbackWaitCap:
+	// the restart-copy ack wait follows the same cap as the claim wait.
+	restartAckWaitCap = loopbackWaitCap
 
 	// runStateFetchTimeout bounds the wait for one file's responses. The
 	// resume command's own deadline bounds the whole sequence.
