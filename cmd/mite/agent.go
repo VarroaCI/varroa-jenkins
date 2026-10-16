@@ -357,22 +357,22 @@ type Agent struct {
 	// run_state_response messages that arrive on the command stream.
 	runStateWaiters *runStateWaiterMap
 
-	// restartAckWaiters correlates a restart-copy chunk's post with its
-	// RunStateAck. Mesh acks never reach it.
-	restartAckWaiters *restartAckWaiterMap
+	// runStateAckWaiters correlates a chunk's post with its RunStateAck. A
+	// restart-copy chunk and the final chunk of a mesh file wait on it.
+	runStateAckWaiters *runStateAckWaiterMap
 
-	// restartAckWaitOverride replaces the derived restart-copy ack wait
+	// runStateAckWaitOverride replaces the derived run-state ack wait
 	// in tests. Zero means the wait derives from claimTimeout.
-	restartAckWaitOverride time.Duration
+	runStateAckWaitOverride time.Duration
 }
 
-// restartAckWaitOrDefault returns how long a restart-copy chunk waits for
-// its ack.
-func (a *Agent) restartAckWaitOrDefault() time.Duration {
-	if a.restartAckWaitOverride > 0 {
-		return a.restartAckWaitOverride
+// runStateAckWaitOrDefault returns how long an acked run-state chunk waits
+// for its ack.
+func (a *Agent) runStateAckWaitOrDefault() time.Duration {
+	if a.runStateAckWaitOverride > 0 {
+		return a.runStateAckWaitOverride
 	}
-	return restartAckWaitFor(a.claimTimeout)
+	return runStateAckWaitFor(a.claimTimeout)
 }
 
 // identityState represents the agent's identity state during the bootstrap
@@ -419,7 +419,7 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 		crossTenantWaiters:     newCrossTenantWaiterMap(),
 		runStateAcks:           newRunStateAckStore(),
 		runStateWaiters:        newRunStateWaiterMap(),
-		restartAckWaiters:      newRestartAckWaiterMap(),
+		runStateAckWaiters:     newRunStateAckWaiterMap(),
 	}, nil
 }
 
@@ -1386,8 +1386,8 @@ func (a *Agent) processCommands(ctx context.Context) {
 	// D2): stream teardown must never leave an HTTP handler blocked on
 	// POST /v1/cross-tenant/*.
 	defer a.crossTenantWaiters.releaseAll()
-	// A restart-copy post waiting for its ack answers ack-timeout at once.
-	defer a.restartAckWaiters.releaseAll()
+	// A run-state post waiting for its ack answers ack-timeout at once.
+	defer a.runStateAckWaiters.releaseAll()
 
 	// The receive goroutines use the session captured here. They never
 	// read a.sess, which the run loop clears when this function returns.
@@ -1490,7 +1490,7 @@ func (a *Agent) processCommands(ctx context.Context) {
 		case *mitev1.OperatorMessage_LogAck:
 			a.handleLogAck(ctx, m.LogAck)
 		case *mitev1.OperatorMessage_RunStateAck:
-			if !a.restartAckWaiters.resolve(m.RunStateAck) {
+			if !a.runStateAckWaiters.resolve(m.RunStateAck) {
 				a.runStateAcks.record(m.RunStateAck)
 			}
 		case *mitev1.OperatorMessage_RunStateResponse:

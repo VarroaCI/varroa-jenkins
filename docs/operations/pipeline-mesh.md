@@ -60,3 +60,5 @@ terminal for more than an hour, so a stopped recorder leaves nothing.
 Varroa stores each state file under its own push: the Jenkins process and its push count. A resume
 reads the push the recorder recorded. A late push cannot overwrite a newer one, whichever gateway
 pod writes it.
+
+The plugin keeps each file until the gateway stores it and records it. A failed record holds the file, and the plugin sends it again.
