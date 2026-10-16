@@ -320,7 +320,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 		// cell's cross-tenant selection is known — the failed paths
 		// already count toward it here, in case a later error return
 		// leaves this initial value standing.
-		entries = append(entries, carryAppliedSeed(preSendEntry(tenant, "", st.placement.Generation, cellInstance, int32(count), false, int32(len(o.failedPaths)), now), st.existing))
+		entries = append(entries, carryRehydrationError(carryAppliedSeed(preSendEntry(tenant, "", st.placement.Generation, cellInstance, int32(count), false, int32(len(o.failedPaths)), now), st.existing), st.existing))
 	}
 
 	if len(allSeeds) == 0 {

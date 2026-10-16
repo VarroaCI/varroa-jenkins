@@ -2582,13 +2582,13 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 
 	// 6. Reload every item the rehydration section named. Runs after the
 	// items apply, so a job the items section just created adopts its
-	// seeded records. A failed reload fails only the rehydration section;
-	// the items result stands on its own. An item Jenkins no longer holds
+	// seeded records. A failed reload fails no section: the operator
+	// attributes each failure to the item's tenant, and the tenant holds
+	// until a resend reloads the item. An item Jenkins no longer holds
 	// is skipped, not failed: the record store keeps runs of a job the
 	// tenant has since removed, and a failure here would fence every
 	// other job of the tenant behind NOT_READY for good.
 	if cmd.Rehydration != nil {
-		var reloadErrs []string
 		for _, itemPath := range cmd.Rehydration.ReloadItems {
 			err := jenkinsClient.ReloadItem(ctx, itemPath)
 			if errors.Is(err, jenkins.ErrItemNotFound) {
@@ -2597,15 +2597,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			}
 			if err != nil {
 				a.Logger.Error("rehydration item reload failed", "item", itemPath, "error", err)
-				reloadErrs = append(reloadErrs, err.Error())
+				result.RehydrationReloadFailures = append(result.RehydrationReloadFailures,
+					&mitev1.RehydrationReloadFailure{Item: itemPath, Error: err.Error()})
 			}
-		}
-		if len(reloadErrs) > 0 {
-			result.RehydrationSuccess = false
-			if result.RehydrationError != "" {
-				result.RehydrationError += "; "
-			}
-			result.RehydrationError += strings.Join(reloadErrs, "; ")
 		}
 	}
 
@@ -2623,9 +2617,10 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				newSections[name] = desired[name]
 			}
 		}
-		// A job still deferred has no seeded record. The marker must not
-		// record the section, or a resend would skip the job's seed.
-		if len(result.RehydrationDeferredJobs) > 0 {
+		// A job still deferred has no seeded record, and a reload that
+		// failed has no reload. The marker must not record the section,
+		// or a resend would skip the job's seed or its reload.
+		if len(result.RehydrationDeferredJobs) > 0 || len(result.RehydrationReloadFailures) > 0 {
 			delete(newSections, "rehydration")
 		}
 		a.writeMarker(appliedMarker{

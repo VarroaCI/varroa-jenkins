@@ -1307,12 +1307,13 @@ func (r *Reconciler) TriggerOwnedReconcile(cluster, name, namespace string) {
 // NotifyCommandResult enqueues a reconcile of an owned Controller when a
 // desired-state result applies its rehydration seed. The reconcile drains
 // the buffered result at once. A result that does not apply the seed wakes
-// nothing: a deferred job or a failure makes the next reconcile resend the
-// bundle, so the periodic tick must pace that resend. It never routes a
-// wake to another shard.
+// nothing: a deferred job, a reload failure, or a failure makes the next
+// reconcile resend the bundle, so the periodic tick must pace that resend.
+// It never routes a wake to another shard.
 func (r *Reconciler) NotifyCommandResult(ns, name string, res *mitev1.CommandResult) {
 	ds := res.GetDesiredState()
-	if ds == nil || !ds.RehydrationSuccess || ds.RehydrationError != "" || len(ds.RehydrationDeferredJobs) > 0 {
+	if ds == nil || !ds.RehydrationSuccess || ds.RehydrationError != "" ||
+		len(ds.RehydrationDeferredJobs) > 0 || len(ds.RehydrationReloadFailures) > 0 {
 		return
 	}
 	if r.ownsController(ns, name) {
@@ -3984,19 +3985,27 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					}
 					deferredByTenant := partitionJobPathsByTenant(r.DesiredState.RehydrationDeferredJobs, tenants)
 					coveredByTenant := partitionJobPathsByTenant(resultMatch.CoveredJobPaths, tenants)
+					reloadFailedByTenant := partitionReloadFailuresByTenant(r.DesiredState.RehydrationReloadFailures, tenants)
 					cr.Status.Cell.Rehydration = applyRehydrationResult(
 						cr.Status.Cell.Rehydration, rehydrationID,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
-						deferredByTenant, coveredByTenant, time.Now(),
+						deferredByTenant, coveredByTenant, reloadFailedByTenant, time.Now(),
 					)
 				}
 				// Number-only progress (design D4, task 5.7): a block
 				// counts as seeded only once this matching, successful
-				// result confirms it. See commitNumberOnlyProgress.
+				// result confirms it. A job whose reload failed is not
+				// confirmed either, so the number cache never marks it seeded
+				// and the next push resends it. See commitNumberOnlyProgress.
 				if isCellController(cr) {
+					unconfirmed := append([]string(nil), r.DesiredState.RehydrationDeferredJobs...)
+					for _, failure := range r.DesiredState.RehydrationReloadFailures {
+						if failure != nil {
+							unconfirmed = append(unconfirmed, failure.Item)
+						}
+					}
 					recv.commitNumberOnlyProgress(cr.Namespace+"/"+cr.Name, resultMatch.CellInstance, resultMatch.NumberOnlyJobPaths,
-						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
-						r.DesiredState.RehydrationDeferredJobs)
+						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError, unconfirmed)
 				}
 				// DeletionPending: surface deferred item deletions from the mite.
 				if len(r.DesiredState.DeferredItemDeletions) > 0 {

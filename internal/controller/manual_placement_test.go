@@ -299,7 +299,7 @@ func manualCellWithPendingRehydration(t *testing.T, name string, records cells.R
 	// stays pending with no push in flight.
 	if match, ok := rec.takeRehydrationResult(cr.Namespace+"/"+cr.Name, tr.last.CommandId); ok {
 		cr.Status.Cell.Rehydration = applyRehydrationResult(cr.Status.Cell.Rehydration, match.StampedID, true, "",
-			map[string][]string{"team-a": {"team-a/build"}}, nil, time.Now())
+			map[string][]string{"team-a": {"team-a/build"}}, nil, nil, time.Now())
 	}
 	cr.Spec.ReconciliationPolicy.Mode = v1alpha1.ReconciliationModeManual
 	return rec, tr, cr

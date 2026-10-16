@@ -1307,6 +1307,11 @@ sections describe.
   `rehydration_success` with no error, minus any path the mite deferred. A
   failed or unmatched block is never committed, so the next tick's selection
   recomputes and resends it.
+  **A failed reload marks only its tenant.** The mite reports each failed reload
+  in `rehydration_reload_failures`. `partitionReloadFailuresByTenant` attributes
+  it to the owning tenant, and `applyRehydrationResult` sets that tenant's
+  `Error` and keeps `Applied`. `carryRehydrationError` keeps the `Error` on a
+  resend, so the status shows it until a later result clears it.
   **A deferred job does not drop the applied seed.** `applyRehydrationResult`
   sets `Applied` from the success and the error only. `carryAppliedSeed`
   keeps `Applied` and `Deferred` on the pre-send entry of a resend, for the

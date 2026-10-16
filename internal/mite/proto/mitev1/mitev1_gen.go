@@ -389,19 +389,20 @@ type DesiredStateCommand struct {
 }
 
 type DesiredStateResult struct {
-	ConfigSuccess           bool                `json:"config_success"`
-	RbacSuccess             bool                `json:"rbac_success"`
-	PluginsSuccess          bool                `json:"plugins_success"`
-	ItemsSuccess            bool                `json:"items_success"`
-	ConfigError             string              `json:"config_error,omitempty"`
-	RbacError               string              `json:"rbac_error,omitempty"`
-	PluginsError            string              `json:"plugins_error,omitempty"`
-	ItemsError              string              `json:"items_error,omitempty"`
-	AppliedHash             string              `json:"applied_hash,omitempty"`
-	DeferredItemDeletions   []*DeferredDeletion `json:"deferred_item_deletions,omitempty"`
-	RehydrationSuccess      bool                `json:"rehydration_success,omitempty"`
-	RehydrationError        string              `json:"rehydration_error,omitempty"`
-	RehydrationDeferredJobs []string            `json:"rehydration_deferred_jobs,omitempty"`
+	ConfigSuccess             bool                        `json:"config_success"`
+	RbacSuccess               bool                        `json:"rbac_success"`
+	PluginsSuccess            bool                        `json:"plugins_success"`
+	ItemsSuccess              bool                        `json:"items_success"`
+	ConfigError               string                      `json:"config_error,omitempty"`
+	RbacError                 string                      `json:"rbac_error,omitempty"`
+	PluginsError              string                      `json:"plugins_error,omitempty"`
+	ItemsError                string                      `json:"items_error,omitempty"`
+	AppliedHash               string                      `json:"applied_hash,omitempty"`
+	DeferredItemDeletions     []*DeferredDeletion         `json:"deferred_item_deletions,omitempty"`
+	RehydrationSuccess        bool                        `json:"rehydration_success,omitempty"`
+	RehydrationError          string                      `json:"rehydration_error,omitempty"`
+	RehydrationDeferredJobs   []string                    `json:"rehydration_deferred_jobs,omitempty"`
+	RehydrationReloadFailures []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
 }
 
 type EventAck struct {
@@ -1229,6 +1230,12 @@ type RehydrationFile struct {
 	Path        string `json:"path,omitempty"`
 	GzipContent []byte `json:"gzip_content,omitempty"`
 	RawSize     int64  `json:"raw_size,omitempty"`
+}
+
+// RehydrationReloadFailure is one reload item that Jenkins did not reload.
+type RehydrationReloadFailure struct {
+	Item  string `json:"item,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type ReplayBuildPayload struct {

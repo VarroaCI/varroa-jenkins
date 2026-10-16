@@ -287,11 +287,21 @@ message DesiredStateResult {
   // count: one command covers every tenant on a cell, so a count cannot
   // attribute a deferral to one tenant.
   repeated string rehydration_deferred_jobs = 16;
+  // rehydration_reload_failures lists each reload item that Jenkins did not
+  // reload. A failed reload fails no section: the rehydration section stays
+  // successful, and the operator attributes each failure to the item's tenant.
+  repeated RehydrationReloadFailure rehydration_reload_failures = 17;
 }
 
 message DeferredDeletion {
   string path = 1;
   string reason = 2;
+}
+
+// RehydrationReloadFailure is one reload item that Jenkins did not reload.
+message RehydrationReloadFailure {
+  string item = 1;
+  string error = 2;
 }
 
 

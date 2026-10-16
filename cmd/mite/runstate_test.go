@@ -120,7 +120,15 @@ func startAdoptAndReloadStub(t *testing.T) *resumeStub {
 		stub.note("adopt")
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/job/"+strings.ReplaceAll(stubJobPath, "/", "/job/")+"/reload", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/varroa-run/reload-item", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			JobPath string `json:"jobPath"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.JobPath != stubJobPath {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		stub.reloadHit.Store(true)
 		if hook := stub.onReload.Load(); hook != nil {
 			(*hook)()
