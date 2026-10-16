@@ -194,6 +194,33 @@ describe("CatalogBrowser", () => {
       // The item is added to the bundle (card shows the added badge).
       expect(await screen.findByText(/Added/)).toBeInTheDocument();
     });
+
+    it("in edit mode, card click does not add an invalid item", async () => {
+      const user = userEvent.setup();
+      mockUseCatalogItems.mockReturnValue({
+        data: { items: [mockCatalogItem("item-1", { valid: false, message: "x" })] },
+        isLoading: false,
+        error: null,
+      });
+      const editTarget = {
+        namespace: "default",
+        name: "my-bundle",
+        baseBundle: {
+          apiVersion: "varroa.dev/v1alpha1",
+          kind: "ComposedBundle",
+          metadata: { name: "my-bundle", namespace: "default" },
+          spec: { inputs: [] },
+        },
+        gitInputs: [],
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      renderWithProviders(<CatalogBrowser editTarget={editTarget as any} />);
+
+      await user.click(screen.getByText("Display item-1"));
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Added/)).not.toBeInTheDocument();
+    });
   });
 
   describe("Filter controls", () => {
@@ -257,6 +284,51 @@ describe("CatalogBrowser", () => {
       await user.click(screen.getByText("+ Add to bundle"));
 
       expect(screen.getByText(/Added/)).toBeInTheDocument();
+    });
+
+    it("disables Add to bundle for an invalid item and shows its message as the hint", async () => {
+      const user = userEvent.setup();
+      const message = "closure holds unread plugin versions: foo@1.0";
+      mockUseCatalogItems.mockReturnValue({
+        data: { items: [mockCatalogItem("bad-item", { valid: false, message })] },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      const addButton = screen.getByRole("button", { name: "+ Add to bundle" });
+      expect(addButton).toBeDisabled();
+      expect(addButton).toHaveAttribute("title", message);
+      await user.click(addButton);
+      expect(screen.queryByText(/Added/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Invalid/)).toHaveAttribute("title", message);
+    });
+
+    it("uses a fallback hint when an invalid item has no message", () => {
+      mockUseCatalogItems.mockReturnValue({
+        data: { items: [mockCatalogItem("bad-item", { valid: false })] },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      expect(screen.getByRole("button", { name: "+ Add to bundle" })).toHaveAttribute(
+        "title",
+        "This item is invalid.",
+      );
+    });
+
+    it("keeps Add to bundle enabled for a valid item", () => {
+      mockUseCatalogItems.mockReturnValue({
+        data: { items: [mockCatalogItem("good-item")] },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      const addButton = screen.getByRole("button", { name: "+ Add to bundle" });
+      expect(addButton).not.toBeDisabled();
+      expect(addButton).not.toHaveAttribute("title");
     });
 
     it("shows FAB with item count when composer has items", async () => {

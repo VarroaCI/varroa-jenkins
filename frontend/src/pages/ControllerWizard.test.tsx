@@ -613,6 +613,21 @@ describe("ControllerWizard", () => {
     expect(screen.getByTestId("picker-group-team-x")).toBeInTheDocument();
   });
 
+  it("does not stage an invalid catalog item from the picker", async () => {
+    mockListCatalogItems.mockResolvedValue({
+      items: [{ ...mkItem("bad-item", "varroa-system", "Bad Item"), valid: false, message: "closure incomplete: bar@2.0" }],
+      operatorNamespace: "varroa-system",
+    });
+    const user = userEvent.setup();
+    await openComposePicker(user);
+
+    const row = await screen.findByText("Bad Item");
+    expect(row.closest('[title="closure incomplete: bar@2.0"]')).not.toBeNull();
+    await user.click(row);
+    // A staged item closes the picker; an ignored click leaves it open.
+    expect(screen.getByPlaceholderText("Search catalog...")).toBeInTheDocument();
+  });
+
   it("adds an item with its namespace and shows it as a badge on the staged row", async () => {
     mockListCatalogItems.mockResolvedValue({
       items: [mkItem("platform-theme", "varroa-system", "Platform Theme")],

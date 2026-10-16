@@ -36,6 +36,11 @@
   background: var(--surface-3);
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .sm {
   padding: 6px 11px;
   font-size: 12px;

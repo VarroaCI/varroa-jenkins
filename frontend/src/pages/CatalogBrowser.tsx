@@ -38,6 +38,10 @@ const TYPE_ICONS: Record<string, string> = {
   "pipeline-template": "▶",
 };
 
+function invalidHint(item: CatalogItemSummary): string {
+  return item.message || "This item is invalid.";
+}
+
 interface CatalogBrowserProps {
   editTarget?: EditTarget | null;
 }
@@ -107,6 +111,8 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
     // to the standalone item-detail page (which lives outside this editor's
     // composer session and would discard in-progress edits).
     if (editTarget) {
+      // An invalid item fails composition, so a card click must not add it.
+      if (!item.valid) return;
       if (!composer.hasItem({ name: item.name, namespace: item.namespace })) {
         composer.addItem({ name: item.name, namespace: item.namespace, variables: {} });
       }
@@ -120,6 +126,7 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
 
   function handleAddItem(e: React.MouseEvent, item: CatalogItemSummary) {
     e.stopPropagation();
+    if (!item.valid) return;
     composer.addItem({ name: item.name, namespace: item.namespace, variables: {} });
   }
 
@@ -227,7 +234,7 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
                   <div className={styles.cardTop}>
                     <span className={styles.typeIcon}>{TYPE_ICONS[item.type] || "○"}</span>
                     <div className={styles.displayName}>{item.displayName || group.pluginName}</div>
-                    {!item.valid && <span className={styles.invalidBadge}>&#x26A0; Invalid</span>}
+                    {!item.valid && <span className={styles.invalidBadge} title={invalidHint(item)}>&#x26A0; Invalid</span>}
                     {verdict && isWarningVerdict(verdict) && (
                       <span
                         className={styles.compatBadge}
@@ -279,13 +286,23 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
                     ) : (
                       item.version && <span className={styles.version}>v{item.version}</span>
                     )}
-                    <span onClick={(e) => e.stopPropagation()}>
+                    <span
+                      onClick={(e) => e.stopPropagation()}
+                      title={item.valid ? undefined : invalidHint(item)}
+                    >
                       {composer.hasItem({ name: item.name, namespace: item.namespace }) ? (
                         <span className={styles.addedBadge}>&#x2713; Added</span>
                       ) : (
-                        /* A compat badge NEVER disables this — derivability blocks,
-                           compatibility only advises. */
-                        <Button size="sm" variant="ghost" onClick={(e) => handleAddItem(e, item)}>
+                        /* A compat badge never disables this button. An invalid item
+                           disables it, because derivability blocks and compatibility
+                           only advises. */
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={!item.valid}
+                          title={item.valid ? undefined : invalidHint(item)}
+                          onClick={(e) => handleAddItem(e, item)}
+                        >
                           + Add to bundle
                         </Button>
                       )}
@@ -314,7 +331,7 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
                   {item.displayName || item.name}
                 </div>
                 {!item.valid && (
-                  <span className={styles.invalidBadge}>
+                  <span className={styles.invalidBadge} title={invalidHint(item)}>
                     &#x26A0; Invalid
                   </span>
                 )}
@@ -337,11 +354,20 @@ export default function CatalogBrowser({ editTarget }: CatalogBrowserProps) {
                 {item.version && (
                   <span className={styles.version}>v{item.version}</span>
                 )}
-                <span onClick={(e) => e.stopPropagation()}>
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  title={item.valid ? undefined : invalidHint(item)}
+                >
                   {composer.hasItem({ name: item.name, namespace: item.namespace }) ? (
                     <span className={styles.addedBadge}>&#x2713; Added</span>
                   ) : (
-                    <Button size="sm" variant="ghost" onClick={(e) => handleAddItem(e, item)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!item.valid}
+                      title={item.valid ? undefined : invalidHint(item)}
+                      onClick={(e) => handleAddItem(e, item)}
+                    >
                       + Add to bundle
                     </Button>
                   )}
