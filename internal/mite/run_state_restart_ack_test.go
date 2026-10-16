@@ -1,6 +1,7 @@
 package mite
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -81,5 +82,118 @@ func TestRestartSourceEnvelopePublishedBeforeStoredAck(t *testing.T) {
 	// The STORED ack for the final chunk must come after it.
 	if pub.acksAt[0] != 1 {
 		t.Fatalf("envelope published after %d acks, want 1: the STORED ack went out first", pub.acksAt[0])
+	}
+}
+
+// storedRelpathsOf reports the relpaths one restart copy holds as stored.
+func storedRelpathsOf(t *testing.T, h *BusHandler, runID string) (map[string]int64, bool) {
+	t.Helper()
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	e, ok := h.restartRuns[runID]
+	if !ok {
+		return nil, false
+	}
+	return e.stored, true
+}
+
+func TestRestartSourcePublishFailureAnswersBusy(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	pub := &fakePublisher{syncFailLeft: 1, syncErr: errors.New("nats down")}
+	h.publisher = pub
+	relpath := restartTestBuildPath + "workflow-completed/2.xml"
+	data := []byte("<flow/>")
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, int64(len(data)), data))
+
+	ack := lastRunStateAck(t, sender)
+	if ack.Status != stateAckStatusBusy {
+		t.Fatalf("ack status %v, want BUSY", ack.Status)
+	}
+	if ack.Reason != stateReasonBudgetFull {
+		t.Fatalf("ack reason %q, want %q", ack.Reason, stateReasonBudgetFull)
+	}
+	if ack.PauseMs <= 0 {
+		t.Fatalf("ack pause %d, want a positive pause", ack.PauseMs)
+	}
+	stored, ok := storedRelpathsOf(t, h, runID)
+	if !ok {
+		t.Fatal("copy entry was dropped after a failed publish")
+	}
+	if _, has := stored[relpath]; has {
+		t.Fatal("failed file entered the stored set")
+	}
+	if len(pub.published) != 0 {
+		t.Fatalf("published %d envelopes after a failed publish, want 0", len(pub.published))
+	}
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, int64(len(data)), data))
+
+	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusStored {
+		t.Fatalf("retry ack status %v, want STORED", got.Status)
+	}
+	if len(pub.published) != 1 {
+		t.Fatalf("published %d envelopes after retry, want 1", len(pub.published))
+	}
+	stored, _ = storedRelpathsOf(t, h, runID)
+	if _, has := stored[relpath]; !has {
+		t.Fatal("retried file is not in the stored set")
+	}
+}
+
+func TestRestartSourcePublishFailureOnLastFileKeepsEntry(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	pub := &fakePublisher{syncFailLeft: 1, syncErr: errors.New("nats down")}
+	h.publisher = pub
+	relpath := restartTestBuildPath + "workflow-completed/2.xml"
+	data := []byte("<flow/>")
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, int64(len(data)), data))
+
+	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusBusy {
+		t.Fatalf("ack status %v, want BUSY", got.Status)
+	}
+	if _, ok := storedRelpathsOf(t, h, runID); !ok {
+		t.Fatal("copy entry was deleted after a failed publish of its last file")
+	}
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, int64(len(data)), data))
+
+	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusStored {
+		t.Fatalf("retry ack status %v, want STORED", got.Status)
+	}
+	if _, ok := storedRelpathsOf(t, h, runID); ok {
+		t.Fatal("copy entry survived its last stored file")
+	}
+	if len(pub.published) != 1 {
+		t.Fatalf("published %d envelopes, want 1", len(pub.published))
+	}
+}
+
+func TestRestartSourceUnresolvedTenantAnswersBusy(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	pub := &fakePublisher{}
+	h.publisher = pub
+	h.tenantResolver = stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}}
+	relpath := restartTestBuildPath + "workflow-completed/2.xml"
+	data := []byte("<flow/>")
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 2, int64(len(data)), data))
+
+	if got := lastRunStateAck(t, sender); got.Status != stateAckStatusBusy {
+		t.Fatalf("ack status %v, want BUSY", got.Status)
+	}
+	if len(pub.published) != 0 {
+		t.Fatalf("published %d envelopes for an unresolved tenant, want 0", len(pub.published))
+	}
+	stored, _ := storedRelpathsOf(t, h, runID)
+	if _, has := stored[relpath]; has {
+		t.Fatal("file with an unresolved tenant entered the stored set")
 	}
 }
