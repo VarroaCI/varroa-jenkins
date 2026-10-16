@@ -8,7 +8,11 @@ organizations that cannot accept the AGPL's terms.
 Both licenses cover identical software. There is no separate enterprise
 edition, no feature gating, and no license key.
 
-Licenses are priced per managed controller. To purchase one, contact
+Licenses are priced per team. A team is one `Team` resource; its people
+share classic controllers, pipelines, or both. Within a team, users,
+build agents, controllers, and builds are unlimited. A classic controller
+that belongs to no team counts as one team; a shared pipelines cell never
+counts. To purchase a license, contact
 [licensing@varroa.dev](mailto:licensing@varroa.dev). The agreement
 template is in
 [`legal/commercial-license-agreement.md`](legal/commercial-license-agreement.md).

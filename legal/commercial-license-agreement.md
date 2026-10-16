@@ -19,13 +19,15 @@ This Commercial License Agreement ("Agreement") is entered into as of
   form, including the operator, gateway, BFF, mite, update center,
   varroactl, frontend, Helm chart, and the VarroaSecurityRealm Jenkins
   plugin, together with updates released by Licensor during the Term.
-- **"Managed Controller"** means one `Controller` custom resource
-  reconciled by any installation of the Software operated by or for
-  Customer, measured as the count returned by
-  `kubectl get controllers --all-namespaces` across Customer's
-  clusters.
-- **"Licensed Count"** means the maximum number of Managed Controllers
-  covered by this Agreement, as stated in the Order Form.
+- **"Team"** means one `Team` custom resource reconciled by any
+  installation of the Software operated by or for Customer, measured as
+  the count returned by `kubectl get teams` across Customer's clusters.
+  A `Controller` custom resource whose namespace is not listed in the
+  `spec.namespaces` of any `Team` counts as one additional Team. A
+  `Controller` with `spec.cell.enabled` is shared infrastructure and is
+  never counted.
+- **"Licensed Count"** means the maximum number of Teams covered by this
+  Agreement, as stated in the Order Form.
 - **"Order Form"** means the ordering document referencing this
   Agreement that states the Licensed Count, fees, and Term.
 
@@ -65,7 +67,7 @@ holds under the AGPL-3.0.
 
 ## 4. Licensed Count and true-up
 
-Customer self-reports its Managed Controller count. Within thirty (30)
+Customer self-reports its Team count. Within thirty (30)
 days after each anniversary of the Effective Date, Customer will report
 its then-current count. If the count exceeds the Licensed Count,
 Customer will pay for the excess at the per-band rates stated in the
@@ -74,15 +76,16 @@ is increased accordingly. There are no audits, agents, or telemetry;
 reporting is on the honor system and this Section is the sole true-up
 mechanism.
 
-Users, build agents, executors, and builds are unlimited and are not
-license metrics under this Agreement.
+Within a Team, users, build agents, executors, controllers, cells, and
+builds are unlimited and are not license metrics under this Agreement. A
+`Controller` that belongs to no Team counts as one Team under Section 1.
 
 ## 5. Fees
 
-Fees are stated in the Order Form, quoted per Managed Controller in
-banded annual rates (or as a flat-rate site license covering unlimited
-Managed Controllers). Fees are exclusive of taxes and are
-non-refundable except as stated in Section 8.
+Fees are stated in the Order Form, quoted per Team in banded annual
+rates (or as a flat-rate site license covering unlimited Teams). Fees
+are exclusive of taxes and are non-refundable except as stated in
+Section 8.
 
 ## 6. Support
 
