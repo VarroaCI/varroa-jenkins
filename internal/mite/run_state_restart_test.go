@@ -430,3 +430,48 @@ func TestOnRunStateChunk_RestartSourceTenantGraceClearsOnPublish(t *testing.T) {
 		t.Fatal("a resolved publish did not clear the restart grace clock")
 	}
 }
+
+// TestBufferRestartSourceChunk_NewerEpochKeepsUnresolvedClock proves a
+// newer process's re-post of a restart copy keeps the copy's tenant grace
+// clock. A copy whose tenant stayed unresolved past the grace is refused
+// on the re-post's first file.
+func TestBufferRestartSourceChunk_NewerEpochKeepsUnresolvedClock(t *testing.T) {
+	sender := &recordingSender{}
+	runID := newTestRunID()
+	h := newRunStateTestHandler(t, newRestartTestOwner(runID), sender)
+	h.publisher = &fakePublisher{}
+	h.SetCellTenantResolver(stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{}})
+	relpath := restartTestBuildPath + "build.xml"
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 100, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("first ack = %+v, want BUSY", ack)
+	}
+	h.stateMu.Lock()
+	since := h.restartRuns[runID].tenantUnresolvedSince
+	h.stateMu.Unlock()
+	if since.IsZero() {
+		t.Fatal("the first unresolved answer did not start the grace clock")
+	}
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 200, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusBusy {
+		t.Fatalf("re-post ack inside the grace = %+v, want BUSY", ack)
+	}
+	h.stateMu.Lock()
+	e := h.restartRuns[runID]
+	epoch, kept := e.epoch, e.tenantUnresolvedSince
+	e.tenantUnresolvedSince = time.Now().Add(-(runStateTenantGrace + time.Second))
+	h.stateMu.Unlock()
+	if epoch != 200 {
+		t.Fatalf("copy epoch = %d, want 200", epoch)
+	}
+	if !kept.Equal(since) {
+		t.Fatalf("grace clock after a newer epoch = %v, want %v", kept, since)
+	}
+
+	h.OnRunStateChunk("cell1", "ns1", restartOneChunk(runID, relpath, 300, 1, 1, []byte("x")))
+	if ack := lastRunStateAck(t, sender); ack.Status != stateAckStatusRejected {
+		t.Fatalf("re-post ack past the grace = %+v, want REJECTED", ack)
+	}
+}
