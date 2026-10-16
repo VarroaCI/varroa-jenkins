@@ -149,6 +149,9 @@ func TestHandleRunState_RestartSourceAckTimeoutIs503(t *testing.T) {
 	if got := rec.Header().Get(hdrStateReason); got != stateReasonAckTimeout {
 		t.Fatalf("reason = %q, want ack-timeout", got)
 	}
+	if got := rec.Header().Get(hdrPauseMs); got != "" {
+		t.Fatalf("pause = %q, want none on ack-timeout", got)
+	}
 	agent.runStateAckWaiters.mu.Lock()
 	n := len(agent.runStateAckWaiters.waiters)
 	agent.runStateAckWaiters.mu.Unlock()
@@ -283,6 +286,9 @@ func TestHandleRunState_MeshFinalChunkAckTimeoutIs503(t *testing.T) {
 	}
 	if got := rec.Header().Get(hdrStateReason); got != stateReasonAckTimeout {
 		t.Fatalf("reason = %q, want ack-timeout", got)
+	}
+	if got := rec.Header().Get(hdrPauseMs); got != "" {
+		t.Fatalf("pause = %q, want none on ack-timeout", got)
 	}
 	agent.runStateAckWaiters.mu.Lock()
 	n := len(agent.runStateAckWaiters.waiters)
