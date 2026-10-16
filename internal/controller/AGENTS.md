@@ -1320,7 +1320,9 @@ sections describe.
   those jobs wait. A give-up (`deadlineEntry`, `released`) keeps `Applied`
   true only when an earlier apply exists on the same generation and instance.
   That release answers no pending jobs. A bundle that never applied stays
-  held as a whole.
+  held as a whole. `deadlineEntry` sets `DeadlineExceeded`. `seedAnswerOf`
+  reads that flag, never the `Error` text. `carryRehydrationError` carries the
+  flag with `Error`, and `applyRehydrationResult` clears it.
   **A number-only round holds only its uncovered jobs.** `CellRehydrationEntry.Unseeded`
   lists the jobs that wait for a number seed on the instance: the jobs no bundle
   covers, the jobs of the outstanding block while its push is outstanding, and a

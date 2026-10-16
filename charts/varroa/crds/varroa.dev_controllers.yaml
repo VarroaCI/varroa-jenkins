@@ -4220,6 +4220,12 @@ spec:
                             carried its bundle. Persisting it survives a controller restart,
                             which an in-memory map does not.
                           type: string
+                        deadlineExceeded:
+                          description: |-
+                            DeadlineExceeded is true only on an entry that the deadline give-up
+                            wrote, or on a resend that carries that give-up. A released give-up
+                            answers no pending jobs. A mite result clears it.
+                          type: boolean
                         deferred:
                           description: |-
                             Deferred lists the job paths the mite could not seed, because the

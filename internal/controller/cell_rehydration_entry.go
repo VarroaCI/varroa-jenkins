@@ -54,8 +54,8 @@ func preSendEntry(tenant, bundleID string, generation int64, cellInstance string
 	}
 }
 
-// deadlineExceededPrefix opens the Error of a give-up entry. A reload
-// failure never opens its Error with this prefix.
+// deadlineExceededPrefix opens the human-readable Error of a give-up entry.
+// No code reads this text; seedAnswerOf reads DeadlineExceeded.
 const deadlineExceededPrefix = "rehydration deadline exceeded"
 
 // deadlineExceededMessage names the still-deferred jobs in the
@@ -86,7 +86,7 @@ func deadlineEntry(tenant string, generation int64, cellInstance string, deferre
 	return v1alpha1.CellRehydrationEntry{
 		Tenant: tenant, Generation: generation, CellInstance: cellInstance,
 		Deferred: deferred, Error: deadlineExceededMessage(deferred),
-		Applied: released, At: &at,
+		DeadlineExceeded: true, Applied: released, At: &at,
 	}
 }
 
@@ -106,14 +106,16 @@ func carryAppliedSeed(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.Cel
 	return next
 }
 
-// carryRehydrationError keeps the Error of an existing entry for the same
-// generation and cell instance. A resend keeps the failure of the last
-// result, so the status shows it until a later result clears it.
+// carryRehydrationError keeps the Error and the give-up flag of an existing
+// entry for the same generation and cell instance. A resend keeps the
+// failure of the last result, so the status shows it until a later result
+// clears it.
 func carryRehydrationError(next v1alpha1.CellRehydrationEntry, existing *v1alpha1.CellRehydrationEntry) v1alpha1.CellRehydrationEntry {
 	if existing == nil || existing.Generation != next.Generation || existing.CellInstance != next.CellInstance {
 		return next
 	}
 	next.Error = existing.Error
+	next.DeadlineExceeded = existing.DeadlineExceeded
 	return next
 }
 
@@ -131,14 +133,15 @@ type seedAnswer struct {
 // entry answers its instance and its pending jobs, the deferred and the
 // unseeded paths, so only those jobs wait. A released give-up is applied
 // with an error and answers no pending jobs, so they build with no seeded
-// history. An applied entry whose unseeded list is shorter than its
+// history. The release reads DeadlineExceeded, never the Error text. An
+// applied entry whose unseeded list is shorter than its
 // UnseededJobs count dropped the list, so it holds the whole tenant.
 func seedAnswerOf(e *v1alpha1.CellRehydrationEntry) seedAnswer {
 	pending := rehydrate.PendingJobPaths(e.Deferred, e.Unseeded)
 	switch {
 	case !e.Applied:
 		return seedAnswer{pending: pending}
-	case e.Error != "" && strings.HasPrefix(e.Error, deadlineExceededPrefix):
+	case e.DeadlineExceeded:
 		return seedAnswer{instance: e.CellInstance}
 	case int(e.UnseededJobs) > len(e.Unseeded):
 		return seedAnswer{pending: pending}
@@ -290,6 +293,8 @@ func applyRehydrationResult(entries []v1alpha1.CellRehydrationEntry, commandID s
 		tenantDeferred := deferredByTenant[e.Tenant]
 		e.Deferred = tenantDeferred
 		e.Error = rehydrationError
+		// A result replaces the give-up.
+		e.DeadlineExceeded = false
 		// A job whose reload failed keeps its seed unconfirmed: it stays in
 		// the unseeded list, so the next push resends it and reloads it. A
 		// later result that does not name the job cannot clear the failure.

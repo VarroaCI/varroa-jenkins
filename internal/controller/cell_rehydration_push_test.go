@@ -110,7 +110,7 @@ func TestReconcileConnected_AutomaticCellSendsNothingForAPendingTenantWithNoBund
 			}
 			if tc.name == "past the deadline" {
 				e := entryFor(t, cr, "team-a")
-				if !strings.Contains(e.Error, "deadline") {
+				if !strings.Contains(e.Error, "deadline") || !e.DeadlineExceeded {
 					t.Fatalf("entry = %+v, want the deadline error", e)
 				}
 				if !e.Applied || !slices.Equal(e.Deferred, []string{"team-a/build"}) {

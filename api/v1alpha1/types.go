@@ -809,6 +809,11 @@ type CellRehydrationEntry struct {
 	// Empty when none.
 	// +optional
 	Error string `json:"error,omitempty"`
+	// DeadlineExceeded is true only on an entry that the deadline give-up
+	// wrote, or on a resend that carries that give-up. A released give-up
+	// answers no pending jobs. A mite result clears it.
+	// +optional
+	DeadlineExceeded bool `json:"deadlineExceeded,omitempty"`
 	// At is when the controller reconciler last wrote this entry.
 	// +optional
 	At *metav1.Time `json:"at,omitempty"`
