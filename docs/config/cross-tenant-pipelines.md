@@ -285,7 +285,7 @@ Raise the outer budget before an inner one. Varroa logs a warning when a budget 
 than the budget inside it.
 
 The mite waits at most 9000 ms. The mite's loopback listener stops each reply after 10 seconds,
-so a longer wait loses the reply. A larger value logs one warning, and the mite uses 9000 ms.
+so a longer wait loses the reply. A larger value logs one warning, and the mite uses 9000 ms. The mite counts the wait from the moment it receives the request.
 
 ## Placement requirement
 

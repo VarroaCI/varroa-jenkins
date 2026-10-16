@@ -40,6 +40,8 @@ timeout.
 
 The mite wait is never more than 9 s, because the loopback listener stops each reply after 10 s. A larger budget logs one warning on the mite, and the mite waits 9 s.
 
+The mite counts each wait from the moment it receives the request. A slow send to the gateway shortens the wait.
+
 The operator stamps the first two overrides together from its own `VARROA_CLAIM_TIMEOUT_MS`
 value. Leave it unset and both containers use their built-in defaults, 5000 ms and 4500 ms. Set
 it and the operator stamps that value on the Jenkins container and the value minus 500 ms on the

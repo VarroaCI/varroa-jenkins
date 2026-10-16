@@ -174,7 +174,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   or more `BuildEvent`s as `MiteMessage.build_event`, `POST /v1/claim`
   forwards one `ClaimRequest` as `MiteMessage.claim_request` and blocks for
   the reply (a start mark is the same request with `start_mark` set, so the
-  claim metrics count marks too). The wait is `claimWaitFor(claimTimeout)`: the budget, capped at `loopbackWaitCap` (9 s, the 10 s write timeout minus 1 s).
+  claim metrics count marks too). The wait is `claimWaitFor(claimTimeout)`: the budget, capped at `loopbackWaitCap` (9 s, the 10 s write timeout minus 1 s). Every capped wait (claim, cross-tenant, run-state ack) counts from handler entry through `loopbackWaitLeft`, so time spent on the body read and on the stream send reduces the wait.
   `POST /v1/log` (`handleLog`) reads nine `X-Varroa-*` headers
   (`parseLogChunkHeaders`) plus the raw body, stamps the cell's own pod
   identity onto `LogChunk.cell_instance` (the plugin never sends one), and
@@ -186,7 +186,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   headers mark a restart-copy chunk: `X-Varroa-Restart-Source: 1`, plus
   `X-Varroa-Copy-Files` and `X-Varroa-Copy-Bytes`, which both name the whole
   copy and are required with the flag. A copy chunk holds its HTTP answer until
-  its `RunStateAck` arrives (`runStateAckWaiterMap`, derived by `runStateAckWaitFor` from `claimTimeout`: budget minus 500 ms, at least half, at most 9 s; reason `ack-timeout`);
+  its `RunStateAck` arrives (`runStateAckWaiterMap`, derived by `runStateAckWaitFor` from `claimTimeout`: budget minus 500 ms, at least half, at most 9 s, counted from handler entry; reason `ack-timeout`);
   the final chunk of a mesh file waits the same way, and a non-final mesh chunk still answers 202 at once. The ack store (`runStateAckStore`)
   keys each refusal by run and kind (`runStateAckKey`), so a copy refusal never
   blocks a mesh post. Every request carries
@@ -245,7 +245,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     `crossTenantMiteTimeoutFromEnv` resolves
     `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` (default 9000ms, clamped to
     `loopbackWaitCap`, 9s, one second inside the listener's 10s write
-    timeout) independently of
+    timeout, counted from handler entry) independently of
     `internal/mite.CrossTenantTimeoutFromEnv` — `cmd/mite` does not import
     `internal/mite`, so the two budgets are separate parsers with the same
     rule, not one shared function.

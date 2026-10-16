@@ -240,6 +240,7 @@ const (
 // arrives, so the plugin sees the gateway's answer for that chunk. A
 // non-final mesh chunk answers 202 at once.
 func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
+	entry := time.Now()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -284,7 +285,7 @@ func (a *Agent) handleRunState(w http.ResponseWriter, r *http.Request) {
 	// A restart-copy chunk and the final chunk of a mesh file wait for their
 	// own ack, so the plugin keeps the file until the gateway publishes it.
 	if chunk.RestartSource || chunk.Seq == chunk.Total-1 {
-		a.forwardAckedRunStateChunk(r.Context(), w, chunk)
+		a.forwardAckedRunStateChunk(r.Context(), w, chunk, entry)
 		return
 	}
 
@@ -317,10 +318,10 @@ func runStateAckWaitFor(claimTimeout time.Duration) time.Duration {
 // forwardAckedRunStateChunk sends one restart-copy chunk, or the final
 // chunk of a mesh file, and answers the plugin with the gateway's own
 // answer for that chunk. It waits for the RunStateAck of the chunk, up to
-// runStateAckWaitFor. A STORED ack answers 202. A BUSY or REJECTED ack
+// runStateAckWaitFor, counted from handler entry. A STORED ack answers 202. A BUSY or REJECTED ack
 // answers 503 with the gateway's reason. A wait that ends without an ack
 // answers 503 ack-timeout, and the plugin retries.
-func (a *Agent) forwardAckedRunStateChunk(ctx context.Context, w http.ResponseWriter, chunk *mitev1.RunStateChunk) {
+func (a *Agent) forwardAckedRunStateChunk(ctx context.Context, w http.ResponseWriter, chunk *mitev1.RunStateChunk, entry time.Time) {
 	key := runStateAckWaitKey(chunk.RunId, chunk.Relpath, chunk.Seq, chunk.RestartSource)
 	ch, ok := a.runStateAckWaiters.register(key)
 	if !ok {
@@ -334,7 +335,7 @@ func (a *Agent) forwardAckedRunStateChunk(ctx context.Context, w http.ResponseWr
 		return
 	}
 
-	timer := time.NewTimer(a.runStateAckWaitOrDefault())
+	timer := time.NewTimer(loopbackWaitLeft(entry, time.Now(), a.runStateAckWaitOrDefault()))
 	defer timer.Stop()
 	var ack *mitev1.RunStateAck
 	select {
