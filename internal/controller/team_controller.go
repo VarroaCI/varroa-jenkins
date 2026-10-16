@@ -1155,49 +1155,112 @@ var tenantWarningPriority = map[string]int{
 	v1alpha1.TeamReasonHibernationIgnored: 4,
 }
 
-// setTenantWarningsCondition folds the owning cell's
-// status.cell.tenantWarnings entries naming this Team into the Team's
-// TenantWarnings condition (task 6.14, design D4). TeamReconciler stays the
-// only writer of every Team condition; the controller reconciler discovers
-// warnings and hands them off through Controller.status.cell.tenantWarnings
-// because it may never write to a Team.
+// foldedWarning is one distinct tenant warning and the namespace/name keys
+// of the cells that report it.
+type foldedWarning struct {
+	w     v1alpha1.TenantWarning
+	cells []string
+}
+
+// orderedMemberCells lists the cells a tenant holds in reading order: the
+// scalar slot-0 cell first, then the active members by slot, then the
+// standby members by cell key. A cell appears once.
+func orderedMemberCells(placement *v1alpha1.TeamPlacementStatus) []struct{ namespace, name string } {
+	var out []struct{ namespace, name string }
+	seen := map[string]bool{}
+	add := func(namespace, name string) {
+		key := teamCellKey(namespace, name)
+		if name == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, struct{ namespace, name string }{namespace, name})
+	}
+	add(placement.CellNamespace, placement.Cell)
+	var active, standby []v1alpha1.TeamMemberStatus
+	for _, m := range placement.Members {
+		if m.Slot != nil {
+			active = append(active, m)
+		} else {
+			standby = append(standby, m)
+		}
+	}
+	sort.SliceStable(active, func(i, j int) bool { return *active[i].Slot < *active[j].Slot })
+	sort.SliceStable(standby, func(i, j int) bool {
+		return teamCellKey(standby[i].CellNamespace, standby[i].Cell) < teamCellKey(standby[j].CellNamespace, standby[j].Cell)
+	})
+	for _, m := range active {
+		add(m.CellNamespace, m.Cell)
+	}
+	for _, m := range standby {
+		add(m.CellNamespace, m.Cell)
+	}
+	return out
+}
+
+// setTenantWarningsCondition folds the status.cell.tenantWarnings entries
+// that name this Team, from every member cell (active and standby), into
+// the Team's TenantWarnings condition (task 6.14, design D4). Each distinct
+// warning appears once. When more than one cell contributes, each line
+// names the cells that report it. TeamReconciler stays the only writer of
+// every Team condition; the controller reconciler discovers warnings and
+// hands them off through Controller.status.cell.tenantWarnings because it
+// may never write to a Team.
 func (r *TeamReconciler) setTenantWarningsCondition(status *v1alpha1.TeamStatus, team *v1alpha1.Team, cellsByKey map[string]*v1alpha1.Controller) {
 	if status.Placement == nil {
 		status.Conditions = removeTeamCondition(status.Conditions, v1alpha1.TeamConditionTenantWarnings)
 		return
 	}
-	owner := cellsByKey[teamCellKey(status.Placement.CellNamespace, status.Placement.Cell)]
-	var mine []v1alpha1.TenantWarning
-	if owner != nil && owner.Status.Cell != nil {
-		for _, w := range owner.Status.Cell.TenantWarnings {
-			if w.Tenant == team.Name {
-				mine = append(mine, w)
+	var folded []foldedWarning
+	index := map[string]int{}
+	contributing := map[string]bool{}
+	for _, ref := range orderedMemberCells(status.Placement) {
+		cell := cellsByKey[teamCellKey(ref.namespace, ref.name)]
+		if cell == nil || cell.Status.Cell == nil {
+			continue
+		}
+		for _, w := range cell.Status.Cell.TenantWarnings {
+			if w.Tenant != team.Name {
+				continue
+			}
+			contributing[teamCellKey(ref.namespace, ref.name)] = true
+			key := w.Reason + "\x00" + w.Message
+			i, ok := index[key]
+			if !ok {
+				i = len(folded)
+				index[key] = i
+				folded = append(folded, foldedWarning{w: w})
+			}
+			cellKey := teamCellKey(ref.namespace, ref.name)
+			if !slices.Contains(folded[i].cells, cellKey) {
+				folded[i].cells = append(folded[i].cells, cellKey)
 			}
 		}
 	}
-	// The entries carry no timestamp, so a stable sort is the only
-	// deterministic order across ticks (tenant-placement spec) — two
-	// entries with the same tenant and reason but a different message
-	// must keep their relative order, or the folded Message would churn
-	// with no underlying change.
-	sort.SliceStable(mine, func(i, j int) bool {
-		if mine[i].Tenant != mine[j].Tenant {
-			return mine[i].Tenant < mine[j].Tenant
-		}
-		return mine[i].Reason < mine[j].Reason
-	})
+
+	// The entries carry no timestamp, so a stable sort over the cell order
+	// is the only deterministic order across ticks (tenant-placement spec).
+	sort.SliceStable(folded, func(i, j int) bool { return folded[i].w.Reason < folded[j].w.Reason })
 
 	cond := v1alpha1.TeamCondition{Type: v1alpha1.TeamConditionTenantWarnings, Status: metav1.ConditionFalse}
-	if len(mine) > 0 {
+	if len(folded) > 0 {
 		cond.Status = metav1.ConditionTrue
 		bestRank := len(tenantWarningPriority)
-		lines := make([]string, 0, len(mine))
-		for _, w := range mine {
-			if rank, ok := tenantWarningPriority[w.Reason]; ok && rank < bestRank {
+		lines := make([]string, 0, len(folded))
+		for _, f := range folded {
+			if rank, ok := tenantWarningPriority[f.w.Reason]; ok && rank < bestRank {
 				bestRank = rank
-				cond.Reason = w.Reason
+				cond.Reason = f.w.Reason
 			}
-			lines = append(lines, fmt.Sprintf("%s: %s", w.Reason, w.Message))
+			line := fmt.Sprintf("%s: %s", f.w.Reason, f.w.Message)
+			if len(contributing) > 1 {
+				names := make([]string, 0, len(f.cells))
+				for _, k := range f.cells {
+					names = append(names, k[strings.LastIndex(k, "/")+1:])
+				}
+				line = strings.Join(names, ", ") + ": " + line
+			}
+			lines = append(lines, line)
 		}
 		cond.Message = capBytes(strings.Join(lines, "; "), 2048)
 	}

@@ -17,7 +17,7 @@ Six limitations apply:
 - A cell never auto-hibernates.
 - `powerState: Stopped` on a cell destroys every in-flight build.
 - Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
-- A rehydrated run shows no stage view, culprit list, or test detail.
+- A rehydrated run shows no stage view, culprits, or test detail.
 - The role-strategy screen shows an unknown service identity until the first build.
 - An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
   the tenant's [`items.yaml`](../config/items.md) bundle does.
@@ -31,7 +31,7 @@ A cell needs:
 - External artifact storage. Pin `artifact-manager-s3` in the cell's `JenkinsVersionProfile` and
   configure [Artifact credentials](artifact-credentials.md).
 
-The operator reports `CellReady=False` until all three hold.
+`CellReady` stays `False` until all three hold.
 
 ## Enable a cell
 
@@ -113,8 +113,9 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A new held tenant has no
   folder until fixed. Held folders show no job.
-- **Item role.** The operator synthesizes a role for the folder's subtree, granting build,
-  read, and replay permissions to the service identity.
+- **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells.
+- **Item role.** The operator grants the service identity build, read, and replay permissions
+  on the folder's subtree.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
   with no user record.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
@@ -152,7 +153,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   Varroa skips a `Secret` with a missing key, an unknown kind, or a duplicate id, and records
   it in `TenantWarnings`. It also skips `secretFile`, `certificate`, or `githubApp`
-  values over 64 KiB, and a keystore that is not binary PKCS#12. The projected credentials of one cell share a 512 KiB budget. Varroa serves tenants by name and skips a credential that does not fit, with a `TenantWarnings` entry. A library that names a skipped credential holds the folder (`ItemsHeld`). A value reaches Jenkins as written, `${`
+  values over 64 KiB, and a keystore that is not binary PKCS#12. Projected credentials share a 512 KiB budget per cell; a credential that does not fit is skipped with a `TenantWarnings` entry. A library that names a skipped credential holds the folder (`ItemsHeld`). A value reaches Jenkins as written, `${`
   included. The controller diff drops comments and shows each credential as
   `<redacted>`, so a rotation shows no change. A GitHub deploy key:
 

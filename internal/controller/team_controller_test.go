@@ -2299,3 +2299,156 @@ func TestSetTenantWarningsCondition_ItemsHeldOutranksBundleKeysIgnored(t *testin
 		t.Errorf("expected reason ItemsHeld, got %q", cond.Reason)
 	}
 }
+
+// foldTenantWarningsMembers runs setTenantWarningsCondition for the Team
+// payments over placement and cellsByKey, and returns the TenantWarnings
+// condition.
+func foldTenantWarningsMembers(t *testing.T, placement *v1alpha1.TeamPlacementStatus, cellsByKey map[string]*v1alpha1.Controller) v1alpha1.TeamCondition {
+	t.Helper()
+	team := &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}}
+	status := &v1alpha1.TeamStatus{Placement: placement}
+	rec := &TeamReconciler{}
+	rec.setTenantWarningsCondition(status, team, cellsByKey)
+	for _, c := range status.Conditions {
+		if c.Type == v1alpha1.TeamConditionTenantWarnings {
+			return c
+		}
+	}
+	t.Fatal("expected a TenantWarnings condition")
+	return v1alpha1.TeamCondition{}
+}
+
+// warnCell builds a cell Controller in namespace cells-ns that reports
+// entries.
+func warnCell(name string, entries ...v1alpha1.TenantWarning) *v1alpha1.Controller {
+	return &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "cells-ns"},
+		Status:     v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{TenantWarnings: entries}},
+	}
+}
+
+func TestSetTenantWarningsCondition_ReadsNonSlotZeroMember(t *testing.T) {
+	placement := &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells-ns",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(0)},
+			{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(1)},
+		},
+	}
+	cells := map[string]*v1alpha1.Controller{
+		teamCellKey("cells-ns", "cell-a"): warnCell("cell-a"),
+		teamCellKey("cells-ns", "cell-b"): warnCell("cell-b",
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonCredentialSkipped, Message: `credential "big" does not fit the cell budget`},
+			v1alpha1.TenantWarning{Tenant: "other-team", Reason: v1alpha1.TeamReasonItemsHeld, Message: "other team warning"},
+		),
+	}
+	cond := foldTenantWarningsMembers(t, placement, cells)
+	if cond.Status != metav1.ConditionTrue {
+		t.Fatalf("status = %v, want True", cond.Status)
+	}
+	if cond.Reason != v1alpha1.TeamReasonCredentialSkipped {
+		t.Errorf("reason = %q, want CredentialSkipped", cond.Reason)
+	}
+	want := `CredentialSkipped: credential "big" does not fit the cell budget`
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+}
+
+func TestSetTenantWarningsCondition_ReadsStandbyMember(t *testing.T) {
+	placement := &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells-ns",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(0)},
+			{Cell: "cell-s", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby},
+		},
+	}
+	cells := map[string]*v1alpha1.Controller{
+		teamCellKey("cells-ns", "cell-a"): warnCell("cell-a"),
+		teamCellKey("cells-ns", "cell-s"): warnCell("cell-s",
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonCredentialSkipped, Message: `credential "big" does not fit the cell budget`},
+		),
+	}
+	cond := foldTenantWarningsMembers(t, placement, cells)
+	if cond.Status != metav1.ConditionTrue {
+		t.Fatalf("status = %v, want True", cond.Status)
+	}
+	want := `CredentialSkipped: credential "big" does not fit the cell budget`
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+}
+
+func TestSetTenantWarningsCondition_NamesCellsWhenTwoContribute(t *testing.T) {
+	placement := &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells-ns",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(0)},
+			{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(1)},
+		},
+	}
+	cells := map[string]*v1alpha1.Controller{
+		teamCellKey("cells-ns", "cell-a"): warnCell("cell-a",
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonPodTemplateSkipped, Message: "pod template skipped"},
+		),
+		teamCellKey("cells-ns", "cell-b"): warnCell("cell-b",
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonItemsHeld, Message: "items held"},
+		),
+	}
+	cond := foldTenantWarningsMembers(t, placement, cells)
+	if cond.Reason != v1alpha1.TeamReasonItemsHeld {
+		t.Errorf("reason = %q, want ItemsHeld", cond.Reason)
+	}
+	want := "cell-b: ItemsHeld: items held; cell-a: PodTemplateSkipped: pod template skipped"
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+}
+
+func TestSetTenantWarningsCondition_SameWarningOnTwoCellsListedOnce(t *testing.T) {
+	placement := &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells-ns",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(0)},
+			{Cell: "cell-b", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(1)},
+		},
+	}
+	held := v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonItemsHeld, Message: "items held"}
+	cells := map[string]*v1alpha1.Controller{
+		teamCellKey("cells-ns", "cell-a"): warnCell("cell-a", held),
+		teamCellKey("cells-ns", "cell-b"): warnCell("cell-b", held,
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonCredentialSkipped, Message: "credential skipped"},
+		),
+	}
+	cond := foldTenantWarningsMembers(t, placement, cells)
+	if cond.Reason != v1alpha1.TeamReasonItemsHeld {
+		t.Errorf("reason = %q, want ItemsHeld", cond.Reason)
+	}
+	// Lines sort by reason, so CredentialSkipped precedes ItemsHeld.
+	want := "cell-b: CredentialSkipped: credential skipped; cell-a, cell-b: ItemsHeld: items held"
+	if cond.Message != want {
+		t.Errorf("message = %q, want %q", cond.Message, want)
+	}
+}
+
+func TestSetTenantWarningsCondition_SkipsMissingMemberCell(t *testing.T) {
+	placement := &v1alpha1.TeamPlacementStatus{
+		Cell: "cell-a", CellNamespace: "cells-ns",
+		Members: []v1alpha1.TeamMemberStatus{
+			{Cell: "cell-a", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleActive, Slot: int32Ptr(0)},
+			{Cell: "cell-gone", CellNamespace: "cells-ns", Role: v1alpha1.TeamMemberRoleStandby},
+		},
+	}
+	cells := map[string]*v1alpha1.Controller{
+		teamCellKey("cells-ns", "cell-a"): warnCell("cell-a",
+			v1alpha1.TenantWarning{Tenant: "payments", Reason: v1alpha1.TeamReasonItemsHeld, Message: "items held"},
+		),
+	}
+	cond := foldTenantWarningsMembers(t, placement, cells)
+	if cond.Status != metav1.ConditionTrue {
+		t.Fatalf("status = %v, want True", cond.Status)
+	}
+	if cond.Message != "ItemsHeld: items held" {
+		t.Errorf("message = %q, want %q", cond.Message, "ItemsHeld: items held")
+	}
+}
