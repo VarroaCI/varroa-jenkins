@@ -506,7 +506,7 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   mesh chunks only. A copy ack carries `seq`, and the mite answers the copy's own
   post with it.
   The gateway publishes the `run.state` envelope before it records the push and before the `STORED` ack, on both paths.
-  A failed publish answers `BUSY` `gateway-budget-full`. An unresolved tenant answers `BUSY` `tenant-unresolved` for `runStateTenantGrace` (two resolver TTLs, 60 s) per run entry, then `REJECTED` `foreign-run`. A resolved publish clears that clock.
+  A failed publish answers `BUSY` `gateway-budget-full`. An unresolved tenant answers `BUSY` `tenant-unresolved` for `runStateTenantGrace` (two resolver TTLs, 60 s) per run, then `REJECTED` `foreign-run`. A resolved publish clears that clock. The clock lives in `BusHandler.tenantGrace` on one gateway replica, keyed by run and by restart copy. A mite disconnect does not clear it. The terminal drop clears it. Clocks older than `tenantGraceRetain` (10 min) are swept on the next `tenant-unresolved` answer, so an idle gateway keeps them until then.
   The mesh path records no push for that file, so the plugin's retry is not a redelivery.
   The copy path keeps the file out of its stored set.
   A state-cap refusal publishes its envelope before the `REJECTED` ack, and the ack holds whatever the publish answers.

@@ -99,10 +99,6 @@ type runStateEntry struct {
 	// fetched records that this run has already served one state fetch,
 	// so the owner-cache invalidation runs on the first fetch alone.
 	fetched bool
-	// tenantUnresolvedSince is when a stored file of this run first found
-	// no tenant. A resolved publish clears it. It is read and written
-	// under h.stateMu.
-	tenantUnresolvedSince time.Time
 	// writeMu keeps two writes of one key apart. A whole-object replace
 	// is not atomic on the object tier: it deletes the key and then
 	// writes part 0. A redelivery repeats a push that this replica is
@@ -163,10 +159,11 @@ func (h *BusHandler) getOrCreateStateEntry(runID, ns, name, jobPath string) *run
 
 // dropStateEntry removes one run's entry and refunds its pending bytes.
 // A terminal run keeps no entry: without this drop an entry would live
-// for the whole gateway lifetime.
+// for the whole gateway lifetime. It also drops the run's mesh grace clock.
 func (h *BusHandler) dropStateEntry(runID string) {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
+	h.clearTenantGraceLocked(tenantGraceKey{runID: runID})
 	e, ok := h.stateRuns[runID]
 	if !ok {
 		return
@@ -181,7 +178,9 @@ func (h *BusHandler) dropStateEntry(runID string) {
 }
 
 // dropCellStateEntries removes every entry of one cell. A disconnect
-// ends every push that cell had in flight.
+// ends every push that cell had in flight. The tenant grace clocks stay:
+// they belong to the run's placement, and a reconnect must not restart
+// the grace.
 func (h *BusHandler) dropCellStateEntries(ns, name string) {
 	h.stateMu.Lock()
 	defer h.stateMu.Unlock()
@@ -450,7 +449,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	}
 
 	if h.runStateTenantMissing(ns, name, chunk.JobPath) {
-		return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "run-state", ns, name, chunk)
+		return h.unresolvedTenantGrace(tenantGraceKey{runID: chunk.RunId}, "run-state", ns, name, chunk)
 	}
 
 	key := blob.RunStateKey(chunk.RunId, chunk.PusherEpoch, outcome.stateGen, chunk.Relpath)
@@ -472,7 +471,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	// runStateTenantGrace and foreign-run after it.
 	if err := h.publishRunStateOutcome(ns, name, chunk, outcome); err != nil {
 		if errors.Is(err, errRunStateTenantUnresolved) {
-			return h.unresolvedTenantGrace(&e.tenantUnresolvedSince, "run-state", ns, name, chunk)
+			return h.unresolvedTenantGrace(tenantGraceKey{runID: chunk.RunId}, "run-state", ns, name, chunk)
 		}
 		return runStateOutcome{status: stateAckStatusBusy, reason: stateReasonBudgetFull, pauseMS: stateBudgetPauseMinMS}
 	}
@@ -481,7 +480,7 @@ func (h *BusHandler) storeRunStateObject(ctx context.Context, ns, name string, e
 	e.storedTotal += outcome.bytes - e.storedSizes[chunk.Relpath]
 	e.storedSizes[chunk.Relpath] = outcome.bytes
 	e.completed[chunk.Relpath] = storedPush{epoch: chunk.PusherEpoch, gen: outcome.stateGen}
-	e.tenantUnresolvedSince = time.Time{}
+	h.clearTenantGraceLocked(tenantGraceKey{runID: chunk.RunId})
 	h.stateMu.Unlock()
 
 	h.metrics.runStateBytes.Add(ctx, outcome.bytes)
@@ -555,12 +554,47 @@ const (
 // because the cell does not host its tenant.
 const runStateTenantGrace = 2 * cellTenantResolveTTL
 
+// tenantGraceKey names one grace clock. A restart copy keeps a clock of
+// its own, because the terminal mesh drop clears the run's mesh clock.
+type tenantGraceKey struct {
+	runID   string
+	restart bool
+}
+
+// tenantGraceRetain bounds how long a clock outlives its last use. A run
+// past the grace is refused, and its pusher stops, so an older clock
+// only holds memory.
+const tenantGraceRetain = 10 * runStateTenantGrace
+
+// sweepTenantGraceLocked drops every clock older than tenantGraceRetain.
+// Caller must hold h.stateMu.
+func (h *BusHandler) sweepTenantGraceLocked(now time.Time) {
+	for k, since := range h.tenantGrace {
+		if now.Sub(since) >= tenantGraceRetain {
+			delete(h.tenantGrace, k)
+		}
+	}
+}
+
+// clearTenantGraceLocked drops one clock. Caller must hold h.stateMu.
+func (h *BusHandler) clearTenantGraceLocked(key tenantGraceKey) {
+	delete(h.tenantGrace, key)
+}
+
 // unresolvedTenantGrace answers a file whose tenant does not resolve. It
 // takes the grace outcome under h.stateMu and logs a refusal. what names
-// the path in the log line. Callers hold no lock.
-func (h *BusHandler) unresolvedTenantGrace(since *time.Time, what, ns, name string, chunk *mitev1.RunStateChunk) runStateOutcome {
+// the path in the log line. The clock for key lives in h.tenantGrace.
+// Callers hold no lock.
+func (h *BusHandler) unresolvedTenantGrace(key tenantGraceKey, what, ns, name string, chunk *mitev1.RunStateChunk) runStateOutcome {
+	now := time.Now()
 	h.stateMu.Lock()
-	o := unresolvedTenantOutcomeLocked(since, time.Now())
+	if h.tenantGrace == nil {
+		h.tenantGrace = make(map[tenantGraceKey]time.Time)
+	}
+	h.sweepTenantGraceLocked(now)
+	since := h.tenantGrace[key]
+	o := unresolvedTenantOutcomeLocked(&since, now)
+	h.tenantGrace[key] = since
 	h.stateMu.Unlock()
 	if o.status == stateAckStatusRejected {
 		h.log().Warn(what+" tenant unresolved past the grace, refusing",

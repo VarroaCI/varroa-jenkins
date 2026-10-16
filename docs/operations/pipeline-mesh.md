@@ -63,4 +63,4 @@ pod writes it.
 
 The plugin keeps each file until the gateway stores it and records it. A failed record holds the file, and the plugin sends it again.
 
-When the gateway cannot find the tenant of a run, it answers busy with the reason `tenant-unresolved`, and the plugin sends the file again after the pause. After 60 seconds it refuses the run as `foreign-run`. The run then stops replicating its state, and a later resume takes the ordinary path. The same rule applies to the restart copy.
+When the gateway cannot find the tenant of a run, it answers busy with the reason `tenant-unresolved`, and the plugin sends the file again after the pause. After 60 seconds it refuses the run as `foreign-run`. A mite reconnect to the same gateway replica keeps that replica's clock while the clock is retained. Gateway replicas do not share clocks, so another replica may start a new clock. The run then stops replicating its state, and a later resume takes the ordinary path. The same rule applies to the restart copy.
