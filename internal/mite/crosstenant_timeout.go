@@ -13,14 +13,14 @@ const crossTenantGatewayTimeoutEnv = "VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS"
 // defaultCrossTenantGatewayTimeout is VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS's
 // default: the gateway's hop of the shrink-inward cross-tenant timeout
 // budget (design.md D14).
-const defaultCrossTenantGatewayTimeout = 9 * time.Second
+const defaultCrossTenantGatewayTimeout = 8500 * time.Millisecond
 
 // crossTenantMiteHopTimeout is the mite's own default budget for waiting
 // on the gateway's cross-tenant reply (design.md D14,
 // VARROA_CROSSTENANT_MITE_TIMEOUT_MS). The gateway's own budget must stay
 // shorter, because the mite is the caller waiting on this hop; an
 // operator raises an outer budget before an inner one.
-const crossTenantMiteHopTimeout = 9500 * time.Millisecond
+const crossTenantMiteHopTimeout = 9 * time.Second
 
 // CrossTenantTimeoutFromEnv reads envVar as a whole number of
 // milliseconds and converts it to a time.Duration. An unset, empty,

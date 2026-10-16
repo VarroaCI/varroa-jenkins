@@ -326,14 +326,14 @@ func TestCrossTenantTimeoutFromEnv_NonWholeNumberKeepsDefault(t *testing.T) {
 }
 
 func TestCrossTenantGatewayTimeout_WarnsWhenAtLeastMiteHopDefault(t *testing.T) {
-	t.Setenv(crossTenantGatewayTimeoutEnv, "9500")
+	t.Setenv(crossTenantGatewayTimeoutEnv, "9000")
 	var buf bytes.Buffer
 	h := newClaimTestHandler(&fakeCrossTenantLedger{})
 	h.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	got := h.crossTenantGatewayTimeout()
-	if got != 9500*time.Millisecond {
-		t.Fatalf("timeout = %v, want 9500ms", got)
+	if got != 9000*time.Millisecond {
+		t.Fatalf("timeout = %v, want 9000ms", got)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "level=WARN") {
@@ -345,7 +345,7 @@ func TestCrossTenantGatewayTimeout_WarnsWhenAtLeastMiteHopDefault(t *testing.T) 
 }
 
 func TestCrossTenantGatewayTimeout_NoWarningWhenShorterThanMiteHop(t *testing.T) {
-	t.Setenv(crossTenantGatewayTimeoutEnv, "9000")
+	t.Setenv(crossTenantGatewayTimeoutEnv, "8500")
 	var buf bytes.Buffer
 	h := newClaimTestHandler(&fakeCrossTenantLedger{})
 	h.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))

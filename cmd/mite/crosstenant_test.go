@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -463,46 +464,72 @@ func TestCrossTenantMiteTimeoutMalformedKeepsDefaultAndWarns(t *testing.T) {
 	}
 }
 
-func TestCrossTenantMiteTimeoutClampedAbove10000(t *testing.T) {
+func TestCrossTenantMiteTimeoutClampedAboveWaitCap(t *testing.T) {
 	t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", "20000")
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	got := crossTenantMiteTimeoutFromEnv(logger)
-	if want := 10 * time.Second; got != want {
-		t.Errorf("expected the clamped 10s, got %v", got)
+	if got != loopbackWaitCap {
+		t.Errorf("expected the clamped %v, got %v", loopbackWaitCap, got)
 	}
-	if !strings.Contains(buf.String(), "clamping") {
-		t.Errorf("expected a clamp WARNING, got: %q", buf.String())
+	if strings.Count(buf.String(), "level=WARN") != 1 || !strings.Contains(buf.String(), "clamping") {
+		t.Errorf("expected exactly one clamp WARNING, got: %q", buf.String())
 	}
 }
 
-// TestCrossTenantMiteTimeoutNestingWarning proves a mite budget at least as
-// long as the plugin read budget's 10000ms default logs one WARNING and
-// still serves (design.md D14; the mite cannot read the plugin's own
-// environment, so the comparison uses that variable's default).
-func TestCrossTenantMiteTimeoutNestingWarning(t *testing.T) {
+// A value at the listener's write timeout is above the wait cap, so it is
+// clamped. The clamp is the only warning: no plugin-budget comparison
+// remains, because the cap is below the plugin read default.
+func TestCrossTenantMiteTimeoutAtWriteTimeoutIsClamped(t *testing.T) {
 	t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", "10000")
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	got := crossTenantMiteTimeoutFromEnv(logger)
-	if want := 10 * time.Second; got != want {
-		t.Errorf("expected 10s (no clamp needed at exactly the cap), got %v", got)
+	if got != loopbackWaitCap {
+		t.Errorf("expected the clamped %v, got %v", loopbackWaitCap, got)
 	}
 	logged := buf.String()
 	if strings.Count(logged, "level=WARN") != 1 {
-		t.Errorf("expected exactly one nesting WARNING, got: %q", logged)
+		t.Errorf("expected exactly one clamp WARNING, got: %q", logged)
 	}
-	if !strings.Contains(logged, "plugin read budget") {
-		t.Errorf("expected the nesting warning to name the plugin read budget, got: %q", logged)
+	if strings.Contains(logged, "plugin read budget") {
+		t.Errorf("expected no plugin-budget warning, got: %q", logged)
 	}
 }
 
-func TestCrossTenantMiteTimeoutBelowNestingThresholdLogsNothing(t *testing.T) {
-	t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", "9500")
+func TestCrossTenantMiteTimeoutAtWaitCapKept(t *testing.T) {
+	t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", "9000")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	if got := crossTenantMiteTimeoutFromEnv(logger); got != 9*time.Second {
+		t.Errorf("expected 9s, got %v", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no log output at the wait cap, got %q", buf.String())
+	}
+}
+
+func TestCrossTenantMiteTimeoutBelowWaitCapLogsNothing(t *testing.T) {
+	t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", "8999")
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	_ = crossTenantMiteTimeoutFromEnv(logger)
 	if buf.Len() != 0 {
-		t.Errorf("expected no warning below the nesting threshold, got %q", buf.String())
+		t.Errorf("expected no warning below the wait cap, got %q", buf.String())
+	}
+}
+
+// TestCrossTenantMiteTimeout_StaysUnderWriteTimeout proves no accepted
+// value lets the wait reach the listener's write deadline.
+func TestCrossTenantMiteTimeout_StaysUnderWriteTimeout(t *testing.T) {
+	if loopbackWaitCap >= loopbackWriteTimeout {
+		t.Fatalf("wait cap %v must stay below the write timeout %v", loopbackWaitCap, loopbackWriteTimeout)
+	}
+	for ms := 1000; ms <= 30000; ms += 250 {
+		t.Setenv("VARROA_CROSSTENANT_MITE_TIMEOUT_MS", strconv.Itoa(ms))
+		got := crossTenantMiteTimeoutFromEnv(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if got <= 0 || got > loopbackWaitCap {
+			t.Errorf("value %dms resolved to %v, want (0, %v]", ms, got, loopbackWaitCap)
+		}
 	}
 }

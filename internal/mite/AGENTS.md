@@ -299,8 +299,8 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   through, because this package relays a contract it does not own.
   `CrossTenantTimeoutFromEnv` is the whole-number-milliseconds parser
   behind this package's own `VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS` budget
-  (default 9s); it warns once per call when the resolved value is at least
-  as long as the mite's 9.5s default, because that leaves the mite's whole
+  (default 8.5s); it warns once per call when the resolved value is at least
+  as long as the mite's 9s default, because that leaves the mite's whole
   budget consumed before this hop even gives up. `cmd/mite` never imports
   this package — the gateway server would pull into the sidecar binary —
   so its own hop (`VARROA_CROSSTENANT_MITE_TIMEOUT_MS`) keeps a second,

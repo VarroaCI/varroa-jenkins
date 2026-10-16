@@ -278,11 +278,14 @@ Each of four hops carries its own timeout. Each hop's budget is shorter than the
 |---|---|---|
 | the plugin's connect | `VARROA_CROSSTENANT_CONNECT_TIMEOUT_MS` | 1000 ms |
 | the plugin's read | `VARROA_CROSSTENANT_READ_TIMEOUT_MS` | 10000 ms |
-| the mite's wait for a response | `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` | 9500 ms |
-| the gateway's wait for the record store | `VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS` | 9000 ms |
+| the mite's wait for a response | `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` | 9000 ms |
+| the gateway's wait for the record store | `VARROA_CROSSTENANT_GATEWAY_TIMEOUT_MS` | 8500 ms |
 
 Raise the outer budget before an inner one. Varroa logs a warning when a budget is not shorter
 than the budget inside it.
+
+The mite waits at most 9000 ms. The mite's loopback listener stops each reply after 10 seconds,
+so a longer wait loses the reply. A larger value logs one warning, and the mite uses 9000 ms.
 
 ## Placement requirement
 

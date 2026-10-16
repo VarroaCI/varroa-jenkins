@@ -243,8 +243,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
     answers `{"code":"UNAVAILABLE"}` in `payload_json`, since
     `CrossTenantResponse` carries no dedicated code field.
     `crossTenantMiteTimeoutFromEnv` resolves
-    `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` (default 9500ms, clamped to the
-    listener's own 10s write timeout) independently of
+    `VARROA_CROSSTENANT_MITE_TIMEOUT_MS` (default 9000ms, clamped to
+    `loopbackWaitCap`, 9s, one second inside the listener's 10s write
+    timeout) independently of
     `internal/mite.CrossTenantTimeoutFromEnv` — `cmd/mite` does not import
     `internal/mite`, so the two budgets are separate parsers with the same
     rule, not one shared function.

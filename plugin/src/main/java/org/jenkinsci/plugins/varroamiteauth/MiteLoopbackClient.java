@@ -44,12 +44,12 @@ public class MiteLoopbackClient {
     private static final long DEFAULT_CROSSTENANT_READ_TIMEOUT_MILLIS = 10_000L;
 
     /**
-     * The mite's own wait-for-response budget (D14), 9.5 s by default. The
+     * The mite's own wait-for-response budget (D14), 9 s by default. The
      * plugin cannot read the mite process's own environment, so the
      * nesting check below compares against this documented default, never
      * a live value.
      */
-    private static final long CROSSTENANT_MITE_HOP_DEFAULT_MILLIS = 9500L;
+    private static final long CROSSTENANT_MITE_HOP_DEFAULT_MILLIS = 9000L;
 
     static final String HOMES_PATH = "/v1/homes";
 
@@ -427,7 +427,7 @@ public class MiteLoopbackClient {
     /**
      * Parses {@code VARROA_CROSSTENANT_READ_TIMEOUT_MS} from its raw value,
      * and logs one {@code WARNING} when the resolved budget is at most the
-     * mite hop's own 9500 ms default (D14): the plugin's read budget is the
+     * mite hop's own 9000 ms default (D14): the plugin's read budget is the
      * outermost budget in the chain, and must stay longer than every hop it
      * wraps.
      */
