@@ -252,7 +252,7 @@ public class MiteLoopbackClient {
     }
 
     /** The first {@value #BODY_PREFIX_BYTES} bytes of an answer body as UTF-8, or null when it has none. */
-    private static String bodyPrefix(byte[] body) {
+    static String bodyPrefix(byte[] body) {
         if (body == null || body.length == 0) {
             return null;
         }

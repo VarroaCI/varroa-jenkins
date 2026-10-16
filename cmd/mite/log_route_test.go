@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
@@ -83,6 +86,8 @@ func TestLogResponseContractTable(t *testing.T) {
 		malformed  bool
 		wantStatus int
 		wantMaxHdr bool
+		// wantBody is the plain-text line a 400 or 413 answer carries.
+		wantBody string
 		// wantPause is true only for the 503 the mite raises inside a
 		// BUSY pause window. Every other answer carries no pause header.
 		wantPause bool
@@ -99,6 +104,7 @@ func TestLogResponseContractTable(t *testing.T) {
 			token:      "tok",
 			malformed:  true,
 			wantStatus: http.StatusBadRequest,
+			wantBody:   "malformed log headers",
 		},
 		{
 			name:       "bad bearer",
@@ -153,7 +159,34 @@ func TestLogResponseContractTable(t *testing.T) {
 			if got := rec.Header().Get(hdrPauseMs) != ""; got != tc.wantPause {
 				t.Errorf("%s: %s present = %v, want %v", tc.name, hdrPauseMs, got, tc.wantPause)
 			}
+			if tc.wantBody != "" {
+				if got := strings.TrimSpace(rec.Body.String()); got != tc.wantBody {
+					t.Errorf("%s: body = %q, want %q", tc.name, got, tc.wantBody)
+				}
+				if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+					t.Errorf("%s: Content-Type = %q, want text/plain", tc.name, ct)
+				}
+			}
 		})
+	}
+}
+
+func TestLogUnreadableBodyIs400(t *testing.T) {
+	agent := mustNewAgent(t, Config{})
+	agent.Logger = slog.Default()
+	agent.loopbackToken = "tok"
+	setTestStream(agent, &concurrentSendStream{sendFn: func(*mitev1.MiteMessage) error { return nil }})
+
+	req := newLogRequest("tok", "j", 1, 1, "", "", 0, 0, "")
+	req.Body = io.NopCloser(iotest.ErrReader(errors.New("read failed")))
+	rec := httptest.NewRecorder()
+	agent.handleLog(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "unreadable log body" {
+		t.Errorf("body = %q, want %q", got, "unreadable log body")
 	}
 }
 
@@ -235,6 +268,9 @@ func TestLogOversizedBody413CarriesMaxChunkHeader(t *testing.T) {
 	}
 	if rec.Header().Get(hdrLogMaxChunkBytes) != strconv.Itoa(logChunkMaxBytes) {
 		t.Errorf("expected %s header = %d, got %q", hdrLogMaxChunkBytes, logChunkMaxBytes, rec.Header().Get(hdrLogMaxChunkBytes))
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "log chunk over the cap" {
+		t.Errorf("body = %q, want %q", got, "log chunk over the cap")
 	}
 }
 

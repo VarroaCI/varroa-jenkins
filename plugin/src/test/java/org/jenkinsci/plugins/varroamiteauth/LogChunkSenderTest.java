@@ -6,6 +6,10 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -121,6 +125,70 @@ public class LogChunkSenderTest {
 
         assertEquals(1, owner.terminallyFailed.size());
         assertEquals(8192L, LogChunkSender.currentChunkCapBytes());
+    }
+
+    @Test
+    public void a400LogsTheRefusalBodyPrefix() {
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        Handler handler = captureWarnings(records);
+        try {
+            LogChunkSender.Transport t = (url, chunk, token, timeout) ->
+                    new LogChunkSender.Attempt(400, -1, -1, false, "malformed log headers");
+            LogChunkSender sender = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(), t,
+                    ms -> { }, directExecutor());
+            RecordingOwner owner = new RecordingOwner();
+            sender.enqueue(owner, chunk("r1", 0, false));
+
+            assertEquals(1, owner.terminallyFailed.size());
+            assertEquals(1, records.size());
+            assertEquals(Level.WARNING, records.get(0).getLevel());
+            assertTrue(records.get(0).getMessage().contains("malformed log headers"));
+        } finally {
+            Logger.getLogger(LogChunkSender.class.getName()).removeHandler(handler);
+        }
+    }
+
+    @Test
+    public void a413LogsTheRefusalBodyPrefix() {
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        Handler handler = captureWarnings(records);
+        try {
+            LogChunkSender.Transport t = (url, chunk, token, timeout) ->
+                    new LogChunkSender.Attempt(413, 8192, -1, false, "log chunk over the cap");
+            LogChunkSender sender = new LogChunkSender("http://127.0.0.1:9095/v1/log", new LoopbackTokenFile(), t,
+                    ms -> { }, directExecutor());
+            RecordingOwner owner = new RecordingOwner();
+            sender.enqueue(owner, chunk("r1", 0, false));
+
+            assertEquals(1, owner.terminallyFailed.size());
+            assertEquals(1, records.size());
+            assertEquals(Level.WARNING, records.get(0).getLevel());
+            assertTrue(records.get(0).getMessage().contains("log chunk over the cap"));
+        } finally {
+            Logger.getLogger(LogChunkSender.class.getName()).removeHandler(handler);
+        }
+    }
+
+    /** Adds a handler that collects WARNING records from the sender's logger. The caller removes it. */
+    private static Handler captureWarnings(List<LogRecord> records) {
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                if (r.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    records.add(r);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger.getLogger(LogChunkSender.class.getName()).addHandler(handler);
+        return handler;
     }
 
     @Test

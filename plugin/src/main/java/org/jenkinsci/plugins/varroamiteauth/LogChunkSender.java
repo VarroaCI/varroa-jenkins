@@ -97,6 +97,10 @@ class LogChunkSender {
         }
     }
 
+    private static String bodyText(Attempt a) {
+        return a.bodyPrefix != null ? a.bodyPrefix : "";
+    }
+
     /** Resets the shared lowered cap. Package-private for testing. */
     static void resetChunkCapForTesting() {
         CURRENT_CHUNK_CAP_BYTES.set(-1L);
@@ -156,13 +160,13 @@ class LogChunkSender {
             }
             if (!result.transportFailure && result.statusCode == STATUS_BAD_REQUEST) {
                 LOGGER.log(Level.WARNING, "LogChunkSender: mite rejected chunk seq=" + chunk.seq
-                        + " for run " + chunk.runId + " with 400");
+                        + " for run " + chunk.runId + " with 400: " + bodyText(result));
                 rq.owner.onChunkTerminallyFailed(chunk);
                 return true;
             }
             if (!result.transportFailure && result.statusCode == STATUS_TOO_LARGE) {
                 LOGGER.log(Level.WARNING, "LogChunkSender: mite rejected chunk seq=" + chunk.seq
-                        + " for run " + chunk.runId + " with 413");
+                        + " for run " + chunk.runId + " with 413: " + bodyText(result));
                 applyLoweredCap(result.maxChunkBytes);
                 rq.owner.onChunkTerminallyFailed(chunk);
                 return true;
@@ -284,7 +288,8 @@ class LogChunkSender {
             HttpResponse<byte[]> resp = SHARED_CLIENT.send(b.build(), HttpResponse.BodyHandlers.ofByteArray());
             long maxChunkBytes = parseMaxChunkBytesHeader(resp);
             long pauseMillis = parsePauseMillis(resp.headers().firstValue(PAUSE_HEADER).orElse(null));
-            return new Attempt(resp.statusCode(), maxChunkBytes, pauseMillis, false);
+            return new Attempt(resp.statusCode(), maxChunkBytes, pauseMillis, false,
+                    MiteLoopbackClient.bodyPrefix(resp.body()));
         } catch (HttpTimeoutException e) {
             LOGGER.log(Level.FINE, "LogChunkSender: timeout posting chunk seq=" + chunk.seq, e);
             return new Attempt(0, -1, -1, true);
@@ -329,12 +334,19 @@ class LogChunkSender {
         final long maxChunkBytes;
         final long pauseMillis;
         final boolean transportFailure;
+        /** The first bytes of the answer body as UTF-8, or null when the answer had none. */
+        final String bodyPrefix;
 
         Attempt(int statusCode, long maxChunkBytes, long pauseMillis, boolean transportFailure) {
+            this(statusCode, maxChunkBytes, pauseMillis, transportFailure, null);
+        }
+
+        Attempt(int statusCode, long maxChunkBytes, long pauseMillis, boolean transportFailure, String bodyPrefix) {
             this.statusCode = statusCode;
             this.maxChunkBytes = maxChunkBytes;
             this.pauseMillis = pauseMillis;
             this.transportFailure = transportFailure;
+            this.bodyPrefix = bodyPrefix;
         }
     }
 
