@@ -39,6 +39,10 @@ const (
 	loopbackWriteTimeout      = 10 * time.Second
 	loopbackShutdownTimeout   = 5 * time.Second
 
+	// loopbackWaitCap bounds each handler wait that holds a loopback answer.
+	// The wait must end before the write timeout of the listener stops the reply.
+	loopbackWaitCap = loopbackWriteTimeout - time.Second
+
 	maxClaimWaiters       = 64
 	defaultClaimTimeoutMS = 4500
 
@@ -165,6 +169,28 @@ func claimTimeoutFromEnv() time.Duration {
 	return time.Duration(envOrInt("MITE_CLAIM_TIMEOUT_MS", defaultClaimTimeoutMS)) * time.Millisecond
 }
 
+// claimWaitFor returns how long /v1/claim waits for a ClaimResponse. The wait
+// is the claim budget and never more than loopbackWaitCap. A budget of zero
+// or less uses the default budget.
+func claimWaitFor(claimTimeout time.Duration) time.Duration {
+	if claimTimeout <= 0 {
+		claimTimeout = defaultClaimTimeoutMS * time.Millisecond
+	}
+	if claimTimeout > loopbackWaitCap {
+		return loopbackWaitCap
+	}
+	return claimTimeout
+}
+
+// logClaimWaitClamp logs one WARNING when the claim budget is above
+// loopbackWaitCap, because claimWaitFor then shortens the wait.
+func logClaimWaitClamp(logger *slog.Logger, claimTimeout time.Duration) {
+	if claimTimeout > loopbackWaitCap {
+		logger.Warn("MITE_CLAIM_TIMEOUT_MS exceeds the loopback wait cap, clamping the claim wait",
+			"value_ms", claimTimeout.Milliseconds(), "clamped_ms", loopbackWaitCap.Milliseconds())
+	}
+}
+
 // crossTenantMiteTimeoutFromEnv resolves VARROA_CROSSTENANT_MITE_TIMEOUT_MS
 // (design.md D14, mite-loopback-api spec). An absent variable keeps the
 // 9500ms default. A value that is not a whole number is refused: the
@@ -267,6 +293,7 @@ func (a *Agent) startLoopback(ctx context.Context) error {
 	// warnings above reach the real logger: main.go assigns a.Logger after
 	// NewAgent returns, and Run calls startLoopback after that assignment.
 	a.crossTenantTimeout = crossTenantMiteTimeoutFromEnv(a.Logger)
+	logClaimWaitClamp(a.Logger, a.claimTimeout)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/events", a.handleEvents)
@@ -625,7 +652,7 @@ func (a *Agent) handleClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timer := time.NewTimer(a.claimTimeout)
+	timer := time.NewTimer(claimWaitFor(a.claimTimeout))
 	defer timer.Stop()
 
 	select {

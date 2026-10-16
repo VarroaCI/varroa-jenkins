@@ -174,7 +174,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   or more `BuildEvent`s as `MiteMessage.build_event`, `POST /v1/claim`
   forwards one `ClaimRequest` as `MiteMessage.claim_request` and blocks for
   the reply (a start mark is the same request with `start_mark` set, so the
-  claim metrics count marks too), `POST /v1/log` (`handleLog`) reads nine `X-Varroa-*` headers
+  claim metrics count marks too). The wait is `claimWaitFor(claimTimeout)`: the budget, capped at `loopbackWaitCap` (9 s, the 10 s write timeout minus 1 s).
+  `POST /v1/log` (`handleLog`) reads nine `X-Varroa-*` headers
   (`parseLogChunkHeaders`) plus the raw body, stamps the cell's own pod
   identity onto `LogChunk.cell_instance` (the plugin never sends one), and
   forwards it as `MiteMessage.log_chunk`. `POST /v1/run-state`

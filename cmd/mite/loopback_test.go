@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -1627,5 +1628,71 @@ func TestClaimRelaysTheHomeSlotOfANotHomeVeto(t *testing.T) {
 				t.Fatalf("body %s carries home_slot, want none", body)
 			}
 		})
+	}
+}
+
+func TestClaimWaitFor(t *testing.T) {
+	cases := []struct {
+		name   string
+		budget time.Duration
+		want   time.Duration
+	}{
+		{"budget under the cap is kept", 4500 * time.Millisecond, 4500 * time.Millisecond},
+		{"budget at the cap is kept", 9000 * time.Millisecond, 9000 * time.Millisecond},
+		{"budget over the cap is clamped", 9500 * time.Millisecond, 9 * time.Second},
+		{"large budget is clamped", 20 * time.Second, 9 * time.Second},
+		{"zero uses the default budget", 0, 4500 * time.Millisecond},
+		{"negative uses the default budget", -time.Millisecond, 4500 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := claimWaitFor(tc.budget); got != tc.want {
+				t.Fatalf("claimWaitFor(%v) = %v, want %v", tc.budget, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaimWaitFor_StaysUnderWriteTimeout(t *testing.T) {
+	for b := 100 * time.Millisecond; b <= 30*time.Second; b += 50 * time.Millisecond {
+		w := claimWaitFor(b)
+		if w <= 0 || w > b {
+			t.Fatalf("claimWaitFor(%v) = %v, want 0 < wait <= budget", b, w)
+		}
+		if w > loopbackWaitCap {
+			t.Fatalf("claimWaitFor(%v) = %v, above loopbackWaitCap %v", b, w, loopbackWaitCap)
+		}
+		if w >= loopbackWriteTimeout {
+			t.Fatalf("claimWaitFor(%v) = %v, not under the write timeout %v", b, w, loopbackWriteTimeout)
+		}
+	}
+}
+
+func TestLogClaimWaitClamp(t *testing.T) {
+	logAt := func(budget time.Duration) string {
+		var buf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		logClaimWaitClamp(logger, budget)
+		return buf.String()
+	}
+
+	out := logAt(20 * time.Second)
+	if n := strings.Count(out, "level=WARN"); n != 1 {
+		t.Fatalf("20s budget logged %d WARN lines, want 1: %q", n, out)
+	}
+	if !strings.Contains(out, "clamping") {
+		t.Fatalf("20s budget warning does not name the clamp: %q", out)
+	}
+	if out := logAt(9 * time.Second); out != "" {
+		t.Fatalf("9s budget logged %q, want nothing", out)
+	}
+	if out := logAt(4500 * time.Millisecond); out != "" {
+		t.Fatalf("4500ms budget logged %q, want nothing", out)
+	}
+}
+
+func TestClaimWaitAndRestartAckWaitShareTheCap(t *testing.T) {
+	if restartAckWaitCap != loopbackWaitCap {
+		t.Fatalf("restartAckWaitCap = %v, want loopbackWaitCap %v", restartAckWaitCap, loopbackWaitCap)
 	}
 }

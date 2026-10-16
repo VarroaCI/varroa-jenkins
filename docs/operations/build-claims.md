@@ -33,10 +33,12 @@ timeout.
 |---|---|---|---|
 | Plugin to mite, connect | 1 s | none | empty decision, code `UNAVAILABLE` |
 | Plugin to mite, read | 5 s | `VARROA_CLAIM_TIMEOUT_MS` on the Jenkins container | empty decision, code `UNAVAILABLE` |
-| Mite wait for the claim reply | 4.5 s | `MITE_CLAIM_TIMEOUT_MS` on the mite container | HTTP `504`, empty decision, code `UNAVAILABLE` |
+| Mite wait for the claim reply | 4.5 s, never over 9 s | `MITE_CLAIM_TIMEOUT_MS` on the mite container | HTTP `504`, empty decision, code `UNAVAILABLE` |
 | Mite wait for a restart-copy ack | 4 s by default, derived from `MITE_CLAIM_TIMEOUT_MS` | none | HTTP `503`, reason `ack-timeout`, the plugin retries |
 | Gateway request to the recorder | 4 s | `VARROA_LEDGER_TIMEOUT_MS` on the gateway | claim reply with empty decision, code `UNAVAILABLE` |
 | Recorder database work for one claim | 3.5 s | none | claim reply with empty decision, code `UNAVAILABLE` |
+
+The mite wait is never more than 9 s, because the loopback listener stops each reply after 10 s. A larger budget logs one warning on the mite, and the mite waits 9 s.
 
 The operator stamps the first two overrides together from its own `VARROA_CLAIM_TIMEOUT_MS`
 value. Leave it unset and both containers use their built-in defaults, 5000 ms and 4500 ms. Set
@@ -44,6 +46,8 @@ it and the operator stamps that value on the Jenkins container and the value min
 mite container. A value below 5000 ms is rejected. The operator then stamps neither variable and logs a warning.
 
 The restart-copy ack wait derives from the mite budget. The wait is the budget minus 500 ms. It is never under half the budget and never over 9 s. The plugin uses the same `VARROA_CLAIM_TIMEOUT_MS` read budget for its restart-copy post. Set the budget on the operator, not through `podOverrides`. If you override it through `podOverrides`, also set `MITE_CLAIM_TIMEOUT_MS` to 500 ms less.
+
+Keep `VARROA_LEDGER_TIMEOUT_MS` under 9 s.
 
 Raise `VARROA_LEDGER_TIMEOUT_MS` only after raising `VARROA_CLAIM_TIMEOUT_MS` to match. Raising
 the gateway budget alone makes the mite answer `504` while the gateway is still waiting, which
