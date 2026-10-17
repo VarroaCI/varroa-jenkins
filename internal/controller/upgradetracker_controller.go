@@ -115,6 +115,11 @@ func isTwoSegmentVersion(version string) bool {
 	return len(strings.Split(version, ".")) == 2
 }
 
+// stableDocumentMaxBytes caps the stable/ update-center document read. The
+// document is a full update-center listing of several megabytes, so the cap
+// must sit above its real size. It only guards against an unbounded body.
+const stableDocumentMaxBytes = 32 << 20
+
 // fetchNewLTSLine issues a GET against upstream's "current stable LTS"
 // alias, following the redirect (an ordinary http.Client does this by
 // default) onto the per-patch document, decoding only its top-level
@@ -143,7 +148,7 @@ func (r *UpgradeTrackerReconciler) fetchNewLTSLine(ctx context.Context) (string,
 			Version string `json:"version"`
 		} `json:"core"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, stableDocumentMaxBytes)).Decode(&doc); err != nil {
 		r.logger.Warn("upgrade tracker: parse stable/ response failed", "error", err)
 		return "", false
 	}
