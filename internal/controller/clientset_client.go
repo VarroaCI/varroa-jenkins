@@ -72,6 +72,29 @@ const operatorUserAgent = "varroa-operator"
 // the StatefulSet object metadata so out-of-band image edits are detectable.
 const computedImagesAnnotation = "varroa.dev/computed-images"
 
+// neverUpdateCenterFlag is the JVM option that turns off the runtime update
+// site poll. buildStatefulSet adds it only when the upstream is off, and the
+// upstream roll check reads it back from the live JAVA_OPTS.
+const neverUpdateCenterFlag = "-Dhudson.model.UpdateCenter.never=true"
+
+// neverDownloadServiceFlag is the JVM option that turns off the plugin metadata
+// download. buildStatefulSet adds it together with neverUpdateCenterFlag.
+const neverDownloadServiceFlag = "-Dhudson.model.DownloadService.never=true"
+
+// jenkinsUpstreamAnnotation records the Jenkins upstream mode the operator
+// rendered into JAVA_OPTS: "off" when the update-site and download polls are
+// disabled, "on" otherwise. It sits on the object metadata so a stamp-only
+// change restarts no pod.
+const jenkinsUpstreamAnnotation = "varroa.dev/jenkins-upstream"
+
+// jenkinsUpstreamStamp returns the value stamped under jenkinsUpstreamAnnotation.
+func jenkinsUpstreamStamp(off bool) string {
+	if off {
+		return "off"
+	}
+	return "on"
+}
+
 // resourcesSourceAnnotation stamps which tier supplied each container's
 // resource block at provisioning time — "spec", "class", or "none" — keyed
 // by container name ("jenkins", "mite").  reconcileContainerSpecRoll reads
@@ -568,6 +591,24 @@ func (c *ClientsetClient) GetStatefulSetArtifactSecretHash(ctx context.Context, 
 	}
 	anns, _, _ := unstructured.NestedStringMap(sts.Object, "spec", "template", "metadata", "annotations")
 	return anns[artifactSecretHashAnnotation], true, nil
+}
+
+// GetStatefulSetJenkinsUpstream returns the live upstream stamp (the
+// varroa.dev/jenkins-upstream object annotation, empty when absent) and the
+// JAVA_OPTS value of the jenkins container. found is false when the
+// StatefulSet does not exist.
+func (c *ClientsetClient) GetStatefulSetJenkinsUpstream(ctx context.Context, name, namespace string) (stamp, javaOpts string, found bool, err error) {
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+	sts, getErr := c.dynamic.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if getErr != nil {
+		if apierrors.IsNotFound(getErr) {
+			return "", "", false, nil
+		}
+		return "", "", false, getErr
+	}
+	anns := sts.GetAnnotations()
+	env, _ := stsContainerEnvByName(sts, overlay.JenkinsContainerName)
+	return anns[jenkinsUpstreamAnnotation], env["JAVA_OPTS"], true, nil
 }
 
 // stsContainerEnvByName walks spec.template.spec.containers for the named
@@ -1644,7 +1685,7 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 										if spec.JenkinsUpstreamOff {
 											// The runtime update site and the plugin metadata download
 											// are the JVM's own polls of updates.jenkins.io.
-											javaOptsValue += " -Dhudson.model.UpdateCenter.never=true -Dhudson.model.DownloadService.never=true"
+											javaOptsValue += " " + neverUpdateCenterFlag + " " + neverDownloadServiceFlag
 										}
 										if spec.Cell {
 											// UseItemPermission scopes a folder credential to its own
@@ -2227,6 +2268,7 @@ func (c *ClientsetClient) CreateStatefulSet(ctx context.Context, spec StatefulSe
 		anns = map[string]string{}
 	}
 	anns[computedImagesAnnotation] = string(stampJSON)
+	anns[jenkinsUpstreamAnnotation] = jenkinsUpstreamStamp(spec.JenkinsUpstreamOff)
 	// Stamp the resource source so the drift comparator can distinguish
 	// "spec block was removed → roll" from "never user-set → skip".
 	if spec.ResourcesSource != nil {

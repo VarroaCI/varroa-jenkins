@@ -175,6 +175,11 @@ type testClient struct {
 	stsArtifactSecretHash      string
 	stsArtifactSecretHashFound bool
 	stsArtifactSecretHashErr   error
+	// stsJenkinsUpstream* back GetStatefulSetJenkinsUpstream.
+	stsJenkinsUpstreamStamp    string
+	stsJenkinsUpstreamJavaOpts string
+	stsJenkinsUpstreamFound    bool
+	stsJenkinsUpstreamErr      error
 	// stsMite* back the resources/pullPolicy/found/err half of
 	// GetStatefulSetContainerSpecs; tests set images and mite fields together.
 	// stsMiteFound defaults to false (no StatefulSet yet); set it true to
@@ -902,6 +907,9 @@ func (t *testClient) GetStatefulSetContainerEnv(_ context.Context, _, _, contain
 }
 func (t *testClient) GetStatefulSetArtifactSecretHash(_ context.Context, _, _ string) (string, bool, error) {
 	return t.stsArtifactSecretHash, t.stsArtifactSecretHashFound, t.stsArtifactSecretHashErr
+}
+func (t *testClient) GetStatefulSetJenkinsUpstream(_ context.Context, _, _ string) (string, string, bool, error) {
+	return t.stsJenkinsUpstreamStamp, t.stsJenkinsUpstreamJavaOpts, t.stsJenkinsUpstreamFound, t.stsJenkinsUpstreamErr
 }
 func (t *testClient) GetStatefulSetContainerSpecs(_ context.Context, _, _ string) (computedMiteImage, liveMiteImage string, miteResources, jenkinsResources *corev1.ResourceRequirements, mitePullPolicy string, resourcesSource map[string]string, found bool, err error) {
 	if t.stsImagesErr != nil {

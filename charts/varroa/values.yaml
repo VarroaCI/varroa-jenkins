@@ -562,7 +562,8 @@ jenkins:
   # -- Jenkins upstream host with the updates.jenkins.io layout. The operator
   # reads it for newer LTS patches and candidate plugin sets. Jenkins
   # controllers do not read this host. Set "" to turn off the operator reads
-  # and the controllers' update-site and plugin-metadata polls. Leaving the
+  # and the controllers' update-site and plugin-metadata polls. A change to
+  # this value rolls each Connected controller and cell once. Leaving the
   # key absent (null) keeps the built-in host.
   upstreamURL: "https://updates.jenkins.io"
   image:

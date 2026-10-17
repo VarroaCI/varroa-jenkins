@@ -2847,6 +2847,9 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		if !rolled && oldPhase == v1alpha1.ControllerPhaseConnected {
 			rolled = r.reconcileArtifactSecretRoll(ctx, cr)
 		}
+		if !rolled && oldPhase == v1alpha1.ControllerPhaseConnected {
+			rolled = r.reconcileJenkinsUpstreamRoll(ctx, cr)
+		}
 		r.deleteWakeSlice(ctx, cr, logger)
 	}
 
@@ -5060,7 +5063,7 @@ func (r *Reconciler) connectsInSamePass(cr *v1alpha1.Controller, contribErr erro
 // this writes the status first. Otherwise the Connected phase is lost and
 // the Running timeout guard can fail a connected controller.
 func (r *Reconciler) runConnectedAfterRunning(ctx context.Context, cr *v1alpha1.Controller, contrib runners.RunnerContribution) error {
-	if r.reconcileHeadlessRoll(ctx, cr) || r.reconcileArtifactSecretRoll(ctx, cr) {
+	if r.reconcileHeadlessRoll(ctx, cr) || r.reconcileArtifactSecretRoll(ctx, cr) || r.reconcileJenkinsUpstreamRoll(ctx, cr) {
 		return nil
 	}
 	err := r.handleConnected(ctx, cr, contrib)
