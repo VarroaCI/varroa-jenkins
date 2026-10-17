@@ -71,6 +71,12 @@ type Transport interface {
 	// the controller, or nil if none has been received.
 	ObservabilityReport(ns, name string) *mitev1.ObservabilityReport
 
+	// EnsureInbound makes the transport receive what the mite of ns/name
+	// sends to the operator, such as a token refresh request, before the
+	// first desired-state push. Only the replica that owns the controller
+	// calls it. A transport that needs no subscription does nothing.
+	EnsureInbound(ns, name string)
+
 	// FetchLastApplied requests the mite's actual last-applied content via an
 	// on-demand content-fetch RPC bridged through NATS. Returns a
 	// ContentResponse or ErrContentUnavailable if the mite is offline/times out.

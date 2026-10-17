@@ -1365,6 +1365,7 @@ sections describe.
   `ownsController`/`EnqueueShards` on `*Reconciler` consume it. Only the owning
   replica may hold the inbound subscription of a mite: each holder answers the
   mite's token refresh, and a held result channel fills with no reader.
+  `reconcileController` opens it through `EnsureInbound` in Provisioning, Running, Connected, and Failed.
   Every lease API call of the shard manager goes through `callCtx` (`leaseCallTimeout`
   20s, below the 25s deadline). Never set `rest.Config.Timeout`, because watches share it.
   `NewShardManager` takes a `metric.MeterProvider` as its first parameter and
