@@ -124,7 +124,7 @@ The empty value stops these reads:
 - **Every Jenkins controller and cell.** Each JVM starts with `-Dhudson.model.UpdateCenter.never=true` and `-Dhudson.model.DownloadService.never=true`. The JVM does not poll its update site or download plugin metadata on a timer.
 - **Usage statistics, always.** Each Jenkins JVM starts with `-Dhudson.model.UsageStatistics.disabled=true`. This flag applies whether or not the upstream host is set. It stops the calls to `usage.jenkins.io` and to the telemetry uplink.
 
-A controller created with this setting gets the flags. A running controller keeps its JVM options until it is provisioned again, for example after a version change. Varroa does not update these options on a running controller.
+A change to `jenkins.upstreamURL` rolls every Connected controller and cell once. The new pod gets the matching JVM flags. A cell drains its builds before the roll. A hibernated controller gets the flags when it wakes.
 
 The empty value does not change the plugins-init step. That init container still installs plugins from the update center in `ProvisioningDefaults`, or from the in-cluster update center. Set that source as described in [Enable the Offline Update Center](#enable-the-offline-update-center).
 

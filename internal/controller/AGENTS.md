@@ -138,6 +138,11 @@ sections describe.
   `UsageStatistics.disabled` (always) and `UpdateCenter.never`/`DownloadService.never`
   (when off), all built in `buildStatefulSet`. Do not add a second source for these
   flags or an unconditional `https://updates.jenkins.io` literal.
+  `CreateStatefulSet` stamps `varroa.dev/jenkins-upstream` (`on`/`off`) on the object
+  metadata. `reconcileJenkinsUpstreamRoll` (`jenkinsupstream_roll.go`) rolls a Connected
+  controller or cell once when the stamp differs from the operator value. A StatefulSet
+  with no stamp falls back to its live `JAVA_OPTS`: the never token means `off`. The stamp
+  wins over the token, so a `podOverrides` never token does not loop the roll.
 - `Reconciler` (`controller_controller.go`) is the `Controller` CRD's controller-runtime
   reconciler. `SetupWithManager` (`operator.go`) wires: `For(&Controller{})`; an
   `UpdateFunc` predicate that skips status-only updates and only reacts to
@@ -209,8 +214,8 @@ sections describe.
     exists. `nextRequeueDuration` requeues a `Running` + `StreamLost`
     controller at `streamLostRequeue` (15 s); nothing else wakes it on a
     reconnect. When `handleRunning` moves the phase to `Connected`, the same
-    pass runs `reconcileHeadlessRoll`, `reconcileArtifactSecretRoll`, and
-    `handleConnected` (`runConnectedAfterRunning`), so the first desired-state
+    pass runs `reconcileHeadlessRoll`, `reconcileArtifactSecretRoll`,
+    `reconcileJenkinsUpstreamRoll`, and `handleConnected` (`runConnectedAfterRunning`), so the first desired-state
     push follows the connect. The chain runs only after a good runner
     contribution read and with no armed force-reprovision annotation. A chained
     error writes the status before it returns. The brood `connected` event wakes
@@ -226,7 +231,8 @@ sections describe.
     `reconcileArtifactSecretRoll` (Connected only; the latter compares the per-cell
     artifact Secret's content hash with the `varroa.dev/artifact-secret-hash`
     pod-template annotation, `artifactcasc.go`; in STS mode it rolls only a cell
-    whose live `JAVA_OPTS` lacks the shared credentials property) — the jenkins-image check compares an effective
+    whose live `JAVA_OPTS` lacks the shared credentials property), then
+    `reconcileJenkinsUpstreamRoll` (Connected only; see the Jenkins upstream bullet) — the jenkins-image check compares an effective
     desired image (`effectiveDesiredJenkinsImage`) against the
     `varroa.dev/computed-images`-stamped container image on the live StatefulSet
     (`GetStatefulSetImages`, keyed by container name); `reconcileContainerSpecRoll`
