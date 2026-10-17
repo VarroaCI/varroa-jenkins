@@ -23,7 +23,8 @@ index parsing, and pre-apply content validation.
   `ParseVariables`, `VarsReplacer`, `RemainingVarRefs`, `ParseTenantItems`,
   `SplitDroppedItemKeys`, `TenantItemsManifest`, `LintTenantTemplates`, shared by
   the cell and the pipelines read), `unclassified.location.url`
-  injection (`location.go`), structural/content validation (`validator.go`),
+  injection (`location.go`), the `jenkins.updateCenter.sites` injection
+  (`updatesite.go`), structural/content validation (`validator.go`),
   the pipeline-template set (`pipelinetemplates.go`'s
   `InjectPipelineTemplates`, package `pipelinetemplate/`), and tenant-cloud
   injection for a cell (`tenant_clouds.go`).
@@ -31,7 +32,7 @@ index parsing, and pre-apply content validation.
   ConfigMap persistence (`status.contentRef`), or the completeness check —
   those live in `internal/controller/` (`catalog_controller.go` for
   `ReconcileComposedBundle`; `controller_controller.go` for the per-controller
-  hot path calling `ResolveVars`/`MergeJenkinsYAML`/`InjectLocationURL`). This
+  hot path calling `ResolveVars`/`MergeJenkinsYAML`/`InjectLocationURL`/`InjectUpdateSites`). This
   package produces content; it does not decide when/where to apply it.
 
 ## Local Contracts

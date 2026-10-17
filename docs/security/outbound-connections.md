@@ -59,7 +59,7 @@ A build check fails when a source adds a host that this page does not list.
 
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
-| updates.jenkins.io (Jenkins update site) | Jenkins core checks for plugin updates once a day. | HTTPS 443 | jenkins.upstreamURL | Yes. Set jenkins.upstreamURL to "". |
+| updates.jenkins.io (Jenkins update site) | Jenkins core reads update-site and tool-installer metadata at boot, once a day, and after a version change. | HTTPS 443 | ProvisioningDefaults pluginUpdateCenterURL, the in-cluster update center, or jenkins.upstreamURL | Yes. Enable the in-cluster update center, or set jenkins.upstreamURL to "". Varroa then writes an empty update-site list. |
 | usage.jenkins.io | The viewer browser sends usage statistics when the Jenkins usage setting is on. | HTTPS 443 | None needed | Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true. |
 | uplink.jenkins.io | Jenkins core sends server telemetry when the usage setting is on. | HTTPS 443 | None needed | Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true. |
 | archives.jenkins.io | plugins-init falls back to the archive for each failed plugin download. | HTTPS 443 | None | No. The plugins-init script always runs. |
