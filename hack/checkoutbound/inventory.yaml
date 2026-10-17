@@ -1,0 +1,370 @@
+# Outbound-connection inventory. The checker in this directory reads this file
+# and generates docs/security/outbound-connections.md from it. Edit this file,
+# then run make outbound-doc. Never edit the generated page.
+#
+# Row fields:
+#   component    one of the section keys in hack/checkoutbound/inventory.go
+#   destination  the host, or the text that names a value-driven destination
+#   hosts        bare host names that a source literal dials; [] for value-driven rows
+#   purpose      what the connection does, in one short sentence
+#   protocol     transport and port, for example "HTTPS 443"
+#   control      the chart value or resource field that sets the destination
+#   disable      "Yes" or "No", then the exact step when the answer is Yes
+#
+# identifiers: literals that a source holds but never dials.
+# excludePaths: source path prefixes the scan skips, with a reason.
+
+connections:
+  # Operator
+
+  - component: operator
+    destination: updates.jenkins.io
+    hosts: [updates.jenkins.io]
+    purpose: Find newer LTS patches and resolve candidate plugin sets for the upgrade tracker.
+    protocol: HTTPS 443
+    control: None
+    disable: "No."
+
+  - component: operator
+    destination: updates.jenkins.io (update-center metadata)
+    hosts: []
+    purpose: Read update-center metadata when pull-through uses the default upstream.
+    protocol: HTTPS 443
+    control: updateCenter.pullThrough.upstreamURL
+    disable: 'Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false.'
+
+  - component: operator
+    destination: Git remotes of catalog sources and bundle inputs
+    hosts: []
+    purpose: Clone catalog sources and git bundle inputs.
+    protocol: HTTPS 443 or SSH 22
+    control: CatalogSource.spec.repoURL and ComposedBundle gitSource inputs
+    disable: "Yes. Do not declare the source or the input."
+
+  - component: operator
+    destination: OCI registries of catalog sources and bundle inputs
+    hosts: []
+    purpose: Pull catalog and bundle artifacts.
+    protocol: HTTPS 443
+    control: CatalogSource.spec.ociRef and ComposedBundle ociSource inputs
+    disable: "Yes. Do not declare the source or the input."
+
+  # Gateway
+
+  - component: gateway
+    destination: None outside the cluster
+    hosts: []
+    purpose: Serves mite gRPC and API key verification. It dials NATS inside the cluster only.
+    protocol: gRPC 9090 and 9092, NATS 4222
+    control: Not applicable
+    disable: "Not applicable."
+
+  # BFF
+
+  - component: bff
+    destination: OIDC issuer (auth.oidc.issuer)
+    hosts: []
+    purpose: Discover the sign-in provider keys and endpoints.
+    protocol: HTTPS 443
+    control: auth.oidc.issuer
+    disable: "Yes, with a local issuer (auth.mode local or ldap). Set the mode in the chart."
+
+  - component: bff
+    destination: Record store (external Postgres)
+    hosts: []
+    purpose: Read build history from the record store.
+    protocol: PostgreSQL 5432
+    control: recordStore.postgres.mode and host
+    disable: "Yes. Leave recordStore.enabled false."
+
+  # Update center
+
+  - component: updatecenter
+    destination: updates.jenkins.io
+    hosts: [updates.jenkins.io]
+    purpose: Pull plugin metadata and HPI files from the upstream update center on demand.
+    protocol: HTTPS 443
+    control: updateCenter.pullThrough.upstreamURL and downloadURL
+    disable: 'Yes. Keep updateCenter.pullThrough.enabled false. The default is false.'
+
+  - component: updatecenter
+    destination: repo.jenkins-ci.org
+    hosts: [repo.jenkins-ci.org]
+    purpose: Recover checksums for plugin versions that the update-center metadata no longer lists.
+    protocol: HTTPS 443
+    control: updateCenter.pullThrough.archiveURL
+    disable: 'Yes. Set updateCenter.pullThrough.archiveURL to "". Aged pins then report as gaps. The egress rule defaults to 0.0.0.0/0 on 443.'
+
+  - component: updatecenter
+    destination: OCI registry (storage type oci)
+    hosts: []
+    purpose: Store plugin packs in an external OCI registry.
+    protocol: HTTPS 443
+    control: updateCenter.storage
+    disable: "Yes. Use local storage. The egress rule defaults to 0.0.0.0/0 on 443."
+
+  # Recorder
+
+  - component: recorder
+    destination: Record store (external Postgres)
+    hosts: []
+    purpose: Write build history and the build-number ledger.
+    protocol: PostgreSQL 5432
+    control: recordStore.postgres.mode and host
+    disable: "No, while the record store runs."
+
+  - component: recorder
+    destination: S3-compatible blob store (recordStore.blobs.s3.url)
+    hosts: []
+    purpose: Store build logs and artifacts in object storage.
+    protocol: HTTPS 443
+    control: recordStore.blobs.mode and s3.url
+    disable: 'Yes. Set recordStore.blobs.mode to postgres. The egress rule defaults to 0.0.0.0/0 on 443.'
+
+  - component: recorder
+    destination: STS endpoint (recordStore.blobs.s3.artifactSTS.endpoint)
+    hosts: []
+    purpose: Issue a scoped artifact credential for each cell.
+    protocol: HTTPS 443
+    control: recordStore.blobs.s3.artifactSTS.endpoint
+    disable: "Yes. Set artifactSTS.enabled to false."
+
+  - component: recorder
+    destination: Completion webhook URL of a Team
+    hosts: []
+    purpose: Post a signed message when a tenant run completes.
+    protocol: HTTPS 443
+    control: Team spec.pipelines.notifications.webhook and networkPolicy.recorderWebhookEgress
+    disable: "Yes. Leave the webhook unset. The webhook egress rule is off by default."
+
+  # Mite
+
+  - component: mite
+    destination: Gateway service inside the cluster
+    hosts: []
+    purpose: Send heartbeats and receive commands over gRPC with mTLS.
+    protocol: gRPC 9090, mTLS
+    control: Chart service name
+    disable: "Not applicable. The service runs inside the cluster."
+
+  # Jenkins controller
+
+  - component: jenkins
+    destination: updates.jenkins.io (Jenkins update site)
+    hosts: []
+    purpose: Jenkins core checks for plugin updates once a day.
+    protocol: HTTPS 443
+    control: None. Jenkins core default.
+    disable: "No."
+
+  - component: jenkins
+    destination: usage.jenkins.io
+    hosts: []
+    purpose: The viewer browser sends usage statistics when the Jenkins usage setting is on.
+    protocol: HTTPS 443
+    control: None. Jenkins core default.
+    disable: "No."
+
+  - component: jenkins
+    destination: uplink.jenkins.io
+    hosts: []
+    purpose: Jenkins core sends server telemetry when the usage setting is on.
+    protocol: HTTPS 443
+    control: None. Jenkins core default.
+    disable: "No."
+
+  - component: jenkins
+    destination: archives.jenkins.io
+    hosts: [archives.jenkins.io]
+    purpose: plugins-init falls back to the archive for each failed plugin download.
+    protocol: HTTPS 443
+    control: None
+    disable: "No. The plugins-init script always runs."
+
+  - component: jenkins
+    destination: Plugin update center (plugins-init)
+    hosts: []
+    purpose: Download plugins from the update center named in the JENKINS_UC variables.
+    protocol: HTTPS 443
+    control: ProvisioningDefaults and the in-cluster update center
+    disable: "Yes, when an in-cluster update center serves every plugin. Otherwise No."
+
+  - component: jenkins
+    destination: OIDC issuer (bundle variable)
+    hosts: []
+    purpose: The OIDC plugin discovers the sign-in provider.
+    protocol: HTTPS 443
+    control: auth.oidc.issuer
+    disable: "Yes, with a local issuer (auth.mode local or ldap)."
+
+  - component: jenkins
+    destination: Gateway API key verification
+    hosts: []
+    purpose: Check an API key against the gateway inside the cluster.
+    protocol: HTTPS 9092
+    control: Operator endpoint setting (VARROA_APIKEY_VERIFY_URL overrides it)
+    disable: "Not applicable. The gateway runs inside the cluster."
+
+  - component: jenkins
+    destination: CellPool library remotes
+    hosts: []
+    purpose: Clone trusted shared libraries into each cell of a pool.
+    protocol: HTTPS 443 or SSH 22
+    control: CellPool spec.libraries
+    disable: "Yes. Remove the libraries from the pool."
+
+  - component: jenkins
+    destination: SMTP server (CellPool mail)
+    hosts: []
+    purpose: Send mail from pipeline steps.
+    protocol: SMTP
+    control: CellPool spec.mail
+    disable: "Yes. Leave spec.mail unset."
+
+  - component: jenkins
+    destination: Gitea servers (CellPool giteaServers)
+    hosts: []
+    purpose: Read repositories from Gitea hosts that a pool names.
+    protocol: HTTPS 443
+    control: CellPool spec.giteaServers
+    disable: "Yes. Leave spec.giteaServers unset."
+
+  # Agents
+
+  - component: agents
+    destination: External runner machines (SSH)
+    hosts: []
+    purpose: The cell dials out over SSH to each external runner.
+    protocol: SSH 22
+    control: Runner spec
+    disable: "Yes. Delete the Runner object."
+
+  # Dex
+
+  - component: dex
+    destination: Dex connector targets
+    hosts: []
+    purpose: Check user credentials and groups with upstream identity providers.
+    protocol: HTTPS 443 or LDAP 636
+    control: dex.config.connectors
+    disable: "Yes. Remove the connectors and use a local connector."
+
+  # NATS
+
+  - component: nats
+    destination: Hive NATS (bus.url)
+    hosts: []
+    purpose: Link a member cluster to the core bus.
+    protocol: NATS 4222, TLS
+    control: bus.url
+    disable: 'Yes. Set bus.url to "".'
+
+  # varroactl
+
+  - component: varroactl
+    destination: updates.jenkins.io (plugin download)
+    hosts: [updates.jenkins.io]
+    purpose: Download plugin archives for an export.
+    protocol: HTTPS 443
+    control: export plugins --download-url-base
+    disable: "Yes. Pass a local download base or use prebuilt packs."
+
+  - component: varroactl
+    destination: repo.jenkins-ci.org (bootstrapdeps)
+    hosts: [repo.jenkins-ci.org]
+    purpose: Maintainer plugin resolver. It is not in any image.
+    protocol: HTTPS 443
+    control: Run by hand with --resolve only
+    disable: "Yes. Do not run the maintainer command."
+
+  - component: varroactl
+    destination: Git remote of an export bundle
+    hosts: []
+    purpose: Clone the bundle repository for export bundle.
+    protocol: HTTPS 443 or SSH 22
+    control: The repository argument of export bundle
+    disable: "Yes. Do not run the command."
+
+  - component: varroactl
+    destination: Registry of an OCI source or target
+    hosts: []
+    purpose: Read or write images, charts, and plugin packs in an OCI registry.
+    protocol: HTTPS 443
+    control: The oci reference given on the command line
+    disable: "Yes. Do not run the command."
+
+  # Cluster-wide: images and telemetry
+
+  - component: cluster
+    destination: ghcr.io (Varroa images)
+    hosts: [ghcr.io]
+    purpose: Pull the operator, gateway, BFF, update center, recorder, mite, and frontend images.
+    protocol: HTTPS 443
+    control: "Each component's image repository and tag. The mite image is set by VARROA_MITE_IMAGE."
+    disable: "No. Mirror the images and set the repositories."
+
+  - component: cluster
+    destination: ghcr.io (Dex image)
+    hosts: [ghcr.io]
+    purpose: Pull the Dex image.
+    protocol: HTTPS 443
+    control: dex.image.repository and tag
+    disable: "No. Mirror the image and set the repository."
+
+  - component: cluster
+    destination: docker.io (jenkins/jenkins)
+    hosts: [docker.io]
+    purpose: Pull the Jenkins controller image for each controller.
+    protocol: HTTPS 443
+    control: Controller resourceOverlay only. No chart value.
+    disable: "No. Mirror the image and set the overlay."
+
+  - component: cluster
+    destination: docker.io (jenkins/inbound-agent)
+    hosts: [docker.io]
+    purpose: Pull the Jenkins agent image for starter and cell pods.
+    protocol: HTTPS 443
+    control: Starter bundle and cell JCasC
+    disable: "No. Mirror the image and edit the bundle."
+
+  - component: cluster
+    destination: docker.io (nats)
+    hosts: [docker.io]
+    purpose: Pull the NATS server image.
+    protocol: HTTPS 443
+    control: nats.container.image.repository and tag
+    disable: "No. Mirror the image and set the repository."
+
+  - component: cluster
+    destination: docker.io (NATS subchart images)
+    hosts: []
+    purpose: Pull the NATS box and config reloader images.
+    protocol: HTTPS 443
+    control: NATS subchart values
+    disable: "No. Mirror the images and set the subchart values."
+
+  - component: cluster
+    destination: ghcr.io (CloudNativePG operator and database images)
+    hosts: []
+    purpose: Pull the database images in cnpg mode.
+    protocol: HTTPS 443
+    control: recordStore.postgres.mode
+    disable: "Yes. Set recordStore.postgres.mode to external."
+
+  - component: cluster
+    destination: OTLP collector (telemetry.endpoint)
+    hosts: []
+    purpose: Export traces, metrics, and logs.
+    protocol: OTLP gRPC, no TLS
+    control: telemetry.endpoint
+    disable: 'Yes. Leave telemetry.endpoint "". No export runs.'
+
+identifiers:
+  - host: json-schema.org
+    reason: JSON Schema dialect identifier in the pipeline template validator.
+  - host: xml.org
+    reason: SAX feature identifier in the changelog parser. Never dialed.
+  - host: apache.org
+    reason: XML feature identifier in the changelog parser. Never dialed.
+
+excludePaths: []

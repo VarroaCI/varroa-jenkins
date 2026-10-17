@@ -1,0 +1,31 @@
+# Outbound connections
+
+<!-- Generated from hack/checkoutbound/inventory.yaml by make outbound-doc. Do not edit this page. -->
+
+This page lists each destination that a Varroa component dials.
+Use it to build an egress allowlist.
+Use it also to show an accreditor where traffic goes.
+
+Each row names one destination. The Control column names the chart value or the resource field that changes the destination. The last column states whether a deny-all cluster can turn the connection off.
+
+A build check fails when a source adds a host that this page does not list.
+{{- range .Sections}}
+
+## {{.Title}}
+
+| Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
+| --- | --- | --- | --- | --- |
+{{- range .Rows}}
+| {{cell .Destination}} | {{cell .Purpose}} | {{cell .Protocol}} | {{cell .Control}} | {{cell .Disable}} |
+{{- end}}
+{{- end}}
+
+## Destinations this page cannot list
+
+The check reads the Go, chart, bundle, plugin, and example sources only. It does not read the frontend. It does not assign a host to a component. It cannot list these destinations:
+
+- Images and hosts in pipeline scripts. A tenant defines them at run time.
+- Traffic from tenant builds. Each build sends the traffic that its own steps need.
+- The database image that CloudNativePG chooses when the chart sets no image.
+
+To mirror the images and plugins for a cluster with no internet access, follow [Air-gapped installs](../install/air-gapped.md).

@@ -59,6 +59,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Runner tokens](security/runner-tokens.md)
 - [executeGroovy controls](security/execute-groovy.md)
 - [Headless controllers](security/headless-controllers.md)
+- [Outbound connections](security/outbound-connections.md)
 
 ## AI and agents
 

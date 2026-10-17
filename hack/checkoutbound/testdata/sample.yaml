@@ -1,0 +1,5 @@
+# https://comment.host.io/ is only a comment.
+upstream: https://real-host.io/update-center.json
+image:
+  repository: nats
+  tag: 2.10.0
