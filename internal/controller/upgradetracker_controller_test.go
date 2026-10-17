@@ -93,6 +93,18 @@ func dynamicStableServer(stableCore string, okPaths map[string]bool) *httptest.S
 	return httptest.NewServer(mux)
 }
 
+// paddedStableServer serves /stable/update-center.actual.json as a body of
+// more than 1 MiB, with core.version placed after a large padding field, the
+// shape of the real full update-center listing.
+func paddedStableServer(stableCore string) *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stable/update-center.actual.json", func(w http.ResponseWriter, _ *http.Request) {
+		pad := strings.Repeat("x", 3<<19) // 1.5 MiB
+		fmt.Fprintf(w, `{"plugins":{"pad":%q},"core":{"version":%q}}`, pad, stableCore)
+	})
+	return httptest.NewServer(mux)
+}
+
 func testProfile(name, version, resolveVersion string) *v1alpha1.JenkinsVersionProfile {
 	return &v1alpha1.JenkinsVersionProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -296,5 +308,24 @@ func TestUpgradeTrackerApplyOwnedNoOpOnRepeat(t *testing.T) {
 	}
 	if events := sink.ofType("upgrade.candidate.created"); len(events) != 1 {
 		t.Fatalf("upgrade.candidate.created events = %d, want exactly 1", len(events))
+	}
+}
+
+// TestUpgradeTracker_StableDocumentLargerThanOneMiB verifies that the stable/
+// document parses when it exceeds 1 MiB and core.version sits after the
+// padding. The tracker must still learn the stable LTS line.
+func TestUpgradeTracker_StableDocumentLargerThanOneMiB(t *testing.T) {
+	ts := paddedStableServer("2.570.2")
+	defer ts.Close()
+
+	tracker := NewUpgradeTrackerReconciler(crdstore.NewFake(), &recordingSink{}, "https://updates.jenkins.io", testLogger())
+	tracker.httpDoer = rewriteToServer(t, ts)
+
+	line, ok := tracker.fetchNewLTSLine(context.Background())
+	if !ok {
+		t.Fatal("fetchNewLTSLine ok = false, want true for a stable/ document larger than 1 MiB")
+	}
+	if line != "2.570" {
+		t.Fatalf("fetchNewLTSLine line = %q, want %q", line, "2.570")
 	}
 }
