@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.4.1...v0.5.0) (2026-10-17)
+
+
+### Features
+
+* **hack:** add outbound connection inventory check ([408153c](https://github.com/VarroaCI/varroa-jenkins/commit/408153c3b078398ebf264349d1a9be2c171e395f))
+* **operator:** add offline switches for Jenkins upstream reads and images ([cf870a3](https://github.com/VarroaCI/varroa-jenkins/commit/cf870a3cb87bf90942c4712c51afa66e6333dc01))
+
+
+### Bug Fixes
+
+* **mite:** keep the tenant grace clock across a reconnect ([1e27fb5](https://github.com/VarroaCI/varroa-jenkins/commit/1e27fb589db6f586cf920ea8120c0a49ec510803))
+* **operator:** open the mite inbound subscription from Provisioning ([5cbe37a](https://github.com/VarroaCI/varroa-jenkins/commit/5cbe37af3ede10db699cf2ad5460b80b66a7365e))
+
 ## [0.4.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.4.0...v0.4.1) (2026-10-16)
 
 
