@@ -27,9 +27,11 @@ jobs:
       charts: ${{ steps.paths.outputs.charts }}
       docker: ${{ steps.paths.outputs.docker }}
       frontend: ${{ steps.paths.outputs.frontend }}
+      outbound: ${{ steps.base.outputs.outbound }}
     steps:
       # A changed file sets "go" only when it matches every rule. The negated
-      # rules exclude the paths that no Go build, test, or lint reads.
+      # rules exclude the paths that no Go build, test, or lint reads. The same
+      # step also sets "outbound" for frontend source that the outbound check reads.
       - id: base
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -42,6 +44,19 @@ jobs:
               - '!*.md'
               - '!docs/**'
               - '!charts/**'
+            outbound:
+              - 'frontend/{src/**,public/**,index.html}'
+              - '!**/*.test.ts'
+              - '!**/*.test.tsx'
+              - '!**/*.spec.ts'
+              - '!**/*.spec.tsx'
+              - '!**/*.test.js'
+              - '!**/*.test.jsx'
+              - '!**/*.test.mjs'
+              - '!**/*.spec.js'
+              - '!**/*.spec.jsx'
+              - '!**/*.spec.mjs'
+              - '!frontend/src/test/**'
       # A changed file sets an output here when it matches one rule.
       # goextra lists the files under excluded paths that Go code reads.
       # Every docker path must also set "go": the image build needs Lint and Test.
@@ -96,7 +111,7 @@ jobs:
   checks:
     name: Checks
     needs: changes
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.charts == 'true'
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.charts == 'true' || needs.changes.outputs.outbound == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

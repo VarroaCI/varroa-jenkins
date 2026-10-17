@@ -228,19 +228,18 @@ func TestCheck_ValidInventoryHasNoProblems(t *testing.T) {
 }
 
 func TestRenderDoc_DeterministicAndMatchesCommitted(t *testing.T) {
+	// The page depends only on the inventory. The source scan runs in
+	// make check-outbound, so this test reads no source file.
 	const repoRoot = "../.."
-	res, err := scan(repoRoot)
+	inv, err := loadInventory(filepath.Join(repoRoot, inventoryRel))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if problems := res.problems(); len(problems) != 0 {
-		t.Fatalf("inventory has problems: %v", problems)
-	}
-	first, err := renderDoc(res.inv)
+	first, err := renderDoc(inv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := renderDoc(res.inv)
+	second, err := renderDoc(inv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,5 +282,107 @@ func TestInventory_AcceptsIPv6Host(t *testing.T) {
 	inv.Connections[0].Hosts = []string{"bad:port"}
 	if err := inv.validate(); err == nil {
 		t.Fatal("validate accepted a host with a port")
+	}
+}
+
+func TestExtractTS_LiteralsOnly(t *testing.T) {
+	hits := extractTS("sample.tsx", readFixture(t, "sample.tsx"))
+	var kept []hit
+	for _, h := range hits {
+		if !isExcludedHost(h.Host) {
+			kept = append(kept, h)
+		}
+	}
+	want := []string{
+		"after-div-host.io", "after-jsx-host.io", "after-regex-host.io",
+		"deep-host.io", "double-host.io", "jsx-attr-host.io", "jsx-text-host.io",
+		"nested-host.io", "single-host.io", "static-host.io",
+	}
+	if got := hostsOf(kept); !reflect.DeepEqual(got, want) {
+		t.Fatalf("hosts = %v, want %v", got, want)
+	}
+}
+
+func TestExtractTS_LineNumbers(t *testing.T) {
+	src := []byte("const t = `line one\nline two\nline three`;\nconst s = \"https://line-host.io\";\n")
+	hits := extractTS("line.ts", src)
+	if len(hits) != 1 || hits[0].Host != "line-host.io" || hits[0].Line != 4 {
+		t.Fatalf("hits = %+v, want one hit for line-host.io on line 4", hits)
+	}
+}
+
+func TestExtractCSS_StripsComments(t *testing.T) {
+	src := []byte("/* https://c.io */\n@import url(\"https://fonts-host.io/a\");\n.x { background: url(https://cdn-host.io/i.png); }\n")
+	want := []string{"cdn-host.io", "fonts-host.io"}
+	if got := hostsOf(extractCSS("s.css", src)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("hosts = %v, want %v", got, want)
+	}
+}
+
+func TestExtractHTML_StripsComments(t *testing.T) {
+	src := []byte("<!-- https://c.io -->\n<link href=\"https://html-host.io/x\">\n")
+	want := []string{"html-host.io"}
+	if got := hostsOf(extractHTML("index.html", src)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("hosts = %v, want %v", got, want)
+	}
+}
+
+func TestExtractFrontend_ProtocolRelativeAndTemplateLines(t *testing.T) {
+	css := hostsOf(extractCSS("s.css", []byte("@import url(//proto-css.io/a.css);\n")))
+	if want := []string{"proto-css.io"}; !reflect.DeepEqual(css, want) {
+		t.Fatalf("css hosts = %v, want %v", css, want)
+	}
+	html := hostsOf(extractHTML("index.html", []byte("<script src=\"//proto-html.io/x.js\"></script>\n")))
+	if want := []string{"proto-html.io"}; !reflect.DeepEqual(html, want) {
+		t.Fatalf("html hosts = %v, want %v", html, want)
+	}
+	ts := extractTS("p.ts", []byte("const s = \"//proto-ts.io/x\";\n"))
+	if got := hostsOf(ts); !reflect.DeepEqual(got, []string{"proto-ts.io"}) {
+		t.Fatalf("ts hosts = %v, want proto-ts.io", got)
+	}
+	if got := hostsOf(extractTS("u.ts", []byte("const t = `//proto-tpl.io/x`;\n"))); !reflect.DeepEqual(got, []string{"proto-tpl.io"}) {
+		t.Fatalf("template protocol-relative hosts = %v, want proto-tpl.io", got)
+	}
+	if got := hostsOf(extractCSS("u.css", []byte("a { background: url(//proto-bare.io); }\n"))); !reflect.DeepEqual(got, []string{"proto-bare.io"}) {
+		t.Fatalf("bare css hosts = %v, want proto-bare.io", got)
+	}
+	if got := hostsOf(extractTS("c.ts", []byte("const s = \"//PROTO-UP.io/x\";\n"))); !reflect.DeepEqual(got, []string{"proto-up.io"}) {
+		t.Fatalf("uppercase hosts = %v, want proto-up.io", got)
+	}
+	expr := extractTS("e.ts", []byte("const t = `${\na\n}\nhttps://expr-host.io/x`;\n"))
+	if len(expr) != 1 || expr[0].Line != 4 {
+		t.Fatalf("expression template hit = %+v, want one hit on line 4", expr)
+	}
+	if got := hostsOf(extractCSS("u2.css", []byte("a { background: url(//first.last@userinfo-host.io:8443/x); }\n"))); !reflect.DeepEqual(got, []string{"userinfo-host.io"}) {
+		t.Fatalf("userinfo hosts = %v, want userinfo-host.io", got)
+	}
+	if got := hostsOf(extractCSS("u3.css", []byte("a { background: url(//build_bot@underscore-host.io/x); }\n"))); !reflect.DeepEqual(got, []string{"underscore-host.io"}) {
+		t.Fatalf("underscore userinfo hosts = %v, want underscore-host.io", got)
+	}
+	multi := extractTS("m.ts", []byte("const t = `a\nb\nhttps://tpl-host.io/x`;\n"))
+	if len(multi) != 1 || multi[0].Line != 3 {
+		t.Fatalf("template hit = %+v, want one hit on line 3", multi)
+	}
+}
+
+func TestCollectHits_FrontendScope(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"charts/varroa/values.yaml":     minimalValues,
+		"frontend/src/a.ts":             "export const u = \"https://fe-host.io/x\";\n",
+		"frontend/src/a.test.ts":        "export const u = \"https://test-host.io/x\";\n",
+		"frontend/src/test/handlers.ts": "export const u = \"https://mock-host.io/x\";\n",
+		"frontend/src/s.css":            "a { background: url(https://css-host.io/f); }\n",
+		"frontend/src/j.js":             "export const u = \"https://js-host.io/x\";\n",
+		"frontend/src/j.test.js":        "export const u = \"https://jstest-host.io/x\";\n",
+		"frontend/public/t.css":         "a { background: url(https://pub-host.io/f); }\n",
+		"frontend/index.html":           "<script src=\"https://html-host.io/x.js\"></script>\n",
+	})
+	hits, err := collectHits(root, &Inventory{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"css-host.io", "fe-host.io", "html-host.io", "js-host.io", "pub-host.io", "real-host.io"}
+	if got := hostsOf(hits); !reflect.DeepEqual(got, want) {
+		t.Fatalf("hosts = %v, want %v", got, want)
 	}
 }

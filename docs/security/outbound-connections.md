@@ -112,7 +112,7 @@ A build check fails when a source adds a host that this page does not list.
 
 ## Destinations this page cannot list
 
-The check reads the Go, chart, bundle, plugin, and example sources only. It does not read the frontend. It does not assign a host to a component. It cannot list these destinations:
+The check reads the Go, chart, bundle, plugin, frontend, and example sources. It does not assign a host to a component. It cannot list these destinations:
 
 - Images and hosts in pipeline scripts. A tenant defines them at run time.
 - Traffic from tenant builds. Each build sends the traffic that its own steps need.

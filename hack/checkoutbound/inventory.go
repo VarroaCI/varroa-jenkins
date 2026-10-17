@@ -58,6 +58,7 @@ var componentOrder = []componentSection{
 	{"dex", "Dex"},
 	{"nats", "NATS"},
 	{"varroactl", "varroactl"},
+	{"browser", "Dashboard (user's browser)"},
 	{"cluster", "Cluster-wide"},
 }
 

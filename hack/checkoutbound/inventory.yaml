@@ -12,6 +12,8 @@
 #   disable      "Yes" or "No", then the exact step when the answer is Yes
 #
 # identifiers: literals that a source holds but never dials.
+# A host that the dashboard loads in the user's browser is a connections row with
+# component browser. A link that the user opens is an identifiers entry.
 # excludePaths: source path prefixes the scan skips, with a reason.
 
 connections:
@@ -360,6 +362,10 @@ connections:
     disable: 'Yes. Leave telemetry.endpoint "". No export runs.'
 
 identifiers:
+  - host: github.com
+    reason: Dashboard link and placeholder text. The user's browser opens it. No component dials it.
+  - host: gitlab.com
+    reason: Dashboard link. The user's browser opens it. No component dials it.
   - host: json-schema.org
     reason: JSON Schema dialect identifier in the pipeline template validator.
   - host: xml.org

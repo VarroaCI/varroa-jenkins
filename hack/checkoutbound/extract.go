@@ -28,6 +28,14 @@ type hit struct {
 // query, fragment, quote, or space. Userinfo and the port are removed later.
 var urlPattern = regexp.MustCompile(`(?i)\b(?:https?|wss?|oci|ssh|git|tls|nats)://([^/\s"'` + "`" + `<>?#]+)`)
 
+// schemeRelativePattern matches a protocol-relative URL in a line of text,
+// such as "//cdn.host.io/x.js". The "//" must not follow a scheme byte.
+var schemeRelativePattern = regexp.MustCompile(`(?i)(?:^|[^:\w/])//([^/\s"'` + "`" + `<>?#();,{}]+)`)
+
+// schemeRelativeLiteral matches a string literal whose whole value is a
+// protocol-relative URL.
+var schemeRelativeLiteral = regexp.MustCompile(`(?i)^//([^/\s"'` + "`" + `<>?#();,{}]+)`)
+
 // goImagePattern matches an image reference inside a Go string literal. The
 // reference must carry a tag. The tag may be empty, as in "jenkins/jenkins:".
 var goImagePattern = regexp.MustCompile(`^((?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?/)?[a-z0-9._-]+(?:/[a-z0-9._-]+)+:[A-Za-z0-9._-]*$`)
@@ -264,6 +272,341 @@ func extractJava(rel string, src []byte) []hit {
 	return out
 }
 
+// extractTS scans TypeScript, TSX, or JavaScript source. A small lexer drops
+// line and block comments, skips regular expression literals, and reads string
+// and template literals. Only the text of those literals is scanned for URLs.
+//
+// Limits: JSX text with an apostrophe opens a string that ends at the line
+// end, so a mismatch stays on one line. A "//" in JSX text that is not part of
+// a URL scheme reads as a comment.
+func extractTS(rel string, src []byte) []hit {
+	lx := &tsLexer{rel: rel, src: src, line: 1}
+	lx.lexCode(false)
+	return lx.out
+}
+
+// tsLexer holds the scan state of extractTS.
+type tsLexer struct {
+	rel       string
+	src       []byte
+	i         int
+	line      int
+	out       []hit
+	prev      byte   // last significant code byte, 0 at the start of input
+	prevWord  string // last identifier, valid while prevIdent is true
+	prevIdent bool
+}
+
+// tsKeywordsBeforeRegex lists the words after which a slash starts a regex.
+var tsKeywordsBeforeRegex = map[string]bool{
+	"return": true, "typeof": true, "case": true, "do": true, "else": true,
+	"in": true, "of": true, "new": true, "delete": true, "void": true,
+	"throw": true, "instanceof": true, "yield": true, "await": true,
+}
+
+// tsOperatorsBeforeRegex lists the bytes after which a slash starts a regex.
+// A "<" is absent on purpose: "</p>" in JSX is a closing tag, not a regex.
+const tsOperatorsBeforeRegex = "(,=:[!&|?{};+-*%>~^"
+
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func isTSIdentByte(c byte) bool {
+	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func (lx *tsLexer) setPrev(c byte) {
+	lx.prev = c
+	lx.prevIdent = false
+}
+
+func (lx *tsLexer) peekNext() byte {
+	if lx.i+1 < len(lx.src) {
+		return lx.src[lx.i+1]
+	}
+	return 0
+}
+
+// regexAllowed reports whether a slash at the current position starts a regex.
+func (lx *tsLexer) regexAllowed() bool {
+	if lx.prevIdent {
+		return tsKeywordsBeforeRegex[lx.prevWord]
+	}
+	return lx.prev == 0 || strings.IndexByte(tsOperatorsBeforeRegex, lx.prev) >= 0
+}
+
+// lexCode scans code until the end of input. With stopAtBrace set, it stops
+// after the "}" that closes a template expression at depth zero.
+func (lx *tsLexer) lexCode(stopAtBrace bool) {
+	n := len(lx.src)
+	depth := 0
+	for lx.i < n {
+		c := lx.src[lx.i]
+		switch {
+		case c == '\n':
+			lx.line++
+			lx.i++
+		case c == ' ' || c == '\t' || c == '\r':
+			lx.i++
+		case c == '/' && lx.peekNext() == '/':
+			lx.lineComment()
+		case c == '/' && lx.peekNext() == '*':
+			lx.blockComment()
+		case c == '"' || c == '\'':
+			lx.str(c)
+		case c == '`':
+			lx.template()
+		case c == '/' && lx.regexAllowed():
+			lx.regex()
+		case c == '{':
+			depth++
+			lx.setPrev(c)
+			lx.i++
+		case c == '}':
+			lx.i++
+			if stopAtBrace && depth == 0 {
+				return
+			}
+			depth--
+			lx.setPrev(c)
+		case isTSIdentByte(c):
+			start := lx.i
+			for lx.i < n && isTSIdentByte(lx.src[lx.i]) {
+				lx.i++
+			}
+			lx.prevWord = string(lx.src[start:lx.i])
+			lx.prevIdent = true
+		default:
+			lx.setPrev(c)
+			lx.i++
+		}
+	}
+}
+
+// lineComment skips a "//" comment. The exception is a URL scheme in JSX text,
+// such as "Visit https://host.io", where the "//" belongs to the URL.
+func (lx *tsLexer) lineComment() {
+	end := bytes.IndexByte(lx.src[lx.i:], '\n')
+	if end < 0 {
+		end = len(lx.src)
+	} else {
+		end += lx.i
+	}
+	if k, ok := tsSchemeBefore(lx.src, lx.i); ok {
+		if m := urlPattern.FindSubmatchIndex(lx.src[k:end]); m != nil && m[0] == 0 {
+			lx.out = append(lx.out, hit{Host: hostOf(string(lx.src[k+m[2] : k+m[3]])), File: lx.rel, Line: lx.line})
+			lx.i = k + m[1]
+			lx.setPrev('a')
+			return
+		}
+	}
+	lx.i = end
+}
+
+// tsSchemeBefore reports whether the bytes before index i spell a URL scheme
+// followed by a colon, and returns the index where the scheme starts.
+func tsSchemeBefore(src []byte, i int) (int, bool) {
+	j := i - 1
+	if j < 0 || src[j] != ':' {
+		return 0, false
+	}
+	k := j
+	for k > 0 && (isTSIdentByte(src[k-1]) || src[k-1] == '+' || src[k-1] == '.' || src[k-1] == '-') {
+		k--
+	}
+	if k == j || !isASCIILetter(src[k]) {
+		return 0, false
+	}
+	return k, true
+}
+
+// textURLHits returns one hit per URL in val. A hit carries the line of its
+// own match, so a URL inside a multi-line template is reported where it sits.
+func textURLHits(file string, line int, val string) []hit {
+	matches := urlPattern.FindAllStringSubmatchIndex(val, -1)
+	out := make([]hit, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, hit{Host: hostOf(val[m[2]:m[3]]), File: file, Line: line + strings.Count(val[:m[0]], "\n")})
+	}
+	return out
+}
+
+// templateHits returns the URL hits of a template's text. A text that starts
+// with "//" is also a protocol-relative URL.
+func templateHits(file string, line int, val string) []hit {
+	out := textURLHits(file, line, val)
+	if m := schemeRelativeLiteral.FindStringSubmatch(val); m != nil {
+		out = append(out, hit{Host: hostOf(m[1]), File: file, Line: line})
+	}
+	return out
+}
+
+// blockComment skips a "/* */" comment and counts its newlines.
+func (lx *tsLexer) blockComment() {
+	n := len(lx.src)
+	lx.i += 2
+	for lx.i < n && (lx.src[lx.i] != '*' || lx.peekNext() != '/') {
+		if lx.src[lx.i] == '\n' {
+			lx.line++
+		}
+		lx.i++
+	}
+	lx.i = min(lx.i+2, n)
+}
+
+// str reads a quoted string. It stops at the matching quote or at a newline,
+// so a broken literal cannot hide the rest of the file.
+func (lx *tsLexer) str(quote byte) {
+	n := len(lx.src)
+	start := lx.line
+	lx.i++
+	j := lx.i
+	for lx.i < n && lx.src[lx.i] != quote && lx.src[lx.i] != '\n' {
+		if lx.src[lx.i] == '\\' {
+			lx.i++
+			if lx.i < n && lx.src[lx.i] == '\n' {
+				lx.line++
+			}
+		}
+		lx.i++
+	}
+	end := min(lx.i, n)
+	body := string(lx.src[j:end])
+	lx.out = append(lx.out, literalURLHits(lx.rel, start, body)...)
+	if m := schemeRelativeLiteral.FindStringSubmatch(body); m != nil {
+		lx.out = append(lx.out, hit{Host: hostOf(m[1]), File: lx.rel, Line: start})
+	}
+	if lx.i < n && lx.src[lx.i] == quote {
+		lx.i++
+	}
+	lx.setPrev(quote)
+}
+
+// template reads a template literal. The static text is collected, and each
+// "${" expression is scanned as code. A placeholder stays in the text as "${}",
+// so "https://${host}/x" yields the host "${}", which isExcludedHost drops,
+// while "https://github.com/${o}" still yields "github.com".
+func (lx *tsLexer) template() {
+	n := len(lx.src)
+	start := lx.line
+	lx.i++
+	var text strings.Builder
+	for lx.i < n {
+		c := lx.src[lx.i]
+		switch {
+		case c == '`':
+			lx.i++
+			lx.out = append(lx.out, templateHits(lx.rel, start, text.String())...)
+			lx.setPrev('`')
+			return
+		case c == '\\' && lx.i+1 < n:
+			if lx.src[lx.i+1] == '\n' {
+				lx.line++
+			}
+			text.WriteByte(c)
+			text.WriteByte(lx.src[lx.i+1])
+			lx.i += 2
+		case c == '$' && lx.peekNext() == '{':
+			text.WriteString("${}")
+			lx.i += 2
+			lx.setPrev('{')
+			before := lx.line
+			lx.lexCode(true)
+			text.WriteString(strings.Repeat("\n", lx.line-before))
+		default:
+			if c == '\n' {
+				lx.line++
+			}
+			text.WriteByte(c)
+			lx.i++
+		}
+	}
+	lx.out = append(lx.out, templateHits(lx.rel, start, text.String())...)
+}
+
+// regex skips a regular expression literal, including its flags. A regex body
+// never yields a hit. The scan stops at a newline, so a misread slash stays on
+// one line.
+func (lx *tsLexer) regex() {
+	n := len(lx.src)
+	lx.i++
+	inClass := false
+	for lx.i < n && lx.src[lx.i] != '\n' {
+		c := lx.src[lx.i]
+		if c == '\\' {
+			lx.i += 2
+			continue
+		}
+		if c == '[' {
+			inClass = true
+		} else if c == ']' {
+			inClass = false
+		} else if c == '/' && !inClass {
+			lx.i++
+			break
+		}
+		lx.i++
+	}
+	for lx.i < n && isTSIdentByte(lx.src[lx.i]) {
+		lx.i++
+	}
+	lx.i = min(lx.i, n)
+	lx.setPrev(')')
+}
+
+// cssComment and htmlComment match the comments that extractStripped removes.
+var (
+	cssComment  = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+)
+
+// extractCSS scans a stylesheet. A comment is removed first, so a URL in a
+// comment is never a hit. The rule covers url(...) and @import.
+func extractCSS(rel string, src []byte) []hit {
+	return extractStripped(rel, src, cssComment)
+}
+
+// extractHTML scans an HTML page. A comment is removed first.
+func extractHTML(rel string, src []byte) []hit {
+	return extractStripped(rel, src, htmlComment)
+}
+
+// extractStripped replaces each comment with its newlines, so line numbers
+// hold, then scans every line for URLs.
+func extractStripped(rel string, src []byte, comment *regexp.Regexp) []hit {
+	s := comment.ReplaceAllStringFunc(string(src), func(m string) string {
+		return strings.Repeat("\n", strings.Count(m, "\n"))
+	})
+	var out []hit
+	for i, line := range strings.Split(s, "\n") {
+		for _, host := range urlHosts(line) {
+			out = append(out, hit{Host: host, File: rel, Line: i + 1})
+		}
+		for _, m := range schemeRelativePattern.FindAllStringSubmatch(line, -1) {
+			out = append(out, hit{Host: hostOf(m[1]), File: rel, Line: i + 1})
+		}
+	}
+	return out
+}
+
+// isFrontendTestFile reports whether a frontend path is test code. Test files
+// and the test support tree hold fixture URLs that no browser loads.
+func isFrontendTestFile(rel string) bool {
+	if strings.HasPrefix(rel, "frontend/src/test/") {
+		return true
+	}
+	for _, suffix := range []string{
+		".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs",
+		".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mjs",
+	} {
+		if strings.HasSuffix(rel, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // walkFiles calls visit for every regular file under dir (relative to root).
 // A missing directory is not an error, so an optional tree may be absent.
 // Hidden directories and testdata directories are skipped.
@@ -406,6 +749,56 @@ func collectHits(root string, inv *Inventory) ([]hit, error) {
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+
+	// Frontend: TypeScript, TSX, and CSS under src, CSS under public, and the
+	// entry page. Test files are skipped.
+	err = walkFiles(root, "frontend/src", func(rel, abs string) error {
+		var extract func(string, []byte) []hit
+		switch filepath.Ext(rel) {
+		case ".ts", ".tsx", ".js", ".jsx", ".mjs":
+			extract = extractTS
+		case ".css":
+			extract = extractCSS
+		default:
+			return nil
+		}
+		if excluded(rel) || isFrontendTestFile(rel) {
+			return nil
+		}
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		raw = append(raw, extract(rel, src)...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = walkFiles(root, "frontend/public", func(rel, abs string) error {
+		if filepath.Ext(rel) != ".css" || excluded(rel) {
+			return nil
+		}
+		src, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		raw = append(raw, extractCSS(rel, src)...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	indexRel := "frontend/index.html"
+	src, err = os.ReadFile(filepath.Join(root, indexRel))
+	switch {
+	case err == nil:
+		if !excluded(indexRel) {
+			raw = append(raw, extractHTML(indexRel, src)...)
+		}
+	case !errors.Is(err, fs.ErrNotExist):
 		return nil, err
 	}
 
