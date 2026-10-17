@@ -619,7 +619,7 @@ func main() {
 
 	// jenkinsUpstream is the Jenkins upstream host. "" turns off every read from
 	// it: the upgrade tracker, candidate metadata, and the Jenkins JVM flags.
-	jenkinsUpstream := jenkinsUpstreamURL(os.LookupEnv)
+	jenkinsUpstream := controller.JenkinsUpstreamURLFromEnv(os.LookupEnv)
 	reconciler.SetJenkinsUpstreamURL(jenkinsUpstream)
 
 	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, jenkinsUpstream, logger)

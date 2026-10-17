@@ -673,6 +673,9 @@ func main() {
 			apiDeps.CellMaxTenants = n
 		}
 	}
+	// The chart renders jenkins.upstreamURL into the operator and the BFF from
+	// one value. The BFF only reports the state; the operator reads the URL.
+	apiDeps.JenkinsUpstream = controller.ClassifyJenkinsUpstream(controller.JenkinsUpstreamURLFromEnv(os.LookupEnv))
 	if dsn := os.Getenv("VARROA_RECORDSTORE_DSN"); dsn != "" {
 		rsPool, err := pgxpool.New(context.Background(), dsn)
 		if err != nil {

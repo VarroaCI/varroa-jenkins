@@ -102,7 +102,8 @@ stating what it is/is not responsible for:
   no server-side session. Multiple replicas run behind a load balancer
   (leader election only for the parts that must be singleton). Wires
   `Deps.FleetPluginInventory` via `api.NewFleetInventoryReader(miteTransport)`.
-  Reads `VARROA_CELLS_MAX_TENANTS` into `Deps.CellMaxTenants`, unconditionally
+  Reads `VARROA_JENKINS_UPSTREAM_URL` into `Deps.JenkinsUpstream` (display state only, via
+  `controller.ClassifyJenkinsUpstream`). Reads `VARROA_CELLS_MAX_TENANTS` into `Deps.CellMaxTenants`, unconditionally
   and not inside the record-store block: it is the chart tier of the cell
   usage reads' tenant cap, and one chart value renders it into this binary and
   into the operator, so the two agree. `main` reads `otel.GetMeterProvider()`

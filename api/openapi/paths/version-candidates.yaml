@@ -13,12 +13,18 @@
           application/json:
             schema:
               type: object
-              required: [items]
+              required: [items, upstreamMetadata]
               properties:
                 items:
                   type: array
                   items:
                     $ref: '../components/schemas.yaml#/ProfileCandidate'
+                upstreamMetadata:
+                  type: string
+                  enum: [online, mirror, off]
+                  description: >
+                    State of the Jenkins upstream metadata host. off means
+                    Varroa does not discover upgrade candidates.
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":

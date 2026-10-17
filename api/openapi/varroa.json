@@ -23231,10 +23231,20 @@
                         "$ref": "#/components/schemas/components_schemas_ProfileCandidate"
                       },
                       "type": "array"
+                    },
+                    "upstreamMetadata": {
+                      "description": "State of the Jenkins upstream metadata host. off means Varroa does not discover upgrade candidates.\n",
+                      "enum": [
+                        "online",
+                        "mirror",
+                        "off"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "items"
+                    "items",
+                    "upstreamMetadata"
                   ],
                   "type": "object"
                 }

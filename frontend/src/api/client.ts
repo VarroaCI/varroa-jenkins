@@ -30,6 +30,7 @@ import type {
   PreviewResponse,
   VersionProfileDetail,
   VersionCandidate,
+  VersionCandidateList,
   SubjectRef,
   BroodRun,
   BroodListResponse,
@@ -576,8 +577,8 @@ export function getVersionProfiles(cluster: string): Promise<VersionProfileDetai
 // Version candidates are clusterless (a ProfileCandidate targets a
 // cluster-scoped JenkinsVersionProfile, not a per-cluster route segment) —
 // matching the /updatecenter no-cluster-segment precedent below.
-export function listVersionCandidates(): Promise<VersionCandidate[]> {
-  return bffFetch<{items: VersionCandidate[]}>("/version-candidates").then(r => r.items);
+export function listVersionCandidates(): Promise<VersionCandidateList> {
+  return bffFetch<VersionCandidateList>("/version-candidates");
 }
 
 export function promoteVersionCandidate(name: string): Promise<VersionCandidate> {

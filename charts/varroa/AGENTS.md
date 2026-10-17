@@ -291,11 +291,14 @@ the packaged CRDs. Does not own the Go source it packages
   shape asserted by `tests/test-updatecenter-netpol.sh` (hive mode stays exactly
   4 policies). `ociRegistryEgress` defaults to off. Its empty-list rule is in the
   `networkpolicy-guard.yaml` bullet.
-- **`jenkins.*` values** (top-level block, `values.yaml`) are read only by the operator
+- **`jenkins.*` values** (top-level block, `values.yaml`) are read by the operator
   Deployment (`templates/operator/deployment.yaml`): `upstreamURL` renders
   `VARROA_JENKINS_UPSTREAM_URL`, `image.repository` renders
   `VARROA_JENKINS_IMAGE_REPOSITORY`, and `agentImage` renders
-  `VARROA_JENKINS_AGENT_IMAGE`. The upstream variable renders only when the key is
+  `VARROA_JENKINS_AGENT_IMAGE`. `upstreamURL` also renders
+  `VARROA_JENKINS_UPSTREAM_URL` into the BFF Deployment (`templates/bff/deployment.yaml`),
+  which reports the upstream state (`online`, `mirror`, `off`) on
+  `GET /version-candidates`. The upstream variable renders only when the key is
   present, so an empty string means off and an absent key keeps the built-in host.
   Asserted by `tests/test-jenkins-upstream.sh` and `tests/test-jenkins-images.sh`.
 - **`templates/recorder/`** — the opt-in build record store component

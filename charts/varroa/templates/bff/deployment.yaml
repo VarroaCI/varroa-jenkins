@@ -121,6 +121,14 @@ spec:
             # usage read from it, so both processes agree.
             - name: VARROA_CELLS_MAX_TENANTS
               value: {{ include "varroa.cells.int" (dict "name" "cells.maxTenantsPerCell" "value" .Values.cells.maxTenantsPerCell) | quote }}
+            # One value renders this variable into the operator and into the
+            # BFF. The BFF reports the upstream state on the version-candidate
+            # reads. A key absent (null) omits the variable, as in the operator.
+            {{- $jenkins := .Values.jenkins | default dict }}
+            {{- if hasKey $jenkins "upstreamURL" }}
+            - name: VARROA_JENKINS_UPSTREAM_URL
+              value: {{ get $jenkins "upstreamURL" | quote }}
+            {{- end }}
             {{- range .Values.bff.env }}
             - name: {{ .name }}
               value: {{ .value | quote }}

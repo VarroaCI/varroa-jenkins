@@ -673,6 +673,8 @@ federation, activity persistence, and SSE fanout.
   finds the run through `RecordStore.ListRuns` and answers `{link}`, the build page or the job
   page. It authorizes the run with the run read check and answers 404 on every miss.
 
+- **Upstream state** (`Deps.JenkinsUpstream`, set by `cmd/bff`): `GET /version-candidates` and MCP `list_version_candidates` report `upstreamMetadata` (`online`, `mirror`, `off`) through `UpstreamMetadataState`. An unset value reports `online`. The state is display only; no handler gates on it.
+
 - Run detail carries `waiting` (`RunWaitJSON`) for a queued run that a cap holds. The job detail lists `waiting` for each job. Both read `run_waits` through the record store. A read error leaves the field out.
 
 ## Work Guidance

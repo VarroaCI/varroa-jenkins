@@ -120,7 +120,7 @@ jenkins:
 
 The empty value stops these reads:
 
-- **The operator.** The upgrade tracker does not start. The operator makes no request to the upstream host to find newer LTS patches or to resolve candidate plugin sets. A candidate that needs upstream metadata reports `Resolved=False` with reason `UpstreamMetadataDisabled`. Import the candidate's plugin pack into an update center with `oci` storage to resolve it.
+- **The operator.** The upgrade tracker does not start. The operator makes no request to the upstream host to find newer LTS patches or to resolve candidate plugin sets. The upgrade tracker creates no candidates. Settings ▸ Versions shows a note that upstream metadata is off, and `GET /api/v1/version-candidates` returns `upstreamMetadata: "off"`. A plugin pack import into an update center with `oci` storage resolves an existing candidate that reports `Resolved=False` with reason `UpstreamMetadataDisabled`. The import does not add a candidate.
 - **Every Jenkins controller and cell.** Each JVM starts with `-Dhudson.model.UpdateCenter.never=true`, which stops the daily update-site poll. Each JVM also starts with `-Dhudson.model.DownloadService.never=true`, which stops no request in current Jenkins. The runtime update site is set separately, as described below.
 - **Usage statistics, always.** Each Jenkins JVM starts with `-Dhudson.model.UsageStatistics.disabled=true`. This flag applies whether or not the upstream host is set. It stops the calls to `usage.jenkins.io` and to the telemetry uplink.
 

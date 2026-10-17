@@ -44,7 +44,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   https://<varroa-host>/api/v1/version-candidates/<name>/promote
 ```
 
-or via the `promote_version_candidate` MCP tool. Both list and inspect candidates first (`GET /api/v1/version-candidates`, `GET /api/v1/version-candidates/{name}`, and their `list_version_candidates`/`get_version_candidate` MCP equivalents) to review a candidate's phase, conditions, and pre-flight summary before acting.
+or via the `promote_version_candidate` MCP tool. Both list and inspect candidates first (`GET /api/v1/version-candidates`, `GET /api/v1/version-candidates/{name}`, and their `list_version_candidates`/`get_version_candidate` MCP equivalents) to review a candidate's phase, conditions, and pre-flight summary before acting. The list response also carries `upstreamMetadata` (`online`, `mirror`, or `off`). An `off` value means that Varroa discovers no candidates, so an empty list has a known cause.
 
 ## Controlling the rollout: `upgradePolicy`
 
@@ -72,7 +72,7 @@ A released target isn't considered done the moment the write lands. When the con
 
 ## Reviewing and rolling out a candidate in the dashboard
 
-Everything above is also driven from the dashboard, not just the API. Settings ▸ Versions lists each cluster's `JenkinsVersionProfile`s alongside any open `ProfileCandidate`s for them, split into an active table and a collapsed history of ones already promoted or superseded. Each active row shows the six gating conditions as chips and, once a pre-flight has run, how many controllers it flagged and why.
+Everything above is also driven from the dashboard, not just the API. Settings ▸ Versions lists each cluster's `JenkinsVersionProfile`s alongside any open `ProfileCandidate`s for them, split into an active table and a collapsed history of ones already promoted or superseded. Each active row shows the six gating conditions as chips and, once a pre-flight has run, how many controllers it flagged and why. When `jenkins.upstreamURL` is `""`, the tab shows a note in place of the empty-state line: "Upstream metadata is off. Varroa does not check for new Jenkins releases. A new Varroa release adds the next version profile."
 
 Promote is only enabled once a candidate reaches `Ready`, and clicking it asks for confirmation first. The confirmation copy tracks the cluster's `upgradePolicy`, so the operator sees the actual consequence, not just a version number, before committing to it. Under `auto` the confirmation reads: "This will roll every controller pinned to line `<line>` through the version-roll gate." Under `manual` it reads: "This will hold every controller pinned to line `<line>` with `UpgradePending` until released."
 

@@ -5,7 +5,12 @@ import {
   listVersionCandidates,
   promoteVersionCandidate,
 } from "../api/client";
-import type { VersionProfileDetail, VersionProfileCondition, VersionCandidate } from "../types";
+import type {
+  VersionProfileDetail,
+  VersionProfileCondition,
+  VersionCandidate,
+  UpstreamMetadataState,
+} from "../types";
 import { ApiError } from "../hooks/useApi";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ClusterSelector from "../components/ClusterSelector";
@@ -116,6 +121,7 @@ function PromoteConfirmDialog({
 export default function SettingsVersionsTab() {
   const [profiles, setProfiles] = useState<VersionProfileDetail[] | null>(null);
   const [candidates, setCandidates] = useState<VersionCandidate[] | null>(null);
+  const [upstream, setUpstream] = useState<UpstreamMetadataState>("online");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedCluster, setSelectedCluster] = useState("core");
@@ -127,7 +133,8 @@ export default function SettingsVersionsTab() {
     Promise.all([getVersionProfiles(selectedCluster), listVersionCandidates()])
       .then(([p, c]) => {
         setProfiles(p);
-        setCandidates(c);
+        setCandidates(c.items);
+        setUpstream(c.upstreamMetadata);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
@@ -252,13 +259,19 @@ export default function SettingsVersionsTab() {
       </div>
 
       <h3 className={styles.sectionTitle}>Upgrade candidates</h3>
+      {upstream === "off" && (
+        <p className={styles.muted} data-testid="upstream-off-note">
+          Upstream metadata is off. Varroa does not check for new Jenkins releases. A new Varroa
+          release adds the next version profile.
+        </p>
+      )}
       {active.length === 0 ? (
         allActive.length > 0 ? (
           <p className={styles.muted}>
             Upgrade candidates aren&apos;t tracked per cluster, and none of the current candidates match this
             cluster&apos;s version profiles.
           </p>
-        ) : (
+        ) : upstream === "off" ? null : (
           <p className={styles.muted}>No pending upgrade candidates.</p>
         )
       ) : (
