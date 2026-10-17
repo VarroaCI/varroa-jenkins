@@ -46,7 +46,19 @@ func (s *Server) HandleVersionCandidates(w http.ResponseWriter, r *http.Request)
 		s.writeK8sError(w, err)
 		return
 	}
-	s.writeJSON(w, http.StatusOK, itemsEnvelope(items))
+	envelope := itemsEnvelope(items)
+	envelope["upstreamMetadata"] = UpstreamMetadataState(s.deps)
+	s.writeJSON(w, http.StatusOK, envelope)
+}
+
+// UpstreamMetadataState names the Jenkins upstream metadata state the
+// version-candidate reads report. An unset state reports online, the built-in
+// host.
+func UpstreamMetadataState(deps *Dependencies) controller.JenkinsUpstreamState {
+	if deps == nil || deps.JenkinsUpstream == "" {
+		return controller.JenkinsUpstreamOnline
+	}
+	return deps.JenkinsUpstream
 }
 
 // HandleVersionCandidateDispatch handles the clusterless dynamic-segment

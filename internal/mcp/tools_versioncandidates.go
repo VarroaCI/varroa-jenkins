@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -52,14 +53,39 @@ func summarizeVersionCandidate(c *v1alpha1.ProfileCandidate) versionCandidateSum
 	}
 }
 
-var versionCandidateListOutputSchema = listOutputSchema("Default summary projection.", []schemaField{
+// versionCandidateListOutputSchema describes the result of list_version_candidates.
+var versionCandidateListOutputSchema = withUpstreamMetadataProperty(listOutputSchema("Default summary projection.", []schemaField{
 	{Name: "name", Type: "string", Desc: "Candidate name."},
 	{Name: "profileRef", Type: "string", Desc: "JenkinsVersionProfile this candidate would promote into."},
 	{Name: "observedVersion", Type: "string", Desc: "Profile's resolveVersion at discovery time."},
 	{Name: "resolveVersion", Type: "string", Desc: "Newly discovered patch this candidate would promote the profile to."},
 	{Name: "phase", Type: "string", Desc: "Pending, Ready, Promoted, Failed, or Superseded."},
 	{Name: "promotedAt", Type: "string", Desc: "RFC3339 UTC; set once Phase becomes Promoted."},
-})
+}))
+
+// withUpstreamMetadataProperty adds the upstreamMetadata property to a list
+// output schema and makes it required. The value names the Jenkins upstream
+// metadata state: online, mirror, or off.
+func withUpstreamMetadataProperty(schema json.RawMessage) json.RawMessage {
+	var doc map[string]any
+	if err := json.Unmarshal(schema, &doc); err != nil {
+		panic("list output schema: " + err.Error())
+	}
+	props, _ := doc["properties"].(map[string]any)
+	props["upstreamMetadata"] = map[string]any{
+		"type": "string",
+		"enum": []string{"online", "mirror", "off"},
+		"description": "State of the Jenkins upstream metadata host. off means no upgrade " +
+			"candidates are discovered.",
+	}
+	required, _ := doc["required"].([]any)
+	doc["required"] = append(required, "upstreamMetadata")
+	out, err := json.Marshal(doc)
+	if err != nil {
+		panic("list output schema: " + err.Error())
+	}
+	return out
+}
 
 func registerVersionCandidateTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	listVC := mcp.NewTool("list_version_candidates",
@@ -67,7 +93,8 @@ func registerVersionCandidateTools(mcpServer *server.MCPServer, deps *api.Depend
 			"candidates for JenkinsVersionProfiles, pending validation and promotion. Returns a "+
 			"compact summary per candidate (name, profileRef, observedVersion, resolveVersion, "+
 			"phase, promotedAt). Use get_version_candidate for the full resource, including "+
-			"conditions and the advisory pre-flight report."),
+			"conditions and the advisory pre-flight report. upstreamMetadata names the Jenkins "+
+			"upstream state (online, mirror, or off); off explains an empty list."),
 		mcp.WithBoolean("verbose", mcp.Description("Return full ProfileCandidate resources "+
 			"instead of summaries. Prefer get_version_candidate for detail on a specific candidate.")),
 		withListOutput(versionCandidateListOutputSchema),
@@ -84,14 +111,18 @@ func registerVersionCandidateTools(mcpServer *server.MCPServer, deps *api.Depend
 		if err != nil {
 			return mcp.NewToolResultError("failed to list version candidates: " + err.Error()), nil
 		}
+		upstream := api.UpstreamMetadataState(deps)
 		if verbose, _ := getArgs(req)["verbose"].(bool); verbose {
-			return resultJSON(items)
+			if items == nil {
+				items = []*v1alpha1.ProfileCandidate{}
+			}
+			return resultJSON(map[string]any{"items": items, "count": len(items), "upstreamMetadata": upstream})
 		}
 		summaries := make([]versionCandidateSummary, 0, len(items))
 		for _, c := range items {
 			summaries = append(summaries, summarizeVersionCandidate(c))
 		}
-		return resultJSON(summaries)
+		return resultJSON(map[string]any{"items": summaries, "count": len(summaries), "upstreamMetadata": upstream})
 	})
 
 	getVC := mcp.NewTool("get_version_candidate",

@@ -1117,6 +1117,15 @@ export interface VersionCandidateStatus {
   promotedAt?: string;
 }
 
+// State of the Jenkins upstream metadata host. "off" means Varroa discovers no
+// upgrade candidates.
+export type UpstreamMetadataState = "online" | "mirror" | "off";
+
+export interface VersionCandidateList {
+  items: VersionCandidate[];
+  upstreamMetadata: UpstreamMetadataState;
+}
+
 export interface VersionCandidate {
   metadata: ObjectMeta;
   spec: VersionCandidateSpec;

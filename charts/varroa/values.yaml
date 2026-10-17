@@ -555,7 +555,8 @@ operator:
 
 # ---------------------------------------------------------------------------
 # Jenkins controllers — images and upstream metadata reads. The operator reads
-# every value here. An air-gapped install sets upstreamURL to "" and mirrors
+# every value here. The BFF reads upstreamURL only to report the upstream state
+# on the version-candidate reads. An air-gapped install sets upstreamURL to "" and mirrors
 # the two images. See docs/install/air-gapped.md.
 # ---------------------------------------------------------------------------
 jenkins:

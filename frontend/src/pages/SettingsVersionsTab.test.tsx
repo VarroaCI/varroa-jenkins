@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 vi.mock("../api/client", () => ({
   getVersionProfiles: vi.fn(),
   listClusters: vi.fn(() => Promise.resolve([{ name: "core", core: true }])),
-  listVersionCandidates: vi.fn(() => Promise.resolve([])),
+  listVersionCandidates: vi.fn(() => Promise.resolve({ items: [], upstreamMetadata: "online" })),
   promoteVersionCandidate: vi.fn(),
   getProvisioningDefaults: vi.fn(() => Promise.resolve({ spec: {} })),
 }));
@@ -68,7 +68,7 @@ const metadataOnly: VersionProfileDetail = {
 beforeEach(() => {
   mockGet.mockReset();
   mockListCandidates.mockReset();
-  mockListCandidates.mockResolvedValue([]);
+  mockListCandidates.mockResolvedValue({ items: [], upstreamMetadata: "online" });
   mockPromote.mockReset();
   mockGetDefaults.mockReset();
   mockGetDefaults.mockResolvedValue({ spec: {} });
@@ -190,7 +190,7 @@ const promotedCandidate: VersionCandidate = {
 describe("SettingsVersionsTab upgrade candidates", () => {
   it("groups active vs. history candidates and renders all six condition chips", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate, promotedCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate, promotedCandidate], upstreamMetadata: "online" });
     renderTab();
 
     await screen.findByText("Upgrade candidates");
@@ -210,7 +210,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("disables Promote outside the Ready phase", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate, pendingCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate, pendingCandidate], upstreamMetadata: "online" });
     renderTab();
 
     await screen.findByText("Upgrade candidates");
@@ -222,7 +222,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("shows the auto-policy promote copy when upgradePolicy is unset", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate], upstreamMetadata: "online" });
     mockGetDefaults.mockResolvedValue({ spec: {} });
     renderTab();
 
@@ -234,7 +234,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("shows the manual-policy promote copy when upgradePolicy is explicitly manual", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate], upstreamMetadata: "online" });
     mockGetDefaults.mockResolvedValue({ spec: { upgradePolicy: "manual" } });
     renderTab();
 
@@ -245,7 +245,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("shows the auto-policy promote copy when upgradePolicy is explicitly auto", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate], upstreamMetadata: "online" });
     mockGetDefaults.mockResolvedValue({ spec: { upgradePolicy: "auto" } });
     renderTab();
 
@@ -256,7 +256,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("refetches the candidate list on successful promotion", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValueOnce([readyCandidate]).mockResolvedValueOnce([promotedCandidate]);
+    mockListCandidates.mockResolvedValueOnce({ items: [readyCandidate], upstreamMetadata: "online" }).mockResolvedValueOnce({ items: [promotedCandidate], upstreamMetadata: "online" });
     mockPromote.mockResolvedValue({ ...readyCandidate, status: { ...readyCandidate.status, phase: "Promoted" } });
     renderTab();
 
@@ -271,7 +271,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("shows an inline error and does not refetch when promotion fails", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([readyCandidate]);
+    mockListCandidates.mockResolvedValue({ items: [readyCandidate], upstreamMetadata: "online" });
     mockPromote.mockRejectedValue(new Error("promote failed"));
     renderTab();
 
@@ -288,7 +288,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
     mockGet.mockResolvedValue([readyLts]);
     // readyCandidate.spec.profileRef ("jenkins-version-2-555") is not among readyLts's profile
     // names when the profile itself is named something the candidate doesn't reference.
-    mockListCandidates.mockResolvedValue([{ ...readyCandidate, spec: { ...readyCandidate.spec, profileRef: "jenkins-version-9-999" } }]);
+    mockListCandidates.mockResolvedValue({ items: [{ ...readyCandidate, spec: { ...readyCandidate.spec, profileRef: "jenkins-version-9-999" } }], upstreamMetadata: "online" });
     renderTab();
 
     await screen.findByText("Upgrade candidates");
@@ -302,7 +302,7 @@ describe("SettingsVersionsTab upgrade candidates", () => {
 
   it("shows the generic empty state when there are genuinely no candidates", async () => {
     mockGet.mockResolvedValue([readyLts]);
-    mockListCandidates.mockResolvedValue([]);
+    mockListCandidates.mockResolvedValue({ items: [], upstreamMetadata: "online" });
     renderTab();
 
     await screen.findByText("Upgrade candidates");
@@ -314,11 +314,36 @@ describe("SettingsVersionsTab upgrade candidates", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows the upstream-off note in place of the generic empty state when upstream metadata is off", async () => {
+    mockGet.mockResolvedValue([readyLts]);
+    mockListCandidates.mockResolvedValue({ items: [], upstreamMetadata: "off" });
+    renderTab();
+
+    await screen.findByText("Upgrade candidates");
+    expect(screen.getByTestId("upstream-off-note")).toHaveTextContent(
+      "Upstream metadata is off. Varroa does not check for new Jenkins releases. A new Varroa release adds the next version profile.",
+    );
+    expect(screen.queryByText("No pending upgrade candidates.")).not.toBeInTheDocument();
+  });
+
+  it("shows no upstream note when upstream metadata is mirror", async () => {
+    mockGet.mockResolvedValue([readyLts]);
+    mockListCandidates.mockResolvedValue({ items: [], upstreamMetadata: "mirror" });
+    renderTab();
+
+    await screen.findByText("Upgrade candidates");
+    expect(screen.queryByTestId("upstream-off-note")).not.toBeInTheDocument();
+    expect(screen.getByText("No pending upgrade candidates.")).toBeInTheDocument();
+  });
+
   it("shows the not-available message and refetches when promotion conflicts (409)", async () => {
     mockGet.mockResolvedValue([readyLts]);
     mockListCandidates
-      .mockResolvedValueOnce([readyCandidate])
-      .mockResolvedValueOnce([{ ...readyCandidate, status: { ...readyCandidate.status, phase: "Superseded" } }]);
+      .mockResolvedValueOnce({ items: [readyCandidate], upstreamMetadata: "online" })
+      .mockResolvedValueOnce({
+        items: [{ ...readyCandidate, status: { ...readyCandidate.status, phase: "Superseded" } }],
+        upstreamMetadata: "online",
+      });
     mockPromote.mockRejectedValue(new ApiError(409, "conflict"));
     renderTab();
 

@@ -148,6 +148,11 @@ type Dependencies struct {
 	// tenant cap the cell usage reads report. Zero when the variable is
 	// missing or is not a whole number.
 	CellMaxTenants int
+
+	// JenkinsUpstream is the state of the Jenkins upstream metadata host,
+	// from VARROA_JENKINS_UPSTREAM_URL. The zero value means the built-in
+	// host, the same rule as an absent env var.
+	JenkinsUpstream controller.JenkinsUpstreamState
 }
 
 // IdentityConfig holds the identity/OIDC configuration surfaced to the admin

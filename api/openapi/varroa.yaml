@@ -16485,8 +16485,17 @@ paths:
                     items:
                       $ref: '#/components/schemas/components_schemas_ProfileCandidate'
                     type: array
+                  upstreamMetadata:
+                    description: |
+                      State of the Jenkins upstream metadata host. off means Varroa does not discover upgrade candidates.
+                    enum:
+                    - online
+                    - mirror
+                    - "off"
+                    type: string
                 required:
                 - items
+                - upstreamMetadata
                 type: object
           description: Candidates listed.
         "401":

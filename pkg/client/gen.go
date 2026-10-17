@@ -21804,11 +21804,15 @@ type ListVersionCandidatesResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *struct {
 		Items []ComponentsSchemasProfileCandidate `json:"items"`
+
+		// UpstreamMetadata State of the Jenkins upstream metadata host. off means Varroa does not discover upgrade candidates.
+		UpstreamMetadata ListVersionCandidates200UpstreamMetadata `json:"upstreamMetadata"`
 	}
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON405 *ComponentsResponsesMethodNotAllowed
 }
+type ListVersionCandidates200UpstreamMetadata string
 
 // Status returns HTTPResponse.Status
 func (r ListVersionCandidatesResponse) Status() string {
@@ -31652,6 +31656,9 @@ func ParseListVersionCandidatesResponse(rsp *http.Response) (*ListVersionCandida
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
 			Items []ComponentsSchemasProfileCandidate `json:"items"`
+
+			// UpstreamMetadata State of the Jenkins upstream metadata host. off means Varroa does not discover upgrade candidates.
+			UpstreamMetadata ListVersionCandidates200UpstreamMetadata `json:"upstreamMetadata"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
