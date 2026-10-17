@@ -12,6 +12,8 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  # The last step dispatches release.yaml against the new tag.
+  actions: write
 
 jobs:
   release-please:
@@ -26,10 +28,39 @@ jobs:
       #
       # The tag this creates is pushed with the default GITHUB_TOKEN, and GitHub
       # does not fire workflow triggers for those — so release.yaml's `push:
-      # tags` trigger will NOT run for it. Publish that release's artifacts by
-      # dispatching release.yaml against the tag; it carries a workflow_dispatch
-      # trigger for exactly this.
+      # tags` trigger will NOT run for it. The step after this one dispatches
+      # release.yaml against the tag; it carries a workflow_dispatch trigger
+      # for exactly this.
       - uses: google-github-actions/release-please-action@v4
         with:
           config-file: .github/release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The merged release pull request bumps the manifest on main, so the
+      # checkout of this push holds the released version. The step runs also
+      # when release-please fails, because release-please can fail after it
+      # creates the release, for example on the comment to the locked pull
+      # request. The run check keeps the step idempotent: a push that releases
+      # nothing finds the run of the current tag and exits.
+      - uses: actions/checkout@v4
+        if: always()
+
+      - name: Publish the release artifacts
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r '."."' .release-please-manifest.json)
+          tag="v${version}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "no release for ${tag}; nothing to publish"
+            exit 0
+          fi
+          runs=$(gh run list --workflow release.yaml --branch "$tag" --json databaseId --jq 'length')
+          if [ "$runs" -gt 0 ]; then
+            echo "release.yaml already ran for ${tag}"
+            exit 0
+          fi
+          gh workflow run release.yaml --ref "$tag"
+          echo "dispatched release.yaml for ${tag}"
