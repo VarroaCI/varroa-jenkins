@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -135,27 +136,11 @@ func runImport(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runImportToUC handles --to uc://<host>[:<port>].
-// It checks VARROACTL_UC_TOKEN, builds a tar.gz from the source, and POSTs it.
-func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registryConfig string, insecure bool) error {
-	// 1. Check env var BEFORE touching --from or building payload.
-	token := os.Getenv("VARROACTL_UC_TOKEN")
-	if token == "" {
-		fmt.Fprintln(os.Stderr, "error: VARROACTL_UC_TOKEN is not set")
-		fmt.Fprintln(os.Stderr, "  The uc:// destination requires a valid import token.")
-		fmt.Fprintln(os.Stderr, "  Set VARROACTL_UC_TOKEN to the token stored in the")
-		fmt.Fprintln(os.Stderr, "  varroa-updatecenter-import-token Secret (key: token).")
-		return fmt.Errorf("VARROACTL_UC_TOKEN not set")
-	}
-
-	// 2. Open source store.
-	srcStore, srcCleanup, err := openOCISrc(srcScheme, srcTarget, registryConfig, insecure)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcCleanup() }()
-
-	// 3. Create temp LayoutStore, copy source into it.
+// importPackToUC copies one pack from src into a temp layout under ref, then
+// posts it to the update center at dstTarget (host:port). token is the import
+// bearer token.
+func importPackToUC(ctx context.Context, srcStore oci.BlobStore, ref, dstTarget, token string) error {
+	// Create a temp LayoutStore and copy the pack into it.
 	tmpDir, err := os.MkdirTemp("", "varroactl-uc-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -167,11 +152,11 @@ func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registry
 		return fmt.Errorf("open temp layout store: %w", err)
 	}
 
-	if err := oci.Copy(cmd.Context(), srcStore, srcTarget, tmpStore, srcTarget); err != nil {
+	if err := oci.Copy(ctx, srcStore, ref, tmpStore, ref); err != nil {
 		return fmt.Errorf("copy to temp layout: %w", err)
 	}
 
-	// 4. Archive temp dir to tar.gz in memory.
+	// Archive the temp dir to tar.gz in memory.
 	var tarGzBuf bytes.Buffer
 	gzw := gzip.NewWriter(&tarGzBuf)
 	tw := tar.NewWriter(gzw)
@@ -216,7 +201,7 @@ func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registry
 	_ = tw.Close()
 	_ = gzw.Close()
 
-	// 5. Parse host:port from dstTarget. Default port 80.
+	// Parse host:port from dstTarget. Default port 80.
 	host, portStr, err := net.SplitHostPort(dstTarget)
 	if err != nil {
 		// Assume dstTarget is just a hostname without port.
@@ -229,8 +214,8 @@ func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registry
 	}
 	targetURL := fmt.Sprintf("http://%s:%d", host, port)
 
-	// 6. POST import.
-	if err := updatecenter.PostImport(cmd.Context(), targetURL, token, &tarGzBuf); err != nil {
+	// POST the import.
+	if err := updatecenter.PostImport(ctx, targetURL, token, &tarGzBuf); err != nil {
 		if errors.Is(err, updatecenter.ErrInvalidToken) {
 			fmt.Fprintln(os.Stderr, "error: invalid or expired import token")
 			fmt.Fprintln(os.Stderr, "  The uc:// server rejected the VARROACTL_UC_TOKEN.")
@@ -238,6 +223,33 @@ func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registry
 			return fmt.Errorf("import token rejected")
 		}
 		return fmt.Errorf("post import: %w", err)
+	}
+
+	return nil
+}
+
+// runImportToUC handles --to uc://<host>[:<port>].
+// It checks VARROACTL_UC_TOKEN, builds a tar.gz from the source, and POSTs it.
+func runImportToUC(cmd *cobra.Command, srcScheme, srcTarget, dstTarget, registryConfig string, insecure bool) error {
+	// 1. Check env var BEFORE touching --from or building payload.
+	token := os.Getenv("VARROACTL_UC_TOKEN")
+	if token == "" {
+		fmt.Fprintln(os.Stderr, "error: VARROACTL_UC_TOKEN is not set")
+		fmt.Fprintln(os.Stderr, "  The uc:// destination requires a valid import token.")
+		fmt.Fprintln(os.Stderr, "  Set VARROACTL_UC_TOKEN to the token stored in the")
+		fmt.Fprintln(os.Stderr, "  varroa-updatecenter-import-token Secret (key: token).")
+		return fmt.Errorf("VARROACTL_UC_TOKEN not set")
+	}
+
+	// 2. Open source store.
+	srcStore, srcCleanup, err := openOCISrc(srcScheme, srcTarget, registryConfig, insecure)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = srcCleanup() }()
+
+	if err := importPackToUC(cmd.Context(), srcStore, srcTarget, dstTarget, token); err != nil {
+		return err
 	}
 
 	// 7. Success output.

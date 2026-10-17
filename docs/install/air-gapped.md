@@ -2,30 +2,78 @@
 
 An offline installation needs internal copies of every chart, image, plugin, bundle, and identity endpoint used by Varroa or Jenkins.
 
-## Mirror Artifacts
+## Transfer One Bundle
 
-| Artifact | Include |
-|---|---|
-| Varroa | Chart, backend, and dashboard |
-| Dependencies | Enabled NATS and Dex images |
-| Jenkins | Images selected by version profiles |
-| Agents | Images referenced by bundles |
-| Plugins | Packs for permitted profiles |
-| Configuration | Internal Git or OCI artifacts |
+Export one bundle on a connected machine. Import it on the disconnected side. The bundle holds the chart, the images that the chart uses, the plugin packs of the profiles that you choose, and a manifest. The manifest records a digest for every file.
 
-Find every destination in the [outbound connections](../security/outbound-connections.md) page before transfer. The page lists each image registry, each external host, and the chart value that controls it.
+The export needs three things on the connected side:
 
-## Export Plugin Packs
+- A connected Varroa of the same version. The export reads the version profiles from its API.
+- The `helm` binary. The export renders the chart with it. Use `--helm` to name another path.
+- Your values files. Use the files that you deploy with. The export then reads the same images as the install.
 
-Run this in a connected environment for every profile that offline controllers may use:
+The values files choose the image set. They do not choose the configuration that the bundle carries. The chart does not render without some required values, such as `auth.oidc.clientSecret`, `auth.oidc.clientId`, and `auth.dashboardUrl`. In `local` or `ldap` auth mode, `auth.bffUrl` is required too. On the connected machine, set a placeholder for each required value in the export values file. A placeholder is correct for the export. Install the disconnected cluster with the real values. The manifest records only the file name and the SHA-256 digest of each values file. It never records the content of a values file.
 
 ```bash
-varroactl export plugins \
+varroactl export release \
+  --version 3.0.0 \
+  --values values-prod.yaml \
   --profile jenkins-version-2-570 \
-  --to tar:///transfer/plugins-2-570.tar.gz
+  --to tar:///transfer/varroa-3.0.0.tar.gz
 ```
 
-The command resolves the plugin closure, downloads it, verifies checksums, and creates an OCI plugin pack. The pack records concrete versions; a `latest` pin resolves at export time. `--to` also accepts `oci://` and `dir://`. Use `--registry-config` for registry credentials. Use `--insecure` only for plain HTTP on a trusted isolated network.
+The command prints a manifest digest. Record it. The import needs it.
+
+Send the manifest digest to the disconnected side over a channel that is separate from the archive. The digest is the trust anchor. An archive that carries its own digest proves nothing, because anyone who alters the archive can alter the digest too.
+
+Carry the archive across the boundary. Then run the import on the internal side:
+
+```bash
+varroactl import release \
+  --from tar:///transfer/varroa-3.0.0.tar.gz \
+  --to oci://registry.example.com/varroa \
+  --manifest-digest sha256:<manifest digest>
+```
+
+The import checks the manifest digest, every blob, and every artifact tag before it pushes anything. A failed check stops the import, and nothing is pushed.
+
+A registry or network failure during the push is different. The artifacts that were already pushed stay in the registry, and the import reports how many completed. Run the same import again. A rerun of the same bundle is safe: it pushes the same digests under the same names. The import then prints a values file. Save it, and install from the internal registry with it:
+
+```bash
+helm upgrade --install varroa oci://registry.example.com/varroa/charts/varroa \
+  --version 3.0.0 -f values-prod.yaml -f values-airgap.yaml
+```
+
+Add `--uc uc://localhost:8080` to the import to upload the plugin packs to the update center. The [Import Plugin Packs](#import-plugin-packs) section shows how to reach the update center.
+
+Use `--registry-config` for registry credentials. Use `--insecure` only for plain HTTP on a trusted, isolated network. The commands read registry credentials from the Docker config. `--registry-config <file>` names a plain config file instead. A credential helper that fails makes a registry fetch fail with `exit status 1`. A `dir://` bundle works on removable media. An `oci://` destination pushes the bundle to a staging registry, but the import reads only `tar://` and `dir://` sources.
+
+### Rules the export enforces
+
+- Every image needs an exact tag or a digest. The export refuses the tag `latest`. Release the chart with pinned image tags.
+- Every image must come from a chart value, a profile, a `--bundle-dir`, or an `--image` flag. The export refuses any other image.
+
+### What the export cannot see
+
+The export does not read these image sources:
+
+- Images in pipeline scripts and in pod template steps.
+- Images in Team and CellPool pod templates that users create through the API.
+- Images that plugins pull at run time.
+
+Name a bundle directory with `--bundle-dir` to include the JCasC pod templates that name images. Use `--image` for any other image. The manifest lists these sources under `unseen`. Mirror them by hand.
+
+### What the bundle does not carry
+
+The bundle carries the Varroa chart, its images, and the plugin packs. It does not carry the following. Mirror each one by hand, and point the cluster at the internal copy:
+
+- Git and OCI sources for JCasC bundles, such as the `repoURL`, `ociRef`, `gitSource`, and `ociSource` fields.
+- Catalog sources and the catalog items that they serve.
+- Identity endpoints: Dex connectors and the OIDC issuer.
+- The record store: an external Postgres server and the S3 blob endpoint.
+- Telemetry endpoints, completion webhook targets, and the mail and Gitea servers that a cell pool uses.
+
+Find every other destination in the [outbound connections](../security/outbound-connections.md) page before transfer.
 
 ## Configure Internal Images
 
@@ -117,6 +165,8 @@ helm install varroa oci://registry.example.com/charts/varroa \
 ```
 
 ## Import Plugin Packs
+
+This section transfers plugin packs only. The release bundle above uploads the packs for you through `import release --uc`.
 
 ```bash
 export VARROACTL_UC_TOKEN=$(kubectl get secret \
