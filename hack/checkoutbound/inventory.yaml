@@ -154,10 +154,10 @@ connections:
   - component: jenkins
     destination: updates.jenkins.io (Jenkins update site)
     hosts: []
-    purpose: Jenkins core checks for plugin updates once a day.
+    purpose: Jenkins core reads update-site and tool-installer metadata at boot, once a day, and after a version change.
     protocol: HTTPS 443
-    control: jenkins.upstreamURL
-    disable: 'Yes. Set jenkins.upstreamURL to "".'
+    control: ProvisioningDefaults pluginUpdateCenterURL, the in-cluster update center, or jenkins.upstreamURL
+    disable: 'Yes. Enable the in-cluster update center, or set jenkins.upstreamURL to "". Varroa then writes an empty update-site list.'
 
   - component: jenkins
     destination: usage.jenkins.io

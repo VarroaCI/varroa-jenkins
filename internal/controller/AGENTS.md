@@ -498,6 +498,15 @@ sections describe.
   bundle, four content keys (never `jenkins.yaml`), and `held`. `held` comes from
   `TeamHeld` (`team_held.go`), which checks `status.cell.tenantWarnings` of every member
   cell in `v1alpha1.PlacementCells` order through `v1alpha1.CellHoldsTenant`.
+- **`applyRuntimeUpdateSite` is the only writer of `jenkins.updateCenter`**
+  (`updatesite.go`). It runs in `resolveBundleForController` after `ResolveVars`
+  and replaces any bundle value through `bundle.InjectUpdateSites`. The site URL
+  follows the precedence in `resolveRuntimeUpdateSiteURL`: explicit
+  `ProvisioningDefaults.spec.pluginUpdateCenterURL`, then the in-cluster update
+  center (`ucBaseURL`), then `jenkinsUpstreamURL`, then an empty list. Every URL
+  from the update center or the upstream ends in `/update-center.json`. Jenkins
+  reads tool-installer metadata only from a site URL with that name; do not use
+  `update-center.actual.json`.
 - **plugins-init reports on its termination log.** `pluginsInitScript`
   (`clientset_client.go`) writes one marker line that `plugininit_report.go`
   parses, so the format is a contract:

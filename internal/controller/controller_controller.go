@@ -817,6 +817,12 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 		mat.JenkinsYAML = out
 	}
 
+	// The runtime update site is set after ResolveVars so that no bundle
+	// variable can change the URL.
+	if err := r.applyRuntimeUpdateSite(ctx, cr, mat); err != nil {
+		return nil, "", bundleIdentity{}, v1alpha1.ControllerCondition{}, fmt.Errorf("inject runtime update site: %w", err)
+	}
+
 	clearBundleFailed(cr)
 
 	return mat, cb.Status.ResolvedHash, ident, artifactCond, nil

@@ -121,7 +121,7 @@ jenkins:
 The empty value stops these reads:
 
 - **The operator.** The upgrade tracker does not start. The operator makes no request to the upstream host to find newer LTS patches or to resolve candidate plugin sets. A candidate that needs upstream metadata reports `Resolved=False` with reason `UpstreamMetadataDisabled`. Import the candidate's plugin pack into an update center with `oci` storage to resolve it.
-- **Every Jenkins controller and cell.** Each JVM starts with `-Dhudson.model.UpdateCenter.never=true` and `-Dhudson.model.DownloadService.never=true`. The JVM does not poll its update site or download plugin metadata on a timer.
+- **Every Jenkins controller and cell.** Each JVM starts with `-Dhudson.model.UpdateCenter.never=true`, which stops the daily update-site poll. Each JVM also starts with `-Dhudson.model.DownloadService.never=true`, which stops no request in current Jenkins. The runtime update site is set separately, as described below.
 - **Usage statistics, always.** Each Jenkins JVM starts with `-Dhudson.model.UsageStatistics.disabled=true`. This flag applies whether or not the upstream host is set. It stops the calls to `usage.jenkins.io` and to the telemetry uplink.
 
 A change to `jenkins.upstreamURL` rolls every Connected controller and cell once. The new pod gets the matching JVM flags. A cell drains its builds before the roll. A hibernated controller gets the flags when it wakes.
@@ -130,7 +130,7 @@ The empty value does not change the plugins-init step. That init container still
 
 The in-cluster update center has its own default host for pull-through. Turn off pull-through as described in [Enable the Offline Update Center](#enable-the-offline-update-center), or set its upstream URLs to your mirror. This value does not change that default.
 
-The JVM flags do not set a runtime update site. A controller that has no update-site data file can still download it from the default host on first start. Varroa does not yet point the runtime update site at the in-cluster update center. Until it does, check the egress policy for this one request.
+Varroa sets the runtime update site through JCasC. The site is `ProvisioningDefaults.spec.pluginUpdateCenterURL` when set. Otherwise it is the in-cluster update center, and then `jenkins.upstreamURL`. With none of these, the site list is empty. A `pluginUpdateCenterURL` must end in `update-center.json` or `update-center.actual.json`; Varroa rewrites the second form to the first for Jenkins. Other names do not load tool-installer metadata. The in-cluster update center does not sign its metadata, so Jenkins does not load it. The controller's plugin manager shows no available plugins. Plugins come only from the bundle.
 
 Check the operator log after the change. It contains `upgrade tracker off: jenkins upstream URL is empty` once.
 
