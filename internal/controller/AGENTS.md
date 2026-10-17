@@ -130,6 +130,14 @@ sections describe.
   `False` condition fails just that target with a distinct reason before
   anything is written. An `Unknown` condition holds the target at `Pending`
   and retries on a later tick.
+- **The Jenkins upstream host is one operator value.** `cmd/operator`'s
+  `jenkinsUpstreamURL` reads `VARROA_JENKINS_UPSTREAM_URL` and passes it to the upgrade
+  tracker, the candidate reconciler, and `SetJenkinsUpstreamURL`. An empty value turns
+  the tracker off and makes candidates report `UpstreamMetadataDisabled`, and it sets
+  `StatefulSetSpec.JenkinsUpstreamOff`. Every Jenkins JVM then gets
+  `UsageStatistics.disabled` (always) and `UpdateCenter.never`/`DownloadService.never`
+  (when off), all built in `buildStatefulSet`. Do not add a second source for these
+  flags or an unconditional `https://updates.jenkins.io` literal.
 - `Reconciler` (`controller_controller.go`) is the `Controller` CRD's controller-runtime
   reconciler. `SetupWithManager` (`operator.go`) wires: `For(&Controller{})`; an
   `UpdateFunc` predicate that skips status-only updates and only reacts to

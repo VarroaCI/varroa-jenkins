@@ -134,6 +134,17 @@ spec:
             {{- end }}
             - name: VARROA_MITE_IMAGE
               value: {{ .Values.operator.miteImage | default (printf "%s:%s" .Values.operator.image.repository .Values.operator.image.tag) | quote }}
+            {{- /* Absent key (null) omits the variable, so the operator keeps its built-in host. An empty string renders "" and turns the upstream reads off. */}}
+            {{- $jenkins := .Values.jenkins | default dict }}
+            {{- $jenkinsImage := $jenkins.image | default dict }}
+            {{- if hasKey $jenkins "upstreamURL" }}
+            - name: VARROA_JENKINS_UPSTREAM_URL
+              value: {{ get $jenkins "upstreamURL" | quote }}
+            {{- end }}
+            - name: VARROA_JENKINS_IMAGE_REPOSITORY
+              value: {{ get $jenkinsImage "repository" | default "jenkins/jenkins" | quote }}
+            - name: VARROA_JENKINS_AGENT_IMAGE
+              value: {{ get $jenkins "agentImage" | default "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21" | quote }}
             - name: VARROA_VARROACTL_IMAGE
               value: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
             - name: VARROA_SCHEDULE_BFF_URL

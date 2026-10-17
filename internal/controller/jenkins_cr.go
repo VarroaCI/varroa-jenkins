@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"fmt"
-
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
@@ -135,7 +133,7 @@ func GenerateJenkinsCR(cr *v1alpha1.Controller, configMapName string) (*JenkinsC
 				Containers: []JenkinsCRContainer{
 					{
 						Name:            "jenkins-master",
-						Image:           fmt.Sprintf("jenkins/jenkins:%s", image),
+						Image:           jenkinsImageRepository() + ":" + image,
 						ImagePullPolicy: "IfNotPresent",
 						Resources: &JenkinsCRResources{
 							Requests: map[string]string{

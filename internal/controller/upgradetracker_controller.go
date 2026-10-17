@@ -32,11 +32,6 @@ const UpgradeTrackerInterval = 6 * time.Hour
 // an unbounded fetch loop.
 const maxPatchProbeSteps = 20
 
-// upstreamUpdatesBaseURL is the upstream Jenkins update-center host this
-// tracker probes. Always the real internet — unlike UpdateCenterReconciler's
-// configurable ucBaseURL, this reconciler has no in-cluster mode.
-const upstreamUpdatesBaseURL = "https://updates.jenkins.io"
-
 // UpgradeTrackerReconciler discovers upstream Jenkins LTS patch/line movement
 // on a periodic tick: a same-line newer patch than a tracked
 // JenkinsVersionProfile's current ResolveVersion becomes a ProfileCandidate; a
@@ -47,7 +42,13 @@ type UpgradeTrackerReconciler struct {
 	activityPublisher activity.EventSink
 	logger            *slog.Logger
 
-	// httpDoer performs HTTP requests. Default is http.DefaultClient.
+	// baseURL is the Jenkins upstream host the tracker probes, with the
+	// updates.jenkins.io layout. The operator passes "" when upstream reads are
+	// off; Reconcile then does nothing.
+	baseURL string
+
+	// httpDoer performs HTTP requests. The default client has a timeout so a
+	// dropped connection cannot hold a tick open.
 	httpDoer interface {
 		Do(*http.Request) (*http.Response, error)
 	}
@@ -59,8 +60,9 @@ type UpgradeTrackerReconciler struct {
 	seenFacts map[string]struct{}
 }
 
-// NewUpgradeTrackerReconciler creates a new UpgradeTrackerReconciler.
-func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activity.EventSink, logger *slog.Logger) *UpgradeTrackerReconciler {
+// NewUpgradeTrackerReconciler creates a new UpgradeTrackerReconciler that
+// probes baseURL. An empty baseURL makes the tracker inert.
+func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activity.EventSink, baseURL string, logger *slog.Logger) *UpgradeTrackerReconciler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -68,7 +70,8 @@ func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activ
 		store:             store,
 		activityPublisher: activityPublisher,
 		logger:            logger,
-		httpDoer:          http.DefaultClient,
+		baseURL:           strings.TrimRight(baseURL, "/"),
+		httpDoer:          &http.Client{Timeout: candidateHTTPTimeout},
 		seenFacts:         make(map[string]struct{}),
 	}
 }
@@ -78,6 +81,9 @@ func NewUpgradeTrackerReconciler(store crdstore.Backend, activityPublisher activ
 // ProfileCandidates), and the new-line informational event. One profile's
 // failure is logged and does not stop the rest — never a hard failure.
 func (r *UpgradeTrackerReconciler) Reconcile(ctx context.Context) {
+	if r.baseURL == "" {
+		return
+	}
 	profiles, err := crdstore.List[v1alpha1.JenkinsVersionProfile](ctx, r.store, "", "")
 	if err != nil {
 		r.logger.Warn("upgrade tracker: list JenkinsVersionProfiles failed", "error", err)
@@ -116,7 +122,7 @@ func isTwoSegmentVersion(version string) bool {
 // fetch/parse problem logs at warn and returns ok=false, which skips this
 // tick's new-line check only.
 func (r *UpgradeTrackerReconciler) fetchNewLTSLine(ctx context.Context) (string, bool) {
-	url := upstreamUpdatesBaseURL + "/stable/update-center.actual.json"
+	url := r.baseURL + "/stable/update-center.actual.json"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		r.logger.Warn("upgrade tracker: build stable/ request failed", "error", err)
@@ -166,7 +172,7 @@ func (r *UpgradeTrackerReconciler) reconcileProfile(ctx context.Context, profile
 	lastSuccess := -1
 	k := patch + 1
 	for step := 0; step < maxPatchProbeSteps; step++ {
-		url := fmt.Sprintf("%s/dynamic-stable-%d.%d.%d/update-center.actual.json", upstreamUpdatesBaseURL, major, minor, k)
+		url := fmt.Sprintf("%s/dynamic-stable-%d.%d.%d/update-center.actual.json", r.baseURL, major, minor, k)
 		status, err := r.probeStatus(ctx, url)
 		if err != nil {
 			r.logger.Warn("upgrade tracker: patch probe failed", "profile", profile.Name, "url", url, "error", err)

@@ -80,11 +80,17 @@ type ProfileCandidateReconciler struct {
 	newRegistryStore func(ref string, opts oci.RegistryOptions) (oci.BlobStore, error)
 	readRootHPI      func() ([]byte, error)
 
-	// upstreamBaseURL is the online-source base, defaulting to
-	// upstreamUpdatesBaseURL. Test-overridable so online-path tests run
-	// against a local httptest server rather than updates.jenkins.io.
+	// upstreamBaseURL is the online-source base: the Jenkins upstream host
+	// with the updates.jenkins.io layout. Test-overridable so online-path
+	// tests run against a local httptest server. "" means upstream metadata
+	// is off, and selectSource returns errUpstreamDisabled.
 	upstreamBaseURL string
 }
+
+// errUpstreamDisabled reports that no in-cluster update center serves the
+// candidate and the upstream host is turned off. Retrying changes nothing
+// until an update center with oci storage exists or the upstream host is set.
+var errUpstreamDisabled = errors.New("jenkins upstream metadata is off")
 
 // candidateHTTPTimeout bounds every outbound call this reconciler makes (the
 // in-cluster update-center inventory fetch and upstream metadata
@@ -98,7 +104,7 @@ type ProfileCandidateReconciler struct {
 const candidateHTTPTimeout = 30 * time.Second
 
 // NewProfileCandidateReconciler creates a new ProfileCandidateReconciler.
-func NewProfileCandidateReconciler(client ResourceClient, store crdstore.Backend, operatorNamespace, ucBaseURL string, activityPublisher activity.EventSink, logger *slog.Logger) *ProfileCandidateReconciler {
+func NewProfileCandidateReconciler(client ResourceClient, store crdstore.Backend, operatorNamespace, ucBaseURL, upstreamBaseURL string, activityPublisher activity.EventSink, logger *slog.Logger) *ProfileCandidateReconciler {
 	return &ProfileCandidateReconciler{
 		client:            client,
 		store:             store,
@@ -111,7 +117,7 @@ func NewProfileCandidateReconciler(client ResourceClient, store crdstore.Backend
 			return oci.NewRegistryStore(ref, opts)
 		},
 		readRootHPI:     func() ([]byte, error) { return os.ReadFile(rootHPIPath) },
-		upstreamBaseURL: upstreamUpdatesBaseURL,
+		upstreamBaseURL: strings.TrimRight(upstreamBaseURL, "/"),
 	}
 }
 
@@ -156,14 +162,24 @@ func (r *ProfileCandidateReconciler) Reconcile(ctx context.Context, req reconcil
 	// runs this time, so this happens before resolution and is shared by both.
 	source, fetch, err := r.selectSource(ctx, candidate.Spec.ResolveVersion, logger)
 	if err != nil {
-		logger.Warn("failed to select metadata source; retrying later", "error", err)
-		if candidate.Spec.ClosureContentRef == "" {
+		reason, message := "MetadataUnavailable", fmt.Sprintf("selecting metadata source: %v", err)
+		if errors.Is(err, errUpstreamDisabled) {
+			// A deliberate air-gap setting, not a fault: no warning on each retry.
+			logger.Debug("upstream metadata is off; candidate cannot resolve yet", "error", err)
+			reason = "UpstreamMetadataDisabled"
+			message = "Jenkins upstream metadata is off. Import the candidate's plugin pack into an update center with oci storage, or set jenkins.upstreamURL."
+		} else {
+			logger.Warn("failed to select metadata source; retrying later", "error", err)
+		}
+		// A disabled upstream always reports, even with a stored closure: the
+		// candidate cannot advance, and a stale Resolved=True would hide that.
+		if candidate.Spec.ClosureContentRef == "" || errors.Is(err, errUpstreamDisabled) {
 			r.setCondition(status, v1alpha1.ProfileCandidateCondition{
 				Type:               v1alpha1.ConditionCandidateResolved,
 				Status:             metav1.ConditionFalse,
 				LastTransitionTime: metav1.Now(),
-				Reason:             "MetadataUnavailable",
-				Message:            fmt.Sprintf("selecting metadata source: %v", err),
+				Reason:             reason,
+				Message:            message,
 			})
 		}
 		if patchErr := r.patchStatus(ctx, name, status); patchErr != nil {
@@ -439,7 +455,7 @@ func (r *ProfileCandidateReconciler) selectSource(ctx context.Context, target st
 		if !apierrors.IsNotFound(err) {
 			logger.Warn("failed to fetch UpdateCenter; falling back to online source", "error", err)
 		}
-		return r.onlineSource(target, logger), pluginresolve.HTTPFetcher(r.upstreamBaseURL), nil
+		return r.upstreamSource(target, logger)
 	}
 
 	switch uc.Spec.Storage.Type {
@@ -455,7 +471,7 @@ func (r *ProfileCandidateReconciler) selectSource(ctx context.Context, target st
 		// local-PVC-backed store (only the varroa-updatecenter pod does).
 		return nil, nil, pluginresolve.ErrMetadataUnavailable
 	default:
-		return r.onlineSource(target, logger), pluginresolve.HTTPFetcher(r.upstreamBaseURL), nil
+		return r.upstreamSource(target, logger)
 	}
 }
 
@@ -480,7 +496,17 @@ func (r *ProfileCandidateReconciler) buildRegistryStore(ctx context.Context, uc 
 	return r.newRegistryStore(cfg.Ref, opts)
 }
 
-// onlineSource builds a *ucmeta.Resolver against updates.jenkins.io, mirroring
+// upstreamSource is the online branch of selectSource. It returns
+// errUpstreamDisabled when the upstream host is off, so no request leaves the
+// cluster.
+func (r *ProfileCandidateReconciler) upstreamSource(target string, logger *slog.Logger) (pluginresolve.MetadataSource, pluginresolve.Fetcher, error) {
+	if r.upstreamBaseURL == "" {
+		return nil, nil, errUpstreamDisabled
+	}
+	return r.onlineSource(target, logger), pluginresolve.HTTPFetcher(r.upstreamBaseURL), nil
+}
+
+// onlineSource builds a *ucmeta.Resolver against the upstream host, mirroring
 // cmd/varroactl/export.go's newExportResolver two-source ("weekly" then
 // per-target dynamic-stable) pattern.
 func (r *ProfileCandidateReconciler) onlineSource(target string, logger *slog.Logger) pluginresolve.MetadataSource {

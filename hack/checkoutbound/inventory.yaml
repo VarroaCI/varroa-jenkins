@@ -22,8 +22,8 @@ connections:
     hosts: [updates.jenkins.io]
     purpose: Find newer LTS patches and resolve candidate plugin sets for the upgrade tracker.
     protocol: HTTPS 443
-    control: None
-    disable: "No."
+    control: jenkins.upstreamURL
+    disable: 'Yes. Set jenkins.upstreamURL to "".'
 
   - component: operator
     destination: updates.jenkins.io (update-center metadata)
@@ -154,24 +154,24 @@ connections:
     hosts: []
     purpose: Jenkins core checks for plugin updates once a day.
     protocol: HTTPS 443
-    control: None. Jenkins core default.
-    disable: "No."
+    control: jenkins.upstreamURL
+    disable: 'Yes. Set jenkins.upstreamURL to "".'
 
   - component: jenkins
     destination: usage.jenkins.io
     hosts: []
     purpose: The viewer browser sends usage statistics when the Jenkins usage setting is on.
     protocol: HTTPS 443
-    control: None. Jenkins core default.
-    disable: "No."
+    control: None needed
+    disable: 'Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true.'
 
   - component: jenkins
     destination: uplink.jenkins.io
     hosts: []
     purpose: Jenkins core sends server telemetry when the usage setting is on.
     protocol: HTTPS 443
-    control: None. Jenkins core default.
-    disable: "No."
+    control: None needed
+    disable: 'Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true.'
 
   - component: jenkins
     destination: archives.jenkins.io
@@ -316,16 +316,16 @@ connections:
     hosts: [docker.io]
     purpose: Pull the Jenkins controller image for each controller.
     protocol: HTTPS 443
-    control: Controller resourceOverlay only. No chart value.
-    disable: "No. Mirror the image and set the overlay."
+    control: jenkins.image.repository
+    disable: "No. Mirror the image and set the value."
 
   - component: cluster
     destination: docker.io (jenkins/inbound-agent)
     hosts: [docker.io]
     purpose: Pull the Jenkins agent image for starter and cell pods.
     protocol: HTTPS 443
-    control: Starter bundle and cell JCasC
-    disable: "No. Mirror the image and edit the bundle."
+    control: jenkins.agentImage
+    disable: "No. Mirror the image and set the value."
 
   - component: cluster
     destination: docker.io (nats)

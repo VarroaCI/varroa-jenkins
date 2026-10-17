@@ -122,7 +122,7 @@ func TestUpgradeTrackerNewLineDedup(t *testing.T) {
 	defer ts.Close()
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
 	tracker.Reconcile(context.Background())
@@ -146,7 +146,7 @@ func TestUpgradeTrackerFirstProbe404NoOp(t *testing.T) {
 	defer ts.Close()
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
 	tracker.Reconcile(context.Background())
@@ -177,7 +177,7 @@ func TestUpgradeTrackerCreatesCandidateOnPatchDiscovery(t *testing.T) {
 	defer ts.Close()
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
 	tracker.Reconcile(context.Background())
@@ -219,7 +219,7 @@ func TestUpgradeTrackerExhaustsProbeStepsCreatesCandidate(t *testing.T) {
 	defer ts.Close()
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
 	tracker.Reconcile(context.Background())
@@ -251,7 +251,7 @@ func TestUpgradeTrackerTransportErrorSkipsProfile(t *testing.T) {
 	good := rewriteToServer(t, ts)
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = doerFunc(func(req *http.Request) (*http.Response, error) {
 		if strings.Contains(req.URL.Path, "2.400") {
 			return nil, errors.New("simulated transport failure")
@@ -281,7 +281,7 @@ func TestUpgradeTrackerApplyOwnedNoOpOnRepeat(t *testing.T) {
 	defer ts.Close()
 
 	sink := &recordingSink{}
-	tracker := NewUpgradeTrackerReconciler(store, sink, testLogger())
+	tracker := NewUpgradeTrackerReconciler(store, sink, "https://updates.jenkins.io", testLogger())
 	tracker.httpDoer = rewriteToServer(t, ts)
 
 	tracker.Reconcile(context.Background())

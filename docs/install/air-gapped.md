@@ -52,9 +52,39 @@ bff:
   image: {repository: registry.example.com/varroa-jenkins, tag: "<version>"}
 frontend:
   image: {repository: registry.example.com/varroa-jenkins-frontend, tag: "<version>"}
+jenkins:
+  image: {repository: registry.example.com/jenkins/jenkins}
+  agentImage: registry.example.com/jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21
 ```
 
 Mirror and override enabled dependency images too. NATS reads `nats.container.image`. Set `ProvisioningDefaults.spec.imagePullSecrets` for controller pods. Each named Secret must exist in the controller namespace.
+
+`jenkins.image.repository` sets the Jenkins controller image. The operator adds the core version as the tag. `jenkins.agentImage` sets the jnlp agent image for the starter bundle and for cell pod templates. Mirror the exact agent tag, as shown in the starter bundle. A bundle that names its own agent image bypasses this value.
+
+## Turn Off Upstream Reads
+
+Set `jenkins.upstreamURL` to an empty string. The default value reads `https://updates.jenkins.io`.
+
+```yaml
+jenkins:
+  upstreamURL: ""
+```
+
+The empty value stops these reads:
+
+- **The operator.** The upgrade tracker does not start. The operator makes no request to the upstream host to find newer LTS patches or to resolve candidate plugin sets. A candidate that needs upstream metadata reports `Resolved=False` with reason `UpstreamMetadataDisabled`. Import the candidate's plugin pack into an update center with `oci` storage to resolve it.
+- **Every Jenkins controller and cell.** Each JVM starts with `-Dhudson.model.UpdateCenter.never=true` and `-Dhudson.model.DownloadService.never=true`. The JVM does not poll its update site or download plugin metadata on a timer.
+- **Usage statistics, always.** Each Jenkins JVM starts with `-Dhudson.model.UsageStatistics.disabled=true`. This flag applies whether or not the upstream host is set. It stops the calls to `usage.jenkins.io` and to the telemetry uplink.
+
+A controller created with this setting gets the flags. A running controller keeps its JVM options until it is provisioned again, for example after a version change. Varroa does not update these options on a running controller.
+
+The empty value does not change the plugins-init step. That init container still installs plugins from the update center in `ProvisioningDefaults`, or from the in-cluster update center. Set that source as described in [Enable the Offline Update Center](#enable-the-offline-update-center).
+
+The in-cluster update center has its own default host for pull-through. Turn off pull-through as described in [Enable the Offline Update Center](#enable-the-offline-update-center), or set its upstream URLs to your mirror. This value does not change that default.
+
+The JVM flags do not set a runtime update site. A controller that has no update-site data file can still download it from the default host on first start. Varroa does not yet point the runtime update site at the in-cluster update center. Until it does, check the egress policy for this one request.
+
+Check the operator log after the change. It contains `upgrade tracker off: jenkins upstream URL is empty` once.
 
 ## Enable the Offline Update Center
 

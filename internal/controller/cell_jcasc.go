@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -37,12 +38,26 @@ const cellGitHostKeyDefault = `security:
     sshHostKeyVerificationStrategy: "acceptFirstConnectionStrategy"
 `
 
+// defaultTenantAgentJnlpImage is the pinned jnlp agent image the operator uses
+// when VARROA_JENKINS_AGENT_IMAGE is unset. It matches the starter bundle's
+// agent image (bundles/starter/jenkins.yaml), which the operator injects as
+// ${varroa_jenkins_agent_image}.
+const defaultTenantAgentJnlpImage = "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21"
+
+// tenantAgentJnlpImage returns the jnlp agent image for the operator's own
+// tenant pod template and for the starter bundle. The chart sets
+// VARROA_JENKINS_AGENT_IMAGE from jenkins.agentImage.
+func tenantAgentJnlpImage() string {
+	if img := os.Getenv("VARROA_JENKINS_AGENT_IMAGE"); img != "" {
+		return img
+	}
+	return defaultTenantAgentJnlpImage
+}
+
 // The operator's own constant agent pod template (design D11). A
 // JenkinsVersionProfile carries no pod template, so this mirrors the
-// starter bundle's pinned agent image and resources
-// (bundles/starter/jenkins.yaml).
+// starter bundle's agent image and resources.
 const (
-	tenantAgentJnlpImage                 = "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21"
 	tenantAgentJnlpResourceRequestCPU    = "100m"
 	tenantAgentJnlpResourceRequestMemory = "256Mi"
 	tenantAgentJnlpResourceLimitCPU      = "500m"
@@ -100,7 +115,7 @@ func tenantCloudFor(team, agentNamespace, agentEndpoint string, lifted []bundle.
 			Labels:         fmt.Sprintf("%s %s-default", tenantNodeLabel(team), team),
 			Containers: []bundle.TenantCloudContainer{{
 				Name:                  "jnlp",
-				Image:                 tenantAgentJnlpImage,
+				Image:                 tenantAgentJnlpImage(),
 				ResourceRequestCPU:    tenantAgentJnlpResourceRequestCPU,
 				ResourceRequestMemory: tenantAgentJnlpResourceRequestMemory,
 				ResourceLimitCPU:      tenantAgentJnlpResourceLimitCPU,

@@ -530,6 +530,7 @@ var InjectedVariableNames = []string{
 	"varroa_controller_name", "varroa_controller_namespace", "varroa_controller_endpoint",
 	"varroa_controller_external_url", "varroa_controller_path_prefix", "varroa_frontend_url",
 	"varroa_oidc_issuer", "varroa_oidc_client_id", "varroa_login_url",
+	"varroa_jenkins_agent_image",
 }
 
 // DroppedItemKeysConfigMapKey is the content ConfigMap key that holds the
