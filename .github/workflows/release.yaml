@@ -187,7 +187,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
 
           # Refuse anything that isn't a clean semver — VERSION is written into
-          # five values.yaml keys below, and an empty or malformed value would
+          # six values.yaml keys below, and an empty or malformed value would
           # silently produce a chart that pulls a nonexistent tag.
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "FATAL: refusing to package: '$VERSION' is not semver (from tag '$GITHUB_REF_NAME')" >&2
@@ -203,10 +203,10 @@ jobs:
           # templates/operator/deployment.yaml, so pinning operator covers both.
           # This edit must live in this step: VERSION is a shell variable and does
           # not survive into another step.
-          for c in operator gateway bff frontend updateCenter; do
+          for c in operator gateway bff frontend updateCenter recorder; do
             VERSION="$VERSION" yq -i ".${c}.image.tag = strenv(VERSION)" charts/varroa/values.yaml
           done
-          yq '.operator.image, .gateway.image, .bff.image, .frontend.image, .updateCenter.image' charts/varroa/values.yaml
+          yq '.operator.image, .gateway.image, .bff.image, .frontend.image, .updateCenter.image, .recorder.image' charts/varroa/values.yaml
 
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
           helm package charts/varroa --version "${VERSION}" --app-version "${VERSION}"
