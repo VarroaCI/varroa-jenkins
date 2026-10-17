@@ -52,6 +52,8 @@ jobs:
             goextra:
               - 'charts/varroa/values.yaml'
               - 'charts/varroa/crds/**'
+              - 'docs/security/outbound-connections.md'
+              - 'docs/install/examples/**'
             charts:
               - 'charts/**'
               - 'frontend/nginx.conf'
@@ -106,6 +108,9 @@ jobs:
       # Each check step also runs after a failed check, so one failure does not hide the next.
       - name: Check comments
         run: go run ./hack/checkcomments .
+      - name: Check outbound connections
+        if: ${{ !cancelled() }}
+        run: make check-outbound
       - name: Check Proto
         if: ${{ !cancelled() }}
         run: make check-proto

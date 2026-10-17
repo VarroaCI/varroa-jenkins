@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments check-outbound outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -71,6 +71,15 @@ check-crds:
 
 check-comments:
 	go run ./hack/checkcomments .
+
+# Fails on an unlisted host, a stale inventory row, or a page that differs
+# from hack/checkoutbound/inventory.yaml.
+check-outbound:
+	go run ./hack/checkoutbound .
+
+# Regenerates docs/security/outbound-connections.md from the inventory.
+outbound-doc:
+	go run ./hack/checkoutbound -write .
 
 # Runs the public and site export leak gates into a scratch directory.
 # The exports gate the HEAD commit, not the working tree: commit first.

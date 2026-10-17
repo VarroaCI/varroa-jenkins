@@ -13,13 +13,7 @@ An offline installation needs internal copies of every chart, image, plugin, bun
 | Plugins | Packs for permitted profiles |
 | Configuration | Internal Git or OCI artifacts |
 
-Render the exact values and inspect every image before transfer:
-
-```bash
-helm template varroa oci://ghcr.io/varroaci/charts/varroa \
-  --version <version> -n varroa-system -f values-airgap.yaml > rendered.yaml
-grep 'image:' rendered.yaml
-```
+Find every destination in the [outbound connections](../security/outbound-connections.md) page before transfer. The page lists each image registry, each external host, and the chart value that controls it.
 
 ## Export Plugin Packs
 
