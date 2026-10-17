@@ -78,23 +78,62 @@ An empty `tenantNamespaceSelector` permits every namespace to reach the gateway.
 
 ## Restrict External Egress
 
-Git egress defaults to ports 443 and 22 for any destination. OCI and update-center rules default to HTTPS for any IPv4 address. Narrow them to known registry or proxy CIDRs:
+Each egress group renders a rule only when its gate is on and its `cidrs` list is not empty. A gate that is on with an empty list fails the render. The failure message names the value to set.
+
+| Group | Default | Renders when | Empty `cidrs` |
+| --- | --- | --- | --- |
+| `pullThroughEgress` | On, `["0.0.0.0/0"]` | `updateCenter.pullThrough.enabled` is true | Fails the render while pull-through is on. |
+| `updateCenterRegistryEgress` | On, `[]` | `updateCenter.storage.type` is `oci` | Fails the render. |
+| `ociRegistryEgress` | Off, `[]` | `enabled` is true | Fails the render. |
+| `coreNatsEgress` | `[]` | Hive mode | Fails the render in hive mode. |
+| `recordStoreBlobEgress` | On, `[]` | `recordStore.blobs.mode` is `s3` | Fails the render. |
+| `recorderWebhookEgress` | Off, `[]` | `enabled` is true | Fails the render. |
+| `recordStorePostgresEgress` | On, `[]` | `recordStore.enabled` is true | In `cnpg` mode, selects the CloudNativePG pods. In `external` mode, fails the render. |
+
+The `pullThroughEgress` default stays wide by design. The upstream hosts are public CDN hosts. Pin the CIDRs of your mirror, or keep `["0.0.0.0/0"]`.
+
+Some groups stay open. The chart does not pin them yet.
+
+| Group | Default | Why it stays open |
+| --- | --- | --- |
+| `apiServerEgress` | Opens `0.0.0.0/0` on 443 and 6443 when `cidrs` is empty | Pin it to your API server addresses. The cell policy reads the same value. |
+| `gitEgress` | Opens `0.0.0.0/0` on 443 and 22 | Bundle git clones need any Git host. The group has no `cidrs` value yet. |
+| `dexConnectorEgress` | Opens `0.0.0.0/0` on 443 | Dex connectors reach any identity provider. |
+| `telemetryEgress` | Opens `0.0.0.0/0` on the OTLP ports | Renders only when `telemetry.endpoint` is set. |
+
+Egress rules add up. A connection is allowed when any rule allows it. While `apiServerEgress` and `gitEgress` stay open, the operator, BFF, and gateway reach any address on port 443. Closing the OCI and blob groups closes port 443 only for the recorder and the update center.
+
+Pin the groups that you control:
 
 ```yaml
 networkPolicy:
+  apiServerEgress:
+    cidrs: ["10.0.0.2/32"]
+    ports: [443, 6443]
   ociRegistryEgress:
     enabled: true
     cidrs: ["10.20.0.0/16"]
     ports: [443]
-  pullThroughEgress:
-    enabled: false
   updateCenterRegistryEgress:
-    enabled: true
     cidrs: ["10.20.0.0/16"]
+    ports: [443]
+  recordStoreBlobEgress:
+    cidrs: ["203.0.113.10/32"]   # s3 blob mode only
     ports: [443]
 ```
 
-Kubernetes NetworkPolicy matches IP addresses, not DNS names. Include every address returned by load-balanced endpoints. Update-center pull-through can contact both the configured update service and its checksum archive. Allow both or disable the archive fallback and pre-seed every required plugin.
+Kubernetes NetworkPolicy matches IP addresses, not DNS names. Include every address that a load-balanced endpoint returns. Update-center pull-through can contact the configured update service and its checksum archive at `repo.jenkins-ci.org`. The default pull-through rule allows both hosts.
+
+### Upgrade Impact
+
+With `networkPolicy.enabled: true`, an upgrade fails the render until you set the values below. No failure is silent.
+
+1. Update center with `updateCenter.storage.type: oci`: set `networkPolicy.updateCenterRegistryEgress.cidrs`.
+2. Hive mode: set `networkPolicy.coreNatsEgress.cidrs`.
+3. Record store with `recordStore.blobs.mode: s3`: set `networkPolicy.recordStoreBlobEgress.cidrs`.
+4. `networkPolicy.recorderWebhookEgress.enabled: true`: set `cidrs`, or set `["0.0.0.0/0"]` to allow every address.
+5. `ociRegistryEgress` now defaults to off. No traffic usually breaks, because `gitEgress` still allows port 443 to every address. A registry on another port needs `enabled: true` and its CIDRs.
+6. `pullThroughEgress`: no change.
 
 ## Isolate Cells
 

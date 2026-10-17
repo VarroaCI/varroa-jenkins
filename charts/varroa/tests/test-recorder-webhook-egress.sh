@@ -3,8 +3,9 @@
 # Golden render test: completion webhook egress on the recorder NetworkPolicy
 # =============================================================================
 # Verifies that networkPolicy.recorderWebhookEgress is off by default, that
-# enabling it adds the configured CIDR and port to np-recorder, and that the
-# recorder receives VARROA_DASHBOARD_URL from auth.dashboardUrl.
+# enabling it adds the configured CIDR and port to np-recorder, that enabling
+# it with an empty cidrs list fails the render, and that the recorder receives
+# VARROA_DASHBOARD_URL from auth.dashboardUrl.
 # =============================================================================
 set -euo pipefail
 
@@ -66,19 +67,21 @@ grep -q 'port: 8443' <<< "$REC_ON" || rc=1
 check "enabled: np-recorder carries the configured port" "$rc"
 
 # ---------------------------------------------------------------------------
-# (c) Enabled with no CIDR: the rule opens 0.0.0.0/0.
+# (c) Enabled with no CIDR: the render fails and names the value.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (c) Enabled with no CIDR ---"
 
-RENDER_OPEN=$(helm template "$ROOT" $COMMON --set networkPolicy.enabled=true --set recordStore.enabled=true \
-  --set networkPolicy.recorderWebhookEgress.enabled=true 2>/dev/null) || {
-  echo "FAIL: helm template (open) failed"; exit 1
-}
-REC_OPEN=$(recorder_policy "$RENDER_OPEN")
 rc=0
-grep -q 'cidr: 0.0.0.0/0' <<< "$REC_OPEN" || rc=1
-check "enabled with no cidrs: np-recorder renders 0.0.0.0/0" "$rc"
+OUT_OPEN=$(helm template "$ROOT" $COMMON --set networkPolicy.enabled=true --set recordStore.enabled=true \
+  --set networkPolicy.recorderWebhookEgress.enabled=true 2>&1) && rc=1 || rc=0
+check "enabled with no cidrs: helm template fails" "$rc"
+rc=0
+grep -q 'networkPolicy.recorderWebhookEgress.cidrs must name' <<< "$OUT_OPEN" || rc=1
+check "enabled with no cidrs: failure names recorderWebhookEgress.cidrs" "$rc"
+rc=0
+grep -q '0.0.0.0/0' <<< "$OUT_OPEN" || rc=1
+check "enabled with no cidrs: failure names the 0.0.0.0/0 opt-in" "$rc"
 
 # ---------------------------------------------------------------------------
 # (d) The recorder receives the dashboard URL.

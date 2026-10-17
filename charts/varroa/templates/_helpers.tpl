@@ -188,7 +188,7 @@ Usage: {{ include "varroa.np.recordStoreBlobEgress" $ | nindent 4 }}
 */}}
 {{- define "varroa.np.recordStoreBlobEgress" -}}
 {{- $toggle := .Values.networkPolicy.recordStoreBlobEgress -}}
-{{- if and $toggle.enabled (ne .Values.recordStore.blobs.mode "postgres") -}}
+{{- if and $toggle.enabled $toggle.cidrs (ne .Values.recordStore.blobs.mode "postgres") -}}
 - to:
 {{- range $toggle.cidrs }}
   - ipBlock:
@@ -204,22 +204,17 @@ Usage: {{ include "varroa.np.recordStoreBlobEgress" $ | nindent 4 }}
 
 {{/*
 Completion webhook egress rule for the recorder. Renders nothing unless
-networkPolicy.recorderWebhookEgress.enabled is true. Empty cidrs render
-0.0.0.0/0.
+networkPolicy.recorderWebhookEgress.enabled is true and cidrs is non-empty.
+The guard fails the render for enabled with an empty list.
 Usage: {{ include "varroa.np.recorderWebhookEgress" $ | nindent 4 }}
 */}}
 {{- define "varroa.np.recorderWebhookEgress" -}}
 {{- $toggle := .Values.networkPolicy.recorderWebhookEgress -}}
-{{- if $toggle.enabled -}}
+{{- if and $toggle.enabled $toggle.cidrs -}}
 - to:
-{{- if $toggle.cidrs }}
 {{- range $toggle.cidrs }}
   - ipBlock:
       cidr: {{ . }}
-{{- end }}
-{{- else }}
-  - ipBlock:
-      cidr: 0.0.0.0/0
 {{- end }}
   ports:
 {{- range $toggle.ports }}

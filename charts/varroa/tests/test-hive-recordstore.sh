@@ -34,7 +34,8 @@ doc() {
 }
 
 AUTH=(--set auth.oidc.clientSecret=s --set auth.dashboardUrl=https://example.com)
-HIVE=(-f "$ROOT/values-hive.yaml" --set cluster.name=member --set bus.url=tls://core.example:4222 "${AUTH[@]}")
+HIVE=(-f "$ROOT/values-hive.yaml" --set cluster.name=member --set bus.url=tls://core.example:4222 "${AUTH[@]}"
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}')
 S3_URL='s3://varroa-blobs?region=us-east-1&endpoint=http://objects.example:9000'
 MEMBER=(--set recordStore.enabled=true --set recordStore.postgres.mode=external
   --set recordStore.blobs.mode=s3 --set-string "recordStore.blobs.s3.url=$S3_URL"

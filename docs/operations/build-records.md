@@ -301,7 +301,7 @@ networkPolicy:
     ports: [5432]
   recordStoreBlobEgress:
     enabled: true
-    cidrs: ["0.0.0.0/0"]
+    cidrs: ["203.0.113.10/32"]
     ports: [443]
 ```
 
@@ -311,7 +311,7 @@ CloudNativePG pods; in `external` mode it selects nothing, so the render fails a
 name the host.
 
 `recordStoreBlobEgress` governs the same components' egress to S3-compatible storage, and it
-renders nothing when `recordStore.blobs.mode` is `postgres`: that mode needs no external egress.
+renders nothing when `recordStore.blobs.mode` is `postgres`. In `s3` mode, an empty `cidrs` list fails the render.
 
 Both policies apply only when `networkPolicy.enabled` and `recordStore.enabled` are true.
 

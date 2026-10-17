@@ -83,6 +83,8 @@ RENDER_FULL=$(helm template "$ROOT" $COMMON \
   --set updateCenter.storage.oci.ref=test \
   --set networkPolicy.pullThroughEgress.enabled=true \
   --set networkPolicy.updateCenterRegistryEgress.enabled=true \
+  --set-string 'networkPolicy.updateCenterRegistryEgress.cidrs={172.16.0.0/12}' \
+  --set-string 'networkPolicy.ociRegistryEgress.cidrs={192.168.0.0/16}' \
   --set networkPolicy.ociRegistryEgress.enabled=true 2>/dev/null) || {
   echo "FAIL: helm template (full) failed"; exit 1
 }
@@ -158,7 +160,8 @@ RENDER_NO_PT=$(helm template "$ROOT" $COMMON \
   --set updateCenter.storage.type=oci \
   --set updateCenter.storage.oci.ref=test \
   --set networkPolicy.pullThroughEgress.enabled=true \
-  --set networkPolicy.updateCenterRegistryEgress.enabled=true 2>/dev/null) || {
+  --set networkPolicy.updateCenterRegistryEgress.enabled=true \
+  --set-string 'networkPolicy.updateCenterRegistryEgress.cidrs={172.16.0.0/12}' 2>/dev/null) || {
   echo "FAIL: helm template (no pull-through) failed"; exit 1
 }
 
@@ -215,7 +218,8 @@ RENDER_NO_UCR=$(helm template "$ROOT" $COMMON \
   --set updateCenter.storage.type=oci \
   --set updateCenter.storage.oci.ref=test \
   --set networkPolicy.pullThroughEgress.enabled=true \
-  --set networkPolicy.updateCenterRegistryEgress.enabled=false 2>/dev/null) || {
+  --set networkPolicy.updateCenterRegistryEgress.enabled=false \
+  --set-string 'networkPolicy.updateCenterRegistryEgress.cidrs={172.16.0.0/12}' 2>/dev/null) || {
   echo "FAIL: helm template (no UC registry egress) failed"; exit 1
 }
 
@@ -266,6 +270,8 @@ HIVE_RENDER=$(helm template "$ROOT" \
   --set auth.dashboardUrl=http://example.com \
   --set networkPolicy.enabled=true \
   --set networkPolicy.ociRegistryEgress.enabled=true \
+  --set-string 'networkPolicy.ociRegistryEgress.cidrs={192.168.0.0/16}' \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}' \
   --set updateCenter.enabled=true 2>/dev/null) || {
   echo "FAIL: helm template (hive) failed"; exit 1
 }
@@ -286,10 +292,10 @@ uc_egress_hive=$(grep_c "varroa-updatecenter" "$OPERATOR_HIVE")
 [[ "$uc_egress_hive" -eq 0 ]]; check "hive mode: operator has no UC-egress rule" $?
 [[ "$uc_egress_hive" -eq 0 ]] || true
 
-# Operator still has ociRegistryEgress rule (4 cidrs: apiServer + gitEgress + oci + coreNats)
-operator_cidr_hive=$(grep_c 'cidr: 0.0.0.0/0' "$OPERATOR_HIVE")
-[[ "$operator_cidr_hive" -ge 3 ]]; check "hive mode: operator has ociRegistryEgress (3+ cidrs)" $?
-[[ "$operator_cidr_hive" -ge 3 ]] || true
+# Operator still has the pinned ociRegistryEgress rule
+oci_cidr_hive=$(grep_c 'cidr: 192.168.0.0/16' "$OPERATOR_HIVE")
+[[ "$oci_cidr_hive" -ge 1 ]]; check "hive mode: operator has pinned ociRegistryEgress CIDR" $?
+[[ "$oci_cidr_hive" -ge 1 ]] || true
 
 # UpdateCenter workload is entirely suppressed in hive mode (full-mode only)
 uc_workload_hive=$(grep_c "name: varroa-updatecenter" "$HIVE_RENDER")
@@ -319,15 +325,16 @@ HIVE_NO_OCI=$(helm template "$ROOT" \
   --set auth.dashboardUrl=http://example.com \
   --set networkPolicy.enabled=true \
   --set networkPolicy.ociRegistryEgress.enabled=false \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}' \
   --set updateCenter.enabled=true 2>/dev/null) || {
   echo "FAIL: helm template (hive no OCI) failed"; exit 1
 }
 
 OPERATOR_HIVE_NO_OCI=$(sed_extract 'np-operator' "$HIVE_NO_OCI")
 operator_cidr_hive_no_oci=$(grep_c 'cidr: 0.0.0.0/0' "$OPERATOR_HIVE_NO_OCI")
-# apiServer (1) + gitEgress (1) + coreNats (1) = 3 cidr blocks without ociRegistryEgress
-[[ "$operator_cidr_hive_no_oci" -eq 3 ]]; check "hive + ociRegistryEgress disabled: operator has 3 cidr blocks (no OCI)" $?
-[[ "$operator_cidr_hive_no_oci" -eq 3 ]] || true
+# apiServer (1) + gitEgress (1) = 2 open 0.0.0.0/0 blocks; coreNats is pinned, OCI is off
+[[ "$operator_cidr_hive_no_oci" -eq 2 ]]; check "hive + ociRegistryEgress disabled: operator has 2 open cidr blocks (apiserver, git)" $?
+[[ "$operator_cidr_hive_no_oci" -eq 2 ]] || true
 
 # Hive count still 4
 netpol_hive_no_oci=$(grep_c "kind: NetworkPolicy" "$HIVE_NO_OCI")
@@ -348,7 +355,8 @@ RENDER_CUSTOM=$(helm template "$ROOT" $COMMON \
   --set updateCenter.storage.oci.ref=test \
   --set-string 'networkPolicy.pullThroughEgress.cidrs={10.0.0.0/8}' \
   --set-string 'networkPolicy.updateCenterRegistryEgress.cidrs={172.16.0.0/12}' \
-  --set-string 'networkPolicy.ociRegistryEgress.cidrs={192.168.0.0/16}' 2>/dev/null) || {
+  --set-string 'networkPolicy.ociRegistryEgress.cidrs={192.168.0.0/16}' \
+  --set networkPolicy.ociRegistryEgress.enabled=true 2>/dev/null) || {
   echo "FAIL: helm template (custom CIDR) failed"; exit 1
 }
 

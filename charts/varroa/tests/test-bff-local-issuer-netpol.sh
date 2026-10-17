@@ -82,7 +82,8 @@ check "rule follows bff.service.port" has 'port: 8181' "$RULE"
 
 echo "--- hive mode ---"
 HIVE=$(helm template "$ROOT" -f "$ROOT/values-hive.yaml" "${COMMON[@]}" "${BFF_URL[@]}" \
-  --set cluster.name=x --set bus.url=nats://h:4222 --set auth.localAccounts.enabled=true)
+  --set cluster.name=x --set bus.url=nats://h:4222 --set auth.localAccounts.enabled=true \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}')
 check "hive render succeeds" has 'np-default-deny' "$HIVE"
 check "hive renders no bff policy" lacks 'name: .*-np-bff$' "$HIVE"
 

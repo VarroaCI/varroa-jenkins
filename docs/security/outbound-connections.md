@@ -38,14 +38,14 @@ A build check fails when a source adds a host that this page does not list.
 | --- | --- | --- | --- | --- |
 | updates.jenkins.io | Pull plugin metadata and HPI files from the upstream update center on demand. | HTTPS 443 | updateCenter.pullThrough.upstreamURL and downloadURL | Yes. Keep updateCenter.pullThrough.enabled false. The default is false. |
 | repo.jenkins-ci.org | Recover checksums for plugin versions that the update-center metadata no longer lists. | HTTPS 443 | updateCenter.pullThrough.archiveURL | Yes. Set updateCenter.pullThrough.archiveURL to "". Aged pins then report as gaps. The egress rule defaults to 0.0.0.0/0 on 443. |
-| OCI registry (storage type oci) | Store plugin packs in an external OCI registry. | HTTPS 443 | updateCenter.storage | Yes. Use local storage. The egress rule defaults to 0.0.0.0/0 on 443. |
+| OCI registry (storage type oci) | Store plugin packs in an external OCI registry. | HTTPS 443 | updateCenter.storage | Yes. Use local storage. With oci storage, networkPolicy.updateCenterRegistryEgress.cidrs must name the registry. |
 
 ## Recorder
 
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
 | Record store (external Postgres) | Write build history and the build-number ledger. | PostgreSQL 5432 | recordStore.postgres.mode and host | No, while the record store runs. |
-| S3-compatible blob store (recordStore.blobs.s3.url) | Store build logs and artifacts in object storage. | HTTPS 443 | recordStore.blobs.mode and s3.url | Yes. Set recordStore.blobs.mode to postgres. The egress rule defaults to 0.0.0.0/0 on 443. |
+| S3-compatible blob store (recordStore.blobs.s3.url) | Store build logs and artifacts in object storage. | HTTPS 443 | recordStore.blobs.mode and s3.url | Yes. Set recordStore.blobs.mode to postgres. In s3 mode, networkPolicy.recordStoreBlobEgress.cidrs must name the store. |
 | STS endpoint (recordStore.blobs.s3.artifactSTS.endpoint) | Issue a scoped artifact credential for each cell. | HTTPS 443 | recordStore.blobs.s3.artifactSTS.endpoint | Yes. Set artifactSTS.enabled to false. |
 | Completion webhook URL of a Team | Post a signed message when a tenant run completes. | HTTPS 443 | Team spec.pipelines.notifications.webhook and networkPolicy.recorderWebhookEgress | Yes. Leave the webhook unset. The webhook egress rule is off by default. |
 

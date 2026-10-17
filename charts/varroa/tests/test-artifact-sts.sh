@@ -78,8 +78,8 @@ expect_fail "issuer is the recorder Secret" "$STS --set recordStore.blobs.s3.exi
 
 echo ""
 echo "--- (d) operator blob egress follows STS mode ---"
-NP_STS=$(helm template "$ROOT" $COMMON $STS --set networkPolicy.enabled=true --show-only templates/networkpolicy.yaml)
-NP_STATIC=$(helm template "$ROOT" $COMMON $S3 --set recordStore.blobs.s3.artifactSecret=x --set networkPolicy.enabled=true --show-only templates/networkpolicy.yaml)
+NP_STS=$(helm template "$ROOT" $COMMON $STS --set networkPolicy.enabled=true --set-string 'networkPolicy.recordStoreBlobEgress.cidrs={198.51.100.0/24}' --show-only templates/networkpolicy.yaml)
+NP_STATIC=$(helm template "$ROOT" $COMMON $S3 --set recordStore.blobs.s3.artifactSecret=x --set networkPolicy.enabled=true --set-string 'networkPolicy.recordStoreBlobEgress.cidrs={198.51.100.0/24}' --show-only templates/networkpolicy.yaml)
 operator_np() {
   awk '/^---/{p=0} /name: .*-np-operator$/{p=1} p' <<< "$1"
 }

@@ -199,8 +199,9 @@ networkPolicy:
     ports: [443]
 ```
 
-The rule is off by default. An empty `cidrs` list opens `0.0.0.0/0`. Pin
-the CIDR to your receiver's address range when you can.
+The rule is off by default. Enabled with an empty `cidrs` list, the render
+fails. Set `["0.0.0.0/0"]` to allow every address. Pin the CIDR to your
+receiver's address range when you can.
 
 ## Dashboard link
 

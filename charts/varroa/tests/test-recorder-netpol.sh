@@ -149,22 +149,23 @@ RENDER_S3=$(helm template "$ROOT" $COMMON \
   --set networkPolicy.enabled=true \
   --set recordStore.enabled=true \
   --set recordStore.blobs.mode=s3 \
+  --set-string 'networkPolicy.recordStoreBlobEgress.cidrs={198.51.100.0/24}' \
   --set recordStore.blobs.s3.url=s3://bucket 2>/dev/null) || {
   echo "FAIL: helm template (blobs=s3) failed"; exit 1
 }
 
 RECORDER_S3=$(sed_extract 'np-recorder' "$RENDER_S3")
-grep -q '0.0.0.0/0' <<< "$RECORDER_S3" && rc=0 || rc=1
-check "recorder: blob egress present in s3 mode" "$rc"
+grep -q 'cidr: 198.51.100.0/24' <<< "$RECORDER_S3" && rc=0 || rc=1
+check "recorder: pinned blob egress CIDR present in s3 mode" "$rc"
 grep -q 'port: 443' <<< "$RECORDER_S3" && rc=0 || rc=1
 check "recorder: blob egress port 443" "$rc"
 
 BFF_S3=$(sed_extract 'np-bff' "$RENDER_S3")
-grep -q '0.0.0.0/0' <<< "$BFF_S3" && rc=0 || rc=1
-check "bff: blob egress present in s3 mode" "$rc"
+grep -q 'cidr: 198.51.100.0/24' <<< "$BFF_S3" && rc=0 || rc=1
+check "bff: pinned blob egress CIDR present in s3 mode" "$rc"
 
 GATEWAY_S3=$(sed_extract 'np-gateway' "$RENDER_S3")
-grep -q '0.0.0.0/0' <<< "$GATEWAY_S3" && rc=0 || rc=1
+grep -q 'cidr: 198.51.100.0/24' <<< "$GATEWAY_S3" && rc=0 || rc=1
 check "gateway: blob egress present in s3 mode" "$rc"
 found=$(grep_c 'cnpg.io/cluster' "$GATEWAY_S3")
 if [[ "$found" -eq 0 ]]; then rc=0; else rc=1; fi
@@ -228,7 +229,9 @@ HIVE_RENDER=$(helm template "$ROOT" \
   --set recordStore.enabled=true \
   --set recordStore.postgres.mode=external \
   --set recordStore.blobs.mode=s3 \
-  --set-string 'recordStore.blobs.s3.url=s3://b?endpoint=http://objects.example:9000' 2>/dev/null) || {
+  --set-string 'recordStore.blobs.s3.url=s3://b?endpoint=http://objects.example:9000' \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}' \
+  --set-string 'networkPolicy.recordStoreBlobEgress.cidrs={198.51.100.0/24}' 2>/dev/null) || {
   echo "FAIL: helm template (hive) failed"; exit 1
 }
 

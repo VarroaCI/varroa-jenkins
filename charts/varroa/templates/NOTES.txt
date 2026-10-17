@@ -185,9 +185,9 @@ Set global.domain in values.yaml to see external URLs.
   • By default, NetworkPolicy is opt-in (enabled: false). Enable only after
     verifying cluster CNI compatibility.
   • The hive-mode NP set covers only the operator and gateway.
-  • networkPolicy.coreNatsEgress.cidrs should be pinned to your core NATS
-    endpoint IP(s) in production. Default (empty) uses 0.0.0.0/0 on the
-    bus.url-derived port (see values.yaml comments for override).
+  • networkPolicy.coreNatsEgress.cidrs is required in hive mode. The render
+    fails without it. Set your core NATS endpoint IP(s). The port comes from
+    bus.url (see values.yaml comments for override).
   • networkPolicy.tenantNamespaceSelector controls which tenant/controller
     namespaces can reach the gateway on :{{ .Values.gateway.service.grpcPort }} (gRPC)
     and :9092 (apikey verify). Default: {} = all namespaces.

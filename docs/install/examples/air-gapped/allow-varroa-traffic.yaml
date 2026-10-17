@@ -101,7 +101,7 @@ spec:
           port: 22
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: 10.0.0.0/8  # pin to your registry CIDR
       ports:
         - protocol: TCP
           port: 443
@@ -264,7 +264,7 @@ spec:
           port: 443
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: 10.0.0.0/8  # pin to your registry CIDR
       ports:
         - protocol: TCP
           port: 443
