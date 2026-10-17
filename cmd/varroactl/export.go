@@ -84,27 +84,10 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	downloadURLBase = strings.TrimRight(downloadURLBase, "/")
 
-	// --- Step 1: Resolve closure ---
-	resolved, jenkinsVersion, err := resolvePluginClosure(cmd, profile, pluginsFile, downloadURLBase)
+	// --- Steps 1-3: resolve, download, verify (no store writes) ---
+	pack, err := preparePack(cmd, profile, pluginsFile, downloadURLBase)
 	if err != nil {
 		return err
-	}
-
-	// --- Step 2: Phase A — download + verify (no store writes) ---
-	resolvedPlugins, unreadableManifests, err := downloadAndVerify(cmd.Context(), downloadURLBase, jenkinsVersion, resolved)
-	if err != nil {
-		return err
-	}
-
-	// --- Step 3: Phase B — build pack (single store write) ---
-	lockHash := oci.LockHash(resolvedPlugins)
-	cfg := oci.PackConfig{
-		Kind:           oci.PackKindProfile,
-		JenkinsVersion: jenkinsVersion,
-		Profile:        profile,
-		LockHash:       lockHash,
-		PluginCount:    len(resolvedPlugins),
-		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Determine ref for BuildPluginPack
@@ -140,14 +123,14 @@ func runExport(cmd *cobra.Command, args []string) error {
 		buildRef = profile
 	}
 
-	if err := oci.BuildPluginPack(cmd.Context(), store, buildRef, cfg, resolvedPlugins); err != nil {
+	if err := pack.write(cmd.Context(), store, buildRef); err != nil {
 		_ = finalize()
 		return fmt.Errorf("build plugin pack: %w", err)
 	}
 
 	// --- Step 4: Dual-tag strategy (2.4a) ---
 	if dualTag {
-		if err := applyDualTag(cmd.Context(), store, profile, lockHash); err != nil {
+		if err := applyDualTag(cmd.Context(), store, profile, pack.cfg.LockHash); err != nil {
 			_ = finalize()
 			return err
 		}
@@ -172,23 +155,74 @@ func runExport(cmd *cobra.Command, args []string) error {
 	if outputJSON == "json" {
 		out := map[string]any{
 			"digest":      desc.Digest,
-			"pluginCount": len(resolvedPlugins),
+			"pluginCount": len(pack.resolved),
 			"ref":         resolveRef,
 		}
-		if len(unreadableManifests) > 0 {
+		if len(pack.unreadable) > 0 {
 			// Named, not silent: these plugins are packed but carry no derived
 			// metadata because their HPI manifest would not parse.
-			out["unreadableManifests"] = unreadableManifests
+			out["unreadableManifests"] = pack.unreadable
 		}
 		return printJSON(os.Stdout, out)
 	}
 
-	fmt.Printf("Exported %d plugins with digest %s\n", len(resolvedPlugins), desc.Digest)
-	if len(unreadableManifests) > 0 {
+	fmt.Printf("Exported %d plugins with digest %s\n", len(pack.resolved), desc.Digest)
+	if len(pack.unreadable) > 0 {
 		fmt.Printf("Warning: %d plugin(s) packed without derived metadata (unreadable HPI manifest): %s\n",
-			len(unreadableManifests), strings.Join(unreadableManifests, ", "))
+			len(pack.unreadable), strings.Join(pack.unreadable, ", "))
 	}
 	return nil
+}
+
+// preparedPack is a plugin pack whose plugins are downloaded and verified
+// but not yet written to a store. write is the only store operation, so a
+// caller can open its destination after the network work succeeds.
+type preparedPack struct {
+	resolved       []oci.ResolvedPlugin
+	unreadable     []string
+	jenkinsVersion string // the profile's Jenkins version, "" in plugins-file mode
+	coreVersion    string // the core the profile deploys: resolveVersion, else jenkinsVersion
+	cfg            oci.PackConfig
+}
+
+// preparePack resolves a profile's closure, downloads and verifies each plugin,
+// and returns the pack configuration. It writes nothing.
+func preparePack(cmd *cobra.Command, profile, pluginsFile, downloadURLBase string) (preparedPack, error) {
+	downloadURLBase = strings.TrimRight(downloadURLBase, "/")
+
+	entries, jenkinsVersion, err := resolvePluginClosure(cmd, profile, pluginsFile, downloadURLBase)
+	if err != nil {
+		return preparedPack{}, err
+	}
+	coreVersion := jenkinsVersion
+	if len(entries) > 0 && entries[0].ResolveVersion != "" {
+		coreVersion = entries[0].ResolveVersion
+	}
+
+	resolvedPlugins, unreadable, err := downloadAndVerify(cmd.Context(), downloadURLBase, jenkinsVersion, entries)
+	if err != nil {
+		return preparedPack{}, err
+	}
+
+	return preparedPack{
+		resolved:       resolvedPlugins,
+		unreadable:     unreadable,
+		jenkinsVersion: jenkinsVersion,
+		coreVersion:    coreVersion,
+		cfg: oci.PackConfig{
+			Kind:           oci.PackKindProfile,
+			JenkinsVersion: jenkinsVersion,
+			Profile:        profile,
+			LockHash:       oci.LockHash(resolvedPlugins),
+			PluginCount:    len(resolvedPlugins),
+			CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		},
+	}, nil
+}
+
+// write builds the pack under ref in store. It is the only store write.
+func (p preparedPack) write(ctx context.Context, store oci.BlobStore, ref string) error {
+	return oci.BuildPluginPack(ctx, store, ref, p.cfg, p.resolved)
 }
 
 // resolvePluginClosure resolves the plugin closure either from the BFF API or

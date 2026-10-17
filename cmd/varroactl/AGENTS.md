@@ -179,6 +179,34 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   command, the bound URL, and the expiry, then exits 0 when the token
   expires or the command is interrupted.
 
+- **Release bundle (`export_release.go`, `import_release.go`)** — `export release`
+  writes one air-gap transfer artifact: the chart, the images that the rendered
+  chart and the selected profiles name, one plugin pack per profile, and
+  `release-manifest.json` with a digest for every blob. `import release` verifies
+  the manifest digest that the operator supplies, then every blob, then every
+  artifact tag, and only then pushes. A failed check pushes nothing. The
+  `--manifest-digest` flag is required, with no skip mode.
+  - The `helm` binary is an external dependency. The export runs `helm template`,
+    `helm show chart`, `helm show values`, and `helm package`, through `--helm`.
+  - The export never writes values content to the bundle. The manifest records a
+    file name and a digest for each values file.
+  - An image needs an exact tag or a digest. The tag `latest` fails the export.
+    An image must match a row of the `imageValueKeys` table (`release_images.go`),
+    a selected profile's core image, a `--bundle-dir` pod template, or an
+    `--image` flag, or the export fails with "has no known source". Add a row to
+    the table for each new chart value that holds an image, and keep
+    `TestImageValueKeys_MatchChartValues` green.
+  - A bundle directory supplies JCasC pod template images. The agent variable
+    `${varroa_jenkins_agent_image}` resolves to `jenkins.agentImage`. Any other
+    variable fails the export.
+  - The profile pack layout tag is the profile name, so an update center import keeps
+    that reference name. The `--uc` path reuses `importPackToUC`, which
+    `import --to uc://` also uses.
+  - Each `unseen` source names an image family that the export cannot read. Keep
+    the list in `releaseUnseen` and in the air-gapped guide consistent.
+  - `export plugins` and `export release` share `preparePack`, which downloads and
+    checks plugins and writes nothing. Only `pack.write` touches a store.
+
 ## Work Guidance
 
 - New API surface goes in the OpenAPI spec + `pkg/client` (regenerated via

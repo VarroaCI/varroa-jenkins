@@ -156,6 +156,24 @@ before any request.
 There is no `create cellpool` and no `delete cellpool`. Create and delete a pool with `kubectl` or
 through GitOps. See [Cells and pipelines tenants](operations/cells.md).
 
+## Transfer a release bundle
+
+`export release` writes one air-gap bundle: the chart, every image the chart uses, the plugin packs of the profiles you name, and a manifest. `import release` checks the bundle and then pushes it to an internal registry.
+
+```bash
+varroactl export release --version 3.0.0 --values values-prod.yaml \
+  --profile jenkins-version-2-570 --to tar:///transfer/varroa-3.0.0.tar.gz
+
+varroactl import release --from tar:///transfer/varroa-3.0.0.tar.gz \
+  --to oci://registry.example.com/varroa --manifest-digest sha256:<digest>
+```
+
+The export needs a connected Varroa of the same version and `helm` on the path, or the `--helm` flag. The import needs neither. Pass `--bundle-dir` for JCasC pod templates that name images, and `--image` for any other image. The export refuses an image with the tag `latest` and an image that no chart value names. The export does not read images in pipeline scripts or in user-created pod templates. The manifest lists those sources under `unseen`.
+
+`import release` checks the manifest digest, every blob, and every artifact tag before any push. It prints the values that point the chart at the internal registry. Add `--uc uc://<host>[:<port>]` to upload the plugin packs to an update center. That needs `VARROACTL_UC_TOKEN`. A tar archive is extracted under the system temp directory. `--work-dir <dir>` names another directory with room for the bundle. The import accepts only the release layout files, and it refuses any other archive entry. The first entry must be `release-manifest.json`, and the import checks its digest before it reads anything else. A hand-built archive must put the manifest first, and each blob that the manifest lists must have its recorded size. See [Air-gapped installation](install/air-gapped.md#transfer-one-bundle).
+
+The commands read registry credentials from the Docker config. `--registry-config <file>` names a plain config file instead. A credential helper that fails makes a registry fetch fail with `exit status 1`.
+
 ## Register an external runner
 
 `runners` is an ordinary cluster-scoped noun (alias `rnr`): `get`, `describe`, `create`,

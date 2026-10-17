@@ -40,6 +40,8 @@ dependencies. Addon packs contain exactly one plugin.
 
 ## Copy or import
 
+For a complete air-gap transfer that includes the chart and the images, use [release bundles](../install/air-gapped.md#transfer-one-bundle). The commands below move one pack.
+
 Sources and destinations support `oci://`, `dir://`, and `tar://`:
 
 ```bash
