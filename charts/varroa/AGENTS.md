@@ -67,11 +67,21 @@ the packaged CRDs. Does not own the Go source it packages
   `nats.container.merge.resources` instead);
   `mode-guard.yaml`/`oidc-guard.yaml` render nothing, only `fail` on invalid `mode`,
   missing hive/OIDC prereqs, or an explicit `jetStreamReplicas` exceeding the actual
-  NATS server count; `networkpolicy.yaml` (all opt-in, `networkPolicy.enabled`);
+  NATS server count; `networkpolicy-guard.yaml` (fail-closed egress, see the bullet below);
+  `networkpolicy.yaml` (all opt-in, `networkPolicy.enabled`);
   `pdb.yaml` (operator/gateway/bff PDBs, only when replicas > 1; bff PDB skipped in hive
   mode); `nats-auth-config.yaml`/`secret-nats-creds.yaml`/`nats-external-service.yaml`
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
+- **`templates/networkpolicy-guard.yaml`** — fails closed for every operator-named egress
+  group. A rule renders only when its gate is on and `cidrs` is non-empty. A gate that is on
+  with an empty list fails the render, and the message names the value. The six conditions:
+  `pullThroughEgress` (update-center pull-through), `updateCenterRegistryEgress` (oci storage),
+  `ociRegistryEgress`, `coreNatsEgress` (hive mode), `recordStoreBlobEgress` (s3 blobs), and
+  `recorderWebhookEgress`. The template helpers also test `cidrs`, so an empty list never
+  renders an open `to:`. `pullThroughEgress` keeps `0.0.0.0/0` as its default by design.
+  `apiServerEgress`, `gitEgress`, `dexConnectorEgress`, and `telemetryEgress` stay open until
+  the follow-up issue lands. Asserted by `tests/test-netpol-egress-defaults.sh`.
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
 - `nats-auth-config.yaml` grants no identity any `mite_desired` KV
   operation. The desired-state command carries credential values and travels
@@ -279,7 +289,8 @@ the packaged CRDs. Does not own the Go source it packages
   (`pullThroughEgress`/`updateCenterRegistryEgress`/`ociRegistryEgress`) are a
   pinned contract shared with `internal/updatecenter`; netpol
   shape asserted by `tests/test-updatecenter-netpol.sh` (hive mode stays exactly
-  4 policies).
+  4 policies). `ociRegistryEgress` defaults to off. Its empty-list rule is in the
+  `networkpolicy-guard.yaml` bullet.
 - **`jenkins.*` values** (top-level block, `values.yaml`) are read only by the operator
   Deployment (`templates/operator/deployment.yaml`): `upstreamURL` renders
   `VARROA_JENKINS_UPSTREAM_URL`, `image.repository` renders
@@ -349,7 +360,8 @@ the packaged CRDs. Does not own the Go source it packages
   `VARROA_ARTIFACT_STS_*` variables to the operator and the
   `recordStoreBlobEgress` rule to the operator NetworkPolicy. The recorder's
   completion-webhook egress is `networkPolicy.recorderWebhookEgress`, off by
-  default (`tests/test-recorder-webhook-egress.sh`); the recorder reads
+  default. Enabled with an empty `cidrs` list, the render fails
+  (`tests/test-recorder-webhook-egress.sh`); the recorder reads
   `VARROA_DASHBOARD_URL` from `auth.dashboardUrl`. The operator
   Deployment carries `VARROA_ARTIFACT_SECRET` (that base name, only when
   non-empty) and `VARROA_BLOBSTORE_URL` set to the identical value the

@@ -101,7 +101,7 @@ connections:
     purpose: Store plugin packs in an external OCI registry.
     protocol: HTTPS 443
     control: updateCenter.storage
-    disable: "Yes. Use local storage. The egress rule defaults to 0.0.0.0/0 on 443."
+    disable: "Yes. Use local storage. With oci storage, networkPolicy.updateCenterRegistryEgress.cidrs must name the registry."
 
   # Recorder
 
@@ -119,7 +119,7 @@ connections:
     purpose: Store build logs and artifacts in object storage.
     protocol: HTTPS 443
     control: recordStore.blobs.mode and s3.url
-    disable: 'Yes. Set recordStore.blobs.mode to postgres. The egress rule defaults to 0.0.0.0/0 on 443.'
+    disable: 'Yes. Set recordStore.blobs.mode to postgres. In s3 mode, networkPolicy.recordStoreBlobEgress.cidrs must name the store.'
 
   - component: recorder
     destination: STS endpoint (recordStore.blobs.s3.artifactSTS.endpoint)

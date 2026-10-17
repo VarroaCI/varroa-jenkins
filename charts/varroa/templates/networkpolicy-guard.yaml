@@ -1,0 +1,38 @@
+{{- /*
+networkpolicy-guard.yaml
+Fails the render when an operator-named egress group is enabled without
+the CIDRs it needs. Every such group renders a rule only when its gate is
+on and its cidrs list is non-empty, so an empty list never opens every
+destination. Renders no objects. Only evaluated when networkPolicy.enabled.
+Each failure message names the value to set.
+*/ -}}
+
+{{- if .Values.networkPolicy.enabled }}
+{{- $full := not (include "varroa.isHive" .) }}
+{{- $np := .Values.networkPolicy }}
+
+{{- if and $full .Values.updateCenter.enabled .Values.updateCenter.pullThrough.enabled $np.pullThroughEgress.enabled (empty (default list $np.pullThroughEgress.cidrs)) }}
+{{- fail "networkPolicy.pullThroughEgress.cidrs must not be empty while updateCenter.pullThrough is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $full .Values.updateCenter.enabled (eq .Values.updateCenter.storage.type "oci") $np.updateCenterRegistryEgress.enabled (empty (default list $np.updateCenterRegistryEgress.cidrs)) }}
+{{- fail "networkPolicy.updateCenterRegistryEgress.cidrs must name the OCI registry address when updateCenter.storage.type is oci. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $np.ociRegistryEgress.enabled (empty (default list $np.ociRegistryEgress.cidrs)) }}
+{{- fail "networkPolicy.ociRegistryEgress.cidrs must name the OCI registry address when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and (not $full) (empty (default list $np.coreNatsEgress.cidrs)) }}
+{{- fail "networkPolicy.coreNatsEgress.cidrs must name the core NATS address in hive mode. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and .Values.recordStore.enabled (ne .Values.recordStore.blobs.mode "postgres") $np.recordStoreBlobEgress.enabled (empty (default list $np.recordStoreBlobEgress.cidrs)) }}
+{{- fail "networkPolicy.recordStoreBlobEgress.cidrs must name the blob store address when recordStore.blobs.mode is s3. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $np.recorderWebhookEgress.enabled (empty (default list $np.recorderWebhookEgress.cidrs)) }}
+{{- fail "networkPolicy.recorderWebhookEgress.cidrs must name the webhook receiver address when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- end }}

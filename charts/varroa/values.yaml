@@ -204,6 +204,10 @@ networkPolicy:
   # With a local issuer (auth.bffUrl set, and auth.mode local or ldap or
   # auth.localAccounts), controller pods here also reach the BFF for its JWKS.
   tenantNamespaceSelector: {}
+  # Egress rules add up. gitEgress allows every address on 443. Pinning
+  # apiServerEgress does not close that. The groups that name an address, such as
+  # updateCenterRegistryEgress and recordStoreBlobEgress, render only when their gate is
+  # on and their cidrs list is not empty. See docs/install/network-policies.md.
   # kube-apiserver egress for operator/gateway/bff/dex.
   # Empty cidrs = 0.0.0.0/0 on the listed ports; pin to your apiserver endpoint IPs.
   apiServerEgress:
@@ -223,35 +227,40 @@ networkPolicy:
     ports: [4317, 4318]
   # Update-center pull-through egress (UC → updates.jenkins.io).
   # Renders only when updateCenter.pullThrough.enabled is also true.
+  # The default allows every address, because the upstream hosts are public CDN
+  # hosts. An empty list fails the render.
   pullThroughEgress:
     # -- Enable egress for update-center pull-through caching.
     enabled: true
-    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
+    # -- CIDR blocks to allow egress to. Must not be empty while pull-through is on.
     cidrs: ["0.0.0.0/0"]
     # -- TCP ports to allow egress on (default 443 = HTTPS).
     ports: [443]
   # Update-center OCI-registry egress (UC → external OCI registry for seed store).
   # Renders only when updateCenter.storage.type=oci is also set.
+  # Required when updateCenter.storage.type is oci.
   updateCenterRegistryEgress:
     # -- Enable egress for update-center OCI registry storage.
     enabled: true
-    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
-    cidrs: ["0.0.0.0/0"]
+    # -- CIDR blocks to allow egress to. Required when updateCenter.storage.type is oci.
+    cidrs: []
     # -- TCP ports to allow egress on (default 443 = HTTPS).
     ports: [443]
   # Operator OCI-registry egress (mode-independent: renders in both full and
   # hive mode). Allows the operator to reach an external OCI registry for
   # catalog and config-transport operations, and the update-center component
   # to reach an OCI-backed storage registry.
+  # Enabled with an empty list fails the render.
   ociRegistryEgress:
     # -- Enable the OCI-registry egress rule on the operator policy.
-    enabled: true
-    # -- CIDR blocks to allow egress to (default 0.0.0.0/0 = all IPs).
-    cidrs: ["0.0.0.0/0"]
+    enabled: false
+    # -- CIDR blocks to allow egress to. Enabled with an empty list fails the render.
+    cidrs: []
     # -- TCP ports to allow egress on (default 443 = HTTPS).
     ports: [443]
   # Hive-mode egress to the core's external NATS endpoint (bus.url).
-  # cidrs: [] renders ipBlock 0.0.0.0/0 — pin to the core NATS endpoint IP(s).
+  # Required in hive mode when networkPolicy.enabled is true.
+  # cidrs: [] fails the render in hive mode — pin to the core NATS endpoint IP(s).
   # ports: [] derives the port from bus.url's trailing ":<port>" (fallback 4222);
   # set explicitly for multi-server or IPv6 bus.url forms.
   coreNatsEgress:
@@ -278,15 +287,16 @@ networkPolicy:
     kubernetes.io/metadata.name: cnpg-system
   # Record-store blob egress (recorder/bff/gateway reach S3-compatible blob
   # storage). Renders nothing when recordStore.blobs.mode is postgres. Pin
-  # cidrs to your storage provider's address range.
+  # cidrs to your storage provider's address range. Required when
+  # recordStore.blobs.mode is s3.
   recordStoreBlobEgress:
     enabled: true
-    cidrs: ["0.0.0.0/0"]
+    cidrs: []
     ports: [443]
   # Completion webhook egress: the recorder posts a tenant's signed run
   # payload to the receiver URL. Off by default. Enable it when a tenant
-  # declares spec.pipelines.notifications.webhook. Empty cidrs open
-  # 0.0.0.0/0. Pin cidrs to the receiver's address range.
+  # declares spec.pipelines.notifications.webhook. Enabled with an empty
+  # list fails the render. Pin cidrs to the receiver's address range.
   recorderWebhookEgress:
     enabled: false
     cidrs: []

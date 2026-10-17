@@ -65,3 +65,7 @@ networkPolicy:
   # (rendered only when storage.type=oci).
   updateCenterRegistryEgress:
     enabled: true
+    cidrs:
+      - 10.0.0.0/8               # pin to your private registry CIDR
+    ports:
+      - 443

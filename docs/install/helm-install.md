@@ -125,7 +125,7 @@ first; `recordStore.blobs.mode` defaults to `postgres`; and `recordStore.retenti
 value takes the form `<n>d`, a whole number of days from `1` to `3650`. `restartSource` must not
 be longer than `runs`. `recorder.replicas` defaults to `1`.
 `networkPolicy.recordStorePostgresEgress` and `networkPolicy.recordStoreBlobEgress` both default
-to `enabled: true`, on ports `5432` and `443`. See [Build records](../operations/build-records.md)
+to `enabled: true`, on ports `5432` and `443`. `recordStoreBlobEgress.cidrs` has no default. See [Build records](../operations/build-records.md)
 for the CloudNativePG prerequisite and the full value tree.
 `recordStore.postgres.memberEndpoint` exposes the CloudNativePG primary to member clusters. It
 defaults to off. A member cluster sets `recordStore.enabled: true` with

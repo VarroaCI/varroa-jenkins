@@ -154,7 +154,7 @@ networkPolicy:
     enabled: false
 ```
 
-For shared registry storage, use `updateCenter.storage.type: oci` with an internal `ref` and `existingSecret`. Allow only that registry through `networkPolicy.updateCenterRegistryEgress`.
+For shared registry storage, use `updateCenter.storage.type: oci` with an internal `ref` and `existingSecret`. With oci storage, set `networkPolicy.updateCenterRegistryEgress.cidrs` to that registry's CIDR. The render fails without it.
 
 Install from an internal chart registry:
 

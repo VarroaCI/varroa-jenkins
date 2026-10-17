@@ -158,7 +158,7 @@ spec:
           port: {{ . }}
 {{- end }}
 {{- end }}
-{{- if .Values.networkPolicy.ociRegistryEgress.enabled }}
+{{- if and .Values.networkPolicy.ociRegistryEgress.enabled .Values.networkPolicy.ociRegistryEgress.cidrs }}
     # ociRegistryEgress: operator reaches external OCI registry (mode-independent)
     - to:
 {{- range .Values.networkPolicy.ociRegistryEgress.cidrs }}
@@ -172,20 +172,15 @@ spec:
 {{- end }}
 {{- end }}
 {{ include "varroa.np.telemetryEgress" . | nindent 4 }}
-{{- if and .Values.recordStore.enabled .Values.recordStore.blobs.s3.artifactSTS.enabled }}
+{{- if and .Values.recordStore.enabled .Values.recordStore.blobs.s3.artifactSTS.enabled .Values.networkPolicy.recordStoreBlobEgress.cidrs }}
     # artifactSTS: operator calls STS AssumeRole on the blob store's endpoint
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
 {{- end }}
 {{- if not $full }}
     - to:
-{{- if .Values.networkPolicy.coreNatsEgress.cidrs }}
 {{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
         - ipBlock:
             cidr: {{ . }}
-{{- end }}
-{{- else }}
-        - ipBlock:
-            cidr: 0.0.0.0/0
 {{- end }}
       ports:
 {{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
@@ -277,14 +272,9 @@ spec:
 {{- end }}
 {{- if not $full }}
     - to:
-{{- if .Values.networkPolicy.coreNatsEgress.cidrs }}
 {{- range .Values.networkPolicy.coreNatsEgress.cidrs }}
         - ipBlock:
             cidr: {{ . }}
-{{- end }}
-{{- else }}
-        - ipBlock:
-            cidr: 0.0.0.0/0
 {{- end }}
       ports:
 {{- range (include "varroa.np.coreNatsPorts" . | fromJsonArray) }}
@@ -699,7 +689,7 @@ spec:
         - protocol: TCP
           port: 8080
   egress:
-{{- if and .Values.updateCenter.pullThrough.enabled .Values.networkPolicy.pullThroughEgress.enabled }}
+{{- if and .Values.updateCenter.pullThrough.enabled .Values.networkPolicy.pullThroughEgress.enabled .Values.networkPolicy.pullThroughEgress.cidrs }}
     # Pull-through egress: UC reaches updates.jenkins.io for plugin metadata/HPIs
     - to:
 {{- range .Values.networkPolicy.pullThroughEgress.cidrs }}
@@ -712,7 +702,7 @@ spec:
           port: {{ . }}
 {{- end }}
 {{- end }}
-{{- if and (eq .Values.updateCenter.storage.type "oci") .Values.networkPolicy.updateCenterRegistryEgress.enabled }}
+{{- if and (eq .Values.updateCenter.storage.type "oci") .Values.networkPolicy.updateCenterRegistryEgress.enabled .Values.networkPolicy.updateCenterRegistryEgress.cidrs }}
     # OCI-registry egress: UC reaches external OCI registry for seed store
     - to:
 {{- range .Values.networkPolicy.updateCenterRegistryEgress.cidrs }}

@@ -22,7 +22,8 @@ bff: {enabled: false}
 frontend: {enabled: false}
 
 # Optional: default-deny NetworkPolicy for the hive namespace (operator+gateway).
-# The core-NATS egress port is derived from bus.url; pin the CIDR in production.
+# The core-NATS egress port is derived from bus.url. coreNatsEgress.cidrs is
+# required when networkPolicy.enabled is true; the render fails without it.
 #networkPolicy:
 #  enabled: true
 #  coreNatsEgress:

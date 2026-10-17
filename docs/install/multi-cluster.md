@@ -13,7 +13,7 @@ helm upgrade --install varroa charts/varroa \
   --set nats.external.serviceType=LoadBalancer
 ```
 
-Protect the endpoint with firewall rules and NATS credentials. If network policies are enabled, permit member-cluster egress to this endpoint.
+Protect the endpoint with firewall rules and NATS credentials. If network policies are enabled, a member must set `networkPolicy.coreNatsEgress.cidrs` to this endpoint's address. The render fails without it.
 
 ## Install the member
 
@@ -42,7 +42,8 @@ A member that hosts [cells](../operations/cells.md) must also write to the core 
 | `recordStore.blobs.s3.url` | The core bucket URL, with an `endpoint` that the member can reach |
 | `recordStore.blobs.s3.existingSecret` | The Secret that holds the object store credential |
 | `recordStore.blobs.s3.artifactSecret` or `artifactSTS` | The member's [artifact credentials](../operations/artifact-credentials.md) |
-| `networkPolicy.recordStoreBlobEgress` | The object store address and port, when network policies are enabled |
+| `networkPolicy.coreNatsEgress.cidrs` | **Required** when network policies are enabled: the core NATS endpoint address |
+| `networkPolicy.recordStoreBlobEgress.cidrs` | **Required** when network policies are enabled: the object store address. The port comes from `ports` |
 
 The hive render adds the blob settings to the gateway and the operator. It renders no recorder, no CloudNativePG cluster, and no retention settings. The core keeps the retention rules for every cluster.
 
