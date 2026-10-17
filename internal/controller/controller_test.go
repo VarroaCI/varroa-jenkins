@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -3627,6 +3628,48 @@ type captureTransport struct {
 	known []string
 	// imperatives records each command that SendImperative received.
 	imperatives []*mitev1.ImperativeCommand
+	// ensured records each ns/name that EnsureInbound received.
+	ensured []string
+}
+
+func (c *captureTransport) EnsureInbound(ns, name string) {
+	c.ensured = append(c.ensured, ns+"/"+name)
+}
+
+func TestReconcileController_EnsuresMiteInbound(t *testing.T) {
+	deleting := testController("test", "ns1", v1alpha1.ControllerPhaseRunning)
+	now := metav1Now()
+	deleting.DeletionTimestamp = &now
+	deleting.Finalizers = []string{"varroa.dev/finalizer"}
+
+	stopped := testController("test", "ns1", v1alpha1.ControllerPhaseRunning)
+	stopped.Spec.PowerState = "Stopped"
+
+	cases := []struct {
+		name string
+		cr   *v1alpha1.Controller
+		want []string
+	}{
+		{"provisioning", testController("test", "ns1", v1alpha1.ControllerPhaseProvisioning), []string{"ns1/test"}},
+		{"running", testController("test", "ns1", v1alpha1.ControllerPhaseRunning), []string{"ns1/test"}},
+		{"connected", testController("test", "ns1", v1alpha1.ControllerPhaseConnected), []string{"ns1/test"}},
+		{"failed", testController("test", "ns1", v1alpha1.ControllerPhaseFailed), []string{"ns1/test"}},
+		{"pending", testController("test", "ns1", v1alpha1.ControllerPhasePending), nil},
+		{"deleting", deleting, nil},
+		{"stopped", stopped, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newTestReconciler(newTestClientWithBundle())
+			ct := &captureTransport{}
+			rec.miteTransport = ct
+			// The reconcile error is not under test; only the inbound hook is.
+			_ = rec.reconcileController(context.Background(), tc.cr)
+			if !slices.Equal(ct.ensured, tc.want) {
+				t.Errorf("EnsureInbound calls = %v, want %v", ct.ensured, tc.want)
+			}
+		})
+	}
 }
 
 func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.OperatorMessage) error {

@@ -172,6 +172,7 @@ func (s *stubTransport) IdleGauges(_, _ string) (*mitev1.IdleGauges, time.Time, 
 	return nil, time.Time{}, false
 }
 func (s *stubTransport) ObservabilityReport(_, _ string) *mitev1.ObservabilityReport { return s.report }
+func (s *stubTransport) EnsureInbound(_, _ string)                                   {}
 func (s *stubTransport) FetchLastApplied(_ context.Context, _, _ string) (*mitev1.ContentResponse, error) {
 	if s.content != nil {
 		return s.content, nil

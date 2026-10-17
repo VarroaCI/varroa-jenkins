@@ -2742,6 +2742,16 @@ func (r *Reconciler) reconcileController(ctx context.Context, cr *v1alpha1.Contr
 		return nil
 	}
 
+	// A mite can connect and ask for a token before the first desired-state
+	// push. The inbound subscription must exist from Provisioning on, or
+	// NATS drops the request. Reconcile reaches here only on the owning replica.
+	switch oldPhase {
+	case v1alpha1.ControllerPhaseProvisioning, v1alpha1.ControllerPhaseRunning, v1alpha1.ControllerPhaseConnected, v1alpha1.ControllerPhaseFailed:
+		if r.miteTransport != nil {
+			r.miteTransport.EnsureInbound(cr.Namespace, cr.Name)
+		}
+	}
+
 	// reconcileSharedHostMismatch for all active phases: set Degraded/True
 	// when a path-mode controller's Host differs from the dashboard host;
 	// clear the condition when the mismatch is resolved.

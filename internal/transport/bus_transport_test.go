@@ -221,6 +221,92 @@ func TestBusTransport_TokenRefreshGrant(t *testing.T) {
 	}
 }
 
+func TestBusTransport_TokenRefreshBeforeSendAnsweredAfterEnsureInbound(t *testing.T) {
+	tr := newBusTransport(t, startNATS(t))
+
+	if err := tr.conn.EnsureStream(bus.StreamConfig("varroa")); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
+
+	called := make(chan string, 4)
+	tr.TokenGrantFunc = func(ns, name string) (string, int64, error) {
+		called <- ns + "/" + name
+		return "minted-token", 4242, nil
+	}
+
+	ns, name := "ns", "ctrl"
+
+	sub, err := tr.conn.JetStream().SubscribeSync(bus.MiteOutSubject(bus.DefaultCluster, ns, name))
+	if err != nil {
+		t.Fatalf("subscribe mite-out: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	data, err := json.Marshal(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_TokenRefreshRequest{TokenRefreshRequest: &mitev1.TokenRefreshRequest{}},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	publish := func() {
+		t.Helper()
+		if err := tr.conn.Publish(bus.MiteInSubject(bus.DefaultCluster, ns, name), data); err != nil {
+			t.Fatalf("publish request: %v", err)
+		}
+	}
+
+	// No Send, DrainResults, or EnsureInbound yet: the request has no subscriber.
+	publish()
+	select {
+	case got := <-called:
+		t.Fatalf("TokenGrantFunc called before EnsureInbound with %q", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	tr.EnsureInbound(ns, name)
+	publish()
+	select {
+	case got := <-called:
+		if got != "ns/ctrl" {
+			t.Errorf("TokenGrantFunc called with %q, want ns/ctrl", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TokenGrantFunc was not called after EnsureInbound")
+	}
+
+	msg, err := sub.NextMsg(2 * time.Second)
+	if err != nil {
+		t.Fatalf("no TokenGrant published to mite-out: %v", err)
+	}
+	var om mitev1.OperatorMessage
+	if err := json.Unmarshal(msg.Data, &om); err != nil {
+		t.Fatalf("unmarshal grant: %v", err)
+	}
+	if tg := om.GetTokenGrant(); tg == nil || tg.MiteJenkinsToken != "minted-token" {
+		t.Errorf("unexpected token grant: %+v", tg)
+	}
+
+	// A second EnsureInbound keeps the one subscription, so one request yields one grant.
+	tr.EnsureInbound(ns, name)
+	publish()
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TokenGrantFunc was not called after the second EnsureInbound")
+	}
+	if _, err := sub.NextMsg(2 * time.Second); err != nil {
+		t.Fatalf("no second TokenGrant published: %v", err)
+	}
+	select {
+	case got := <-called:
+		t.Errorf("duplicate TokenGrantFunc call %q for one request", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if msg, err := sub.NextMsg(300 * time.Millisecond); err == nil {
+		t.Errorf("duplicate TokenGrant published: %q", msg.Data)
+	}
+}
+
 func TestBusReadModel_NoInboundSubscription(t *testing.T) {
 	s := startNATS(t)
 	busConn, err := bus.Connect(s.ClientURL())
@@ -241,6 +327,9 @@ func TestBusReadModel_NoInboundSubscription(t *testing.T) {
 	m := NewBusReadModel(bus.DefaultCluster, busConn, snapshotKV, presenceKV)
 
 	ns, name := "ns", "ctrl"
+
+	// EnsureInbound on the read model is a no-op and must not panic.
+	NewBusReadModelTransport(m).EnsureInbound(ns, name)
 
 	if m.Connected(ns, name) {
 		t.Error("BusReadModel.Connected should not subscribe nor report connected without presence data")

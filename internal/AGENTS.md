@@ -184,7 +184,11 @@ reading each package's entry point):
   no `ClearDesired`: no desired state is stored. `BusTransport.ensureSub`
   reads the inbound subscription's denial watcher under `b.mu` on every
   call. After a server denial, it subscribes again and keeps the result
-  channel. `Transport.Forget` drops a deleted controller's entries: the
+  channel. `Transport.EnsureInbound` opens the inbound subscription. The
+  reconciler calls it on every owned tick in Provisioning, Running, Connected,
+  and Failed, before the phase dispatch. A mite can request a token before the
+  first desired-state push.
+  `Transport.Forget` drops a deleted controller's entries: the
   reconciler calls it in the deletion branch and on a `Controller`
   NotFound; `ApproveRestart` refuses a controller under deletion and
   reads it again after its send. `BusTransport.Forget` unsubscribes, releases the denial

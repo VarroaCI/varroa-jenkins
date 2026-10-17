@@ -98,6 +98,9 @@ func (l *LocalRegistry) SendImperative(_ context.Context, ns, name string, cmd *
 	})
 }
 
+// EnsureInbound does nothing. The gateway answers token refresh in process.
+func (l *LocalRegistry) EnsureInbound(_, _ string) {}
+
 // ObservabilityReport delegates to Registry.GetObservabilityReport.
 func (l *LocalRegistry) ObservabilityReport(ns, name string) *mitev1.ObservabilityReport {
 	return l.reg.GetObservabilityReport(name, ns)

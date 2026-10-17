@@ -177,6 +177,11 @@ func (b *BusTransport) ensureSub(ns, name string) {
 	b.subs[key] = entry
 }
 
+// EnsureInbound subscribes to the inbound subject of the mite of ns/name
+// when no subscription exists. Every holder of the subscription answers
+// the token refresh of the mite, so only the owning replica calls it.
+func (b *BusTransport) EnsureInbound(ns, name string) { b.ensureSub(ns, name) }
+
 // storeReport keeps report as the latest report of key while entry is still
 // the current subscription of key. A callback can run after Forget or a
 // rebuild replaced entry, and its report must not come back into b.reports.
@@ -277,9 +282,7 @@ const desiredRequestTimeout = 5 * time.Second
 // values. When no gateway answers, Send returns ErrMiteUnreachable. The
 // reconciler sends the command again on the next tick or on the reconnect.
 func (b *BusTransport) Send(ctx context.Context, ns, name string, msg *mitev1.OperatorMessage) error {
-	// Ensure the NATS subscription for this mite's inbound subject exists
-	// before the mite connects, so TokenRefreshRequest messages are never
-	// published without a subscriber. The subscription is idempotent.
+	// Send also opens the inbound subscription; see EnsureInbound.
 	b.ensureSub(ns, name)
 
 	data, err := json.Marshal(msg)

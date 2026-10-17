@@ -86,6 +86,9 @@ func (t *BusReadModelTransport) ConnEpoch(_, _ string) (int64, bool) {
 	return 0, false
 }
 
+// EnsureInbound does nothing. The read model keeps no inbound subscription.
+func (t *BusReadModelTransport) EnsureInbound(_, _ string) {}
+
 // ObservabilityReport delegates to the underlying BusReadModel.
 func (t *BusReadModelTransport) ObservabilityReport(ns, name string) *mitev1.ObservabilityReport {
 	return t.model.ObservabilityReport(ns, name)
