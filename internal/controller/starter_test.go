@@ -256,6 +256,7 @@ func TestStarterContentHasNoVariablesOrPinnedPlugins(t *testing.T) {
 		"varroa_frontend_url":            "https://varroa.example",
 		"varroa_controller_external_url": "",
 		"varroa_controller_path_prefix":  "",
+		"varroa_jenkins_agent_image":     defaultTenantAgentJnlpImage,
 	}
 
 	var gotImages []string
@@ -288,6 +289,11 @@ func TestStarterContentHasNoVariablesOrPinnedPlugins(t *testing.T) {
 				continue
 			}
 			ref := strings.Trim(strings.TrimSpace(strings.SplitN(line, "image:", 2)[1]), `"'`)
+			// The agent image is injected. The operator's default is the approved
+			// ref, so the check compares that default.
+			if ref == "${varroa_jenkins_agent_image}" {
+				ref = defaultTenantAgentJnlpImage
+			}
 			if ref != "" {
 				gotImages = append(gotImages, ref)
 			}

@@ -25,7 +25,9 @@ zero-config controller with no author present to fix it:
 
 - **No `${...}` placeholders except those the operator injects unconditionally**
   (`varroa_controller_name`, `varroa_controller_namespace`, `varroa_controller_endpoint`,
-  `varroa_frontend_url`, `varroa_controller_external_url`, `varroa_controller_path_prefix`).
+  `varroa_frontend_url`, `varroa_controller_external_url`, `varroa_controller_path_prefix`,
+  `varroa_jenkins_agent_image`, which the operator reads from `VARROA_JENKINS_AGENT_IMAGE`
+  and which the starter uses for its jnlp agent image).
   The OIDC and login-URL variables are conditional on a configured Resolver and must not
   be used. **The unresolved-variable scan does not skip comments** — a dollar-brace
   placeholder written in a comment fails provisioning exactly as a real one would.

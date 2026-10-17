@@ -617,14 +617,19 @@ func main() {
 	reconciler.SetActivityPublisher(actPub)
 	teamReconciler.SetActivityPublisher(actPub)
 
-	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, logger)
+	// jenkinsUpstream is the Jenkins upstream host. "" turns off every read from
+	// it: the upgrade tracker, candidate metadata, and the Jenkins JVM flags.
+	jenkinsUpstream := jenkinsUpstreamURL(os.LookupEnv)
+	reconciler.SetJenkinsUpstreamURL(jenkinsUpstream)
+
+	upgradeTrackerReconciler := controller.NewUpgradeTrackerReconciler(clientsetClient, actPub, jenkinsUpstream, logger)
 
 	// Create ProfileCandidateReconciler to resolve, verify, and pre-flight
 	// ProfileCandidates the upgrade tracker creates. Without this nothing ever
 	// clears a candidate's Pending phase, so promotion can never succeed.
 	profileCandidateReconciler := controller.NewProfileCandidateReconciler(
 		clientsetClient, clientsetClient, operatorNamespace,
-		os.Getenv("VARROA_UPDATE_CENTER_URL"), actPub, logger)
+		os.Getenv("VARROA_UPDATE_CENTER_URL"), jenkinsUpstream, actPub, logger)
 
 	// --- Controller-runtime manager ---
 	scheme := runtime.NewScheme()
@@ -970,8 +975,11 @@ func main() {
 
 	// 1d. Upgrade tracker (6h, immediate, leader-gated — everyReplica defaults
 	// to false). Discovers upstream Jenkins LTS patch/line movement and turns a
-	// same-line newer patch into a ProfileCandidate.
-	if err := mgr.Add(&tickerRunnable{
+	// same-line newer patch into a ProfileCandidate. Not registered when the
+	// upstream host is off, so no tick runs.
+	if jenkinsUpstream == "" {
+		logger.Info("upgrade tracker off: jenkins upstream URL is empty")
+	} else if err := mgr.Add(&tickerRunnable{
 		name:      "upgrade-tracker",
 		interval:  controller.UpgradeTrackerInterval,
 		immediate: true,

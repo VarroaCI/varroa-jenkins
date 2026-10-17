@@ -164,6 +164,7 @@ type Reconciler struct {
 	Logger             *slog.Logger
 	caPEM              string
 	ucBaseURL          string // VARROA_UPDATE_CENTER_URL, read once at boot
+	jenkinsUpstreamURL string // VARROA_JENKINS_UPSTREAM_URL, read once at boot; "" turns the upstream reads off
 	claimGate          string // VARROA_CLAIM_GATE, read once at boot; "0" or "1"
 	claimTimeoutMS     int    // VARROA_CLAIM_TIMEOUT_MS, read once at boot; 0 means unset
 	blobstoreURL       string // VARROA_BLOBSTORE_URL, read once at boot; drives the artifact-storage fragment
@@ -317,6 +318,13 @@ func (r *Reconciler) SetCAPEM(pem string) {
 // resolving init-container plugin update center URLs.
 func (r *Reconciler) SetUpdateCenterBaseURL(baseURL string) {
 	r.ucBaseURL = strings.TrimRight(baseURL, "/")
+}
+
+// SetJenkinsUpstreamURL sets the Jenkins upstream host. An empty value makes
+// every provisioned Jenkins JVM skip its runtime update-site and download
+// reads, through the JVM flags in buildStatefulSet.
+func (r *Reconciler) SetJenkinsUpstreamURL(baseURL string) {
+	r.jenkinsUpstreamURL = strings.TrimRight(baseURL, "/")
 }
 
 // SetClaimGate sets the value the operator stamps as VARROA_CLAIM_GATE on
@@ -561,6 +569,7 @@ func (r *Reconciler) resolveBundleForController(ctx context.Context, cr *v1alpha
 	baseEndpoint := inClusterEndpoint(cr)
 	vars["varroa_controller_endpoint"] = baseEndpoint
 	vars["varroa_frontend_url"] = varroaBaseURL(r.varroaRedirectURL)
+	vars["varroa_jenkins_agent_image"] = tenantAgentJnlpImage()
 
 	// Inject mode-aware routing vars.
 	extURL := ""
@@ -880,6 +889,11 @@ type StatefulSetSpec struct {
 	// property to JAVA_OPTS. It is true in STS mode when ArtifactSecretName
 	// is set, so the JVM reads the projected credentials file.
 	ArtifactSharedCredentials bool
+
+	// JenkinsUpstreamOff adds the JVM flags that stop the runtime update-site
+	// and download-service reads of the Jenkins controller. It is true when
+	// the operator's upstream host is "" (jenkins.upstreamURL: "").
+	JenkinsUpstreamOff bool
 
 	// CellSecretsName is the pool confidential store
 	// ("varroa-cell-secrets-<pool>") a pool cell mounts as the
@@ -6267,7 +6281,21 @@ func defaultMiteImage() string {
 // plugin set agree by construction, and keeps this in step with
 // EvaluateCoreCompat, which reports both sentinels as baseline-backed.
 func jenkinsImageForVersion(version string, profile *v1alpha1.JenkinsVersionProfile) string {
-	return "jenkins/jenkins:" + deployedCore(version, profile)
+	return jenkinsImageRepository() + ":" + deployedCore(version, profile)
+}
+
+// defaultJenkinsImageRepository is the Jenkins controller image repository the
+// operator uses when VARROA_JENKINS_IMAGE_REPOSITORY is unset.
+const defaultJenkinsImageRepository = "jenkins/jenkins"
+
+// jenkinsImageRepository returns the Jenkins controller image repository. The
+// chart sets VARROA_JENKINS_IMAGE_REPOSITORY from jenkins.image.repository, so
+// an internal registry can mirror the image. The core version is the tag.
+func jenkinsImageRepository() string {
+	if repo := os.Getenv("VARROA_JENKINS_IMAGE_REPOSITORY"); repo != "" {
+		return repo
+	}
+	return defaultJenkinsImageRepository
 }
 
 // deployedCore returns the Jenkins core version a Controller runs for version and

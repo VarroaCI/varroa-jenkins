@@ -43,12 +43,11 @@ jenkins:
             nodeUsageMode: "NORMAL"
             containers:
               - name: "jnlp"
-                # Pinned, not `latest-jdk21`. A moving tag would let the agent
-                # change independently of the pinned core and plugin lock, and
-                # an air-gapped cluster can only mirror an image it can name.
-                # Refresh alongside the plugin lock; mirror this exact tag when
-                # running without egress.
-                image: "jenkins/inbound-agent:3384.v60d89463d9e0-1-jdk21"
+                # The operator injects the agent image (default: a pinned tag,
+                # not `latest-jdk21`, so the agent cannot drift from the pinned
+                # core and plugin lock). The chart sets jenkins.agentImage to
+                # point this at an internal mirror for an air-gapped cluster.
+                image: "${varroa_jenkins_agent_image}"
                 resourceRequestCpu: "100m"
                 resourceRequestMemory: "256Mi"
                 resourceLimitCpu: "500m"

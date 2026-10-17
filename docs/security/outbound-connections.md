@@ -14,7 +14,7 @@ A build check fails when a source adds a host that this page does not list.
 
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
-| updates.jenkins.io | Find newer LTS patches and resolve candidate plugin sets for the upgrade tracker. | HTTPS 443 | None | No. |
+| updates.jenkins.io | Find newer LTS patches and resolve candidate plugin sets for the upgrade tracker. | HTTPS 443 | jenkins.upstreamURL | Yes. Set jenkins.upstreamURL to "". |
 | updates.jenkins.io (update-center metadata) | Read update-center metadata when pull-through uses the default upstream. | HTTPS 443 | updateCenter.pullThrough.upstreamURL | Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false. |
 | Git remotes of catalog sources and bundle inputs | Clone catalog sources and git bundle inputs. | HTTPS 443 or SSH 22 | CatalogSource.spec.repoURL and ComposedBundle gitSource inputs | Yes. Do not declare the source or the input. |
 | OCI registries of catalog sources and bundle inputs | Pull catalog and bundle artifacts. | HTTPS 443 | CatalogSource.spec.ociRef and ComposedBundle ociSource inputs | Yes. Do not declare the source or the input. |
@@ -59,9 +59,9 @@ A build check fails when a source adds a host that this page does not list.
 
 | Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
 | --- | --- | --- | --- | --- |
-| updates.jenkins.io (Jenkins update site) | Jenkins core checks for plugin updates once a day. | HTTPS 443 | None. Jenkins core default. | No. |
-| usage.jenkins.io | The viewer browser sends usage statistics when the Jenkins usage setting is on. | HTTPS 443 | None. Jenkins core default. | No. |
-| uplink.jenkins.io | Jenkins core sends server telemetry when the usage setting is on. | HTTPS 443 | None. Jenkins core default. | No. |
+| updates.jenkins.io (Jenkins update site) | Jenkins core checks for plugin updates once a day. | HTTPS 443 | jenkins.upstreamURL | Yes. Set jenkins.upstreamURL to "". |
+| usage.jenkins.io | The viewer browser sends usage statistics when the Jenkins usage setting is on. | HTTPS 443 | None needed | Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true. |
+| uplink.jenkins.io | Jenkins core sends server telemetry when the usage setting is on. | HTTPS 443 | None needed | Yes. Off on every controller: the JVM starts with -Dhudson.model.UsageStatistics.disabled=true. |
 | archives.jenkins.io | plugins-init falls back to the archive for each failed plugin download. | HTTPS 443 | None | No. The plugins-init script always runs. |
 | Plugin update center (plugins-init) | Download plugins from the update center named in the JENKINS_UC variables. | HTTPS 443 | ProvisioningDefaults and the in-cluster update center | Yes, when an in-cluster update center serves every plugin. Otherwise No. |
 | OIDC issuer (bundle variable) | The OIDC plugin discovers the sign-in provider. | HTTPS 443 | auth.oidc.issuer | Yes, with a local issuer (auth.mode local or ldap). |
@@ -103,8 +103,8 @@ A build check fails when a source adds a host that this page does not list.
 | --- | --- | --- | --- | --- |
 | ghcr.io (Varroa images) | Pull the operator, gateway, BFF, update center, recorder, mite, and frontend images. | HTTPS 443 | Each component's image repository and tag. The mite image is set by VARROA_MITE_IMAGE. | No. Mirror the images and set the repositories. |
 | ghcr.io (Dex image) | Pull the Dex image. | HTTPS 443 | dex.image.repository and tag | No. Mirror the image and set the repository. |
-| docker.io (jenkins/jenkins) | Pull the Jenkins controller image for each controller. | HTTPS 443 | Controller resourceOverlay only. No chart value. | No. Mirror the image and set the overlay. |
-| docker.io (jenkins/inbound-agent) | Pull the Jenkins agent image for starter and cell pods. | HTTPS 443 | Starter bundle and cell JCasC | No. Mirror the image and edit the bundle. |
+| docker.io (jenkins/jenkins) | Pull the Jenkins controller image for each controller. | HTTPS 443 | jenkins.image.repository | No. Mirror the image and set the value. |
+| docker.io (jenkins/inbound-agent) | Pull the Jenkins agent image for starter and cell pods. | HTTPS 443 | jenkins.agentImage | No. Mirror the image and set the value. |
 | docker.io (nats) | Pull the NATS server image. | HTTPS 443 | nats.container.image.repository and tag | No. Mirror the image and set the repository. |
 | docker.io (NATS subchart images) | Pull the NATS box and config reloader images. | HTTPS 443 | NATS subchart values | No. Mirror the images and set the subchart values. |
 | ghcr.io (CloudNativePG operator and database images) | Pull the database images in cnpg mode. | HTTPS 443 | recordStore.postgres.mode | Yes. Set recordStore.postgres.mode to external. |

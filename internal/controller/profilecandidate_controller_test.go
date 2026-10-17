@@ -121,7 +121,7 @@ func newCandidateTestFixtures(t *testing.T) (*testClient, *v1alpha1.ProfileCandi
 }
 
 func newCandidateReconciler(client *testClient, upstreamBaseURL string) *ProfileCandidateReconciler {
-	rec := NewProfileCandidateReconciler(client, client.store, profileReconcilerNamespace, "http://unused-uc-base", nil, testLogger())
+	rec := NewProfileCandidateReconciler(client, client.store, profileReconcilerNamespace, "http://unused-uc-base", "https://updates.jenkins.io", nil, testLogger())
 	rec.upstreamBaseURL = upstreamBaseURL
 	rec.readRootHPI = func() ([]byte, error) {
 		return candidateFixtureHPIForRoot, nil
@@ -277,7 +277,7 @@ func TestProfileCandidateReconciler_PluginsServableFalseHoldsPending(t *testing.
 
 	ucSrv := candidateUCServer(t, nil, map[string]ucServabilityResult{"git": {Reason: "pull-through-disabled"}}, 0, nil)
 
-	rec := NewProfileCandidateReconciler(client, client.store, profileReconcilerNamespace, ucSrv.URL, nil, testLogger())
+	rec := NewProfileCandidateReconciler(client, client.store, profileReconcilerNamespace, ucSrv.URL, "https://updates.jenkins.io", nil, testLogger())
 	rec.upstreamBaseURL = srv.URL
 	rec.readRootHPI = func() ([]byte, error) { return rootHPI, nil }
 
@@ -364,7 +364,7 @@ func TestProfileCandidateReconciler_PreflightMissingOnlyDoesNotFail(t *testing.T
 // an httpDoer with no timeout (e.g. http.DefaultClient). This test checks
 // the constructor's actual default instead.
 func TestNewProfileCandidateReconciler_HTTPDoerHasTimeout(t *testing.T) {
-	rec := NewProfileCandidateReconciler(nil, nil, "ns", "http://unused", nil, testLogger())
+	rec := NewProfileCandidateReconciler(nil, nil, "ns", "http://unused", "https://updates.jenkins.io", nil, testLogger())
 	client, ok := rec.httpDoer.(*http.Client)
 	if !ok {
 		t.Fatalf("expected httpDoer to be *http.Client, got %T", rec.httpDoer)

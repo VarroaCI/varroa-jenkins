@@ -362,7 +362,7 @@ func TestBuildStatefulSetJvmOptsAppendsToJAVA_OPTS(t *testing.T) {
 			ControllerName: "ci",
 		})
 		javaOpts := builtContainerEnv(t, sts, "jenkins")["JAVA_OPTS"]
-		expected := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true"
+		expected := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true -Dhudson.model.UsageStatistics.disabled=true"
 		if javaOpts != expected {
 			t.Errorf("JAVA_OPTS = %q, want %q", javaOpts, expected)
 		}
@@ -376,7 +376,7 @@ func TestBuildStatefulSetJvmOptsAppendsToJAVA_OPTS(t *testing.T) {
 			PodOverrides:   nil,
 		})
 		javaOpts := builtContainerEnv(t, sts, "jenkins")["JAVA_OPTS"]
-		expected := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true"
+		expected := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true -Dhudson.model.UsageStatistics.disabled=true"
 		if javaOpts != expected {
 			t.Errorf("JAVA_OPTS = %q, want %q", javaOpts, expected)
 		}

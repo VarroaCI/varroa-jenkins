@@ -65,6 +65,7 @@ take precedence. Varroa also supplies:
 | `varroa_oidc_issuer` | Configured OIDC issuer |
 | `varroa_oidc_client_id` | Configured OIDC client ID |
 | `varroa_login_url` | Configured login URL |
+| `varroa_jenkins_agent_image` | Jnlp agent image, from `jenkins.agentImage` |
 
 Unresolved required variables prevent a controller from applying the new
 content. The last valid configuration remains active.

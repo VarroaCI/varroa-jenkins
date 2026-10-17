@@ -1638,7 +1638,14 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 										},
 									},
 									"env": func() []map[string]interface{} {
-										javaOptsValue := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true"
+										// Usage statistics are off on every controller and cell: the
+										// viewer browser would otherwise call usage.jenkins.io.
+										javaOptsValue := "-Djenkins.install.runSetupWizard=false -Djenkins.security.SystemReadPermission=true -Dhudson.model.UsageStatistics.disabled=true"
+										if spec.JenkinsUpstreamOff {
+											// The runtime update site and the plugin metadata download
+											// are the JVM's own polls of updates.jenkins.io.
+											javaOptsValue += " -Dhudson.model.UpdateCenter.never=true -Dhudson.model.DownloadService.never=true"
+										}
 										if spec.Cell {
 											// UseItemPermission scopes a folder credential to its own
 											// folder. A cell needs this: without it, a tenant's

@@ -329,6 +329,7 @@ func (r *Reconciler) buildStatefulSetSpec(cr *v1alpha1.Controller, class *v1alph
 		ArtifactSecretHash:        in.ArtifactSecretHash,
 		ArtifactSharedCredentials: in.ArtifactSharedCredentials,
 		CellSecretsName:           in.CellSecretsName,
+		JenkinsUpstreamOff:        r.jenkinsUpstreamURL == "",
 		Cell:                      v1alpha1.IsCell(cr),
 		CellPool:                  cellPoolLabel(cr),
 		Headless:                  v1alpha1.IsHeadless(cr),
