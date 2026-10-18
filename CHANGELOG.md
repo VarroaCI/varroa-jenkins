@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.5.0](https://github.com/VarroaCI/varroa-jenkins/compare/v0.4.1...v0.5.0) (2026-10-18)
+
+
+### Features
+
+* **api:** report the Jenkins upstream state on version candidates ([5c54e55](https://github.com/VarroaCI/varroa-jenkins/commit/5c54e5580831e6e241d8037973579e921b936e0d))
+* **chart:** expose externalTrafficPolicy on the member endpoint ([4495787](https://github.com/VarroaCI/varroa-jenkins/commit/4495787eafb1289311056d6aa21f0d44cdc8ede4))
+* **chart:** set the external NATS traffic policy ([4e9cbc5](https://github.com/VarroaCI/varroa-jenkins/commit/4e9cbc5944f42a1cf4b69a83369f38cd40f2bf6d))
+* **checkoutbound:** scan frontend source for outbound hosts ([95fb851](https://github.com/VarroaCI/varroa-jenkins/commit/95fb851c0745becadf0180a515d65e25d4db6c78))
+* **controller:** set the runtime update site to the in-cluster update center ([53ddbde](https://github.com/VarroaCI/varroa-jenkins/commit/53ddbde8c0a7304f106a714a0b44a8b1836c4c65))
+* **hack:** add outbound connection inventory check ([408153c](https://github.com/VarroaCI/varroa-jenkins/commit/408153c3b078398ebf264349d1a9be2c171e395f))
+* **operator:** add offline switches for Jenkins upstream reads and images ([cf870a3](https://github.com/VarroaCI/varroa-jenkins/commit/cf870a3cb87bf90942c4712c51afa66e6333dc01))
+* **varroactl:** add the air-gap release transfer bundle ([5a0d41a](https://github.com/VarroaCI/varroa-jenkins/commit/5a0d41af4c0154759c4405109106ab1b746153d4))
+
+
+### Bug Fixes
+
+* **bundle:** peel annotated tags to their commit SHA ([bbb680c](https://github.com/VarroaCI/varroa-jenkins/commit/bbb680c5a76634d808c87a5270026fccebb2ab5b))
+* **chart:** fail closed for egress groups that name an address ([a615a3b](https://github.com/VarroaCI/varroa-jenkins/commit/a615a3bc8ea25cb9270b96721939d0525fb23f8f))
+* **chart:** pin the remaining egress groups ([b2de0eb](https://github.com/VarroaCI/varroa-jenkins/commit/b2de0ebf35bba84208fca6774f07f8773f1d9b48))
+* **controller:** roll Connected controllers on a Jenkins upstream change ([f2b80b7](https://github.com/VarroaCI/varroa-jenkins/commit/f2b80b7bf581969892514a3e2cd59342fa63a486))
+* **mite:** keep the tenant grace clock across a reconnect ([1e27fb5](https://github.com/VarroaCI/varroa-jenkins/commit/1e27fb589db6f586cf920ea8120c0a49ec510803))
+* **operator:** open the mite inbound subscription from Provisioning ([5cbe37a](https://github.com/VarroaCI/varroa-jenkins/commit/5cbe37af3ede10db699cf2ad5460b80b66a7365e))
+* **operator:** raise the upgrade tracker stable/ read cap ([9ffd572](https://github.com/VarroaCI/varroa-jenkins/commit/9ffd5724060d85a243712387a4210f21022b18f8))
+* **varroactl:** check the git host for export catalog secrets ([2ed3ae6](https://github.com/VarroaCI/varroa-jenkins/commit/2ed3ae6a425cdcd168ee2ecf02ccb454d74bac9c))
+* **varroactl:** export a directory-convention catalog ([465a1c3](https://github.com/VarroaCI/varroa-jenkins/commit/465a1c3ab5e4ff9601d8e9096e5d1b86c2adb0c0))
+* **varroactl:** pack only the --path directory in export bundle ([da556b7](https://github.com/VarroaCI/varroa-jenkins/commit/da556b7c4e99146550cf2180922bfd52bffcbfb0))
+* **varroactl:** refuse uc:// for export bundle and catalog ([8c59b36](https://github.com/VarroaCI/varroa-jenkins/commit/8c59b36828a809031c7537d66c9a7dd01a9a3162))
+
 ## [0.4.1](https://github.com/VarroaCI/varroa-jenkins/compare/v0.4.0...v0.4.1) (2026-10-16)
 
 
