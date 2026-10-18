@@ -62,6 +62,7 @@ spec:
 
 The URL must use HTTPS, SSH, or scp-style `git@host:path`. Pin a tag or commit
 so content changes only with a spec change.
+For an annotated tag named by `revision`, `status.observedRevisions` records the commit that the tag points to. A 40-character SHA is recorded as given, even when it names a tag object.
 
 The operator and `varroactl export` copy the files of the commit with `git archive`. They do not keep a `.git` directory. Files that `.gitattributes` marks `export-ignore` are not copied. `export-subst` placeholders are expanded. This applies with and without the Git cache.
 

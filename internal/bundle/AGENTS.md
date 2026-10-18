@@ -178,6 +178,10 @@ index parsing, and pre-apply content validation.
   both paths. The per-key lock is a one-slot channel, not a mutex: a waiter
   leaves when its context is done, so a compose never inherits another caller's
   stuck fetch.
+  - `RemoteSHA` asks ls-remote for `<ref>` and `<ref>^{}` and prefers the peeled line.
+  - `peelCommit` peels the SHA to its commit on the hit check and in `fetchCommit`. `Checkout` and `Clone` therefore always return a commit SHA.
+  - The composer records a tag object SHA in `observedRevisions` for a ComposedBundle input pinned to one. That is the accepted gap.
+  - A pinned-SHA fetch passes `--no-tags`.
 - **`GitCloner`** (`git.go`) — `validateRepoURL` is the RCE defense: only
   `https://`, `ssh://`, scp-like `[user@]host:path`; any `"<transport>::"`
   form and `file://` (except test-only `AllowLocalTransportForTest`) rejected
@@ -256,7 +260,8 @@ make lint
 Key tests: `composer_test.go`/`composer_namespace_test.go` (merge strategy,
 itemRef fallback/shadowing), `clonecache_test.go` (checkout tree, export
 attributes, exec bit and symlinks, and cache-off `GitCloner.Clone` parity
-with the cached path), `gitarchive_test.go` (extractor rejects
+with the cached path, revision forms resolve to the commit on both paths),
+`gitarchive_test.go` (extractor rejects
 unsafe entries; archive cleans its target), `git_test.go` (URL
 validation/RCE guard), `git_deadline_test.go` (git stops at the context
 deadline, against a silent 127.0.0.1 listener), `validator_test.go`, `unresolved_test.go`,

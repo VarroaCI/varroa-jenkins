@@ -566,3 +566,86 @@ func TestCheckGitSecretHost(t *testing.T) {
 }
 
 // Helpers
+
+func TestLsRemoteSHA(t *testing.T) {
+	const tagObj = "1111111111111111111111111111111111111111"
+	const commitSHA = "2222222222222222222222222222222222222222"
+	const other = "3333333333333333333333333333333333333333"
+	tests := []struct {
+		name   string
+		out    string
+		want   string
+		wantOK bool
+	}{
+		{
+			name:   "no output",
+			out:    "",
+			wantOK: false,
+		},
+		{
+			name:   "branch without peel line",
+			out:    other + "\trefs/heads/main\n",
+			want:   other,
+			wantOK: true,
+		},
+		{
+			name:   "peel line after the ref",
+			out:    tagObj + "\trefs/tags/v1\n" + commitSHA + "\trefs/tags/v1^{}\n",
+			want:   commitSHA,
+			wantOK: true,
+		},
+		{
+			name:   "peel line before the ref",
+			out:    commitSHA + "\trefs/tags/v1^{}\n" + tagObj + "\trefs/tags/v1\n",
+			want:   commitSHA,
+			wantOK: true,
+		},
+		{
+			name:   "peel only for the second matching ref",
+			out:    other + "\trefs/heads/v1\n" + tagObj + "\trefs/tags/v1\n" + commitSHA + "\trefs/tags/v1^{}\n",
+			want:   other,
+			wantOK: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := lsRemoteSHA(tt.out)
+			if ok != tt.wantOK {
+				t.Fatalf("lsRemoteSHA ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("lsRemoteSHA = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoteSHA_PeelsAnnotatedTag(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	shaA := commit("a.txt", "A")
+	_ = tagFixture(t, bareURL, "light", shaA, false)
+	v1Obj := tagFixture(t, bareURL, "v1", shaA, true)
+	_ = tagFixture(t, bareURL, "nested", v1Obj, true)
+	shaB := commit("a.txt", "B")
+
+	cloner := newLocalCloner()
+	ctx := context.Background()
+	tests := []struct {
+		revision string
+		want     string
+	}{
+		{"v1", shaA},
+		{"refs/tags/v1", shaA},
+		{"nested", shaA},
+		{"light", shaA},
+		{"main", shaB},
+		{v1Obj, v1Obj},
+	}
+	for _, tt := range tests {
+		got, err := cloner.RemoteSHA(ctx, bareURL, tt.revision, nil)
+		must(t, err)
+		if got != tt.want {
+			t.Errorf("RemoteSHA(%q) = %q, want %q", tt.revision, got, tt.want)
+		}
+	}
+}

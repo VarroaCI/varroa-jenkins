@@ -225,7 +225,8 @@ func validateRepoURL(repoURL string, allowLocal bool) error {
 // Clone fetches the commit at revision into a temporary bare repository and
 // writes its tree to targetDir with git archive, so .gitattributes export
 // rules apply. The target receives the files of the tree and no .git
-// directory. It returns the resolved commit SHA. targetDir must be a missing
+// directory. It returns the resolved commit SHA, peeled for an annotated tag.
+// targetDir must be a missing
 // path or an empty directory. revision may be empty (HEAD), a branch or tag, or a
 // full commit SHA. auth may be nil for public repositories. Every git
 // process stops when ctx is done, and the returned error then wraps ctx.Err().
@@ -371,11 +372,11 @@ func redactURL(rawURL string) string {
 	return rawURL
 }
 
-// RemoteSHA fetches the HEAD commit SHA for a remote branch or tag using
-// git ls-remote. If revision is a 40-char hex SHA, it is returned directly
-// to avoid an unnecessary ls-remote call that would return empty.
-// auth may be nil for public repositories. The git process stops when ctx is
-// done, and the returned error then wraps ctx.Err().
+// RemoteSHA returns the commit SHA for a remote branch or tag with git
+// ls-remote. For an annotated tag it returns the commit that the tag points
+// to. A 40-hex revision is returned as it is, without a remote call, and it
+// can be a tag object SHA. auth may be nil for public repositories. The git
+// process stops when ctx is done, and the returned error then wraps ctx.Err().
 func (g *GitCloner) RemoteSHA(ctx context.Context, repoURL, revision string, auth *GitAuth) (string, error) {
 	if err := validateRepoURL(repoURL, g.allowLocalTransport); err != nil {
 		return "", err
@@ -393,7 +394,7 @@ func (g *GitCloner) RemoteSHA(ctx context.Context, repoURL, revision string, aut
 	}
 	defer cleanup()
 
-	cmd := gitCommand(ctx, "ls-remote", repoURL, revision)
+	cmd := gitCommand(ctx, "ls-remote", repoURL, revision, revision+"^{}")
 	// Run from a neutral directory: ls-remote attempts enclosing-repo
 	// discovery from the cwd, and a broken .git (e.g. a worktree whose
 	// gitdir pointer is outside a container mount) hard-fails it even
@@ -410,11 +411,39 @@ func (g *GitCloner) RemoteSHA(ctx context.Context, repoURL, revision string, aut
 		}
 		return "", fmt.Errorf("git ls-remote %s %s: %s", redactURL(repoURL), revision, stderr.String())
 	}
-	parts := strings.Fields(stdout.String())
-	if len(parts) < 1 {
+	sha, ok := lsRemoteSHA(stdout.String())
+	if !ok {
 		return "", fmt.Errorf("git ls-remote: no output for %s %s", redactURL(repoURL), revision)
 	}
-	return parts[0], nil
+	return sha, nil
+}
+
+// lsRemoteSHA returns the SHA of the first ref in ls-remote output. When the
+// output also holds the peeled line "<ref>^{}" for that ref, it returns the
+// peeled SHA, which is the commit that an annotated tag points to.
+func lsRemoteSHA(out string) (string, bool) {
+	var firstSHA, firstRef string
+	peeled := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		if ref, ok := strings.CutSuffix(f[1], "^{}"); ok {
+			peeled[ref] = f[0]
+			continue
+		}
+		if firstRef == "" {
+			firstSHA, firstRef = f[0], f[1]
+		}
+	}
+	if firstRef == "" {
+		return "", false
+	}
+	if p, ok := peeled[firstRef]; ok {
+		return p, true
+	}
+	return firstSHA, true
 }
 
 // isCommitSHA returns true if s is a 40-character hex string (a pinned commit SHA).
