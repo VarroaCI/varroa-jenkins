@@ -475,6 +475,8 @@ reading each package's entry point):
 - **`hibernation/`** — shared controller-hibernation contracts: webhook replay
   constants, the BFF/operator wake interstitial renderer, and the operator's
   informer-backed `wakeserver` HTTP handler.
+- **`forge/`** — operator-only client for a repository forge (GitHub REST and Gitea API). Stdlib only. `NewHTTPClient` refuses non-global addresses and redirects. `Token` never renders its value. `forge/forgeapi/` holds the stdlib wire types of the operator forge verbs.
+- **`forgeurl/`** — leaf rules for the forge path: repository URL normalization, branch names, revisions, file paths, file sets, titles, and bodies. Stdlib only.
 - **`secretredact/`** — replaces secret values in JCasC (`JCasC`) and items
   (`Items`) YAML with `<redacted>`. A key that contains `password`, `secret`,
   `passphrase`, `privatekey`, or `token`, and does not end in `id`, marks a

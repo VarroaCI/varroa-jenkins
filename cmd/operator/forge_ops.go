@@ -1,0 +1,118 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
+	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
+)
+
+// forgeRequestTimeout bounds one forge check or read on the operator. It
+// stays under the requester's forgeapi.RequestTimeout, so the operator
+// returns its own reply first.
+const forgeRequestTimeout = 25 * time.Second
+
+// forgeConcurrency limits the forge requests that one replica runs at a
+// time on one verb subject.
+const forgeConcurrency = 4
+
+// forgeOps is the slice of *forgeops.Ops that the forge handlers call.
+type forgeOps interface {
+	Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.CheckReply
+	Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadReply
+}
+
+// shardEnterer registers work on a held ring shard. It returns false when the
+// replica does not hold the shard.
+type shardEnterer func(ctx context.Context, key string) (context.Context, func(), bool)
+
+// handleForgeCheck answers one operator.<cluster>.forge.check request. A
+// replica that does not own the Team's shard returns nil, so it sends no
+// reply.
+func handleForgeCheck(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
+	var req forgeapi.CheckRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("forge check decode failed", "error", err)
+		return encodeForgeReply(forgeapi.CheckReply{Status: invalidForgeStatus()})
+	}
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	if !ok {
+		return nil
+	}
+	defer leave()
+	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
+	defer cancel()
+	return encodeForgeReply(ops.Check(rctx, req))
+}
+
+// handleForgeRead answers one operator.<cluster>.forge.read request. The
+// ownership rule is the same as handleForgeCheck.
+func handleForgeRead(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
+	var req forgeapi.ReadRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("forge read decode failed", "error", err)
+		return encodeForgeReply(forgeapi.ReadReply{Status: invalidForgeStatus()})
+	}
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	if !ok {
+		return nil
+	}
+	defer leave()
+	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
+	defer cancel()
+	return encodeForgeReply(ops.Read(rctx, req))
+}
+
+// invalidForgeStatus is the reply to a request that does not decode.
+func invalidForgeStatus() forgeapi.Status {
+	return forgeapi.Status{Code: forgeapi.CodeInvalidRequest, Error: "invalid request"}
+}
+
+// encodeForgeReply returns the JSON form of a reply. HTML escaping is off.
+func encodeForgeReply(v any) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		// The reply types hold only strings and numbers, so this is unreachable.
+		return nil
+	}
+	return buf.Bytes()
+}
+
+// forgeRunner serves one forge verb on every replica. It subscribes with no
+// queue group, because only the Team's shard owner may answer, and a queue
+// group could hand the request to a replica that does not hold the shard.
+type forgeRunner struct {
+	busConn *bus.Conn
+	cluster string
+	verb    string
+	limit   int
+	handle  func(ctx context.Context, data []byte) []byte
+	logger  *slog.Logger
+}
+
+// NeedLeaderElection reports that the runner runs on every replica.
+func (r *forgeRunner) NeedLeaderElection() bool { return false }
+
+// Start serves the verb until ctx ends.
+func (r *forgeRunner) Start(ctx context.Context) error {
+	subject := bus.OperatorForgeSubject(r.cluster, r.verb)
+	sub, err := r.busConn.ServeRequestsConcurrently(subject, "", r.limit, func(data []byte) []byte {
+		return r.handle(ctx, data)
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe forge %s: %w", r.verb, err)
+	}
+	<-ctx.Done()
+	if err := sub.Unsubscribe(); err != nil {
+		r.logger.Warn("unsubscribe forge verb failed", "verb", r.verb, "error", err)
+	}
+	return nil
+}

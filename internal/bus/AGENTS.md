@@ -240,6 +240,8 @@ control plane's async transport — no other package talks to NATS directly.
   `charts/varroa/templates/nats-auth-config.yaml` when adding a new stream,
   subject prefix, or KV bucket — connections are denied by default.
 
+- **Forge subjects** — `operator.<cluster>.forge.{check,read,pullrequest}` (`OperatorForgeSubject`). A later change adds `issue`. Every operator replica subscribes with no queue group. Only the Team's shard owner replies. Request and reply types live in `internal/forge/forgeapi`.
+
 ## Work Guidance
 
 - New subjects/streams/buckets must be added here first, then mirrored into

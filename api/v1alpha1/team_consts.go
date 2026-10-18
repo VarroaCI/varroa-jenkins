@@ -139,3 +139,14 @@ const (
 
 // CellPoolFinalizerDrain holds a deleted pool until its free cells are gone.
 const CellPoolFinalizerDrain = "varroa.dev/cellpool-drain"
+
+// Tenant-credential Secret label, annotations, and the credential kinds the
+// forge path reads. The cell projection and the forge path share these names.
+const (
+	TenantCredentialLabel          = "varroa.dev/tenant-credential"
+	TenantCredentialSelector       = TenantCredentialLabel + "=true"
+	CredentialIDAnnotation         = "varroa.dev/credential-id"
+	CredentialKindAnnotation       = "varroa.dev/credential-kind"
+	CredentialKindUsernamePassword = "usernamePassword"
+	CredentialKindSecretText       = "secretText"
+)
