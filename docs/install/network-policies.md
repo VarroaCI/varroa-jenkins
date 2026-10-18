@@ -39,7 +39,7 @@ On a [member cluster](multi-cluster.md#record-store), the gateway policy carries
 Point it at the core object store address. In `postgres` blob mode the member gateway also needs
 `networkPolicy.recordStorePostgresEgress.cidrs`, pinned to the core member endpoint. The core
 database policy admits that traffic from `recordStore.postgres.memberEndpoint.allowedCIDRs`, a
-required list when network policies are enabled.
+required list when network policies are enabled. With `externalTrafficPolicy: Cluster`, the list must hold the core node and pod ranges. See the [multi-cluster page](multi-cluster.md#record-store).
 
 An agent uploads build artifacts straight to the object store, not through the controller pod.
 This chart does not isolate controller or agent namespaces. An agent namespace that egresses

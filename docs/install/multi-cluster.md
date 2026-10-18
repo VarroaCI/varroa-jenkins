@@ -68,7 +68,16 @@ helm upgrade varroa charts/varroa -n varroa-system -f values.yaml \
   --set 'recordStore.postgres.memberEndpoint.allowedCIDRs={203.0.113.0/24}'
 ```
 
-The endpoint Service selects the CloudNativePG primary on port 5432. Put the core `varroa-recordstore-gateway` DSN into the member Secret named by `recordStore.postgres.external.existingSecret`, with the host replaced by the endpoint address. With network policies enabled, set `networkPolicy.recordStorePostgresEgress.cidrs` on the member. The core then requires `recordStore.postgres.memberEndpoint.allowedCIDRs`. A NodePort or load-balancer path can rewrite the source address, so list the addresses the traffic arrives from. Set `0.0.0.0/0` only when the endpoint is not reachable from outside your network.
+The endpoint Service selects the CloudNativePG primary on port 5432. Put the core `varroa-recordstore-gateway` DSN into the member Secret named by `recordStore.postgres.external.existingSecret`, with the host replaced by the endpoint address. With network policies enabled, set `networkPolicy.recordStorePostgresEgress.cidrs` on the member. The core then requires `recordStore.postgres.memberEndpoint.allowedCIDRs`. With `externalTrafficPolicy: Cluster`, kube-proxy replaces the member source address with a core node address. Then `allowedCIDRs` must include the core node range and the pod range.
+Set `recordStore.postgres.memberEndpoint.externalTrafficPolicy: Local` to keep the member source address. Then list only the member egress addresses.
+Set `0.0.0.0/0` only when the endpoint is not reachable from outside your network.
+
+With `Local`, only the node that runs the CloudNativePG primary answers.
+A load balancer health check sends traffic only to that node.
+A NodePort answers only on that node address. Set the member DSN host to that address, and the DSN port to the NodePort (`30543` in the example above).
+With `cnpg.instances: 1`, the address changes only when the pod moves to another node.
+With more instances, a failover moves the primary to another node. A NodePort DSN must then list every node that can host an instance.
+libpq accepts a comma-separated host list with `target_session_attrs=read-write`. Add each node address to `networkPolicy.recordStorePostgresEgress.cidrs` on the member.
 
 ### Pipelines tenant on a member
 
