@@ -63,7 +63,7 @@ spec:
 The URL must use HTTPS, SSH, or scp-style `git@host:path`. Pin a tag or commit
 so content changes only with a spec change.
 
-The operator copies the files of the commit out of its Git cache. It does not keep a `.git` directory. Files that `.gitattributes` marks `export-ignore` are not copied. `export-subst` placeholders are expanded. `varroactl export` and an operator with `gitCache.enabled: false` copy every file.
+The operator and `varroactl export` copy the files of the commit with `git archive`. They do not keep a `.git` directory. Files that `.gitattributes` marks `export-ignore` are not copied. `export-subst` placeholders are expanded. This applies with and without the Git cache.
 
 For private HTTPS Git, set `secretRef` to a same-namespace Secret with
 `username`, `password`, and an allowed-hosts annotation:

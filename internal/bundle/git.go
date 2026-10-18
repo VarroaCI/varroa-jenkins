@@ -222,76 +222,76 @@ func validateRepoURL(repoURL string, allowLocal bool) error {
 	return fmt.Errorf("repoURL %q has no recognized transport (expected https://, ssh://, or scp-like git@host:path)", redactURL(u))
 }
 
-// Clone performs a shallow clone of a repository at the given revision.
-// If revision looks like a full SHA (40 hex chars), the default branch is
-// cloned and then the SHA is checked out — --branch only works with ref names.
-// auth may be nil for public repositories. Every git process stops when ctx
-// is done, and the returned error then wraps ctx.Err().
-func (g *GitCloner) Clone(ctx context.Context, repoURL, revision, targetDir string, auth *GitAuth) error {
+// Clone fetches the commit at revision into a temporary bare repository and
+// writes its tree to targetDir with git archive, so .gitattributes export
+// rules apply. The target receives the files of the tree and no .git
+// directory. It returns the resolved commit SHA. targetDir must be a missing
+// path or an empty directory. revision may be empty (HEAD), a branch or tag, or a
+// full commit SHA. auth may be nil for public repositories. Every git
+// process stops when ctx is done, and the returned error then wraps ctx.Err().
+func (g *GitCloner) Clone(ctx context.Context, repoURL, revision, targetDir string, auth *GitAuth) (string, error) {
 	if err := validateRepoURL(repoURL, g.allowLocalTransport); err != nil {
-		return err
+		return "", err
 	}
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("create target dir: %w", err)
+	sha, err := g.resolveRevision(ctx, repoURL, revision, auth)
+	if err != nil {
+		return "", err
 	}
 
-	isSHA := isCommitSHA(revision)
+	bare, err := os.MkdirTemp("", "varroa-git-bare-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp bare repo: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(bare) }()
 
+	if err := initBareRepo(ctx, bare); err != nil {
+		return "", err
+	}
+	sha, err = fetchCommit(ctx, bare, repoURL, sha, revision, auth, g.allowLocalTransport)
+	if err != nil {
+		return "", err
+	}
+	if err := archiveCommit(ctx, bare, sha, targetDir); err != nil {
+		return "", err
+	}
+	return sha, nil
+}
+
+// resolveRevision returns the commit SHA for revision. A full commit SHA is
+// returned as it is, so no remote call runs. An empty revision resolves HEAD.
+func (g *GitCloner) resolveRevision(ctx context.Context, repoURL, revision string, auth *GitAuth) (string, error) {
+	if isCommitSHA(revision) {
+		return revision, nil
+	}
+	if revision == "" {
+		sha, err := g.RemoteSHA(ctx, repoURL, "HEAD", auth)
+		if err != nil {
+			return "", fmt.Errorf("resolve HEAD: %w", err)
+		}
+		return sha, nil
+	}
+	sha, err := g.RemoteSHA(ctx, repoURL, revision, auth)
+	if err != nil {
+		return "", fmt.Errorf("resolve revision %s: %w", revision, err)
+	}
+	return sha, nil
+}
+
+// remoteGitEnv returns the environment for a git process that talks to a
+// remote. It holds the auth overrides, disables prompting, and allows only
+// the permitted transports. The cleanup function removes the auth temp files.
+func remoteGitEnv(auth *GitAuth, allowLocal bool) ([]string, func(), error) {
 	authEnv, cleanup, err := gitAuthEnv(auth)
 	if err != nil {
-		return fmt.Errorf("setup git auth: %w", err)
+		return nil, func() {}, fmt.Errorf("setup git auth: %w", err)
 	}
-	defer cleanup()
-
-	// Always disable interactive prompting — public repos should clone
-	// anonymously, not prompt for credentials.
-	gitEnv := append(os.Environ(), authEnv...)
-	gitEnv = append(gitEnv, "GIT_TERMINAL_PROMPT=0")
 	allowProto := "https:ssh"
-	if g.allowLocalTransport {
+	if allowLocal {
 		allowProto = "https:ssh:file"
 	}
-	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL="+allowProto)
-
-	args := []string{"clone", "--depth=1", "--no-tags"}
-	if revision != "" && !isSHA {
-		args = append(args, "--branch", revision)
-	}
-	args = append(args, repoURL, targetDir)
-
-	cmd := gitCommand(ctx, args...)
-	cmd.Env = gitEnv
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("git clone %s: %w", redactURL(repoURL), ctx.Err())
-		}
-		return fmt.Errorf("git clone %s: %s", redactURL(repoURL), stderr.String())
-	}
-
-	if isSHA {
-		cmd := gitCommand(ctx, "-C", targetDir, "fetch", "--depth=1", "origin", revision)
-		cmd.Env = gitEnv
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("fetch revision %s: %w", revision, ctx.Err())
-			}
-			return fmt.Errorf("fetch revision %s: %s", revision, stderr.String())
-		}
-		cmd = gitCommand(ctx, "-C", targetDir, "checkout", "--quiet", revision)
-		cmd.Env = gitEnv
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("checkout revision %s: %w", revision, ctx.Err())
-			}
-			return fmt.Errorf("checkout revision %s: %s", revision, stderr.String())
-		}
-	}
-
-	return nil
+	env := append(os.Environ(), authEnv...)
+	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+allowProto)
+	return env, cleanup, nil
 }
 
 // GitAuthFromSecret reads a Kubernetes Secret (as raw byte map) and returns a
@@ -387,19 +387,11 @@ func (g *GitCloner) RemoteSHA(ctx context.Context, repoURL, revision string, aut
 		return revision, nil
 	}
 
-	authEnv, cleanup, err := gitAuthEnv(auth)
+	gitEnv, cleanup, err := remoteGitEnv(auth, g.allowLocalTransport)
 	if err != nil {
-		return "", fmt.Errorf("setup git auth: %w", err)
+		return "", err
 	}
 	defer cleanup()
-
-	gitEnv := append(os.Environ(), authEnv...)
-	gitEnv = append(gitEnv, "GIT_TERMINAL_PROMPT=0")
-	allowProto := "https:ssh"
-	if g.allowLocalTransport {
-		allowProto = "https:ssh:file"
-	}
-	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL="+allowProto)
 
 	cmd := gitCommand(ctx, "ls-remote", repoURL, revision)
 	// Run from a neutral directory: ls-remote attempts enclosing-repo

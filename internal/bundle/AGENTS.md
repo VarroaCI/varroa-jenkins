@@ -169,20 +169,23 @@ index parsing, and pre-apply content validation.
   `.git` directory. `extractTar` writes through `os.Root`. It rejects a
   non-local name, an entry below a symlink, a symlink that leaves the target,
   and any type other than directory, regular file or symlink. A failure removes
-  what it wrote. `export-ignore` and `export-subst` apply on this path. They do
-  not apply on the `GitCloner.Clone` fallback. The `refs/varroa/*` refs stay in
-  the bare store; `fetchBare` and the re-resolve still use them. Nil
-  `*CloneCache` = disabled;
-  `Resolver.Materialize` falls back to `GitCloner.Clone` directly. The
-  per-key lock is a one-slot channel, not a mutex: a waiter leaves when its
-  context is done, so a compose never inherits another caller's stuck fetch.
+  what it wrote. `export-ignore` and `export-subst` apply on this path. The
+  `refs/varroa/*` refs stay in the bare store; `fetchBareRef` and the re-resolve
+  in `fetchCommit` still use them. A nil `*CloneCache` = disabled. Then
+  `Resolver.Materialize` calls `GitCloner.Clone`, which fetches into a temporary
+  bare repository with the same `fetchCommit`, archives with `archiveCommit`,
+  removes the bare repository, and returns the SHA. Export attributes apply on
+  both paths. The per-key lock is a one-slot channel, not a mutex: a waiter
+  leaves when its context is done, so a compose never inherits another caller's
+  stuck fetch.
 - **`GitCloner`** (`git.go`) — `validateRepoURL` is the RCE defense: only
   `https://`, `ssh://`, scp-like `[user@]host:path`; any `"<transport>::"`
   form and `file://` (except test-only `AllowLocalTransportForTest`) rejected
   before git sees the URL, plus `GIT_ALLOW_PROTOCOL` as defense-in-depth.
   `GitAuth` supports basic (askpass script, avoids argv leak) or SSH (temp
   key, mode 0600, optional pinned `known_hosts`). `redactURL` strips creds
-  before logging.
+  before logging. `remoteGitEnv` is the single builder of the auth plus
+  `GIT_TERMINAL_PROMPT`/`GIT_ALLOW_PROTOCOL` env for every remote git call.
 - **Git deadlines** — every git process in this package starts through
   `gitCommand(ctx, ...)` (`gitcmd_unix.go`). It runs git in its own process
   group, kills the whole group when ctx is done, and sets a 5s `WaitDelay`.
@@ -252,7 +255,8 @@ make lint
 
 Key tests: `composer_test.go`/`composer_namespace_test.go` (merge strategy,
 itemRef fallback/shadowing), `clonecache_test.go` (checkout tree, export
-attributes, exec bit and symlinks), `gitarchive_test.go` (extractor rejects
+attributes, exec bit and symlinks, and cache-off `GitCloner.Clone` parity
+with the cached path), `gitarchive_test.go` (extractor rejects
 unsafe entries; archive cleans its target), `git_test.go` (URL
 validation/RCE guard), `git_deadline_test.go` (git stops at the context
 deadline, against a silent 127.0.0.1 listener), `validator_test.go`, `unresolved_test.go`,

@@ -50,8 +50,8 @@ stating what it is/is not responsible for:
   subject; there is no `bundles.validate` subject. Move a row to a higher limit only after its handler is safe for
   concurrent calls. A compose context ends at `composeRequestTimeout` (55
   seconds, `internal/controller/config_crud.go`), under the BFF's 60-second
-  timeout. A git process (`GitCloner.Clone`, `CloneCache.fetchBare`) does not
-  observe that context, so it can run past the deadline.
+  timeout. Each git process (`GitCloner.Clone`, `CloneCache.Checkout`) stops
+  when that context ends.
   `controllerIssuer` (`main.go`) is the only choice of
   the issuer that controllers trust: the BFF URL in `local` and `ldap` modes,
   else the OIDC issuer. The operator exits in those two modes without

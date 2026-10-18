@@ -123,14 +123,27 @@ func assertStoppedAtDeadline(t *testing.T, err error, elapsed time.Duration) {
 }
 
 func TestClone_StopsAtContextDeadline(t *testing.T) {
-	remote := newSilentRemote(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
+	tests := []struct {
+		name     string
+		revision string
+	}{
+		// A branch name stops in ls-remote.
+		{name: "branch", revision: "main"},
+		// A pinned SHA skips ls-remote and stops in the bare fetch.
+		{name: "pinned SHA", revision: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remote := newSilentRemote(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
 
-	start := time.Now()
-	err := NewGitCloner().Clone(ctx, remote.url, "main", filepath.Join(t.TempDir(), "clone"), nil)
-	assertStoppedAtDeadline(t, err, time.Since(start))
-	remote.assertPeerClosed(t)
+			start := time.Now()
+			_, err := NewGitCloner().Clone(ctx, remote.url, tt.revision, filepath.Join(t.TempDir(), "clone"), nil)
+			assertStoppedAtDeadline(t, err, time.Since(start))
+			remote.assertPeerClosed(t)
+		})
+	}
 }
 
 func TestRemoteSHA_StopsAtContextDeadline(t *testing.T) {

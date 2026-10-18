@@ -3,6 +3,7 @@ package bundle
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -653,6 +654,199 @@ func TestCheckout_DefaultBranchNameCollision(t *testing.T) {
 			}
 			if gotSHA != sha {
 				t.Errorf("Checkout SHA = %q, want %q", gotSHA, sha)
+			}
+			data, err := os.ReadFile(filepath.Join(target, "file.txt"))
+			must(t, err)
+			if string(data) != "content-"+branch {
+				t.Errorf("file content = %q, want %q", data, "content-"+branch)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GitCloner.Clone (cache-off path) must match CloneCache.Checkout.
+// ---------------------------------------------------------------------------
+
+// newLocalCloner returns a GitCloner that accepts the file:// fixtures.
+func newLocalCloner() *GitCloner {
+	c := NewGitCloner()
+	c.AllowLocalTransportForTest()
+	return c
+}
+
+// treeSnapshot maps each path under root to its kind, its executable bits
+// and its content, so two materialized trees can be compared.
+func treeSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			out[rel] = "link:" + target
+		case info.IsDir():
+			out[rel] = "dir"
+		default:
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			out[rel] = fmt.Sprintf("%o:%s", info.Mode().Perm()&0o111, data)
+		}
+		return nil
+	})
+	must(t, err)
+	return out
+}
+
+func TestClone_HonorsExportAttributes(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	commit(".gitattributes", "ignored.txt export-ignore\nsubst.txt export-subst\n")
+	commit("ignored.txt", "not copied")
+	sha := commit("subst.txt", "$Format:%H$\n")
+
+	target := filepath.Join(t.TempDir(), "out")
+	gotSHA, err := newLocalCloner().Clone(context.Background(), bareURL, "main", target, nil)
+	must(t, err)
+	if gotSHA != sha {
+		t.Errorf("Clone SHA = %q, want %q", gotSHA, sha)
+	}
+
+	if _, err := os.Stat(filepath.Join(target, "ignored.txt")); !os.IsNotExist(err) {
+		t.Errorf("export-ignore file was copied (stat err = %v)", err)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "subst.txt"))
+	must(t, err)
+	if string(data) != sha+"\n" {
+		t.Errorf("subst.txt = %q, want %q", data, sha+"\n")
+	}
+	if _, err := os.Stat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+		t.Errorf(".git exists in target (stat err = %v)", err)
+	}
+}
+
+func TestClone_MatchesCheckoutTree(t *testing.T) {
+	bareURL, _ := newBareFixture(t)
+	sha := commitWorkTree(t, bareURL, func(work string) {
+		must(t, os.WriteFile(filepath.Join(work, ".gitattributes"),
+			[]byte("ignored.txt export-ignore\nsubst.txt export-subst\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(work, "ignored.txt"), []byte("not copied"), 0o644))
+		must(t, os.WriteFile(filepath.Join(work, "subst.txt"), []byte("$Format:%H$\n"), 0o644))
+		must(t, os.MkdirAll(filepath.Join(work, "data"), 0o755))
+		must(t, os.WriteFile(filepath.Join(work, "data", "input.yaml"), []byte("x: 1\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(work, "run.sh"), []byte("#!/bin/sh\n"), 0o644))
+		must(t, os.Chmod(filepath.Join(work, "run.sh"), 0o755))
+		must(t, os.Symlink("data/input.yaml", filepath.Join(work, "link.yaml")))
+	})
+
+	cached := filepath.Join(t.TempDir(), "cached")
+	cache := newCacheForTest(t, t.TempDir(), 10, 100)
+	cachedSHA, _, err := cache.Checkout(context.Background(), bareURL, "main", cached, nil)
+	must(t, err)
+
+	direct := filepath.Join(t.TempDir(), "direct")
+	directSHA, err := newLocalCloner().Clone(context.Background(), bareURL, "main", direct, nil)
+	must(t, err)
+
+	if cachedSHA != sha || directSHA != sha {
+		t.Fatalf("SHAs: cache=%q clone=%q, want %q", cachedSHA, directSHA, sha)
+	}
+	got, want := treeSnapshot(t, direct), treeSnapshot(t, cached)
+	if len(got) != len(want) {
+		t.Errorf("Clone tree has %d entries, Checkout tree has %d", len(got), len(want))
+	}
+	for path, w := range want {
+		if g, ok := got[path]; !ok || g != w {
+			t.Errorf("entry %q: Clone = %q (present=%v), Checkout = %q", path, g, ok, w)
+		}
+	}
+	for path := range got {
+		if _, ok := want[path]; !ok {
+			t.Errorf("entry %q exists only in the Clone tree", path)
+		}
+	}
+}
+
+func TestClone_PinnedSHA(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	shaA := commit("a.txt", "A")
+	_ = commit("a.txt", "B")
+
+	target := filepath.Join(t.TempDir(), "out")
+	gotSHA, err := newLocalCloner().Clone(context.Background(), bareURL, shaA, target, nil)
+	must(t, err)
+	if gotSHA != shaA {
+		t.Errorf("Clone SHA = %q, want %q", gotSHA, shaA)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "a.txt"))
+	must(t, err)
+	if string(data) != "A" {
+		t.Errorf("a.txt = %q, want %q", data, "A")
+	}
+}
+
+func TestClone_RemovesTemporaryBareRepo(t *testing.T) {
+	bareURL, _ := newBareFixture(t)
+	// Targets come from TempDir before TMPDIR changes, because TempDir
+	// itself uses TMPDIR and would add entries to the directory under test.
+	successTarget := filepath.Join(t.TempDir(), "out")
+	failureTarget := filepath.Join(t.TempDir(), "out")
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	cloner := newLocalCloner()
+
+	t.Run("success", func(t *testing.T) {
+		_, err := cloner.Clone(context.Background(), bareURL, "main", successTarget, nil)
+		must(t, err)
+		entries, err := os.ReadDir(tmp)
+		must(t, err)
+		if len(entries) != 0 {
+			t.Errorf("temp dir holds %d entries after success, want 0", len(entries))
+		}
+	})
+
+	t.Run("failure after bare init", func(t *testing.T) {
+		// An absent pinned SHA passes resolution, creates the bare repo,
+		// and fails in the fetch.
+		_, err := cloner.Clone(context.Background(), bareURL, "0000000000000000000000000000000000000001", failureTarget, nil)
+		if err == nil {
+			t.Fatal("Clone of an absent SHA succeeded, want an error")
+		}
+		entries, err := os.ReadDir(tmp)
+		must(t, err)
+		if len(entries) != 0 {
+			t.Errorf("temp dir holds %d entries after failure, want 0", len(entries))
+		}
+	})
+}
+
+func TestClone_DefaultBranchNameCollision(t *testing.T) {
+	for _, branch := range []string{"master", "main"} {
+		t.Run(branch, func(t *testing.T) {
+			bareURL, commit := newBareFixtureBranch(t, branch)
+			sha := commit("file.txt", "content-"+branch)
+
+			target := filepath.Join(t.TempDir(), "clone")
+			gotSHA, err := newLocalCloner().Clone(context.Background(), bareURL, branch, target, nil)
+			if err != nil {
+				t.Fatalf("Clone(branch=%s): %v", branch, err)
+			}
+			if gotSHA != sha {
+				t.Errorf("Clone SHA = %q, want %q", gotSHA, sha)
 			}
 			data, err := os.ReadFile(filepath.Join(target, "file.txt"))
 			must(t, err)

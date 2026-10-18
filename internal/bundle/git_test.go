@@ -317,7 +317,7 @@ func TestCloneRejectsFileProtocol(t *testing.T) {
 
 	cloner := NewGitCloner()
 	cloneDir := filepath.Join(fixtureDir, "clone-target")
-	err := cloner.Clone(context.Background(), "file://"+bareRepo, "0000000000000000000000000000000000000000", cloneDir, nil)
+	_, err := cloner.Clone(context.Background(), "file://"+bareRepo, "0000000000000000000000000000000000000000", cloneDir, nil)
 	if err == nil {
 		t.Fatal("Clone with file:// protocol should be rejected, got nil error")
 	}
