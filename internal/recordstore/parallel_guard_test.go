@@ -20,8 +20,9 @@ const serialReasonRole = "reads or creates a cluster-wide role"
 // t.Parallel. Every other database test calls t.Parallel as its first
 // statement. TestDatabaseTestsRunInParallel enforces both rules.
 var serialDatabaseTests = map[string]string{
-	"TestEnsureGrantsGatewayRole": serialReasonRole,
-	"TestEnsureGrantsIdempotent":  serialReasonRole,
+	"TestEnsureGrantsGatewayRole":       serialReasonRole,
+	"TestEnsureGrantsIdempotent":        serialReasonRole,
+	"TestEnsureGrantsClientAgentTables": serialReasonRole,
 }
 
 // databaseEntryPoints are the helpers through which a test reaches the

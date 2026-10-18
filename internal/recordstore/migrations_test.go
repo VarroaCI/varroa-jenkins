@@ -48,6 +48,7 @@ func TestMigrationsFSListsEveryFile(t *testing.T) {
 		"00035_job_inventory_truncation.sql":               false,
 		"00036_run_tests_drop_total.sql":                   false,
 		"00037_runs_restart_source_idx.sql":                false,
+		"00038_agent_sessions.sql":                         false,
 	}
 	for _, entry := range entries {
 		if _, ok := want[entry.Name()]; !ok {

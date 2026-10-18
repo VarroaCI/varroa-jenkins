@@ -95,6 +95,22 @@ connections:
     control: recordStore.postgres.mode and host
     disable: "Yes. Leave recordStore.enabled false."
 
+  - component: bff
+    destination: api.anthropic.com
+    hosts: [api.anthropic.com]
+    purpose: "Send assistant requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty."
+    protocol: HTTPS 443
+    control: "assistant.providers[].baseURL (the adapter default when it is empty)"
+    disable: "Yes. Keep assistant.enabled false."
+
+  - component: bff
+    destination: Configured assistant provider base URLs
+    hosts: []
+    purpose: Send assistant requests to the configured model provider.
+    protocol: "HTTPS 443, or the port in the base URL"
+    control: assistant.providers[].baseURL
+    disable: "Yes. Keep assistant.enabled false."
+
   # Update center
 
   - component: updatecenter

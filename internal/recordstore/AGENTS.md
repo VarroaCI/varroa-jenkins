@@ -13,6 +13,9 @@ of the fleet's audit activity, once a controller becomes disposable.
 
 - Owns: schema `varroa` in Postgres database `varroa`, migration `00001`
   and every migration after it, the migration runner, and `EnsureGrants`.
+- Owns migration `00038` (the four agent tables) and every delete of an agent
+  row (`retention_agent.go`). `internal/agent/store` inserts and updates those
+  tables through `varroa_client`; this package never writes them otherwise.
 - Is the single writer of the record tables. No other package writes to
   schema `varroa`. A reader (the BFF, the gateway in blob mode) opens its
   own connection with the read-only `varroa_client` role and never
@@ -302,7 +305,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   no-op otherwise. It never creates a role. CloudNativePG creates the role
   from the chart's `spec.managed.roles`, on its own schedule, so the
   migration runner and the retention ticker both call `EnsureGrants` on
-  every pass.
+  every pass. The client role also gets `INSERT` and `UPDATE` on the four
+  agent tables. It holds no `DELETE` on any table.
 - **`VARROA_TEST_DSN` harness** (`testutil_test.go`) — a test that needs a
   live database reads this environment variable and calls `t.Skip` when it
   is unset, so `make test` stays green with no database present. Each such
@@ -1498,7 +1502,7 @@ of the fleet's audit activity, once a controller becomes disposable.
 
 ```bash
 VARROA_TEST_DSN='postgres://user:pass@host:port/db?sslmode=disable' \
-  go test -race -count=1 -parallel 8 -timeout 30m ./internal/recordstore/...
+  go test -race -count=1 -parallel 8 -timeout 30m ./internal/recordstore/... ./internal/agent/store/...
 go test -race -count=1 ./internal/recordstore/...   # DSN unset: tests skip
 ```
 
