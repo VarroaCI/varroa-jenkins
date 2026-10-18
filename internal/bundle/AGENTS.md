@@ -149,6 +149,9 @@ index parsing, and pre-apply content validation.
   shares the same parse/validate/merge pipeline via `materializeDir`.
   `materializeDir` is the shared seam (`ParseManifest` → `Validator.Validate`
   → merge jcasc → read plugins/items/rbac → parse variable files).
+  `MaterializedBundle.Dir` is the resolved bundle directory; it stays valid only
+  until the caller removes the clone or extraction directory. `CommitSHA` is set on
+  the git path only and is empty for `MaterializeOCI`.
   `MaterializedBundle.PipelineTemplatesYAML` carries the controller's own
   delivered template set; `CellTemplateFragments` carries one entry per
   placed tenant, for a cell — neither is ever subject to `ResolveVars`.

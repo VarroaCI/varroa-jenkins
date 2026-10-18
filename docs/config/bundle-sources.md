@@ -96,6 +96,33 @@ spec:
 must contain exactly one registry entry; a secret with more than one `auths`
 entry is rejected.
 
+`path` selects one bundle in a hand-built artifact whose root holds more than one bundle.
+
+## Export a Git bundle to OCI
+
+Use `varroactl export bundle` to publish one Git bundle as an OCI artifact:
+
+```bash
+varroactl export bundle --repo https://github.com/example/bundles.git \
+  --path bundles/team-platform --revision main \
+  --to oci://registry.example.com/bundles/team-platform:v1
+```
+
+The artifact root is the bundle directory. Import it with `ref` only:
+
+```yaml
+spec:
+  inputs:
+    - ociSource:
+        ref: registry.example.com/bundles/team-platform:v1
+```
+
+- An `oci://` destination with an explicit `:tag` uses that tag.
+- A `dir://` or `tar://` destination uses the tag `<repo>-<path>`, for example
+  `github.com-example-bundles-bundles-team-platform`.
+- The paths `a-b` and `a/b` produce the same derived tag. Use an explicit tag in that case.
+- The manifest records the source URL without credentials, the commit SHA, and the bundle path.
+
 ## Size the Git cache
 
 ```yaml

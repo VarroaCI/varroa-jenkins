@@ -169,7 +169,7 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 
 	// Tar+gzip the cloned directory and push as a layer.
 	ref := name
-	if err := pushBundleAsOCIArtifact(cmd.Context(), store, ref, cloneDir, "application/vnd.varroa.catalog.v1.tar+gzip", "application/vnd.varroa.catalog.v1"); err != nil {
+	if err := pushBundleAsOCIArtifact(cmd.Context(), store, ref, cloneDir, "application/vnd.varroa.catalog.v1.tar+gzip", "application/vnd.varroa.catalog.v1", nil); err != nil {
 		return fmt.Errorf("push catalog artifact: %w", err)
 	}
 
@@ -178,8 +178,9 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 }
 
 // pushBundleAsOCIArtifact creates a tar.gz of srcDir, pushes it as a blob,
-// and pushes a manifest referencing that layer under the given ref.
-func pushBundleAsOCIArtifact(ctx context.Context, store oci.BlobStore, ref, srcDir, layerMediaType, artifactType string) error {
+// and pushes a manifest referencing that layer under the given ref. The
+// annotations map becomes the manifest annotations; it may be nil.
+func pushBundleAsOCIArtifact(ctx context.Context, store oci.BlobStore, ref, srcDir, layerMediaType, artifactType string, annotations map[string]string) error {
 	// Create tar.gz of the bundle directory.
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -244,6 +245,7 @@ func pushBundleAsOCIArtifact(ctx context.Context, store oci.BlobStore, ref, srcD
 	// Push the manifest.
 	return store.Push(ctx, ref, oci.Manifest{
 		ArtifactType: artifactType,
+		Annotations:  annotations,
 		Config: oci.Descriptor{
 			MediaType: "application/vnd.varroa.bundle.config.v1+json",
 			Digest:    configDigest,
