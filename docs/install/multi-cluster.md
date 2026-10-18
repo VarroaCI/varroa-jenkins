@@ -17,6 +17,8 @@ Protect the endpoint with firewall rules and NATS credentials. If network polici
 
 On the core, with network policies enabled, set `nats.external.allowedCIDRs` to the source addresses of each member. The render fails while the list is empty. A member address behind a NodePort or LoadBalancer can change. See [Network Policies](network-policies.md#external-nats-clients).
 
+With `nats.external.externalTrafficPolicy: Local`, each node sends NATS traffic only to a NATS pod on that node. A load balancer checks each node and skips a node without a NATS pod. A NodePort drops the connection on a node without a NATS pod. For a NodePort, set the member `bus.url` to a comma-separated list of node addresses that run NATS pods. Add each address to `nats.external.ipSANs` on the core and to `networkPolicy.coreNatsEgress.cidrs` on the member. Pin the NATS pods to those nodes with `nats.podTemplate.merge.spec.nodeSelector`.
+
 ## Install the member
 
 Create in the member namespace a `varroa-nats-creds` Secret containing only `operator-password`, `gateway-password`, and `ca.crt`, copied securely from the core deployment. Do not copy private keys or BFF credentials.

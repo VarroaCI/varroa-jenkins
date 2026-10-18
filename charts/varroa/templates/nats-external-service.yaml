@@ -1,5 +1,9 @@
 {{- if and (not (include "varroa.isHive" .)) (.Values.nats.external).enabled -}}
 {{- $external := .Values.nats.external -}}
+{{- $policy := $external.externalTrafficPolicy | default "Cluster" -}}
+{{- if not (has $policy (list "Cluster" "Local")) -}}
+{{- fail (printf "nats.external.externalTrafficPolicy must be Cluster or Local, not %q" $policy) -}}
+{{- end -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,6 +17,7 @@ metadata:
   {{- end }}
 spec:
   type: {{ $external.serviceType | default "LoadBalancer" }}
+  externalTrafficPolicy: {{ $policy }}
   {{- if and (eq ($external.serviceType | default "LoadBalancer") "NodePort") (gt ($external.nodePort | int) 0) }}
   ports:
     - name: nats

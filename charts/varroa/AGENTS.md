@@ -71,7 +71,7 @@ the packaged CRDs. Does not own the Go source it packages
   `networkpolicy.yaml` (all opt-in, `networkPolicy.enabled`);
   `pdb.yaml` (operator/gateway/bff PDBs, only when replicas > 1; bff PDB skipped in hive
   mode); `nats-auth-config.yaml`/`secret-nats-creds.yaml`/`nats-external-service.yaml`
-  (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
+  (NATS TLS + per-service ACL creds; `nats-external-service.yaml` renders `spec.externalTrafficPolicy` from `nats.external.externalTrafficPolicy` (`Cluster` default or `Local`; any other value fails the render; `tests/test-hive-mode.sh`)); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
 - **`templates/networkpolicy-guard.yaml`** — fails closed for every egress group. A rule
   renders only when its gate is on and its `cidrs` list is non-empty. A gate that is on

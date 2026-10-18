@@ -820,11 +820,12 @@ nats:
     enabled: false
     serviceType: LoadBalancer   # LoadBalancer | NodePort
     nodePort: 0                 # fixed nodePort when serviceType=NodePort (0 = auto)
+    externalTrafficPolicy: Cluster  # Cluster | Local. Local keeps the member source address for allowedCIDRs. A NodePort with Local answers only on nodes that run a NATS pod.
     annotations: {}
     host: ""                    # REQUIRED when enabled — external DNS name; becomes a cert SAN + NOTES output
     extraSANs: []               # additional DNS SANs
     ipSANs: []                  # IP SANs
-    allowedCIDRs: []            # required when networkPolicy.enabled=true and external.enabled; [] fails the render. Use ["0.0.0.0/0"] to admit every source.
+    allowedCIDRs: []            # required when networkPolicy.enabled=true and external.enabled; [] fails the render. With Cluster, include the core node and pod ranges. Use ["0.0.0.0/0"] to admit every source.
 
 # ---------------------------------------------------------------------------
 # Frontend — React SPA served by nginx. All CRD operations flow through the auth-protected Varroa BFF API.
