@@ -606,3 +606,219 @@ func TestFindSubCommand(t *testing.T) {
 		t.Errorf("expected name 'export', got %q", exportCmd.Name())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// export catalog secretRef tests
+// ---------------------------------------------------------------------------
+
+const testSecretRepoURL = "https://git.example.com/org/repo.git"
+
+// writeSecretFile writes a Secret manifest to a temp file and returns its path.
+func writeSecretFile(t *testing.T, manifest string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "secret.yaml")
+	if err := os.WriteFile(path, []byte(manifest), 0600); err != nil {
+		t.Fatalf("write secret file: %v", err)
+	}
+	return path
+}
+
+func basicAuthSecretYAML(name, annotation string) string {
+	annot := ""
+	if annotation != "" {
+		annot = "  annotations:\n    varroa.dev/allowed-hosts: " + annotation + "\n"
+	}
+	return "apiVersion: v1\nkind: Secret\nmetadata:\n  name: " + name + "\n  namespace: ns1\n" + annot +
+		"type: kubernetes.io/basic-auth\nstringData:\n  username: alice\n  password: s3cret\n"
+}
+
+func gitSpec(secretRef string) v1alpha1.CatalogSourceSpec {
+	return v1alpha1.CatalogSourceSpec{RepoURL: testSecretRepoURL, SecretRef: secretRef}
+}
+
+func TestCatalogFetchAuth_AnnotationCoversHost(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "git.example.com"))
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(gitSpec("git-creds"), "ns1", path, &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.GitAuth == nil || fetch.GitAuth.Username != "alice" {
+		t.Fatalf("GitAuth = %+v, want username alice", fetch.GitAuth)
+	}
+}
+
+func TestCatalogFetchAuth_AnnotationOtherHost(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "github.com"))
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(gitSpec("git-creds"), "ns1", path, &fetch)
+	if err == nil {
+		t.Fatal("expected host check error")
+	}
+	if !strings.Contains(err.Error(), "git host check failed for secret") || !strings.Contains(err.Error(), "is not in the allowed-hosts list") {
+		t.Errorf("error = %v", err)
+	}
+	if fetch.GitAuth != nil {
+		t.Error("GitAuth set despite refused host")
+	}
+}
+
+func TestCatalogFetchAuth_NoAnnotationBasicAuthRefused(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", ""))
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(gitSpec("git-creds"), "ns1", path, &fetch)
+	if err == nil || !strings.Contains(err.Error(), `must have annotation "varroa.dev/allowed-hosts"`) {
+		t.Fatalf("error = %v, want missing-annotation refusal", err)
+	}
+}
+
+func TestCatalogFetchAuth_SSHKeyNoAnnotationAllowed(t *testing.T) {
+	// The key body is a placeholder. The test checks only that the key is taken, not that it parses.
+	path := writeSecretFile(t, "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ssh-key\ntype: kubernetes.io/ssh-auth\nstringData:\n  ssh-privatekey: placeholder-key-material\n")
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(gitSpec("ssh-key"), "ns1", path, &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.GitAuth == nil || fetch.GitAuth.SSHPrivateKey == "" {
+		t.Fatalf("GitAuth = %+v, want SSH key", fetch.GitAuth)
+	}
+}
+
+func TestCatalogFetchAuth_StringDataMerged(t *testing.T) {
+	// Data holds the username in base64 (alice); stringData overrides the password.
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: git-creds\n" +
+		"  annotations:\n    varroa.dev/allowed-hosts: git.example.com\n" +
+		"data:\n  username: YWxpY2U=\nstringData:\n  password: s3cret\n"
+	path := writeSecretFile(t, manifest)
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(gitSpec("git-creds"), "ns1", path, &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.GitAuth == nil || fetch.GitAuth.Username != "alice" || fetch.GitAuth.Password != "s3cret" {
+		t.Fatalf("GitAuth = %+v, want alice/s3cret", fetch.GitAuth)
+	}
+}
+
+func TestCatalogFetchAuth_SecretNameMismatch(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("other-creds", "git.example.com"))
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(gitSpec("git-creds"), "ns1", path, &fetch)
+	if err == nil || !strings.Contains(err.Error(), "other-creds") || !strings.Contains(err.Error(), "git-creds") {
+		t.Fatalf("error = %v, want name mismatch naming both", err)
+	}
+}
+
+func TestCatalogFetchAuth_NamespaceMismatch(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "git.example.com"))
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(gitSpec("git-creds"), "other-ns", path, &fetch)
+	if err == nil || !strings.Contains(err.Error(), "other-ns") {
+		t.Fatalf("error = %v, want namespace mismatch", err)
+	}
+}
+
+func TestCatalogFetchAuth_SecretRefWithoutFile(t *testing.T) {
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(gitSpec("git-creds"), "ns1", "", &fetch)
+	if err == nil || !strings.Contains(err.Error(), "--secret-file") {
+		t.Fatalf("error = %v, want --secret-file hint", err)
+	}
+}
+
+func TestCatalogFetchAuth_FileWithoutSecretRef(t *testing.T) {
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "git.example.com"))
+	var fetch bundle.CatalogFetch
+	err := catalogFetchAuth(v1alpha1.CatalogSourceSpec{RepoURL: testSecretRepoURL}, "ns1", path, &fetch)
+	var ue usageError
+	if !errorsAs(err, &ue) {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+}
+
+func TestCatalogFetchAuth_OCIDockerConfig(t *testing.T) {
+	// The auth value is base64 of "user:pass" and is not a real credential.
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: oci-creds\n" +
+		"type: kubernetes.io/dockerconfigjson\nstringData:\n  .dockerconfigjson: |\n" +
+		"    {\"auths\":{\"registry.example.com\":{\"auth\":\"dXNlcjpwYXNz\"}}}\n"
+	path := writeSecretFile(t, manifest)
+	spec := v1alpha1.CatalogSourceSpec{OCIRef: "registry.example.com/catalog:latest", SecretRef: "oci-creds"}
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(spec, "ns1", path, &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.OCIAuth == nil {
+		t.Fatal("OCIAuth not set")
+	}
+	if fetch.GitAuth != nil {
+		t.Error("GitAuth set for an OCI source")
+	}
+}
+
+func TestCatalogFetchAuth_NoSecretRefNoFile(t *testing.T) {
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(v1alpha1.CatalogSourceSpec{RepoURL: testSecretRepoURL}, "ns1", "", &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.GitAuth != nil || fetch.OCIAuth != nil {
+		t.Error("auth set without secretRef")
+	}
+}
+
+func TestCatalogFetchAuth_RepoURLWinsOverOCIRef(t *testing.T) {
+	// Both fields set: FetchCatalog clones git, so the Secret must be a git secret.
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "git.example.com"))
+	spec := gitSpec("git-creds")
+	spec.OCIRef = "registry.example.com/catalog:latest"
+	var fetch bundle.CatalogFetch
+	if err := catalogFetchAuth(spec, "ns1", path, &fetch); err != nil {
+		t.Fatalf("catalogFetchAuth: %v", err)
+	}
+	if fetch.GitAuth == nil || fetch.OCIAuth != nil {
+		t.Fatalf("GitAuth = %+v, OCIAuth = %+v, want git auth only", fetch.GitAuth, fetch.OCIAuth)
+	}
+}
+
+// catalogSourceServerWithSecret answers the CatalogSource with secretRef and
+// records every request path. Any other path answers 404.
+func catalogSourceServerWithSecret(t *testing.T, repoURL, secretRef string, seen *[]string) *httptest.Server {
+	t.Helper()
+	srcJSON, _ := json.Marshal(v1alpha1.CatalogSource{
+		Spec: v1alpha1.CatalogSourceSpec{RepoURL: repoURL, SecretRef: secretRef},
+	})
+	return testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		*seen = append(*seen, r.URL.Path)
+		if strings.Contains(r.URL.Path, "/catalogsources/ns1/src1") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(srcJSON)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+}
+
+func TestExportCatalog_SecretHostRefused(t *testing.T) {
+	var seen []string
+	srv := catalogSourceServerWithSecret(t, testSecretRepoURL, "git-creds", &seen)
+	path := writeSecretFile(t, basicAuthSecretYAML("git-creds", "github.com"))
+	dest := filepath.Join(t.TempDir(), "out")
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "catalog",
+		"--namespace", "ns1", "--name", "src1",
+		"--to", "dir://" + dest,
+		"--secret-file", path,
+		"--server", srv.URL,
+		"--context", "test",
+	})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "git host check failed for secret git-creds") {
+		t.Fatalf("error = %v, want host check refusal", err)
+	}
+	for _, p := range seen {
+		if strings.Contains(p, "/secrets/") {
+			t.Errorf("BFF saw a secret request: %s", p)
+		}
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("destination written despite refusal: stat err = %v", statErr)
+	}
+}

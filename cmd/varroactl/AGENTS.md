@@ -19,7 +19,9 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   `bundle.FetchCatalog`, reads the index with `bundle.ParseCatalogIndex`, and
   pushes the tree as one catalog layer. It never calls `Resolver.Materialize`.
   The manifest reference is the `--to` target. An untagged `oci://` target
-  takes `:<name>` as its tag.
+  takes `:<name>` as its tag. A `spec.secretRef` source needs `--secret-file`.
+  The command reads the Secret from that file, never through the BFF, and
+  applies `bundle.CheckGitSecretHost` with the controller's error text.
 - **Entrypoint** — `main.go` just calls `run(os.Args[1:])` (`root.go`).
   `root.go` maps errors to exit codes: `usageError` / cobra parse errors → 2,
   other errors → 1, success → 0 (`isUsageError`, `run`).
