@@ -22,6 +22,32 @@ import (
 // export catalog tests
 // ---------------------------------------------------------------------------
 
+func TestExportCatalog_RejectsUCDestination(t *testing.T) {
+	testSetup(t)
+	srv := testServer(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected BFF request %s", r.URL.Path)
+	})
+	defer srv.Close()
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "catalog",
+		"--namespace", "ns1",
+		"--name", "src1",
+		"--to", "uc://localhost:8080",
+	})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected usage error for uc:// destination")
+	}
+	var ue usageError
+	if !errorsAs(err, &ue) {
+		t.Fatalf("expected usageError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "uc://") {
+		t.Errorf("error %q does not name uc://", err.Error())
+	}
+}
+
 func TestExportCatalog_FlagParsing(t *testing.T) {
 	testSetup(t)
 
@@ -475,6 +501,31 @@ func TestExportBundle_DestToDir(t *testing.T) {
 // ---------------------------------------------------------------------------
 // pushBundleAsOCIArtifact test (unit test for the shared helper)
 // ---------------------------------------------------------------------------
+
+func TestExportBundle_RejectsUCDestination(t *testing.T) {
+	testSetup(t)
+
+	root := newRootCmd()
+	root.SetArgs([]string{"export", "bundle",
+		"--repo", "https://example.invalid/bundles.git",
+		"--path", "prod",
+		"--revision", "main",
+		"--to", "uc://team-a/prod-bundle:v1",
+	})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected usage error for uc:// destination")
+	}
+	var ue usageError
+	if !errorsAs(err, &ue) {
+		t.Fatalf("expected usageError, got %T: %v", err, err)
+	}
+	for _, want := range []string{"uc://", "oci://", "dir://", "tar://"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+}
 
 func TestPushBundleAsOCIArtifact_DirDest(t *testing.T) {
 	testSetup(t)

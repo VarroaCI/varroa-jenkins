@@ -97,6 +97,10 @@ func runExportBundle(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if scheme == "uc" {
+		return rejectUCSnapshotDest("bundle")
+	}
+
 	// Open the destination store.
 	store, finalize, err := openOCIDest(scheme, target, registryConfig, insecure)
 	if err != nil {
