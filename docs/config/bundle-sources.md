@@ -108,6 +108,8 @@ varroactl export bundle --repo https://github.com/example/bundles.git \
   --to oci://registry.example.com/bundles/team-platform:v1
 ```
 
+`--to` accepts `oci://`, `dir://`, and `tar://`. The command refuses `uc://`, because the update center serves plugin packs only.
+
 The artifact root is the bundle directory. Import it with `ref` only:
 
 ```yaml

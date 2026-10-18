@@ -192,6 +192,7 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
   `org.opencontainers.image.revision` (the commit SHA, omitted when empty), and
   `dev.varroa.bundle.path`. `pushBundleAsOCIArtifact` takes the annotations;
   `export catalog` passes nil.
+- **Snapshot destinations** — `export bundle` and `export catalog` refuse `uc://` with a usage error before any clone, BFF call, or store write (`rejectUCSnapshotDest`). `export plugins` keeps the runtime `errUCNotSupported`.
 - **Release bundle (`export_release.go`, `import_release.go`)** — `export release`
   writes one air-gap transfer artifact: the chart, the images that the rendered
   chart and the selected profiles name, one plugin pack per profile, and

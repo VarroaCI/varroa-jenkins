@@ -165,6 +165,8 @@ varroactl export catalog --namespace varroa-system --name platform-catalog \
   --to tar:///transfer/platform-catalog.tar.gz
 ```
 
+`--to` accepts `oci://`, `dir://`, and `tar://`. The command refuses `uc://`, because the update center serves plugin packs only.
+
 `varroactl import` copies the result to a registry. Set a `CatalogSource.spec.ociRef` to that reference to serve the catalog from it. The source keeps its `spec.path`.
 
 ## Transfer a release bundle

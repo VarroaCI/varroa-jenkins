@@ -91,6 +91,19 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	registryConfig, _ := cmd.Flags().GetString("registry-config")
 	insecure, _ := cmd.Flags().GetBool("insecure")
 
+	// Parse the OCI dest scheme.
+	scheme, target, err := ParseOCIDest(toDest)
+	if err != nil {
+		if _, ok := err.(*ErrUnrecognizedScheme); ok {
+			return usagef("%v", err)
+		}
+		return err
+	}
+
+	if scheme == "uc" {
+		return rejectUCSnapshotDest("catalog")
+	}
+
 	cluster := resolveCrdCluster(cmd)
 
 	// Fetch CatalogSource from BFF.
@@ -118,15 +131,6 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	spec := src.Spec
 	if spec.RepoURL == "" && spec.OCIRef == "" {
 		return fmt.Errorf("CatalogSource %s/%s has neither repoURL nor ociRef", ns, name)
-	}
-
-	// Parse the OCI dest scheme.
-	scheme, target, err := ParseOCIDest(toDest)
-	if err != nil {
-		if _, ok := err.(*ErrUnrecognizedScheme); ok {
-			return usagef("%v", err)
-		}
-		return err
 	}
 
 	// Open the destination store.

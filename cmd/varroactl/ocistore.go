@@ -15,6 +15,12 @@ import (
 // errUCNotSupported is returned when the caller requests a uc:// scheme.
 var errUCNotSupported = fmt.Errorf("uc:// requires the update-center service (not available in this build)")
 
+// rejectUCSnapshotDest refuses uc:// for a catalog or bundle snapshot.
+// The update center serves plugin packs only, so nothing reads a snapshot there.
+func rejectUCSnapshotDest(noun string) error {
+	return usagef("uc:// is not a valid destination for export %s: the update center serves plugin packs only; use oci://, dir://, or tar://", noun)
+}
+
 // openOCIDest opens a BlobStore for writing (destination).
 // The returned finalize function MUST be called after the store operation completes.
 // For tar://, finalize archives the temp layout into the target .tar.gz and cleans up.
