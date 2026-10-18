@@ -289,8 +289,11 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 	}
 
 	// Step 5: hit check.
-	hit = commitExists(ctx, bare, sha)
-	if !hit {
+	var peeled string
+	peeled, hit = peelCommit(ctx, bare, sha)
+	if hit {
+		sha = peeled
+	} else {
 		// MISS — fetch.
 		if c.fetchHook != nil {
 			c.fetchHook()
@@ -359,21 +362,26 @@ func initBareRepo(ctx context.Context, bare string) error {
 	return nil
 }
 
-// commitExists reports whether sha is a commit object in the bare repository.
-func commitExists(ctx context.Context, bare, sha string) bool {
-	cmd := gitCommand(ctx, "-C", bare, "cat-file", "-e", sha+"^{commit}")
-	return cmd.Run() == nil
+// peelCommit returns the commit SHA that sha names in the bare repository.
+// It peels a tag object to its commit. ok is false when the commit is absent.
+func peelCommit(ctx context.Context, bare, sha string) (string, bool) {
+	out, err := gitCommand(ctx, "-C", bare, "rev-parse", "--verify", "--quiet", sha+"^{commit}").Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 // fetchCommit fetches the commit for revision into the bare repository and
-// returns the commit SHA to archive. A branch or tag can move between the
-// ls-remote and the fetch, so the SHA is re-read from the fetched ref when
-// the first SHA is missing.
+// returns the commit SHA to archive. A tag object SHA is peeled to its commit.
+// A branch or tag can move between the ls-remote and the fetch, so the SHA is
+// re-read from the fetched ref when the first SHA is missing.
 func fetchCommit(ctx context.Context, bare, repoURL, sha, revision string, auth *GitAuth, allowLocal bool) (string, error) {
 	if err := fetchBareRef(ctx, bare, repoURL, sha, revision, auth, allowLocal); err != nil {
 		return "", err
 	}
-	if !commitExists(ctx, bare, sha) && !isCommitSHA(revision) {
+	peeled, ok := peelCommit(ctx, bare, sha)
+	if !ok && !isCommitSHA(revision) {
 		ref := revision
 		if ref == "" {
 			ref = "HEAD"
@@ -381,15 +389,16 @@ func fetchCommit(ctx context.Context, bare, repoURL, sha, revision string, auth 
 		out, err := gitCommand(ctx, "-C", bare, "rev-parse", "refs/varroa/"+ref).Output()
 		if err == nil {
 			sha = strings.TrimSpace(string(out))
+			peeled, ok = peelCommit(ctx, bare, sha)
 		}
 	}
-	if !commitExists(ctx, bare, sha) {
+	if !ok {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("check fetched SHA %s for %s: %w", sha, redactURL(repoURL), ctx.Err())
 		}
 		return "", fmt.Errorf("desired SHA %s is absent after fetch for %s", sha, redactURL(repoURL))
 	}
-	return sha, nil
+	return peeled, nil
 }
 
 // fetchBareRef performs a shallow fetch into the bare repository. The URL is
@@ -408,7 +417,7 @@ func fetchBareRef(ctx context.Context, bare, repoURL, sha, revision string, auth
 	if isCommitSHA(revision) {
 		// Pinned SHA: fetch into a ref so it's reachable for clone.
 		ref := "refs/varroa/pinned/" + sha
-		cmd := gitCommand(ctx, "-C", bare, "fetch", "--depth=1", repoURL, "+"+sha+":"+ref)
+		cmd := gitCommand(ctx, "-C", bare, "fetch", "--depth=1", "--no-tags", repoURL, "+"+sha+":"+ref)
 		cmd.Env = gitEnv
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {

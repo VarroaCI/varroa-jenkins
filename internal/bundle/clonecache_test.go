@@ -856,3 +856,118 @@ func TestClone_DefaultBranchNameCollision(t *testing.T) {
 		})
 	}
 }
+
+// tagFixture creates a tag named name in the bare repository at target. An
+// annotated tag is a tag object. It returns the SHA that the tag ref names.
+func tagFixture(t *testing.T, bareURL, name, target string, annotated bool) string {
+	t.Helper()
+	bare := strings.TrimPrefix(bareURL, "file://")
+	env := append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	args := []string{"-C", bare, "tag"}
+	if annotated {
+		args = append(args, "-a", "-m", "tag "+name)
+	}
+	args = append(args, name, target)
+	tag := exec.Command("git", args...)
+	tag.Env = env
+	must(t, tag.Run())
+	out, err := exec.Command("git", "-C", bare, "rev-parse", "refs/tags/"+name).Output()
+	must(t, err)
+	return strings.TrimSpace(string(out))
+}
+
+// TestRevisionForms_ResolveToCommit checks that every revision form resolves
+// to the commit SHA on the cached and the cache-off paths.
+func TestRevisionForms_ResolveToCommit(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	shaA := commit("a.txt", "A")
+	light := tagFixture(t, bareURL, "light", shaA, false)
+	_ = light
+	v1Obj := tagFixture(t, bareURL, "v1", shaA, true)
+	nestedObj := tagFixture(t, bareURL, "nested", v1Obj, true)
+	_ = nestedObj
+	shaB := commit("a.txt", "B")
+
+	tests := []struct {
+		name     string
+		revision string
+		want     string
+		content  string
+	}{
+		{"branch", "main", shaB, "B"},
+		{"lightweight tag", "light", shaA, "A"},
+		{"annotated tag", "v1", shaA, "A"},
+		{"qualified annotated tag", "refs/tags/v1", shaA, "A"},
+		{"tag of a tag", "nested", shaA, "A"},
+		{"pinned commit", shaA, shaA, "A"},
+		{"pinned annotated tag object", v1Obj, shaA, "A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			cache := newCacheForTest(t, t.TempDir(), 10, 100)
+
+			out1 := filepath.Join(t.TempDir(), "out1")
+			sha, hit, err := cache.Checkout(ctx, bareURL, tt.revision, out1, nil)
+			must(t, err)
+			if sha != tt.want {
+				t.Errorf("Checkout SHA = %q, want %q", sha, tt.want)
+			}
+			if hit {
+				t.Errorf("first Checkout hit = true, want false")
+			}
+			data, err := os.ReadFile(filepath.Join(out1, "a.txt"))
+			must(t, err)
+			if string(data) != tt.content {
+				t.Errorf("a.txt = %q, want %q", data, tt.content)
+			}
+
+			out2 := filepath.Join(t.TempDir(), "out2")
+			sha, hit, err = cache.Checkout(ctx, bareURL, tt.revision, out2, nil)
+			must(t, err)
+			if sha != tt.want {
+				t.Errorf("second Checkout SHA = %q, want %q", sha, tt.want)
+			}
+			if !hit {
+				t.Errorf("second Checkout hit = false, want true")
+			}
+
+			out3 := filepath.Join(t.TempDir(), "out3")
+			gotSHA, err := newLocalCloner().Clone(ctx, bareURL, tt.revision, out3, nil)
+			must(t, err)
+			if gotSHA != tt.want {
+				t.Errorf("Clone SHA = %q, want %q", gotSHA, tt.want)
+			}
+			data, err = os.ReadFile(filepath.Join(out3, "a.txt"))
+			must(t, err)
+			if string(data) != tt.content {
+				t.Errorf("Clone a.txt = %q, want %q", data, tt.content)
+			}
+		})
+	}
+}
+
+// TestCheckout_PinnedSHAFetchesNoTags checks that a pinned fetch does not copy
+// the remote tags into the bare store.
+func TestCheckout_PinnedSHAFetchesNoTags(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	shaA := commit("a.txt", "A")
+	_ = tagFixture(t, bareURL, "v1", shaA, true)
+	_ = commit("a.txt", "B")
+
+	root := t.TempDir()
+	cache := newCacheForTest(t, root, 10, 100)
+	target := filepath.Join(t.TempDir(), "out")
+	_, _, err := cache.Checkout(context.Background(), bareURL, shaA, target, nil)
+	must(t, err)
+
+	bare := cache.barePath(cacheKey(bareURL))
+	out, err := exec.Command("git", "-C", bare, "for-each-ref", "refs/tags").Output()
+	must(t, err)
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("bare store holds tags after a pinned fetch:\n%s", out)
+	}
+}

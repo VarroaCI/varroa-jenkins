@@ -1100,6 +1100,119 @@ items:
 	}
 }
 
+// annotatedTagFixture creates an annotated tag v1.0 on the work tree HEAD,
+// pushes it, and returns the commit SHA that the tag points to.
+func annotatedTagFixture(t *testing.T, work string) string {
+	t.Helper()
+	gitCmd(t, work, "tag", "-a", "v1.0", "-m", "release")
+	gitCmd(t, work, "push", "origin", "v1.0")
+	out, err := exec.Command("git", "-C", work, "rev-parse", "v1.0^{commit}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestReconcileComposedBundle_GitInputAnnotatedTagNoFalseDrift(t *testing.T) {
+	fixture := t.TempDir()
+	bare := filepath.Join(fixture, "bare.git")
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, fixture, "init", "--bare", bare)
+
+	work := filepath.Join(fixture, "work")
+	gitCmd(t, fixture, "clone", bare, work)
+	gitCmd(t, work, "checkout", "-b", "main")
+	writeFile(t, filepath.Join(work, "bundle.yaml"), "id: test\nversion: \"1\"\napiVersion: \"1\"\njcasc:\n  - jenkins.yaml\n")
+	writeFile(t, filepath.Join(work, "jenkins.yaml"), "jenkins:\n  systemMessage: \"v1\"\n")
+	gitCmd(t, work, "add", ".")
+	gitCmd(t, work, "commit", "-m", "initial")
+	gitCmd(t, work, "push", "origin", "main")
+	commitSHA := annotatedTagFixture(t, work)
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "tag-cb", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{{GitSource: &v1alpha1.GitBundleSource{RepoURL: "file://" + bare, Path: ".", Revision: "v1.0"}}},
+		},
+	}
+
+	tc := newCatalogTestClient()
+	rec := newComposedBundleReconciler(tc, t)
+
+	rec.ReconcileComposedBundle(context.Background(), cb)
+	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("first reconcile phase = %v, want Ready", tc.lastStatus())
+	}
+	if got := tc.lastStatus().ObservedRevisions["0"]; got != commitSHA {
+		t.Fatalf("observedRevisions[0] = %q, want commit SHA %q", got, commitSHA)
+	}
+
+	// Carry status forward (contentRef + observedRevisions) as the cluster would.
+	cb.Status = *tc.lastStatus()
+
+	// Re-create the tag on the same commit. Its tag object SHA changes.
+	gitCmd(t, work, "tag", "-f", "-a", "v1.0", "-m", "again")
+	gitCmd(t, work, "push", "--force", "origin", "v1.0")
+
+	rec.ReconcileComposedBundle(context.Background(), cb)
+	if tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("second reconcile phase = %v, want Ready without drift", tc.lastStatus().Phase)
+	}
+	if got := tc.lastStatus().ObservedRevisions["0"]; got != commitSHA {
+		t.Fatalf("observedRevisions[0] = %q after tag re-creation, want unchanged %q", got, commitSHA)
+	}
+}
+
+func TestReconcileCatalogSource_AnnotatedTagRecordsCommit(t *testing.T) {
+	fixture := t.TempDir()
+	bare := filepath.Join(fixture, "bare.git")
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, fixture, "init", "--bare", bare)
+
+	work := filepath.Join(fixture, "work")
+	gitCmd(t, fixture, "clone", bare, work)
+	gitCmd(t, work, "checkout", "-b", "main")
+	writeFile(t, filepath.Join(work, "plugins.yaml"), "not valid plugin yaml")
+	writeFile(t, filepath.Join(work, "catalog.yaml"), `apiVersion: "1"
+name: test-catalog
+items:
+  - type: plugin
+    name: bad-plugin
+    path: plugins.yaml
+`)
+	gitCmd(t, work, "add", ".")
+	gitCmd(t, work, "commit", "-m", "initial")
+	gitCmd(t, work, "push", "origin", "main")
+	commitSHA := annotatedTagFixture(t, work)
+
+	tc := newCatalogTestClient()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "tag-src", Namespace: "ns"},
+		Spec: v1alpha1.CatalogSourceSpec{
+			RepoURL:  "file://" + bare,
+			Revision: "v1.0",
+			Path:     ".",
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.Reconcile(context.Background(), src)
+
+	items := tc.storedItems(t)
+	if len(items) == 0 {
+		t.Fatal("no catalog items stored")
+	}
+	for key, item := range items {
+		if item.Status.ObservedRevision != commitSHA {
+			t.Errorf("item %q: ObservedRevision = %q, want commit SHA %q", key, item.Status.ObservedRevision, commitSHA)
+		}
+	}
+}
+
 // --- helpers ---
 
 func gitCmd(t *testing.T, dir string, args ...string) {

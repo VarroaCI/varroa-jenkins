@@ -77,6 +77,8 @@ spec:
   syncIntervalSeconds: 300
 ```
 
+`status.observedRevision` holds the commit SHA. An annotated tag resolves to its commit.
+
 `syncIntervalSeconds` defaults to 300. A set value must be between 30 and 31536000 (one year); 0 or an omitted field means the default. The API, the MCP tools, and kubectl all reject any other value. Private Git uses
 a same-namespace `secretRef`; see [bundle source authentication](bundle-sources.md#reference-git). The catalog copies files the same way as a bundle source; see [Reference Git](bundle-sources.md#reference-git) for `.gitattributes` handling.
 
