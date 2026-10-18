@@ -48,9 +48,12 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
+	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/forge"
+	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation/wakeserver"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
@@ -826,6 +829,27 @@ func main() {
 	}); err != nil {
 		logger.Error("failed to add approve deletion runner", "error", err)
 		os.Exit(1)
+	}
+
+	// Forge check and read run on every replica; only the Team's shard owner replies.
+	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
+	enterTeam := func(ctx context.Context, key string) (context.Context, func(), bool) {
+		return shardSet.Enter(ctx, ring.ShardFor(key))
+	}
+	for _, r := range []*forgeRunner{
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbCheck, limit: forgeConcurrency, logger: logger,
+			handle: func(ctx context.Context, d []byte) []byte {
+				return handleForgeCheck(ctx, logger, forgeAnswerer, enterTeam, d)
+			}},
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbRead, limit: forgeConcurrency, logger: logger,
+			handle: func(ctx context.Context, d []byte) []byte {
+				return handleForgeRead(ctx, logger, forgeAnswerer, enterTeam, d)
+			}},
+	} {
+		if err := mgr.Add(r); err != nil {
+			logger.Error("failed to add forge runner", "verb", r.verb, "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Register cluster heartbeat runner (leader-elected, 30s tick).

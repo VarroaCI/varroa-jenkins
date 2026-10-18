@@ -51,6 +51,22 @@ connections:
     control: CatalogSource.spec.ociRef and ComposedBundle ociSource inputs
     disable: "Yes. Do not declare the source or the input."
 
+  - component: operator
+    destination: api.github.com
+    hosts: [api.github.com]
+    purpose: Read a proposed repository and open a pull request on GitHub.
+    protocol: HTTPS 443
+    control: the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts
+    disable: "Yes. Create no tenant credential that lists github.com."
+
+  - component: operator
+    destination: Forge API of a proposed repository
+    hosts: []
+    purpose: Read a proposed repository and open a pull request on a Gitea-API forge.
+    protocol: HTTPS 443
+    control: the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts
+    disable: "Yes. Create no tenant credential whose varroa.dev/allowed-hosts lists a non-GitHub forge host."
+
   # Gateway
 
   - component: gateway

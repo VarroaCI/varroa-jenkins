@@ -314,3 +314,9 @@ type CatalogSyncResponse struct {
 	Code  string `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
 }
+
+// OperatorForgeSubject returns operator.<cluster>.forge.<verb>.
+// verb is one of check, read, or pullrequest. A later change adds issue. The request and reply types live in internal/forge/forgeapi.
+func OperatorForgeSubject(cluster, verb string) string {
+	return "operator." + cluster + ".forge." + verb
+}

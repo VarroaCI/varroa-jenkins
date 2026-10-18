@@ -1491,6 +1491,8 @@ sections describe.
   empty on the last page. A single row over the budget fails the list with
   `listRowTooLargeError`.
 
+- **`forgeops/`** — answers the operator forge verbs `check` and `read` (`operator.<cluster>.forge.<verb>`). `chooseCredential` reads the Team's agent-namespace tenant-credential Secrets and keeps the ones whose `varroa.dev/allowed-hosts` lists the repository host, sorted by id. `pickWriter` uses the first credential whose `Repository` reports push; a credential that reads but cannot push is skipped. Replies name only the credential id and HTTP status, never a body or a token. `ShardKey(team)` is `team/<name>`, the ring key of every forge verb.
+
 ## Work Guidance
 
 - Any change to `DesiredStateCommand` fields must account for

@@ -90,6 +90,7 @@ stating what it is/is not responsible for:
   the ticker. `BusTransport.OnCommandResult` is set to
   `Reconciler.NotifyCommandResult`, so an applied rehydration result wakes
   its owned Controller at once.
+  Every replica also serves `operator.<cluster>.forge.check` and `.forge.read` (`forge_ops.go`), with no queue group and only the Team's shard owner replying. Each verb runs four requests at a time under a 25-second deadline (`forgeRequestTimeout`), below the requester's 30 seconds.
 - **`gateway/`** (`bin/varroa-gateway`) — terminates mTLS/gRPC from mite
   sidecars on `:9090` and bridges each `CommandStream` to NATS
   (`mite.<cluster>.<ns>.<name>.{in,out,content,desired}`). Loads the shared CA from the `varroa-ca`

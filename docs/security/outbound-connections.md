@@ -18,6 +18,8 @@ A build check fails when a source adds a host that this page does not list.
 | updates.jenkins.io (update-center metadata) | Read update-center metadata when pull-through uses the default upstream. | HTTPS 443 | updateCenter.pullThrough.upstreamURL | Yes. Pull-through is off by default. Keep updateCenter.pullThrough.enabled false. |
 | Git remotes of catalog sources and bundle inputs | Clone catalog sources and git bundle inputs. | HTTPS 443 or SSH 22 | CatalogSource.spec.repoURL and ComposedBundle gitSource inputs | Yes. Do not declare the source or the input. |
 | OCI registries of catalog sources and bundle inputs | Pull catalog and bundle artifacts. | HTTPS 443 | CatalogSource.spec.ociRef and ComposedBundle ociSource inputs | Yes. Do not declare the source or the input. |
+| api.github.com | Read a proposed repository and open a pull request on GitHub. | HTTPS 443 | the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts | Yes. Create no tenant credential that lists github.com. |
+| Forge API of a proposed repository | Read a proposed repository and open a pull request on a Gitea-API forge. | HTTPS 443 | the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts | Yes. Create no tenant credential whose varroa.dev/allowed-hosts lists a non-GitHub forge host. |
 
 ## Gateway
 

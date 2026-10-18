@@ -340,3 +340,12 @@ func TestOperatorCellPoolsSubject(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorForgeSubject(t *testing.T) {
+	for _, verb := range []string{"check", "read", "pullrequest", "issue"} {
+		want := "operator.member-c.forge." + verb
+		if got := OperatorForgeSubject("member-c", verb); got != want {
+			t.Errorf("OperatorForgeSubject(member-c, %q) = %q, want %q", verb, got, want)
+		}
+	}
+}

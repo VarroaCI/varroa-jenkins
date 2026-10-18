@@ -19,15 +19,15 @@ import (
 
 // Tenant-credential Secret label, annotations, and the six credential kinds.
 const (
-	tenantCredentialLabelSelector = "varroa.dev/tenant-credential=true"
+	tenantCredentialLabelSelector = v1alpha1.TenantCredentialSelector
 
-	annotationCredentialID          = "varroa.dev/credential-id"
-	annotationCredentialKind        = "varroa.dev/credential-kind"
+	annotationCredentialID          = v1alpha1.CredentialIDAnnotation
+	annotationCredentialKind        = v1alpha1.CredentialKindAnnotation
 	annotationCredentialDescription = "varroa.dev/credential-description"
 	annotationCredentialFilename    = "varroa.dev/credential-filename"
 
-	credentialKindUsernamePassword = "usernamePassword"
-	credentialKindSecretText       = "secretText"
+	credentialKindUsernamePassword = v1alpha1.CredentialKindUsernamePassword
+	credentialKindSecretText       = v1alpha1.CredentialKindSecretText
 	credentialKindSSHPrivateKey    = "sshPrivateKey"
 	credentialKindSecretFile       = "secretFile"
 	credentialKindCertificate      = "certificate"
