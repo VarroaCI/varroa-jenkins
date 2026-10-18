@@ -244,7 +244,7 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 		if r.cloneCache != nil {
 			_, _, err = r.cloneCache.Checkout(ctx, repoURL, revision, cloneDir, auth)
 		} else {
-			err = r.cloner.Clone(ctx, repoURL, revision, cloneDir, auth)
+			_, err = r.cloner.Clone(ctx, repoURL, revision, cloneDir, auth)
 		}
 		duration := time.Since(start).Seconds()
 		result := "success"

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -237,14 +236,10 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 				return
 			}
 		} else {
-			if err := r.cloner.Clone(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth); err != nil {
-				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
-				return
-			}
 			var err error
-			rev, err = getGitRevision(fetchCtx, dir)
+			rev, err = r.cloner.Clone(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth)
 			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("resolve revision: %v", err))
+				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
 				return
 			}
 		}
@@ -1081,19 +1076,6 @@ func (r *CatalogReconciler) setError(ctx context.Context, src *v1alpha1.CatalogS
 		r.logger.Error("failed to patch catalog source status to error",
 			"source", src.Name, "namespace", src.Namespace, "error", err)
 	}
-}
-
-// getGitRevision returns the full SHA of HEAD in the given git repository.
-func getGitRevision(ctx context.Context, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("git rev-parse HEAD: %w", ctx.Err())
-		}
-		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // storeItemLookup adapts crdstore.Backend to bundle.ItemLookup.

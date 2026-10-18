@@ -67,7 +67,8 @@ type repoMeta struct {
 }
 
 // CloneCache is a per-replica on-disk cache of bare git repositories.
-// Nil *CloneCache is valid and means "disabled" (callers fall back to direct clones).
+// Nil *CloneCache is valid and means "disabled": each call fetches into a
+// temporary bare repository (see GitCloner.Clone).
 type CloneCache struct {
 	root                string // e.g. /var/cache/varroa-git
 	maxRepos            int    // eviction bound, default 50
@@ -256,20 +257,9 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 	}
 
 	// Step 2: resolve the desired SHA.
-	var isPinned bool
-	if isCommitSHA(revision) {
-		sha = revision
-		isPinned = true
-	} else if revision == "" {
-		sha, err = c.cloner.RemoteSHA(ctx, repoURL, "HEAD", auth)
-		if err != nil {
-			return "", false, fmt.Errorf("resolve HEAD: %w", err)
-		}
-	} else {
-		sha, err = c.cloner.RemoteSHA(ctx, repoURL, revision, auth)
-		if err != nil {
-			return "", false, fmt.Errorf("resolve revision %s: %w", revision, err)
-		}
+	sha, err = c.cloner.resolveRevision(ctx, repoURL, revision, auth)
+	if err != nil {
+		return "", false, err
 	}
 
 	key := cacheKey(repoURL)
@@ -289,38 +279,25 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 
 	// Step 4: ensure bare repository exists.
 	if _, statErr := os.Stat(bare); os.IsNotExist(statErr) {
-		if err := c.initBare(ctx, key, bare, repoURL); err != nil {
+		if err := initBareRepo(ctx, bare); err != nil {
 			return "", false, err
+		}
+		m := &repoMeta{URL: redactURL(normalizeRepoURL(repoURL))}
+		if err := c.writeMeta(key, m); err != nil {
+			return "", false, fmt.Errorf("write meta for %s: %w", key, err)
 		}
 	}
 
 	// Step 5: hit check.
-	hit = c.catFileExists(ctx, bare, sha)
+	hit = commitExists(ctx, bare, sha)
 	if !hit {
 		// MISS — fetch.
 		if c.fetchHook != nil {
 			c.fetchHook()
 		}
-		if err := c.fetchBare(ctx, bare, repoURL, sha, revision, auth); err != nil {
+		sha, err = fetchCommit(ctx, bare, repoURL, sha, revision, auth, c.allowLocalTransport)
+		if err != nil {
 			return "", false, err
-		}
-
-		// Race re-resolution (ls-remote vs fetch).
-		if !c.catFileExists(ctx, bare, sha) && !isPinned {
-			ref := revision
-			if ref == "" {
-				ref = "HEAD"
-			}
-			out, err := gitCommand(ctx, "-C", bare, "rev-parse", "refs/varroa/"+ref).Output()
-			if err == nil {
-				sha = strings.TrimSpace(string(out))
-			}
-		}
-		if !c.catFileExists(ctx, bare, sha) {
-			if ctx.Err() != nil {
-				return "", false, fmt.Errorf("check fetched SHA %s for %s: %w", sha, redactURL(repoURL), ctx.Err())
-			}
-			return "", false, fmt.Errorf("desired SHA %s is absent after fetch for %s", sha, redactURL(repoURL))
 		}
 
 		// Update lastFetch and re-measure the repo (its size only changes on
@@ -367,8 +344,9 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 	return sha, hit, nil
 }
 
-// initBare creates a new bare repository and its metadata file.
-func (c *CloneCache) initBare(ctx context.Context, key, bare, repoURL string) error {
+// initBareRepo creates an empty bare repository at bare. The directory may
+// exist and be empty.
+func initBareRepo(ctx context.Context, bare string) error {
 	cmd := gitCommand(ctx, "init", "--bare", bare)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -378,40 +356,52 @@ func (c *CloneCache) initBare(ctx context.Context, key, bare, repoURL string) er
 		}
 		return fmt.Errorf("git init --bare %s: %s", bare, stderr.String())
 	}
-
-	m := &repoMeta{
-		URL:       redactURL(normalizeRepoURL(repoURL)),
-		LastFetch: 0,
-		LastUsed:  0,
-	}
-	if err := c.writeMeta(key, m); err != nil {
-		return fmt.Errorf("write meta for %s: %w", key, err)
-	}
 	return nil
 }
 
-// catFileExists checks if the given SHA exists as a commit object in the bare repo.
-func (c *CloneCache) catFileExists(ctx context.Context, bare, sha string) bool {
+// commitExists reports whether sha is a commit object in the bare repository.
+func commitExists(ctx context.Context, bare, sha string) bool {
 	cmd := gitCommand(ctx, "-C", bare, "cat-file", "-e", sha+"^{commit}")
 	return cmd.Run() == nil
 }
 
-// fetchBare performs a shallow fetch into the bare repository. The URL is passed
-// as argv, never configured as a remote. The fetch stops when ctx is done.
-func (c *CloneCache) fetchBare(ctx context.Context, bare, repoURL, sha, revision string, auth *GitAuth) error {
-	authEnv, cleanup, err := gitAuthEnv(auth)
+// fetchCommit fetches the commit for revision into the bare repository and
+// returns the commit SHA to archive. A branch or tag can move between the
+// ls-remote and the fetch, so the SHA is re-read from the fetched ref when
+// the first SHA is missing.
+func fetchCommit(ctx context.Context, bare, repoURL, sha, revision string, auth *GitAuth, allowLocal bool) (string, error) {
+	if err := fetchBareRef(ctx, bare, repoURL, sha, revision, auth, allowLocal); err != nil {
+		return "", err
+	}
+	if !commitExists(ctx, bare, sha) && !isCommitSHA(revision) {
+		ref := revision
+		if ref == "" {
+			ref = "HEAD"
+		}
+		out, err := gitCommand(ctx, "-C", bare, "rev-parse", "refs/varroa/"+ref).Output()
+		if err == nil {
+			sha = strings.TrimSpace(string(out))
+		}
+	}
+	if !commitExists(ctx, bare, sha) {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("check fetched SHA %s for %s: %w", sha, redactURL(repoURL), ctx.Err())
+		}
+		return "", fmt.Errorf("desired SHA %s is absent after fetch for %s", sha, redactURL(repoURL))
+	}
+	return sha, nil
+}
+
+// fetchBareRef performs a shallow fetch into the bare repository. The URL is
+// passed as argv, never configured as a remote. The fetch stops when ctx is
+// done. A pinned SHA is fetched into refs/varroa/pinned/<sha>; a ref is
+// fetched into refs/varroa/<ref>.
+func fetchBareRef(ctx context.Context, bare, repoURL, sha, revision string, auth *GitAuth, allowLocal bool) error {
+	gitEnv, cleanup, err := remoteGitEnv(auth, allowLocal)
 	if err != nil {
-		return fmt.Errorf("setup git auth: %w", err)
+		return err
 	}
 	defer cleanup()
-
-	gitEnv := append(os.Environ(), authEnv...)
-	gitEnv = append(gitEnv, "GIT_TERMINAL_PROMPT=0")
-	allowProto := "https:ssh"
-	if c.allowLocalTransport {
-		allowProto = "https:ssh:file"
-	}
-	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL="+allowProto)
 
 	var stderr bytes.Buffer
 
