@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
@@ -36,9 +35,16 @@ func newExportCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "catalog --namespace <ns> --name <catalogsource> --to <dest>",
 		Short: "Export a CatalogSource to an OCI destination",
-		Long: `Export a CatalogSource by fetching its spec from the cluster, materializing
-the bundle (from git or OCI), and pushing the result as a tar.gz layer to
-the destination OCI store.
+		Long: `Export a CatalogSource as a catalog artifact.
+
+The command fetches the source tree from git or from an OCI artifact. It reads
+the catalog index from catalog.yaml, or from the directory convention when
+catalog.yaml is absent. It then pushes the whole source tree as one catalog
+layer. The layer root is the source root, so an imported CatalogSource keeps
+the same spec.path.
+
+The manifest reference is the --to target. An oci:// target without a tag
+takes the CatalogSource name as its tag.
 
 The --to destination uses the following schemes:
   oci://<registry>/<repo>[:<tag>]   push to an OCI registry
@@ -59,6 +65,24 @@ The --to destination uses the following schemes:
 
 	return cmd
 }
+
+// removeSymlinks deletes every symbolic link under root. A link can dangle or
+// point at a directory, and the layer writer cannot pack either.
+func removeSymlinks(root string) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return os.Remove(path)
+		}
+		return nil
+	})
+}
+
+// newCatalogCloner returns the git cloner that export catalog uses. Tests
+// replace it to permit local repository fixtures.
+var newCatalogCloner = bundle.NewGitCloner
 
 func runExportCatalog(cmd *cobra.Command, args []string) error {
 	ns, _ := cmd.Flags().GetString("namespace")
@@ -92,11 +116,8 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	}
 
 	spec := src.Spec
-
-	// Determine the path component (default ".").
-	srcPath := spec.Path
-	if srcPath == "" {
-		srcPath = "."
+	if spec.RepoURL == "" && spec.OCIRef == "" {
+		return fmt.Errorf("CatalogSource %s/%s has neither repoURL nor ociRef", ns, name)
 	}
 
 	// Parse the OCI dest scheme.
@@ -119,61 +140,76 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Materialize the bundle into a temp dir.
+	// Fetch the source tree into a temp dir, with the same fetch as the catalog controller.
 	tmpDir, err := os.MkdirTemp("", "varroactl-catalog-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	resolver := bundle.NewResolver(noop.NewMeterProvider(), tmpDir)
-	cloneDir := filepath.Join(tmpDir, "bundle")
+	cloneDir := filepath.Join(tmpDir, "catalog")
+	if err := os.MkdirAll(cloneDir, 0755); err != nil {
+		return fmt.Errorf("create catalog dir: %w", err)
+	}
 
-	if spec.OCIRef != "" {
-		// OCI path: pull the artifact.
-		var auth *bundle.OCIAuth
-		if spec.SecretRef != "" {
-			secData, err := getLocalSecret(cmd, spec.SecretRef, ns)
-			if err != nil {
-				return fmt.Errorf("read OCI auth secret %s: %w", spec.SecretRef, err)
-			}
-			auth, err = bundle.OCIAuthFromSecret(secData)
+	fetch := bundle.CatalogFetch{
+		RepoURL:  spec.RepoURL,
+		Revision: spec.Revision,
+		OCIRef:   spec.OCIRef,
+		Cloner:   newCatalogCloner(),
+	}
+	if spec.SecretRef != "" {
+		secData, err := getLocalSecret(cmd, spec.SecretRef, ns)
+		if err != nil {
+			return fmt.Errorf("read auth secret %s: %w", spec.SecretRef, err)
+		}
+		if spec.OCIRef != "" {
+			fetch.OCIAuth, err = bundle.OCIAuthFromSecret(secData)
 			if err != nil {
 				return fmt.Errorf("bad OCI auth secret %s: %w", spec.SecretRef, err)
 			}
-		}
-
-		if _, err := resolver.MaterializeOCI(cmd.Context(), spec.OCIRef, srcPath, cloneDir, auth); err != nil {
-			return fmt.Errorf("materialize OCI bundle: %w", err)
-		}
-	} else if spec.RepoURL != "" {
-		// Git path: clone the repo.
-		var auth *bundle.GitAuth
-		if spec.SecretRef != "" {
-			secData, err := getLocalSecret(cmd, spec.SecretRef, ns)
-			if err != nil {
-				return fmt.Errorf("read git auth secret %s: %w", spec.SecretRef, err)
-			}
-			auth, err = bundle.GitAuthFromSecret(secData, "")
+		} else {
+			fetch.GitAuth, err = bundle.GitAuthFromSecret(secData, "")
 			if err != nil {
 				return fmt.Errorf("bad git auth secret %s: %w", spec.SecretRef, err)
 			}
 		}
-
-		if _, err := resolver.Materialize(cmd.Context(), spec.RepoURL, srcPath, spec.Revision, cloneDir, auth); err != nil {
-			return fmt.Errorf("materialize git bundle: %w", err)
-		}
-	} else {
-		return fmt.Errorf("CatalogSource %s/%s has neither repoURL nor ociRef", ns, name)
 	}
 
-	// Tar+gzip the cloned directory and push as a layer.
-	ref := name
-	if err := pushBundleAsOCIArtifact(cmd.Context(), store, ref, cloneDir, "application/vnd.varroa.catalog.v1.tar+gzip", "application/vnd.varroa.catalog.v1", nil); err != nil {
+	rev, err := bundle.FetchCatalog(cmd.Context(), fetch, cloneDir)
+	if err != nil {
+		return fmt.Errorf("fetch catalog: %w", err)
+	}
+	// The controller and import skip symlinks, so the exported tree does too.
+	if err := removeSymlinks(cloneDir); err != nil {
+		return fmt.Errorf("prepare catalog tree: %w", err)
+	}
+
+	root, err := bundle.CatalogRoot(cloneDir, spec.Path)
+	if err != nil {
+		return err
+	}
+	index, err := bundle.ParseCatalogIndex(root)
+	if err != nil {
+		return fmt.Errorf("parse catalog index: %w", err)
+	}
+	if len(index.Items) == 0 {
+		fmt.Fprintf(os.Stderr, "warning: CatalogSource %s/%s has no catalog items\n", ns, name)
+	}
+
+	// The manifest reference is the --to target. An untagged oci:// target
+	// takes the CatalogSource name as its tag.
+	ref := target
+	if scheme == "oci" && !hasExplicitTag(target) {
+		ref = target + ":" + name
+	}
+
+	// The layer holds the whole source tree. spec.path applies on import.
+	if err := pushBundleAsOCIArtifact(cmd.Context(), store, ref, cloneDir, bundle.CatalogLayerMediaType, bundle.CatalogArtifactType, nil); err != nil {
 		return fmt.Errorf("push catalog artifact: %w", err)
 	}
 
-	fmt.Printf("Exported CatalogSource %s/%s as OCI artifact at %s\n", ns, name, toDest)
+	fmt.Printf("Exported CatalogSource %s/%s (%d items, revision %s) as OCI artifact at %s\n", ns, name, len(index.Items), rev, toDest)
 	return nil
 }
 

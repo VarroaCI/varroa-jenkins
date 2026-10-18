@@ -15,6 +15,11 @@ new capabilities are added to the BFF/OpenAPI spec first, then surfaced here.
 
 ## Local Contracts
 
+- **`export catalog`** (`export_catalog.go`) — fetches the source tree with
+  `bundle.FetchCatalog`, reads the index with `bundle.ParseCatalogIndex`, and
+  pushes the tree as one catalog layer. It never calls `Resolver.Materialize`.
+  The manifest reference is the `--to` target. An untagged `oci://` target
+  takes `:<name>` as its tag.
 - **Entrypoint** — `main.go` just calls `run(os.Args[1:])` (`root.go`).
   `root.go` maps errors to exit codes: `usageError` / cobra parse errors → 2,
   other errors → 1, success → 0 (`isUsageError`, `run`).

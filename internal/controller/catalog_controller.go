@@ -1,11 +1,8 @@
 package controller
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -197,141 +194,65 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, src *v1alpha1.Catalog
 		return
 	}
 
-	// Clone the repository with optional git auth, or pull OCI artifact.
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, catalogFetchTimeout)
 	defer cancelFetch()
-	var rev string
-	if src.Spec.RepoURL != "" {
-		var auth *bundle.GitAuth
-		if src.Spec.SecretRef != "" {
-			secData, err := r.client.GetSecret(ctx, src.Spec.SecretRef, src.Namespace)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("read git auth secret %s: %v", src.Spec.SecretRef, err))
-				return
-			}
-			auth, err = bundle.GitAuthFromSecret(secData, "")
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("bad git auth secret %s: %v", src.Spec.SecretRef, err))
-				return
-			}
-			// Enforce host-scoped credential use for basic-auth git secrets.
-			// An annotations read failure must fail closed (treat as
-			// unannotated) for basic-auth, never skip the check.
-			ann, aErr := r.client.GetSecretAnnotations(ctx, src.Spec.SecretRef, src.Namespace)
-			if aErr != nil {
-				r.logger.Warn("failed to read git auth secret annotations; treating as unannotated",
-					"secret", src.Spec.SecretRef, "error", aErr)
-			}
-			if hErr := bundle.CheckGitSecretHost(auth, ann, src.Spec.RepoURL); hErr != nil {
-				r.setError(ctx, src, fmt.Sprintf("git host check failed for secret %s: %v", src.Spec.SecretRef, hErr))
-				return
-			}
-		}
-
-		if r.cloneCache != nil {
-			var err error
-			rev, _, err = r.cloneCache.Checkout(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
-				return
-			}
-		} else {
-			var err error
-			rev, err = r.cloner.Clone(fetchCtx, src.Spec.RepoURL, src.Spec.Revision, dir, auth)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("clone repo: %v", err))
-				return
-			}
-		}
-	} else if src.Spec.OCIRef != "" {
-		// Pull OCI artifact.
-		var auth *bundle.OCIAuth
-		if src.Spec.SecretRef != "" {
-			secData, err := r.client.GetSecret(ctx, src.Spec.SecretRef, src.Namespace)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("read OCI auth secret %s: %v", src.Spec.SecretRef, err))
-				return
-			}
-			auth, err = bundle.OCIAuthFromSecret(secData)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("bad OCI auth secret %s: %v", src.Spec.SecretRef, err))
-				return
-			}
-		}
-
-		// Build a temp docker config.json for auth (if any).
-		var configPath string
-		var configDir string
-		if auth != nil {
-			var err error
-			configPath, err = bundle.WriteDockerConfigJSON(auth)
-			if err != nil {
-				r.setError(ctx, src, fmt.Sprintf("prepare OCI auth: %v", err))
-				return
-			}
-			configDir = filepath.Dir(configPath)
-			defer func() { _ = os.RemoveAll(configDir) }()
-		}
-
-		store, err := oci.NewRegistryStore(src.Spec.OCIRef, oci.RegistryOptions{
-			CredentialConfigPath: configPath,
-			Insecure:             false,
-		})
+	fetch := bundle.CatalogFetch{
+		RepoURL:    src.Spec.RepoURL,
+		Revision:   src.Spec.Revision,
+		OCIRef:     src.Spec.OCIRef,
+		Cloner:     r.cloner,
+		CloneCache: r.cloneCache,
+	}
+	if src.Spec.RepoURL != "" && src.Spec.SecretRef != "" {
+		secData, err := r.client.GetSecret(ctx, src.Spec.SecretRef, src.Namespace)
 		if err != nil {
-			r.setError(ctx, src, fmt.Sprintf("create registry store for %q: %v", src.Spec.OCIRef, err))
+			r.setError(ctx, src, fmt.Sprintf("read git auth secret %s: %v", src.Spec.SecretRef, err))
 			return
 		}
-
-		// Resolve the manifest digest for ObservedRevision.
-		desc, err := store.Resolve(fetchCtx, src.Spec.OCIRef)
+		gitAuth, err := bundle.GitAuthFromSecret(secData, "")
 		if err != nil {
-			r.setError(ctx, src, fmt.Sprintf("resolve OCI ref %q: %v", src.Spec.OCIRef, err))
+			r.setError(ctx, src, fmt.Sprintf("bad git auth secret %s: %v", src.Spec.SecretRef, err))
 			return
 		}
-		rev = desc.Digest
-
-		// Pull the manifest to find the catalog bundle layer.
-		manifest, err := store.Pull(fetchCtx, src.Spec.OCIRef)
+		fetch.GitAuth = gitAuth
+		// Enforce host-scoped credential use for basic-auth git secrets.
+		// An annotations read failure must fail closed (treat as
+		// unannotated) for basic-auth, never skip the check.
+		ann, aErr := r.client.GetSecretAnnotations(ctx, src.Spec.SecretRef, src.Namespace)
+		if aErr != nil {
+			r.logger.Warn("failed to read git auth secret annotations; treating as unannotated",
+				"secret", src.Spec.SecretRef, "error", aErr)
+		}
+		if hErr := bundle.CheckGitSecretHost(gitAuth, ann, src.Spec.RepoURL); hErr != nil {
+			r.setError(ctx, src, fmt.Sprintf("git host check failed for secret %s: %v", src.Spec.SecretRef, hErr))
+			return
+		}
+	} else if src.Spec.OCIRef != "" && src.Spec.SecretRef != "" {
+		secData, err := r.client.GetSecret(ctx, src.Spec.SecretRef, src.Namespace)
 		if err != nil {
-			r.setError(ctx, src, fmt.Sprintf("pull OCI artifact %q: %v", src.Spec.OCIRef, err))
+			r.setError(ctx, src, fmt.Sprintf("read OCI auth secret %s: %v", src.Spec.SecretRef, err))
 			return
 		}
-
-		// Find and extract the catalog bundle layer.
-		var layer *oci.Descriptor
-		for _, l := range manifest.Layers {
-			if l.MediaType == "application/vnd.varroa.catalog.v1.tar+gzip" {
-				layer = &l
-				break
-			}
-		}
-		if layer == nil {
-			r.setError(ctx, src, fmt.Sprintf("OCI artifact %q: no layer with media type application/vnd.varroa.catalog.v1.tar+gzip", src.Spec.OCIRef))
-			return
-		}
-
-		rc, err := store.FetchBlob(fetchCtx, layer.Digest)
+		ociAuth, err := bundle.OCIAuthFromSecret(secData)
 		if err != nil {
-			r.setError(ctx, src, fmt.Sprintf("fetch catalog layer %q: %v", layer.Digest, err))
+			r.setError(ctx, src, fmt.Sprintf("bad OCI auth secret %s: %v", src.Spec.SecretRef, err))
 			return
 		}
-		defer func() { _ = rc.Close() }()
+		fetch.OCIAuth = ociAuth
+	}
 
-		if err := untarGzipBundle(rc, dir); err != nil {
-			r.setError(ctx, src, fmt.Sprintf("extract catalog bundle: %v", err))
-			return
-		}
+	// Clone the repository, or pull the OCI catalog layer.
+	rev, err := bundle.FetchCatalog(fetchCtx, fetch, dir)
+	if err != nil {
+		r.setError(ctx, src, err.Error())
+		return
 	}
 
 	// Determine catalog root directory.
-	targetDir := dir
-	if src.Spec.Path != "" {
-		var err error
-		targetDir, err = bundle.ResolveContainedPath(dir, src.Spec.Path)
-		if err != nil {
-			r.setError(ctx, src, fmt.Sprintf("catalog path: %v", err))
-			return
-		}
+	targetDir, err := bundle.CatalogRoot(dir, src.Spec.Path)
+	if err != nil {
+		r.setError(ctx, src, err.Error())
+		return
 	}
 
 	// Parse the catalog index.
@@ -1160,50 +1081,4 @@ func ownerRef(src *v1alpha1.CatalogSource) metav1.OwnerReference {
 		BlockOwnerDeletion: &controller,
 		Controller:         &controller,
 	}
-}
-
-// untarGzipBundle decompresses a gzipped tar stream into the given directory.
-func untarGzipBundle(r io.Reader, targetDir string) error {
-	gzr, err := gzip.NewReader(r)
-	if err != nil {
-		return fmt.Errorf("create gzip reader: %w", err)
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read tar header: %w", err)
-		}
-
-		cleanPath := filepath.Join(targetDir, filepath.Clean(header.Name))
-		if !strings.HasPrefix(cleanPath, filepath.Clean(targetDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("tar entry %q escapes target directory", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(cleanPath, 0755); err != nil {
-				return fmt.Errorf("create dir %q: %w", cleanPath, err)
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(cleanPath), 0755); err != nil {
-				return fmt.Errorf("create parent dir for %q: %w", cleanPath, err)
-			}
-			f, err := os.Create(cleanPath)
-			if err != nil {
-				return fmt.Errorf("create file %q: %w", cleanPath, err)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				_ = f.Close()
-				return fmt.Errorf("write file %q: %w", cleanPath, err)
-			}
-			_ = f.Close()
-		}
-	}
-	return nil
 }

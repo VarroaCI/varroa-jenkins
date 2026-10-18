@@ -156,6 +156,17 @@ before any request.
 There is no `create cellpool` and no `delete cellpool`. Create and delete a pool with `kubectl` or
 through GitOps. See [Cells and pipelines tenants](operations/cells.md).
 
+## Export a catalog
+
+`export catalog` copies a CatalogSource to a destination. It reads the source from git or OCI. It accepts a directory-convention catalog or a catalog with `catalog.yaml`.
+
+```bash
+varroactl export catalog --namespace varroa-system --name platform-catalog \
+  --to tar:///transfer/platform-catalog.tar.gz
+```
+
+`varroactl import` copies the result to a registry. Set a `CatalogSource.spec.ociRef` to that reference to serve the catalog from it. The source keeps its `spec.path`.
+
 ## Transfer a release bundle
 
 `export release` writes one air-gap bundle: the chart, every image the chart uses, the plugin packs of the profiles you name, and a manifest. `import release` checks the bundle and then pushes it to an internal registry.

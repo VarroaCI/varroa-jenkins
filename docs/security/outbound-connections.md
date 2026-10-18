@@ -96,6 +96,7 @@ A build check fails when a source adds a host that this page does not list.
 | repo.jenkins-ci.org (bootstrapdeps) | Maintainer plugin resolver. It is not in any image. | HTTPS 443 | Run by hand with --resolve only | Yes. Do not run the maintainer command. |
 | Git remote of an export bundle | Clone the bundle repository for export bundle. | HTTPS 443 or SSH 22 | The repository argument of export bundle | Yes. Do not run the command. |
 | Registry of an OCI source or target | Read or write images, charts, and plugin packs in an OCI registry. | HTTPS 443 | The oci reference given on the command line | Yes. Do not run the command. |
+| Git remote of an export catalog | Clone the catalog source for export catalog. | HTTPS 443 or SSH 22 | The CatalogSource that export catalog reads | Yes. Do not run the command. |
 
 ## Cluster-wide
 

@@ -295,6 +295,14 @@ connections:
     control: The oci reference given on the command line
     disable: "Yes. Do not run the command."
 
+  - component: varroactl
+    destination: Git remote of an export catalog
+    hosts: []
+    purpose: Clone the catalog source for export catalog.
+    protocol: HTTPS 443 or SSH 22
+    control: The CatalogSource that export catalog reads
+    disable: "Yes. Do not run the command."
+
   # Cluster-wide: images and telemetry
 
   - component: cluster
