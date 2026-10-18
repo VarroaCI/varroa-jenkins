@@ -226,7 +226,7 @@ func TestPushBundleAsOCIArtifact_DirDest(t *testing.T) {
 
 	// Push the bundle as an OCI artifact.
 	ref := "test-bundle"
-	if err := pushBundleAsOCIArtifact(context.TODO(), store, ref, bundleDir, "application/vnd.varroa.bundle.v1.tar+gzip", "application/vnd.varroa.bundle.v1"); err != nil {
+	if err := pushBundleAsOCIArtifact(context.TODO(), store, ref, bundleDir, "application/vnd.varroa.bundle.v1.tar+gzip", "application/vnd.varroa.bundle.v1", nil); err != nil {
 		t.Fatalf("pushBundleAsOCIArtifact: %v", err)
 	}
 

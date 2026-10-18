@@ -49,6 +49,15 @@ type MaterializedBundle struct {
 	// ResolveVars; this field never is.
 	RawPluginsYAML string
 
+	// Dir is the resolved bundle directory under the clone or extraction
+	// directory. The caller owns that directory and removes it; Dir is valid
+	// only until then.
+	Dir string
+
+	// CommitSHA is the commit that Materialize checked out. It is empty for
+	// MaterializeOCI, which has no commit.
+	CommitSHA string
+
 	// CellCloudCredentials are a cell's SYSTEM-scope tenant-cloud
 	// credentials (design D8, D11). The caller that builds the desired-
 	// state command injects them into JcascYaml itself. No code path
@@ -234,6 +243,7 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 	if r.Logger != nil {
 		r.Logger.Info("cloning repo", "url", repoURL)
 	}
+	var sha string
 	if err := func() error {
 		start := time.Now()
 		_, span := otel.Tracer("varroa-operator").Start(ctx, "bundle.clone",
@@ -242,9 +252,9 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 		defer span.End()
 		var err error
 		if r.cloneCache != nil {
-			_, _, err = r.cloneCache.Checkout(ctx, repoURL, revision, cloneDir, auth)
+			sha, _, err = r.cloneCache.Checkout(ctx, repoURL, revision, cloneDir, auth)
 		} else {
-			_, err = r.cloner.Clone(ctx, repoURL, revision, cloneDir, auth)
+			sha, err = r.cloner.Clone(ctx, repoURL, revision, cloneDir, auth)
 		}
 		duration := time.Since(start).Seconds()
 		result := "success"
@@ -268,7 +278,12 @@ func (r *Resolver) Materialize(ctx context.Context, repoURL, path, revision stri
 	if err != nil {
 		return nil, fmt.Errorf("bundle path %q: %w", path, err)
 	}
-	return r.materializeDir(bundleDir)
+	mat, err := r.materializeDir(bundleDir)
+	if err != nil {
+		return nil, err
+	}
+	mat.CommitSHA = sha
+	return mat, nil
 }
 
 // materializeDir processes a bundle directory: parses the manifest, validates,
@@ -334,6 +349,7 @@ func (r *Resolver) materializeDir(bundleDir string) (*MaterializedBundle, error)
 		ItemsYAML:   itemsYAML,
 		RbacYAML:    rbacYAML,
 		Variables:   vars,
+		Dir:         bundleDir,
 	}, nil
 }
 
