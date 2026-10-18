@@ -180,16 +180,14 @@ func TestCheckout_HitMissLifecycle(t *testing.T) {
 		t.Errorf("checkout #1: fetch count = %d, want 1", n)
 	}
 
-	// Verify working tree content + git rev-parse HEAD.
+	// Verify working tree content and that no .git directory is written.
 	data, err := os.ReadFile(filepath.Join(target1, "a.txt"))
 	must(t, err)
 	if string(data) != "content-v1" {
 		t.Errorf("checkout #1: file content = %q, want %q", string(data), "content-v1")
 	}
-	out, err := exec.Command("git", "-C", target1, "rev-parse", "HEAD").Output()
-	must(t, err)
-	if strings.TrimSpace(string(out)) != headSHA1 {
-		t.Errorf("checkout #1: git rev-parse HEAD = %q, want %q", strings.TrimSpace(string(out)), headSHA1)
+	if _, err := os.Stat(filepath.Join(target1, ".git")); !os.IsNotExist(err) {
+		t.Errorf("checkout #1: .git exists in target (stat err = %v)", err)
 	}
 
 	// Checkout #2: same repo@ref, unmoved tip -> hit, 0 fetches.
@@ -533,8 +531,11 @@ func TestEvictionDoesNotBreakCheckout(t *testing.T) {
 
 	target := filepath.Join(t.TempDir(), "out")
 	must(t, os.MkdirAll(target, 0o755))
-	_, _, err := c.Checkout(context.Background(), bareURL, "main", target, nil)
+	gotSHA, _, err := c.Checkout(context.Background(), bareURL, "main", target, nil)
 	must(t, err)
+	if gotSHA != sha {
+		t.Fatalf("Checkout SHA = %q, want %q", gotSHA, sha)
+	}
 
 	// Simulate eviction by removing the bare entry.
 	key := cacheKey(bareURL)
@@ -548,19 +549,91 @@ func TestEvictionDoesNotBreakCheckout(t *testing.T) {
 		t.Errorf("after eviction: file content = %q, want %q", string(data), "this should survive")
 	}
 
-	out, err := exec.Command("git", "-C", target, "rev-parse", "HEAD").Output()
+	if _, err := os.Stat(filepath.Join(target, ".git")); !os.IsNotExist(err) {
+		t.Errorf("after eviction: .git exists in target (stat err = %v)", err)
+	}
+}
+
+// commitWorkTree clones the bare fixture, adds files that git cannot carry in
+// a single commit helper call, and pushes the result to main. It returns the
+// new HEAD SHA.
+func commitWorkTree(t *testing.T, bareURL string, files func(work string)) string {
+	t.Helper()
+	work := filepath.Join(t.TempDir(), "work")
+	must(t, exec.Command("git", "clone", bareURL, work).Run())
+	files(work)
+	gitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	add := exec.Command("git", "-C", work, "add", "-A")
+	must(t, add.Run())
+	c := exec.Command("git", "-C", work, "commit", "-m", "tree")
+	c.Env = gitEnv
+	must(t, c.Run())
+	p := exec.Command("git", "-C", work, "push", "origin", "main")
+	p.Env = gitEnv
+	must(t, p.Run())
+	out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output()
 	must(t, err)
-	if strings.TrimSpace(string(out)) != sha {
-		t.Errorf("after eviction: git rev-parse HEAD = %q, want %q", strings.TrimSpace(string(out)), sha)
+	return strings.TrimSpace(string(out))
+}
+
+func TestCheckout_HonorsExportAttributes(t *testing.T) {
+	bareURL, commit := newBareFixture(t)
+	commit(".gitattributes", "ignored.txt export-ignore\nsubst.txt export-subst\n")
+	commit("ignored.txt", "not copied")
+	sha := commit("subst.txt", "$Format:%H$\n")
+
+	cache := newCacheForTest(t, t.TempDir(), 10, 100)
+	target := filepath.Join(t.TempDir(), "out")
+	gotSHA, _, err := cache.Checkout(context.Background(), bareURL, "main", target, nil)
+	must(t, err)
+	if gotSHA != sha {
+		t.Errorf("Checkout SHA = %q, want %q", gotSHA, sha)
+	}
+
+	if _, err := os.Stat(filepath.Join(target, "ignored.txt")); !os.IsNotExist(err) {
+		t.Errorf("export-ignore file was copied (stat err = %v)", err)
+	}
+	data, err := os.ReadFile(filepath.Join(target, "subst.txt"))
+	must(t, err)
+	if string(data) != sha+"\n" {
+		t.Errorf("subst.txt = %q, want %q", data, sha+"\n")
+	}
+}
+
+func TestCheckout_PreservesExecAndSymlink(t *testing.T) {
+	bareURL, _ := newBareFixture(t)
+	commitWorkTree(t, bareURL, func(work string) {
+		must(t, os.MkdirAll(filepath.Join(work, "data"), 0o755))
+		must(t, os.WriteFile(filepath.Join(work, "data", "input.yaml"), []byte("x: 1\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(work, "run.sh"), []byte("#!/bin/sh\n"), 0o644))
+		must(t, os.Chmod(filepath.Join(work, "run.sh"), 0o755))
+		must(t, os.Symlink("data/input.yaml", filepath.Join(work, "link.yaml")))
+	})
+
+	cache := newCacheForTest(t, t.TempDir(), 10, 100)
+	target := filepath.Join(t.TempDir(), "out")
+	_, _, err := cache.Checkout(context.Background(), bareURL, "main", target, nil)
+	must(t, err)
+
+	info, err := os.Stat(filepath.Join(target, "run.sh"))
+	must(t, err)
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("run.sh mode = %o, want executable", info.Mode().Perm())
+	}
+	link, err := os.Readlink(filepath.Join(target, "link.yaml"))
+	must(t, err)
+	if link != "data/input.yaml" {
+		t.Errorf("link target = %q, want %q", link, "data/input.yaml")
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Repos whose branch name matches git's init.defaultBranch must still
-// materialize. localClone must never fetch
-// into refs/heads/* of the target working tree: git refuses to update the
-// checked-out (even unborn) branch of a fresh `git init`, wedging every
-// CatalogSource/gitSource tracking such a branch.
+// materialize. The archive path has no target branch, so the collision
+// cannot occur. This test guards that property.
 // ---------------------------------------------------------------------------
 
 func TestCheckout_DefaultBranchNameCollision(t *testing.T) {

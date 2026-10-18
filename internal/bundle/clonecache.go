@@ -247,7 +247,8 @@ func (c *CloneCache) writeMeta(key string, m *repoMeta) error {
 
 // Checkout materializes repoURL@revision into targetDir and returns the
 // resolved commit SHA and whether the bare store already had it (hit).
-// targetDir must not exist or must be empty (caller prepares it).
+// targetDir must not exist or must be empty (caller prepares it). The target
+// receives the files of the tree at the commit and no .git directory.
 func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir string, auth *GitAuth) (sha string, hit bool, err error) {
 	// Step 1: validate the repository URL.
 	if err := validateRepoURL(repoURL, c.allowLocalTransport); err != nil {
@@ -348,8 +349,8 @@ func (c *CloneCache) Checkout(ctx context.Context, repoURL, revision, targetDir 
 		)
 	}
 
-	// Step 7: materialize via local clone + checkout.
-	if err := c.localClone(ctx, bare, targetDir, sha); err != nil {
+	// Step 7: materialize the tree at sha from the bare store.
+	if err := archiveCommit(ctx, bare, sha, targetDir); err != nil {
 		return "", false, err
 	}
 
@@ -440,66 +441,6 @@ func (c *CloneCache) fetchBare(ctx context.Context, bare, repoURL, sha, revision
 			}
 			return fmt.Errorf("git fetch %s %s: %s", redactURL(repoURL), ref, stderr.String())
 		}
-	}
-	return nil
-}
-
-// localClone performs a git clone from the local bare store into targetDir,
-// then checks out the specified SHA. The bare repo path is operator-owned
-// (never caller input), so this runs with GIT_ALLOW_PROTOCOL=https:ssh:file.
-// Uses git init + fetch with an explicit refspec that includes refs/varroa/*
-// so that refs stored under refs/varroa/ are propagated to the target.
-//
-// Refs are fetched into a private namespace, never refs/heads/*: git refuses
-// to fetch into the checked-out branch of a non-bare repo — including the
-// unborn init.defaultBranch of a fresh `git init` — so any repo tracking a
-// branch of that name would fail to materialize. The SHA
-// checkout below detaches HEAD and only needs the objects, not branch refs.
-func (c *CloneCache) localClone(ctx context.Context, bare, targetDir, sha string) error {
-	gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	gitEnv = append(gitEnv, "GIT_ALLOW_PROTOCOL=https:ssh:file")
-
-	var stderr bytes.Buffer
-
-	// Step 1: init and add remote.
-	initCmd := gitCommand(ctx, "init", targetDir)
-	initCmd.Env = gitEnv
-	initCmd.Stderr = &stderr
-	if err := initCmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("git init %s: %w", targetDir, ctx.Err())
-		}
-		return fmt.Errorf("git init %s: %s", targetDir, stderr.String())
-	}
-
-	// Step 2: fetch from the bare into the private refs/varroa/* namespace.
-	stderr.Reset()
-	fetchCmd := gitCommand(ctx, "-C", targetDir, "fetch", "--no-tags", bare,
-		"refs/varroa/*:refs/varroa/*",
-		"refs/heads/*:refs/varroa/heads/*",
-	)
-	fetchCmd.Env = gitEnv
-	fetchCmd.Stderr = &stderr
-	if err := fetchCmd.Run(); err != nil {
-		// If the bare has no refs at all (empty initial cache entry before fetch),
-		// the fetch legitimately fails. In that case there's nothing to check out
-		// and the caller should have already ensured the SHA is present.
-		if ctx.Err() != nil {
-			return fmt.Errorf("git fetch (local cache) %s: %w", bare, ctx.Err())
-		}
-		return fmt.Errorf("git fetch (local cache) %s: %s", bare, stderr.String())
-	}
-
-	// Step 3: checkout the desired SHA.
-	stderr.Reset()
-	checkoutCmd := gitCommand(ctx, "-C", targetDir, "checkout", "--quiet", sha)
-	checkoutCmd.Env = gitEnv
-	checkoutCmd.Stderr = &stderr
-	if err := checkoutCmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("git checkout %s: %w", sha, ctx.Err())
-		}
-		return fmt.Errorf("git checkout %s: %s", sha, stderr.String())
 	}
 	return nil
 }

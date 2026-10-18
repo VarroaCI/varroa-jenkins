@@ -163,10 +163,16 @@ index parsing, and pre-apply content validation.
   under `<root>/repos/<sha256(normalizedURL)>.git` + `.meta.json`
   (lastFetch/lastUsed/size drive LRU eviction bounded by `maxRepos`/
   `maxSizeMiB`). `Checkout` resolves the SHA via `ls-remote` (skipped if
-  already a 40-hex SHA), locks per cache key, fetches on miss, then clones
-  locally from the bare store into a private `refs/varroa/*` namespace — never
-  `refs/heads/*` directly, since git refuses to fetch into a non-bare repo's
-  checked-out (even unborn) branch. Nil `*CloneCache` = disabled;
+  already a 40-hex SHA), locks per cache key, fetches on miss, then runs
+  `archiveCommit` (`gitarchive.go`). It streams `git archive --format=tar <sha>`
+  from the bare store into `extractTar`. The target gets the tree files and no
+  `.git` directory. `extractTar` writes through `os.Root`. It rejects a
+  non-local name, an entry below a symlink, a symlink that leaves the target,
+  and any type other than directory, regular file or symlink. A failure removes
+  what it wrote. `export-ignore` and `export-subst` apply on this path. They do
+  not apply on the `GitCloner.Clone` fallback. The `refs/varroa/*` refs stay in
+  the bare store; `fetchBare` and the re-resolve still use them. Nil
+  `*CloneCache` = disabled;
   `Resolver.Materialize` falls back to `GitCloner.Clone` directly. The
   per-key lock is a one-slot channel, not a mutex: a waiter leaves when its
   context is done, so a compose never inherits another caller's stuck fetch.
@@ -245,7 +251,9 @@ make lint
 ```
 
 Key tests: `composer_test.go`/`composer_namespace_test.go` (merge strategy,
-itemRef fallback/shadowing), `clonecache_test.go`, `git_test.go` (URL
+itemRef fallback/shadowing), `clonecache_test.go` (checkout tree, export
+attributes, exec bit and symlinks), `gitarchive_test.go` (extractor rejects
+unsafe entries; archive cleans its target), `git_test.go` (URL
 validation/RCE guard), `git_deadline_test.go` (git stops at the context
 deadline, against a silent 127.0.0.1 listener), `validator_test.go`, `unresolved_test.go`,
 `location_test.go`, `bundle_test.go`, `pipelinetemplates_test.go`
