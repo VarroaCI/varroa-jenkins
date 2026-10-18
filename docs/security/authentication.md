@@ -132,7 +132,7 @@ Dex sends one group for each organization, `<org>`, and one for each team, `<org
 A user on no team of an organization gets no group for it.
 A `Team` or a `VarroaRoleBinding` can bind either string, for example `acme` or `acme:Owners`.
 With `useLoginAsID`, the forge login is the user identity.
-If the forge does not listen on port 443, add its port to `networkPolicy.dexConnectorEgress.ports`.
+If the forge does not listen on port 443, add its port to `networkPolicy.dexConnectorEgress.ports`. Pin its addresses in `networkPolicy.dexConnectorEgress.cidrs`.
 
 ## Use LDAP
 

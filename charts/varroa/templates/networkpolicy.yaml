@@ -4,29 +4,29 @@ Reusable snippets
 {{- define "varroa.np.apiServerEgress" -}}
 {{- $cidrs := .Values.networkPolicy.apiServerEgress.cidrs }}
 {{- $ports := .Values.networkPolicy.apiServerEgress.ports }}
-- to:
 {{- if $cidrs }}
+- to:
 {{- range $cidrs }}
   - ipBlock:
       cidr: {{ . }}
-{{- end }}
-{{- else }}
-  - ipBlock:
-      cidr: 0.0.0.0/0
 {{- end }}
   ports:
 {{- range $ports }}
   - protocol: TCP
     port: {{ . }}
 {{- end }}
+{{- end }}
 {{- end -}}
 
 {{- define "varroa.np.telemetryEgress" -}}
+{{- $cidrs := .Values.networkPolicy.telemetryEgress.cidrs }}
 {{- $ports := .Values.networkPolicy.telemetryEgress.ports }}
-{{- if and .Values.telemetry.endpoint (not .Values.telemetry.disabled) }}
+{{- if and .Values.telemetry.endpoint (not .Values.telemetry.disabled) $cidrs }}
 - to:
+{{- range $cidrs }}
   - ipBlock:
-      cidr: 0.0.0.0/0
+      cidr: {{ . }}
+{{- end }}
   ports:
 {{- range $ports }}
   - protocol: TCP
@@ -148,10 +148,12 @@ spec:
         - protocol: TCP
           port: {{ .Values.dex.service.port }}
 {{- end }}
-{{- if .Values.networkPolicy.gitEgress.enabled }}
+{{- if and .Values.networkPolicy.gitEgress.enabled .Values.networkPolicy.gitEgress.cidrs }}
     - to:
+{{- range .Values.networkPolicy.gitEgress.cidrs }}
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: {{ . }}
+{{- end }}
       ports:
 {{- range .Values.networkPolicy.gitEgress.ports }}
         - protocol: TCP
@@ -406,10 +408,12 @@ spec:
         - protocol: TCP
           port: 8080
 {{- end }}
-{{- if .Values.networkPolicy.gitEgress.enabled }}
+{{- if and .Values.networkPolicy.gitEgress.enabled .Values.networkPolicy.gitEgress.cidrs }}
     - to:
+{{- range .Values.networkPolicy.gitEgress.cidrs }}
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: {{ . }}
+{{- end }}
       ports:
 {{- range .Values.networkPolicy.gitEgress.ports }}
         - protocol: TCP
@@ -493,11 +497,9 @@ spec:
           port: {{ .Values.dex.service.port }}
   egress:
 {{ include "varroa.np.apiServerEgress" . | nindent 4 }}
-{{- if .Values.networkPolicy.dexConnectorEgress.enabled }}
+{{- if and .Values.networkPolicy.dexConnectorEgress.enabled .Values.networkPolicy.dexConnectorEgress.cidrs }}
     - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-{{- range .Values.networkPolicy.dexConnectorEgress.extraCIDRs }}
+{{- range .Values.networkPolicy.dexConnectorEgress.cidrs }}
         - ipBlock:
             cidr: {{ . }}
 {{- end }}
@@ -586,17 +588,12 @@ spec:
 {{- end }}
 {{- /* External NATS clients (hive clusters via LB/NodePort) */}}
 {{- $external := .Values.nats.external | default dict }}
-{{- if $external.enabled }}
-    - from:
 {{- $cidrs := $external.allowedCIDRs | default list }}
-{{- if $cidrs }}
+{{- if and $external.enabled $cidrs }}
+    - from:
 {{- range $cidrs }}
         - ipBlock:
             cidr: {{ . }}
-{{- end }}
-{{- else }}
-        - ipBlock:
-            cidr: 0.0.0.0/0
 {{- end }}
       ports:
         - protocol: TCP

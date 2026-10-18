@@ -49,6 +49,13 @@ updateCenter:
 
 networkPolicy:
   enabled: true
+  # The defaults of the next three groups allow every address. Pin them.
+  # Pin apiServerEgress to the kubernetes EndpointSlice IPs on port 6443.
+  apiServerEgress: {cidrs: ["10.0.0.1/32"], ports: [6443]}
+  # Pin gitEgress to the internal Git server.
+  gitEgress: {cidrs: ["10.0.0.0/8"], ports: [443, 22]}
+  # Pin dexConnectorEgress to the internal identity provider.
+  dexConnectorEgress: {cidrs: ["10.0.0.0/8"], ports: [443]}
   # Operator OCI-registry egress: lets the operator reach the private
   # registry for plugin-pack import and catalog operations.
   ociRegistryEgress:
