@@ -114,6 +114,11 @@ Set global.domain in values.yaml to see external URLs.
   External NATS Exposure
 ================================================================================
   External NATS endpoint: {{ .Values.nats.external.host }}:4222
+  External traffic policy: {{ .Values.nats.external.externalTrafficPolicy | default "Cluster" }}
+{{- if and (eq (.Values.nats.external.externalTrafficPolicy | default "Cluster") "Local") (eq (.Values.nats.external.serviceType | default "LoadBalancer") "NodePort") }}
+    A NodePort with Local answers only on nodes that run a NATS pod.
+    Set each member bus.url to those node addresses.
+{{- end }}
 
   If this install existed before enabling nats.external, the varroa-nats-creds
   TLS certificate must be rotated to include the new SANs. Run:

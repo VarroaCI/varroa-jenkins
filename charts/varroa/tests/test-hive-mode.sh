@@ -7,7 +7,7 @@
 #   2. Missing cluster.name or bus.url → failure with appropriate message
 #   3. mode=hive with nats.enabled=true → failure mentioning nats.enabled=false
 #   4. Full default render → nats+bff+frontend present, no nats-external
-#   5. External exposure render → nats-external Service with correct selector
+#   5. External exposure render → nats-external Service with correct selector and traffic policy
 # =============================================================================
 set -euo pipefail
 
@@ -121,9 +121,51 @@ grep -c "nats-external" <<< "$EXT_RENDER" > /dev/null 2>&1
 check "External render: nats-external Service present" $?
 
 # Extract the nats-external Service and check selector
-EXT_SVC=$(grep -A20 "name:.*nats-external" <<< "$EXT_RENDER" || true)
+EXT_SVC=$(grep -A30 "name:.*nats-external" <<< "$EXT_RENDER" || true)
 grep -c "app.kubernetes.io/component: nats" <<< "$EXT_SVC" > /dev/null 2>&1
 check "External Service selector has app.kubernetes.io/component: nats" $?
+if grep -q "externalTrafficPolicy: Cluster" <<< "$EXT_SVC"; then check "External Service defaults to externalTrafficPolicy: Cluster" 0; else check "External Service defaults to externalTrafficPolicy: Cluster" 1; fi
+
+# Local keeps the member source address for nats.external.allowedCIDRs.
+LOCAL_RENDER=$(helm template "$ROOT" \
+  --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://example.com \
+  --set nats.external.enabled=true \
+  --set nats.external.host=nats.example.com \
+  --set nats.external.externalTrafficPolicy=Local 2>/dev/null) || {
+  echo "FAIL: helm template (external Local) failed"
+  exit 1
+}
+LOCAL_SVC=$(grep -A30 "name:.*nats-external" <<< "$LOCAL_RENDER" || true)
+if grep -q "externalTrafficPolicy: Local" <<< "$LOCAL_SVC"; then check "External Service renders externalTrafficPolicy: Local" 0; else check "External Service renders externalTrafficPolicy: Local" 1; fi
+
+# NodePort with a fixed port and Local.
+NP_RENDER=$(helm template "$ROOT" \
+  --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://example.com \
+  --set nats.external.enabled=true \
+  --set nats.external.host=nats.example.com \
+  --set nats.external.serviceType=NodePort \
+  --set nats.external.nodePort=30422 \
+  --set nats.external.externalTrafficPolicy=Local 2>/dev/null) || {
+  echo "FAIL: helm template (external NodePort) failed"
+  exit 1
+}
+NP_SVC=$(grep -A30 "name:.*nats-external" <<< "$NP_RENDER" || true)
+if grep -q "nodePort: 30422" <<< "$NP_SVC"; then check "NodePort External Service renders nodePort: 30422" 0; else check "NodePort External Service renders nodePort: 30422" 1; fi
+if grep -q "type: NodePort" <<< "$NP_SVC"; then check "NodePort External Service renders type: NodePort" 0; else check "NodePort External Service renders type: NodePort" 1; fi
+if grep -q "externalTrafficPolicy: Local" <<< "$NP_SVC"; then check "NodePort External Service renders externalTrafficPolicy: Local" 0; else check "NodePort External Service renders externalTrafficPolicy: Local" 1; fi
+
+# An unknown policy fails the render with a message that names the value.
+if BAD_OUT=$(helm template "$ROOT" \
+  --set auth.oidc.clientSecret=test --set auth.dashboardUrl=https://example.com \
+  --set nats.external.enabled=true \
+  --set nats.external.host=nats.example.com \
+  --set nats.external.externalTrafficPolicy=Bogus 2>&1); then
+  check "Bogus externalTrafficPolicy fails the render" 1
+elif grep -q "nats.external.externalTrafficPolicy must be Cluster or Local" <<< "$BAD_OUT"; then
+  check "Bogus externalTrafficPolicy fails the render" 0
+else
+  check "Bogus externalTrafficPolicy fails the render" 1
+fi
 
 echo ""
 if [[ "$failures" -eq 0 ]]; then

@@ -140,7 +140,7 @@ Every group in the table except `coreNatsEgress` refuses `ports: []` while it is
 
 `nats.external.allowedCIDRs` is required when `networkPolicy.enabled` is true, full mode is active, and `nats.external.enabled` is true. An empty list fails the render. Set the member cluster source addresses. To admit every source, set `["0.0.0.0/0"]`.
 
-Behind a NodePort or a LoadBalancer with `externalTrafficPolicy: Cluster`, kube-proxy can rewrite the source address to a node address. Include the core node and pod ranges in that case. Otherwise the allow-list does not match the member traffic.
+Behind a NodePort or a LoadBalancer with `externalTrafficPolicy: Cluster`, kube-proxy in iptables or IPVS mode replaces the source address with a core node address. The allow-list must then include the core node range and pod range. Set `nats.external.externalTrafficPolicy: Local` to keep the member source address. Then list only the member egress addresses. The chart does not compute a default list, because it cannot know the member addresses.
 
 ### Upgrade Impact
 
