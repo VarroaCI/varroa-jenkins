@@ -387,9 +387,11 @@ the packaged CRDs. Does not own the Go source it packages
   mode like `nats.external`) renders `<release>-recordstore-member` for the
   CNPG primary and a `np-recordstore-db` ingress rule from `allowedCIDRs`,
   which the guard requires when `networkPolicy.enabled` (an empty list
-  would admit every source; a NodePort path masquerades the source, so the
-  list must hold the addresses the traffic arrives from). `tests/test-hive-recordstore.sh`
-  asserts all of it.
+  would admit every source). The Service renders `spec.externalTrafficPolicy`
+  from `memberEndpoint.externalTrafficPolicy` (`Cluster` default or `Local`;
+  any other value fails the render). With `Cluster` the list must hold the
+  core node and pod ranges. With `Local` only the primary's node answers, so
+  list the member egress addresses. `tests/test-hive-recordstore.sh` asserts all of it.
 - **`tests/test-*.sh`** — golden-render bash assertions over `helm template` output,
   not the `helm unittest` plugin. `make chart-test` runs every `test-*.sh` file
   and names each failed test; the **Chart tests** job in both `pr.yaml` workflows

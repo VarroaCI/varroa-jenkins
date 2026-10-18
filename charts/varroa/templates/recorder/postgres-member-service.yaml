@@ -4,6 +4,11 @@ only: a member gateway in postgres blob mode dials this endpoint.
 */}}
 {{- $me := .Values.recordStore.postgres.memberEndpoint | default dict -}}
 {{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) (eq .Values.recordStore.postgres.mode "cnpg") $me.enabled }}
+{{- $policy := $me.externalTrafficPolicy | default "Cluster" -}}
+{{- $type := $me.serviceType | default "LoadBalancer" -}}
+{{- if not (has $policy (list "Cluster" "Local")) -}}
+{{- fail (printf "recordStore.postgres.memberEndpoint.externalTrafficPolicy must be Cluster or Local, not %q" $policy) -}}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,12 +21,15 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ $me.serviceType | default "LoadBalancer" }}
+  type: {{ $type }}
+  {{- if has $type (list "LoadBalancer" "NodePort") }}
+  externalTrafficPolicy: {{ $policy }}
+  {{- end }}
   ports:
     - name: postgres
       port: 5432
       targetPort: 5432
-      {{- if and (eq ($me.serviceType | default "LoadBalancer") "NodePort") (gt ($me.nodePort | int) 0) }}
+      {{- if and (eq $type "NodePort") (gt ($me.nodePort | int) 0) }}
       nodePort: {{ $me.nodePort }}
       {{- end }}
   selector:

@@ -1014,13 +1014,17 @@ recordStore:
       serviceType: LoadBalancer
       # -- Fixed nodePort when serviceType is NodePort (0 = auto).
       nodePort: 0
+      # -- Cluster or Local. Local keeps the member source address for
+      # allowedCIDRs. With Local, only the node that runs the primary answers.
+      externalTrafficPolicy: Cluster
       # -- REQUIRED when enabled: the address members dial. It replaces
       # the host in the DSN a member receives.
       host: ""
       annotations: {}
       # -- With networkPolicy.enabled, REQUIRED: the source CIDRs the
-      # database admits on 5432. A NodePort or load-balancer path can
-      # rewrite the source address; set 0.0.0.0/0 to admit every source.
+      # database admits on 5432. With Cluster, include the core node and
+      # pod ranges. With Local, list the member egress addresses. Set
+      # 0.0.0.0/0 to admit every source.
       allowedCIDRs: []
     # -- Used when postgres.mode is "cnpg". Requires the CloudNativePG
     # operator to be installed in the cluster; this chart does not install it.

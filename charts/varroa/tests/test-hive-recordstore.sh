@@ -11,8 +11,8 @@
 #      needs pinned Postgres CIDRs.
 #   4. Hive + s3 blobs + NetworkPolicy: the gateway egress carries the blob
 #      rule, and the render stays at four policies.
-#   5. Core member endpoint: Service shape, guards, database ingress rule,
-#      and no Service in a hive release.
+#   5. Core member endpoint: Service shape, traffic policy, guards, database
+#      ingress rule, and no Service in a hive release.
 # =============================================================================
 set -euo pipefail
 
@@ -95,6 +95,25 @@ SVC=$(doc Service t-recordstore-member "$R")
 grep -q "type: NodePort" <<< "$SVC"; check "member endpoint Service is a NodePort" $?
 grep -q "nodePort: 30543" <<< "$SVC"; check "member endpoint Service pins the nodePort" $?
 grep -q "cnpg.io/instanceRole: primary" <<< "$SVC"; check "member endpoint selects the primary" $?
+grep -q "externalTrafficPolicy: Cluster" <<< "$SVC"; check "member endpoint defaults to externalTrafficPolicy: Cluster" $?
+RX=$(helm template t "$ROOT" "${CORE[@]}" --set recordStore.postgres.memberEndpoint.host=pg.example \
+  --set recordStore.postgres.memberEndpoint.serviceType=NodePort --set recordStore.postgres.memberEndpoint.nodePort=30543 \
+  --set recordStore.postgres.memberEndpoint.externalTrafficPolicy=Local)
+SVCX=$(doc Service t-recordstore-member "$RX")
+grep -q "externalTrafficPolicy: Local" <<< "$SVCX"; check "member endpoint renders externalTrafficPolicy: Local" $?
+grep -q "type: NodePort" <<< "$SVCX" && grep -q "nodePort: 30543" <<< "$SVCX"; check "member endpoint keeps the NodePort with Local" $?
+RX=$(helm template t "$ROOT" "${CORE[@]}" --set recordStore.postgres.memberEndpoint.host=pg.example \
+  --set recordStore.postgres.memberEndpoint.externalTrafficPolicy=Local)
+SVCX=$(doc Service t-recordstore-member "$RX")
+grep -q "type: LoadBalancer" <<< "$SVCX" && grep -q "externalTrafficPolicy: Local" <<< "$SVCX"; check "LoadBalancer member endpoint renders externalTrafficPolicy: Local" $?
+RX=$(helm template t "$ROOT" "${CORE[@]}" --set recordStore.postgres.memberEndpoint.host=pg.example \
+  --set recordStore.postgres.memberEndpoint.serviceType=ClusterIP)
+SVCX=$(doc Service t-recordstore-member "$RX")
+grep -q "externalTrafficPolicy" <<< "$SVCX" && rc=1 || rc=0; check "ClusterIP member endpoint renders no externalTrafficPolicy" $rc
+if OUT=$(helm template t "$ROOT" "${CORE[@]}" --set recordStore.postgres.memberEndpoint.host=pg.example \
+  --set recordStore.postgres.memberEndpoint.externalTrafficPolicy=Bogus 2>&1); then check "Bogus member endpoint traffic policy fails the render" 1
+elif grep -q "memberEndpoint.externalTrafficPolicy must be Cluster or Local" <<< "$OUT"; then check "Bogus member endpoint traffic policy fails the render" 0
+else check "Bogus member endpoint traffic policy fails the render" 1; fi
 NPDB=$(doc NetworkPolicy t-np-recordstore-db "$R")
 grep -q "cidr: 192.0.2.0/24" <<< "$NPDB"; check "database admits the member CIDR on 5432" $?
 OUT=$(helm template t "$ROOT" "${CORE[@]}" 2>&1 || true)

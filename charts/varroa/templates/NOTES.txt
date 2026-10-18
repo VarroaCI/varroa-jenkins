@@ -132,6 +132,27 @@ Set global.domain in values.yaml to see external URLs.
   See docs/install/multi-cluster.md for the full runbook.
 {{- end }}
 
+{{- $me := .Values.recordStore.postgres.memberEndpoint | default dict }}
+{{- if and .Values.recordStore.enabled (not (include "varroa.isHive" .)) (eq .Values.recordStore.postgres.mode "cnpg") $me.enabled }}
+================================================================================
+  Record Store Member Endpoint
+================================================================================
+{{- $mePort := 5432 }}
+{{- if and (eq ($me.serviceType | default "LoadBalancer") "NodePort") (gt ($me.nodePort | int) 0) }}
+{{- $mePort = $me.nodePort }}
+{{- end }}
+  Member endpoint: {{ $me.host }}:{{ $mePort }}
+  External traffic policy: {{ $me.externalTrafficPolicy | default "Cluster" }}
+{{- if and (eq ($me.externalTrafficPolicy | default "Cluster") "Local") (eq ($me.serviceType | default "LoadBalancer") "NodePort") }}
+    A NodePort with Local answers only on the node that runs the primary.
+    Set the member DSN host to that node address.
+{{- end }}
+{{- if and (eq ($me.serviceType | default "LoadBalancer") "NodePort") (not ($me.nodePort | int)) }}
+    NodePort is 0, so Kubernetes picks the port. Read it with kubectl get svc.
+{{- end }}
+
+{{- end }}
+
 {{- if not (include "varroa.isHive" .) }}
 
 {{- if .Values.networkPolicy.enabled }}
