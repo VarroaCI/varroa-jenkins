@@ -18,8 +18,8 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the record store's seventeen tables, column for
-// column: migration 00001's seven, plus migration 00002's "activity",
+// expectedColumns mirrors the seventeen record-store tables and the four
+// agent tables, column for column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
 // migration 00017's "run_test_cases", migration 00030's "run_waits", and
@@ -260,6 +260,63 @@ var expectedColumns = map[string][]columnSpec{
 		{"first_seen_at", "timestamp with time zone", false},
 		{"last_seen_at", "timestamp with time zone", false},
 	},
+	// The four agent tables come from migration 00038. They sit beside the
+	// record tables and do not count toward the record table set.
+	"agent_sessions": {
+		{"id", "uuid", false},
+		{"kind", "text", false},
+		{"principal", "text", false},
+		{"team", "text", false},
+		{"cluster", "text", false},
+		{"trigger", "text", false},
+		{"context", "jsonb", false},
+		{"provider", "text", false},
+		{"model", "text", false},
+		{"key_source", "text", false},
+		{"data_sharing", "text", false},
+		{"instructions_sha", "text", true},
+		{"team_agent_generation", "bigint", true},
+		{"state", "text", false},
+		{"skip_reason", "text", true},
+		{"prompt_tokens", "bigint", false},
+		{"completion_tokens", "bigint", false},
+		{"steps", "integer", false},
+		{"lease_owner", "text", true},
+		{"lease_expires_at", "timestamp with time zone", true},
+		{"started_at", "timestamp with time zone", false},
+		{"ended_at", "timestamp with time zone", true},
+	},
+	"agent_session_events": {
+		{"session_id", "uuid", false},
+		{"seq", "integer", false},
+		{"type", "text", false},
+		{"payload", "jsonb", false},
+		{"created_at", "timestamp with time zone", false},
+	},
+	"agent_approvals": {
+		{"id", "uuid", false},
+		{"session_id", "uuid", false},
+		{"call_id", "text", false},
+		{"tool", "text", false},
+		{"arguments", "jsonb", false},
+		{"target_kind", "text", false},
+		{"target_ref", "text", false},
+		{"state", "text", false},
+		{"requested_at", "timestamp with time zone", false},
+		{"expires_at", "timestamp with time zone", false},
+		{"resolved_by", "text", true},
+		{"resolved_at", "timestamp with time zone", true},
+		{"reason", "text", true},
+	},
+	"agent_settings": {
+		{"scope", "text", false},
+		{"paused", "boolean", false},
+		{"paused_by", "text", true},
+		{"paused_at", "timestamp with time zone", true},
+		{"settings", "jsonb", false},
+		{"updated_at", "timestamp with time zone", false},
+		{"updated_by", "text", true},
+	},
 	"upstream_origins": {
 		{"intent_key", "text", false},
 		{"cluster", "text", false},
@@ -302,7 +359,8 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the record store's seventeen tables, column for column.
+// schema against the seventeen record-store tables and the four agent
+// tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
 
@@ -473,6 +531,7 @@ func TestNonPartitionedTables(t *testing.T) {
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
 		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
+		"agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,
@@ -506,6 +565,8 @@ func TestIndexesExist(t *testing.T) {
 		"job_branch_projects": {"job_branch_projects_cell_idx"},
 		"fleet_locks":         {"fleet_locks_one_holder", "fleet_locks_cluster_owner_tenant"},
 		"run_test_cases":      {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
+		"agent_sessions":      {"agent_sessions_principal_started_idx", "agent_sessions_team_started_idx", "agent_sessions_lease_idx"},
+		"agent_approvals":     {"agent_approvals_session_idx", "agent_approvals_pending_idx", "agent_approvals_target_idx"},
 	}
 
 	for table, indexes := range want {

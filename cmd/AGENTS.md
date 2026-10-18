@@ -160,6 +160,10 @@ stating what it is/is not responsible for:
   Jenkins plugin's build-event and claim traffic.
 - **`varroactl/`** (`bin/varroactl`) — CLI + MCP surface; own contract in
   `cmd/varroactl/AGENTS.md`.
+- **`fakeprovider/`** — scripted model provider for tests (serves the
+  Messages and Chat Completions streams from a script; library in
+  `internal/agent/provider/providertest`). It ships in no image, and
+  `hack/build-image-binaries.sh` does not list it.
 - **`fakemite/`** — synthetic load generator: opens N real mTLS
   `CommandStream`s against a gateway (embedded self-contained NATS+gateway by
   default, or `--gateway ADDR` against a real one) to profile CPU/etcd QPS/

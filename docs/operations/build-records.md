@@ -2,7 +2,7 @@
 
 The build record store keeps build history outside each Jenkins controller. It records one run
 per build: stages, tests, artifacts, and build-number ledger.
-It is optional and off by default.
+It is off by default.
 
 Logs and artifacts live in a blob store, and the record store holds only their index. See [Build logs and
 artifacts](build-logs-and-artifacts.md).
@@ -74,7 +74,7 @@ Pin the operator version and upgrade it on your schedule.
 | Role | Created by | Used by |
 |---|---|---|
 | `varroa_recorder` | CloudNativePG, as the database owner | the recorder; runs migrations and writes every table |
-| `varroa_client` | CloudNativePG, as a managed role | the BFF; reads runs, stages, tests, and artifacts |
+| `varroa_client` | CloudNativePG, as a managed role | the BFF; reads records and writes agent tables |
 | `varroa_gateway` | CloudNativePG, as a managed role | the gateway, only in `postgres` blob mode; reads every table and writes log chunks |
 
 `varroa_gateway` writes only to `varroa.log_chunks` and its later partitions, and never deletes a

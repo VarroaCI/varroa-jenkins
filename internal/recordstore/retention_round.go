@@ -130,7 +130,9 @@ func RunMaintenanceRound(ctx context.Context, pool *pgxpool.Pool, cfg Maintenanc
 // sweep), all against db. Step 10, EnsureGrants, is not one of these:
 // RunMaintenance calls it every tick regardless of which replica holds
 // the advisory lock, because it is idempotent and every replica
-// benefits from running it as soon as the client role appears.
+// benefits from running it as soon as the client role appears. The
+// agent-session step runs after the upstream-origin sweep and before the
+// log finalization; it deletes final agent sessions only.
 func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfig) error {
 	now := cfg.now()
 
@@ -213,6 +215,12 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 
 	if _, err := sweepUpstreamOrigins(ctx, db); err != nil {
 		return fmt.Errorf("sweep upstream origins: %w", err)
+	}
+
+	// The agent step runs after the upstream sweep and before the log
+	// finalization. It deletes only final agent sessions, bounded per round.
+	if _, err := deleteExpiredAgentSessions(ctx, db, now, cfg.RunRetention, agentRetentionRoundBudget); err != nil {
+		return fmt.Errorf("delete expired agent sessions: %w", err)
 	}
 
 	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.FinalizeWait, now); err != nil {

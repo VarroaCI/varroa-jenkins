@@ -33,6 +33,8 @@ A build check fails when a source adds a host that this page does not list.
 | --- | --- | --- | --- | --- |
 | OIDC issuer (auth.oidc.issuer) | Discover the sign-in provider keys and endpoints. | HTTPS 443 | auth.oidc.issuer | Yes, with a local issuer (auth.mode local or ldap). Set the mode in the chart. |
 | Record store (external Postgres) | Read build history from the record store. | PostgreSQL 5432 | recordStore.postgres.mode and host | Yes. Leave recordStore.enabled false. |
+| api.anthropic.com | Send assistant requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty. | HTTPS 443 | assistant.providers[].baseURL (the adapter default when it is empty) | Yes. Keep assistant.enabled false. |
+| Configured assistant provider base URLs | Send assistant requests to the configured model provider. | HTTPS 443, or the port in the base URL | assistant.providers[].baseURL | Yes. Keep assistant.enabled false. |
 
 ## Update center
 

@@ -13,7 +13,7 @@ import (
 type Event struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Type        string    `json:"type"`
-	Source      string    `json:"source"`          // "mite", "operator", "user", "jenkins", "api", "mcp"
+	Source      string    `json:"source"`          // "mite", "operator", "user", "jenkins", "api", "mcp", "assistant"
 	Actor       string    `json:"actor,omitempty"` // username, else email, else subject (api.ActorFrom); "operator"; or empty
 	Controller  string    `json:"controller,omitempty"`
 	Namespace   string    `json:"namespace,omitempty"`

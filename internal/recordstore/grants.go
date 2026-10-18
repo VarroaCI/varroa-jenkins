@@ -17,7 +17,9 @@ import (
 // INSERT on varroa.log_chunks names the partitioned parent only;
 // PostgreSQL routes an insert through the parent and checks the parent's
 // privileges, so a partition created after this grant needs no grant of
-// its own. The UPDATE grant covers digest, bytes, and writer alone: the
+// its own. The client role also writes the four agent tables with INSERT
+// and UPDATE only. It holds no DELETE on any table; the recorder's
+// maintenance round is the only deleter of agent rows. The UPDATE grant covers digest, bytes, and writer alone: the
 // log writer replaces a log part that a lost writer left above a hole,
 // and needs no other column. varroa_gateway gets no DELETE.
 const ensureGrantsSQL = `
@@ -26,6 +28,8 @@ DO $$ BEGIN
     GRANT USAGE ON SCHEMA varroa TO varroa_client;
     GRANT SELECT ON ALL TABLES IN SCHEMA varroa TO varroa_client;
     GRANT INSERT ON varroa.log_chunks TO varroa_client;
+    GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
+      varroa.agent_approvals, varroa.agent_settings TO varroa_client;
     ALTER DEFAULT PRIVILEGES IN SCHEMA varroa GRANT SELECT ON TABLES TO varroa_client;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'varroa_gateway') THEN
