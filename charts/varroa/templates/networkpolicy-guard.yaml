@@ -1,9 +1,11 @@
 {{- /*
 networkpolicy-guard.yaml
 Fails the render when an operator-named egress group is enabled without
-the CIDRs it needs. Every such group renders a rule only when its gate is
-on and its cidrs list is non-empty, so an empty list never opens every
-destination. Renders no objects. Only evaluated when networkPolicy.enabled.
+the CIDRs it needs, when an egress group has an empty port list, or when
+the NATS external allow-list is empty. Every such group renders a rule only
+when its gate is on and its cidrs list is non-empty, so an empty list never
+opens every destination. An empty ports list would allow every port, so it
+fails too. Renders no objects. Only evaluated when networkPolicy.enabled.
 Each failure message names the value to set.
 */ -}}
 
@@ -33,6 +35,34 @@ Each failure message names the value to set.
 
 {{- if and $np.recorderWebhookEgress.enabled (empty (default list $np.recorderWebhookEgress.cidrs)) }}
 {{- fail "networkPolicy.recorderWebhookEgress.cidrs must name the webhook receiver address when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $np.apiServerEgress (empty (default list $np.apiServerEgress.cidrs)) }}
+{{- fail "networkPolicy.apiServerEgress.cidrs must name the API server endpoint addresses. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $np.gitEgress.enabled (empty (default list $np.gitEgress.cidrs)) }}
+{{- fail "networkPolicy.gitEgress.cidrs must name the Git and OIDC issuer addresses when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and $np.dexConnectorEgress.enabled (empty (default list $np.dexConnectorEgress.cidrs)) }}
+{{- fail "networkPolicy.dexConnectorEgress.cidrs must name the identity provider addresses when the rule is enabled. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- if and .Values.telemetry.endpoint (not .Values.telemetry.disabled) (empty (default list $np.telemetryEgress.cidrs)) }}
+{{- fail "networkPolicy.telemetryEgress.cidrs must name the OTLP collector address when telemetry.endpoint is set. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+
+{{- $ext := .Values.nats.external | default dict }}
+{{- if and $full .Values.nats.enabled $ext.enabled (empty (default list $ext.allowedCIDRs)) }}
+{{- fail "nats.external.allowedCIDRs must list the member cluster source addresses when networkPolicy.enabled is true. Set [\"0.0.0.0/0\"] to admit every source." }}
+{{- end }}
+
+{{- range $name := list "apiServerEgress" "gitEgress" "dexConnectorEgress" "telemetryEgress" "pullThroughEgress" "updateCenterRegistryEgress" "ociRegistryEgress" "recordStorePostgresEgress" "recordStoreBlobEgress" "recorderWebhookEgress" }}
+{{- $g := index $np $name | default dict }}
+{{- if and (or (not (hasKey $g "enabled")) $g.enabled) (empty (default list $g.ports)) }}
+{{- fail (printf "networkPolicy.%s.ports must not be empty, because an empty list allows every port. Name each TCP port." $name) }}
+{{- end }}
 {{- end }}
 
 {{- end }}

@@ -15,6 +15,8 @@ helm upgrade --install varroa charts/varroa \
 
 Protect the endpoint with firewall rules and NATS credentials. If network policies are enabled, a member must set `networkPolicy.coreNatsEgress.cidrs` to this endpoint's address. The render fails without it.
 
+On the core, with network policies enabled, set `nats.external.allowedCIDRs` to the source addresses of each member. The render fails while the list is empty. A member address behind a NodePort or LoadBalancer can change. See [Network Policies](network-policies.md#external-nats-clients).
+
 ## Install the member
 
 Create in the member namespace a `varroa-nats-creds` Secret containing only `operator-password`, `gateway-password`, and `ca.crt`, copied securely from the core deployment. Do not copy private keys or BFF credentials.

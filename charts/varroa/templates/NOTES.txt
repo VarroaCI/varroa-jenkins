@@ -145,9 +145,13 @@ Set global.domain in values.yaml to see external URLs.
   • kubelet liveness/readiness probes are assumed CNI-exempt (Calico, Cilium
     default). Clusters that enforce NetworkPolicy on kubelet-originated traffic
     need a node-CIDR ingress allowance (not shipped).
-  • networkPolicy.apiServerEgress.cidrs should be pinned to your apiserver
-    endpoint IPs in production. Default (empty) uses 0.0.0.0/0 on ports
-    443 and 6443.
+  • networkPolicy.apiServerEgress.cidrs defaults to ["0.0.0.0/0"], which
+    allows every address on ports 443 and 6443. Pin each endpoint IP from
+    `kubectl get endpointslice -n default -l kubernetes.io/service-name=kubernetes`
+    as a /32. An empty list fails the render.
+  • networkPolicy.gitEgress.cidrs and networkPolicy.dexConnectorEgress.cidrs
+    default to ["0.0.0.0/0"], which allows every address on 443. Pin them to
+    your Git, OIDC, and identity provider addresses.
   • networkPolicy.metricsIngress allows your externally-managed scraper to
     reach operator :8080/:9091, gateway :{grpcPort+1}, bff, and nats :8222
     (the chart ships no monitoring stack; default [] renders no rule).
@@ -194,9 +198,13 @@ Set global.domain in values.yaml to see external URLs.
   • kubelet liveness/readiness probes are assumed CNI-exempt (Calico, Cilium
     default). Clusters that enforce NetworkPolicy on kubelet-originated traffic
     need a node-CIDR ingress allowance (not shipped).
-  • networkPolicy.apiServerEgress.cidrs should be pinned to your apiserver
-    endpoint IPs in production. Default (empty) uses 0.0.0.0/0 on ports
-    443 and 6443.
+  • networkPolicy.apiServerEgress.cidrs defaults to ["0.0.0.0/0"], which
+    allows every address on ports 443 and 6443. Pin each endpoint IP from
+    `kubectl get endpointslice -n default -l kubernetes.io/service-name=kubernetes`
+    as a /32. An empty list fails the render.
+  • networkPolicy.gitEgress.cidrs and networkPolicy.dexConnectorEgress.cidrs
+    default to ["0.0.0.0/0"], which allows every address on 443. Pin them to
+    your Git, OIDC, and identity provider addresses.
   • networkPolicy.metricsIngress allows user-managed scrapers to reach
     operator :8080/:9091 and gateway :{grpcPort+1}.
 {{- else }}

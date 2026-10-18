@@ -4,7 +4,10 @@
 # =============================================================================
 # Verifies that networkPolicy.enabled=true with an empty cidrs list fails the
 # render for each group that needs a named address, that the failure message
-# names the value, and that a pinned CIDR renders as the only peer.
+# names the value, and that a pinned CIDR renders as the only peer. It also
+# checks that an empty ports list fails the render, that the default egress
+# groups render their wide explicit defaults, and that the NATS external
+# allow-list is required in full mode.
 # Empty lists come from a values file, because --set cannot write an empty list.
 # Guard: charts/varroa/templates/networkpolicy-guard.yaml.
 # =============================================================================
@@ -76,6 +79,47 @@ networkPolicy:
   recorderWebhookEgress:
     enabled: true
     cidrs: []
+EOF
+cat > "$TMP/empty-apiserver.yaml" <<'EOF'
+networkPolicy:
+  apiServerEgress:
+    cidrs: []
+EOF
+cat > "$TMP/empty-git.yaml" <<'EOF'
+networkPolicy:
+  gitEgress:
+    cidrs: []
+EOF
+cat > "$TMP/empty-dex.yaml" <<'EOF'
+networkPolicy:
+  dexConnectorEgress:
+    cidrs: []
+EOF
+cat > "$TMP/empty-nats-allowed.yaml" <<'EOF'
+nats:
+  external:
+    allowedCIDRs: []
+EOF
+cat > "$TMP/git-empty-ports.yaml" <<'EOF'
+networkPolicy:
+  gitEgress:
+    ports: []
+EOF
+cat > "$TMP/apiserver-empty-ports.yaml" <<'EOF'
+networkPolicy:
+  apiServerEgress:
+    ports: []
+EOF
+cat > "$TMP/oci-off-empty-ports.yaml" <<'EOF'
+networkPolicy:
+  ociRegistryEgress:
+    enabled: false
+    ports: []
+EOF
+cat > "$TMP/corenats-empty-ports.yaml" <<'EOF'
+networkPolicy:
+  coreNatsEgress:
+    ports: []
 EOF
 
 # ---------------------------------------------------------------------------
@@ -224,10 +268,174 @@ check "webhook failure names recorderWebhookEgress.cidrs" "$rc"
 fail_messages="$fail_messages$OUT"
 
 # ---------------------------------------------------------------------------
-# (8) Every failure message names the 0.0.0.0/0 opt-in.
+# (8) apiServerEgress: the default is wide, an empty list fails, a pin renders.
 # ---------------------------------------------------------------------------
 echo ""
-echo "--- (8) failure messages name the opt-in ---"
+echo "--- (8) apiServerEgress ---"
+
+render --set networkPolicy.enabled=true
+OP=$(sed_extract 'np-operator' "$OUT")
+grep -q 'cidr: 0.0.0.0/0' <<< "$OP" && rc=0 || rc=1
+check "apiServerEgress default: np-operator allows 0.0.0.0/0" "$rc"
+grep -q 'port: 6443' <<< "$OP" && rc=0 || rc=1
+check "apiServerEgress default: np-operator allows port 6443" "$rc"
+
+render --set networkPolicy.enabled=true -f "$TMP/empty-apiserver.yaml"
+check "apiServerEgress with empty cidrs fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.apiServerEgress.cidrs must name the API server' <<< "$OUT" && rc=0 || rc=1
+check "apiServerEgress failure names apiServerEgress.cidrs" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true \
+  --set-string 'networkPolicy.apiServerEgress.cidrs={192.0.2.1/32}'
+check "apiServerEgress with pinned CIDR renders" "$RC"
+GW=$(sed_extract 'np-gateway' "$OUT")
+grep -q 'cidr: 192.0.2.1/32' <<< "$GW" && rc=0 || rc=1
+check "pinned apiServerEgress CIDR is in np-gateway" "$rc"
+
+# ---------------------------------------------------------------------------
+# (9) gitEgress: an empty list fails, a pin renders, enabled=false passes.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (9) gitEgress ---"
+
+render --set networkPolicy.enabled=true -f "$TMP/empty-git.yaml"
+check "gitEgress enabled with empty cidrs fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.gitEgress.cidrs must name the Git and OIDC' <<< "$OUT" && rc=0 || rc=1
+check "gitEgress failure names gitEgress.cidrs" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true \
+  --set-string 'networkPolicy.gitEgress.cidrs={198.51.100.7/32}'
+check "gitEgress with pinned CIDR renders" "$RC"
+OP=$(sed_extract 'np-operator' "$OUT")
+BFF=$(sed_extract 'np-bff' "$OUT")
+grep -q 'cidr: 198.51.100.7/32' <<< "$OP" && rc=0 || rc=1
+check "pinned gitEgress CIDR is in np-operator" "$rc"
+grep -q 'cidr: 198.51.100.7/32' <<< "$BFF" && rc=0 || rc=1
+check "pinned gitEgress CIDR is in np-bff" "$rc"
+
+render --set networkPolicy.enabled=true --set networkPolicy.gitEgress.enabled=false -f "$TMP/empty-git.yaml"
+check "gitEgress disabled with empty cidrs passes" "$RC"
+
+# ---------------------------------------------------------------------------
+# (10) dexConnectorEgress: an empty list fails, a pin renders in np-dex.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (10) dexConnectorEgress ---"
+
+render --set networkPolicy.enabled=true -f "$TMP/empty-dex.yaml"
+check "dexConnectorEgress enabled with empty cidrs fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.dexConnectorEgress.cidrs must name the identity provider' <<< "$OUT" && rc=0 || rc=1
+check "dexConnectorEgress failure names dexConnectorEgress.cidrs" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true \
+  --set-string 'networkPolicy.dexConnectorEgress.cidrs={203.0.113.5/32}'
+check "dexConnectorEgress with pinned CIDR renders" "$RC"
+DEX=$(sed_extract 'np-dex' "$OUT")
+grep -q 'cidr: 203.0.113.5/32' <<< "$DEX" && rc=0 || rc=1
+check "pinned dexConnectorEgress CIDR is in np-dex" "$rc"
+
+# ---------------------------------------------------------------------------
+# (11) telemetryEgress: an endpoint needs a pinned collector CIDR.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (11) telemetryEgress ---"
+
+render --set networkPolicy.enabled=true --set telemetry.endpoint=http://otel.example:4317
+check "telemetry endpoint with default cidrs fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.telemetryEgress.cidrs must name the OTLP collector' <<< "$OUT" && rc=0 || rc=1
+check "telemetry failure names telemetryEgress.cidrs" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true --set telemetry.endpoint=http://otel.example:4317 \
+  --set-string 'networkPolicy.telemetryEgress.cidrs={10.1.2.3/32}'
+check "telemetry with pinned collector CIDR renders" "$RC"
+OP=$(sed_extract 'np-operator' "$OUT")
+grep -q 'cidr: 10.1.2.3/32' <<< "$OP" && rc=0 || rc=1
+check "pinned telemetryEgress CIDR is in np-operator" "$rc"
+grep -q 'port: 4317' <<< "$OP" && rc=0 || rc=1
+check "telemetryEgress rule carries port 4317" "$rc"
+
+# ---------------------------------------------------------------------------
+# (12) Closed set: pinned apiServer, git, and dex leave no 0.0.0.0/0 behind.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (12) closed egress set ---"
+
+render --set networkPolicy.enabled=true \
+  --set-string 'networkPolicy.apiServerEgress.cidrs={192.0.2.1/32}' \
+  --set-string 'networkPolicy.gitEgress.cidrs={198.51.100.7/32}' \
+  --set-string 'networkPolicy.dexConnectorEgress.cidrs={203.0.113.5/32}'
+check "all three pinned renders" "$RC"
+for policy in np-operator np-bff np-gateway np-dex; do
+  DOC=$(sed_extract "$policy" "$OUT")
+  grep -q 'cidr: 0.0.0.0/0' <<< "$DOC" && rc=1 || rc=0
+  check "$policy has no 0.0.0.0/0 once the three groups are pinned" "$rc"
+done
+
+# ---------------------------------------------------------------------------
+# (13) Empty ports lists fail; disabled groups and coreNatsEgress pass.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (13) empty ports ---"
+
+render --set networkPolicy.enabled=true -f "$TMP/git-empty-ports.yaml"
+check "gitEgress with empty ports fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.gitEgress.ports must not be empty' <<< "$OUT" && rc=0 || rc=1
+check "empty gitEgress ports failure names gitEgress.ports" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true -f "$TMP/apiserver-empty-ports.yaml"
+check "apiServerEgress with empty ports fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'networkPolicy.apiServerEgress.ports must not be empty' <<< "$OUT" && rc=0 || rc=1
+check "empty apiServerEgress ports failure names apiServerEgress.ports" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render --set networkPolicy.enabled=true -f "$TMP/oci-off-empty-ports.yaml"
+check "disabled ociRegistryEgress with empty ports renders" "$RC"
+
+render "${HIVE[@]}" --set bus.url=tls://core.example:4222 \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}' -f "$TMP/corenats-empty-ports.yaml"
+check "hive coreNatsEgress with empty ports (bus.url port) renders" "$RC"
+
+# ---------------------------------------------------------------------------
+# (14) NATS external: full mode needs an allow-list; hive mode does not.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (14) nats.external.allowedCIDRs ---"
+
+NATS_EXT=(--set networkPolicy.enabled=true --set nats.external.enabled=true
+  --set nats.external.host=nats.example.com)
+
+render "${NATS_EXT[@]}" -f "$TMP/empty-nats-allowed.yaml"
+check "full mode nats external with empty allow-list fails" "$([[ "$RC" -ne 0 ]] && echo 0 || echo 1)"
+grep -q 'nats.external.allowedCIDRs must list the member cluster' <<< "$OUT" && rc=0 || rc=1
+check "nats external failure names nats.external.allowedCIDRs" "$rc"
+fail_messages="$fail_messages$OUT"
+
+render "${NATS_EXT[@]}" --set-string 'nats.external.allowedCIDRs={192.168.1.22/32}'
+check "full mode nats external with pinned source renders" "$RC"
+NATS=$(sed_extract 'np-nats' "$OUT")
+grep -q 'cidr: 192.168.1.22/32' <<< "$NATS" && rc=0 || rc=1
+check "pinned nats external source is in np-nats" "$rc"
+grep -q 'cidr: 0.0.0.0/0' <<< "$NATS" && rc=1 || rc=0
+check "pinned nats external: np-nats has no 0.0.0.0/0" "$rc"
+
+render -f "$ROOT/values-hive.yaml" --set cluster.name=test \
+  --set auth.dashboardUrl=http://example.com --set networkPolicy.enabled=true \
+  --set bus.url=tls://core.example:4222 \
+  --set-string 'networkPolicy.coreNatsEgress.cidrs={192.0.2.10/32}' \
+  --set nats.external.enabled=true --set nats.external.host=nats.example.com \
+  -f "$TMP/empty-nats-allowed.yaml"
+check "hive mode nats external with empty allow-list renders" "$RC"
+
+# ---------------------------------------------------------------------------
+# (15) Every failure message names the 0.0.0.0/0 opt-in.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (15) failure messages name the opt-in ---"
 
 grep -q '0.0.0.0/0' <<< "$fail_messages" && rc=0 || rc=1
 check "failure messages contain 0.0.0.0/0" "$rc"

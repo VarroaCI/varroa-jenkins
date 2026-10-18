@@ -204,26 +204,33 @@ networkPolicy:
   # With a local issuer (auth.bffUrl set, and auth.mode local or ldap or
   # auth.localAccounts), controller pods here also reach the BFF for its JWKS.
   tenantNamespaceSelector: {}
-  # Egress rules add up. gitEgress allows every address on 443. Pinning
-  # apiServerEgress does not close that. The groups that name an address, such as
-  # updateCenterRegistryEgress and recordStoreBlobEgress, render only when their gate is
-  # on and their cidrs list is not empty. See docs/install/network-policies.md.
-  # kube-apiserver egress for operator/gateway/bff/dex.
-  # Empty cidrs = 0.0.0.0/0 on the listed ports; pin to your apiserver endpoint IPs.
+  # Egress rules add up. The egress set closes only when every open group is pinned.
+  # apiServerEgress, gitEgress, and dexConnectorEgress default to every address on
+  # 443. Pin each one to its real addresses. See docs/install/network-policies.md.
+  # An empty cidrs list fails the render. An empty ports list fails the render,
+  # because Kubernetes reads it as every port.
+  # kube-apiserver egress for operator/gateway/bff/dex. Pin cidrs to the
+  # kubernetes EndpointSlice IPs on port 6443, not to the ClusterIP. Calico
+  # matches the endpoint address after kube-proxy rewrites it.
   apiServerEgress:
-    cidrs: []
+    cidrs: ["0.0.0.0/0"]
     ports: [443, 6443]
-  # Dex connector egress (GitHub/Gitea/OIDC :443; add 636 for LDAP).
+  # Dex connector egress (GitHub/Gitea/OIDC :443; add 636 for LDAP). Pin cidrs to
+  # the identity provider addresses.
   dexConnectorEgress:
     enabled: true
+    cidrs: ["0.0.0.0/0"]
     ports: [443]
-    extraCIDRs: []                     # appended as additional ipBlock entries
-  # operator/bff bundle git clone + non-Dex OIDC issuer egress.
+  # operator/bff bundle git clone + non-Dex OIDC issuer egress. Pin cidrs to the
+  # Git server and OIDC issuer addresses.
   gitEgress:
     enabled: true
+    cidrs: ["0.0.0.0/0"]
     ports: [443, 22]
-  # OTLP collector egress ports (rule renders only when telemetry.endpoint is set).
+  # OTLP collector egress (rule renders only when telemetry.endpoint is set).
+  # Empty cidrs fails the render while telemetry.endpoint is set. Name the collector address.
   telemetryEgress:
+    cidrs: []
     ports: [4317, 4318]
   # Update-center pull-through egress (UC → updates.jenkins.io).
   # Renders only when updateCenter.pullThrough.enabled is also true.
@@ -817,7 +824,7 @@ nats:
     host: ""                    # REQUIRED when enabled — external DNS name; becomes a cert SAN + NOTES output
     extraSANs: []               # additional DNS SANs
     ipSANs: []                  # IP SANs
-    allowedCIDRs: []            # when networkPolicy.enabled=true, ingress CIDRs for external clients ([] = 0.0.0.0/0)
+    allowedCIDRs: []            # required when networkPolicy.enabled=true and external.enabled; [] fails the render. Use ["0.0.0.0/0"] to admit every source.
 
 # ---------------------------------------------------------------------------
 # Frontend — React SPA served by nginx. All CRD operations flow through the auth-protected Varroa BFF API.

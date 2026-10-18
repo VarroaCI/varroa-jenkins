@@ -73,15 +73,19 @@ the packaged CRDs. Does not own the Go source it packages
   mode); `nats-auth-config.yaml`/`secret-nats-creds.yaml`/`nats-external-service.yaml`
   (NATS TLS + per-service ACL creds); `examples-item-rbac.yaml` (off by default,
   `examples.itemRbac.enabled`).
-- **`templates/networkpolicy-guard.yaml`** — fails closed for every operator-named egress
-  group. A rule renders only when its gate is on and `cidrs` is non-empty. A gate that is on
-  with an empty list fails the render, and the message names the value. The six conditions:
-  `pullThroughEgress` (update-center pull-through), `updateCenterRegistryEgress` (oci storage),
-  `ociRegistryEgress`, `coreNatsEgress` (hive mode), `recordStoreBlobEgress` (s3 blobs), and
-  `recorderWebhookEgress`. The template helpers also test `cidrs`, so an empty list never
-  renders an open `to:`. `pullThroughEgress` keeps `0.0.0.0/0` as its default by design.
-  `apiServerEgress`, `gitEgress`, `dexConnectorEgress`, and `telemetryEgress` stay open until
-  the follow-up issue lands. Asserted by `tests/test-netpol-egress-defaults.sh`.
+- **`templates/networkpolicy-guard.yaml`** — fails closed for every egress group. A rule
+  renders only when its gate is on and its `cidrs` list is non-empty. A gate that is on
+  with an empty list fails the render, and the message names the value. The template
+  helpers also test `cidrs`, so an empty list never renders an open `to:`. The guard covers:
+  `apiServerEgress` (always on; wide default `["0.0.0.0/0"]`), `gitEgress` and
+  `dexConnectorEgress` (when enabled; wide defaults), `telemetryEgress` (while
+  `telemetry.endpoint` is set; default `[]`), `pullThroughEgress` (wide default by design),
+  `updateCenterRegistryEgress` (oci storage), `ociRegistryEgress`, `coreNatsEgress` (hive
+  mode), `recordStoreBlobEgress` (s3 blobs), and `recorderWebhookEgress`. The NATS external
+  allow-list `nats.external.allowedCIDRs` fails when empty, in full mode with `nats.enabled`
+  and `nats.external.enabled`. A hive install with external NATS does not check it. The guard
+  also fails an empty `ports` list on each egress group, except `coreNatsEgress`, which takes
+  its port from `bus.url` when empty. Asserted by `tests/test-netpol-egress-defaults.sh`.
 - KV watchers require `$JS.FC.KV_<bucket>.>` publish grants.
 - `nats-auth-config.yaml` grants no identity any `mite_desired` KV
   operation. The desired-state command carries credential values and travels

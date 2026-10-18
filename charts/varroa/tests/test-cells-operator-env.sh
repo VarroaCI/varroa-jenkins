@@ -75,8 +75,8 @@ unquoted_value() {
 
 # json_value strips the surrounding YAML double quotes AND unescapes the
 # backslash-escaped inner quotes, turning a rendered
-# value: "{\"cidrs\":[],\"ports\":[443,6443]}" line into the raw JSON text
-# {"cidrs":[],"ports":[443,6443]}.
+# value: "{\"cidrs\":[\"0.0.0.0/0\"],\"ports\":[443,6443]}" line into the raw JSON text
+# {"cidrs":["0.0.0.0/0"],"ports":[443,6443]}.
 json_value() {
   local v="$1"
   v="${v#\"}"
@@ -161,8 +161,8 @@ check "VARROA_NETWORKPOLICY_ENABLED default is false" "$rc"
 
 APISERVER_EGRESS_JSON_DEFAULT=$(json_value "$(raw_value "$(env_block "VARROA_NETWORKPOLICY_APISERVER_EGRESS" "$OPERATOR_DEFAULT")")")
 assert_valid_json "VARROA_NETWORKPOLICY_APISERVER_EGRESS is valid JSON (default render)" "$APISERVER_EGRESS_JSON_DEFAULT"
-grep -q '"cidrs":\[\]' <<< "$APISERVER_EGRESS_JSON_DEFAULT" && rc=0 || rc=1
-check "VARROA_NETWORKPOLICY_APISERVER_EGRESS default carries empty cidrs" "$rc"
+grep -q '"cidrs":\["0.0.0.0/0"\]' <<< "$APISERVER_EGRESS_JSON_DEFAULT" && rc=0 || rc=1
+check 'VARROA_NETWORKPOLICY_APISERVER_EGRESS default carries cidrs ["0.0.0.0/0"]' "$rc"
 grep -q '"ports":\[443,6443\]' <<< "$APISERVER_EGRESS_JSON_DEFAULT" && rc=0 || rc=1
 check "VARROA_NETWORKPOLICY_APISERVER_EGRESS default carries ports [443,6443]" "$rc"
 

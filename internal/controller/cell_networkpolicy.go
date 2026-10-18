@@ -195,9 +195,9 @@ func agentNamespacePeers(namespaces []string) []networkingv1.NetworkPolicyPeer {
 	return peers
 }
 
-// apiServerEgressPeers builds one ipBlock peer per CIDR, falling back to
-// 0.0.0.0/0 when none are configured — the same fallback the chart's own
-// NetworkPolicy templates use for parity (design D2).
+// apiServerEgressPeers builds one ipBlock peer per CIDR. The chart guard
+// refuses an empty list, so the 0.0.0.0/0 fallback covers only an unset or
+// unparsable env var.
 func apiServerEgressPeers(cidrs []string) []networkingv1.NetworkPolicyPeer {
 	if len(cidrs) == 0 {
 		cidrs = []string{"0.0.0.0/0"}
@@ -210,8 +210,8 @@ func apiServerEgressPeers(cidrs []string) []networkingv1.NetworkPolicyPeer {
 }
 
 // apiServerEgressPorts builds one TCP port entry per configured apiserver
-// egress port. An empty list allows every port on the matched CIDRs,
-// mirroring the chart's own template.
+// egress port. The chart guard refuses an empty ports list, because Kubernetes
+// reads an empty list as every port.
 func apiServerEgressPorts(ports []int32) []networkingv1.NetworkPolicyPort {
 	tcp := corev1.ProtocolTCP
 	rules := make([]networkingv1.NetworkPolicyPort, 0, len(ports))

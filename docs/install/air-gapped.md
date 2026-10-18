@@ -206,7 +206,9 @@ The hosts named in `updateCenter.pullThrough.upstreamURL`, `downloadURL`, and `a
 
 ## Enforce the Offline Boundary
 
-The chart isolates only `varroa-system`. Apply default-deny egress and explicit allow rules in every controller namespace. Allow DNS, the Kubernetes API when needed, the mite gateway, internal registries, internal Git or OCI sources, the update center, identity services, and approved build destinations.
+The chart isolates only `varroa-system`. Pin `networkPolicy.apiServerEgress`, `networkPolicy.gitEgress`, and `networkPolicy.dexConnectorEgress` to internal addresses too. Their defaults allow every address on 443. Use `examples/air-gapped/values-airgap.yaml` as the model, and the [egress table](network-policies.md#restrict-external-egress).
+
+Apply default-deny egress and explicit allow rules in every controller namespace. Allow DNS, the Kubernetes API when needed, the mite gateway, internal registries, internal Git or OCI sources, the update center, identity services, and approved build destinations.
 
 Test from the control-plane, Jenkins, and agent pods. Public registry and Jenkins update-service connections must fail while all internal endpoints remain reachable.
 
