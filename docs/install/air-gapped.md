@@ -68,7 +68,7 @@ Name a bundle directory with `--bundle-dir` to include the JCasC pod templates t
 The bundle carries the Varroa chart, its images, and the plugin packs. It does not carry the following. Mirror each one by hand, and point the cluster at the internal copy:
 
 - Git and OCI sources for JCasC bundles, such as the `repoURL`, `ociRef`, `gitSource`, and `ociSource` fields.
-- Catalog sources and the catalog items that they serve.
+- Catalog sources and the catalog items that they serve. Use `varroactl export catalog` to copy a catalog source to a transfer archive.
 - Identity endpoints: Dex connectors and the OIDC issuer.
 - The record store: an external Postgres server and the S3 blob endpoint.
 - Telemetry endpoints, completion webhook targets, and the mail and Gitea servers that a cell pool uses.

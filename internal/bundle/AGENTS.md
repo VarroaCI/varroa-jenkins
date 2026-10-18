@@ -14,7 +14,8 @@ index parsing, and pre-apply content validation.
 ## Ownership
 
 - Owns: composition/merge (`composer.go`), git clone/materialize
-  (`resolver.go`, `git.go`, `clonecache.go`), `bundle.yaml` manifest + jcasc
+  (`resolver.go`, `git.go`, `clonecache.go`), the CatalogSource tree fetch
+  (`catalogfetch.go`), `bundle.yaml` manifest + jcasc
   file merging (`manifest.go`), catalog index/content validation
   (`catalog.go`, `catalog_validate.go`), the `${var}` substitution primitive
   `ResolveVars` + canonical `InjectedVariableNames` (`resolver.go`),
@@ -36,6 +37,12 @@ index parsing, and pre-apply content validation.
   package produces content; it does not decide when/where to apply it.
 
 ## Local Contracts
+
+- **CatalogSource fetch** (`catalogfetch.go`) — `FetchCatalog` and `FetchCatalogLayer`
+  are the only fetch of a CatalogSource tree. The catalog controller and
+  `varroactl export catalog` both call them, then `ParseCatalogIndex`. A
+  `bundle.yaml` is not required. The catalog layer holds the source root.
+  `CatalogRoot` applies `spec.path` after extraction.
 
 - **`Composer.Compose`** (`composer.go`) — validates each input is exactly
   one of `ItemRef`/`GitSource`/`OCISource`, then per input in list order.
