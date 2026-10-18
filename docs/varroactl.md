@@ -167,6 +167,17 @@ varroactl export catalog --namespace varroa-system --name platform-catalog \
 
 `--to` accepts `oci://`, `dir://`, and `tar://`. The command refuses `uc://`, because the update center serves plugin packs only.
 
+If the CatalogSource sets `spec.secretRef`, pass the Secret as a file. The command applies the same allowed-hosts check as the controller:
+
+```bash
+(umask 077; kubectl get secret git-creds -n varroa-system -o yaml > secret.yaml)
+varroactl export catalog --namespace varroa-system --name platform-catalog \
+  --secret-file secret.yaml --to tar:///transfer/platform-catalog.tar.gz
+rm -f secret.yaml
+```
+
+A username and password Secret needs the `varroa.dev/allowed-hosts` annotation. See [Reference Git](config/bundle-sources.md#reference-git). Delete the file after use.
+
 `varroactl import` copies the result to a registry. Set a `CatalogSource.spec.ociRef` to that reference to serve the catalog from it. The source keeps its `spec.path`.
 
 ## Transfer a release bundle

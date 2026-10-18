@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bundle"
@@ -49,7 +51,10 @@ takes the CatalogSource name as its tag.
 The --to destination uses the following schemes:
   oci://<registry>/<repo>[:<tag>]   push to an OCI registry
   dir://<path>                      write to an OCI layout directory
-  tar://<path>.tar.gz                write to a gzipped tar archive`,
+  tar://<path>.tar.gz                write to a gzipped tar archive
+
+When the CatalogSource sets spec.secretRef, pass --secret-file with that Secret.
+The command applies the same allowed-hosts check as the catalog controller.`,
 		RunE: runExportCatalog,
 	}
 
@@ -59,6 +64,7 @@ The --to destination uses the following schemes:
 	_ = cmd.MarkFlagRequired("name")
 	cmd.Flags().String("to", "", "destination (oci://, dir://, tar://) (required)")
 	_ = cmd.MarkFlagRequired("to")
+	cmd.Flags().String("secret-file", "", "path to the Secret manifest that spec.secretRef names (kubectl get secret -o yaml); - reads stdin")
 	cmd.Flags().String("registry-config", "", "path to Docker config.json for registry auth")
 	cmd.Flags().Bool("insecure", false, "use plain HTTP for registry")
 	addClusterFlag(cmd)
@@ -88,6 +94,7 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	ns, _ := cmd.Flags().GetString("namespace")
 	name, _ := cmd.Flags().GetString("name")
 	toDest, _ := cmd.Flags().GetString("to")
+	secretFile, _ := cmd.Flags().GetString("secret-file")
 	registryConfig, _ := cmd.Flags().GetString("registry-config")
 	insecure, _ := cmd.Flags().GetBool("insecure")
 
@@ -133,6 +140,17 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("CatalogSource %s/%s has neither repoURL nor ociRef", ns, name)
 	}
 
+	// Resolve auth before the destination opens, so a refusal writes no files.
+	fetch := bundle.CatalogFetch{
+		RepoURL:  spec.RepoURL,
+		Revision: spec.Revision,
+		OCIRef:   spec.OCIRef,
+		Cloner:   newCatalogCloner(),
+	}
+	if err := catalogFetchAuth(spec, ns, secretFile, &fetch); err != nil {
+		return err
+	}
+
 	// Open the destination store.
 	store, finalize, err := openOCIDest(scheme, target, registryConfig, insecure)
 	if err != nil {
@@ -154,30 +172,6 @@ func runExportCatalog(cmd *cobra.Command, args []string) error {
 	cloneDir := filepath.Join(tmpDir, "catalog")
 	if err := os.MkdirAll(cloneDir, 0755); err != nil {
 		return fmt.Errorf("create catalog dir: %w", err)
-	}
-
-	fetch := bundle.CatalogFetch{
-		RepoURL:  spec.RepoURL,
-		Revision: spec.Revision,
-		OCIRef:   spec.OCIRef,
-		Cloner:   newCatalogCloner(),
-	}
-	if spec.SecretRef != "" {
-		secData, err := getLocalSecret(cmd, spec.SecretRef, ns)
-		if err != nil {
-			return fmt.Errorf("read auth secret %s: %w", spec.SecretRef, err)
-		}
-		if spec.OCIRef != "" {
-			fetch.OCIAuth, err = bundle.OCIAuthFromSecret(secData)
-			if err != nil {
-				return fmt.Errorf("bad OCI auth secret %s: %w", spec.SecretRef, err)
-			}
-		} else {
-			fetch.GitAuth, err = bundle.GitAuthFromSecret(secData, "")
-			if err != nil {
-				return fmt.Errorf("bad git auth secret %s: %w", spec.SecretRef, err)
-			}
-		}
 	}
 
 	rev, err := bundle.FetchCatalog(cmd.Context(), fetch, cloneDir)
@@ -300,36 +294,73 @@ func pushBundleAsOCIArtifact(ctx context.Context, store oci.BlobStore, ref, srcD
 	})
 }
 
-// getLocalSecret reads a Secret from the local k8s API (via the BFF proxy path).
-func getLocalSecret(cmd *cobra.Command, name, namespace string) (map[string][]byte, error) {
-	cluster := resolveCrdCluster(cmd)
-	resp, err := rawRequest(cmd, http.MethodGet, "/clusters/"+cluster+"/namespaces/"+namespace+"/secrets/"+name, nil)
+// loadSecretFile decodes a Secret manifest in YAML or JSON. The file is read
+// locally, so no credential passes through the BFF. stringData entries merge
+// into Data and win over an existing key, as the API server merges them.
+func loadSecretFile(path string) (*corev1.Secret, error) {
+	raw, err := readStdinOrFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("fetch secret %s/%s: %w", namespace, name, err)
+		return nil, fmt.Errorf("read secret file: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	var sec corev1.Secret
+	if err := yaml.Unmarshal(raw, &sec); err != nil {
+		return nil, fmt.Errorf("decode secret file %s: %w", path, err)
+	}
+	if sec.Kind != "" && sec.Kind != "Secret" {
+		return nil, fmt.Errorf("secret file %s has kind %q, want Secret", path, sec.Kind)
+	}
+	if len(sec.StringData) > 0 && sec.Data == nil {
+		sec.Data = make(map[string][]byte, len(sec.StringData))
+	}
+	for k, v := range sec.StringData {
+		sec.Data[k] = []byte(v)
+	}
+	return &sec, nil
+}
 
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("fetch secret %s/%s: HTTP %d: %s", namespace, name, resp.StatusCode, strings.TrimSpace(string(body)))
+// catalogFetchAuth sets the source credentials on fetch from the Secret file.
+// The git host check matches the catalog controller: a basic-auth Secret
+// without the allowed-hosts annotation fails closed.
+func catalogFetchAuth(spec v1alpha1.CatalogSourceSpec, ns, secretFile string, fetch *bundle.CatalogFetch) error {
+	if spec.SecretRef == "" {
+		if secretFile != "" {
+			return usagef("CatalogSource has no spec.secretRef; do not pass --secret-file")
+		}
+		return nil
+	}
+	if secretFile == "" {
+		return fmt.Errorf("CatalogSource names secretRef %q: pass --secret-file with that Secret (kubectl get secret %s -n %s -o yaml)", spec.SecretRef, spec.SecretRef, ns)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	sec, err := loadSecretFile(secretFile)
 	if err != nil {
-		return nil, fmt.Errorf("read secret response: %w", err)
+		return err
+	}
+	if sec.Name != spec.SecretRef {
+		return fmt.Errorf("secret file names %q, but CatalogSource secretRef is %q", sec.Name, spec.SecretRef)
+	}
+	if sec.Namespace != "" && sec.Namespace != ns {
+		return fmt.Errorf("secret file is in namespace %q, but --namespace is %q", sec.Namespace, ns)
 	}
 
-	var secretData map[string]string
-	if err := json.Unmarshal(body, &secretData); err != nil {
-		return nil, fmt.Errorf("decode secret: %w", err)
+	// Git wins when both repoURL and ociRef are set, as in FetchCatalog.
+	if spec.RepoURL == "" {
+		fetch.OCIAuth, err = bundle.OCIAuthFromSecret(sec.Data)
+		if err != nil {
+			return fmt.Errorf("bad OCI auth secret %s: %w", spec.SecretRef, err)
+		}
+		return nil
 	}
 
-	// Convert string map to byte map.
-	result := make(map[string][]byte, len(secretData))
-	for k, v := range secretData {
-		result[k] = []byte(v)
+	auth, err := bundle.GitAuthFromSecret(sec.Data, "")
+	if err != nil {
+		return fmt.Errorf("bad git auth secret %s: %w", spec.SecretRef, err)
 	}
-	return result, nil
+	if hErr := bundle.CheckGitSecretHost(auth, sec.Annotations, spec.RepoURL); hErr != nil {
+		return fmt.Errorf("git host check failed for secret %s: %w", spec.SecretRef, hErr)
+	}
+	fetch.GitAuth = auth
+	return nil
 }
 
 // findSubCommand locates a subcommand by name on a cobra command.
