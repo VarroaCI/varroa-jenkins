@@ -882,7 +882,7 @@ type tenantListing struct {
 // job with a run in progress, and an inventory without a complete job set
 // keep their row. So does a job that is in the inventory, and a job whose
 // last run is not older than the inventory's observation time, because
-// that job may have been created after the cell last reported.
+// that job may have been created after the cell took the inventory.
 func inventoryDropsRun(js recordstore.JobSummary, inv recordstore.JobInventory, declared, running bool) bool {
 	if declared || running || !inv.JobsKnown || js.LastRun == nil || inv.JobsObservedAt.IsZero() {
 		return false

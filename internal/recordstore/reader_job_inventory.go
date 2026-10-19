@@ -24,7 +24,7 @@ type JobInventory struct {
 	ProjectsKnown bool
 	// Projects holds the job paths of the tenant's job_branch_projects rows.
 	Projects map[string]struct{}
-	// JobsObservedAt is the earliest time an active member cell reported its
+	// JobsObservedAt is the earliest time an active member cell took its
 	// job.schedules set. It is zero when any active member has not reported
 	// one. A job with a run that started before this time may predate the
 	// set, so a reader must not judge it deleted.

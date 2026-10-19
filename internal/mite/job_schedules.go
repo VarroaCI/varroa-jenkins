@@ -124,12 +124,20 @@ func (h *BusHandler) clearJobScheduleStreamMissing(key string) {
 
 // publishJobSchedules resolves every row of set and, only when every row
 // resolves, publishes one job.schedules envelope on the cell's build
-// subject with a JetStream acknowledgement. One unresolved row publishes
+// subject with a JetStream acknowledgement. The envelope time is the time
+// the cell took the set, so a kept or resent set keeps its time. A set
+// with no taken time publishes nothing. One unresolved row publishes
 // nothing and counts a rejection; the caller retains set for the next
 // tick. It reports whether the publish succeeded (the retained set can
 // then be cleared).
 func (h *BusHandler) publishJobSchedules(ns, name string, set *mitev1.JobScheduleSet) bool {
 	key := ns + "/" + name
+
+	if set.TakenAtMillis <= 0 {
+		h.metrics.buildEventsDropped.Add(context.Background(), 1)
+		h.log().Warn("job schedule set has no taken time, publishing no envelope", "controller", key)
+		return false
+	}
 
 	rows := make([]jobScheduleRow, 0, len(set.Items))
 	for _, item := range set.Items {
@@ -173,7 +181,7 @@ func (h *BusHandler) publishJobSchedules(ns, name string, set *mitev1.JobSchedul
 		Namespace:     ns,
 		Cell:          name,
 		CellInstance:  h.lookupCellInstance(ns, name),
-		OccurredAt:    time.Now().UTC(),
+		OccurredAt:    millisToTime(set.TakenAtMillis),
 		Payload: map[string]interface{}{
 			"hash":      set.Hash,
 			"truncated": set.Truncated,

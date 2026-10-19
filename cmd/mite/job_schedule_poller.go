@@ -225,6 +225,9 @@ func (a *Agent) storeJobScheduleSet(set *mitev1.JobScheduleSet, earliest time.Ti
 func (a *Agent) pollJobSchedules(ctx context.Context) (*mitev1.JobScheduleSet, []jobScheduleRow, error) {
 	client := a.getJenkinsClient()
 
+	// The time is read before the request. A run created before it names a
+	// job that the plugin walk saw, so the time is a safe lower bound.
+	takenAt := time.Now()
 	httpResp, err := client.DoGet(ctx, jobSchedulesPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("do get: %w", err)
@@ -256,10 +259,11 @@ func (a *Agent) pollJobSchedules(ctx context.Context) (*mitev1.JobScheduleSet, [
 	}
 
 	return &mitev1.JobScheduleSet{
-		Hash:      computeJobScheduleHash(resp.Schedules),
-		Items:     items,
-		Truncated: resp.Truncated,
-		Total:     resp.Total,
+		Hash:          computeJobScheduleHash(resp.Schedules),
+		Items:         items,
+		Truncated:     resp.Truncated,
+		Total:         resp.Total,
+		TakenAtMillis: takenAt.UnixMilli(),
 	}, resp.Schedules, nil
 }
 

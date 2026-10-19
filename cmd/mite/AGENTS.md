@@ -273,6 +273,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
 - **`job_branch_export.go`** — `pollJobBranches` reads `GET /varroa-activity/branches` once per
   schedule poll (`pollJobBranchesOnce`). `maybeAttachJobBranches` sends `StateSnapshot.job_branches`
   when the hash changes, on a reconnect, or every thirty minutes. It never feeds a state hash.
+  The poll records `taken_at_millis` before the request, and a resend carries that time.
 - **`script_approval_poller.go`** — `startScriptApprovalPoller` polls
   `GET /varroa-activity/script-approvals` once a minute, only while the tenant
   gate reports a cell, and keeps the last set on a failed poll. A non-cell
@@ -280,7 +281,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   on each snapshot once a poll has succeeded.
 - **`job_schedule_poller.go`** — `startJobSchedulePoller` polls
   `GET /varroa-activity/schedules` and caches the decoded set for
-  `sendHeartbeats` to attach as `StateSnapshot.job_schedules`.
+  `sendHeartbeats` to attach as `StateSnapshot.job_schedules`. The poll records
+  `taken_at_millis` before the request; a resend carries that time.
   **The export gate** — `scheduleExportOpen` is true once the convergence
   marker exists or `runCommand` saw a desired-state result with
   `ItemsSuccess` (`openScheduleExport`). The gate never closes in one

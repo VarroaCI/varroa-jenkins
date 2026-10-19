@@ -379,3 +379,43 @@ func TestJobInventoryJobsObservedAt(t *testing.T) {
 		t.Fatalf("JobsObservedAt = %v, want %v", got, at)
 	}
 }
+
+// TestJobInventoryResentSetKeepsTakenTime proves a resent set answers stale
+// and keeps the watermark at the time the cell took it. A run after that
+// time must not be judged against a later receipt time.
+func TestJobInventoryResentSetKeepsTakenTime(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seedJobInventoryPlacement(t, db, jiMembersActiveAndStandby)
+	g := NewIngester(pool, nil, nil)
+	t0 := time.Now().UTC().Truncate(time.Microsecond)
+	applyInventorySchedules(t, g, jsTestCell, t0, false)
+
+	// The resend carries the same taken time, as the mite resends a cached set.
+	resend := newJobScheduleEnvelope(t, jsTestCell, t0, JobSchedulesPayload{
+		Hash: "h-" + t0.String(),
+		Rows: []JobScheduleRowInput{
+			{Tenant: "acme", PlacementGeneration: 1, JobPath: "acme/app", TriggerType: "none"},
+		},
+	})
+	result, err := g.Apply(context.Background(), resend)
+	if err != nil {
+		t.Fatalf("apply resent job.schedules: %v", err)
+	}
+	if !result.ScheduleStale {
+		t.Fatal("resent set with the same taken time must answer ScheduleStale")
+	}
+
+	inv := readInventory(t, NewReader(pool))
+	if !inv.JobsObservedAt.Equal(t0) {
+		t.Fatalf("JobsObservedAt = %v, want the taken time %v", inv.JobsObservedAt, t0)
+	}
+	if _, ok := inv.Jobs["acme/new"]; ok {
+		t.Fatal("acme/new was created after the taken time and must be absent from the inventory")
+	}
+	runAfter := t0.Add(time.Minute)
+	if runAfter.Before(inv.JobsObservedAt) {
+		t.Fatalf("a run at %v must not predate the inventory taken at %v", runAfter, inv.JobsObservedAt)
+	}
+}

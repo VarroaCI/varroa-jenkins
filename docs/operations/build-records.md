@@ -237,7 +237,7 @@ A row's `next_fire_times` keeps its passed occurrences from the last
 `max(3 × cronGrace, 2 × cronGrace + 10m) + 2m`, at most 16, so the backstop can judge a miss. A changed spec, time zone, or disabled state
 replaces the list.
 
-`job_schedule_cells` holds one watermark row per cell: the time of the newest accepted envelope.
+`job_schedule_cells` holds one watermark row per cell: the time the cell took its newest accepted set. A resent set keeps the time the cell took it.
 An occurrence that never fired under a watermark at most thirty minutes old is a missed fire. An older watermark means the cell has not reported, so its set is stale.
 
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
