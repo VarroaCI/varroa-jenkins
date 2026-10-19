@@ -79,6 +79,49 @@ next session.
 
 The runtime does not read keys, links, or includes from the file.
 
+## Forge credential
+
+The instructions read, the repository reads, and `open_issue` use a Team
+credential. The operator selects the credential from the Secrets in the
+namespace of `spec.pipelines.agentNamespace`. A Secret is a candidate only
+when it has all of these:
+
+- The label `varroa.dev/tenant-credential: "true"`.
+- The annotation `varroa.dev/credential-id`.
+- The annotation `varroa.dev/credential-kind`. Use `usernamePassword` with the
+  token in the key `password`, or `secretText` with the token in the key `secret`.
+- The annotation `varroa.dev/allowed-hosts`. Its value is a comma-separated
+  list of host names, for example `git.example.org`. The list must include the
+  host of the repository.
+
+A Secret without the `allowed-hosts` annotation never matches. When no
+credential matches, the condition `InstructionsResolved` reports `FetchFailed`.
+
+The token needs these permissions on Gitea or Forgejo:
+
+| Use | Token scope | Repository access |
+|---|---|---|
+| Instructions and repository reads | `read:repository` | Read |
+| `open_issue` | `write:repository` and `write:issue` | Write |
+
+A token without `write:issue` answers `forge_write_denied`. On GitHub, give the
+token read access to contents and write access to issues.
+
+The instructions source must follow the default branch. Set no
+`spec.revision` on the `CatalogSource`. A source that pins `revision: main`
+reports `NotDefaultBranch`. Create a second `CatalogSource` for the agent when
+the Team source pins a revision. Create it in the namespace of the `TeamAgent`:
+
+```yaml
+apiVersion: varroa.dev/v1alpha1
+kind: CatalogSource
+metadata:
+  name: payments-agent
+  namespace: varroa-system
+spec:
+  repoURL: https://git.example.org/payments/platform
+```
+
 ## Triggers
 
 Each trigger starts a session, and each session records the activity that
@@ -173,8 +216,8 @@ Read the conditions in the Settings tab or on `/agents`.
 | `InstructionsResolved` | `NotDefaultBranch` | Remove the pinned revision from the source. |
 | `InstructionsResolved` | `NotFound` | Add the file at the path, on the default branch. |
 | `InstructionsResolved` | `TooLarge`, `NotText` | Shorten the file, and keep it UTF-8 text. |
-| `InstructionsResolved` | `HostNotAllowed` | Use a repository host that the credential allows. |
-| `InstructionsResolved` | `FetchFailed` | Check the operator logs. The ticker retries after ten minutes. |
+| `InstructionsResolved` | `HostNotAllowed` | Use an `https` repository URL on port 443. |
+| `InstructionsResolved` | `FetchFailed` | If no credential matches, add one that lists the host. See [Forge credential](#forge-credential). Otherwise check the operator logs. The ticker retries after ten minutes. |
 | `ProviderReady` | `UnknownProvider`, `UnknownModel` | Use a provider and model from the chart. |
 | `ProviderReady` | `KeyMissing` | Add the provider key to the chart secret. |
 | `ProviderReady` | `AssistantDisabled` | Turn on the assistant in the chart. |
