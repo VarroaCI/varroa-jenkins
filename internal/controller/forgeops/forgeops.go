@@ -88,7 +88,8 @@ func asStatus(err error) forgeapi.Status {
 }
 
 // forgeFailure maps a forge client error onto a reply code. The message names
-// the credential and the HTTP status, never the response body.
+// the credential and the HTTP status, never the response body. The forbidden
+// message carries a fixed hint about the token scope and access.
 func forgeFailure(err error, credID string) error {
 	var se *forge.StatusError
 	switch {
@@ -97,7 +98,7 @@ func forgeFailure(err error, credID string) error {
 	case errors.Is(err, forge.ErrAuth):
 		return replyErr(forgeapi.CodeForgeAuthFailed, "credential %q was refused", credID)
 	case errors.Is(err, forge.ErrForbidden):
-		return replyErr(forgeapi.CodeForgeWriteDenied, "credential %q is forbidden", credID)
+		return replyErr(forgeapi.CodeForgeWriteDenied, "credential %q is forbidden; check the token scope and the repository access of the credential", credID)
 	case errors.Is(err, forge.ErrListingTruncated):
 		return replyErr(forgeapi.CodeForgeUnreachable, "credential %q: directory listing is truncated", credID)
 	case errors.Is(err, forge.ErrRedirect):

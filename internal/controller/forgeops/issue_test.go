@@ -3,6 +3,7 @@ package forgeops
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -129,5 +130,27 @@ func TestIssue_Refusals(t *testing.T) {
 				t.Fatalf("reply %+v, want code %s", rep, c.code)
 			}
 		})
+	}
+}
+
+// TestIssue_ForbiddenNamesHint checks that a 403 on the write names the
+// credential and the scope hint, and never the token.
+func TestIssue_ForbiddenNamesHint(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	seedAgent(t, fx, nil)
+	c := pushable()
+	c.issueErr = forge.ErrForbidden
+	oneWriter(fx, c)
+	rep := fx.ops.Issue(context.Background(), issueReq("ops"), "varroa-system")
+	if rep.OK || rep.Code != forgeapi.CodeForgeWriteDenied {
+		t.Fatalf("reply %+v, want code %s", rep, forgeapi.CodeForgeWriteDenied)
+	}
+	for _, want := range []string{`credential "a" is forbidden`, "check the token scope and the repository access of the credential"} {
+		if !strings.Contains(rep.Error, want) {
+			t.Errorf("reply error %q lacks %q", rep.Error, want)
+		}
+	}
+	if strings.Contains(rep.Error, "tok-a") {
+		t.Errorf("reply error %q leaks the token", rep.Error)
 	}
 }
