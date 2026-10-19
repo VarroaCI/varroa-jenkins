@@ -53,8 +53,10 @@ type restartSourceEntry struct {
 	writeMu sync.Mutex
 }
 
-// restartSourceBuildPrefix returns the relpath prefix of one build's
-// directory. It matches RunStatePusher.buildRelPathPrefix in the plugin.
+// restartSourceBuildPrefix returns the logical wire prefix of one build's
+// files. It matches RunStatePusher.buildRelPathPrefix in the plugin. The
+// prefix is not an on-disk path: the mite maps it to the job's directory on
+// the target cell, so a branch job's files land under branches/<dir>.
 func restartSourceBuildPrefix(jobPath string, buildNumber int64) string {
 	var b strings.Builder
 	for _, seg := range strings.Split(jobPath, "/") {

@@ -749,6 +749,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 	var slowestPath string
 	var slowestFetch time.Duration
 	var fetchedBytes int
+	resolver := newJobDirResolver(home)
 	for _, file := range payload.StateFiles {
 		relPath := file.Relpath
 		parsed, absPath, err := checkRehydrationPath(home, relPath)
@@ -760,6 +761,11 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 		}
 		if parsed.kind == rehydrationPathNodeConfig {
 			nodeNames = append(nodeNames, parsed.nodeName)
+		} else {
+			absPath, err = resolver.resolveJobFilePath(parsed, relPath)
+			if err != nil {
+				return fmt.Errorf("resume_build: %w", err)
+			}
 		}
 
 		fetchStart := time.Now()
@@ -794,6 +800,7 @@ func (a *Agent) applyResumeBuild(ctx context.Context, payload *mitev1.ResumeBuil
 	// node that never appears.
 	a.Logger.Info("resume files written",
 		"run_id", payload.RunId, "files", len(payload.StateFiles), "bytes", fetchedBytes,
+		"build_dir", resumeBuildDir(home, payload),
 		"slowest_file", slowestPath, "slowest_fetch", slowestFetch.String(),
 		"elapsed", time.Since(started).String())
 
@@ -943,15 +950,20 @@ func writeResumeLogNextSeq(home string, payload *mitev1.ResumeBuildPayload) erro
 // resumeBuildDir answers the directory of the command's own build under
 // home, or an empty string when the command names no build record.
 func resumeBuildDir(home string, payload *mitev1.ResumeBuildPayload) string {
+	resolver := newJobDirResolver(home)
 	for _, file := range payload.StateFiles {
-		parsed, absPath, err := checkRehydrationPath(home, file.Relpath)
+		parsed, _, err := checkRehydrationPath(home, file.Relpath)
 		if err != nil || parsed.kind != rehydrationPathBuildXML {
 			continue
 		}
 		if checkResumePathBinding(parsed, payload) != nil {
 			continue
 		}
-		return filepath.Dir(absPath)
+		p, err := resolver.resolveJobFilePath(parsed, file.Relpath)
+		if err != nil {
+			continue
+		}
+		return filepath.Dir(p)
 	}
 	return ""
 }
@@ -1205,9 +1217,10 @@ func (a *Agent) restartWithRestore(ctx context.Context, payload *mitev1.RestartB
 // directory into place. The rename is the only write the build directory
 // sees, so a failed copy leaves no partial build behind.
 //
-// The copy's files are checked against the build prefix of the source
-// build. A file outside that prefix, or a build directory that already
-// exists, refuses the restore.
+// The copy lands in the source build's resolved directory under the job's
+// own directory, which the mite finds on this cell's disk. The copy's files
+// are checked against the build prefix of the source build. A file outside
+// that prefix, or a build directory that already exists, refuses the restore.
 func (a *Agent) restoreRestartSource(ctx context.Context, payload *mitev1.RestartBuildPayload) error {
 	home := a.jenkinsHomeDir
 	if home == "" {
@@ -1234,7 +1247,10 @@ func (a *Agent) restoreRestartSource(ctx context.Context, payload *mitev1.Restar
 		return fmt.Errorf("the restart copy holds %d bytes, above the %d cap", total, restartSourceMaxBytes)
 	}
 
-	buildDir := filepath.Join(home, filepath.FromSlash(strings.TrimSuffix(prefix, "/")))
+	buildDir, err := restartSourceBuildDir(home, prefix)
+	if err != nil {
+		return err
+	}
 	// An earlier attempt may have moved the copy into place and then failed
 	// at the reload or the load. Such a directory holds every copy file at
 	// its declared size, and the restore then only repeats the reload and
@@ -1381,9 +1397,27 @@ func checkRestartSourceFilesPresent(buildDir, prefix string, files []*mitev1.Res
 	return nil
 }
 
-// restartSourceBuildPrefix returns the relative path prefix of one build's
-// directory under the Jenkins home. It follows the same rule as the plugin's
-// run-state prefix, so a copy's file names match the directory they restore.
+// restartSourceBuildDir answers the directory of the build that prefix names,
+// under the job's resolved directory. The prefix is the logical wire form, so
+// a branch job or a mangled repository maps through its parent's metadata.
+func restartSourceBuildDir(home, prefix string) (string, error) {
+	rel := prefix + buildFileName
+	parsed, err := parseRehydrationPath(rel)
+	if err != nil {
+		return "", fmt.Errorf("the restart prefix %s: %w", prefix, err)
+	}
+	abs, err := newJobDirResolver(home).resolveJobFilePath(parsed, rel)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(abs), nil
+}
+
+// restartSourceBuildPrefix returns the logical wire prefix of one build's
+// files: "jobs/<seg>" for each job segment, then "builds/<n>/". It follows the
+// same rule as the plugin's run-state prefix, so a copy's file names match
+// what the plugin sends. The prefix is not an on-disk path. The mite maps it to
+// the job's directory on this cell with restartSourceBuildDir.
 func restartSourceBuildPrefix(jobPath string, buildNumber int64) (string, error) {
 	if buildNumber <= 0 {
 		return "", fmt.Errorf("the source build number %d is not a build", buildNumber)

@@ -751,3 +751,70 @@ func TestApplyRehydrationBundle_RefusesSymlinkedBuildsOfMovedJob(t *testing.T) {
 		t.Errorf("a file was written outside JENKINS_HOME: %v", entries)
 	}
 }
+
+// resolveFileForTest parses relPath and maps it through the resolver of home.
+func resolveFileForTest(t *testing.T, home, relPath string) (string, error) {
+	t.Helper()
+	parsed, err := parseRehydrationPath(relPath)
+	if err != nil {
+		t.Fatalf("parse %q: %v", relPath, err)
+	}
+	return newJobDirResolver(home).resolveJobFilePath(parsed, relPath)
+}
+
+func TestResolveJobFilePath_PlainJobKeepsLogicalPath(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "team/app", folderConfig)
+	got, err := resolveFileForTest(t, home, "jobs/team/jobs/app/builds/7/build.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "jobs", "team", "jobs", "app", "builds", "7", "build.xml")
+	if got != want {
+		t.Errorf("path = %s, want %s", got, want)
+	}
+}
+
+func TestResolveJobFilePath_MultibranchBranch(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+	got, err := resolveFileForTest(t, home, "jobs/mb/jobs/main/builds/7/workflow/2.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7", "workflow", "2.xml")
+	if got != want {
+		t.Errorf("path = %s, want %s", got, want)
+	}
+}
+
+func TestResolveJobFilePath_OrganizationFolderBranch(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "org", orgFolderConfig)
+	repoDir := filepath.Join(home, "jobs", "org", "jobs", "my-repo.k3j2a1")
+	writeConfigAt(t, repoDir, fmt.Sprintf(repoProjectConfig, "my.repo"))
+	writeConfigAt(t, filepath.Join(repoDir, "branches", "feature-x.abc123"), fmt.Sprintf(branchJobConfig, "feature/x"))
+	got, err := resolveFileForTest(t, home, "jobs/org/jobs/my.repo/jobs/feature%2Fx/builds/7/build.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(repoDir, "branches", "feature-x.abc123", "builds", "7", "build.xml")
+	if got != want {
+		t.Errorf("path = %s, want %s", got, want)
+	}
+}
+
+func TestResolveJobFilePath_RefusesSymlinkedBuildsDir(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	branchDir := filepath.Join(home, "jobs", "mb", "branches", "main")
+	writeConfigAt(t, branchDir, fmt.Sprintf(branchJobConfig, "main"))
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(branchDir, "builds")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveFileForTest(t, home, "jobs/mb/jobs/main/builds/7/build.xml"); err == nil {
+		t.Error("resolveJobFilePath accepted a symbolic link in the build path, want an error")
+	}
+}

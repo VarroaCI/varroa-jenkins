@@ -919,6 +919,21 @@ func (r *jobDirResolver) resolveJobDir(jobPath, logicalDir string) resolvedJobDi
 	return res
 }
 
+// resolveJobFilePath maps the wire path of one job file onto the file under
+// the job's resolved directory. relPath must be the path that parsed into
+// parsed, and parsed must name a job file, not a node file. The parent
+// chain of the result must hold no symbolic link.
+func (r *jobDirResolver) resolveJobFilePath(parsed parsedRehydrationPath, relPath string) (string, error) {
+	logicalDir := filepath.Join(append([]string{r.home}, parsed.jobDirParts...)...)
+	dir := r.resolveJobDir(parsed.jobPath, logicalDir)
+	tail := strings.Split(relPath, "/")[len(parsed.jobDirParts):]
+	abs := filepath.Join(append([]string{dir.absDir}, tail...)...)
+	if err := checkNoSymlinkInParents(r.home, abs); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
 // applyNextBuildNumber inflates f's gzip content, parses it as the proposed
 // nextBuildNumber value, and writes it only when jobDir holds no
 // nextBuildNumber file yet or the stored value is lower. It never lowers a
