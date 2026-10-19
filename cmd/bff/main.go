@@ -578,10 +578,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	// User informer: the cell grants read resolves each User subject to the
+	// Jenkins principal of its person, as the operator does for member roles.
+	userGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "users"}
+	userInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(userGVR).Namespace(operatorNamespace).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(userGVR).Namespace(operatorNamespace).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := userInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		user := &v1alpha1.User{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, user); err != nil {
+			return nil, err
+		}
+		return user, nil
+	}); err != nil {
+		logger.Error("failed to set transform on user informer", "error", err)
+		os.Exit(1)
+	}
+
 	userClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"))
 	groupClaims := auth.ParseClaimNames(envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"))
 	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer, *defaultRead,
 		userClaims)
+	// The cell grants read must resolve the same User principals as the operator.
+	rbacResolver.SetUserDirectory(userInformer.GetIndexer(), operatorNamespace)
 	authorizer := api.NewAuthorizer(rbacResolver, *defaultRead)
 	configBrood := api.NewBusConfigBrood(cluster, busConn, client, clientsetClient, logger)
 	rbacFederation := api.NewRBACFederationReconciler(
@@ -604,6 +637,7 @@ func main() {
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go teamInformer.Run(ctx.Done())
 	go runnerInformer.Run(ctx.Done())
+	go userInformer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(),
 		roleInformer.HasSynced,
 		roleBindingInformer.HasSynced,
@@ -612,6 +646,7 @@ func main() {
 		jenkinsRoleBindingInformer.HasSynced,
 		teamInformer.HasSynced,
 		runnerInformer.HasSynced,
+		userInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
 		os.Exit(1)

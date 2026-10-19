@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -221,5 +222,126 @@ func TestGenerate_TenantMemberRoleRendered(t *testing.T) {
 	}
 	if !strings.Contains(yamlOut, "Job/Build") {
 		t.Errorf("expected Job/Build in YAML, got:\n%s", yamlOut)
+	}
+}
+
+// memberRoleSortedKeys returns the Kind:Name keys of subjects, sorted.
+func memberRoleSortedKeys(subjects []v1alpha1.SubjectRef) []string {
+	keys := make([]string, 0, len(subjects))
+	for _, s := range subjects {
+		keys = append(keys, s.Kind+":"+s.Name)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// memberRoleAssignmentKeys returns the Kind:Name keys of a generated role.
+func memberRoleAssignmentKeys(subjects []SubjectAssignment) []string {
+	keys := make([]string, 0, len(subjects))
+	for _, s := range subjects {
+		keys = append(keys, s.Kind+":"+s.Name)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// memberRoleMixedFixture grants developer to a Team group, cluster-wide to one
+// User subject, and narrowed to two job globs of the same tenant.
+func memberRoleMixedFixture(t *testing.T) (*Resolver, *v1alpha1.Controller) {
+	t.Helper()
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	narrowed := &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "projgen-devs"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: "sbsoftware:Devs"}},
+			RoleRef:  "developer",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{
+					{Name: "sbsoftware", Jobs: []string{"repos/projgen/*"}},
+					{Name: "sbsoftware", Jobs: []string{"repos/other/*"}},
+				},
+			},
+		},
+	}
+	writer := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
+	r := testTenantResolver(
+		[]*v1alpha1.VarroaRole{developerRole()},
+		[]*v1alpha1.VarroaRoleBinding{writer, narrowed},
+		[]*v1alpha1.Team{team},
+		[]*v1alpha1.Controller{controller},
+	)
+	withUserDirectory(r, memberUserTestUser("alice", memberUserTestNamespace, "alice", ""))
+	return r, controller
+}
+
+func TestTenantMemberRoles_MatchesJenkinsRoleAssignments(t *testing.T) {
+	r, controller := memberRoleMixedFixture(t)
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	if len(roles) != 2 {
+		t.Fatalf("expected 2 member roles, got %d: %+v", len(roles), roles)
+	}
+	for _, role := range roles {
+		a := memberRoleTestAssignment(assignments, role.Name)
+		if a == nil {
+			t.Fatalf("role %q missing from JenkinsRoleAssignments", role.Name)
+		}
+		if a.Pattern != role.Pattern {
+			t.Errorf("role %q pattern = %q, want %q", role.Name, a.Pattern, role.Pattern)
+		}
+		if !equalStringSets(a.Permissions, role.Permissions) {
+			t.Errorf("role %q permissions = %v, want %v", role.Name, a.Permissions, role.Permissions)
+		}
+		got := memberRoleAssignmentKeys(a.Subjects)
+		want := memberRoleSortedKeys(role.Subjects)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("role %q subjects = %v, want %v", role.Name, got, want)
+		}
+	}
+}
+
+func TestTenantMemberRoles_SubtreeRoleFirstThenNarrowed(t *testing.T) {
+	r, _ := memberRoleMixedFixture(t)
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	if len(roles) == 0 {
+		t.Fatal("expected member roles")
+	}
+	if roles[0].Name != TenantMemberRoleName("sbsoftware") || roles[0].Binding != "" {
+		t.Errorf("first role = %+v, want the subtree role with no binding", roles[0])
+	}
+	for _, role := range roles[1:] {
+		if role.Binding == "" {
+			t.Errorf("narrowed role %q must name its binding", role.Name)
+		}
+	}
+	if roles[1].Name != TenantMemberNarrowedRoleName("sbsoftware", "projgen-devs") {
+		t.Errorf("second role = %q", roles[1].Name)
+	}
+	if want := TenantMemberNarrowedPattern("sbsoftware", []string{"repos/projgen/*", "repos/other/*"}); roles[1].Pattern != want {
+		t.Errorf("narrowed pattern = %q, want %q", roles[1].Pattern, want)
+	}
+}
+
+func TestTenantMemberRoles_ReadOnlyGrantYieldsNone(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	if roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"}); len(roles) != 0 {
+		t.Errorf("read-only grant must yield no member role, got %+v", roles)
+	}
+}
+
+func TestTenantMemberRoles_NonTeamTenantYieldsNil(t *testing.T) {
+	r, _ := memberRoleMixedFixture(t)
+	if roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantController, Namespace: "varroa-system", Controller: "cell-a"}); roles != nil {
+		t.Errorf("controller tenant must yield nil, got %+v", roles)
+	}
+	var nilResolver *Resolver
+	if roles := nilResolver.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware"}); roles != nil {
+		t.Errorf("nil resolver must yield nil, got %+v", roles)
 	}
 }

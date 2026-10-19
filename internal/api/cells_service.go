@@ -175,14 +175,25 @@ type CellGrant struct {
 	Jobs     []string           `json:"jobs,omitempty"`
 }
 
+// CellMemberRole is one generated Jenkins member role of a tenant. Binding
+// is absent for the role on the whole folder subtree.
+type CellMemberRole struct {
+	Name        string             `json:"name"`
+	Pattern     string             `json:"pattern"`
+	Binding     string             `json:"binding,omitempty"`
+	Permissions []string           `json:"permissions"`
+	Subjects    []CellGrantSubject `json:"subjects"`
+}
+
 // CellTenantGrants is every grant that reaches one tenant of a cell, with
-// the tenant's generated Jenkins item role.
+// the tenant's generated Jenkins item role and member roles.
 type CellTenantGrants struct {
-	Tenant      string      `json:"tenant"`
-	ItemRole    string      `json:"itemRole"`
-	ItemPattern string      `json:"itemPattern"`
-	Truncated   bool        `json:"truncated"`
-	Grants      []CellGrant `json:"grants"`
+	Tenant      string           `json:"tenant"`
+	ItemRole    string           `json:"itemRole"`
+	ItemPattern string           `json:"itemPattern"`
+	Truncated   bool             `json:"truncated"`
+	Grants      []CellGrant      `json:"grants"`
+	MemberRoles []CellMemberRole `json:"memberRoles"`
 }
 
 // CellGrants names a cell and carries one entry for each of its tenants.
@@ -253,7 +264,28 @@ func (s *Server) CellGrants(ctx context.Context, claims *auth.Claims, cluster, n
 			}
 			entry.Grants = append(entry.Grants, grant)
 		}
+		entry.MemberRoles = cellMemberRoles(s.deps.Authorizer.TenantMemberRoles(tenant))
 		out.Tenants = append(out.Tenants, entry)
 	}
 	return out, nil
+}
+
+// cellMemberRoles converts the member roles of a tenant. It never returns
+// nil, so the JSON carries an empty array and not null.
+func cellMemberRoles(roles []rbac.TenantMemberRole) []CellMemberRole {
+	out := make([]CellMemberRole, 0, len(roles))
+	for _, r := range roles {
+		role := CellMemberRole{
+			Name:        r.Name,
+			Pattern:     r.Pattern,
+			Binding:     r.Binding,
+			Permissions: append(make([]string, 0, len(r.Permissions)), r.Permissions...),
+			Subjects:    make([]CellGrantSubject, 0, len(r.Subjects)),
+		}
+		for _, sub := range r.Subjects {
+			role.Subjects = append(role.Subjects, CellGrantSubject{Kind: sub.Kind, Name: sub.Name})
+		}
+		out = append(out, role)
+	}
+	return out
 }

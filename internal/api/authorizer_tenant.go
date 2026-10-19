@@ -147,3 +147,16 @@ func (a *Authorizer) TenantGrantSources(tenant string) ([]rbac.TenantGrantSource
 	}
 	return a.resolver.TenantGrantSourcesTruncated(parsed)
 }
+
+// TenantMemberRoles answers which generated Jenkins member roles a tenant
+// holds. It names no caller and is never capped.
+func (a *Authorizer) TenantMemberRoles(tenant string) []rbac.TenantMemberRole {
+	if a == nil || a.resolver == nil {
+		return nil
+	}
+	parsed, err := rbac.ParseTenant(tenant)
+	if err != nil {
+		return nil
+	}
+	return a.resolver.TenantMemberRoles(parsed)
+}

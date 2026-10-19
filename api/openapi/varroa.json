@@ -8049,6 +8049,41 @@
         ],
         "type": "object"
       },
+      "components_schemas_CellMemberRole": {
+        "additionalProperties": false,
+        "description": "One generated Jenkins member role of a tenant. The role holds the person checks of the acting-user routes for its subjects.",
+        "properties": {
+          "binding": {
+            "description": "The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_CellGrantSubject"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "pattern",
+          "permissions",
+          "subjects"
+        ],
+        "type": "object"
+      },
       "components_schemas_CellPendingSignature": {
         "additionalProperties": false,
         "description": "One script signature the sandbox refused in a cell.",
@@ -8516,7 +8551,7 @@
       },
       "components_schemas_CellTenantGrants": {
         "additionalProperties": false,
-        "description": "Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.",
+        "description": "Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role and its generated member roles. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.",
         "properties": {
           "grants": {
             "items": {
@@ -8529,6 +8564,13 @@
           },
           "itemRole": {
             "type": "string"
+          },
+          "memberRoles": {
+            "description": "The generated Jenkins member roles of the tenant. Each subject with pipelines write gets the person checks of the acting-user routes. The list is never capped.",
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_CellMemberRole"
+            },
+            "type": "array"
           },
           "tenant": {
             "type": "string"
@@ -8543,7 +8585,8 @@
           "itemRole",
           "itemPattern",
           "truncated",
-          "grants"
+          "grants",
+          "memberRoles"
         ],
         "type": "object"
       },

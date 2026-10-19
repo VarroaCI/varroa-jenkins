@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -101,6 +102,110 @@ var tenantMemberPermissions = []string{
 	"hudson.model.Item.Cancel",
 	"hudson.model.Run.Replay",
 	"hudson.model.View.Read",
+}
+
+// TenantMemberRole is one generated Jenkins member role of a tenant.
+type TenantMemberRole struct {
+	Name        string
+	Pattern     string
+	Binding     string // "" for the role on the whole folder subtree
+	Permissions []string
+	Subjects    []v1alpha1.SubjectRef // deduplicated, sorted by Kind+":"+Name
+}
+
+// TenantMemberRoles returns the generated member roles of one pipelines
+// tenant, the same roles JenkinsRoleAssignments emits for it. The operator
+// and the cell grants read both call it, so they cannot disagree. It returns
+// nil for a nil Resolver or a tenant that is not a pipelines Team.
+func (r *Resolver) TenantMemberRoles(tenant ParsedTenant) []TenantMemberRole {
+	if r == nil || tenant.Kind != TenantTeam || tenant.Team == "" {
+		return nil
+	}
+	return r.tenantMemberRoles(tenant.Team, r.userPrincipalAliases())
+}
+
+// tenantMemberRoles builds the member roles of one team. The subtree role
+// comes first, then one narrowed role per binding in first-seen order.
+//
+// The member role grants the person checks. The acting-user routes (scan,
+// run, replay, restart, input answers) check the caller's own Jenkins
+// permissions, so each subject with pipelines write on the tenant gets the
+// item permissions here. A narrowed grant gets only its job globs. The walk
+// is uncapped: a cut list would drop a subject silently. One binding can
+// narrow the same tenant in several entries. Each entry names the same role,
+// so the job globs of one binding merge into one pattern. A separate role per
+// entry would collide by name, and Jenkins keeps one of them.
+func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) []TenantMemberRole {
+	var subtree *TenantMemberRole
+	narrowed := map[string]*tenantMemberNarrowing{}
+	var narrowedOrder []string
+	for _, src := range r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team}) {
+		if !slices.Contains(src.Verbs, "write") {
+			continue
+		}
+		subjects := expandMemberUserSubjects(src.Subjects, aliases)
+		if src.Jobs == nil {
+			if subtree == nil {
+				subtree = &TenantMemberRole{
+					Name:        TenantMemberRoleName(team),
+					Pattern:     TenantMemberRolePattern(team),
+					Permissions: slices.Clone(tenantMemberPermissions),
+				}
+			}
+			subtree.Subjects = mergeMemberSubjects(subtree.Subjects, subjects)
+			continue
+		}
+		if len(src.Jobs) == 0 {
+			continue
+		}
+		n, ok := narrowed[src.Binding]
+		if !ok {
+			n = &tenantMemberNarrowing{}
+			narrowed[src.Binding] = n
+			narrowedOrder = append(narrowedOrder, src.Binding)
+		}
+		// Every entry of one binding names the same subjects, so the
+		// subjects are set once, not appended once per entry.
+		if n.subjects == nil {
+			n.subjects = subjects
+		}
+		n.jobs = append(n.jobs, src.Jobs...)
+	}
+
+	var out []TenantMemberRole
+	if subtree != nil {
+		out = append(out, *subtree)
+	}
+	for _, binding := range narrowedOrder {
+		n := narrowed[binding]
+		out = append(out, TenantMemberRole{
+			Name:        TenantMemberNarrowedRoleName(team, binding),
+			Pattern:     TenantMemberNarrowedPattern(team, n.jobs),
+			Binding:     binding,
+			Permissions: slices.Clone(tenantMemberPermissions),
+			Subjects:    mergeMemberSubjects(nil, n.subjects),
+		})
+	}
+	return out
+}
+
+// mergeMemberSubjects appends the subjects that dst does not hold yet.
+// The result is sorted by Kind+":"+Name.
+func mergeMemberSubjects(dst, add []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
+	seen := make(map[string]bool, len(dst)+len(add))
+	out := make([]v1alpha1.SubjectRef, 0, len(dst)+len(add))
+	for _, s := range slices.Concat(dst, add) {
+		key := s.Kind + ":" + s.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, s)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Kind+":"+out[i].Name < out[j].Kind+":"+out[j].Name
+	})
+	return out
 }
 
 // tenantMemberNarrowing collects the subjects and job globs of one binding

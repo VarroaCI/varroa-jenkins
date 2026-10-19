@@ -1727,6 +1727,16 @@ type ComponentsSchemasCellGrants struct {
 	Tenants   []ComponentsSchemasCellTenantGrants `json:"tenants"`
 }
 
+// ComponentsSchemasCellMemberRole One generated Jenkins member role of a tenant. The role holds the person checks of the acting-user routes for its subjects.
+type ComponentsSchemasCellMemberRole struct {
+	// Binding The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.
+	Binding     *string                             `json:"binding,omitempty"`
+	Name        string                              `json:"name"`
+	Pattern     string                              `json:"pattern"`
+	Permissions []string                            `json:"permissions"`
+	Subjects    []ComponentsSchemasCellGrantSubject `json:"subjects"`
+}
+
 // ComponentsSchemasCellPendingSignature One script signature the sandbox refused in a cell.
 type ComponentsSchemasCellPendingSignature struct {
 	Dangerous *bool `json:"dangerous,omitempty"`
@@ -1924,12 +1934,15 @@ type ComponentsSchemasCellStatusProjection struct {
 	Warm                     *bool                                 `json:"warm,omitempty"`
 }
 
-// ComponentsSchemasCellTenantGrants Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.
+// ComponentsSchemasCellTenantGrants Every grant that reaches one tenant of a cell, with the tenant's generated Jenkins item role and its generated member roles. The item role and its pattern come from the tenant name, so the read opens no JenkinsRole object.
 type ComponentsSchemasCellTenantGrants struct {
 	Grants      []ComponentsSchemasCellGrant `json:"grants"`
 	ItemPattern string                       `json:"itemPattern"`
 	ItemRole    string                       `json:"itemRole"`
-	Tenant      string                       `json:"tenant"`
+
+	// MemberRoles The generated Jenkins member roles of the tenant. Each subject with pipelines write gets the person checks of the acting-user routes. The list is never capped.
+	MemberRoles []ComponentsSchemasCellMemberRole `json:"memberRoles"`
+	Tenant      string                            `json:"tenant"`
 
 	// Truncated True only when the 50-grant cap dropped a grant of this tenant.
 	Truncated bool `json:"truncated"`

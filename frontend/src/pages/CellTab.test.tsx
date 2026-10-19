@@ -110,6 +110,15 @@ function makeGrants(overrides?: Partial<CellGrants>): CellGrants {
             jobs: ["release/*"],
           },
         ],
+        memberRoles: [
+          {
+            name: "varroa:tenant-member:acme:acme-release",
+            pattern: "^acme/(?:release/.*)$",
+            binding: "acme-release",
+            permissions: ["hudson.model.Item.Build", "hudson.model.Run.Replay"],
+            subjects: [{ kind: "User", name: "alice" }],
+          },
+        ],
       },
       {
         tenant: "beta",
@@ -117,6 +126,7 @@ function makeGrants(overrides?: Partial<CellGrants>): CellGrants {
         itemPattern: "^beta($|/.*)$",
         truncated: false,
         grants: [],
+        memberRoles: [],
       },
     ],
     ...overrides,
@@ -316,6 +326,22 @@ describe("Permissions panel", () => {
   it("states that no binding reaches a tenant instead of a blank block", () => {
     renderTab();
     expect(screen.getByText(/No binding and no Team membership reaches this tenant/)).toBeInTheDocument();
+  });
+
+  it("lists each member role with its pattern and subjects", () => {
+    renderTab();
+    expect(screen.getAllByText("Jenkins member roles")).toHaveLength(2);
+    expect(screen.getByText("varroa:tenant-member:acme:acme-release")).toBeInTheDocument();
+    expect(screen.getByText("^acme/(?:release/.*)$")).toBeInTheDocument();
+    expect(screen.getByText("User:alice")).toBeInTheDocument();
+    expect(screen.getByText("hudson.model.Item.Build, hudson.model.Run.Replay")).toBeInTheDocument();
+  });
+
+  it("states that no member role exists when no subject holds write", () => {
+    renderTab();
+    expect(
+      screen.getByText(/No member role exists on this tenant/),
+    ).toBeInTheDocument();
   });
 
   it("reports the cap when a tenant's grant list is cut", () => {
