@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -140,4 +141,45 @@ func (g *giteaClient) OpenPullRequest(ctx context.Context, r Repo, base, head, t
 // DeleteBranch deletes a branch.
 func (g *giteaClient) DeleteBranch(ctx context.Context, r Repo, branch string) error {
 	return g.sendJSON(ctx, http.MethodDelete, repoPath(r)+"/branches/"+escapePath(branch), nil, nil)
+}
+
+// CommitStatuses returns the latest status of each context on sha. Gitea
+// names the state under "status" in the combined endpoint.
+func (g *giteaClient) CommitStatuses(ctx context.Context, r Repo, sha string) ([]CommitStatus, error) {
+	return readStatusPages(func(page int) ([]CommitStatus, int, error) {
+		var out struct {
+			TotalCount int `json:"total_count"`
+			Statuses   []struct {
+				Context     string `json:"context"`
+				Status      string `json:"status"`
+				State       string `json:"state"`
+				TargetURL   string `json:"target_url"`
+				Description string `json:"description"`
+			} `json:"statuses"`
+		}
+		q := url.Values{"limit": {strconv.Itoa(statusPageSize)}, "page": {strconv.Itoa(page)}}
+		if err := g.getJSON(ctx, repoPath(r)+"/commits/"+url.PathEscape(sha)+"/status", q, &out); err != nil {
+			return nil, 0, err
+		}
+		items := make([]CommitStatus, 0, len(out.Statuses))
+		for _, s := range out.Statuses {
+			state := s.Status
+			if state == "" {
+				state = s.State
+			}
+			items = append(items, CommitStatus{Context: s.Context, State: state, TargetURL: s.TargetURL, Description: s.Description})
+		}
+		return items, out.TotalCount, nil
+	})
+}
+
+// SetCommitStatus writes one status on sha.
+func (g *giteaClient) SetCommitStatus(ctx context.Context, r Repo, sha string, s CommitStatus) error {
+	in := map[string]string{
+		"state":       s.State,
+		"target_url":  s.TargetURL,
+		"description": s.Description,
+		"context":     s.Context,
+	}
+	return g.sendJSON(ctx, http.MethodPost, repoPath(r)+"/statuses/"+url.PathEscape(sha), in, nil)
 }

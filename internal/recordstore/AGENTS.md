@@ -1090,6 +1090,12 @@ of the fleet's audit activity, once a controller becomes disposable.
   later `job.schedules` envelope for the same cell omits it, or when C5's
   tenant purge removes it. A schedule row describes live state, not
   history, so a staleness sweep would delete a row the fleet still needs.
+- **Commit-status end** (`interrupted.go` `publishEndCommitStatus`) — `afterMark`
+  publishes `end_commit_status` before the cancel and retry, for every mark that
+  is not provisional. The publish needs the run's `scm_revision`, its repository
+  URL (`run.source` `scm_url`, else `run.started` payload), and a build number;
+  otherwise it publishes nothing. `runInterruptCandidate` and
+  `markedLostIntent` carry these facts. The operator sets the pending statuses.
 - **Interrupted-run marking** (`interrupted.go`, `cell_liveness.go`,
   `interrupted_metrics.go`) — design D9. `evaluateInterruption` applies
   the confirmed test, then the moved test, then the silent test, to one

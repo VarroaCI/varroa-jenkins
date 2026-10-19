@@ -164,3 +164,15 @@ type PullRequestReply struct {
 	URL    string `json:"url,omitempty"`
 	Number int    `json:"number,omitempty"`
 }
+
+// CommitStatusRequest asks the operator to end the pending commit statuses
+// of one build. The recorder sends it when it ends a run that Jenkins never
+// completes. It has no reply: the operator logs the outcome.
+type CommitStatusRequest struct {
+	Team        string `json:"team"`
+	Repo        string `json:"repo"`
+	SHA         string `json:"sha"`
+	JobPath     string `json:"jobPath"`
+	BuildNumber int64  `json:"buildNumber"`
+	Reason      string `json:"reason"`
+}

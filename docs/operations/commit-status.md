@@ -123,6 +123,42 @@ The cell must reach the forge API on port 443. Allow the egress in
 
 Varroa does not report commit status to GitLab or Bitbucket.
 
+## Interrupted builds
+
+Jenkins sets a commit status when a build completes. The recorder can end a build that Jenkins
+never completes. The status then stays `pending`. The operator fixes this in three steps:
+
+1. The recorder ends the build with a synthetic end reason.
+2. The operator reads the statuses of the build's commit.
+3. The operator sets each `pending` status of that build to `error`.
+
+The operator writes the status with the tenant credential. The credential must allow a push to the
+repository. The new status keeps the context and the link of the old status. Its description reads
+`Varroa ended the build: <reason>`.
+
+The operator changes only a status that matches the build by its job path and build number. A
+status that has an end state is never changed. A retry of the build has its own build number, so
+the retry keeps its own pending status.
+
+These builds keep their `pending` status:
+
+- A provisional end: `heartbeat-lost` and `start-lost`. The build can still finish. The build's own
+  completion then writes its status.
+- A build with no recorded commit or no recorded repository.
+- A pull-request merge build. The forge reports the status on the pull-request head, and the
+  recorder does not record that commit. The operator finds no matching status and writes nothing.
+- A tenant whose only credential is a `githubApp` credential. The operator does not end a status
+  with a GitHub App credential.
+
+A failed write leaves the status `pending`. The operator logs the failure and does not retry.
+
+The operator runs at most four of these writes at once on each replica. When all four are busy, the
+operator drops the write and logs it at `Info`. The status then stays `pending`.
+
+The write can race the retry. If the retry's own `pending` status lands first, the `error` write can
+land after it. The context then shows `error` until the retry build completes. The retry build then
+writes its own end state, which replaces the `error`.
+
 ## Status links
 
 The status link of a build points to the Varroa build page. A plain job without a `targetUrl`

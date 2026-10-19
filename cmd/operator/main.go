@@ -822,6 +822,7 @@ func main() {
 	broodOps := controller.NewCommandBroodOps(mgr.GetClient(), operatorNamespace, logger)
 	broodSchedules := controller.NewCommandBroodSchedules(mgr.GetClient(), operatorNamespace, logger)
 	configCrud := controller.NewConfigCRUD(clientsetClient, clientsetClient, composer, operatorNamespace, logger.With("component", "config_crud"))
+	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	if err := mgr.Add(&operatorCommandRunner{
 		busConn:        busConn,
 		cluster:        cluster,
@@ -834,6 +835,7 @@ func main() {
 		lifecycle:      lifecycleStore,
 		activity:       actPub,
 		beatNow:        func() { hbRunner.BeatNow() },
+		forge:          forgeAnswerer,
 		logger:         logger,
 	}); err != nil {
 		logger.Error("failed to add operator command runner", "error", err)
@@ -863,7 +865,6 @@ func main() {
 	}
 
 	// Forge check, read, issue, and pullrequest run on every replica; only the Team's shard owner replies.
-	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	enterTeam := func(ctx context.Context, key string) (context.Context, func(), bool) {
 		return shardSet.Enter(ctx, ring.ShardFor(key))
 	}
@@ -1403,7 +1404,9 @@ type operatorCommandRunner struct {
 	lifecycle      *controller.LifecycleStore
 	activity       *activity.Publisher
 	beatNow        func()
-	logger         *slog.Logger
+	// forge ends the pending commit statuses of a build the recorder ended.
+	forge  commitStatusEnder
+	logger *slog.Logger
 }
 
 func (r *operatorCommandRunner) NeedLeaderElection() bool { return true }
@@ -1503,7 +1506,7 @@ func (r *operatorCommandRunner) Start(ctx context.Context) error {
 	// of one cluster across the replicas of that cluster's operator.
 	ledgerActionSub, err := subscribeLedgerActions(r.busConn, r.cluster, operatorQueue,
 		func(subject string, data []byte) {
-			handleLedgerAction(context.Background(), r.logger, r.ledgerMetrics, subject, r.cluster, r.reconciler, data)
+			handleLedgerAction(context.Background(), r.logger, r.ledgerMetrics, subject, r.cluster, r.reconciler, r.forge, data)
 		})
 	if err != nil {
 		return fmt.Errorf("subscribe ledger actions: %w", err)

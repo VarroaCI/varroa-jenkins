@@ -81,7 +81,7 @@ func TestHandleLedgerAction_CancelRun(t *testing.T) {
 		Actor: recordstore.LedgerActionRecorder,
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -113,7 +113,7 @@ func TestHandleLedgerAction_RetryRun(t *testing.T) {
 		Actor:      "varroa-recorder",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -145,7 +145,7 @@ func TestHandleLedgerAction_TriggerRun(t *testing.T) {
 		Actor:      "svc-payments",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -178,7 +178,7 @@ func TestHandleLedgerAction_TriggerRun_OtherCluster(t *testing.T) {
 		RunID: "run-3", IntentKey: "upstream:run-2:t1a2b3c4d5e6", JobPath: "team/job-a",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 0 || rec.wokeCalls != 0 {
 		t.Fatalf("expected no action for another cluster's trigger_run, got sent=%d woke=%d", len(rec.sent), rec.wokeCalls)
@@ -197,7 +197,7 @@ func TestHandleLedgerAction_TriggerRun_WakesHibernatedTargetFirst(t *testing.T) 
 		Actor: "svc-payments",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	want := []string{"wake", "send"}
 	if !reflect.DeepEqual(rec.events, want) {
@@ -220,7 +220,7 @@ func TestHandleLedgerAction_TriggerRun_ConnectedTargetNotWoken(t *testing.T) {
 		Actor: "svc-payments",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	want := []string{"send"}
 	if !reflect.DeepEqual(rec.events, want) {
@@ -237,7 +237,7 @@ func TestHandleLedgerAction_WakeCell(t *testing.T) {
 		Namespace: "cells-ns", Controller: "cell-a",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if rec.wokeCalls != 1 || rec.wokeNS != "cells-ns" || rec.wokeName != "cell-a" {
 		t.Fatalf("expected WakeHibernatedController called once for cells-ns/cell-a, got calls=%d ns=%s name=%s",
@@ -254,7 +254,7 @@ func TestHandleLedgerAction_UnknownKind(t *testing.T) {
 	rec := &fakeLedgerActionRunner{}
 	action := recordstore.LedgerAction{Kind: "delete_everything", Cluster: "core", Namespace: "cells-ns", Controller: "cell-a"}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 0 || rec.wokeCalls != 0 {
 		t.Fatalf("expected no action for an unknown kind, got sent=%d woke=%d", len(rec.sent), rec.wokeCalls)
@@ -270,7 +270,7 @@ func TestHandleLedgerAction_OtherCluster(t *testing.T) {
 		Namespace: "cells-ns", Controller: "cell-a",
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 0 || rec.wokeCalls != 0 {
 		t.Fatalf("expected no action for another cluster's action, got sent=%d woke=%d", len(rec.sent), rec.wokeCalls)
@@ -291,7 +291,7 @@ func TestHandleLedgerAction_ResumeRunCarriesItsDeadline(t *testing.T) {
 		Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -328,7 +328,7 @@ func TestHandleLedgerAction_ResumeRunIdentifiesItsTarget(t *testing.T) {
 			Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 		}
 		data, _ := json.Marshal(action)
-		handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+		handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 		if len(rec.sent) != 1 {
 			t.Fatalf("expected one imperative command, got %d", len(rec.sent))
 		}
@@ -361,7 +361,7 @@ func TestHandleLedgerAction_ResumeRunCarriesTheAbsoluteExpiry(t *testing.T) {
 		Deadline: &deadline,
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -387,7 +387,7 @@ func TestHandleLedgerAction_ResumeRunWithoutADeadlineSendsZero(t *testing.T) {
 		Files: []recordstore.ResumeFile{{RelPath: "jobs/team/jobs/job-a/builds/5/build.xml", Epoch: 1737000000000}},
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -413,7 +413,7 @@ func TestHandleLedgerAction_ResumeRunCarriesEachFileEpoch(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 {
 		t.Fatalf("expected one imperative command, got %d", len(rec.sent))
@@ -443,7 +443,7 @@ func TestHandleLedgerAction_ResumeRunCarriesTheLogNextSeq(t *testing.T) {
 		LogNextSeq: 42,
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if len(rec.sent) != 1 || rec.sent[0].ResumeBuild == nil {
 		t.Fatalf("expected one resume command, got %+v", rec.sent)
@@ -465,7 +465,7 @@ func TestHandleLedgerAction_ReleaseAgents(t *testing.T) {
 		AgentPods: []string{"sbsoftware-deploy-phnq4", "sbsoftware-python-3pzkf"},
 	}
 	data, _ := json.Marshal(action)
-	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if rec.releaseCalls != 1 {
 		t.Fatalf("ReleaseRunAgentPods calls = %d, want 1", rec.releaseCalls)
@@ -497,7 +497,7 @@ func TestHandleLedgerAction_ReleaseAgentsWithoutPodsDoesNothing(t *testing.T) {
 			action.Namespace = "cells-ns"
 			action.Controller = "cell-a"
 			data, _ := json.Marshal(action)
-			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
 			if rec.releaseCalls != 0 {
 				t.Fatalf("ReleaseRunAgentPods calls = %d, want 0", rec.releaseCalls)
 			}

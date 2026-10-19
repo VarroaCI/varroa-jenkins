@@ -59,6 +59,11 @@ type markedLostIntent struct {
 	paramsDigest  string
 	buildNumber   *int64
 	startMarkedAt time.Time
+	// scmRevision and scmURL come from the run row that the guard admits,
+	// when a QUEUED placeholder recorded them. Only selectMarkedLostIntents
+	// reads them.
+	scmRevision string
+	scmURL      string
 }
 
 // selectMarkedLostIntents reads the oldest markedLostBatch intents the
@@ -74,8 +79,11 @@ func selectMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, confirmedB
 	rows, err := pool.Query(ctx, `
 		SELECT ri.run_id, ri.created_at, ri.intent_key, ri.cluster, ri.namespace, COALESCE(ri.cell, ''),
 		       ri.tenant, ri.job_path, ri.cell_instance, COALESCE(ri.actor, ''), COALESCE(ri.params_digest, ''),
-		       ri.build_number, ri.start_marked_at
+		       ri.build_number, ri.start_marked_at,
+		       COALESCE(r.scm_revision, ''),
+		       COALESCE(NULLIF(r.payload->'run.source'->>'scm_url', ''), r.payload->'run.started'->'payload'->>'scm_url', '')
 		FROM varroa.run_intents ri
+		LEFT JOIN varroa.runs r ON r.run_id = ri.run_id
 		WHERE `+markedLostIntentGuardSQL+`
 		  AND EXISTS (
 		    SELECT 1 FROM varroa.tenant_placements tp,
@@ -97,7 +105,7 @@ func selectMarkedLostIntents(ctx context.Context, pool *pgxpool.Pool, confirmedB
 		var c markedLostIntent
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.intentKey, &c.cluster, &c.namespace, &c.cell,
 			&c.tenant, &c.jobPath, &c.cellInstance, &c.actor, &c.paramsDigest, &c.buildNumber,
-			&c.startMarkedAt); err != nil {
+			&c.startMarkedAt, &c.scmRevision, &c.scmURL); err != nil {
 			return nil, fmt.Errorf("scan marked lost intent: %w", err)
 		}
 		out = append(out, c)
@@ -167,6 +175,8 @@ func (c markedLostIntent) candidate() runInterruptCandidate {
 		buildNumber:  c.buildNumber,
 		actor:        c.actor,
 		cellInstance: c.cellInstance,
+		scmRevision:  c.scmRevision,
+		scmURL:       c.scmURL,
 	}
 }
 

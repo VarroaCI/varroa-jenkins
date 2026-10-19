@@ -99,6 +99,76 @@ type Client interface {
 	// CreateIssue opens an issue with the labels. A label that the
 	// repository does not carry fails with a LabelError.
 	CreateIssue(ctx context.Context, r Repo, title, body string, labels []string) (Issue, error)
+	// CommitStatuses returns the latest status of each context on the
+	// commit sha.
+	CommitStatuses(ctx context.Context, r Repo, sha string) ([]CommitStatus, error)
+	// SetCommitStatus writes one status on the commit sha.
+	SetCommitStatus(ctx context.Context, r Repo, sha string, s CommitStatus) error
+}
+
+// statusPageSize is the page size of a commit-status listing. maxStatusPages
+// bounds how many pages one listing reads. A listing past the bound answers
+// ErrListingTruncated, so no matching status is skipped silently.
+const (
+	statusPageSize = 50
+	maxStatusPages = 20
+)
+
+// readStatusPages collects the contexts of a combined commit status listing.
+// fetch reads one page and reports its statuses and the total count the forge
+// states, or zero when it states none. Duplicate contexts are dropped, so a
+// forge that ignores the page parameter cannot repeat a status. The listing
+// ends when the total is reached, when a page adds no new context, or when a
+// short page ends it. A listing still open after maxStatusPages answers
+// ErrListingTruncated.
+func readStatusPages(fetch func(page int) (items []CommitStatus, total int, err error)) ([]CommitStatus, error) {
+	seen := map[string]bool{}
+	res := []CommitStatus{}
+	for page := 1; page <= maxStatusPages; page++ {
+		items, total, err := fetch(page)
+		if err != nil {
+			return nil, err
+		}
+		added := 0
+		for _, s := range items {
+			if seen[s.Context] {
+				continue
+			}
+			seen[s.Context] = true
+			res = append(res, s)
+			added++
+		}
+		if total > 0 && len(res) >= total {
+			return res, nil
+		}
+		if added == 0 {
+			// A repeated page, with the total still open, means the forge
+			// does not page this listing. The contexts it holds are not all.
+			if total > len(res) {
+				return nil, ErrListingTruncated
+			}
+			return res, nil
+		}
+		if total == 0 && len(items) < statusPageSize {
+			return res, nil
+		}
+	}
+	return nil, ErrListingTruncated
+}
+
+// Commit status states that Varroa writes or reads.
+const (
+	StatePending = "pending"
+	StateError   = "error"
+)
+
+// CommitStatus is one status on a commit. Context names the check and
+// TargetURL links to the build that reports it.
+type CommitStatus struct {
+	Context     string
+	State       string
+	TargetURL   string
+	Description string
 }
 
 // Issue is an issue that a forge created.

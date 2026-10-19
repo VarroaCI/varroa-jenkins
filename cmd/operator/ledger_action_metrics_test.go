@@ -77,7 +77,7 @@ func TestHandleLedgerAction_UnknownKind_CountsRejection(t *testing.T) {
 	action := recordstore.LedgerAction{Kind: "delete_everything", Cluster: "core", Namespace: "cells-ns", Controller: "cell-a"}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if got := ledgerActionRejectedSum(t, reader, "unknown_kind"); got != 1 {
 		t.Fatalf("expected varroa_ledger_actions_rejected_total{reason=unknown_kind}=1, got %d", got)
@@ -99,7 +99,7 @@ func TestHandleLedgerAction_OtherCluster_CountsForeignCluster(t *testing.T) {
 	}
 	data, _ := json.Marshal(action)
 
-	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, data)
+	handleLedgerAction(context.Background(), testLogger(), metrics, "varroa.ledger.actions.core", "core", rec, nil, data)
 
 	if rec.wokeCalls != 0 || len(rec.sent) != 0 {
 		t.Fatalf("expected no action for another cluster, got wokeCalls=%d sent=%d", rec.wokeCalls, len(rec.sent))

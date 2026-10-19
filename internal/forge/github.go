@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -129,4 +131,40 @@ func (g *githubClient) CreateIssue(ctx context.Context, r Repo, title, bodyText 
 // DeleteBranch deletes a branch.
 func (g *githubClient) DeleteBranch(ctx context.Context, r Repo, branch string) error {
 	return g.sendJSON(ctx, http.MethodDelete, repoPath(r)+"/git/refs/heads/"+escapePath(branch), nil, nil)
+}
+
+// CommitStatuses returns the latest status of each context on sha. The
+// combined endpoint is read page by page.
+func (g *githubClient) CommitStatuses(ctx context.Context, r Repo, sha string) ([]CommitStatus, error) {
+	return readStatusPages(func(page int) ([]CommitStatus, int, error) {
+		var out struct {
+			TotalCount int `json:"total_count"`
+			Statuses   []struct {
+				Context     string `json:"context"`
+				State       string `json:"state"`
+				TargetURL   string `json:"target_url"`
+				Description string `json:"description"`
+			} `json:"statuses"`
+		}
+		q := url.Values{"per_page": {strconv.Itoa(statusPageSize)}, "page": {strconv.Itoa(page)}}
+		if err := g.getJSON(ctx, repoPath(r)+"/commits/"+escapePath(sha)+"/status", q, &out); err != nil {
+			return nil, 0, err
+		}
+		items := make([]CommitStatus, 0, len(out.Statuses))
+		for _, s := range out.Statuses {
+			items = append(items, CommitStatus{Context: s.Context, State: s.State, TargetURL: s.TargetURL, Description: s.Description})
+		}
+		return items, out.TotalCount, nil
+	})
+}
+
+// SetCommitStatus writes one status on sha.
+func (g *githubClient) SetCommitStatus(ctx context.Context, r Repo, sha string, s CommitStatus) error {
+	in := map[string]string{
+		"state":       s.State,
+		"target_url":  s.TargetURL,
+		"description": s.Description,
+		"context":     s.Context,
+	}
+	return g.sendJSON(ctx, http.MethodPost, repoPath(r)+"/statuses/"+escapePath(sha), in, nil)
 }

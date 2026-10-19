@@ -72,6 +72,14 @@ type fakeClient struct {
 	// issueErr is returned by CreateIssue. issueLabels records each call.
 	issueErr    error
 	issueLabels [][]string
+	// Commit status fakes. statuses is the canned answer of CommitStatuses.
+	// statusWrites records each SetCommitStatus call with its commit.
+	statuses        []forge.CommitStatus
+	statusErr       error
+	setStatusErr    error
+	statusReads     []string
+	statusWrites    []forge.CommitStatus
+	statusWriteSHAs []string
 	// bySHA holds the files of each commit. When set, Read answers from the
 	// commit named in the call instead of files.
 	bySHA map[string]map[string]forge.Entry
@@ -170,6 +178,22 @@ func (f *fakeClient) CreateIssue(_ context.Context, _ forge.Repo, _, _ string, l
 		return forge.Issue{}, f.issueErr
 	}
 	return forge.Issue{Number: 9, URL: "https://git.example.org/team/app/issues/9"}, nil
+}
+
+// CommitStatuses answers the canned statuses, or statusErr.
+func (f *fakeClient) CommitStatuses(_ context.Context, _ forge.Repo, sha string) ([]forge.CommitStatus, error) {
+	f.statusReads = append(f.statusReads, sha)
+	if f.statusErr != nil {
+		return nil, f.statusErr
+	}
+	return f.statuses, nil
+}
+
+// SetCommitStatus records the write, and fails with setStatusErr.
+func (f *fakeClient) SetCommitStatus(_ context.Context, _ forge.Repo, sha string, s forge.CommitStatus) error {
+	f.statusWrites = append(f.statusWrites, s)
+	f.statusWriteSHAs = append(f.statusWriteSHAs, sha)
+	return f.setStatusErr
 }
 
 // fixture wires an Ops over a Team and a fake forge. clients maps a token

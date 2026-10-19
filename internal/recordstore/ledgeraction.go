@@ -20,6 +20,11 @@ const (
 	// of a run the recorder ended. The pods can hold nodes that only that
 	// run's resume could adopt, so they wait for the run's terminal mark.
 	LedgerActionReleaseAgents = "release_agents"
+	// LedgerActionEndCommitStatus asks the operator to set the pending
+	// commit statuses of a build the recorder ended to error. Only Jenkins
+	// writes a status on build completion, so a synthetic end leaves it
+	// pending.
+	LedgerActionEndCommitStatus = "end_commit_status"
 )
 
 // LedgerActionRecorder is the literal actor value the recorder sets when
@@ -77,6 +82,14 @@ type LedgerAction struct {
 	Tenant         string   `json:"tenant,omitempty"`
 	AgentNamespace string   `json:"agent_namespace,omitempty"`
 	AgentPods      []string `json:"agent_pods,omitempty"`
+
+	// Repo, Revision, and Reason apply to end_commit_status alone, along
+	// with RunID, JobPath, BuildNumber, and Tenant above. Repo is the
+	// repository URL of the run and Revision its commit SHA. Reason is
+	// the synthetic end reason that the recorder recorded.
+	Repo     string `json:"repo,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // ResumeFile is one stored state file of a resume action: the path under

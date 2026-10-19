@@ -78,6 +78,10 @@ A `heartbeat-lost` mark sends neither, and the build's own completion replaces i
 in the same pod sends it at boot. The mark also
 ends a run on a dead cell when a stopped operator reports no liveness.
 
+The other synthetic ends also set the build's pending commit status to `error`. A
+`start-lost` or `heartbeat-lost` mark keeps the status pending. See
+[Interrupted builds](commit-status.md#interrupted-builds).
+
 The lost instance's agent pods keep running. A resume adopts a pod that ran a build step, so a
 Running pod stays for about 41 minutes, or about 46 when no running cell holds the slot. A pod that is not Running goes within about four minutes. See
 [Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime).
