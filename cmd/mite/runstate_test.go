@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -97,18 +99,25 @@ func runStateStreamFailingFetch(a *Agent, reason string) *concurrentSendStream {
 	}}
 }
 
-// startAdoptAndReloadStub starts a stub Jenkins on localhost:8080 (the
+// startAdoptAndReloadStub starts the stub for stubJobPath. See
+// startAdoptAndReloadStubFor.
+func startAdoptAndReloadStub(t *testing.T) *resumeStub {
+	t.Helper()
+	return startAdoptAndReloadStubFor(t, stubJobPath)
+}
+
+// startAdoptAndReloadStubFor starts a stub Jenkins on localhost:8080 (the
 // adopt-node route is hard-coded there, matching every other loopback
 // route's own test in this package) serving the crumb issuer as
-// disabled, the adopt-node route, and one job's reload route. It skips
-// the test when the port is unavailable.
-func startAdoptAndReloadStub(t *testing.T) *resumeStub {
+// disabled, the adopt-node route, and the reload route of jobPath. It
+// skips the test when the port is unavailable.
+func startAdoptAndReloadStubFor(t *testing.T, jobPath string) *resumeStub {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:8080")
 	if err != nil {
 		t.Skip("skipping: localhost:8080 not available:", err)
 	}
-	stub := &resumeStub{loadStatus: http.StatusOK, loadBuilding: true}
+	stub := &resumeStub{loadStatus: http.StatusOK, loadBuilding: true, jobPath: jobPath}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/crumbIssuer/api/json", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -125,7 +134,7 @@ func startAdoptAndReloadStub(t *testing.T) *resumeStub {
 			JobPath string `json:"jobPath"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.JobPath != stubJobPath {
+		if body.JobPath != stub.jobPath {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -183,6 +192,8 @@ const stubJobPath = "team/pipeline"
 // resumeStub records what the resume called on the Jenkins side, and
 // scripts the load route's answer.
 type resumeStub struct {
+	// jobPath is the one job whose reload route answers.
+	jobPath     string
 	adoptedName atomic.Value
 	reloadHit   atomic.Bool
 	loadBody    atomic.Value
@@ -866,5 +877,167 @@ func TestApplyResumeBuild_ZeroLogNextSeqWritesNoFile(t *testing.T) {
 	path := filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7", resumeLogNextSeqFile)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("stat %s = %v, want no file", path, err)
+	}
+}
+
+// writeBranchFixture writes a multibranch project mb with one branch main
+// at jobs/mb/branches/main, the layout Jenkins keeps for a branch job.
+func writeBranchFixture(t *testing.T, home string) {
+	t.Helper()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+}
+
+// assertNoLogicalJobsDir fails when the logical jobs/<seg>/jobs directory of
+// a branch job exists. Such a directory means a file went to the wrong place.
+func assertNoLogicalJobsDir(t *testing.T, home string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "jobs")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the logical directory jobs/mb/jobs exists (stat err %v), want none", err)
+	}
+}
+
+// TestApplyResumeBuild_WritesBranchJobFilesUnderBranches proves the files of
+// a branch job land in the branch directory Jenkins holds, not under the
+// logical jobs/<seg> path.
+func TestApplyResumeBuild_WritesBranchJobFilesUnderBranches(t *testing.T) {
+	stub := startAdoptAndReloadStubFor(t, "mb/main")
+	home := t.TempDir()
+	writeBranchFixture(t, home)
+
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{
+			{Relpath: "jobs/mb/jobs/main/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+			{Relpath: "jobs/mb/jobs/main/builds/7/program.dat", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+			{Relpath: "jobs/mb/jobs/main/builds/7/workflow/2.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+		},
+		Instance: agent.cfg.CellInstance,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	buildDir := filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7")
+	for _, rel := range []string{"build.xml", "program.dat", filepath.Join("workflow", "2.xml")} {
+		if _, err := os.Stat(filepath.Join(buildDir, rel)); err != nil {
+			t.Errorf("%s not written under the branch directory: %v", rel, err)
+		}
+	}
+	assertNoLogicalJobsDir(t, home)
+	if !stub.reloadHit.Load() {
+		t.Error("the branch job was not reloaded")
+	}
+}
+
+// TestApplyResumeBuild_WritesOrgFolderBranchFilesUnderResolvedDirs proves a
+// branch under an organization folder, whose repository directory is
+// mangled, writes under the resolved repository and branch directories.
+func TestApplyResumeBuild_WritesOrgFolderBranchFilesUnderResolvedDirs(t *testing.T) {
+	startAdoptAndReloadStubFor(t, "org/my.repo/main")
+	home := t.TempDir()
+	writeJobConfig(t, home, "org", orgFolderConfig)
+	repoDir := filepath.Join(home, "jobs", "org", "jobs", "my-repo.k3j2a1")
+	writeConfigAt(t, repoDir, fmt.Sprintf(repoProjectConfig, "my.repo"))
+	writeConfigAt(t, filepath.Join(repoDir, "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: "org/my.repo/main", BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{
+			{Relpath: "jobs/org/jobs/my.repo/jobs/main/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+		},
+		Instance: agent.cfg.CellInstance,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "branches", "main", "builds", "7", "build.xml")); err != nil {
+		t.Errorf("build.xml not written under the resolved branch directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "jobs")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the logical jobs directory under the repository exists (stat err %v)", err)
+	}
+}
+
+// TestApplyResumeBuild_PlainJobWritesUnderJobs proves a plain job keeps its
+// logical directory.
+func TestApplyResumeBuild_PlainJobWritesUnderJobs(t *testing.T) {
+	startAdoptAndReloadStubFor(t, "team/pipeline")
+	home := t.TempDir()
+	writeJobConfig(t, home, "team/pipeline", folderConfig)
+
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: "team/pipeline", BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{
+			{Relpath: "jobs/team/jobs/pipeline/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+		},
+		Instance: agent.cfg.CellInstance,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "team", "jobs", "pipeline", "builds", "7", "build.xml")); err != nil {
+		t.Errorf("build.xml not written under the logical job directory: %v", err)
+	}
+}
+
+// TestApplyResumeBuild_WritesBranchLogNextSeqUnderBranches proves the log
+// sequence file of a branch build lands beside the branch build's files.
+func TestApplyResumeBuild_WritesBranchLogNextSeqUnderBranches(t *testing.T) {
+	startAdoptAndReloadStubFor(t, "mb/main")
+	home := t.TempDir()
+	writeBranchFixture(t, home)
+
+	agent := newResumeAgent(t, home, []byte("<build/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{
+			{Relpath: "jobs/mb/jobs/main/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+		},
+		Instance:   agent.cfg.CellInstance,
+		LogNextSeq: 42,
+	}); err != nil {
+		t.Fatalf("applyResumeBuild: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7", resumeLogNextSeqFile))
+	if err != nil {
+		t.Fatalf("log sequence file not under the branch build directory: %v", err)
+	}
+	if string(data) != "42" {
+		t.Errorf("log sequence file = %q, want 42", data)
+	}
+	assertNoLogicalJobsDir(t, home)
+}
+
+// TestApplyResumeBuild_AFinishedBranchBuildIsNotRestored proves the finished
+// check looks in the branch build directory. A finished branch build is not
+// restored, so the command touches nothing but the probe.
+func TestApplyResumeBuild_AFinishedBranchBuildIsNotRestored(t *testing.T) {
+	stub := startAdoptAndReloadStubFor(t, "mb/main")
+	stub.answerProbe(false, false)
+	home := t.TempDir()
+	writeBranchFixture(t, home)
+	completed := filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7", "workflow-completed")
+	if err := os.MkdirAll(completed, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := newResumeAgent(t, home, []byte("<from-the-gateway/>"))
+	if err := agent.applyResumeBuild(context.Background(), &mitev1.ResumeBuildPayload{
+		RunId: "run-1", JobPath: "mb/main", BuildNumber: 7,
+		StateFiles: []*mitev1.ResumeStateFile{
+			{Relpath: "jobs/mb/jobs/main/builds/7/build.xml", PusherEpoch: testPusherEpoch, StateGen: testPusherGen},
+		},
+		Instance: agent.cfg.CellInstance,
+	}); err != nil {
+		t.Fatalf("a finished branch build must answer success: %v", err)
+	}
+	if stub.reloadHit.Load() {
+		t.Error("a finished branch build was reloaded")
+	}
+	if order := stub.callOrder(); len(order) != 1 || order[0] != "probe" {
+		t.Fatalf("call order = %v, want the probe alone", order)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7", "build.xml")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a file was written for a finished branch build (stat err %v)", err)
 	}
 }

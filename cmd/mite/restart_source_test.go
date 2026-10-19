@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -267,5 +269,120 @@ func TestFlowGraphCompletedReturnsStatErrors(t *testing.T) {
 	}
 	if _, err := flowGraphCompleted(marker); err == nil {
 		t.Fatal("a workflow-completed entry that is not a directory must be refused")
+	}
+}
+
+// reloadRefusingServer answers the crumb issuer and refuses every other
+// request with 409, so a restore stops at its reload.
+func reloadRefusingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/crumbIssuer/api/json" {
+			_, _ = w.Write([]byte(`{"crumbRequestField":"Jenkins-Crumb","crumb":"test"}`))
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestRestoreRestartSourceStagesBranchBuildUnderBranches proves the copy of a
+// branch job's build lands in the branch directory, not under jobs/<seg>.
+func TestRestoreRestartSourceStagesBranchBuildUnderBranches(t *testing.T) {
+	srv := reloadRefusingServer(t)
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+	agent := restartTestAgent(t, srv.URL, home)
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, []byte("0123456789")))
+	payload := &mitev1.RestartBuildPayload{
+		RunId: "new", JobPath: "mb/main", SourceRunId: "src", SourceBuildNumber: 7,
+		SourceFiles: []*mitev1.RestartSourceFile{{Relpath: "jobs/mb/jobs/main/builds/7/build.xml", Bytes: 10}},
+	}
+	err := agent.restoreRestartSource(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "reload") {
+		t.Fatalf("restore = %v, want a failure at the reload after the copy", err)
+	}
+	got, err := os.ReadFile(filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7", "build.xml"))
+	if err != nil {
+		t.Fatalf("the copy is not under the branch directory: %v", err)
+	}
+	if string(got) != "0123456789" {
+		t.Fatalf("build.xml = %q, want the copy", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "jobs")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the logical directory jobs/mb/jobs exists (stat err %v)", err)
+	}
+}
+
+// TestRestoreRestartSourceStagesOrgFolderBranchBuild proves a branch under an
+// organization folder, whose repository directory is mangled, restores under
+// the resolved repository and branch directories.
+func TestRestoreRestartSourceStagesOrgFolderBranchBuild(t *testing.T) {
+	srv := reloadRefusingServer(t)
+	home := t.TempDir()
+	writeJobConfig(t, home, "org", orgFolderConfig)
+	repoDir := filepath.Join(home, "jobs", "org", "jobs", "my-repo.k3j2a1")
+	writeConfigAt(t, repoDir, fmt.Sprintf(repoProjectConfig, "my.repo"))
+	writeConfigAt(t, filepath.Join(repoDir, "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+	agent := restartTestAgent(t, srv.URL, home)
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, []byte("0123456789")))
+	payload := &mitev1.RestartBuildPayload{
+		RunId: "new", JobPath: "org/my.repo/main", SourceRunId: "src", SourceBuildNumber: 7,
+		SourceFiles: []*mitev1.RestartSourceFile{{Relpath: "jobs/org/jobs/my.repo/jobs/main/builds/7/build.xml", Bytes: 10}},
+	}
+	err := agent.restoreRestartSource(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "reload") {
+		t.Fatalf("restore = %v, want a failure at the reload after the copy", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "branches", "main", "builds", "7", "build.xml")); err != nil {
+		t.Fatalf("the copy is not under the resolved branch directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "jobs")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the logical jobs directory under the repository exists (stat err %v)", err)
+	}
+}
+
+// TestRestoreRestartSourceReplacesBranchStub proves a rehydration stub under a
+// branch build directory is replaced by the copy, as a plain build's stub is.
+func TestRestoreRestartSourceReplacesBranchStub(t *testing.T) {
+	srv := reloadRefusingServer(t)
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+	buildDir := filepath.Join(home, "jobs", "mb", "branches", "main", "builds", "7")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "build.xml"), []byte(strings.Repeat("s", 632)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := restartTestAgent(t, srv.URL, home)
+	agent.Logger = slog.Default()
+	setTestStream(agent, runStateStreamResolvingFetch(t, agent, []byte("0123456789")))
+	payload := &mitev1.RestartBuildPayload{
+		RunId: "new", JobPath: "mb/main", SourceRunId: "src", SourceBuildNumber: 7,
+		SourceFiles: []*mitev1.RestartSourceFile{{Relpath: "jobs/mb/jobs/main/builds/7/build.xml", Bytes: 10}},
+	}
+	err := agent.restoreRestartSource(context.Background(), payload)
+	if err == nil || !strings.Contains(err.Error(), "reload") {
+		t.Fatalf("restore over a branch stub = %v, want a failure at the reload after the swap", err)
+	}
+	got, err := os.ReadFile(filepath.Join(buildDir, "build.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "0123456789" {
+		t.Fatalf("build.xml = %q, want the copy", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(home, "jobs", "mb", "branches", "main", "builds"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".varroa-replaced-") {
+			t.Fatalf("a moved-aside stub remains: %s", e.Name())
+		}
 	}
 }

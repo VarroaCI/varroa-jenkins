@@ -377,7 +377,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
 - **`runstate.go`** — the mite's half of the pipeline mesh. The loopback
   route above forwards a chunk out of the cell, and `applyResumeBuild`
   answers a `RESUME_BUILD` command: it fetches each named file over
-  `MiteMessage.run_state_request`, checks and writes it, adopts every named
+  `MiteMessage.run_state_request`, checks and writes it. Each build file writes under the job's resolved directory (`jobDirResolver`, the same rule as rehydration), so a branch job's files land under `branches/<dir>`. It adopts every named
   node the disk holds through `POST /varroa-run/adopt-node`, reloads the
   job, and answers one `CommandResult`. It fails the whole command at the
   first failure, so a half-written build is never reloaded. Every build path
@@ -399,7 +399,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   `restartWithRestore` posts the restart, and retries it once only after the plugin answers
   `409` with `X-Varroa-Restart-Refusal: source-missing` (`jenkins.ErrRestartSourceMissing`).
   `restoreRestartSource` fetches each copy file with `restart_source` set. It stages the files
-  under a hidden directory in the home, renames the directory to `jobs/<seg>/…/builds/<n>/`,
+  under a hidden directory in the home, renames the directory to `builds/<n>/` under the job's resolved directory,
   then reloads the job and calls `load-build`. It refuses a file outside that exact build
   prefix (`checkRestartSourceRelpath`). An existing build directory that holds every copy file at
   its declared size skips the write and repeats the reload and load. An existing directory without

@@ -670,14 +670,17 @@ public final class RunStatePusher {
         }
     }
 
-    /** The path prefix of this build's own directory under the Jenkins home. */
+    /** The wire name prefix of this build's files. See {@link #buildRelPathPrefix(String, long)}. */
     String buildRelPathPrefix() {
         return buildRelPathPrefix(jobPath, buildNumber);
     }
 
     /**
-     * The path prefix of one build's directory under the Jenkins home. The
-     * gateway holds the same rule, so a copy's file names match its build.
+     * The wire name prefix of one build's files: "jobs/&lt;seg&gt;" for each
+     * job segment, then "builds/&lt;n&gt;/". It is not the on-disk directory.
+     * The files are read from the build's real root directory. The mite maps
+     * the name to the job's directory on the target cell, so a branch job
+     * resolves under branches/&lt;dir&gt;. The gateway holds the same rule.
      */
     static String buildRelPathPrefix(String jobPath, long buildNumber) {
         StringBuilder sb = new StringBuilder();
