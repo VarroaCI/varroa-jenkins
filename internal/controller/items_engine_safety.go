@@ -15,7 +15,9 @@ var errItemsRefused = errors.New("assemble items")
 // branchBuildStrategiesPlugin supplies
 // jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing,
 // which the items engine renders into every multibranch item and
-// organization folder item (design D12).
+// organization folder item (design D12). The Varroa pushed-branch strategy
+// comes from varroa-mite-auth, which every pod loads from the init container,
+// so this check does not test for it.
 const branchBuildStrategiesPlugin = "basic-branch-build-strategies"
 
 // checkBranchBuildStrategiesPlugin refuses to assemble items when itemsYAML

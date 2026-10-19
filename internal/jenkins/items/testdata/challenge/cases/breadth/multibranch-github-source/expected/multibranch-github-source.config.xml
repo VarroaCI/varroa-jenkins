@@ -21,6 +21,7 @@
         </source>
         <buildStrategies>
           <jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing plugin="basic-branch-build-strategies"></jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing>
+          <org.jenkinsci.plugins.varroamiteauth.VarroaPushedBranchBuildStrategy plugin="varroa-mite-auth"></org.jenkinsci.plugins.varroamiteauth.VarroaPushedBranchBuildStrategy>
         </buildStrategies>
       </jenkins.branch.BranchSource>
     </data>

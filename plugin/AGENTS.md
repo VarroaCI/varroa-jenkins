@@ -62,6 +62,14 @@ the root AGENTS.md greenfield rule.
   fails a `CoreStep` whose `delegate` is `ExecuteDslScripts` through
   `context.onFailure`, because `DSL.invokeStep` only logs a thrown exception. The
   `job-dsl` test dependency version must equal the pin in `pluginlock/lock.yaml`.
+- **Pushed-branch build** (`PushedHeadRegistry.java`, `VarroaPushedHeadListener.java`,
+  `VarroaPushedBranchBuildStrategy.java`). The listener records each `CREATED` or
+  `UPDATED` head event. Its `@Extension(ordinal = 1000)` must stay above the
+  branch-api listeners, so a push is recorded before branch-api indexes its branch job.
+  The registry holds at most 256 entries for ten minutes, in memory only. The strategy
+  answers true once for each branch job that has no revision seen or built, when a live
+  entry names the head at the current revision. Each owner consumes an entry once. Tags
+  never build.
 - **Activity emitters** (feed the push-based Activity page): `ActivitySink.java`
   (bounded, non-blocking, in-memory), `ActivityEvent.java` (normalized shape — actor,
   itemPath, buildNumber, result, url, message; `controller`/`namespace`/`phase`/`reason`

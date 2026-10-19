@@ -132,10 +132,12 @@ reading each package's entry point):
   with `pruneDeadBranches` on; a zero or absent limit renders `-1`, and
   `Item.Validate` (`validateOrphanedItemStrategy`) rejects the key on another kind
   and a negative limit.
-  `configxml.go` also injects a fixed skip-initial-build `buildStrategies`
-  element onto every `multibranch` item and `organizationFolder` item, so a
-  branch scan starts no build; the element needs plugin
-  `basic-branch-build-strategies`, which `internal/controller`'s
+  `configxml.go` also injects a fixed `buildStrategies` element onto every
+  `multibranch` item and `organizationFolder` item. It holds two strategies: the
+  skip-initial-build strategy (plugin `basic-branch-build-strategies`), so a branch
+  scan starts no build, and `VarroaPushedBranchBuildStrategy` (plugin
+  `varroa-mite-auth`), which builds a branch that a push creates, once. The skip
+  strategy needs plugin `basic-branch-build-strategies`, which `internal/controller`'s
   `checkBranchBuildStrategiesPlugin` requires before it resolves a bundle
   holding either item kind. A `triggers.varroaUpstream` block
   (`VarroaUpstreamTrigger{Tenant, Job, Result}`) declares a job's upstream
