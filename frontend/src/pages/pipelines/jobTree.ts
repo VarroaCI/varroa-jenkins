@@ -4,12 +4,14 @@ import { stripTenantFolder } from "./jobPath";
 /**
  * A node of the team home's folder tree. The kind set is complete: a
  * "folder" node is a path segment that no item declares, a "multibranch"
- * node is an item the API reports as multibranch, and a "job" node is an
- * item the API reports as pipeline or unknown.
+ * node is an item the API reports as multibranch, an "organizationFolder"
+ * node is an item the API reports as an organization folder, and a "job"
+ * node is any other item: a pipeline, a branch, or an unknown job.
  *
- * A "folder" node and a "multibranch" node both fold. A "job" node does not.
+ * A "folder", a "multibranch", and an "organizationFolder" node fold. A
+ * "job" node does not.
  */
-export type JobNodeKind = "folder" | "job" | "multibranch";
+export type JobNodeKind = "folder" | "job" | "multibranch" | "organizationFolder";
 
 export interface JobTreeNode {
   /** The node's own path segment. */
@@ -27,6 +29,11 @@ export interface JobTreeNode {
   runningCount: number;
   /** For a "multibranch" node: the number of its direct "job" children. */
   branchCount: number;
+  /**
+   * For an "organizationFolder" node: the number of its direct "multibranch"
+   * children, which are its repositories.
+   */
+  repositoryCount: number;
   /** For a "job" node: the row the table renders. */
   summary?: PipelineSummary;
 }
@@ -47,7 +54,14 @@ function newDraft(name: string, path: string, depth: number): Draft {
 
 /** nodeKindFor maps an API item kind onto a node kind. */
 function nodeKindFor(item: PipelineSummary): JobNodeKind {
-  return item.kind === "multibranch" ? "multibranch" : "job";
+  switch (item.kind) {
+    case "multibranch":
+      return "multibranch";
+    case "organizationFolder":
+      return "organizationFolder";
+    default:
+      return "job";
+  }
 }
 
 /**
@@ -109,6 +123,10 @@ function finish(draft: Draft, runningPaths: string[]): JobTreeNode {
   const runningCount = runningPaths.filter((path) => isAtOrBelow(draft.path, path)).length;
   const branchCount =
     draft.kind === "multibranch" ? children.filter((child) => child.kind === "job").length : 0;
+  const repositoryCount =
+    draft.kind === "organizationFolder"
+      ? children.filter((child) => child.kind === "multibranch").length
+      : 0;
 
   return {
     name: draft.name,
@@ -119,6 +137,7 @@ function finish(draft: Draft, runningPaths: string[]): JobTreeNode {
     jobCount,
     runningCount,
     branchCount,
+    repositoryCount,
     summary: draft.summary,
   };
 }
@@ -141,7 +160,7 @@ function compareNodes(a: JobTreeNode, b: JobTreeNode): number {
 
 /** isFoldable reports whether a node carries a disclosure control. */
 export function isFoldable(node: JobTreeNode): boolean {
-  return node.kind === "folder" || node.kind === "multibranch";
+  return node.kind === "folder" || node.kind === "multibranch" || node.kind === "organizationFolder";
 }
 
 /**

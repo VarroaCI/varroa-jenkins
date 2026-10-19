@@ -365,7 +365,7 @@ export default function PipelinePage() {
           <div className={styles.pageTitle}>{jobDetail.jobPath}</div>
           <JobBreadcrumbs team={team!} tenantFolder={jobDetail.tenantFolder} jobPath={jobDetail.jobPath} />
         </div>
-        {canRun && jobDetail.kind !== "multibranch" && (
+        {canRun && jobDetail.kind !== "multibranch" && jobDetail.kind !== "organizationFolder" && (
           <button type="button" className={styles.runBtn} onClick={() => setDrawerOpen(true)}>
             Run
           </button>
@@ -545,7 +545,7 @@ export default function PipelinePage() {
         />
       </div>
 
-      {jobDetail.kind === "multibranch" ? (
+      {jobDetail.kind === "multibranch" || jobDetail.kind === "organizationFolder" ? (
         <MultibranchCard team={team!} jobPath={jobDetail.jobPath} canScan={canRun} />
       ) : runsQuery.isLoading ? (
         <div className={styles.loading}>Loading builds…</div>

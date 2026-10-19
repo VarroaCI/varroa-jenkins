@@ -41,6 +41,44 @@ describe("JobTree multibranch rows", () => {
   });
 });
 
+// organizationNode is a folder-relative organization folder with two
+// repositories, which are its multibranch children.
+const organizationNode = {
+  name: "repos",
+  path: "repos",
+  depth: 0,
+  kind: "organizationFolder",
+  children: [],
+  jobCount: 2,
+  runningCount: 0,
+  branchCount: 0,
+  repositoryCount: 2,
+} as unknown as JobTreeNode;
+
+describe("JobTree organization folder rows", () => {
+  it("links the organization folder name and counts its repositories", () => {
+    render(
+      <MemoryRouter>
+        <table>
+          <tbody>
+            <JobTree
+              team="alpha"
+              folder="alpha"
+              rows={[organizationNode]}
+              openPaths={new Set()}
+              onToggle={() => {}}
+            />
+          </tbody>
+        </table>
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "repos" });
+    expect(link.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frepos");
+    expect(screen.getByText("2 repositories")).toBeInTheDocument();
+  });
+});
+
 // jobNode builds a "job" row node whose summary carries the pending flag.
 function jobNode(path: string, pending: boolean): JobTreeNode {
   return {

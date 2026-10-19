@@ -530,15 +530,16 @@ func revisionForInput(cb *v1alpha1.ComposedBundle, i int, itemRefName string) st
 }
 
 // declaredJob is one job path a composed bundle declares, with the item
-// kind the manifest gives it. Only "pipeline" and "multibranch" reach a
-// caller. Every other declared kind is dropped before this value is built.
+// kind the manifest gives it. Only "pipeline", "multibranch", and
+// "organizationFolder" reach a caller. Every other declared kind is dropped
+// before this value is built.
 type declaredJob struct {
 	Path string
 	Kind string
 }
 
-// catalogDeclaredJobPaths lists every pipeline and multibranch item path
-// ref's controller's composed bundle declares. Design D8: the job list is
+// catalogDeclaredJobPaths lists every pipeline, multibranch, and
+// organization folder item path ref's controller's composed bundle declares. Design D8: the job list is
 // the union of the record store's job summaries and the jobs the catalog
 // declares, because a job that has never run holds no record-store row.
 func (s *Server) catalogDeclaredJobPaths(ctx context.Context, ref TenantRef) []declaredJob {
@@ -548,7 +549,8 @@ func (s *Server) catalogDeclaredJobPaths(ctx context.Context, ref TenantRef) []d
 	}
 	var jobs []declaredJob
 	for _, ip := range manifest.Flatten() {
-		if ip.Item.Kind == "pipeline" || ip.Item.Kind == "multibranch" {
+		switch ip.Item.Kind {
+		case "pipeline", "multibranch", "organizationFolder":
 			jobs = append(jobs, declaredJob{Path: ip.Path, Kind: ip.Item.Kind})
 		}
 	}

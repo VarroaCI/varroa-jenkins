@@ -2461,10 +2461,12 @@ components:
           type: string
         kind:
           description: |
-            The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+            The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
           enum:
           - pipeline
           - multibranch
+          - organizationFolder
+          - branch
           - unknown
           type: string
         last30Days:
@@ -2600,10 +2602,12 @@ components:
           type: string
         kind:
           description: |
-            The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+            The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
           enum:
           - pipeline
           - multibranch
+          - organizationFolder
+          - branch
           - unknown
           type: string
         lastBuild:
@@ -8282,6 +8286,12 @@ components:
             export.
           format: date-time
           type: string
+        repositories:
+          description: |
+            The repositories of an organization folder, sorted by name. A multibranch job has none.
+          items:
+            $ref: '#/components/schemas/components_schemas_JobBranchHead'
+          type: array
         tags:
           items:
             $ref: '#/components/schemas/components_schemas_JobBranchHead'
@@ -8295,6 +8305,7 @@ components:
       - branches
       - changeRequests
       - tags
+      - repositories
       type: object
     components_schemas_JobDeclaredBy:
       additionalProperties: false
@@ -8862,10 +8873,12 @@ components:
           type: string
         kind:
           description: |
-            The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+            The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
           enum:
           - pipeline
           - multibranch
+          - organizationFolder
+          - branch
           - unknown
           type: string
         last30Days:
@@ -9132,10 +9145,12 @@ components:
           type: string
         kind:
           description: |
-            The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+            The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
           enum:
           - pipeline
           - multibranch
+          - organizationFolder
+          - branch
           - unknown
           type: string
         lastBuild:
@@ -16555,7 +16570,7 @@ paths:
   /api/v1/pipelines/{team}/jobs/{job}/scan:
     post:
       description: |
-        The command goes to the cell that holds the job's home slot. The route reports no outcome. The result arrives in lastScan of the branch inventory, within about one minute during the fifteen minutes after the request.
+        The job must be a multibranch job or an organization folder. The route answers 409 for any other job before it publishes the command. The command goes to the cell that holds the job's home slot. The route reports no outcome. The result arrives in lastScan of the branch inventory, within about one minute during the fifteen minutes after the request.
       operationId: scanMultibranch
       parameters:
       - $ref: '#/components/parameters/components_parameters_team'
@@ -16584,7 +16599,8 @@ paths:
           $ref: '#/components/responses/components_responses_Conflict'
         "503":
           $ref: '#/components/responses/components_responses_ServiceUnavailable'
-      summary: Requests a scan of a multibranch job's branches and pull requests.
+      summary: Requests a scan of a multibranch job's branches and pull requests,
+        or of an organization folder's repositories.
       tags:
       - Pipelines
   /api/v1/pipelines/{team}/jobs/{job}/tests/{case}:

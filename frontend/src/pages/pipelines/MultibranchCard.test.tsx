@@ -53,6 +53,7 @@ const inventory: JobBranchList = {
       changeRequest: { id: "7", title: "Fix the build" },
     },
   ],
+  repositories: [],
 };
 
 describe("MultibranchCard", () => {
@@ -65,6 +66,25 @@ describe("MultibranchCard", () => {
     expect(screen.getByRole("link", { name: "#7 Fix the build" })).toBeInTheDocument();
     expect(screen.getByText("orphaned")).toBeInTheDocument();
     expect(screen.getByText("abcdef1")).toBeInTheDocument();
+  });
+
+  it("lists the repositories of an organization folder with links and no run column", async () => {
+    mockListJobBranches.mockResolvedValue({
+      jobPath: "alpha/repos",
+      truncated: false,
+      branches: [],
+      changeRequests: [],
+      tags: [],
+      repositories: [
+        { name: "projgen", jobPath: "alpha/repos/projgen", orphaned: false, revision: "" },
+      ],
+    });
+    renderCard();
+
+    const repository = await screen.findByRole("link", { name: "projgen" });
+    expect(repository.getAttribute("href")).toBe("/pipelines/alpha/alpha%2Frepos%2Fprojgen");
+    expect(screen.getByText("Repositories")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Latest run" })).toBeNull();
   });
 
   it("links the latest run result to its build page", async () => {
@@ -82,6 +102,7 @@ describe("MultibranchCard", () => {
       branches: [],
       changeRequests: [],
       tags: [],
+      repositories: [],
     });
     renderCard();
 

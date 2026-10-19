@@ -26,7 +26,8 @@ The Run control does not appear on a multibranch job. Run a head from its own jo
 
 ## Scan the branches
 
-Select **Scan now** on the job page to start a scan. The button appears only when you may
+Select **Scan now** on the job page to start a scan. An organization folder has the same
+button. It scans the folder's repositories. The button appears only when you may
 write the job.
 
 - The scan runs on the cell that holds the job's home slot.
@@ -43,7 +44,11 @@ write the job.
   The result then reaches the list within about one minute.
 
 The MCP tool `scan_multibranch` starts the same scan. Read its result with
-`list_job_branches`, in the `lastScan` value.
+`list_job_branches`, in the `lastScan` value. The tool and the route accept a multibranch
+job or an organization folder. A job that is neither answers `409`, and no scan starts.
+
+An organization folder's page shows a **Repositories** card. Each repository links to its
+own page, which lists its branches and pull requests.
 
 ## Read the inventory from the command line or an agent
 

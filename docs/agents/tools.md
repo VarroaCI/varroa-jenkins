@@ -57,8 +57,8 @@ A cluster with `ok: false` returned incomplete results.
 The MCP server also exposes thirteen pipeline tools: `run_pipeline`, `list_runs`,
 `get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
 `proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, and `get_team_cell`. They operate on the
-build record store. The `scan_multibranch` tool starts a scan of a multibranch job and returns
-a `scanId` and the state `requested`. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
+build record store. The `scan_multibranch` tool starts a scan of a multibranch job or an organization folder and returns
+a `scanId` and the state `requested`. A job that is neither answers an error. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
 `runId`, an `intentKey`, and the state `requested`. A refused trigger ends the run with status `COMPLETED`
 and result `TRIGGER_FAILED`; `get_run` shows the `triggerReasonCode` and `triggerError`.
 The `list_runs` tool takes `limit` with the same default of 50 and the same

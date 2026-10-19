@@ -66,6 +66,12 @@ func (f *fakePipelineReader) JobHome(_ context.Context, _, _, _ string) (records
 	return recordstore.JobHome{}, nil
 }
 
+// JobInventory answers the zero inventory, which holds no known set, so the
+// scan's target check passes for the fixture's job.
+func (f *fakePipelineReader) JobInventory(_ context.Context, _, _ string) (recordstore.JobInventory, error) {
+	return recordstore.JobInventory{}, nil
+}
+
 func newFakePipelineReader() *fakePipelineReader {
 	return &fakePipelineReader{
 		runs:          map[string]recordstore.Run{},

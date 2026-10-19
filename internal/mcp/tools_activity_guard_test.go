@@ -37,6 +37,12 @@ func (guardRecordReader) JobHome(_ context.Context, _, _, _ string) (recordstore
 	return recordstore.JobHome{}, nil
 }
 
+// JobInventory answers the zero inventory, which holds no known set. The
+// scan's target check then passes for the guard's job.
+func (guardRecordReader) JobInventory(_ context.Context, _, _ string) (recordstore.JobInventory, error) {
+	return recordstore.JobInventory{}, nil
+}
+
 // guardReplayRunID names the one run the guard answers as a completed,
 // replicated run, which replay_run needs. Every other identifier answers
 // a RUNNING run.

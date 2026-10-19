@@ -85,18 +85,22 @@ function rowStyle(depth: number): CSSProperties {
 }
 
 /** countLabel names a node's own count: jobs below a folder, branches under
- * a multibranch item. */
+ * a multibranch item, repositories under an organization folder. */
 function countLabel(node: JobTreeNode): string {
   if (node.kind === "multibranch") {
     return node.branchCount === 1 ? "1 branch" : `${node.branchCount} branches`;
+  }
+  if (node.kind === "organizationFolder") {
+    return node.repositoryCount === 1 ? "1 repository" : `${node.repositoryCount} repositories`;
   }
   return node.jobCount === 1 ? "1 job" : `${node.jobCount} jobs`;
 }
 
 /**
- * FolderRow renders a folder node or a multibranch node. It fills the
- * Pipeline column only: Varroa reports no aggregate health for a folder,
- * and a multibranch item does not build.
+ * FolderRow renders a folder node, a multibranch node, or an organization
+ * folder node. It fills the Pipeline column only: Varroa reports no aggregate
+ * health for a folder, and a multibranch item or an organization folder does
+ * not build.
  */
 function FolderRow({
   team,
@@ -141,7 +145,7 @@ function FolderRow({
               className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
             />
           </button>
-          {node.kind === "multibranch" ? (
+          {node.kind === "multibranch" || node.kind === "organizationFolder" ? (
             <Link className={styles.nodeName} to={jobHref(team, folder ? `${folder}/${node.path}` : node.path)}>
               {node.name}
             </Link>
@@ -149,7 +153,8 @@ function FolderRow({
             <span className={styles.nodeName}>{node.name}</span>
           )}
           <span className={styles.counts}>{countLabel(node)}</span>
-          {node.kind === "multibranch" && node.summary?.pending && <PendingBadge />}
+          {(node.kind === "multibranch" || node.kind === "organizationFolder") &&
+            node.summary?.pending && <PendingBadge />}
           {node.runningCount > 0 && (
             <span className={styles.running}>{node.runningCount} running</span>
           )}

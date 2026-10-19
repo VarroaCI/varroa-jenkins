@@ -33,7 +33,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import jenkins.branch.MultiBranchProject;
+import jenkins.branch.OrganizationFolder;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import jenkins.model.lazy.LazyBuildMixIn;
@@ -98,9 +100,9 @@ import org.springframework.security.core.GrantedAuthority;
  * is not restartable. The route name holds one word, so it carries no {@link
  * WebMethod}.
  *
- * <p>{@code POST /varroa-run/scan} starts one branch scan of a multibranch project as
- * the acting user and records the result. The route name holds one word, so it carries
- * no {@link WebMethod}.
+ * <p>{@code POST /varroa-run/scan} starts one branch scan of a multibranch project or an
+ * organization folder as the acting user and records the result. The route name holds one
+ * word, so it carries no {@link WebMethod}.
  *
  * <p>{@code POST /varroa-run/adopt-node} adopts one agent node from its configuration
  * file, so a build that resumed on this process finds the agent it ran on.
@@ -365,7 +367,7 @@ public class VarroaRunTriggerAction implements RootAction {
     /**
      * Handles {@code POST /varroa-run/scan}. Reads {@code scanId}, {@code
      * jobPath}, and {@code actingUser}, narrows the named item to a
-     * multibranch project, and then, inside the acting user's own
+     * multibranch project or organization folder, and then, inside the acting user's own
      * authentication, checks {@link Item#BUILD} and schedules one folder
      * computation. {@link VarroaBranchScans} records the scan before the
      * computation starts and reports its result.
@@ -374,7 +376,7 @@ public class VarroaRunTriggerAction implements RootAction {
      * without the mite authority or for an acting user without {@link Item#BUILD}
      * (the refusal is recorded), {@code 400} for a body that does not decode or
      * names no scan, job, or acting user, {@code 404} for no item at the job path,
-     * {@code 409} for an item that is not a multibranch project or a queue that
+     * {@code 409} for an item that is neither a multibranch project nor an organization folder, or a queue that
      * refuses the computation, and {@code 202} on success.
      */
     public void doScan(StaplerRequest2 req, StaplerResponse2 rsp) {
@@ -409,11 +411,12 @@ public class VarroaRunTriggerAction implements RootAction {
                 PlainTextRefusal.refuse(rsp, 404, "Not Found: no item named " + jobPath);
                 return;
             }
-            if (!(rawItem instanceof MultiBranchProject)) {
-                PlainTextRefusal.refuse(rsp, 409, "Conflict: " + jobPath + " is not a multibranch project");
+            if (!(rawItem instanceof MultiBranchProject) && !(rawItem instanceof OrganizationFolder)) {
+                PlainTextRefusal.refuse(rsp, 409,
+                        "Conflict: " + jobPath + " is not a multibranch project or an organization folder");
                 return;
             }
-            MultiBranchProject project = (MultiBranchProject) rawItem;
+            ComputedFolder<?> project = (ComputedFolder<?>) rawItem;
             String actor = VarroaUserCause.normalizeActor(actingUser.getName());
 
             // The first request of a scan reserves its identifier, atomically.

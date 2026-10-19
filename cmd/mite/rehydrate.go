@@ -353,37 +353,51 @@ func orphanDeferredJobs(jenkinsHome string, deferred []string) (keep, orphans []
 	return keep, orphans
 }
 
-// parentCanCreateJob reports whether the parent of jobPath can still create
-// it later. A parent whose config.xml is absent keeps the job when the parent
-// directory exists, because Jenkins may not have written the config yet. A
-// parent directory that is absent, or a config.xml whose root element is not
-// a multibranch project or organization folder, cannot create it. Any other
-// read error keeps the job, so an unreadable parent never drops records by
-// mistake. A top-level job has no parent and cannot be created later.
+// parentCanCreateJob reports whether an ancestor of jobPath can still create
+// it later. The walk starts at the direct parent and goes up one level at a
+// time. The first ancestor that is a directory without a config.xml, or that
+// has a config.xml, decides. A config.xml that names a multibranch project or
+// an organization folder keeps the job. An organization folder indexes the
+// repositories below it, so a job under a repository that is not indexed yet
+// keeps its records. A directory without a config.xml keeps the job too,
+// because Jenkins may not have written the config yet. An absent directory
+// passes the walk on to its own parent. A config.xml of any other kind cannot
+// create the job. Any other read error keeps the job, so an unreadable
+// ancestor never drops records by mistake. A top-level job has no parent and
+// cannot be created later.
 func parentCanCreateJob(jenkinsHome, jobPath string) bool {
 	idx := strings.LastIndex(jobPath, "/")
 	if idx < 0 {
 		return false
 	}
-	parent := jobPath[:idx]
-	// Map the parent through parseRehydrationPath, the one job-path rule.
-	parsed, err := parseRehydrationPath("jobs/" + strings.ReplaceAll(parent, "/", "/jobs/") + "/nextBuildNumber")
-	if err != nil {
-		return true
-	}
-	parentDir := filepath.Join(append([]string{jenkinsHome}, parsed.jobDirParts...)...)
-	root, err := rootElementName(filepath.Join(parentDir, "config.xml"))
-	if err != nil {
+	for ancestor := jobPath[:idx]; ancestor != ""; {
+		// Map the ancestor through parseRehydrationPath, the one job-path rule.
+		parsed, err := parseRehydrationPath("jobs/" + strings.ReplaceAll(ancestor, "/", "/jobs/") + "/nextBuildNumber")
+		if err != nil {
+			return true
+		}
+		dir := filepath.Join(append([]string{jenkinsHome}, parsed.jobDirParts...)...)
+		root, err := rootElementName(filepath.Join(dir, "config.xml"))
+		if err == nil {
+			return strings.HasSuffix(root, "MultiBranchProject") || strings.HasSuffix(root, "OrganizationFolder")
+		}
 		if !errors.Is(err, os.ErrNotExist) {
 			return true
 		}
-		info, statErr := os.Stat(parentDir)
-		if statErr != nil {
-			return !errors.Is(statErr, os.ErrNotExist)
+		info, statErr := os.Stat(dir)
+		if statErr == nil {
+			return info.IsDir()
 		}
-		return info.IsDir()
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return true
+		}
+		next := strings.LastIndex(ancestor, "/")
+		if next < 0 {
+			return false
+		}
+		ancestor = ancestor[:next]
 	}
-	return strings.HasSuffix(root, "MultiBranchProject") || strings.HasSuffix(root, "OrganizationFolder")
+	return false
 }
 
 // rootElementName returns the name of the root element of the XML file at

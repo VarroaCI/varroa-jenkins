@@ -3,6 +3,7 @@ package org.jenkinsci.plugins.varroamiteauth;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import hudson.model.FreeStyleProject;
@@ -13,6 +14,7 @@ import java.io.BufferedReader;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.List;
+import jenkins.branch.OrganizationFolder;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
 import net.sf.json.JSONNull;
@@ -76,7 +78,31 @@ public class VarroaRunTriggerActionScanTest {
             action.doScan(scanRequest(body("scan-409", p.getFullName(), "ada")), rsp);
         }
 
-        RefusalAssert.assertRefused(rsp, 409, "Conflict: " + p.getFullName() + " is not a multibranch project");
+        RefusalAssert.assertRefused(rsp, 409, "Conflict: " + p.getFullName()
+                + " is not a multibranch project or an organization folder");
+    }
+
+    @Test
+    public void scanAcceptsOrganizationFolder() throws Exception {
+        // The folder needs a navigator and a project factory before the cell can
+        // schedule a computation. Wait for the creation-time computation to end.
+        OrganizationFolder folder = j.jenkins.createProject(OrganizationFolder.class, "org");
+        ScannableOrganizationFolders.makeScannable(folder);
+        j.waitUntilNoActivity();
+        VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+        StringWriter out = new StringWriter();
+        StaplerResponse2 rsp = RefusalAssert.capturing(out);
+
+        try (ACLContext ignored = asMite()) {
+            action.doScan(scanRequest(body("scan-org", folder.getFullName(), "ada")), rsp);
+        }
+        j.waitUntilNoActivity();
+        VarroaBranchScans.tick();
+
+        verify(rsp).setStatus(202);
+        JSONObject row = (JSONObject) VarroaBranchScans.lastScanJson(folder.getFullName());
+        assertEquals("completed", row.getString("state"));
+        assertEquals("scan-org", row.getString("scanId"));
     }
 
     @Test

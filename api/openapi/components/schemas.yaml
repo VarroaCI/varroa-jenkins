@@ -4489,7 +4489,7 @@ JobBranchList:
   description: >
     GET /pipelines/{team}/jobs/{job}/branches. The inventory is up to
     ten minutes stale. A hibernated cell keeps its last export.
-  required: [jobPath, truncated, branches, changeRequests, tags]
+  required: [jobPath, truncated, branches, changeRequests, tags, repositories]
   properties:
     jobPath:
       type: string
@@ -4518,6 +4518,13 @@ JobBranchList:
         $ref: '#/JobBranchHead'
     tags:
       type: array
+      items:
+        $ref: '#/JobBranchHead'
+    repositories:
+      type: array
+      description: >
+        The repositories of an organization folder, sorted by name. A
+        multibranch job has none.
       items:
         $ref: '#/JobBranchHead'
     lastScan:
@@ -4719,11 +4726,13 @@ PipelineSummary:
         more failed, unknown for a job that has never run.
     kind:
       type: string
-      enum: [pipeline, multibranch, unknown]
+      enum: [pipeline, multibranch, organizationFolder, branch, unknown]
       description: >
-        The item kind the tenant's bundle declares. A job the record store
-        alone holds reports unknown. A declared item of any other kind also
-        reports unknown.
+        The job's kind. A declared pipeline, multibranch, or organization
+        folder item sets it. Otherwise a child of a multibranch job or of a
+        project the inventory reports is a branch, and a project the
+        inventory reports is a multibranch job. A run alone marks a pipeline
+        job. Any other job reports unknown.
     pending:
       type: boolean
       description: >
@@ -5000,11 +5009,13 @@ PipelineJobDetail:
       type: string
     kind:
       type: string
-      enum: [pipeline, multibranch, unknown]
+      enum: [pipeline, multibranch, organizationFolder, branch, unknown]
       description: >
-        The job's kind. A declared pipeline or multibranch item sets it.
-        Otherwise a branch inventory row marks a multibranch job, and a
-        run marks a pipeline job.
+        The job's kind. A declared pipeline, multibranch, or organization
+        folder item sets it. Otherwise a child of a multibranch job or of a
+        project the inventory reports is a branch, and a project the
+        inventory reports is a multibranch job. A run alone marks a
+        pipeline job.
     pending:
       type: boolean
       description: >

@@ -89,6 +89,32 @@ function HeadTable({
   );
 }
 
+/**
+ * RepositoryTable lists the repositories of an organization folder. A
+ * repository builds through its own branch jobs, so the table has no run
+ * column.
+ */
+function RepositoryTable({ team, repositories }: { team: string; repositories: JobBranchHead[] }) {
+  return (
+    <table className={styles.table}>
+      <thead>
+        <tr>
+          <th scope="col">Repository</th>
+        </tr>
+      </thead>
+      <tbody>
+        {repositories.map((repository) => (
+          <tr key={repository.jobPath}>
+            <td>
+              <Link to={jobHref(team, repository.jobPath)}>{repository.name}</Link>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 /** ScanNames lists the head names of one scan result inside a disclosure. */
 function ScanNames({ label, names }: { label: string; names: string[] }) {
   if (names.length === 0) {
@@ -150,7 +176,7 @@ function scanPending(lastScan: BranchScan | undefined, scanId: string, startedAt
 
 /**
  * MultibranchCard lists the branches, tags, and pull requests a
- * multibranch job has discovered. The inventory can be up to ten minutes
+ * multibranch job or an organization folder has discovered. The inventory can be up to ten minutes
  * stale, and the card says when the cell last exported it. A caller who
  * may write the job sees a Scan now button. After a scan starts, the card
  * refreshes the inventory every few seconds until the scan reports.
@@ -245,6 +271,11 @@ export function MultibranchCard({
       {scan && !shownScan && !waiting && (
         <Card title="Last scan">
           <div className={styles.meta}>The scan did not report within ten minutes. Refresh the page later.</div>
+        </Card>
+      )}
+      {list.repositories.length > 0 && (
+        <Card title="Repositories">
+          <RepositoryTable team={team} repositories={list.repositories} />
         </Card>
       )}
       <Card title="Branches">

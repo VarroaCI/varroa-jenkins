@@ -128,8 +128,10 @@
   post:
     operationId: scanMultibranch
     tags: [Pipelines]
-    summary: Requests a scan of a multibranch job's branches and pull requests.
+    summary: Requests a scan of a multibranch job's branches and pull requests, or of an organization folder's repositories.
     description: >
+      The job must be a multibranch job or an organization folder. The
+      route answers 409 for any other job before it publishes the command.
       The command goes to the cell that holds the job's home slot. The
       route reports no outcome. The result arrives in lastScan of the
       branch inventory, within about one minute during the fifteen

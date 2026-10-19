@@ -236,24 +236,28 @@ func TestListJobBranchesNilReader503(t *testing.T) {
 }
 
 // TestGetPipelineJobKind covers each source of the job kind, in the order
-// the job page relies on: a declared item, then the inventory, then a run.
+// the job page relies on: a declared item, then the parent, then the
+// inventory, then a run.
 func TestGetPipelineJobKind(t *testing.T) {
 	cases := []struct {
-		name        string
-		declared    string
-		hasBranches bool
-		hasRun      bool
-		want        string
+		name           string
+		declared       string
+		parentMultiple bool
+		hasBranches    bool
+		hasRun         bool
+		want           string
 	}{
-		{"declared pipeline wins", "pipeline", true, false, "pipeline"},
-		{"declared multibranch wins", "multibranch", false, true, "multibranch"},
-		{"inventory marks multibranch", "", true, true, "multibranch"},
-		{"a run marks pipeline", "", false, true, "pipeline"},
-		{"nothing marks unknown", "", false, false, "unknown"},
+		{"declared pipeline wins", "pipeline", true, true, true, "pipeline"},
+		{"declared multibranch wins", "multibranch", false, false, true, "multibranch"},
+		{"declared organization folder wins", "organizationFolder", true, true, true, "organizationFolder"},
+		{"a child of a multibranch parent is a branch", "", true, true, true, "branch"},
+		{"inventory marks multibranch", "", false, true, true, "multibranch"},
+		{"a run marks pipeline", "", false, false, true, "pipeline"},
+		{"nothing marks unknown", "", false, false, false, "unknown"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pipelineJobKind(tc.declared, tc.hasBranches, tc.hasRun); got != tc.want {
+			if got := pipelineJobKind(tc.declared, tc.parentMultiple, tc.hasBranches, tc.hasRun); got != tc.want {
 				t.Fatalf("kind = %q, want %q", got, tc.want)
 			}
 		})

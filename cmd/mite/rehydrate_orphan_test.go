@@ -47,17 +47,19 @@ func TestOrphanDeferredJobs(t *testing.T) {
 	}
 
 	deferred := []string{
-		"tenant-x",          // top level, absent
-		"tenant/gone",       // plain folder parent
-		"tenant/mb/feature", // multibranch parent
-		"org/repo",          // organization folder parent
-		"missing/child",     // parent directory absent
-		"bare/child",        // parent directory exists, no config.xml yet
+		"tenant-x",               // top level, absent
+		"tenant/gone",            // plain folder parent
+		"tenant/mb/feature",      // multibranch parent
+		"org/repo",               // organization folder parent
+		"missing/child",          // parent directory absent
+		"bare/child",             // parent directory exists, no config.xml yet
+		"org/repos/projgen/main", // organization folder grandparent, parent absent
+		"tenant/nest/one/job",    // plain folder grandparent, parent absent
 	}
 	keep, orphans := orphanDeferredJobs(home, deferred)
 
-	wantKeep := []string{"tenant/mb/feature", "org/repo", "bare/child"}
-	wantOrphans := []string{"tenant-x", "tenant/gone", "missing/child"}
+	wantKeep := []string{"tenant/mb/feature", "org/repo", "bare/child", "org/repos/projgen/main"}
+	wantOrphans := []string{"tenant-x", "tenant/gone", "missing/child", "tenant/nest/one/job"}
 	if !reflect.DeepEqual(keep, wantKeep) {
 		t.Errorf("keep = %v, want %v", keep, wantKeep)
 	}
@@ -192,5 +194,27 @@ func TestRehydrationFailedItemsKeepsEveryDeferral(t *testing.T) {
 	}
 	if want := []string{"deleted-job"}; !reflect.DeepEqual(res.RehydrationDeferredJobs, want) {
 		t.Errorf("RehydrationDeferredJobs = %v, want %v", res.RehydrationDeferredJobs, want)
+	}
+}
+
+// TestOrphanDeferredJobsOrganizationFolderLayout models the cell layout that
+// follows a restart: the organization folder config exists, and its repository
+// directory does not exist until the folder's first scan creates it. The
+// deferred branch job stays deferred. A job under a plain folder still orphans.
+func TestOrphanDeferredJobsOrganizationFolderLayout(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "sbsoftware", folderConfig)
+	writeJobConfig(t, home, "sbsoftware/repos", orgFolderConfig)
+
+	keep, orphans := orphanDeferredJobs(home, []string{
+		"sbsoftware/repos/projgen/main",
+		"sbsoftware/projgen/main",
+	})
+
+	if want := []string{"sbsoftware/repos/projgen/main"}; !reflect.DeepEqual(keep, want) {
+		t.Errorf("keep = %v, want %v", keep, want)
+	}
+	if want := []string{"sbsoftware/projgen/main"}; !reflect.DeepEqual(orphans, want) {
+		t.Errorf("orphans = %v, want %v", orphans, want)
 	}
 }

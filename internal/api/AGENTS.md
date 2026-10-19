@@ -430,8 +430,11 @@ federation, activity persistence, and SSE fanout.
   answers `409` with `run does not replay: <reason>`, `413` over 256 KiB, mints a UUIDv7,
   keys it `replay:<source>:<new>`, reads no intent, and publishes one `REPLAY_BUILD` to the
   job's `homeRef`. `POST /pipelines/{team}/jobs/{job}/scan` (`scanMultibranch`, tenant write
-  check, body `{cluster}` optional) mints a UUIDv7 `scanId`, publishes one `SCAN_MULTIBRANCH`
-  to the job's `homeRef`, and answers `202 {scanId, state: "requested"}`; the MCP tool
+  check, body `{cluster}` optional) answers `409` before it publishes for a job that is not a
+  multibranch project or an organization folder (a declared `pipeline` is refused; a declared
+  `multibranch` or `organizationFolder`, or a path the inventory reports as a project, passes;
+  an incomplete inventory passes an undeclared path). Otherwise it mints a UUIDv7 `scanId`,
+  publishes one `SCAN_MULTIBRANCH` to the job's `homeRef`, and answers `202 {scanId, state: "requested"}`; the MCP tool
   `scan_multibranch` emits `pipeline.branch_scan_requested`. `GET /runs/{run}` answers `replayOf` from `runs.replay_of`.
   `run_restart.go` owns the restart route pair: `GET /runs/{run}/restart` reads the stage list the
   plugin recorded in `run.completed.payload.restart_stages` (or its `restart_refusal`) and answers
