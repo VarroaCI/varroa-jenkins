@@ -1,18 +1,28 @@
-# Operate Varroa through MCP
+# Use agents with Varroa
 
-Varroa exposes fleet operations through the Model Context Protocol (MCP).
-Clients act as the owner of a Varroa API key and remain subject to that
-identity's permissions.
+An agent in Varroa acts as a person, with that person's permissions, and never
+as an administrator token.
 
-## Choose the operation surface
+## Choose a way to connect
 
-| Surface | What it can do | Authorization |
-|---|---|---|
-| Varroa | Manage fleet resources | Varroa RBAC |
-| Jenkins | Call controller tools | Varroa and Jenkins RBAC |
-| External systems | Only through a Jenkins tool | Jenkins environment controls |
+| Way | Who acts | Writes | Page |
+|---|---|---|---|
+| Your own MCP client | You, through your API key | The client calls write tools directly. Your grants are the gate. | [Connect a client](connecting.md) |
+| The assistant in the dashboard | You, while you are signed in | Every write waits for your approval. | [Assistant](assistant.md) |
 
-MCP does not provide a shell or unrestricted Kubernetes access.
+## What every agent shares
+
+Both ways use one tool surface, one grant check, and one audit trail. MCP does
+not provide a shell or unrestricted Kubernetes access. See
+[Identity and auditing](identity.md) and [Tool reference](tools.md).
+
+## Start
+
+1. Connect an MCP client, or turn on the assistant.
+2. Confirm the identity with `get_me`.
+3. Confirm effective access with `get_my_permissions`. Then review the roles
+   for each identity in [Identity and auditing](identity.md).
+4. Read [Writing through MCP](writing.md) before you change resources.
 
 ## Apply guardrails
 
@@ -28,19 +38,11 @@ MCP does not provide a shell or unrestricted Kubernetes access.
 Credentials and sensitive status fields are removed from tool results. See
 [Tool behavior](tools.md) for result shapes and redaction.
 
-## Start
-
-1. [Connect the MCP client](connecting.md).
-2. Confirm the identity with `get_me`.
-3. Confirm effective access with `get_my_permissions`.
-4. Grant Varroa and Jenkins roles as described in
-   [Identity and auditing](identity.md).
-5. Read [Writing through MCP](writing.md) before changing resources.
-
 ## Related pages
 
-- [Connect an MCP client](connecting.md)
-- [Tool behavior](tools.md)
-- [Writing through MCP](writing.md)
-- [Jenkins controller tools](jenkins-tools.md)
+- [Connect a client](connecting.md)
 - [Assistant](assistant.md)
+- [Identity and auditing](identity.md)
+- [Jenkins controller tools](jenkins-tools.md)
+- [Tool reference](tools.md)
+- [Writing through MCP](writing.md)
