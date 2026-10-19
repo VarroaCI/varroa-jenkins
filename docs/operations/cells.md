@@ -113,7 +113,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 
   The `Team` reports `TenantWarnings=True`, reason `ItemsHeld`. A new held tenant has no
   folder until fixed. A folder held on any member cell shows no job.
-- **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells.
+- **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells. When Jenkins refuses a tenant item, the Team reports `TenantWarnings=True` with the reason `ItemsApplyFailed`. The message names the item and the Jenkins error. The next successful items apply clears it.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity

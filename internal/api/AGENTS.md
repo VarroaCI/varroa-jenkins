@@ -192,8 +192,10 @@ federation, activity persistence, and SSE fanout.
   reply the recorder marks `unknown` (a failed commit). No responder
   (`ErrFleetLockReleaseNotDelivered`) and any other error reply
   (`ErrFleetLockReleaseFailed`) change no row and write nothing.
-- **The team cell read** (`handleGetTeamCell`, `handlers_pipelines.go`) serves
-  `GET /pipelines/{team}/cell`. It reads the `Team` object first and falls
+- **The team cell read** (`TeamCell`, `handlers_pipelines.go`; the HTTP handler and the
+  `get_team_cell` MCP tool both call it) serves
+  `GET /pipelines/{team}/cell`. It carries the Team's `TenantWarnings` condition as
+  `warning` while that condition is True. It reads the `Team` object first and falls
   back to `TenantResolver`, so a pipelines Team awaiting its first cell
   answers 200 with `unplaced` instead of 404. A resolved tenant whose tenant
   value equals the team name, with no local Team, is a member-placed Team: it

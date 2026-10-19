@@ -51,3 +51,19 @@ func TestRefusalTextKeepsAShortPlainBody(t *testing.T) {
 		t.Fatalf("refusalText = %q", got)
 	}
 }
+
+func TestRefusalTextOopsPageKeepsLoggingID(t *testing.T) {
+	body := `<!DOCTYPE html><html><head><title>Jenkins</title></head>` +
+		`<body><h1>Oops!</h1><p>Logging ID=5f3a9c2e-1b7d-4e8a</p></body></html>`
+	got := refusalText([]byte(body))
+	if got != "Jenkins internal error (Logging ID=5f3a9c2e-1b7d-4e8a)" {
+		t.Fatalf("refusalText = %q", got)
+	}
+}
+
+func TestRefusalTextPlainTitleUnchanged(t *testing.T) {
+	body := `<html><head><title>Forbidden - Jenkins</title></head><body>Logging ID=5f3a9c2e-1b7d-4e8a</body></html>`
+	if got := refusalText([]byte(body)); got != "Forbidden" {
+		t.Fatalf("refusalText = %q, want Forbidden", got)
+	}
+}

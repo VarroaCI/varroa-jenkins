@@ -210,6 +210,9 @@ const refusalTextMaxRunes = 300
 
 var htmlTitlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
+// loggingIDPattern matches the identifier Jenkins prints on its error pages.
+var loggingIDPattern = regexp.MustCompile(`Logging ID=([0-9A-Za-z-]{8,})`)
+
 // refusalText answers the short text of an error response body. Jenkins
 // renders a refusal as a full HTML page that holds the message only in its
 // <title>, as "<message> - Jenkins". The function takes that title,
@@ -223,6 +226,13 @@ func refusalText(body []byte) string {
 		text = strings.TrimSuffix(text, " - Jenkins")
 	}
 	text = strings.TrimSpace(text)
+	if text == "" || text == "Jenkins" {
+		// A server error page carries only the product name as its title.
+		// Its Logging ID is the only handle an operator has on the failure.
+		if m := loggingIDPattern.FindStringSubmatch(string(body)); m != nil {
+			text = "Jenkins internal error (Logging ID=" + m[1] + ")"
+		}
+	}
 	if utf8.RuneCountInString(text) > refusalTextMaxRunes {
 		text = string([]rune(text)[:refusalTextMaxRunes])
 	}

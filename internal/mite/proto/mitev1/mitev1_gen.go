@@ -403,6 +403,7 @@ type DesiredStateResult struct {
 	RehydrationError          string                      `json:"rehydration_error,omitempty"`
 	RehydrationDeferredJobs   []string                    `json:"rehydration_deferred_jobs,omitempty"`
 	RehydrationReloadFailures []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
+	ItemsFailedPath           string                      `json:"items_failed_path,omitempty"`
 }
 
 type EventAck struct {

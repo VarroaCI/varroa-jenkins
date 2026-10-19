@@ -1149,10 +1149,11 @@ func buildCellCandidate(cr *v1alpha1.Controller, profiles []*v1alpha1.JenkinsVer
 // (tenant-placement spec): the lowest rank wins.
 var tenantWarningPriority = map[string]int{
 	v1alpha1.TeamReasonItemsHeld:          0,
-	v1alpha1.TeamReasonBundleKeysIgnored:  1,
-	v1alpha1.TeamReasonPodTemplateSkipped: 2,
-	v1alpha1.TeamReasonCredentialSkipped:  3,
-	v1alpha1.TeamReasonHibernationIgnored: 4,
+	v1alpha1.TeamReasonItemsApplyFailed:   1,
+	v1alpha1.TeamReasonBundleKeysIgnored:  2,
+	v1alpha1.TeamReasonPodTemplateSkipped: 3,
+	v1alpha1.TeamReasonCredentialSkipped:  4,
+	v1alpha1.TeamReasonHibernationIgnored: 5,
 }
 
 // foldedWarning is one distinct tenant warning and the namespace/name keys

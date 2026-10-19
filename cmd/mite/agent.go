@@ -2523,6 +2523,12 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				a.Logger.Error("items apply failed", "error", err)
 				result.ItemsSuccess = false
 				result.ItemsError = err.Error()
+				var itemErr *items.ItemError
+				// Only a refused item raises a tenant warning. A failed check of
+				// existence is a transient Jenkins fault, not a judgement of the item.
+				if errors.As(err, &itemErr) && itemErr.Refusal() {
+					result.ItemsFailedPath = itemErr.Path
+				}
 			} else {
 				result.ItemsSuccess = true
 				if len(applyResult.DeferredDeletions) > 0 {

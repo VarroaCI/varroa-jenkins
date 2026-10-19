@@ -306,7 +306,15 @@ items:
           serverUrl: https://git.example.org
           repoOwner: acme
           credentialsId: forge-token
+    projectFactories:
+      - multiBranchProjectFactory:
+          scriptPath: Jenkinsfile
 ```
+
+An `organizationFolder` item reads `projectFactories`. When you omit it, each repository uses `Jenkinsfile`.
+When Jenkins refuses an item on a cell, the tenant sees an `ItemsApplyFailed` warning. See [Cells](../operations/cells.md).
+Each entry sets `multiBranchProjectFactory` or `workflowBranchProjectFactory`.
+`varroaMarkerProjectFactory` applies only to a `multibranch` item.
 
 The discovery traits are `giteaBranchDiscovery`, `giteaPullRequestDiscovery`,
 `giteaForkDiscovery`, and `giteaTagDiscovery`. Each `strategyId` is `1`, `2`, or `3`. The

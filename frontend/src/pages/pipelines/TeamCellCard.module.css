@@ -166,3 +166,31 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+.warning {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 0.8125rem;
+}
+
+.warningLabel {
+  font-weight: 600;
+}
+
+.warningReason {
+  font-weight: 600;
+}
+
+.warningMessage {
+  flex-basis: 100%;
+  margin: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}

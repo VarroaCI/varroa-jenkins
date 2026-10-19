@@ -88,7 +88,11 @@ const (
 	// TeamReasonItemsHeld reports a tenant whose items fail a cell check.
 	// The cell keeps the tenant's folder as it is and pushes the other
 	// tenants. The message names the fault.
-	TeamReasonItemsHeld         = "ItemsHeld"
+	TeamReasonItemsHeld = "ItemsHeld"
+	// TeamReasonItemsApplyFailed reports a tenant item that Jenkins refused
+	// during the cell's items apply. The message names the item path and
+	// carries the Jenkins error.
+	TeamReasonItemsApplyFailed  = "ItemsApplyFailed"
 	TeamReasonBundleKeysIgnored = "BundleKeysIgnored"
 	// TeamReasonPodTemplateSkipped reports a tenant bundle pod template
 	// that the operator does not lift onto the tenant cloud.

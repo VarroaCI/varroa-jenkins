@@ -291,6 +291,10 @@ message DesiredStateResult {
   // reload. A failed reload fails no section: the rehydration section stays
   // successful, and the operator attributes each failure to the item's tenant.
   repeated RehydrationReloadFailure rehydration_reload_failures = 17;
+  // items_failed_path is the item path whose create or update failed and
+  // stopped the items apply. Empty when the items section succeeded, or when
+  // the failure has no item, for example a parse error or a deadline.
+  string items_failed_path = 18;
 }
 
 message DeferredDeletion {

@@ -6932,10 +6932,10 @@ CellUsage:
 TeamCell:
   type: object
   description: >-
-    The tenant's own view of the cell that hosts it. For the states
-    unplaced and notCellHosted every field other than state and reason is
-    absent. The body carries no other tenant's name, job path, run, or
-    count.
+    The tenant's own view of the cell that hosts it. For the state
+    notCellHosted only state is present. For the state unplaced every
+    field other than state, reason, and warning is absent. The body
+    carries no other tenant's name, job path, run, or count.
   required: [state, canOpenCell]
   properties:
     state:
@@ -6994,6 +6994,26 @@ TeamCell:
         members by ascending slot first, then standbys by cell name. It is
         absent for unplaced and notCellHosted. Every other field of this
         body describes the tenant's slot 0.
+    warning:
+      $ref: '#/TeamCellWarning'
+  additionalProperties: false
+
+TeamCellWarning:
+  type: object
+  description: >-
+    The Team's TenantWarnings condition, verbatim, while its status is
+    True. It is absent otherwise.
+  required: [reason, message]
+  properties:
+    reason:
+      type: string
+      description: >-
+        The warning reason. One of ItemsHeld, ItemsApplyFailed,
+        BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or
+        HibernationIgnored.
+    message:
+      type: string
+      description: The warning message, which names the fault.
   additionalProperties: false
 
 TeamCellMember:

@@ -15,9 +15,9 @@ import (
 )
 
 // =============================================================================
-// Pipeline tools (12): run_pipeline, list_runs, get_run, get_run_log,
+// Pipeline tools (13): run_pipeline, list_runs, get_run, get_run_log,
 // list_job_branches, list_fleet_locks, release_fleet_lock, proceed_run_input,
-// abort_run_input, replay_run, restart_run, scan_multibranch
+// abort_run_input, replay_run, restart_run, scan_multibranch, get_team_cell
 //
 // Design D1a: these tools call the same internal services the
 // pipelines HTTP handlers call (internal/api's RunPipeline, ListRuns,
@@ -53,6 +53,32 @@ func registerPipelinesTools(mcpServer *server.MCPServer, deps *api.Dependencies)
 	registerReplayRunTool(mcpServer, deps)
 	registerScanMultibranchTool(mcpServer, deps)
 	registerRestartRunTool(mcpServer, deps)
+	registerGetTeamCellTool(mcpServer, deps)
+}
+
+// registerGetTeamCellTool registers get_team_cell: the cell that hosts a
+// team's pipelines tenant. It calls the same service the team cell HTTP
+// read calls, so both surfaces share one authorization check.
+func registerGetTeamCellTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
+	getTeamCellTool := mcp.NewTool("get_team_cell",
+		mcp.WithDescription("Get the cell that hosts a team's pipelines tenant: state, placement reason, load, members, and the tenant warning when one holds."),
+		mcp.WithString("team", mcp.Required(), mcp.Description("The team name")),
+	)
+	addTool(mcpServer, kindRead, getTeamCellTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		team := strArg(getArgs(req), "team")
+		if team == "" {
+			return mcp.NewToolResultError("team is required"), nil
+		}
+		body, serr := api.NewServer(deps).TeamCell(ctx, claims, team)
+		if serr != nil {
+			return mcp.NewToolResultError(serr.Error()), nil
+		}
+		return resultJSON(body)
+	})
 }
 
 // registerRestartRunTool registers restart_run: it reruns a completed

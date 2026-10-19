@@ -1590,20 +1590,32 @@ func orgFolderConfigXML(item Item) xmlConfig {
 			}
 		}
 	}
-	if len(item.ProjectFactories) > 0 {
-		o.ProjectFactories = &projectFactoriesXML{}
-		for _, pf := range item.ProjectFactories {
-			if pf.MultiBranch != nil {
-				sp := pf.MultiBranch.ScriptPath
-				if sp == "" {
-					sp = "Jenkinsfile"
-				}
-				o.ProjectFactories.Factory = append(o.ProjectFactories.Factory, &mbFactoryXML{
-					Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
-					ScriptPath: sp,
-				})
-			}
+	// Jenkins OrganizationFolder.onLoad dereferences projectFactories, so the
+	// element is always written with at least one factory.
+	o.ProjectFactories = &projectFactoriesXML{}
+	for _, pf := range item.ProjectFactories {
+		sp := ""
+		switch {
+		case pf.MultiBranch != nil:
+			sp = pf.MultiBranch.ScriptPath
+		case pf.WorkflowBranch != nil:
+			sp = pf.WorkflowBranch.ScriptPath
+		default:
+			continue
 		}
+		if sp == "" {
+			sp = "Jenkinsfile"
+		}
+		o.ProjectFactories.Factory = append(o.ProjectFactories.Factory, &mbFactoryXML{
+			Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
+			ScriptPath: sp,
+		})
+	}
+	if len(o.ProjectFactories.Factory) == 0 {
+		o.ProjectFactories.Factory = append(o.ProjectFactories.Factory, &mbFactoryXML{
+			Class:      "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProjectFactory",
+			ScriptPath: "Jenkinsfile",
+		})
 	}
 	return o
 }
