@@ -432,11 +432,12 @@ type rehydrationApplyResult struct {
 // so applyRehydrationBundle can write the changelog first regardless of the
 // order the bundle lists them in.
 type buildFiles struct {
-	jobDir    string
-	jobPath   string
-	buildDir  string
-	buildXML  *mitev1.RehydrationFile
-	changelog *mitev1.RehydrationFile
+	jobDir      string
+	jobPath     string
+	jobDirParts []string
+	buildNumber int
+	buildXML    *mitev1.RehydrationFile
+	changelog   *mitev1.RehydrationFile
 }
 
 // applyRehydrationBundle writes every file of bundle under jenkinsHomeDir.
@@ -455,7 +456,7 @@ func applyRehydrationBundle(jenkinsHomeDir string, bundle *mitev1.RehydrationBun
 	var numbers []numberFile
 
 	for _, f := range bundle.Files {
-		parsed, absPath, err := checkRehydrationPath(jenkinsHomeDir, f.Path)
+		parsed, _, err := checkRehydrationPath(jenkinsHomeDir, f.Path)
 		if err != nil {
 			return rehydrationApplyResult{}, fmt.Errorf("rehydration: %w", err)
 		}
@@ -465,11 +466,15 @@ func applyRehydrationBundle(jenkinsHomeDir string, bundle *mitev1.RehydrationBun
 		case rehydrationPathNextBuildNumber:
 			numbers = append(numbers, numberFile{jobDir: jobDir, jobPath: parsed.jobPath, file: f})
 		default:
-			buildDir := filepath.Dir(absPath)
 			key := jobDir + "\x00" + strconv.Itoa(parsed.buildNumber)
 			bf, ok := builds[key]
 			if !ok {
-				bf = &buildFiles{jobDir: jobDir, jobPath: parsed.jobPath, buildDir: buildDir}
+				bf = &buildFiles{
+					jobDir:      jobDir,
+					jobPath:     parsed.jobPath,
+					jobDirParts: parsed.jobDirParts,
+					buildNumber: parsed.buildNumber,
+				}
 				builds[key] = bf
 				buildOrder = append(buildOrder, key)
 			}
@@ -491,13 +496,16 @@ func applyRehydrationBundle(jenkinsHomeDir string, bundle *mitev1.RehydrationBun
 		deferredJobs = append(deferredJobs, jobPath)
 	}
 
+	resolver := newJobDirResolver(jenkinsHomeDir)
+
 	// nextBuildNumber: defer a missing job, and never lower a stored value.
 	for _, n := range numbers {
-		if !jobConfigExists(n.jobDir) {
+		dir := resolver.resolveJobDir(n.jobPath, n.jobDir)
+		if !jobConfigExists(dir.absDir) {
 			markDeferred(n.jobPath)
 			continue
 		}
-		if err := applyNextBuildNumber(n.jobDir, n.file); err != nil {
+		if err := applyNextBuildNumber(dir.absDir, n.file); err != nil {
 			return rehydrationApplyResult{}, fmt.Errorf("rehydration: %w", err)
 		}
 	}
@@ -506,20 +514,37 @@ func applyRehydrationBundle(jenkinsHomeDir string, bundle *mitev1.RehydrationBun
 	// and write the changelog before the build.xml of the same build.
 	for _, key := range buildOrder {
 		bf := builds[key]
-		if !jobConfigExists(bf.jobDir) {
+		dir := resolver.resolveJobDir(bf.jobPath, bf.jobDir)
+		if !jobConfigExists(dir.absDir) {
 			markDeferred(bf.jobPath)
 			continue
 		}
-		if buildDirExists(bf.buildDir) {
+		buildNumber := strconv.Itoa(bf.buildNumber)
+		buildDir := filepath.Join(dir.absDir, "builds", buildNumber)
+		// A moved job's build path is not in checkRehydrationPath's check,
+		// so the chain under the resolved job directory is checked here.
+		if err := checkNoSymlinkInParents(jenkinsHomeDir, filepath.Join(buildDir, buildFileName)); err != nil {
+			return rehydrationApplyResult{}, fmt.Errorf("rehydration: %w", err)
+		}
+		if buildDirExists(buildDir) {
 			continue
 		}
 		if bf.changelog != nil {
-			if err := writeInflatedRehydrationFile(filepath.Join(bf.buildDir, changelogFileName), bf.changelog); err != nil {
+			if err := writeInflatedRehydrationFile(filepath.Join(buildDir, changelogFileName), bf.changelog, nil); err != nil {
 				return rehydrationApplyResult{}, fmt.Errorf("rehydration: %w", err)
 			}
 		}
 		if bf.buildXML != nil {
-			if err := writeInflatedRehydrationFile(filepath.Join(bf.buildDir, buildFileName), bf.buildXML); err != nil {
+			var rewrite func([]byte) []byte
+			if dir.moved {
+				// The operator names the changelog by the logical job path.
+				// A moved job's changelog sits under the directory it resolved to.
+				tail := buildNumber + "/" + changelogFileName
+				logicalRel := strings.Join(bf.jobDirParts, "/") + "/builds/" + tail
+				movedRel := strings.Join(dir.parts, "/") + "/builds/" + tail
+				rewrite = func(data []byte) []byte { return rebaseChangelogFile(data, logicalRel, movedRel) }
+			}
+			if err := writeInflatedRehydrationFile(filepath.Join(buildDir, buildFileName), bf.buildXML, rewrite); err != nil {
 				return rehydrationApplyResult{}, fmt.Errorf("rehydration: %w", err)
 			}
 		}
@@ -528,17 +553,245 @@ func applyRehydrationBundle(jenkinsHomeDir string, bundle *mitev1.RehydrationBun
 	return rehydrationApplyResult{deferredJobs: deferredJobs}, nil
 }
 
-// writeInflatedRehydrationFile inflates f's gzip content and writes it to
-// absPath.
-func writeInflatedRehydrationFile(absPath string, f *mitev1.RehydrationFile) error {
+// writeInflatedRehydrationFile inflates f's gzip content, applies rewrite
+// when it is not nil, and writes the result to absPath.
+func writeInflatedRehydrationFile(absPath string, f *mitev1.RehydrationFile, rewrite func([]byte) []byte) error {
 	data, err := inflateRehydrationContent(f.GzipContent, f.RawSize)
 	if err != nil {
 		return fmt.Errorf("file %s: %w", f.Path, err)
+	}
+	if rewrite != nil {
+		data = rewrite(data)
 	}
 	if err := atomicWriteRehydrationFile(absPath, data); err != nil {
 		return fmt.Errorf("file %s: %w", f.Path, err)
 	}
 	return nil
+}
+
+// rebaseChangelogFile replaces the logical changelog path in a build.xml
+// <changelogFile> element with the path of the directory the job resolved
+// to. The operator writes the logical path, which names no directory for a
+// branch job. Only the first match changes.
+func rebaseChangelogFile(data []byte, logicalRel, movedRel string) []byte {
+	oldTail := []byte(xmlEscape("/"+logicalRel) + "</changelogFile>")
+	newTail := []byte(xmlEscape("/"+movedRel) + "</changelogFile>")
+	return bytes.Replace(data, oldTail, newTail, 1)
+}
+
+// xmlEscape escapes s the way encoding/xml writes character data.
+func xmlEscape(s string) string {
+	var b bytes.Buffer
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
+
+// decodeItemName reverses jenkins.branch.NameEncoder for one item name
+// segment. A branch or repository name that holds a reserved character
+// is stored with that character as %XX. Any other %XX stays literal.
+func decodeItemName(seg string) string {
+	switch strings.ToUpper(seg) {
+	case "%00":
+		return ""
+	case "%2E":
+		return "."
+	case "%2E.":
+		return ".."
+	}
+	if !strings.Contains(seg, "%") {
+		return seg
+	}
+	return itemNameDecoder.Replace(seg)
+}
+
+// itemNameDecoder holds the seven escapes NameEncoder writes, in both hex
+// cases.
+var itemNameDecoder = strings.NewReplacer(
+	"%23", "#", "%25", "%", "%2F", "/", "%3F", "?", "%5B", "[", "%5D", "]", "%5C", `\`,
+	"%2f", "/", "%3f", "?", "%5b", "[", "%5d", "]", "%5c", `\`,
+)
+
+// maxItemConfigBytes bounds the read of one item config.xml. A branch or
+// repository config holds its name in the first part of the file.
+const maxItemConfigBytes = 1 << 20
+
+// itemNameFromConfig returns the Jenkins item name that the config.xml at
+// configPath declares. sub is "branches" for a branch job of a multibranch
+// project, whose name is its head name, and "jobs" for a repository of an
+// organization folder, whose name is its ProjectNameProperty. ok is false
+// when the file holds no such name.
+func itemNameFromConfig(configPath, sub string) (name string, ok bool, err error) {
+	f, err := os.Open(configPath)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	match := func(stack []string) bool {
+		if sub == "branches" {
+			return len(stack) == 6 && stack[1] == "properties" &&
+				strings.HasSuffix(stack[2], "BranchJobProperty") &&
+				stack[3] == "branch" && stack[4] == "head" && stack[5] == "name"
+		}
+		return len(stack) == 4 && stack[1] == "properties" &&
+			stack[2] == "jenkins.branch.ProjectNameProperty" && stack[3] == "name"
+	}
+
+	dec := xml.NewDecoder(io.LimitReader(f, maxItemConfigBytes))
+	var stack []string
+	captureDepth := 0
+	var text strings.Builder
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			stack = append(stack, t.Name.Local)
+			if captureDepth == 0 && match(stack) {
+				captureDepth = len(stack)
+				text.Reset()
+			}
+		case xml.CharData:
+			if captureDepth > 0 {
+				text.Write(t)
+			}
+		case xml.EndElement:
+			if captureDepth > 0 && len(stack) == captureDepth {
+				return text.String(), true, nil
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+}
+
+// resolvedJobDir is the directory one job path resolves to. moved is set
+// when the job is not at its logical directory and sits at parts instead.
+type resolvedJobDir struct {
+	absDir string
+	// parts are the path parts under JENKINS_HOME, set only when moved.
+	parts []string
+	moved bool
+}
+
+// jobDirResolver finds the directory of a job that is not at its logical
+// path. A branch job of a multibranch project sits under branches/<dir>,
+// and a repository of an organization folder can sit under jobs/<dir>
+// with a mangled directory name. The resolver reads each parent's own
+// config.xml and indexes its children by their Jenkins item name, so the
+// mite never guesses a directory name. A resolver lives for one apply.
+type jobDirResolver struct {
+	home    string
+	indexes map[string]map[string]string
+	dirs    map[string]resolvedJobDir
+}
+
+// newJobDirResolver returns a resolver for the Jenkins home at home.
+func newJobDirResolver(home string) *jobDirResolver {
+	return &jobDirResolver{
+		home:    home,
+		indexes: make(map[string]map[string]string),
+		dirs:    make(map[string]resolvedJobDir),
+	}
+}
+
+// childIndex maps the Jenkins item name of each child directory of
+// parentDir/sub to the directory name. Symbolic links and entries with
+// an invalid name are skipped. The index is built once per apply.
+func (r *jobDirResolver) childIndex(parentDir, sub string) map[string]string {
+	key := parentDir + "\x00" + sub
+	if idx, ok := r.indexes[key]; ok {
+		return idx
+	}
+	idx := make(map[string]string)
+	r.indexes[key] = idx
+	entries, err := os.ReadDir(filepath.Join(parentDir, sub))
+	if err != nil {
+		return idx
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if validateJobSegment(name) != nil {
+			continue
+		}
+		dir := filepath.Join(parentDir, sub, name)
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		itemName, ok, err := itemNameFromConfig(filepath.Join(dir, "config.xml"), sub)
+		if err != nil || !ok {
+			continue
+		}
+		if _, dup := idx[itemName]; !dup {
+			idx[itemName] = name
+		}
+	}
+	return idx
+}
+
+// resolve walks jobPath from the Jenkins home. A segment under a
+// multibranch project maps through the branch index, and a segment under
+// an organization folder maps through the repository index. Any other
+// segment keeps the logical "jobs/<seg>" form. ok is false when a segment
+// has no indexed directory or the job has no config.xml at the end.
+func (r *jobDirResolver) resolve(jobPath string) (parts []string, ok bool) {
+	dir := r.home
+	for _, seg := range strings.Split(jobPath, "/") {
+		kind, err := rootElementName(filepath.Join(dir, "config.xml"))
+		if err != nil {
+			// The home directory may hold no config.xml yet. Its children
+			// then keep the logical form, as a plain folder does.
+			if dir != r.home || !errors.Is(err, os.ErrNotExist) {
+				return nil, false
+			}
+			kind = ""
+		}
+		var sub string
+		switch {
+		case strings.HasSuffix(kind, "MultiBranchProject"):
+			sub = "branches"
+		case strings.HasSuffix(kind, "OrganizationFolder"):
+			sub = "jobs"
+		default:
+			parts = append(parts, "jobs", seg)
+			dir = filepath.Join(dir, "jobs", seg)
+			continue
+		}
+		d, found := r.childIndex(dir, sub)[decodeItemName(seg)]
+		if !found {
+			return nil, false
+		}
+		parts = append(parts, sub, d)
+		dir = filepath.Join(dir, sub, d)
+	}
+	return parts, jobConfigExists(dir)
+}
+
+// resolveJobDir returns the directory of the job at jobPath. A job with a
+// config.xml at logicalDir keeps that directory. A job without one resolves
+// through its parents. When no directory resolves, logicalDir returns, so
+// the caller defers the job as before.
+func (r *jobDirResolver) resolveJobDir(jobPath, logicalDir string) resolvedJobDir {
+	if cached, ok := r.dirs[logicalDir]; ok {
+		return cached
+	}
+	res := resolvedJobDir{absDir: logicalDir}
+	if !jobConfigExists(logicalDir) {
+		if parts, ok := r.resolve(jobPath); ok {
+			rel := strings.Join(parts, "/")
+			abs, err := confineRehydrationPath(r.home, rel)
+			if err == nil && checkNoSymlinkInParents(r.home, filepath.Join(abs, "config.xml")) == nil {
+				res = resolvedJobDir{absDir: abs, parts: parts, moved: true}
+			}
+		}
+	}
+	r.dirs[logicalDir] = res
+	return res
 }
 
 // applyNextBuildNumber inflates f's gzip content, parses it as the proposed

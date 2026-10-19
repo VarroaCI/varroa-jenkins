@@ -218,3 +218,34 @@ func TestOrphanDeferredJobsOrganizationFolderLayout(t *testing.T) {
 		t.Errorf("orphans = %v, want %v", orphans, want)
 	}
 }
+
+// TestRehydrationSeedsIndexedBranchJob runs a branch job's seed through the
+// whole desired-state apply. The branch directory exists before the apply,
+// so the seed lands there and no deferral is reported.
+func TestRehydrationSeedsIndexedBranchJob(t *testing.T) {
+	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+	srv := rehydrationServer(t, home, []string{"new-job"}, false)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+	cmd := orphanCommand("hash-branch", &mitev1.RehydrationBundle{
+		ContentHash: "content-branch",
+		Files: []*mitev1.RehydrationFile{
+			rehydrationFile(t, "jobs/mb/jobs/main/nextBuildNumber", []byte("2")),
+		},
+	})
+
+	res := agent.handleDesiredState(context.Background(), cmd)
+	if !res.ItemsSuccess || !res.RehydrationSuccess {
+		t.Fatalf("expected items and rehydration to succeed, got %+v", res)
+	}
+	if len(res.RehydrationDeferredJobs) != 0 {
+		t.Errorf("RehydrationDeferredJobs = %v, want none", res.RehydrationDeferredJobs)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "branches", "main", "nextBuildNumber")); err != nil {
+		t.Errorf("nextBuildNumber not written under branches/main: %v", err)
+	}
+}

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -458,5 +460,223 @@ func TestApplyRehydrationBundle_TraversalPathFailsSection(t *testing.T) {
 	}
 	if _, err := applyRehydrationBundle(home, bundle); err == nil {
 		t.Error("applyRehydrationBundle: expected an error for a traversal path")
+	}
+}
+
+// --- branch and mangled-name resolution ---
+
+const (
+	branchJobConfig = `<flow-definition plugin="workflow-job"><properties>` +
+		`<org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty plugin="workflow-multibranch">` +
+		`<branch class="jenkins.branch.Branch"><head class="jenkins.plugins.git.GitBranchSCMHead">` +
+		`<name>%s</name></head></branch></org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty>` +
+		`</properties></flow-definition>`
+	repoProjectConfig = `<org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject plugin="workflow-multibranch">` +
+		`<properties><jenkins.branch.ProjectNameProperty><name>%s</name></jenkins.branch.ProjectNameProperty></properties>` +
+		`</org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject>`
+)
+
+// writeConfigAt writes config under dir, creating dir first.
+func writeConfigAt(t *testing.T, dir, config string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.xml"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDecodeItemName(t *testing.T) {
+	cases := map[string]string{
+		"main":         "main",
+		"feature%2Fx":  "feature/x",
+		"feature%2fx":  "feature/x",
+		"a%25b":        "a%b",
+		"a%23b%3Fc":    "a#b?c",
+		"a%3fb%2fc":    "a?b/c",
+		"%5Bx%5D%5Cy":  `[x]\y`,
+		"%2E":          ".",
+		"%2E.":         "..",
+		"%00":          "",
+		"%20kept":      "%20kept",
+		"no-escapes.x": "no-escapes.x",
+	}
+	for seg, want := range cases {
+		if got := decodeItemName(seg); got != want {
+			t.Errorf("decodeItemName(%q) = %q, want %q", seg, got, want)
+		}
+	}
+}
+
+func TestResolveJobDir_MultibranchBranch(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+
+	parts, ok := newJobDirResolver(home).resolve("mb/main")
+	if !ok {
+		t.Fatal("resolve(mb/main) = false, want true")
+	}
+	if want := []string{"jobs", "mb", "branches", "main"}; !reflect.DeepEqual(parts, want) {
+		t.Errorf("parts = %v, want %v", parts, want)
+	}
+}
+
+func TestResolveJobDir_EncodedBranchName(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeConfigAt(t, filepath.Join(home, "jobs", "mb", "branches", "feature-x.abc123"), fmt.Sprintf(branchJobConfig, "feature/x"))
+
+	parts, ok := newJobDirResolver(home).resolve("mb/feature%2Fx")
+	if !ok {
+		t.Fatal("resolve(mb/feature%2Fx) = false, want true")
+	}
+	if want := []string{"jobs", "mb", "branches", "feature-x.abc123"}; !reflect.DeepEqual(parts, want) {
+		t.Errorf("parts = %v, want %v", parts, want)
+	}
+}
+
+func TestResolveJobDir_OrganizationFolderMangledRepo(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "org", orgFolderConfig)
+	repoDir := filepath.Join(home, "jobs", "org", "jobs", "my-repo.k3j2a1")
+	writeConfigAt(t, repoDir, fmt.Sprintf(repoProjectConfig, "my.repo"))
+	writeConfigAt(t, filepath.Join(repoDir, "branches", "main"), fmt.Sprintf(branchJobConfig, "main"))
+
+	parts, ok := newJobDirResolver(home).resolve("org/my.repo/main")
+	if !ok {
+		t.Fatal("resolve(org/my.repo/main) = false, want true")
+	}
+	want := []string{"jobs", "org", "jobs", "my-repo.k3j2a1", "branches", "main"}
+	if !reflect.DeepEqual(parts, want) {
+		t.Errorf("parts = %v, want %v", parts, want)
+	}
+}
+
+func TestResolveJobDir_UnindexedBranchAnswersFalse(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+
+	if _, ok := newJobDirResolver(home).resolve("mb/main"); ok {
+		t.Error("resolve(mb/main) = true with no branch directory, want false")
+	}
+}
+
+func TestResolveJobDir_SkipsSymlinkedBranchDir(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	target := t.TempDir()
+	writeConfigAt(t, target, fmt.Sprintf(branchJobConfig, "main"))
+	branches := filepath.Join(home, "jobs", "mb", "branches")
+	if err := os.MkdirAll(branches, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(branches, "main")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := newJobDirResolver(home).resolve("mb/main"); ok {
+		t.Error("resolve(mb/main) = true through a symbolic link, want false")
+	}
+}
+
+func TestApplyRehydrationBundle_SeedsBranchJob(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	branchDir := filepath.Join(home, "jobs", "mb", "branches", "main")
+	writeConfigAt(t, branchDir, fmt.Sprintf(branchJobConfig, "main"))
+
+	bundle := &mitev1.RehydrationBundle{Files: []*mitev1.RehydrationFile{
+		rehydrationFile(t, "jobs/mb/jobs/main/nextBuildNumber", []byte("4")),
+		rehydrationFile(t, "jobs/mb/jobs/main/builds/3/build.xml", []byte("<build/>")),
+	}}
+	res, err := applyRehydrationBundle(home, bundle)
+	if err != nil {
+		t.Fatalf("applyRehydrationBundle: %v", err)
+	}
+	if len(res.deferredJobs) != 0 {
+		t.Errorf("deferredJobs = %v, want none", res.deferredJobs)
+	}
+	if _, err := os.Stat(filepath.Join(branchDir, "builds", "3", "build.xml")); err != nil {
+		t.Errorf("build.xml not written under branches/main: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(branchDir, "nextBuildNumber")); err != nil {
+		t.Errorf("nextBuildNumber not written under branches/main: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "jobs", "mb", "jobs")); !os.IsNotExist(err) {
+		t.Errorf("a logical jobs/mb/jobs directory was created, stat err = %v", err)
+	}
+}
+
+func TestApplyRehydrationBundle_RebasesChangelogFileOfBranchJob(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	branchDir := filepath.Join(home, "jobs", "mb", "branches", "main")
+	writeConfigAt(t, branchDir, fmt.Sprintf(branchJobConfig, "main"))
+
+	buildXML := "<build><checkouts><checkout><changelogFile>" +
+		home + "/jobs/mb/jobs/main/builds/3/changelog0.xml" +
+		"</changelogFile></checkout></checkouts></build>"
+	bundle := &mitev1.RehydrationBundle{Files: []*mitev1.RehydrationFile{
+		rehydrationFile(t, "jobs/mb/jobs/main/builds/3/build.xml", []byte(buildXML)),
+		rehydrationFile(t, "jobs/mb/jobs/main/builds/3/changelog0.xml", []byte("<varroa-changelog/>")),
+	}}
+	if _, err := applyRehydrationBundle(home, bundle); err != nil {
+		t.Fatalf("applyRehydrationBundle: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(branchDir, "builds", "3", "build.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "<build><checkouts><checkout><changelogFile>" +
+		home + "/jobs/mb/branches/main/builds/3/changelog0.xml" +
+		"</changelogFile></checkout></checkouts></build>"
+	if string(got) != want {
+		t.Errorf("build.xml = %q, want %q", got, want)
+	}
+}
+
+func TestApplyRehydrationBundle_LogicalJobKeepsChangelogFile(t *testing.T) {
+	home := t.TempDir()
+	jobDir := seedJob(t, home, "jobs", "team", "jobs", "pipeline")
+	buildXML := "<build><checkouts><checkout><changelogFile>" +
+		home + "/jobs/team/jobs/pipeline/builds/3/changelog0.xml" +
+		"</changelogFile></checkout></checkouts></build>"
+	bundle := &mitev1.RehydrationBundle{Files: []*mitev1.RehydrationFile{
+		rehydrationFile(t, "jobs/team/jobs/pipeline/builds/3/build.xml", []byte(buildXML)),
+	}}
+	if _, err := applyRehydrationBundle(home, bundle); err != nil {
+		t.Fatalf("applyRehydrationBundle: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(jobDir, "builds", "3", "build.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != buildXML {
+		t.Errorf("build.xml = %q, want the operator's content unchanged", got)
+	}
+}
+
+func TestApplyRehydrationBundle_RefusesSymlinkedBuildsOfMovedJob(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	branchDir := filepath.Join(home, "jobs", "mb", "branches", "main")
+	writeConfigAt(t, branchDir, fmt.Sprintf(branchJobConfig, "main"))
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(branchDir, "builds")); err != nil {
+		t.Fatal(err)
+	}
+
+	bundle := &mitev1.RehydrationBundle{Files: []*mitev1.RehydrationFile{
+		rehydrationFile(t, "jobs/mb/jobs/main/builds/3/build.xml", []byte("<build/>")),
+	}}
+	if _, err := applyRehydrationBundle(home, bundle); err == nil {
+		t.Fatal("applyRehydrationBundle: expected a refusal of the symbolic link")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("a file was written outside JENKINS_HOME: %v", entries)
 	}
 }

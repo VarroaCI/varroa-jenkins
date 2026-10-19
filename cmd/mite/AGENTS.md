@@ -343,6 +343,14 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   does not exist yet, never overwrites an existing build directory, and
   never lowers a stored `nextBuildNumber`. A deferred job's path returns in
   `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
+  The wire path always uses the `jobs/<seg>` form. A job with no `config.xml`
+  at that logical directory resolves through its parent's Jenkins metadata
+  (`jobDirResolver`). A child of a multibranch project resolves to
+  `branches/<dir>`, matched by head name. A child of an organization folder
+  resolves to `jobs/<dir>`, matched by `ProjectNameProperty`. Names are
+  decoded with `decodeItemName`, which reverses `NameEncoder`. A job with no
+  resolved directory defers as before. For a moved job the mite rewrites the
+  `<changelogFile>` path inside `build.xml` to the resolved directory.
   A items apply that refuses some items sets `DesiredStateResult.item_failures` to one
   entry for each refused item path. The other items still apply. The section stays
   unconverged, so the operator resends it. The walk also opens the schedule export gate. The list is empty for a parse error, a
