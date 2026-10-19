@@ -372,18 +372,25 @@ func heldTenants(cell *v1alpha1.CellStatus) map[string]bool {
 	return held
 }
 
-// appliedTenantsAfterItemsApply answers status.cell.appliedTenants after a
-// successful items apply of the current desired state. A tenant the cell
-// holds keeps its previous state. A held tenant that was applied still
-// has its folder on the cell, so it must not read as drained. A held
-// tenant that was never applied has no folder, so it must not read as
-// applied. The held set is the ItemsHeld entries, which the same resolve
-// that produced the desired state wrote.
-func appliedTenantsAfterItemsApply(cell *v1alpha1.CellStatus) []string {
-	held := heldTenants(cell)
+// appliedTenantsAfterItemsApply answers status.cell.appliedTenants after an
+// items apply that walked every item. The walk can refuse some items and
+// still complete. A held tenant keeps its previous state. A held tenant that
+// was applied still has its folder on the cell, so it must not read as
+// drained. A held tenant that was never applied has no folder, so it must not
+// read as applied. The held set is the ItemsHeld entries, which the same
+// resolve that produced the desired state wrote.
+//
+// A tenant that owns a refused item keeps its previous state too. Its earlier
+// folder stays on the cell, and a new folder is not complete. A refused path
+// that no tenant owns changes no tenant.
+func appliedTenantsAfterItemsApply(cell *v1alpha1.CellStatus, refusedPaths []string) []string {
+	kept := heldTenants(cell)
+	for tenant := range partitionJobPathsByTenant(refusedPaths, cell.Tenants) {
+		kept[tenant] = true
+	}
 	applied := make([]string, 0, len(cell.Tenants))
 	for _, tenant := range cell.Tenants {
-		if !held[tenant] || slices.Contains(cell.AppliedTenants, tenant) {
+		if !kept[tenant] || slices.Contains(cell.AppliedTenants, tenant) {
 			applied = append(applied, tenant)
 		}
 	}

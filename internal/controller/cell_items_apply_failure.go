@@ -39,6 +39,18 @@ func itemsApplyFailureWarnings(cell *v1alpha1.CellStatus, d *mitev1.DesiredState
 	return out
 }
 
+// itemFailurePaths answers the item path of each refused item.
+func itemFailurePaths(d *mitev1.DesiredStateResult) []string {
+	if d == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(d.ItemFailures))
+	for _, f := range d.ItemFailures {
+		paths = append(paths, f.Path)
+	}
+	return paths
+}
+
 // itemsApplyFailedAfter returns the TenantWarnings list after one
 // desired-state result. A successful items section clears every
 // ItemsApplyFailed entry. A result with refused items replaces every
