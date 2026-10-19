@@ -14,10 +14,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/jenkins"
 )
 
-// managedItemsFile is the default path to the managed-items cache on the
-// Jenkins PVC.
-const managedItemsFile = "/var/jenkins_home/varroa-mite/managed-items.json"
-
 // DeferredDeletion records an item whose deletion was deferred because a build
 // is running.
 type DeferredDeletion struct {
@@ -47,14 +43,13 @@ func (r *ApplyResult) FailureText() string {
 // Engine manages Jenkins items based on items.yaml declarations.
 type Engine struct {
 	client *jenkins.Client
-	// managedFile is the managed-items cache path; defaults to
-	// managedItemsFile and is overridable in tests.
+	// managedFile is the path of the managed-items cache.
 	managedFile string
 }
 
-// NewEngine creates a new items engine.
-func NewEngine(client *jenkins.Client) *Engine {
-	return &Engine{client: client, managedFile: managedItemsFile}
+// NewEngine creates an items engine that keeps its managed-items cache at managedFile.
+func NewEngine(client *jenkins.Client, managedFile string) *Engine {
+	return &Engine{client: client, managedFile: managedFile}
 }
 
 // Apply processes an items YAML manifest and reconciles Jenkins items.
