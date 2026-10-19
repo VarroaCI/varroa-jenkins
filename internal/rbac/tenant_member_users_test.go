@@ -227,3 +227,21 @@ func TestJenkinsRoleAssignments_TenantMemberRole_AgentPrincipalNotAliased(t *tes
 		t.Errorf("an agent-prefixed principal must not be aliased, got %v", got)
 	}
 }
+
+func TestJenkinsRoleAssignments_TenantMemberRole_FormerPreferredUsernameNotGranted(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("developer")
+	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "sub-alice"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	user := memberUserTestUser("alice", memberUserTestNamespace, "", "alice@example.com")
+	user.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = `["alice"]`
+	withUserDirectory(r, user)
+
+	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
+	if !got["User:alice@example.com"] {
+		t.Errorf("expected principal alice@example.com, got %v", got)
+	}
+	if got["User:alice"] {
+		t.Errorf("former preferred username granted: %v", got)
+	}
+}

@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/auth/userdirectory"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -22,6 +24,8 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	// email (a binding may reference any of these per --oidc-user-claim, default
 	// preferred_username,sub). Display name is deliberately excluded — it is a
 	// human label, never a binding subject, and would risk over-matching.
+	// Former preferred usernames and emails count too, so a renamed person
+	// loses every binding that names an old identifier.
 	identifiers := map[string]bool{}
 	identifiers[user.Name] = true // local username; harmless oidc-hash for OIDC
 	if localAccount && mode != string(auth.AuthModeLocal) {
@@ -36,6 +40,20 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	}
 	if user.Spec.Email != "" {
 		identifiers[user.Spec.Email] = true
+	}
+	former := userdirectory.FormerIdentifiers(user)
+	if len(former) > 0 {
+		held, err := liveIdentifierHolders(ctx, store, user)
+		if err != nil {
+			return err
+		}
+		for _, v := range former {
+			if owner, ok := held[v]; ok {
+				slog.Default().Info(fmt.Sprintf("deprovision kept %s: held by %s", v, owner))
+				continue
+			}
+			identifiers[v] = true
+		}
 	}
 
 	// --- VarroaRoleBindings (control-plane) ---
@@ -130,6 +148,29 @@ func resetObjectMetaForApply(meta *metav1.ObjectMeta) {
 	meta.DeletionTimestamp = nil
 	meta.DeletionGracePeriodSeconds = nil
 	meta.ManagedFields = nil
+}
+
+// liveIdentifierHolders maps each current preferred username and email of the
+// other idp-managed users in the namespace to the holder's User name. The
+// user being deprovisioned does not count.
+func liveIdentifierHolders(ctx context.Context, store crdstore.Backend, self *v1alpha1.User) (map[string]string, error) {
+	users, err := crdstore.List[v1alpha1.User](ctx, store, self.Namespace, "")
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	held := map[string]string{}
+	for _, u := range users {
+		if u.Name == self.Name || u.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByIDP {
+			continue
+		}
+		if pu := u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; pu != "" {
+			held[pu] = u.Name
+		}
+		if u.Spec.Email != "" {
+			held[u.Spec.Email] = u.Name
+		}
+	}
+	return held, nil
 }
 
 // removeString removes the first occurrence of target from slice and

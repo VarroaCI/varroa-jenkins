@@ -93,3 +93,81 @@ func TestDeprovisionUser_OIDCSkipsGroupCleanup(t *testing.T) {
 		t.Error("expected group membership untouched in OIDC mode")
 	}
 }
+
+func TestDeprovisionUser_StripsFormerIdentifiers(t *testing.T) {
+	store := crdstore.NewFake()
+	ctx := context.Background()
+
+	user := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "carol",
+			Annotations: map[string]string{
+				v1alpha1.AnnotationOIDCSubject:           "subj-carol",
+				v1alpha1.AnnotationOIDCFormerIdentifiers: `["old-name","old@example.com"]`,
+			},
+		},
+		Spec: v1alpha1.UserSpec{Email: "carol@example.com"},
+	}
+
+	crdstore.MustSeed(store,
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-old-name"},
+			Spec:       v1alpha1.JenkinsRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "old-name")}},
+		},
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "jrb-old-email"},
+			Spec: v1alpha1.JenkinsRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{
+				subj("User", "old@example.com"), subj("Group", "devs"),
+			}},
+		},
+	)
+
+	if err := deprovisionUser(ctx, store, user, string(auth.AuthModeOIDC)); err != nil {
+		t.Fatalf("deprovisionUser: %v", err)
+	}
+
+	if b, _ := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, store, "vrb-old-name", ""); b != nil {
+		t.Errorf("expected vrb-old-name deleted, got %+v", b)
+	}
+	kept, _ := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, store, "jrb-old-email", "")
+	if kept == nil || len(kept.Spec.Subjects) != 1 || kept.Spec.Subjects[0].Kind != "Group" {
+		t.Errorf("expected jrb-old-email to retain only the Group subject, got %+v", kept)
+	}
+}
+
+func TestDeprovisionUser_KeepsFormerIdentifierHeldByLiveUser(t *testing.T) {
+	store := crdstore.NewFake()
+	ctx := context.Background()
+
+	departing := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "alice",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCFormerIdentifiers: `["dana"]`},
+		},
+	}
+	live := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "bob",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCPreferredUsername: "dana"},
+		},
+	}
+
+	crdstore.MustSeed(store,
+		live,
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-dana"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "dana")}},
+		},
+	)
+
+	if err := deprovisionUser(ctx, store, departing, string(auth.AuthModeOIDC)); err != nil {
+		t.Fatalf("deprovisionUser: %v", err)
+	}
+
+	kept, _ := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-dana", "")
+	if kept == nil || len(kept.Spec.Subjects) != 1 || kept.Spec.Subjects[0].Name != "dana" {
+		t.Errorf("expected vrb-dana to keep subject dana held by a live user, got %+v", kept)
+	}
+}

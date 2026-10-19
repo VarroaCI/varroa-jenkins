@@ -60,6 +60,7 @@ Each setting takes a comma-separated list of claim names.
 - The same claim names apply to the dashboard. On a Jenkins controller, only
   `preferred_username`, `email`, and `sub` name a person's Jenkins principal. A
   binding on a custom claim value reaches the cell only through those three claims.
+- When you delete a user, Varroa removes the subject, the current and former preferred usernames, and the current and former emails from every role binding. A former name that another signed-in person now holds stays in the bindings.
 
 For AWS Cognito groups, set the group claim to the Cognito claim name:
 

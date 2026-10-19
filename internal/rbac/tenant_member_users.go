@@ -11,7 +11,8 @@ import (
 // userPrincipalAliases maps each configured user claim value to the Jenkins
 // principal names of the people who hold it. The source is the idp-managed
 // User objects of the operator namespace. Only the configured claim names
-// count, and the display name never does. A nil directory yields nil.
+// count, and the display name never does. The former identifiers of a User
+// object never count. A nil directory yields nil.
 func (r *Resolver) userPrincipalAliases() map[string][]string {
 	if r.userIndex == nil {
 		return nil
