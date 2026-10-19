@@ -25,9 +25,12 @@ function renderAdmin() {
   return renderWithProviders(<AssistantAdmin />, { permissions: perms, route: "/administration/assistant" });
 }
 
+const SMOKE = { name: "smoke", kind: "openai-compatible", models: ["varroa-smoke"], trust: "internal", default: true, available: true, baseURL: "http://127.0.0.1:8082/v1" };
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings());
+  vi.mocked(client.listAssistantProviders).mockResolvedValue({ items: [SMOKE] });
 });
 
 describe("AssistantAdmin", () => {
@@ -71,6 +74,23 @@ describe("AssistantAdmin", () => {
     fireEvent.change(screen.getByLabelText("Tenant level"), { target: { value: "logs" } });
     fireEvent.click(screen.getByRole("button", { name: "Set level" }));
     await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ tenantDataSharing: { set: { tenant: "checkout", level: "logs" } } }));
+  });
+
+  it("shows Chart default and saves an empty default when none is set", async () => {
+    vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ defaultProvider: "", defaultModel: "" }));
+    renderAdmin();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(select.selectedOptions[0].textContent).toBe("Chart default");
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "", defaultModel: "" }));
+  });
+
+  it("clears the default model", async () => {
+    renderAdmin();
+    fireEvent.change(await screen.findByLabelText("Default model"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "smoke", defaultModel: "" }));
   });
 
   it("states the limits and the egress, and says when the policy is off", async () => {

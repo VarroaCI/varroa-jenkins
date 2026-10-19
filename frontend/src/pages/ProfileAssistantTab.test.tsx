@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../test/render-utils";
-import { ProfileAssistantTab, keyStatus } from "./ProfileAssistantTab";
+import { ProfileAssistantTab, keyProviderFor, keyStatus } from "./ProfileAssistantTab";
 import { AssistantProvider } from "../components/assistant/AssistantProvider";
 import * as client from "../api/client";
 import { ApiError } from "../hooks/useApi";
@@ -24,6 +24,8 @@ vi.mock("../api/client", async (orig) => {
 
 const perms = { global: { "*": { "*": true } } } as never;
 
+const SMOKE = { name: "smoke", kind: "openai-compatible", models: ["varroa-smoke"], trust: "internal", default: true, available: true, baseURL: "http://x" };
+
 function renderTab(route = "/profile?tab=assistant", state?: unknown) {
   return renderWithProviders(
     <AssistantProvider>
@@ -38,6 +40,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant());
+  vi.mocked(client.listAssistantProviders).mockResolvedValue({ items: [SMOKE] });
 });
 
 describe("ProfileAssistantTab", () => {
@@ -71,6 +74,7 @@ describe("ProfileAssistantTab", () => {
   it("sets a session key directly and clears the field, with no key in any storage or cache", async () => {
     renderTab();
     const input = await screen.findByLabelText("API key");
+    await waitFor(() => expect((screen.getByLabelText("Key provider") as HTMLSelectElement).value).toBe("smoke"));
     fireEvent.change(input, { target: { value: "sk-test-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Set key" }));
     await waitFor(() => expect(client.putMyAssistantKey).toHaveBeenCalledWith({ provider: "smoke", apiKey: "sk-test-123" }));
@@ -83,6 +87,7 @@ describe("ProfileAssistantTab", () => {
     vi.mocked(client.putMyAssistantKey).mockRejectedValueOnce(new ApiError(409, "conflict"));
     renderTab();
     fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "k" } });
+    await waitFor(() => expect((screen.getByLabelText("Key provider") as HTMLSelectElement).value).toBe("smoke"));
     fireEvent.click(screen.getByRole("button", { name: "Set key" }));
     expect(await screen.findByText("A key needs a browser login. An API key session cannot hold one.")).toBeTruthy();
   });
@@ -91,6 +96,7 @@ describe("ProfileAssistantTab", () => {
     vi.mocked(client.putMyAssistantKey).mockRejectedValueOnce(new ApiError(503, "x", { code: "assistant_key_unavailable" }));
     renderTab();
     fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "k" } });
+    await waitFor(() => expect((screen.getByLabelText("Key provider") as HTMLSelectElement).value).toBe("smoke"));
     fireEvent.click(screen.getByRole("button", { name: "Set key" }));
     expect(await screen.findByText(/not available in this login/)).toBeTruthy();
   });
@@ -105,5 +111,79 @@ describe("ProfileAssistantTab", () => {
 
   it("reports no key when none is set", () => {
     expect(keyStatus(createMyAssistant())).toBe("No key set");
+  });
+
+  it("starts the key provider on the default provider when none is saved, and sends it", async () => {
+    vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant({ provider: "", model: "" }));
+    vi.mocked(client.listAssistantProviders).mockResolvedValue({
+      items: [
+        { ...SMOKE, name: "alpha", default: false },
+        { ...SMOKE, name: "beta", default: true },
+      ],
+    });
+    renderTab();
+    await waitFor(() => expect((screen.getByLabelText("Key provider") as HTMLSelectElement).value).toBe("beta"));
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set key" }));
+    await waitFor(() => expect(client.putMyAssistantKey).toHaveBeenCalledWith({ provider: "beta", apiKey: "sk-x" }));
+  });
+
+  it("starts the key provider on the first provider when none is default", async () => {
+    vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant({ provider: "", model: "" }));
+    vi.mocked(client.listAssistantProviders).mockResolvedValue({
+      items: [
+        { ...SMOKE, name: "alpha", default: false },
+        { ...SMOKE, name: "beta", default: false },
+      ],
+    });
+    renderTab();
+    await waitFor(() => expect((screen.getByLabelText("Key provider") as HTMLSelectElement).value).toBe("alpha"));
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set key" }));
+    await waitFor(() => expect(client.putMyAssistantKey).toHaveBeenCalledWith({ provider: "alpha", apiKey: "sk-x" }));
+  });
+
+  it("disables Set key when no provider is listed", async () => {
+    vi.mocked(client.listAssistantProviders).mockResolvedValue({ items: [] });
+    renderTab();
+    fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "sk-x" } });
+    expect((screen.getByRole("button", { name: "Set key" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows Default on the model card when no provider is saved and saves it empty", async () => {
+    vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant({ provider: "", model: "" }));
+    renderTab();
+    const select = (await screen.findByLabelText("Provider")) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(select.selectedOptions[0].textContent).toBe("Default");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ provider: "", model: "" })));
+  });
+
+  describe("keyProviderFor", () => {
+    const list = [
+      { ...SMOKE, name: "alpha", default: false },
+      { ...SMOKE, name: "beta", default: true },
+    ];
+
+    it("keeps a chosen provider that is listed", () => {
+      expect(keyProviderFor("alpha", "beta", list)).toBe("alpha");
+    });
+
+    it("falls back to the saved provider when the chosen one is not listed", () => {
+      expect(keyProviderFor("gone", "alpha", list)).toBe("alpha");
+    });
+
+    it("falls back to the default provider when the saved one is not listed", () => {
+      expect(keyProviderFor("", "gone", list)).toBe("beta");
+    });
+
+    it("falls back to the first provider when none is default", () => {
+      expect(keyProviderFor("", "", [{ ...SMOKE, name: "alpha", default: false }])).toBe("alpha");
+    });
+
+    it("returns an empty name when no provider is listed", () => {
+      expect(keyProviderFor("", "", [])).toBe("");
+    });
   });
 });
