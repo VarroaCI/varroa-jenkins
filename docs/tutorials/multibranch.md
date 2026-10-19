@@ -39,7 +39,7 @@ write the job.
 - A scan that does not complete shows its state and reason:
   - `failed`: Jenkins did not finish the index.
   - `timeout`: the scan ran for more than 30 minutes.
-  - `refused`: the cell did not run the scan. You need the build permission on the job.
+  - `refused`: the cell did not run the scan. You need write access to the team's pipelines on the job.
 - For 15 minutes after a scan starts, the cell exports the list at its shortest interval.
   The result then reaches the list within about one minute.
 

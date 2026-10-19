@@ -36,8 +36,16 @@ func compile(pattern string) *regexp.Regexp {
 // string. Every literal run is passed through regexp.QuoteMeta so a pattern
 // character such as "." or "+" matches only itself.
 func toRegexp(pattern string) string {
+	return `\A` + RegexpBody(pattern) + `\z`
+}
+
+// RegexpBody translates a jobglob pattern to a regular expression body with
+// no anchors. A caller that embeds the pattern in a larger expression adds
+// its own anchors. The body uses only the escapes regexp.QuoteMeta produces
+// and the "[^/]*", ".*", and "." forms, so Java's regular expression engine
+// reads it with the same meaning.
+func RegexpBody(pattern string) string {
 	var out strings.Builder
-	out.WriteString(`\A`)
 
 	var literal strings.Builder
 	flushLiteral := func() {
@@ -69,7 +77,5 @@ func toRegexp(pattern string) string {
 		}
 	}
 	flushLiteral()
-
-	out.WriteString(`\z`)
 	return out.String()
 }
