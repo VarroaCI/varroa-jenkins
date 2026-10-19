@@ -1170,3 +1170,36 @@ assistant:
     steps: 32
   # -- How long an approval waits for a person before it expires. Use m or h.
   approvalExpiry: 24h
+# -- Team agent runner: the varroa-agent Deployment that runs sessions for
+# Team agent objects. Needs assistant, recordStore, and bff enabled. Core
+# install only; a hive member renders nothing.
+agentRunner:
+  # -- Render the varroa-agent Deployment and its RBAC, NATS user, and policy.
+  enabled: false
+  image:
+    repository: ghcr.io/varroaci/varroa-jenkins
+    tag: latest
+    pullPolicy: IfNotPresent
+  # -- Replicas. Each replica competes for the status lease; the consumer is shared.
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+  # -- Node placement for the varroa-agent pods.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

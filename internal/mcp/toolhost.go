@@ -20,17 +20,24 @@ import (
 type InProcessHost struct {
 	srv    *server.MCPServer
 	claims *auth.Claims
+	origin string
 }
 
 // NewInProcessHost returns a host that acts as the caller of claims.
 func NewInProcessHost(s *server.MCPServer, claims *auth.Claims) *InProcessHost {
-	return &InProcessHost{srv: s, claims: claims}
+	return NewInProcessHostWithOrigin(s, claims, OriginAssistant)
+}
+
+// NewInProcessHostWithOrigin is NewInProcessHost for a caller that stamps its
+// own origin, such as a Team agent session.
+func NewInProcessHostWithOrigin(s *server.MCPServer, claims *auth.Claims, origin string) *InProcessHost {
+	return &InProcessHost{srv: s, claims: claims, origin: origin}
 }
 
 // callCtx returns the context of one tool call: the caller's claims and the
 // assistant origin.
 func (h *InProcessHost) callCtx(ctx context.Context) context.Context {
-	return WithOrigin(auth.ContextWithClaims(ctx, h.claims), OriginAssistant)
+	return WithOrigin(auth.ContextWithClaims(ctx, h.claims), h.origin)
 }
 
 type rpcEnvelope struct {

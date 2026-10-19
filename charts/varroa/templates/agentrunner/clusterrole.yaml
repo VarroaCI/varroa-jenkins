@@ -1,0 +1,18 @@
+{{- if and .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "varroa.fullname" (dict "Release" .Release "name" "varroa-agent") }}
+  labels:
+    app.kubernetes.io/component: varroa-agent
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  # The cache watches TeamAgent, Team, and CatalogSource objects in every
+  # namespace. The status ticker writes only the TeamAgent status.
+  - apiGroups: ["varroa.dev"]
+    resources: ["teamagents", "teams", "catalogsources"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["varroa.dev"]
+    resources: ["teamagents/status"]
+    verbs: ["update", "patch"]
+{{- end }}

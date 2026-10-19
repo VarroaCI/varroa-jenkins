@@ -1,0 +1,19 @@
+{{- if and .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: varroa-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: varroa-agent
+    {{- include "varroa.labels" . | nindent 4 }}
+rules:
+  # The status lease elects one replica to write TeamAgent status.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  # The runner reads its own pod to record the image digest.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+{{- end }}

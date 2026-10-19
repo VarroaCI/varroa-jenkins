@@ -21,11 +21,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
 
-// assistantMaxRunning caps the sessions one user may run at once. The count
-// read and the create are not one transaction, so two creates may pass the
-// cap together. The cap is a cost guard, and one extra session is accepted.
-const assistantMaxRunning = 3
-
 // assistantMaxBody caps the size of one assistant request body. The message
 // limit is 8000 characters, and the rest of a request is small.
 const assistantMaxBody = 64 << 10

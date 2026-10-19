@@ -7,6 +7,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
 )
 
 // mcpSource marks an event as originating from an MCP tool call rather than
@@ -17,6 +18,10 @@ const mcpSource = "mcp"
 // OriginAssistant marks a tool call that the assistant loop made. Such a call
 // stamps its activity event with the assistant source.
 const OriginAssistant = agent.ActivitySourceAssistant
+
+// OriginTeamAgent marks a tool call that a Team agent session made. Such a
+// call stamps its activity event with the team_agent source.
+const OriginTeamAgent = agent.ActivitySourceTeamAgent
 
 type originKey struct{}
 
@@ -52,8 +57,11 @@ func emitActivity(ctx context.Context, deps *api.Dependencies, claims *auth.Clai
 	}
 	e.Actor = api.ActorFrom(claims)
 	e.Source = mcpSource
-	if OriginFrom(ctx) == OriginAssistant {
+	switch {
+	case OriginFrom(ctx) == OriginAssistant:
 		e.Source = OriginAssistant
+	case OriginFrom(ctx) == OriginTeamAgent || (claims != nil && accept.IsPrincipal(claims.Subject)):
+		e.Source = agent.ActivitySourceTeamAgent
 	}
 	if e.Severity == "" {
 		e.Severity = "info"

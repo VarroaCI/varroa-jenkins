@@ -56,11 +56,16 @@ generates everything fresh.
     {{- if hasKey $existing.data "recorder-password" -}}
       {{- $recorderPass = index $existing.data "recorder-password" | b64dec -}}
     {{- end -}}
+    {{- $agentPass := randAlphaNum 32 -}}
+    {{- if hasKey $existing.data "agentrunner-password" -}}
+      {{- $agentPass = index $existing.data "agentrunner-password" | b64dec -}}
+    {{- end -}}
     {{- $_ := set $ "natsCreds" (dict
           "operator" (index $existing.data "operator-password" | b64dec)
           "gateway"  (index $existing.data "gateway-password"  | b64dec)
           "bff"      (index $existing.data "bff-password"       | b64dec)
           "recorder" $recorderPass
+          "agentrunner" $agentPass
           "caCert"   (index $existing.data "ca.crt"   | b64dec)
           "caKey"    (index $existing.data "ca.key"   | b64dec)
           "tlsCert"  (index $existing.data "tls.crt"  | b64dec)
@@ -82,6 +87,7 @@ generates everything fresh.
           "gateway"  (randAlphaNum 32)
           "bff"      (randAlphaNum 32)
           "recorder" (randAlphaNum 32)
+          "agentrunner" (randAlphaNum 32)
           "caCert"   $ca.Cert
           "caKey"    $ca.Key
           "tlsCert"  $cert.Cert
@@ -94,6 +100,7 @@ generates everything fresh.
 {{- define "varroa.nats.gatewayPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.gateway -}}{{- end -}}
 {{- define "varroa.nats.bffPassword"     -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.bff     -}}{{- end -}}
 {{- define "varroa.nats.recorderPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.recorder -}}{{- end -}}
+{{- define "varroa.nats.agentrunnerPassword" -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.agentrunner -}}{{- end -}}
 {{- define "varroa.nats.caCert"          -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.caCert  -}}{{- end -}}
 {{- define "varroa.nats.caKey"           -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.caKey   -}}{{- end -}}
 {{- define "varroa.nats.tlsCert"         -}}{{- include "varroa.nats.creds" $ -}}{{- $.natsCreds.tlsCert -}}{{- end -}}

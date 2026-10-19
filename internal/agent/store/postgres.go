@@ -197,26 +197,10 @@ func (p *Postgres) CreateSession(ctx context.Context, s agent.Session, events []
 	if err != nil {
 		return agent.Session{}, nil, err
 	}
-	ctxRaw, err := json.Marshal(s.Context)
-	if err != nil {
-		return agent.Session{}, nil, fmt.Errorf("%w: context: %v", ErrInvalid, err)
-	}
 	var out []agent.Event
 	err = pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO varroa.agent_sessions (id, kind, principal, team, cluster, trigger, context,
-			  provider, model, key_source, data_sharing, instructions_sha, team_agent_generation,
-			  state, skip_reason, lease_owner, lease_expires_at, started_at, ended_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-			s.ID, string(s.Kind), s.Principal, s.Team, s.Cluster, s.Trigger, string(ctxRaw),
-			s.Provider, s.Model, string(s.KeySource), string(s.DataSharing), s.InstructionsSHA,
-			s.TeamAgentGeneration, string(s.State), nullable(string(s.SkipReason)),
-			nullable(s.LeaseOwner), s.LeaseExpiresAt, s.StartedAt, s.EndedAt,
-		); err != nil {
-			return fmt.Errorf("insert session: %w", err)
-		}
 		var err error
-		out, err = appendEvents(ctx, tx, s.ID, evs, now)
+		s, out, err = createSessionTx(ctx, tx, s, evs, now)
 		return err
 	})
 	if err != nil {

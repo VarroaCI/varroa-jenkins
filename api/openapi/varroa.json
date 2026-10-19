@@ -380,7 +380,8 @@
               "api",
               "jenkins",
               "mcp",
-              "assistant"
+              "assistant",
+              "team_agent"
             ],
             "type": "string"
           },
@@ -5941,7 +5942,8 @@
               "api",
               "jenkins",
               "mcp",
-              "assistant"
+              "assistant",
+              "team_agent"
             ],
             "type": "string"
           },
@@ -16481,7 +16483,8 @@
                 "api",
                 "jenkins",
                 "mcp",
-                "assistant"
+                "assistant",
+                "team_agent"
               ],
               "type": "string"
             }

@@ -42,6 +42,10 @@ contract with its adapters, and the sandbox contract.
 - **Sandbox.** `sandbox/v1` never changes its exported shape. A later version
   lives beside it.
 
+- The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
+- `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
+- `agent.MaxRunningSessions` is the cap that the create paths of both kinds use.
+
 ## Work Guidance
 
 - Keep every comment in ASD-STE100. Comments state constraints, not history.

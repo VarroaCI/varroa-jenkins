@@ -33,6 +33,9 @@ spec:
           args:
             - "-bus-ca-file=/etc/nats-creds/ca.crt"
             - "-bus-pass-file=/etc/nats-creds/operator-password"
+{{- if and .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
+            - "-team-agents"
+{{- end }}
           ports:
             - name: metrics
               containerPort: {{ .Values.operator.service.port }}

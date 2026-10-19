@@ -696,6 +696,48 @@ func (m *Memory) GetSettings(_ context.Context, scope string) (agent.Settings, e
 	return cloneSettings(*st), nil
 }
 
+// SetInstructionsSHA records the revision and appends the event under the same lock.
+func (m *Memory) SetInstructionsSHA(_ context.Context, id uuid.UUID, owner, sha string, ev agent.EventInput) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	evs, err := normalizeEvents([]agent.EventInput{ev})
+	if err != nil {
+		return err
+	}
+	s, err := m.sessionLocked(id)
+	if err != nil {
+		return err
+	}
+	if err := guardLocked(s, Guard{States: []agent.SessionState{agent.StateRunning}, LeaseOwner: owner}); err != nil {
+		return err
+	}
+	instr := sha
+	s.InstructionsSHA = &instr
+	m.appendLocked(id, evs, m.now())
+	return nil
+}
+
+// PutTeamAgentUnattended sets or removes one TeamAgent's unattended grant on
+// the global scope.
+func (m *Memory) PutTeamAgentUnattended(_ context.Context, key string, grant *agent.UnattendedGrant, by string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.settings[agent.ScopeGlobal]
+	if grant == nil {
+		delete(st.TeamAgentUnattended, key)
+	} else {
+		if st.TeamAgentUnattended == nil {
+			st.TeamAgentUnattended = map[string]agent.UnattendedGrant{}
+		}
+		g := *grant
+		g.Tools = append([]string(nil), grant.Tools...)
+		st.TeamAgentUnattended[key] = g
+	}
+	st.UpdatedAt = m.now()
+	st.UpdatedBy = by
+	return nil
+}
+
 // PutSettings applies a patch to one scope and returns the result.
 func (m *Memory) PutSettings(_ context.Context, scope string, p SettingsPatch, by string) (agent.Settings, error) {
 	m.mu.Lock()

@@ -1,0 +1,135 @@
+{{- if and .Values.agentRunner.enabled (not (include "varroa.isHive" .)) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: varroa-agent
+  labels:
+    app.kubernetes.io/component: varroa-agent
+    {{- include "varroa.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.agentRunner.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: varroa-agent
+      {{- include "varroa.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: varroa-agent
+        {{- include "varroa.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: varroa-agent
+      {{- include "varroa.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.agentRunner.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "varroa.podPlacement" .Values.agentRunner }}
+      containers:
+        - name: varroa-agent
+          image: "{{ .Values.agentRunner.image.repository }}:{{ .Values.agentRunner.image.tag }}"
+          imagePullPolicy: {{ .Values.agentRunner.image.pullPolicy }}
+          command: ["/app/varroa-agent"]
+          args:
+            - "-bus-ca-file=/etc/nats-creds/ca.crt"
+            - "-bus-pass-file=/etc/nats-creds/agentrunner-password"
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            {{- toYaml .Values.agentRunner.containerSecurityContext | nindent 12 }}
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+            - name: VARROA_BUS_URL
+              value: {{ include "varroa.busURL" (dict "root" $ "tier" "bff") | quote }}
+            - name: VARROA_CLUSTER
+              value: {{ .Values.cluster.name | quote }}
+            - name: VARROA_BFF_URL
+              value: {{ printf "http://%s:8080" (include "varroa.fullname" (dict "Release" .Release "name" "varroa-bff")) | quote }}
+            - name: VARROA_ASSISTANT_CONFIG
+              value: {{ include "varroa.assistant.config" . | quote }}
+            - name: VARROA_RECORDSTORE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "varroa.recordStore.dsnSecretName" (dict "root" $ "role" "client") }}
+                  key: {{ include "varroa.recordStore.dsnSecretKey" $ }}
+            - name: VARROA_TEAM_AGENT_KEY_FILE
+              value: /etc/varroa/team-agent-key/key
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: VARROA_TELEMETRY_DISABLED
+              value: {{ .Values.telemetry.disabled | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.endpoint | quote }}
+            - name: METRICS_TOKEN
+              value: {{ .Values.telemetry.metricsToken | quote }}
+          volumeMounts:
+            - name: nats-creds
+              mountPath: /etc/nats-creds
+              readOnly: true
+            - name: team-agent-key
+              mountPath: /etc/varroa/team-agent-key
+              readOnly: true
+{{- range $i, $p := .Values.assistant.providers }}
+{{- if $p.secretRef }}
+            - name: assistant-key-{{ $i }}
+              mountPath: /etc/varroa/assistant/{{ $p.name }}
+              readOnly: true
+{{- end }}
+{{- end }}
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.agentRunner.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: nats-creds
+          secret:
+            secretName: {{ .Release.Name }}-nats-creds
+        - name: team-agent-key
+          secret:
+            secretName: varroa-team-agent-signing-key
+            items:
+              - key: key
+                path: key
+{{- range $i, $p := .Values.assistant.providers }}
+{{- if $p.secretRef }}
+        - name: assistant-key-{{ $i }}
+          secret:
+            secretName: {{ $p.secretRef }}
+            optional: true
+            items:
+              - key: apiKey
+                path: apiKey
+{{- end }}
+{{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

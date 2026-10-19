@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,9 +54,11 @@ import (
 	ldappkg "github.com/varroaci/varroa-jenkins/internal/auth/ldap"
 	localpkg "github.com/varroaci/varroa-jenkins/internal/auth/local"
 	"github.com/varroaci/varroa-jenkins/internal/auth/schedule"
+	teamagentauth "github.com/varroaci/varroa-jenkins/internal/auth/teamagent"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/forgerelay"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mcp "github.com/varroaci/varroa-jenkins/internal/mcp"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
@@ -62,6 +66,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
 	"github.com/varroaci/varroa-jenkins/internal/signing"
+	teamagentcache "github.com/varroaci/varroa-jenkins/internal/teamagent/cache"
 	"github.com/varroaci/varroa-jenkins/internal/telemetry"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
@@ -718,6 +723,19 @@ func main() {
 				// The run notes go to the recorder, which owns every write to
 				// varroa.run_notes.
 				apiDeps.RunNotePoster = api.NewBusRunNotePoster(busConn)
+				// The Team agent tools reach the operator's forge answers and
+				// the recorder's webhook responder over the bus. The core
+				// cluster answers every forge request.
+				apiDeps.ForgeRelay = forgerelay.Relay{Conn: busConn}
+				apiDeps.WebhookEnqueuer = api.NewBusWebhookEnqueuer(busConn)
+				apiDeps.CoreCluster = cluster
+				// The key file is mounted only when agentRunner is on. The
+				// cache needs the TeamAgent RBAC rule that the same flag renders.
+				if os.Getenv("VARROA_TEAM_AGENT_KEY_FILE") != "" {
+					teamAgents := teamagentcache.New(dynamicClient, operatorNamespace, logger)
+					go teamAgents.Run(ctx)
+					apiDeps.TeamAgents = teamAgents
+				}
 			}
 
 			apiDeps.RecordStoreRunRetention = 365 * 24 * time.Hour
@@ -1020,17 +1038,40 @@ func main() {
 		ticketVerifier = auth.NewTicketVerifier(signer.PublicKey(), *bffURL)
 	}
 
+	// A Team agent token is verified only when the runner is on, which is the
+	// only time the key file is mounted. The verifier answers the cached
+	// TeamAgent for the token's UID and the session principal for its sid.
+	var teamAgentVerifier auth.TeamAgentVerifier
+	if apiDeps.TeamAgents != nil && os.Getenv("VARROA_TEAM_AGENT_KEY_FILE") != "" {
+		tav, err := teamagentauth.NewVerifier(os.Getenv("VARROA_TEAM_AGENT_KEY_FILE"), apiDeps.TeamAgents,
+			func(ctx context.Context, id uuid.UUID) (string, error) {
+				if apiDeps.Assistant == nil || apiDeps.Assistant.Store == nil {
+					return "", errors.New("assistant store is not configured")
+				}
+				sess, err := apiDeps.Assistant.Store.GetSession(ctx, id)
+				if err != nil {
+					return "", err
+				}
+				return sess.Principal, nil
+			})
+		if err != nil {
+			logger.Error("team agent verifier", "error", err)
+			os.Exit(1)
+		}
+		teamAgentVerifier = tav
+	}
+
 	var authHandler http.Handler
 	if !telemetryDisabled {
 		otelHandler := otelhttp.NewHandler(mux, "varroa-bff")
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, nil, otelHandler, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, teamAgentVerifier, otelHandler, logger)
 		} else {
 			authHandler = otelHandler
 		}
 	} else {
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, nil, mux, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, teamAgentVerifier, mux, logger)
 		} else {
 			authHandler = mux
 		}

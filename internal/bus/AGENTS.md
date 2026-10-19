@@ -247,6 +247,8 @@ control plane's async transport — no other package talks to NATS directly.
 
 - **Forge subjects** — `operator.<cluster>.forge.{check,read,pullrequest}` (`OperatorForgeSubject`). A later change adds `issue`. Every operator replica subscribes with no queue group. Only the Team's shard owner replies. Request and reply types live in `internal/forge/forgeapi`.
 
+- Team agent subjects (add-team-agents). The `agentrunner` user publishes `agentsessions.>`, `operator.*.forge.read`, `operator.*.forge.issue`, and `varroa.recordstore.notes.post`. It subscribes `varroa.assistant.control` and `_INBOX_agentrunner.>`. It reads the durable `agent-triggers` consumer on `varroa_activity` and holds no stream write. The BFF publishes `varroa.recordstore.webhook.enqueue`; the recorder subscribes to it. The recorder publishes `activity.>`, the audit producers' subject, on every install with `recordStore` enabled. The gateway holds no `operator.*.forge.issue` grant (`TestACL_GatewayCannotPublishForgeIssue`).
+
 ## Work Guidance
 
 - New subjects/streams/buckets must be added here first, then mirrored into

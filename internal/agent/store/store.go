@@ -192,6 +192,12 @@ type Store interface {
 	Sweep(ctx context.Context) (expired, lost int, err error)
 	GetSettings(ctx context.Context, scope string) (agent.Settings, error)
 	PutSettings(ctx context.Context, scope string, p SettingsPatch, by string) (agent.Settings, error)
+	// SetInstructionsSHA records the revision a Team agent session read and
+	// appends one event, in one write. The lease owner must hold a running session.
+	SetInstructionsSHA(ctx context.Context, id uuid.UUID, owner, sha string, ev agent.EventInput) error
+	// PutTeamAgentUnattended sets one TeamAgent's unattended grant, or removes it
+	// when grant is nil. It writes the global scope only.
+	PutTeamAgentUnattended(ctx context.Context, key string, grant *agent.UnattendedGrant, by string) error
 }
 
 // sweepBoth is the shared body of Sweep for both stores.

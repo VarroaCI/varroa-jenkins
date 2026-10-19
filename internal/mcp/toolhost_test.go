@@ -81,9 +81,9 @@ func TestSessionFrom(t *testing.T) {
 	if _, ok := SessionFrom(context.Background()); ok {
 		t.Errorf("plain call: SessionFrom reports a session")
 	}
-	vctx := context.WithValue(context.Background(), sessionIDKey{}, "sess-1")
+	vctx := auth.ContextWithAgentSession(context.Background(), "sess-1")
 	if got, ok := SessionFrom(vctx); !ok || got != "sess-1" {
-		t.Errorf("verifier key: SessionFrom = %q, %v", got, ok)
+		t.Errorf("agent token: SessionFrom = %q, %v", got, ok)
 	}
 }
 
@@ -98,5 +98,31 @@ func TestEmitActivity_AssistantOrigin(t *testing.T) {
 	emitActivity(context.Background(), deps, &auth.Claims{Subject: "s"}, activity.Event{Type: "x.y"})
 	if got := sink.events[1].Source; got != "mcp" {
 		t.Errorf("Source = %q, want mcp", got)
+	}
+}
+
+func TestEmitActivity_TeamAgentOrigin(t *testing.T) {
+	sink := &recordingSink{}
+	deps := &api.Dependencies{ActivityPublisher: sink}
+	ctx := WithOrigin(context.Background(), OriginTeamAgent)
+	emitActivity(ctx, deps, &auth.Claims{Subject: "s"}, activity.Event{Type: "x.y"})
+	if got := sink.events[0].Source; got != "team_agent" {
+		t.Errorf("Source = %q, want team_agent", got)
+	}
+}
+
+func TestEmitActivity_TeamAgentSubject(t *testing.T) {
+	sink := &recordingSink{}
+	deps := &api.Dependencies{ActivityPublisher: sink}
+	emitActivity(context.Background(), deps, &auth.Claims{Subject: "agent:ns/team/x"}, activity.Event{Type: "x.y"})
+	if got := sink.events[0].Source; got != "team_agent" {
+		t.Errorf("Source = %q, want team_agent", got)
+	}
+}
+
+func TestInProcessHostWithOrigin_StampsOrigin(t *testing.T) {
+	h := NewInProcessHostWithOrigin(nil, &auth.Claims{Subject: "s"}, OriginTeamAgent)
+	if got := OriginFrom(h.callCtx(context.Background())); got != OriginTeamAgent {
+		t.Errorf("origin = %q, want %q", got, OriginTeamAgent)
 	}
 }

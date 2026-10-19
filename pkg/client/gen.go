@@ -39,6 +39,7 @@ const (
 	ComponentsSchemasActivityEventSourceMcp       ComponentsSchemasActivityEventSource = "mcp"
 	ComponentsSchemasActivityEventSourceMite      ComponentsSchemasActivityEventSource = "mite"
 	ComponentsSchemasActivityEventSourceOperator  ComponentsSchemasActivityEventSource = "operator"
+	ComponentsSchemasActivityEventSourceTeamAgent ComponentsSchemasActivityEventSource = "team_agent"
 	ComponentsSchemasActivityEventSourceUser      ComponentsSchemasActivityEventSource = "user"
 )
 
@@ -760,6 +761,7 @@ const (
 	ListActivityParamsSourceMcp       ListActivityParamsSource = "mcp"
 	ListActivityParamsSourceMite      ListActivityParamsSource = "mite"
 	ListActivityParamsSourceOperator  ListActivityParamsSource = "operator"
+	ListActivityParamsSourceTeamAgent ListActivityParamsSource = "team_agent"
 	ListActivityParamsSourceUser      ListActivityParamsSource = "user"
 )
 

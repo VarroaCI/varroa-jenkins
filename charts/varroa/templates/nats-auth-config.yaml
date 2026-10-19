@@ -25,6 +25,10 @@ stringData:
               "mite.*.*.*.content"
               "$JS.API.INFO"
               "_INBOX_bff.>"
+{{- if .Values.agentRunner.enabled }}
+              // Team agent: the forge and role replies go to the runner's inbox.
+              "_INBOX_agentrunner.>"
+{{- end }}
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots.>"
@@ -182,6 +186,10 @@ stringData:
               "varroa.assistant.control"
 {{- end }}
               "operator.>"
+{{- if .Values.agentRunner.enabled }}
+              // Team agent: ask the recorder to queue a signed webhook delivery.
+              "varroa.recordstore.webhook.enqueue"
+{{- end }}
               "$JS.API.INFO"
               "$JS.API.STREAM.*.KV_mite_snapshots"
               "$JS.API.STREAM.MSG.*.KV_mite_snapshots"
@@ -252,6 +260,35 @@ stringData:
             ]
           }
         }
+{{- if .Values.agentRunner.enabled }}
+        {
+          user: "agentrunner"
+          password: "{{ htpasswd "ignored" (include "varroa.nats.agentrunnerPassword" .) | trimPrefix "ignored:" }}"
+          permissions: {
+            publish: [
+              // Team agent sessions: session notices, and the forge and note
+              // requests the runner sends.
+              "agentsessions.>"
+              "operator.*.forge.read"
+              "operator.*.forge.issue"
+              "varroa.recordstore.notes.post"
+              // The activity consumer: create, read, fetch, and ack its own
+              // durable consumer on varroa_activity. It holds no stream write.
+              "$JS.API.STREAM.INFO.varroa_activity"
+              "$JS.API.CONSUMER.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.DURABLE.CREATE.varroa_activity.>"
+              "$JS.API.CONSUMER.INFO.varroa_activity.>"
+              "$JS.API.CONSUMER.MSG.NEXT.varroa_activity.>"
+              "$JS.ACK.varroa_activity.>"
+            ]
+            subscribe: [
+              // The kill switch, and the replies to the runner's requests.
+              "varroa.assistant.control"
+              "_INBOX_agentrunner.>"
+            ]
+          }
+        }
+{{- end }}
 {{- if .Values.recordStore.enabled }}
         {
           user: "recorder"
@@ -272,6 +309,9 @@ stringData:
               // Live run notifications: tell the BFF that a run changed,
               // so a reader refetches the record without a reload.
               "runs.>"
+              // Team agent triggers: the recorder's audit producers publish
+              // on activity.>. The varroa-agent consumer reads them.
+              "activity.>"
               "$JS.API.STREAM.CREATE.varroa_builds"
               "$JS.API.STREAM.UPDATE.varroa_builds"
               "$JS.API.STREAM.INFO.varroa_builds"
@@ -309,6 +349,10 @@ stringData:
               "varroa.recordstore.fleetlock.release"
               // Run notes: answer the BFF's note post.
               "varroa.recordstore.notes.post"
+{{- if .Values.agentRunner.enabled }}
+              // Team agent: queue a signed webhook delivery for a session.
+              "varroa.recordstore.webhook.enqueue"
+{{- end }}
               "_INBOX_recorder.>"
             ]
           }

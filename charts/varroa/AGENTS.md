@@ -444,6 +444,15 @@ the packaged CRDs. Does not own the Go source it packages
   placeholders that the session driver fills via `helm --set-string` at
   install time.
 
+- **Team agent runner (`agentRunner`)** — `templates/agentrunner/` renders the `varroa-agent`
+  Deployment, its ClusterRole (read `teamagents`, `teams`, `catalogsources`; patch
+  `teamagents/status`), its Role (status lease, read own pod), and the signing-key Secret
+  `varroa-team-agent-signing-key` (key `key`, 32 bytes, reused on upgrade through `lookup`).
+  Enabling it fails the render unless `assistant`, `recordStore`, and `bff` are enabled. It
+  adds the `agentrunner` NATS user, the `-team-agents` operator flag, the BFF key mount, and the
+  `varroa-np-agentrunner` policy. The NATS `recorder` user gains `activity.>` publish whenever
+  `recordStore` is enabled, regardless of `agentRunner`. `test-agentrunner-*.sh` assert these.
+
 ## Work Guidance
 
 - A CRD field change in `api/v1alpha1/types.go` requires `make generate-crds` before

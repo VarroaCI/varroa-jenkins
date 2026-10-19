@@ -16,6 +16,7 @@ const (
 var classes = map[string]DataClass{
 	"get_run_log":                  ClassLogs,
 	"get_team_cell":                ClassMetadata,
+	"read_repo_file":               ClassMetadata,
 	"get_controller_logs":          ClassLogs,
 	"get_run":                      ClassMetadataFiltered,
 	"list_controllers":             ClassMetadata,
