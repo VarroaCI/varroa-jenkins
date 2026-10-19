@@ -2580,7 +2580,14 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			keep := retry.deferredJobs
 			if result.ItemsSuccess {
 				var orphans []string
-				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs)
+				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs, func() *mitev1.JobBranchSet {
+					set, err := a.pollJobBranches(ctx)
+					if err != nil {
+						a.Logger.Warn("rehydration branch inventory poll failed, keeping multibranch deferrals", "error", err)
+						return nil
+					}
+					return set
+				})
 				if len(orphans) > 0 {
 					sample := orphans
 					if len(sample) > 5 {

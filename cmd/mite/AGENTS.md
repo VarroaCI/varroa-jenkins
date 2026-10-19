@@ -361,7 +361,13 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   items gate opens. After a successful items apply, a job that is still absent
   is an orphan, not a deferral, unless its parent is a multibranch project or
   an organization folder, or its parent directory exists without a `config.xml`
-  (`orphanDeferredJobs`); the mite drops its records.
+  (`orphanDeferredJobs`); the mite drops its records. A job under a multibranch
+  project or an organization folder also orphans when a polled branch inventory
+  (`GET /varroa-activity/branches`) shows a completed `SUCCESS` scan of the
+  deciding folder, or of the repository below an organization folder, that lists
+  no child on the job's path. A running scan, a failed scan, a missing row,
+  truncated heads, or a failed poll keeps the deferral. The poll runs only when
+  a computed folder decides a deferred job, and the cached set is not used.
   A failed items apply keeps every deferral. The marker never records the `rehydration` section while
   a job stays deferred. The composite fast path skips a command only when the
   marker also holds the bundle's `rehydration` hash.
