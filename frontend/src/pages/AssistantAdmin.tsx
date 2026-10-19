@@ -37,8 +37,8 @@ export function AssistantAdmin() {
   });
   const providers = useQuery({ queryKey: ["assistant-providers"], queryFn: listAssistantProviders, retry: false });
   const [confirming, setConfirming] = useState(false);
-  const [defaultProvider, setDefaultProvider] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
+  const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [tenant, setTenant] = useState("");
   const [level, setLevel] = useState<DataSharingLevel>("none");
   const [error, setError] = useState("");
@@ -66,6 +66,8 @@ export function AssistantAdmin() {
   const s = settings.data;
   const providerList = providers.data?.items ?? [];
   const tenants = Object.entries(s?.tenantDataSharing ?? {});
+  const shownProvider = defaultProvider ?? s?.defaultProvider ?? "";
+  const shownModel = defaultModel ?? s?.defaultModel ?? "";
 
   return (
     <SectionPage title="Assistant" loading={settings.isLoading} empty={!settings.isLoading && !s}>
@@ -112,15 +114,16 @@ export function AssistantAdmin() {
         <Card title="Defaults">
           <label>
             Provider{" "}
-            <select aria-label="Default provider" value={defaultProvider || s.defaultProvider} onChange={(e) => setDefaultProvider(e.target.value)}>
+            <select aria-label="Default provider" value={shownProvider} onChange={(e) => setDefaultProvider(e.target.value)}>
+              <option value="">Chart default</option>
               {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
           </label>{" "}
           <label>
             Model{" "}
-            <input aria-label="Default model" value={defaultModel || s.defaultModel} onChange={(e) => setDefaultModel(e.target.value)} />
+            <input aria-label="Default model" value={shownModel} onChange={(e) => setDefaultModel(e.target.value)} />
           </label>{" "}
-          <Button size="sm" onClick={() => update.mutate({ defaultProvider: defaultProvider || s.defaultProvider, defaultModel: defaultModel || s.defaultModel })}>
+          <Button size="sm" onClick={() => update.mutate({ defaultProvider: shownProvider, defaultModel: shownModel })}>
             Save defaults
           </Button>
         </Card>

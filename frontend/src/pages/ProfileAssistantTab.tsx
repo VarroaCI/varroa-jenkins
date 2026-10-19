@@ -18,7 +18,7 @@ import { Button } from "../components/Button";
 import { useAssistant } from "../components/assistant/AssistantProvider";
 import { PausedBanner } from "../components/assistant/PausedBanner";
 import { HTTP_LABELS } from "../components/assistant/labels";
-import type { DataSharingLevel, MyAssistant, MyAssistantUpdate } from "../types/assistant";
+import type { AssistantProvider, DataSharingLevel, MyAssistant, MyAssistantUpdate } from "../types/assistant";
 
 const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
 
@@ -26,6 +26,13 @@ const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
 export function keyStatus(me: MyAssistant | undefined): string {
   if (me?.sessionKey) return `Key set for ${me.sessionKey.provider}, held for this login only`;
   return "No key set";
+}
+
+/** keyProviderFor picks the provider of the session key card. The select shows this value and Set key sends it. */
+export function keyProviderFor(chosen: string, saved: string, list: AssistantProvider[]): string {
+  if (list.some((p) => p.name === chosen)) return chosen;
+  if (list.some((p) => p.name === saved)) return saved;
+  return list.find((p) => p.default)?.name ?? list[0]?.name ?? "";
 }
 
 export function ProfileAssistantTab() {
@@ -53,6 +60,7 @@ export function ProfileAssistantTab() {
     dataSharing: me.data?.dataSharing ?? "none",
   };
   const providerList = providers.data?.items ?? [];
+  const keyProviderShown = keyProviderFor(keyProvider, current.provider, providerList);
   const selectedProvider = providerList.find((p) => p.name === current.provider);
   const explained = (location.state as { from?: string } | null)?.from === "explain";
 
@@ -75,7 +83,7 @@ export function ProfileAssistantTab() {
     setKeyBusy(true);
     setKeyError("");
     try {
-      await putMyAssistantKey({ provider: keyProvider || current.provider, apiKey: keyValue });
+      await putMyAssistantKey({ provider: keyProviderShown, apiKey: keyValue });
       void queryClient.invalidateQueries({ queryKey: ["me-assistant"] });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -142,6 +150,7 @@ export function ProfileAssistantTab() {
               setModel({ ...current, provider: e.target.value, model: p?.models[0] ?? "" });
             }}
           >
+            <option value="">Default</option>
             {providerList.map((p) => (
               <option key={p.name} value={p.name}>{p.available ? p.name : `${p.name} (unavailable)`}</option>
             ))}
@@ -150,6 +159,7 @@ export function ProfileAssistantTab() {
         <label>
           Model{" "}
           <select aria-label="Model" value={current.model} onChange={(e) => setModel({ ...current, model: e.target.value })}>
+            <option value="">Default</option>
             {(selectedProvider?.models ?? []).map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
@@ -179,7 +189,7 @@ export function ProfileAssistantTab() {
       <Card title="Session key">
         <p role="status">{keyStatus(me.data)}</p>
         <div>
-          <select aria-label="Key provider" value={keyProvider || current.provider} onChange={(e) => setKeyProvider(e.target.value)}>
+          <select aria-label="Key provider" value={keyProviderShown} onChange={(e) => setKeyProvider(e.target.value)}>
             {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>{" "}
           <input
@@ -189,7 +199,7 @@ export function ProfileAssistantTab() {
             value={keyValue}
             onChange={(e) => setKeyValue(e.target.value)}
           />{" "}
-          <Button size="sm" disabled={keyBusy || !keyValue} onClick={() => void setKey()}>Set key</Button>{" "}
+          <Button size="sm" disabled={keyBusy || !keyValue || !keyProviderShown} onClick={() => void setKey()}>Set key</Button>{" "}
           <Button size="sm" variant="ghost" disabled={keyBusy || !me.data?.sessionKey} onClick={() => void clearKey()}>Clear key</Button>
         </div>
         {keyError && <p role="alert">{keyError}</p>}
