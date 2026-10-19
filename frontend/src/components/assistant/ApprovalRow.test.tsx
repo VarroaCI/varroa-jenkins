@@ -96,4 +96,17 @@ describe("ApprovalRow", () => {
     renderRow({ ...pending, arguments: { files: [{ path: "a.txt", content: "hello" }] } });
     expect(await screen.findByText("a.txt")).toBeTruthy();
   });
+
+  it("renders a file that holds a fence as plain text", async () => {
+    const content = "<script>alert(1)</script>\n```\n# h";
+    const { container } = renderRow({ ...pending, arguments: { files: [{ path: "Jenkinsfile", content }] } });
+    const pre = await waitFor(() => {
+      const el = container.querySelector("pre.file, [class*='file']");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(pre.textContent).toBe(content);
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("h1")).toBeNull();
+  });
 });

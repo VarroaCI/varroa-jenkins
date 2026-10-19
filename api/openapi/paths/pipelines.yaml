@@ -367,6 +367,91 @@
       "503":
         $ref: '../components/responses.yaml#/ServiceUnavailable'
 
+/api/v1/pipelines/{team}/propose:
+  post:
+    operationId: proposePipeline
+    tags: [Pipelines]
+    summary: Starts an assistant session that proposes a first Jenkinsfile for a repository.
+    description: >
+      Checks the repository, then starts an assistant session with the fixed
+      prompt propose-pipeline. The session reads the repository and asks for
+      one approval before it opens a pull request. The checks run in this
+      order, and nothing is written before the last one. Each refusal answers
+      its code and creates no session.
+      1. The assistant is on the server (503 assistant_disabled).
+      2. The caller holds assistant use (403).
+      3. The body is valid (400).
+      4. The user's assistant switch is on (409 assistant_off).
+      5. The Team is a pipelines tenant the caller reads (404), and the caller
+         holds the tenant write check (403).
+      6. The repo is an https URL on port 443 (400 repo_url_invalid).
+      7. The data level of the tenant and provider shows read_repo_file
+         (409 data_sharing_too_low).
+      8. The operator finds a credential that reaches the forge and a
+         Jenkinsfile and a proposal branch are absent (422, 409, 502, or 404
+         by the code of the forge reply).
+      9. The assistant is not busy (429 assistant_busy).
+      Codes from the forge check: no_matching_credential, forge_unsupported,
+      forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and
+      proposal_branch_exists (409); not_found (404); forge_unreachable (502).
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/ProposePipelineRequest'
+    responses:
+      "201":
+        description: The session started. The state is running, waiting_approval, or skipped.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineResponse'
+      "400":
+        description: A bad body, or a repo_url_invalid, invalid_request, or forge code of a bad request.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The assistant is off, the data level hides read_repo_file, or the forge found a Jenkinsfile or a proposal branch.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+      "422":
+        description: No credential reaches the forge, or the credential may not write.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+      "429":
+        description: The user has too many running sessions (assistant_busy).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+      "502":
+        description: The forge or the operator did not answer (forge_unreachable).
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+      "503":
+        description: The assistant is disabled or its kill switch is set.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/ProposePipelineError'
+
 /api/v1/pipelines/{team}/stream:
   get:
     operationId: streamTeamRuns

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
@@ -18,23 +19,39 @@ type Relay struct {
 	Conn *bus.Conn
 }
 
+// Check asks the operator of the cluster whether a repository can take a
+// proposal.
+func (r Relay) Check(ctx context.Context, cluster string, req forgeapi.CheckRequest) (forgeapi.CheckReply, error) {
+	var reply forgeapi.CheckReply
+	err := r.call(ctx, cluster, forgeapi.VerbCheck, forgeapi.RequestTimeout, req, &reply)
+	return reply, err
+}
+
 // Read asks the operator of the cluster for one file or directory.
 func (r Relay) Read(ctx context.Context, cluster string, req forgeapi.ReadRequest) (forgeapi.ReadReply, error) {
 	var reply forgeapi.ReadReply
-	err := r.call(ctx, cluster, forgeapi.VerbRead, req, &reply)
+	err := r.call(ctx, cluster, forgeapi.VerbRead, forgeapi.RequestTimeout, req, &reply)
+	return reply, err
+}
+
+// PullRequest asks the operator of the cluster to open a pull request.
+func (r Relay) PullRequest(ctx context.Context, cluster string, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error) {
+	var reply forgeapi.PullRequestReply
+	err := r.call(ctx, cluster, forgeapi.VerbPullRequest, forgeapi.PullRequestTimeout, req, &reply)
 	return reply, err
 }
 
 // Issue asks the operator of the cluster to open an issue.
 func (r Relay) Issue(ctx context.Context, cluster string, req forgeapi.IssueRequest) (forgeapi.IssueReply, error) {
 	var reply forgeapi.IssueReply
-	err := r.call(ctx, cluster, forgeapi.VerbIssue, req, &reply)
+	err := r.call(ctx, cluster, forgeapi.VerbIssue, forgeapi.RequestTimeout, req, &reply)
 	return reply, err
 }
 
-// call sends one request and decodes the reply. A bus error or a reply that
-// does not decode is returned to the caller.
-func (r Relay) call(ctx context.Context, cluster, verb string, req, reply any) error {
+// call sends one request and decodes the reply. The timeout bounds the wait
+// for the reply. A bus error or a reply that does not decode is returned to
+// the caller.
+func (r Relay) call(ctx context.Context, cluster, verb string, timeout time.Duration, req, reply any) error {
 	if r.Conn == nil {
 		return fmt.Errorf("forge relay has no bus connection")
 	}
@@ -42,7 +59,7 @@ func (r Relay) call(ctx context.Context, cluster, verb string, req, reply any) e
 	if err != nil {
 		return fmt.Errorf("encode forge %s request: %w", verb, err)
 	}
-	msg, err := r.Conn.RequestWithContext(ctx, bus.OperatorForgeSubject(cluster, verb), data, forgeapi.RequestTimeout)
+	msg, err := r.Conn.RequestWithContext(ctx, bus.OperatorForgeSubject(cluster, verb), data, timeout)
 	if err != nil {
 		return fmt.Errorf("forge %s request: %w", verb, err)
 	}

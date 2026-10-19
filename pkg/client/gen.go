@@ -69,8 +69,8 @@ const (
 
 // Defines values for ComponentsSchemasAssistantProviderTrust.
 const (
-	External ComponentsSchemasAssistantProviderTrust = "external"
-	Internal ComponentsSchemasAssistantProviderTrust = "internal"
+	ComponentsSchemasAssistantProviderTrustExternal ComponentsSchemasAssistantProviderTrust = "external"
+	ComponentsSchemasAssistantProviderTrustInternal ComponentsSchemasAssistantProviderTrust = "internal"
 )
 
 // Defines values for ComponentsSchemasAssistantSessionDataSharing.
@@ -554,6 +554,32 @@ const (
 	Marker ComponentsSchemasPipelineTemplateInfoSource = "marker"
 )
 
+// Defines values for ComponentsSchemasProposePipelineErrorCode.
+const (
+	ComponentsSchemasProposePipelineErrorCodeAssistantBusy        ComponentsSchemasProposePipelineErrorCode = "assistant_busy"
+	ComponentsSchemasProposePipelineErrorCodeAssistantDisabled    ComponentsSchemasProposePipelineErrorCode = "assistant_disabled"
+	ComponentsSchemasProposePipelineErrorCodeAssistantOff         ComponentsSchemasProposePipelineErrorCode = "assistant_off"
+	ComponentsSchemasProposePipelineErrorCodeDataSharingTooLow    ComponentsSchemasProposePipelineErrorCode = "data_sharing_too_low"
+	ComponentsSchemasProposePipelineErrorCodeForgeAuthFailed      ComponentsSchemasProposePipelineErrorCode = "forge_auth_failed"
+	ComponentsSchemasProposePipelineErrorCodeForgeUnreachable     ComponentsSchemasProposePipelineErrorCode = "forge_unreachable"
+	ComponentsSchemasProposePipelineErrorCodeForgeUnsupported     ComponentsSchemasProposePipelineErrorCode = "forge_unsupported"
+	ComponentsSchemasProposePipelineErrorCodeForgeWriteDenied     ComponentsSchemasProposePipelineErrorCode = "forge_write_denied"
+	ComponentsSchemasProposePipelineErrorCodeInternal             ComponentsSchemasProposePipelineErrorCode = "internal"
+	ComponentsSchemasProposePipelineErrorCodeInvalidRequest       ComponentsSchemasProposePipelineErrorCode = "invalid_request"
+	ComponentsSchemasProposePipelineErrorCodeJenkinsfileExists    ComponentsSchemasProposePipelineErrorCode = "jenkinsfile_exists"
+	ComponentsSchemasProposePipelineErrorCodeKillSwitch           ComponentsSchemasProposePipelineErrorCode = "kill_switch"
+	ComponentsSchemasProposePipelineErrorCodeNoMatchingCredential ComponentsSchemasProposePipelineErrorCode = "no_matching_credential"
+	ComponentsSchemasProposePipelineErrorCodeNotFound             ComponentsSchemasProposePipelineErrorCode = "not_found"
+	ComponentsSchemasProposePipelineErrorCodeProposalBranchExists ComponentsSchemasProposePipelineErrorCode = "proposal_branch_exists"
+	ComponentsSchemasProposePipelineErrorCodeRepoUrlInvalid       ComponentsSchemasProposePipelineErrorCode = "repo_url_invalid"
+)
+
+// Defines values for ComponentsSchemasProposePipelineResponseForge.
+const (
+	ComponentsSchemasProposePipelineResponseForgeGitea  ComponentsSchemasProposePipelineResponseForge = "gitea"
+	ComponentsSchemasProposePipelineResponseForgeGithub ComponentsSchemasProposePipelineResponseForge = "github"
+)
+
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
 	ComponentsSchemasRBACGroupBindingRoleAdmin     ComponentsSchemasRBACGroupBindingRole = "admin"
@@ -614,9 +640,9 @@ const (
 
 // Defines values for ComponentsSchemasRunSummaryScmForge.
 const (
-	Gitea  ComponentsSchemasRunSummaryScmForge = "gitea"
-	Github ComponentsSchemasRunSummaryScmForge = "github"
-	Gitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
+	ComponentsSchemasRunSummaryScmForgeGitea  ComponentsSchemasRunSummaryScmForge = "gitea"
+	ComponentsSchemasRunSummaryScmForgeGithub ComponentsSchemasRunSummaryScmForge = "github"
+	ComponentsSchemasRunSummaryScmForgeGitlab ComponentsSchemasRunSummaryScmForge = "gitlab"
 )
 
 // Defines values for ComponentsSchemasRunSummaryTriggerSource.
@@ -3755,6 +3781,33 @@ type ComponentsSchemasProfileCandidate struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// ComponentsSchemasProposePipelineError A refusal of a proposal. The code names the cause, and error gives the text.
+type ComponentsSchemasProposePipelineError struct {
+	Code  ComponentsSchemasProposePipelineErrorCode `json:"code"`
+	Error string                                    `json:"error"`
+}
+
+// ComponentsSchemasProposePipelineErrorCode defines model for ComponentsSchemasProposePipelineError.Code.
+type ComponentsSchemasProposePipelineErrorCode string
+
+// ComponentsSchemasProposePipelineRequest The repository to propose a first Jenkinsfile for.
+type ComponentsSchemasProposePipelineRequest struct {
+	Repo string `json:"repo"`
+}
+
+// ComponentsSchemasProposePipelineResponse The session that the proposal started, and the forge facts of the check.
+type ComponentsSchemasProposePipelineResponse struct {
+	BaseBranch   string                                        `json:"baseBranch"`
+	CredentialId string                                        `json:"credentialId"`
+	Forge        ComponentsSchemasProposePipelineResponseForge `json:"forge"`
+	Repo         string                                        `json:"repo"`
+	SessionId    string                                        `json:"sessionId"`
+	State        string                                        `json:"state"`
+}
+
+// ComponentsSchemasProposePipelineResponseForge defines model for ComponentsSchemasProposePipelineResponse.Forge.
+type ComponentsSchemasProposePipelineResponseForge string
+
 // ComponentsSchemasProvisioningConfig Aggregate provisioning read surface.
 type ComponentsSchemasProvisioningConfig struct {
 	// DashboardHost Hostname of the Varroa dashboard. Path-mode ingress requires the controller's ingress host to equal this value; empty when the BFF cannot derive it from its auth configuration.
@@ -6091,6 +6144,9 @@ type ScanMultibranchJSONRequestBody = ComponentsSchemasScanMultibranchRequest
 // ValidatePipelineMarkerJSONRequestBody defines body for ValidatePipelineMarker for application/json ContentType.
 type ValidatePipelineMarkerJSONRequestBody = ComponentsSchemasPipelineMarkerValidateRequest
 
+// ProposePipelineJSONRequestBody defines body for ProposePipeline for application/json ContentType.
+type ProposePipelineJSONRequestBody = ComponentsSchemasProposePipelineRequest
+
 // CreateVarroaRoleBindingJSONRequestBody defines body for CreateVarroaRoleBinding for application/json ContentType.
 type CreateVarroaRoleBindingJSONRequestBody = ComponentsSchemasVarroaRoleBinding
 
@@ -7147,6 +7203,11 @@ type ClientInterface interface {
 	ValidatePipelineMarkerWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ProposePipelineWithBody request with any body
+	ProposePipelineWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ProposePipeline(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// StreamTeamRuns request
 	StreamTeamRuns(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9532,6 +9593,30 @@ func (c *Client) ValidatePipelineMarkerWithBody(ctx context.Context, team Compon
 
 func (c *Client) ValidatePipelineMarker(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewValidatePipelineMarkerRequest(c.Server, team, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProposePipelineWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProposePipelineRequestWithBody(c.Server, team, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProposePipeline(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProposePipelineRequest(c.Server, team, body)
 	if err != nil {
 		return nil, err
 	}
@@ -17278,6 +17363,53 @@ func NewValidatePipelineMarkerRequestWithBody(server string, team ComponentsPara
 	return req, nil
 }
 
+// NewProposePipelineRequest calls the generic ProposePipeline builder with application/json body
+func NewProposePipelineRequest(server string, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewProposePipelineRequestWithBody(server, team, "application/json", bodyReader)
+}
+
+// NewProposePipelineRequestWithBody generates requests for ProposePipeline with any type of body
+func NewProposePipelineRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/propose", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewStreamTeamRunsRequest generates requests for StreamTeamRuns
 func NewStreamTeamRunsRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
 	var err error
@@ -19996,6 +20128,11 @@ type ClientWithResponsesInterface interface {
 	ValidatePipelineMarkerWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
 
 	ValidatePipelineMarkerWithResponse(ctx context.Context, team ComponentsParametersTeam, body ValidatePipelineMarkerJSONRequestBody, reqEditors ...RequestEditorFn) (*ValidatePipelineMarkerResponse, error)
+
+	// ProposePipelineWithBodyWithResponse request with any body
+	ProposePipelineWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
+
+	ProposePipelineWithResponse(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error)
 
 	// StreamTeamRunsWithResponse request
 	StreamTeamRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*StreamTeamRunsResponse, error)
@@ -23741,6 +23878,37 @@ func (r ValidatePipelineMarkerResponse) StatusCode() int {
 	return 0
 }
 
+type ProposePipelineResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *ComponentsSchemasProposePipelineResponse
+	JSON400      *ComponentsSchemasProposePipelineError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasProposePipelineError
+	JSON422      *ComponentsSchemasProposePipelineError
+	JSON429      *ComponentsSchemasProposePipelineError
+	JSON502      *ComponentsSchemasProposePipelineError
+	JSON503      *ComponentsSchemasProposePipelineError
+}
+
+// Status returns HTTPResponse.Status
+func (r ProposePipelineResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProposePipelineResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type StreamTeamRunsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -26764,6 +26932,23 @@ func (c *ClientWithResponses) ValidatePipelineMarkerWithResponse(ctx context.Con
 		return nil, err
 	}
 	return ParseValidatePipelineMarkerResponse(rsp)
+}
+
+// ProposePipelineWithBodyWithResponse request with arbitrary body returning *ProposePipelineResponse
+func (c *ClientWithResponses) ProposePipelineWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
+	rsp, err := c.ProposePipelineWithBody(ctx, team, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProposePipelineResponse(rsp)
+}
+
+func (c *ClientWithResponses) ProposePipelineWithResponse(ctx context.Context, team ComponentsParametersTeam, body ProposePipelineJSONRequestBody, reqEditors ...RequestEditorFn) (*ProposePipelineResponse, error) {
+	rsp, err := c.ProposePipeline(ctx, team, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProposePipelineResponse(rsp)
 }
 
 // StreamTeamRunsWithResponse request returning *StreamTeamRunsResponse
@@ -34011,6 +34196,95 @@ func ParseValidatePipelineMarkerResponse(rsp *http.Response) (*ValidatePipelineM
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseProposePipelineResponse parses an HTTP response from a ProposePipelineWithResponse call
+func ParseProposePipelineResponse(rsp *http.Response) (*ProposePipelineResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProposePipelineResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ComponentsSchemasProposePipelineResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasProposePipelineError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

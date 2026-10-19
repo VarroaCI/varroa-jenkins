@@ -236,6 +236,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/locks"},
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/markers/validate"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/cell"},
+	{Method: "POST", Path: "/api/v1/pipelines/{team}/propose"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/stream"},
 	// Team agent routes (api/openapi/paths/teamagents.yaml).
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent"},

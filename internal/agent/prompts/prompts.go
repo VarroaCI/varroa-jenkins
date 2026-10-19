@@ -24,8 +24,13 @@ var all = []Prompt{
 		Startable: true,
 	},
 	{
-		ID:        ProposePipeline,
-		Text:      "Read the repository in the session context. Propose a Jenkinsfile for it.",
+		ID: ProposePipeline,
+		Text: `Propose a first Jenkinsfile for the repository in the session context. Do these steps in order.
+1. Call read_repo_file with the team and the repo of the context and the path "." to list the repository root.
+2. Read the build files that you find, such as go.mod, package.json, pom.xml, build.gradle, Makefile, or Dockerfile. Use read_repo_file and always pass the repo of the context.
+3. Write one complete declarative Jenkinsfile that builds and tests the project.
+4. Call open_pull_request one time. Use the team and the repo of the context, the branch "varroa/propose-pipeline", and the title "Add a Jenkinsfile proposed by Varroa". Set files to one entry with the path "Jenkinsfile" and the file text as content. Set body to a short paragraph that tells why the file fits the project, then this line: "Varroa builds this file after the team's bundle declares this repository."
+Do not call any other write tool. After the tool result, give me the pull request link.`,
 		Startable: false,
 	},
 }

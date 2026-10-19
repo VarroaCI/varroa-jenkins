@@ -42,10 +42,12 @@ type TeamAgentSource interface {
 	Synced() bool
 }
 
-// TeamAgentForge sends a forge request to the operator of a cluster. The
+// ForgeRelay sends a forge request to the operator of a cluster. The
 // forgerelay package implements it over the bus.
-type TeamAgentForge interface {
+type ForgeRelay interface {
+	Check(ctx context.Context, cluster string, req forgeapi.CheckRequest) (forgeapi.CheckReply, error)
 	Read(ctx context.Context, cluster string, req forgeapi.ReadRequest) (forgeapi.ReadReply, error)
+	PullRequest(ctx context.Context, cluster string, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error)
 	Issue(ctx context.Context, cluster string, req forgeapi.IssueRequest) (forgeapi.IssueReply, error)
 }
 
@@ -158,12 +160,10 @@ type ReadRepoFileArgs struct {
 
 // ReadRepoFile serves the read_repo_file tool. Inside a session the repository
 // is the session's own repo unless the caller names another one, which needs
-// the tenant write check. Outside a session the repository is the Team agent's
-// instructions source.
+// the tenant write check. A session with no repo of its own answers 404.
+// Outside a session the repository is the Team agent's instructions source,
+// and only that source needs the Team agent cache.
 func (s *Server) ReadRepoFile(ctx context.Context, claims *auth.Claims, a ReadRepoFileArgs) (any, *ServiceError) {
-	if serr := s.teamAgentsReady(); serr != nil {
-		return nil, serr
-	}
 	if s.deps.ForgeRelay == nil {
 		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "forge relay not configured"}
 	}
@@ -179,28 +179,33 @@ func (s *Server) ReadRepoFile(ctx context.Context, claims *auth.Claims, a ReadRe
 	revision := ""
 	repo := a.Repo
 	cluster := s.teamAgentCluster()
+	sessRepo := ""
+	if inSession {
+		sessRepo, _ = sess.Context["repo"].(string)
+	}
 	switch {
+	case inSession && repo == "" && sessRepo != "":
+		// A session reads the repository and revision it pinned at creation.
+		// The live CatalogSource is never consulted for it.
+		repo = sessRepo
+		revision, _ = sess.Context["revision"].(string)
+		cluster = placementClusterOf(refs, cluster)
 	case inSession && repo != "":
-		if sessRepo, _ := sess.Context["repo"].(string); repo != sessRepo {
+		if canonicalRepo(repo) != canonicalRepo(sessRepo) {
 			return nil, &ServiceError{Status: http.StatusBadRequest, Message: "repo outside the session"}
 		}
 		revision, _ = sess.Context["revision"].(string)
 		cluster = placementClusterOf(refs, cluster)
+	case inSession:
+		return nil, &ServiceError{Status: http.StatusNotFound, Message: "no tracked repo for team " + a.Team}
 	case repo != "":
 		if !s.canWritePipeline(claims, refs[0], "") {
 			return nil, &ServiceError{Status: http.StatusForbidden, Message: "repo needs the tenant write check outside a session"}
 		}
 		cluster = placementClusterOf(refs, cluster)
 	default:
-		if inSession {
-			// A session reads only the repository and revision it pinned at
-			// creation. The live CatalogSource is never consulted for it.
-			repo, _ = sess.Context["repo"].(string)
-			revision, _ = sess.Context["revision"].(string)
-			if repo == "" {
-				return nil, &ServiceError{Status: http.StatusNotFound, Message: "no tracked repo for team " + a.Team}
-			}
-			break
+		if serr := s.teamAgentsReady(); serr != nil {
+			return nil, serr
 		}
 		ta, ok := s.teamAgentFor(a.Team)
 		if !ok || ta.Spec.Instructions == nil {

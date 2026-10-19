@@ -39,6 +39,50 @@ func (s stampOps) Issue(_ context.Context, _ forgeapi.IssueRequest, _ string) fo
 	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 1, URL: s.id}
 }
 
+func (s stampOps) PullRequest(ctx context.Context, _ forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
+	if s.deadline != nil {
+		if d, ok := ctx.Deadline(); ok {
+			*s.deadline = d
+		}
+	}
+	return forgeapi.PullRequestReply{Status: forgeapi.Status{OK: true}, Number: 1, URL: s.id}
+}
+
+func prBody(t *testing.T) []byte {
+	t.Helper()
+	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: "payments", Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestHandleForgePullRequest_NonOwnerSendsNoReply checks that only the shard
+// owner of the Team opens the pull request and answers.
+func TestHandleForgePullRequest_NonOwnerSendsNoReply(t *testing.T) {
+	ring := sharding.NewRing(8)
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), prBody(t))
+	if got != nil {
+		t.Fatalf("non-owner replied: %s", got)
+	}
+}
+
+// TestHandleForgePullRequest_SetsLongDeadline checks that the pull-request
+// call runs under the longer deadline, not the check deadline.
+func TestHandleForgePullRequest_SetsLongDeadline(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	var seen time.Time
+	before := time.Now()
+	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBody(t))
+	if seen.IsZero() {
+		t.Fatal("no deadline on the forge call")
+	}
+	if d := seen.Sub(before); d < forgePullRequestTimeout || d > forgePullRequestTimeout+2*time.Second {
+		t.Fatalf("deadline %v after the call start, want about %v", d, forgePullRequestTimeout)
+	}
+}
+
 func issueBody(t *testing.T) []byte {
 	t.Helper()
 	b, err := json.Marshal(forgeapi.IssueRequest{Team: "payments", Title: "t", Body: "b"})
@@ -168,11 +212,17 @@ func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, 
 		limit:   forgeConcurrency,
 		logger:  logger,
 		handle: func(ctx context.Context, data []byte) []byte {
-			if verb == forgeapi.VerbCheck {
+			switch verb {
+			case forgeapi.VerbCheck:
 				return handleForgeCheck(ctx, logger, stampOps{id: id}, enter, data)
+			case forgeapi.VerbPullRequest:
+				return handleForgePullRequest(ctx, logger, stampOps{id: id}, enter, data)
 			}
 			return handleForgeRead(ctx, logger, stampOps{id: id}, enter, data)
 		},
+	}
+	if verb == forgeapi.VerbPullRequest {
+		r.limit = forgePullRequestConcurrency
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -189,7 +239,7 @@ func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, 
 // TestForgeRunners_OnlyOwnerReplies runs two replicas and checks that exactly
 // one reply comes back for each request, from the shard owner.
 func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
-	for _, verb := range []string{forgeapi.VerbCheck, forgeapi.VerbRead} {
+	for _, verb := range []string{forgeapi.VerbCheck, forgeapi.VerbRead, forgeapi.VerbPullRequest} {
 		t.Run(verb, func(t *testing.T) {
 			s := startLedgerActionNATS(t)
 			url := s.ClientURL()
@@ -212,8 +262,11 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 			t.Cleanup(client.Close)
 			subject := bus.OperatorForgeSubject("core", verb)
 			body := checkBody(t)
-			if verb == forgeapi.VerbRead {
+			switch verb {
+			case forgeapi.VerbRead:
 				body = readBody(t)
+			case forgeapi.VerbPullRequest:
+				body = prBody(t)
 			}
 
 			// Wait for the subscriptions with a warm-up request on its own inbox.
@@ -260,6 +313,13 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 // stampOf returns the replica id that a reply carries.
 func stampOf(t *testing.T, verb string, data []byte) string {
 	t.Helper()
+	if verb == forgeapi.VerbPullRequest {
+		var rep forgeapi.PullRequestReply
+		if err := json.Unmarshal(data, &rep); err != nil {
+			t.Fatal(err)
+		}
+		return rep.URL
+	}
 	if verb == forgeapi.VerbCheck {
 		var rep forgeapi.CheckReply
 		if err := json.Unmarshal(data, &rep); err != nil {

@@ -33,6 +33,8 @@ func TestCanaryToken_NeverInReplyOrLog(t *testing.T) {
 		out = append(out, b...)
 		b, _ = json.Marshal(fx.ops.Read(context.Background(), readReq("a.txt")))
 		out = append(out, b...)
+		b, _ = json.Marshal(fx.ops.PullRequest(context.Background(), prReq()))
+		out = append(out, b...)
 		if strings.Contains(string(out), canary) || strings.Contains(fx.logBuf.String(), canary) {
 			t.Fatalf("token value reached a reply or a log for error %v", e)
 		}

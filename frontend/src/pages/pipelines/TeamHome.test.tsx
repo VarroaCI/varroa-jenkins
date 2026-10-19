@@ -16,9 +16,20 @@ const mockListRunners = vi.fn();
 const mockGetTeamCell = vi.fn();
 const mockListFleetLocks = vi.fn();
 const mockGetTeam = vi.fn();
+const mockGetMyPermissions = vi.fn();
+// mockAssistant is the assistant state the proposal card reads.
+const mockAssistant = { available: false, switchOn: false };
+vi.mock("../../components/assistant/AssistantProvider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../components/assistant/AssistantProvider")>()),
+  useAssistant: () => mockAssistant,
+}));
+vi.mock("./ProposePipelineCard", () => ({
+  default: () => <div>propose-card</div>,
+}));
 vi.mock("../../api/client", () => ({
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
   getTeam: (...args: unknown[]) => mockGetTeam(...args),
+  getMyPermissions: (...args: unknown[]) => mockGetMyPermissions(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),
   getTeamCell: (...args: unknown[]) => mockGetTeamCell(...args),
   listFleetLocks: (...args: unknown[]) => mockListFleetLocks(...args),
@@ -57,6 +68,10 @@ beforeEach(() => {
   mockUseEventStream.mockClear();
   mockUseEventStream.mockReturnValue({ lastEvent: null, readyState: "closed", error: null });
   mockGetTeam.mockReset();
+  mockGetMyPermissions.mockReset();
+  mockGetMyPermissions.mockResolvedValue({ global: {}, scopes: [], tenants: [] });
+  mockAssistant.available = false;
+  mockAssistant.switchOn = false;
 });
 
 /** LocationSpy publishes the current search string, so a test can read the
@@ -1202,5 +1217,77 @@ describe("TeamHome — a waiting team's transitions", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("TeamHome — the proposal card", () => {
+  const writer = {
+    global: {},
+    scopes: [],
+    tenants: [{ tenant: "payments", jobs: [], capabilities: { pipelines: { read: true, write: true } } }],
+  };
+  const reader = {
+    global: {},
+    scopes: [],
+    tenants: [{ tenant: "payments", jobs: [], capabilities: { pipelines: { read: true } } }],
+  };
+
+  beforeEach(() => {
+    mockListPipelines.mockReset();
+    mockListRunners.mockReset();
+    mockGetTeamCell.mockReset();
+    mockListRunners.mockResolvedValue([]);
+    mockGetTeamCell.mockResolvedValue({ state: "notCellHosted", canOpenCell: false });
+    mockAssistant.available = true;
+    mockAssistant.switchOn = true;
+  });
+
+  it("shows the card for a writer on an empty placed tenant", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", []));
+    mockGetMyPermissions.mockResolvedValue(writer);
+    renderPage("/pipelines/payments");
+    expect(await screen.findByText("propose-card")).toBeInTheDocument();
+    expect(screen.getByText("This list shows only the jobs your access covers.")).toBeInTheDocument();
+  });
+
+  it("hides the card from a reader", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", []));
+    mockGetMyPermissions.mockResolvedValue(reader);
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByText("No pipelines yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("propose-card")).not.toBeInTheDocument();
+  });
+
+  it("hides the card for a synthetic tenant", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("", []));
+    mockGetMyPermissions.mockResolvedValue(writer);
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByText("No pipelines yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("propose-card")).not.toBeInTheDocument();
+  });
+
+  it("hides the card when the assistant is unavailable", async () => {
+    mockAssistant.available = false;
+    mockListPipelines.mockResolvedValue(pipelineList("payments", []));
+    mockGetMyPermissions.mockResolvedValue(writer);
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(screen.getByText("No pipelines yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("propose-card")).not.toBeInTheDocument();
+  });
+
+  it("hides the card when the tenant already has jobs", async () => {
+    mockListPipelines.mockResolvedValue(pipelineList("payments", ["payments/deploy"]));
+    mockGetMyPermissions.mockResolvedValue(writer);
+    renderPage("/pipelines/payments");
+    await waitFor(() => {
+      expect(document.querySelector("table")).not.toBeNull();
+    });
+    expect(screen.queryByText("propose-card")).not.toBeInTheDocument();
   });
 });

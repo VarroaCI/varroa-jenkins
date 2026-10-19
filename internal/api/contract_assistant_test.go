@@ -43,5 +43,7 @@ func init() {
 			Body: map[string]any{"provider": "smoke", "apiKey": "key"}, Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 		contractCase{Name: "deleteMyAssistantKey-disabled", Method: "DELETE", Path: "/api/v1/me/assistant/key",
 			Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
+		contractCase{Name: "proposePipeline-disabled", Method: "POST", Path: "/api/v1/pipelines/team-a/propose",
+			Body: map[string]any{"repo": "https://git.example.org/acme/payments"}, Claims: adminClaims, WantStatus: http.StatusServiceUnavailable},
 	)
 }

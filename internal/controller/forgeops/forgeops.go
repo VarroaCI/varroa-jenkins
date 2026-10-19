@@ -1,5 +1,5 @@
-// Package forgeops answers the operator forge verbs: check and read. A
-// request names a Team and a repository. The operator on the Team's shard
+// Package forgeops answers the operator forge verbs: check, read, issue, and
+// pullrequest. A request names a Team and a repository. The operator on the Team's shard
 // owner reads the Team's tenant credentials, picks one that may push, and
 // calls the forge. The package never imports internal/controller.
 package forgeops
@@ -163,6 +163,7 @@ func (o *Ops) Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.Che
 		Forge:        string(w.Kind),
 		BaseBranch:   w.Info.DefaultBranch,
 		CredentialID: w.CredentialID,
+		Revision:     sha,
 	}
 }
 

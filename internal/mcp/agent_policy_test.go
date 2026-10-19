@@ -10,10 +10,6 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
 )
 
-// laterChangeTools names the tools of the agent policy that a later change
-// adds. A listed name in this map may be absent from the live registry.
-var laterChangeTools = map[string]bool{"open_pull_request": true}
-
 // liveByName indexes the live tool list by name.
 func liveByName(t *testing.T) map[string]listedTool {
 	t.Helper()
@@ -32,9 +28,6 @@ func TestPolicyListsNameRegisteredTools(t *testing.T) {
 	live := liveByName(t)
 	for _, list := range [][]string{policy.UnattendedEligible, policy.NeverUnattended} {
 		for _, name := range list {
-			if laterChangeTools[name] {
-				continue
-			}
 			if _, ok := live[name]; !ok {
 				t.Fatalf("policy names %s, which the live tool registry does not register", name)
 			}

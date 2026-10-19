@@ -60,11 +60,19 @@ func (s *Server) assistantIsAdmin(claims *auth.Claims) bool {
 	return s.deps.Authorizer != nil && s.deps.Authorizer.CanAdminAssistant(claims)
 }
 
+// sessionStart is a validated session start: the context values, the first
+// user text, and the requested provider and model.
+type sessionStart struct {
+	Values   map[string]any
+	First    string
+	Provider string
+	Model    string
+}
+
 // startAssistantSession creates a session for the caller. It answers a
 // *assistantFail for every refusal. A skipped session is stored and not run.
 // A running session starts its loop after its creation event.
 func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime, claims *auth.Claims, req assistantStartRequest, sealed string) (agent.Session, error) {
-	sub := claims.Subject
 	if (req.Message == "") == (req.Prompt == "") {
 		return agent.Session{}, failWith(http.StatusBadRequest, "", "send either a message or a prompt")
 	}
@@ -84,7 +92,14 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 		first = p.Text
 		values[agent.CtxPrompt] = p.ID
 	}
+	return s.createAssistantSession(ctx, rt, claims, sessionStart{Values: values, First: first, Provider: req.Provider, Model: req.Model}, sealed)
+}
 
+// createAssistantSession applies the start rules to a validated start: the
+// user switch, the busy cap, the context, the provider, the data level, and
+// the skip decision. It stores the session and starts its loop.
+func (s *Server) createAssistantSession(ctx context.Context, rt *AssistantRuntime, claims *auth.Claims, st sessionStart, sealed string) (agent.Session, error) {
+	sub := claims.Subject
 	user, err := rt.Store.GetSettings(ctx, agent.UserScope(sub))
 	if err != nil {
 		return agent.Session{}, err
@@ -100,7 +115,7 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 		return agent.Session{}, failWith(http.StatusTooManyRequests, assistantErrBusy, "too many sessions are running")
 	}
 
-	team, cluster, serr := s.assistantContext(ctx, claims, values)
+	team, cluster, serr := s.assistantContext(ctx, claims, st.Values)
 	if serr != nil {
 		return agent.Session{}, serr
 	}
@@ -109,7 +124,7 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 	if err != nil {
 		return agent.Session{}, err
 	}
-	name, model, entry, err := rt.chooseProvider(req, user, global)
+	name, model, entry, err := rt.chooseProvider(st.Provider, st.Model, user, global)
 	if err != nil {
 		return agent.Session{}, err
 	}
@@ -130,18 +145,7 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 		}
 	}
 
-	userLevel := user.DataSharing
-	if !userLevel.Valid() {
-		userLevel = agent.DataLogs
-	}
-	var trust agent.ProviderTrust
-	if entry != nil {
-		trust = entry.Endpoint.Trust
-	}
-	level := datashare.Effective(datashare.Inputs{
-		User: userLevel, Team: team, TenantLevels: global.TenantDataSharing,
-		Trust: trust, ExternalCeiling: rt.Config.ExternalDataSharing,
-	})
+	level := rt.sessionLevel(user, global, team, entry)
 
 	day, err := rt.Store.DaySpend(ctx, sub)
 	if err != nil {
@@ -158,10 +162,10 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 	}
 	sess := agent.Session{
 		ID: id, Kind: agent.KindAssistant, Principal: sub, Team: team, Cluster: cluster,
-		Trigger: agent.TriggerManual, Context: values, Provider: name, Model: model,
+		Trigger: agent.TriggerManual, Context: st.Values, Provider: name, Model: model,
 		KeySource: keySource, DataSharing: level, StartedAt: rt.now(),
 	}
-	userEv, err := agent.NewEvent(agent.EventUser, agent.UserPayload{Text: first})
+	userEv, err := agent.NewEvent(agent.EventUser, agent.UserPayload{Text: st.First})
 	if err != nil {
 		return agent.Session{}, err
 	}
@@ -184,6 +188,24 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 	}
 	rt.startRun(rt.RunConfig(claims, created, key, assistantTenantLookup{s: s, claims: claims}), loop.TriggerStart)
 	return created, nil
+}
+
+// sessionLevel is the effective data level of a session of the user, for the
+// tenant and the provider entry (nil when no provider is configured). The
+// route and the session start share this rule.
+func (rt *AssistantRuntime) sessionLevel(user, global agent.Settings, tenant string, entry *provider.Entry) agent.DataSharing {
+	userLevel := user.DataSharing
+	if !userLevel.Valid() {
+		userLevel = agent.DataLogs
+	}
+	var trust agent.ProviderTrust
+	if entry != nil {
+		trust = entry.Endpoint.Trust
+	}
+	return datashare.Effective(datashare.Inputs{
+		User: userLevel, Team: tenant, TenantLevels: global.TenantDataSharing,
+		Trust: trust, ExternalCeiling: rt.Config.ExternalDataSharing,
+	})
 }
 
 // assistantContext resolves the team and the cluster of a session from its
@@ -231,15 +253,15 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 // chooseProvider picks the provider and model of a new session. A provider
 // named in the request must exist. Otherwise the user setting, the global
 // default, then the registry default apply, and the entry may be nil.
-func (rt *AssistantRuntime) chooseProvider(req assistantStartRequest, user, global agent.Settings) (string, string, *provider.Entry, error) {
+func (rt *AssistantRuntime) chooseProvider(reqProvider, reqModel string, user, global agent.Settings) (string, string, *provider.Entry, error) {
 	if rt.Registry == nil {
 		return "", "", nil, nil
 	}
 	var entry provider.Entry
 	var ok bool
 	switch {
-	case req.Provider != "":
-		entry, ok = rt.Registry.Get(req.Provider)
+	case reqProvider != "":
+		entry, ok = rt.Registry.Get(reqProvider)
 		if !ok {
 			return "", "", nil, failWith(http.StatusBadRequest, "", "unknown provider")
 		}
@@ -255,7 +277,7 @@ func (rt *AssistantRuntime) chooseProvider(req assistantStartRequest, user, glob
 		}
 	}
 	name := entry.Endpoint.Name
-	model := req.Model
+	model := reqModel
 	if model == "" {
 		switch {
 		case user.Provider == name && user.Model != "":

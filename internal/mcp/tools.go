@@ -136,6 +136,7 @@ func registerAllTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	registerCellPoolTools(mcpServer, deps)
 	registerCellTools(mcpServer, deps)
 	registerTeamAgentTools(mcpServer, deps)
+	registerForgeTools(mcpServer, deps)
 }
 
 func requireClaims(ctx context.Context) (*auth.Claims, error) {

@@ -103,7 +103,10 @@ func (guardBlobStore) NewRangeReader(_ context.Context, _ string, _, _ int64) (i
 // path.
 type guardTenantResolver struct{ ref api.TenantRef }
 
-func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, _ string) ([]api.TenantRef, error) {
+func (g *guardTenantResolver) Resolve(_ context.Context, _ *auth.Claims, team string) ([]api.TenantRef, error) {
+	if team == "proposal-team" {
+		return []api.TenantRef{{Tenant: team, Team: team, Folder: team, Cluster: "core"}}, nil
+	}
 	return []api.TenantRef{g.ref}, nil
 }
 
@@ -262,6 +265,14 @@ func (guardForge) Issue(context.Context, string, forgeapi.IssueRequest) (forgeap
 	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 7, URL: "https://git.example.org/x/y/issues/7"}, nil
 }
 
+func (guardForge) Check(context.Context, string, forgeapi.CheckRequest) (forgeapi.CheckReply, error) {
+	return forgeapi.CheckReply{Status: forgeapi.Status{OK: true}, Forge: "gitea", BaseBranch: "main", CredentialID: "forge-cred"}, nil
+}
+
+func (guardForge) PullRequest(context.Context, string, forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error) {
+	return forgeapi.PullRequestReply{Status: forgeapi.Status{OK: true}, Number: 3, URL: "https://git.example.org/x/y/pulls/3"}, nil
+}
+
 // guardWebhooks answers every enqueue with success.
 type guardWebhooks struct{}
 
@@ -405,6 +416,9 @@ func guardArgsFor(name string) map[string]interface{} {
 		"post_note":    {"team": "obj", "job": "build", "body": "the build failed at deploy"},
 		"open_issue":   {"team": "obj", "title": "deploy failed", "body": "see the run"},
 		"send_webhook": {"team": "obj", "body": map[string]any{"status": "failed"}},
+		// The proposal tool answers through its own team (see guardTenantResolver).
+		"open_pull_request": {"team": "proposal-team", "repo": "https://git.example.org/x/y", "branch": "varroa/propose-pipeline",
+			"title": "t", "files": []map[string]any{{"path": "Jenkinsfile", "content": "pipeline {}"}}},
 	}
 	args, ok := byName[name]
 	if !ok {
