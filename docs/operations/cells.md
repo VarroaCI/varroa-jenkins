@@ -116,6 +116,13 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells. When Jenkins refuses a tenant item, the Team reports `TenantWarnings=True` with the reason `ItemsApplyFailed`. The message names the item and the Jenkins error. The next successful items apply clears it.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.
+- **Member role.** The operator grants read, discover, build, cancel, and replay on the folder's
+  subtree to each subject with pipelines write on the tenant. A narrowed grant gets only its job
+  globs. Cells stay headless, so this grant has no effect in the Jenkins web UI. Scans, restarts,
+  replays, and input answers check this grant. A `User` subject matches only the name the token
+  carries (preferred username, then email, then subject), so a `User` binding that names another
+  claim does not reach the cell. A cell on a member cluster grants this role to Team-membership
+  subjects only.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
   with no user record. A scan of a multibranch project or an organization folder runs as the system identity, so it can read the folder credentials.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at

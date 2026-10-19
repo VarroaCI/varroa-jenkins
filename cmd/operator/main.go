@@ -541,11 +541,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Team informer: the Jenkins member role of each tenant reads the
+	// Team-membership path, so the operator needs the same Team cache the
+	// BFF builds.
+	teamGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "teams"}
+	teamInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(teamGVR).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(teamGVR).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := teamInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		team := &v1alpha1.Team{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, team); err != nil {
+			return nil, err
+		}
+		return team, nil
+	}); err != nil {
+		logger.Error("failed to set transform on team informer", "error", err)
+		os.Exit(1)
+	}
+
 	userClaims := auth.ParseClaimNames(*oidcUserClaim)
-	// The operator resolves Jenkins assignments, never HTTP capabilities,
-	// and has no Team informer today; a nil teamInformer leaves the
-	// Team-membership tenant path contributing nothing.
-	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, nil,
+	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer,
 		*defaultRead, userClaims)
 	rbacGen := rbac.NewGenerator(rbacResolver)
 	rbacGen.Logger = logger
@@ -918,6 +947,7 @@ func main() {
 	go jenkinsRoleInformer.Run(ctx.Done())
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go controllerInformer.Run(ctx.Done())
+	go teamInformer.Run(ctx.Done())
 	// The cell-pool informer runs on every replica. The channel it feeds is
 	// in-process, so a non-leader replica's informer wakes nothing.
 	go cellPoolInformer.Run(ctx.Done())
@@ -927,6 +957,7 @@ func main() {
 		jenkinsRoleBindingInformer.HasSynced,
 		roleBindingInformer.HasSynced,
 		controllerInformer.HasSynced,
+		teamInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
 		os.Exit(1)

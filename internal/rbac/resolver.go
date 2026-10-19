@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -117,10 +118,9 @@ type Resolver struct {
 // userClaimNames map JWT claims to VarroaRoleBinding User subjects (e.g.
 // sub,preferred_username). Group subjects read Claims.Groups, which the OIDC
 // validator resolves from the configured group claims.
-// teamInformer feeds tenant capability resolution's Team-membership path. A
-// nil teamInformer leaves that path contributing nothing; the operator
-// passes nil because it resolves Jenkins assignments, never HTTP
-// capabilities.
+// teamInformer feeds tenant capability resolution's Team-membership path and
+// the Jenkins member role of each tenant (JenkinsRoleAssignments). A nil
+// teamInformer leaves that path contributing nothing.
 func NewResolver(
 	roleInformer cache.SharedIndexInformer,
 	roleBindingInformer cache.SharedIndexInformer,
@@ -1269,6 +1269,51 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 				Pattern:     ".*",
 				Permissions: []string{"hudson.model.Computer.Build"},
 				Subjects:    []SubjectAssignment{tenantSubj},
+			}
+
+			// The member role grants the person checks. The acting-user
+			// routes (scan, run, replay, restart, input answers) check
+			// the caller's own Jenkins permissions, so each subject with
+			// pipelines write on the tenant gets the item permissions
+			// here. A narrowed grant gets only its job globs. The walk
+			// is uncapped: a cut list would drop a subject silently.
+			// One binding can narrow the same tenant in several entries.
+			// Each entry names the same role, so the job globs of one
+			// binding merge into one pattern. A separate role per entry
+			// would collide by name, and Jenkins keeps one of them.
+			narrowed := map[string]*tenantMemberNarrowing{}
+			var narrowedOrder []string
+			for _, src := range r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team}) {
+				if !slices.Contains(src.Verbs, "write") {
+					continue
+				}
+				subjects := make([]v1alpha1.SubjectRef, 0, len(src.Subjects))
+				subjects = append(subjects, src.Subjects...)
+				if src.Jobs == nil {
+					upsertAssignment(acc, TenantMemberRoleName(team), "Item",
+						TenantMemberRolePattern(team), tenantMemberPermissions, subjects)
+					continue
+				}
+				if len(src.Jobs) == 0 {
+					continue
+				}
+				n, ok := narrowed[src.Binding]
+				if !ok {
+					n = &tenantMemberNarrowing{}
+					narrowed[src.Binding] = n
+					narrowedOrder = append(narrowedOrder, src.Binding)
+				}
+				// Every entry of one binding names the same subjects, so the
+				// subjects are set once, not appended once per entry.
+				if n.subjects == nil {
+					n.subjects = subjects
+				}
+				n.jobs = append(n.jobs, src.Jobs...)
+			}
+			for _, binding := range narrowedOrder {
+				n := narrowed[binding]
+				upsertAssignment(acc, TenantMemberNarrowedRoleName(team, binding), "Item",
+					TenantMemberNarrowedPattern(team, n.jobs), tenantMemberPermissions, n.subjects)
 			}
 		}
 	}

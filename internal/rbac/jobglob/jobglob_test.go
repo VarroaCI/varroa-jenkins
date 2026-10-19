@@ -1,6 +1,9 @@
 package jobglob
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 func TestMatch(t *testing.T) {
 	tests := []struct {
@@ -52,6 +55,30 @@ func TestMatch(t *testing.T) {
 				t.Errorf("Match(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestRegexpBody proves an anchored body gives the same result as Match for
+// every table case, so a caller that embeds the body matches like Match.
+func TestRegexpBody(t *testing.T) {
+	cases := []struct{ pattern, path string }{
+		{"checkout-api", "checkout-api"},
+		{"checkout-api", "checkout-api-2"},
+		{"release/*", "release/eu"},
+		{"release/*", "release/eu/deploy"},
+		{"release/**", "release/eu"},
+		{"release/**", "release/eu/deploy"},
+		{"eu?", "eu1"},
+		{"eu?", "eu"},
+		{"eu?deploy", "eu/deploy"},
+		{"v1.2+build", "v1.2+build"},
+		{"v1.2+build", "v1x2xbuild"},
+	}
+	for _, c := range cases {
+		re := regexp.MustCompile(`\A` + RegexpBody(c.pattern) + `\z`)
+		if got, want := re.MatchString(c.path), Match(c.pattern, c.path); got != want {
+			t.Errorf("anchored RegexpBody(%q) on %q = %v, Match = %v", c.pattern, c.path, got, want)
+		}
 	}
 }
 

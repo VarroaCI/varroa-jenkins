@@ -106,6 +106,35 @@ public class VarroaRunTriggerActionScanTest {
     }
 
     @Test
+    public void actingUserGroupWithBuildOnFolderScansOrganizationFolder() throws Exception {
+        // The person holds Item.BUILD on the folder through a group. The
+        // operator grants that permission to the tenant's write holders.
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        OrganizationFolder folder = j.jenkins.createProject(OrganizationFolder.class, "org-member");
+        ScannableOrganizationFolders.makeScannable(folder);
+        j.waitUntilNoActivity();
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.READ, Item.READ).everywhere().toEveryone()
+                .grant(Item.BUILD).onItems(folder).to("sbsoftware:Owners"));
+        VarroaRunTriggerAction action = new VarroaRunTriggerAction();
+        StringWriter out = new StringWriter();
+        StaplerResponse2 rsp = RefusalAssert.capturing(out);
+        String json = "{\"scanId\":\"scan-member\",\"jobPath\":\"" + folder.getFullName()
+                + "\",\"actingUser\":{\"name\":\"nate\",\"groups\":[\"sbsoftware:Owners\"]}}";
+
+        try (ACLContext ignored = asMite()) {
+            action.doScan(scanRequest(json), rsp);
+        }
+        j.waitUntilNoActivity();
+        VarroaBranchScans.tick();
+
+        verify(rsp).setStatus(202);
+        JSONObject row = (JSONObject) VarroaBranchScans.lastScanJson(folder.getFullName());
+        assertEquals("completed", row.getString("state"));
+        assertEquals("scan-member", row.getString("scanId"));
+    }
+
+    @Test
     public void actingUserWithoutBuildPermissionAnswers403AndRecordsRefusal() throws Exception {
         j.jenkins.setNumExecutors(0);
         // Every identity reads every item, and no identity holds Item.BUILD.

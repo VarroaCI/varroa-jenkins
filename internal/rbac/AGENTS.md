@@ -58,6 +58,18 @@ with what this package generates.
     source of the generated per-tenant Jenkins item role name and its folder
     pattern; `JenkinsRoleAssignments` calls them, so the BFF's cell grants
     read never opens a `JenkinsRole` object.
+  - Member role: `JenkinsRoleAssignments` also emits, per tenant on a cell,
+    a `varroa:tenant-member:<team>` Item role for every grant with pipelines
+    `write`. It carries the person checks of the acting-user routes (scan,
+    run, replay, restart, input answers). A grant with no `scope.tenants`
+    job list gets one role on the whole folder subtree. A tenant-scoped
+    grant gets `varroa:tenant-member:<team>:<binding>` with the job globs
+    (`TenantMemberNarrowedPattern`). The member walk
+    (`allTenantGrantSources`) is uncapped, because a cut list drops a
+    Jenkins subject silently. No generated name may equal
+    `varroa:tenant:<team>`: the plugin looks that exact name up.
+    The operator builds its resolver with a Team informer, so the
+    Team-membership path reaches the member role.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
     `scopeSuffix`) implements namespace/controller-name/label scoping shared
     by both binding kinds.

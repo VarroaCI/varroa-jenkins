@@ -3,8 +3,10 @@ package rbac
 import (
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/rbac/jobglob"
 )
 
 // MaxTenantGrants bounds one tenant's grant list. A cluster-wide binding
@@ -53,6 +55,61 @@ func TenantItemRolePattern(team string) string {
 	return "^" + regexp.QuoteMeta(team) + "($|/.*)$"
 }
 
+// TenantMemberRoleName returns the generated Jenkins item role name that
+// grants a tenant's write holders the build and replay permissions on the
+// tenant folder subtree. A narrowed grant appends its binding name.
+//
+// No name this package generates may equal TenantItemRoleName of a team:
+// the plugin's VarroaTenantResolver looks that exact name up, and a
+// collision would hand a member role to the service identity. Team names
+// hold no ":", so the "tenant-member:" prefix cannot collide.
+func TenantMemberRoleName(team string) string {
+	return "varroa:tenant-member:" + team
+}
+
+// TenantMemberRolePattern returns the folder pattern of the member role of
+// a team that a cluster-wide or Team-membership write grant produces. It
+// covers the tenant folder itself and every job under it.
+func TenantMemberRolePattern(team string) string {
+	return TenantItemRolePattern(team)
+}
+
+// TenantMemberNarrowedRoleName returns the member role name of one
+// tenant-scoped binding that narrows the grant to job globs.
+func TenantMemberNarrowedRoleName(team, binding string) string {
+	return "varroa:tenant-member:" + team + ":" + binding
+}
+
+// TenantMemberNarrowedPattern returns the folder pattern of a narrowed
+// member role. Each job glob is folder-relative, so the pattern joins the
+// team name and the glob body.
+func TenantMemberNarrowedPattern(team string, jobs []string) string {
+	bodies := make([]string, 0, len(jobs))
+	for _, g := range jobs {
+		bodies = append(bodies, jobglob.RegexpBody(g))
+	}
+	return "^" + regexp.QuoteMeta(team) + "/(?:" + strings.Join(bodies, "|") + ")$"
+}
+
+// tenantMemberPermissions lists the Jenkins permissions of a member role.
+// They cover the acting-user routes that check the person, not the service
+// identity: scan, run, replay, restart, and input answers.
+var tenantMemberPermissions = []string{
+	"hudson.model.Item.Read",
+	"hudson.model.Item.Discover",
+	"hudson.model.Item.Build",
+	"hudson.model.Item.Cancel",
+	"hudson.model.Run.Replay",
+	"hudson.model.View.Read",
+}
+
+// tenantMemberNarrowing collects the subjects and job globs of one binding
+// that narrows a tenant, across every scope entry the binding names.
+type tenantMemberNarrowing struct {
+	subjects []v1alpha1.SubjectRef
+	jobs     []string
+}
+
 // TenantGrantSources lists every grant that reaches one pipelines tenant.
 // It is the reverse of EffectiveTenantCapabilities: it walks the same three
 // paths with the subject filter removed, so it takes no claims.
@@ -74,8 +131,19 @@ func (r *Resolver) TenantGrantSources(tenant ParsedTenant) []TenantGrantSource {
 // TenantGrantSourcesTruncated returns the same grants TenantGrantSources
 // returns, and reports whether the cap dropped a grant.
 func (r *Resolver) TenantGrantSourcesTruncated(tenant ParsedTenant) ([]TenantGrantSource, bool) {
+	out := r.allTenantGrantSources(tenant)
+	if len(out) > MaxTenantGrants {
+		return out[:MaxTenantGrants], true
+	}
+	return out, false
+}
+
+// allTenantGrantSources returns every grant that reaches one pipelines
+// tenant, sorted, with no cap. Callers that generate Jenkins grants use it,
+// because a cut list would silently drop a subject from a Jenkins role.
+func (r *Resolver) allTenantGrantSources(tenant ParsedTenant) []TenantGrantSource {
 	if r == nil || tenant.Kind != TenantTeam || tenant.Team == "" {
-		return nil, false
+		return nil
 	}
 
 	var out []TenantGrantSource
@@ -90,10 +158,7 @@ func (r *Resolver) TenantGrantSourcesTruncated(tenant ParsedTenant) ([]TenantGra
 		}
 		return out[i].Binding < out[j].Binding
 	})
-	if len(out) > MaxTenantGrants {
-		return out[:MaxTenantGrants], true
-	}
-	return out, false
+	return out
 }
 
 // teamMembershipGrantSource resolves the Team-membership path. It applies
