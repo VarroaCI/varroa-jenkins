@@ -309,6 +309,25 @@ items:
             workflowBranchProjectFactory:
                 scriptPath: Jenkinsfile
     - kind: folder
+      name: challenge-multibranch-orphaned-strategy
+      items:
+        - kind: multibranch
+          name: multibranch-orphaned-strategy
+          displayName: Multibranch Orphaned Strategy
+          description: Multibranch pipeline with an orphaned item strategy
+          sourcesList:
+            - branchSource:
+                source:
+                    git:
+                        remote: https://github.com/fake-org/multibranch-orphan.git
+                        credentialsId: git-cred
+          projectFactory:
+            workflowBranchProjectFactory:
+                scriptPath: Jenkinsfile
+          orphanedItemStrategy:
+            daysToKeep: 7
+            numToKeep: 5
+    - kind: folder
       name: challenge-orgfolder-github-navigator
       items:
         - kind: organizationFolder
