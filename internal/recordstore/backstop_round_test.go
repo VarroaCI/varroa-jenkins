@@ -536,3 +536,76 @@ func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
 		t.Fatalf("lock notifications = %+v, want releasing then released", locks)
 	}
 }
+
+// TestRunBackstopRoundEndsAFailedResumeInOneRound asserts a resume that
+// failed on the only home target ends its run in one backstop round: the
+// takeover ends the arm, and the sweep that follows marks the run
+// resume-failed. The mark writes one webhook row and one release_agents
+// action, and no cancel.
+func TestRunBackstopRoundEndsAFailedResumeInOneRound(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+	seedFailedArm(t, db, runID, time.Now().Add(resumeArmWindow), "pod-live")
+	seedRunNodeFiles(t, db, runID, "nodes/a/config.xml", meshBuildRecordPath, meshProgramPath)
+	seedTenantAgentNamespace(t, db)
+	if _, err := db.Exec(`
+		UPDATE varroa.tenant_placements SET notification_webhook = $3::jsonb
+		 WHERE cluster = $1 AND tenant = $2
+	`, testCluster, testTenant, `{"url":"https://hooks.example.test/r","key":"whsec-test"}`); err != nil {
+		t.Fatalf("seed webhook: %v", err)
+	}
+
+	conn, cleanup := newSweepTestBus(t)
+	defer cleanup()
+	freshenSweepConsumer(t, conn)
+	received := subscribeClusterActions(t, conn)
+
+	sweepMetrics, err := NewInterruptedMetrics(noop.NewMeterProvider())
+	if err != nil {
+		t.Fatalf("new interrupted metrics: %v", err)
+	}
+	notifier, _, _ := newCaptureNotifier(t)
+	defer notifier.Close()
+	cfg := BackstopConfig{MaxSweepPending: DefaultSweepMaxPending, SweepMetrics: sweepMetrics, RunNotifier: notifier}
+
+	if _, err := RunBackstopRound(context.Background(), pool, conn, cfg); err != nil {
+		t.Fatalf("RunBackstopRound: %v", err)
+	}
+
+	var status, result, reason string
+	if err := db.QueryRow(`
+		SELECT status, COALESCE(result, ''), COALESCE(payload->>'interrupted_reason', '')
+		  FROM varroa.runs WHERE run_id = $1
+	`, runID).Scan(&status, &result, &reason); err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if status != StatusCompleted || result != "INTERRUPTED" || reason != ReasonResumeFailed {
+		t.Fatalf("status=%q result=%q reason=%q, want COMPLETED/INTERRUPTED/%s", status, result, reason, ReasonResumeFailed)
+	}
+
+	var deliveries int
+	if err := db.QueryRow(`SELECT count(*) FROM varroa.webhook_deliveries WHERE run_id = $1`, runID).
+		Scan(&deliveries); err != nil {
+		t.Fatalf("count webhook deliveries: %v", err)
+	}
+	if deliveries != 1 {
+		t.Fatalf("webhook deliveries = %d, want 1", deliveries)
+	}
+
+	select {
+	case a := <-received:
+		if a.Kind != LedgerActionReleaseAgents || a.RunID != runID.String() {
+			t.Fatalf("action = %+v, want release_agents for %s", a, runID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a release_agents action published")
+	}
+	select {
+	case a := <-received:
+		t.Fatalf("want no second action, got %+v", a)
+	case <-time.After(300 * time.Millisecond):
+	}
+}

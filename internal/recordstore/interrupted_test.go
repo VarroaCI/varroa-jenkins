@@ -421,6 +421,16 @@ func TestEvaluateResumeGuardRows(t *testing.T) {
 			wantDecided: true, wantOK: true, wantReason: ReasonResumeTimeout,
 		},
 		{
+			name:        "row 0c: an expired arm whose home target failed is marked resume-failed",
+			c:           runInterruptCandidate{mesh: &runMeshRecord{Resume: &runMeshResume{ArmExpires: &past, Failed: []string{"pod-live"}}}},
+			wantDecided: true, wantOK: true, wantReason: ReasonResumeFailed,
+		},
+		{
+			name:        "row 0a: an armed run inside its window keeps its shield after a failed target",
+			c:           runInterruptCandidate{mesh: &runMeshRecord{Resume: &runMeshResume{ArmExpires: &future, Failed: []string{"pod-live"}}}},
+			wantDecided: true, wantOK: false,
+		},
+		{
 			name: "row 0c: a dispatched run past its deadline with no fresher heartbeat is marked resume-timeout",
 			c: runInterruptCandidate{
 				mesh: &runMeshRecord{
@@ -1591,5 +1601,36 @@ func TestDeadInstancesTrimKeepsUnclaimedQueuedRunEntry(t *testing.T) {
 	}
 	if len(stored.deadInstances) != 11 {
 		t.Fatalf("want 1 kept entry plus 10 trimmed entries (11 total), got %d: %v", len(stored.deadInstances), stored.deadInstances)
+	}
+}
+
+// TestAfterMarkPublishesNoCancelForResumeFailed asserts a resume-failed
+// mark publishes no cancel. The failed resume dispatched nothing, so no
+// process holds the build and the marking alone ends the run.
+func TestAfterMarkPublishesNoCancelForResumeFailed(t *testing.T) {
+	conn := newTestActionConn(t)
+	received := make(chan LedgerAction, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject("core"), func(msg *nats.Msg) {
+		var a LedgerAction
+		_ = json.Unmarshal(msg.Data, &a)
+		received <- a
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	conn.NATSConn().Flush()
+
+	run := runInterruptCandidate{
+		runID: uuid.Must(uuid.NewV7()), cluster: "core", namespace: "team-a", cell: "cell-1", jobPath: "folder/job",
+		status: StatusRunning,
+		mesh:   &runMeshRecord{Resume: &runMeshResume{Failed: []string{"pod-live"}}},
+	}
+	afterMark(context.Background(), conn, JobHome{}, nil, nil, run, ReasonResumeFailed, "", nil)
+
+	select {
+	case a := <-received:
+		t.Fatalf("got %+v, want no action for resume-failed", a)
+	case <-time.After(500 * time.Millisecond):
 	}
 }

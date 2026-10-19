@@ -65,6 +65,7 @@ activity feed. The reason names the signal that decided. A completion webhook al
 | `tenant-moved` | the tenant moved and the old instance stopped reporting |
 | `no-heartbeat` | the run was silent for fifteen minutes on a cell reported not alive |
 | `resume-timeout` | the mesh claimed the run and the run did not come back |
+| `resume-failed` | the mesh sent the resume and the only target pod failed it |
 | `start-lost` | no start event arrived 75 minutes after the start mark |
 | `heartbeat-lost` | the running build was silent for 60 minutes |
 
@@ -80,6 +81,9 @@ ends a run on a dead cell when a stopped operator reports no liveness.
 The lost instance's agent pods keep running. A resume adopts a pod that ran a build step, so a
 Running pod stays for about 41 minutes, or about 46 when no running cell holds the slot. A pod that is not Running goes within about four minutes. See
 [Agent pod lifetime](tenant-pod-templates.md#agent-pod-lifetime).
+After a mark that ends the run, its agent pods go within about one minute. The operator deletes
+only the pods that the run's own state names. A `heartbeat-lost` mark releases no pods, because the
+owner can still resume. Other pods keep the bounds above.
 
 ## The re-fire
 

@@ -32,6 +32,10 @@ const (
 	// not bring back. One reason covers both windows: in each case the
 	// recorder tried to resume the run and the run did not come back.
 	ReasonResumeTimeout = "resume-timeout"
+	// ReasonResumeFailed names a run whose only home target failed its
+	// resume command. No other member can take the run, so the mark
+	// comes at once, not when the arm window passes.
+	ReasonResumeFailed = "resume-failed"
 	// ReasonStartLost names a run whose owner marked the start and whose
 	// start event did not reach the store within ClaimExpiryAge. The owner
 	// can still be alive, so the mark is provisional: a later run.started
@@ -185,6 +189,9 @@ func evaluateResumeGuard(now time.Time, c runInterruptCandidate) (reason string,
 	if r.Instance == "" {
 		if r.ArmExpires != nil && r.ArmExpires.After(now) {
 			return "", false, true
+		}
+		if len(r.Failed) > 0 {
+			return ReasonResumeFailed, true, true
 		}
 		return ReasonResumeTimeout, true, true
 	}
@@ -468,7 +475,7 @@ func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
 		return
 	}
 
-	if reason == ReasonResumeTimeout {
+	if reason == ReasonResumeTimeout || reason == ReasonResumeFailed {
 		metrics.addResumeTimeout(ctx)
 	}
 
@@ -635,6 +642,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		deleteRunState(ctx, pool, stateDeleter, c, logger)
 		afterMark(ctx, conn, jobHomeOf(row.members, true, c.jobPath), metrics, actionMetrics, c, reason,
 			interruptedRetry, logger)
+		releaseRunAgentsAfterMark(ctx, pool, conn, actionMetrics, c, reason, logger)
 		marked++
 	}
 	return marked, nil
@@ -726,6 +734,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		}
 		afterMark(ctx, conn, jobHomeOf(row.members, exists, c.jobPath), metrics, actionMetrics, c, reason,
 			decodeInterruptedRetry(row.policy), logger)
+		releaseRunAgentsAfterMark(ctx, pool, conn, actionMetrics, c, reason, logger)
 		marked++
 	}
 	return marked, nil
