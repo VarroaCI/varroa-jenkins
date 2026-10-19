@@ -6545,6 +6545,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 		ucBaseURL string
 		wantURL   string
 		wantDL    string
+		wantInfo  string
 	}{
 		{
 			name: "explicit defaults override UC Ready",
@@ -6558,6 +6559,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   "https://custom.example.com/update-center.json",
 			wantDL:    "https://custom.example.com/download",
+			wantInfo:  base + "/plugin-versions.json",
 		},
 		{
 			name: "explicit url only — download falls to UC",
@@ -6570,6 +6572,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   "https://custom.example.com/update-center.json",
 			wantDL:    base + "/download/plugins",
+			wantInfo:  base + "/plugin-versions.json",
 		},
 		{
 			name: "explicit download only — url falls to UC",
@@ -6582,6 +6585,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   base + "/update-center.actual.json",
 			wantDL:    "https://custom.example.com/download",
+			wantInfo:  base + "/plugin-versions.json",
 		},
 		{
 			name:      "UC Ready — both resolved",
@@ -6590,6 +6594,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   base + "/update-center.actual.json",
 			wantDL:    base + "/download/plugins",
+			wantInfo:  base + "/plugin-versions.json",
 		},
 		{
 			name:      "UC not Ready — both empty",
@@ -6598,6 +6603,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   "",
 			wantDL:    "",
+			wantInfo:  "",
 		},
 		{
 			name:      "UC no conditions — both empty",
@@ -6606,6 +6612,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   "",
 			wantDL:    "",
+			wantInfo:  "",
 		},
 		{
 			name:      "UC absent — both empty",
@@ -6614,6 +6621,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: base,
 			wantURL:   "",
 			wantDL:    "",
+			wantInfo:  "",
 		},
 		{
 			name:      "UC disabled base URL — both empty",
@@ -6622,6 +6630,7 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: "",
 			wantURL:   "",
 			wantDL:    "",
+			wantInfo:  "",
 		},
 		{
 			name: "UC disabled with explicit defaults — byte-for-byte unchanged",
@@ -6635,17 +6644,34 @@ func TestResolvePluginUpdateCenterURLs(t *testing.T) {
 			ucBaseURL: "",
 			wantURL:   "https://updates.jenkins.io/update-center.json",
 			wantDL:    "https://updates.jenkins.io/download",
+			wantInfo:  "",
+		},
+		{
+			name: "explicit plugin info overrides UC Ready",
+			defaults: &v1alpha1.ProvisioningDefaults{
+				Spec: v1alpha1.ProvisioningDefaultsSpec{
+					PluginInfoURL: "https://mirror.example.com/plugin-versions.json",
+				},
+			},
+			uc:        ucReady,
+			ucBaseURL: base,
+			wantURL:   base + "/update-center.actual.json",
+			wantDL:    base + "/download/plugins",
+			wantInfo:  "https://mirror.example.com/plugin-versions.json",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotURL, gotDL := resolvePluginUpdateCenterURLs(tt.defaults, tt.uc, tt.ucBaseURL)
+			gotURL, gotDL, gotInfo := resolvePluginUpdateCenterURLs(tt.defaults, tt.uc, tt.ucBaseURL)
 			if gotURL != tt.wantURL {
 				t.Errorf("url = %q, want %q", gotURL, tt.wantURL)
 			}
 			if gotDL != tt.wantDL {
 				t.Errorf("downloadURL = %q, want %q", gotDL, tt.wantDL)
+			}
+			if gotInfo != tt.wantInfo {
+				t.Errorf("infoURL = %q, want %q", gotInfo, tt.wantInfo)
 			}
 		})
 	}
@@ -6777,6 +6803,9 @@ func TestHandleProvisioning_UpdateCenterDisabledByteForByteUnchanged(t *testing.
 		}
 		if sts.PluginUpdateCenterDownloadURL != "https://updates.jenkins.io/download" {
 			t.Errorf("PluginUpdateCenterDownloadURL = %q, want explicit default", sts.PluginUpdateCenterDownloadURL)
+		}
+		if sts.PluginInfoURL != "" {
+			t.Errorf("PluginInfoURL = %q, want empty when UC is disabled", sts.PluginInfoURL)
 		}
 	}
 }

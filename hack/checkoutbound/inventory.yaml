@@ -258,6 +258,14 @@ connections:
     disable: "Yes, when an in-cluster update center serves every plugin. Otherwise No."
 
   - component: jenkins
+    destination: updates.jenkins.io (plugins-init plugin info)
+    hosts: []
+    purpose: plugins-init reads plugin-versions.json for the dependencies and checksums of exact pins.
+    protocol: HTTPS 443
+    control: ProvisioningDefaults pluginInfoURL or the in-cluster update center
+    disable: "Yes. Enable the in-cluster update center, or set pluginInfoURL to a mirror."
+
+  - component: jenkins
     destination: OIDC issuer (bundle variable)
     hosts: []
     purpose: The OIDC plugin discovers the sign-in provider.

@@ -509,6 +509,7 @@ sections describe.
   from the update center or the upstream ends in `/update-center.json`. Jenkins
   reads tool-installer metadata only from a site URL with that name; do not use
   `update-center.actual.json`.
+- **plugins-init update-center env.** The env holds `JENKINS_UC`, `JENKINS_UC_EXPERIMENTAL` (same value as `JENKINS_UC`), `JENKINS_UC_DOWNLOAD_URL`, and `JENKINS_PLUGIN_INFO`. `resolvePluginUpdateCenterURLs` resolves each with three tiers: explicit `ProvisioningDefaults`, the in-cluster update center when Ready, then empty. The Jenkins image sets `JENKINS_UC_EXPERIMENTAL` to upstream, and the tool reads plugin info for every exact pin.
 - **plugins-init reports on its termination log.** `pluginsInitScript`
   (`clientset_client.go`) writes one marker line that `plugininit_report.go`
   parses, so the format is a contract:
