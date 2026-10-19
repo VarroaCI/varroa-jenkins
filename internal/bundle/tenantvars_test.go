@@ -68,6 +68,16 @@ func TestParseTenantItems_VarInKeyResolves(t *testing.T) {
 	}
 }
 
+func TestParseTenantItems_EmptyListGivesEmptyManifest(t *testing.T) {
+	m, err := ParseTenantItems(map[string]string{"items.yaml": "items: []\n"})
+	if err != nil {
+		t.Fatalf("ParseTenantItems: %v", err)
+	}
+	if m == nil || len(m.Items) != 0 {
+		t.Fatalf("manifest = %+v, want no items", m)
+	}
+}
+
 func TestParseTenantItems_UnknownKeyFails(t *testing.T) {
 	data := map[string]string{
 		"items.yaml": "items:\n- name: job\n  notAKey: x\n",

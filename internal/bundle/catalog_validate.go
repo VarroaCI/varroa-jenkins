@@ -18,7 +18,8 @@ import (
 //     each entry must have artifactId and version.
 //   - jcasc:              must unmarshal into a non-empty map.
 //   - podtemplate:        must unmarshal into a non-empty list of pod-template objects.
-//   - item:               must unmarshal into a struct with a non-empty items list.
+//   - item:               must unmarshal into a mapping with an items key; an
+//     empty or null items list is valid and contributes no job.
 //   - rbac:               must unmarshal into a struct with a non-empty roles map.
 //   - pipeline-template:  content is one PipelineTemplate document, validated by
 //     internal/bundle/pipelinetemplate; declared variables' Type/AllowedValues are
@@ -97,13 +98,18 @@ type itemContent struct {
 	Items []map[string]any `yaml:"items"`
 }
 
+// An empty items list is valid. A cell then holds an empty tenant folder.
 func validateItemContent(content []byte) (bool, string) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return false, err.Error()
+	}
+	if _, ok := doc["items"]; !ok {
+		return false, "items key is missing"
+	}
 	var ic itemContent
 	if err := yaml.Unmarshal(content, &ic); err != nil {
 		return false, err.Error()
-	}
-	if len(ic.Items) == 0 {
-		return false, "items list is empty"
 	}
 	return true, ""
 }

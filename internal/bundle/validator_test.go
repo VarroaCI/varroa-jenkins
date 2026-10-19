@@ -355,6 +355,49 @@ spec:
   jenkinsfile: "pipeline { stages { stage('build') { steps { echo 'hi' } } } } "
 `
 
+func TestValidateCatalogItem_Item_EmptyListValid(t *testing.T) {
+	valid, msg := ValidateCatalogItem("item", []byte("items: []\n"), nil, "")
+	if !valid || msg != "" {
+		t.Errorf("expected valid with no message, got valid=%v msg=%q", valid, msg)
+	}
+}
+
+func TestValidateCatalogItem_Item_NullListValid(t *testing.T) {
+	valid, msg := ValidateCatalogItem("item", []byte("items:\n"), nil, "")
+	if !valid || msg != "" {
+		t.Errorf("expected valid with no message, got valid=%v msg=%q", valid, msg)
+	}
+}
+
+func TestValidateCatalogItem_Item_NonEmptyListValid(t *testing.T) {
+	valid, msg := ValidateCatalogItem("item", []byte("items:\n- kind: folder\n  name: a\n"), nil, "")
+	if !valid || msg != "" {
+		t.Errorf("expected valid with no message, got valid=%v msg=%q", valid, msg)
+	}
+}
+
+func TestValidateCatalogItem_Item_MissingKeyRejected(t *testing.T) {
+	for _, content := range []string{"", "jobs: []\n"} {
+		valid, msg := ValidateCatalogItem("item", []byte(content), nil, "")
+		if valid {
+			t.Errorf("content %q: expected invalid", content)
+		}
+		if !strings.Contains(msg, "items key is missing") {
+			t.Errorf("content %q: message = %q, want items key is missing", content, msg)
+		}
+	}
+}
+
+func TestValidateCatalogItem_Item_NonListRejected(t *testing.T) {
+	valid, msg := ValidateCatalogItem("item", []byte("items: hello\n"), nil, "")
+	if valid {
+		t.Fatal("expected invalid for a non-list items value")
+	}
+	if msg == "" {
+		t.Error("expected a non-empty message")
+	}
+}
+
 func TestValidateCatalogItem_PipelineTemplate_ValidDocument(t *testing.T) {
 	valid, msg := ValidateCatalogItem("pipeline-template", []byte(validPipelineTemplateDoc), nil, "")
 	if !valid {

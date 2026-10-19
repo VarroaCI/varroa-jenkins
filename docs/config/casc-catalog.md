@@ -18,6 +18,8 @@ A `CatalogSource` turns reusable Git or OCI content into read-only
 `groovy` items cannot enter a `ComposedBundle`. Their controls are documented
 in [executeGroovy security](../security/execute-groovy.md).
 
+An `item` item can hold an empty list, `items: []`. It adds no job.
+
 On a cell, the `podtemplate` items of a tenant bundle go on the tenant's own
 cloud, with the tenant's name, namespace, service account, and label written on
 each template. See [Tenant pod templates](../operations/tenant-pod-templates.md).
