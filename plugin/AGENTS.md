@@ -70,6 +70,13 @@ the root AGENTS.md greenfield rule.
   answers true once for each branch job that has no revision seen or built, when a live
   entry names the head at the current revision. Each owner consumes an entry once. Tags
   never build.
+- **`VarroaCellAgentRelease.java`** is a `@Terminator` active only when `VARROA_CELL=true`
+  (read once, like `VarroaCellJobDslBlock`). At a graceful stop it terminates every
+  `AbstractCloudSlave` whose computer is idle, within a 30 s budget, on at most four
+  daemon threads. Each agent is re-checked and marked offline under the queue lock before
+  its termination, so no build takes it in between. A busy agent stays, because a resume
+  can adopt its pod. Permanent agents are never touched. A hard kill skips it, so the
+  kubernetes plugin garbage collection (2400 s) removes those pods.
 - **Activity emitters** (feed the push-based Activity page): `ActivitySink.java`
   (bounded, non-blocking, in-memory), `ActivityEvent.java` (normalized shape — actor,
   itemPath, buildNumber, result, url, message; `controller`/`namespace`/`phase`/`reason`
