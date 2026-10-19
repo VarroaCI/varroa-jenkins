@@ -331,6 +331,17 @@ var expectedColumns = map[string][]columnSpec{
 		{"updated_at", "timestamp with time zone", false},
 		{"updated_by", "text", true},
 	},
+	// The team_agent_spend table comes from migration 00040. The recorder
+	// keeps one row per Team and UTC day.
+	"team_agent_spend": {
+		{"team", "text", false},
+		{"day", "date", false},
+		{"tokens", "bigint", false},
+		{"sessions", "integer", false},
+		{"skipped", "integer", false},
+		{"failed", "integer", false},
+		{"updated_at", "timestamp with time zone", false},
+	},
 	"upstream_origins": {
 		{"intent_key", "text", false},
 		{"cluster", "text", false},
@@ -546,6 +557,7 @@ func TestNonPartitionedTables(t *testing.T) {
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
 		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
 		"run_notes", "agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
+		"team_agent_spend",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,

@@ -109,6 +109,23 @@ func (g *githubClient) OpenPullRequest(ctx context.Context, r Repo, base, head, 
 	return PullRequest{URL: out.HTMLURL, Number: out.Number}, nil
 }
 
+// CreateIssue opens an issue. The labels are sent by name, which GitHub
+// accepts for a label that the repository carries.
+func (g *githubClient) CreateIssue(ctx context.Context, r Repo, title, bodyText string, labels []string) (Issue, error) {
+	in := map[string]any{"title": title, "body": bodyText}
+	if len(labels) > 0 {
+		in["labels"] = labels
+	}
+	var out struct {
+		HTMLURL string `json:"html_url"`
+		Number  int    `json:"number"`
+	}
+	if err := g.sendJSON(ctx, http.MethodPost, repoPath(r)+"/issues", in, &out); err != nil {
+		return Issue{}, err
+	}
+	return Issue{Number: out.Number, URL: out.HTMLURL}, nil
+}
+
 // DeleteBranch deletes a branch.
 func (g *githubClient) DeleteBranch(ctx context.Context, r Repo, branch string) error {
 	return g.sendJSON(ctx, http.MethodDelete, repoPath(r)+"/git/refs/heads/"+escapePath(branch), nil, nil)

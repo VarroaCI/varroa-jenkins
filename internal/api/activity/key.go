@@ -1,4 +1,4 @@
-package recordstore
+package activity
 
 import (
 	"crypto/sha256"
@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 )
 
 // eventKeySeparator joins EventKey's fields. It is the U+001F
@@ -21,7 +19,7 @@ const eventKeySeparator = "\x1f"
 // so ingest can insert once and ignore a duplicate. The timestamp is
 // normalized because a producer's raw string is not stable across
 // encoders.
-func EventKey(e activity.Event) string {
+func EventKey(e Event) string {
 	build := ""
 	if e.BuildNumber != 0 {
 		build = strconv.FormatInt(e.BuildNumber, 10)

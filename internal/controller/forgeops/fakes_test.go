@@ -66,6 +66,15 @@ type fakeClient struct {
 	resolveErr error
 	files      map[string]forge.Entry
 	readErr    error
+	// revs maps a revision name to its commit. When set, Resolve answers from
+	// it and an unknown name is not found.
+	revs map[string]string
+	// issueErr is returned by CreateIssue. issueLabels records each call.
+	issueErr    error
+	issueLabels [][]string
+	// bySHA holds the files of each commit. When set, Read answers from the
+	// commit named in the call instead of files.
+	bySHA map[string]map[string]forge.Entry
 }
 
 func (f *fakeClient) Repository(context.Context, forge.Repo) (forge.Info, error) {
@@ -80,15 +89,26 @@ func (f *fakeClient) BranchHead(_ context.Context, _ forge.Repo, b string) (stri
 	return sha, ok, nil
 }
 
-func (f *fakeClient) Resolve(context.Context, forge.Repo, string) (string, error) {
+func (f *fakeClient) Resolve(_ context.Context, _ forge.Repo, rev string) (string, error) {
+	if f.revs != nil {
+		sha, ok := f.revs[rev]
+		if !ok {
+			return "", forge.ErrNotFound
+		}
+		return sha, nil
+	}
 	return f.resolveSHA, f.resolveErr
 }
 
-func (f *fakeClient) Read(_ context.Context, _ forge.Repo, _, p string, limit int) (forge.Entry, error) {
+func (f *fakeClient) Read(_ context.Context, _ forge.Repo, sha, p string, limit int) (forge.Entry, error) {
 	if f.readErr != nil {
 		return forge.Entry{}, f.readErr
 	}
-	e, ok := f.files[p]
+	files := f.files
+	if f.bySHA != nil {
+		files = f.bySHA[sha]
+	}
+	e, ok := files[p]
 	if !ok {
 		return forge.Entry{}, forge.ErrNotFound
 	}
@@ -110,10 +130,20 @@ func (f *fakeClient) OpenPullRequest(context.Context, forge.Repo, string, string
 }
 func (f *fakeClient) DeleteBranch(context.Context, forge.Repo, string) error { return nil }
 
+// CreateIssue answers the canned issue, or issueErr, and records the labels.
+func (f *fakeClient) CreateIssue(_ context.Context, _ forge.Repo, _, _ string, labels []string) (forge.Issue, error) {
+	f.issueLabels = append(f.issueLabels, labels)
+	if f.issueErr != nil {
+		return forge.Issue{}, f.issueErr
+	}
+	return forge.Issue{Number: 9, URL: "https://git.example.org/team/app/issues/9"}, nil
+}
+
 // fixture wires an Ops over a Team and a fake forge. clients maps a token
 // value to the client that the token builds.
 type fixture struct {
 	ops     *Ops
+	store   *crdstore.Fake
 	secrets *fakeSecrets
 	kind    forge.Kind
 	detectE error
@@ -137,6 +167,7 @@ func newFixture(t *testing.T, teamAgentNS string) *fixture {
 	}
 	crdstore.MustSeed(store, team)
 	fx := &fixture{
+		store:   store,
 		secrets: &fakeSecrets{},
 		kind:    forge.KindGitea,
 		clients: map[forge.Token]forge.Client{},

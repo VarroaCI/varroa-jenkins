@@ -299,6 +299,9 @@ func (v *Validator) Verify(ctx context.Context, rawToken string) (*Claims, error
 	if err := RefuseLocalPrefix(claims); err != nil {
 		return nil, err
 	}
+	if ReservedSubject(claims) {
+		return nil, ErrReservedSubject
+	}
 	return claims, nil
 }
 

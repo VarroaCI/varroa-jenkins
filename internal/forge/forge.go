@@ -7,6 +7,7 @@ package forge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -95,7 +96,33 @@ type Client interface {
 	OpenPullRequest(ctx context.Context, r Repo, base, head, title, body string) (PullRequest, error)
 	// DeleteBranch deletes a branch.
 	DeleteBranch(ctx context.Context, r Repo, branch string) error
+	// CreateIssue opens an issue with the labels. A label that the
+	// repository does not carry fails with a LabelError.
+	CreateIssue(ctx context.Context, r Repo, title, body string, labels []string) (Issue, error)
 }
+
+// Issue is an issue that a forge created.
+type Issue struct {
+	Number int
+	URL    string
+}
+
+// ErrNoSuchLabel reports a label name that the repository does not carry.
+var ErrNoSuchLabel = errors.New("label not found in the repository")
+
+// LabelError names the label that the repository does not carry. It matches
+// ErrNoSuchLabel with errors.Is.
+type LabelError struct {
+	Name string
+}
+
+// Error names the label.
+func (e *LabelError) Error() string {
+	return fmt.Sprintf("label %q not found in the repository", e.Name)
+}
+
+// Is matches ErrNoSuchLabel.
+func (e *LabelError) Is(target error) bool { return target == ErrNoSuchLabel }
 
 // StatusError reports an HTTP status that has no sentinel error. It never
 // holds the response body.
@@ -122,7 +149,11 @@ func Detect(ctx context.Context, h *http.Client, host string) (Kind, error) {
 func New(kind Kind, host string, token Token, h *http.Client) Client {
 	switch kind {
 	case KindGitHub:
-		return newClient(KindGitHub, "https://api.github.com", token, h)
+		if host == "" || strings.EqualFold(host, "github.com") {
+			return newClient(KindGitHub, "https://api.github.com", token, h)
+		}
+		// GitHub Enterprise Server serves its REST API under /api/v3.
+		return newClient(KindGitHub, "https://"+hostURL(host)+"/api/v3", token, h)
 	case KindGitea:
 		return newClient(KindGitea, "https://"+hostURL(host)+"/api/v1", token, h)
 	}

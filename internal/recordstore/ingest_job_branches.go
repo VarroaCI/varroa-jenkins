@@ -89,7 +89,8 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 		_ = tx.Rollback(ctx)
 	}()
 
-	result, err := applyJobBranchesTx(ctx, tx, env, payload)
+	var out activityOutbox
+	result, err := applyJobBranchesTx(ctx, tx, env, payload, &out)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -97,6 +98,7 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return ApplyResult{}, fmt.Errorf("commit job.branches transaction: %w", err)
 	}
+	publishActivityAfterCommit(g.conn, &out)
 	return result, nil
 }
 
@@ -104,7 +106,7 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 // job.branches envelope inside tx. The watermark row is the one
 // job_schedule_cells row that job.schedules also locks. The branch
 // watermark is its own column, so the two kinds never reject each other.
-func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobBranchesPayload) (ApplyResult, error) {
+func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobBranchesPayload, out *activityOutbox) (ApplyResult, error) {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.job_schedule_cells (cluster, namespace, cell, observed_at)
 		VALUES ($1, $2, $3, '-infinity')
@@ -158,6 +160,11 @@ func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payl
 			}
 			s := string(b)
 			lastScanJSON = &s
+		}
+		if project.LastScan != nil && isBranchScanFailure(project.LastScan) {
+			if err := recordBranchScanFailure(ctx, tx, env, project, out); err != nil {
+				return ApplyResult{}, err
+			}
 		}
 		// A repeat envelope carries last_scan as null until the scan path
 		// fills it, so COALESCE keeps the last scan that was stored.

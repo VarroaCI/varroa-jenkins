@@ -20,6 +20,7 @@ reconciler phases, gRPC server internals, or HTTP route handlers — those are
 One entrypoint per subfolder, each with its own top-of-file doc comment
 stating what it is/is not responsible for:
 
+- Operator flag `--team-agents` (env `VARROA_TEAM_AGENTS`) starts the leader-elected `teamagent` ticker on a core install.
 - **`operator/`** (`bin/varroa-operator`) — registers the controller-runtime
   reconciler for `Controller` CRDs; drives the `Pending→Provisioning→Running→
   Connected→Failed` phase state machine over NATS and serves the per-controller

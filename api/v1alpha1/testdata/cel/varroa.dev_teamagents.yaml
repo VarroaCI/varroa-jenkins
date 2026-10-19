@@ -1,0 +1,81 @@
+# CEL cases for charts/varroa/crds/varroa.dev_teamagents.yaml.
+# Schema-only refusals (enum, minimum, and the generated unattendedWrites
+# enum) live in teamagent_crd_test.go, because the harness fails a fixture
+# that the schema already refuses.
+base:
+  apiVersion: varroa.dev/v1alpha1
+  kind: TeamAgent
+  metadata:
+    name: agent-a
+  spec:
+    teamRef:
+      name: team-a
+    triggers:
+      - type: run.failed
+    instructions:
+      source: repo-a
+      path: .varroa/team-agent.md
+cases:
+  - name: name of 63 characters accepted
+    rule: |-
+      size(self.metadata.name) <= 63
+    field: ""
+    new: {metadata: {name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}
+    want: accept
+  - name: name of 64 characters refused
+    rule: |-
+      size(self.metadata.name) <= 63
+    field: ""
+    new: {metadata: {name: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}}
+    want: reject
+
+  - name: relative instructions path accepted
+    rule: |-
+      !has(self.path) || (!self.path.startsWith('/') && !self.path.matches('(^|/)[.][.](/|$)'))
+    field: spec.instructions
+    new: {spec: {instructions: {source: repo-a, path: docs/agent.md}}}
+    want: accept
+  - name: instructions path with a dot-dot segment refused
+    rule: |-
+      !has(self.path) || (!self.path.startsWith('/') && !self.path.matches('(^|/)[.][.](/|$)'))
+    field: spec.instructions
+    new: {spec: {instructions: {source: repo-a, path: a/../b}}}
+    want: reject
+  - name: absolute instructions path refused
+    rule: |-
+      !has(self.path) || (!self.path.startsWith('/') && !self.path.matches('(^|/)[.][.](/|$)'))
+    field: spec.instructions
+    new: {spec: {instructions: {source: repo-a, path: /etc/agent.md}}}
+    want: reject
+
+  - name: manual trigger without debounce accepted
+    rule: |-
+      !(self.type == 'manual' && has(self.debounce))
+    field: spec.triggers[0]
+    new: {spec: {triggers: [{type: manual}]}}
+    want: accept
+  - name: manual trigger with debounce refused
+    rule: |-
+      !(self.type == 'manual' && has(self.debounce))
+    field: spec.triggers[0]
+    new: {spec: {triggers: [{type: manual, debounce: 5m}]}}
+    want: reject
+
+  - name: debounce of 1m accepted
+    rule: |-
+      !has(self.debounce) || (duration(self.debounce) >= duration('1m') && duration(self.debounce) <= duration('24h'))
+    field: spec.triggers[0]
+    new: {spec: {triggers: [{type: run.failed, debounce: 1m}]}}
+    want: accept
+  - name: debounce of 30s refused
+    rule: |-
+      !has(self.debounce) || (duration(self.debounce) >= duration('1m') && duration(self.debounce) <= duration('24h'))
+    field: spec.triggers[0]
+    new: {spec: {triggers: [{type: run.failed, debounce: 30s}]}}
+    want: reject
+  - name: debounce of 25h refused
+    rule: |-
+      !has(self.debounce) || (duration(self.debounce) >= duration('1m') && duration(self.debounce) <= duration('24h'))
+    field: spec.triggers[0]
+    new: {spec: {triggers: [{type: run.failed, debounce: 25h}]}}
+    want: reject

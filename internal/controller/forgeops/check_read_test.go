@@ -168,17 +168,56 @@ func TestRead_DirectoryEntriesSorted(t *testing.T) {
 	}
 }
 
-func TestRead_ReadOnlyCredentialSkipped(t *testing.T) {
+// TestRead_ReadOnlyCredentialServesRead checks that a credential which can
+// read but not push serves a read. The read path does not need push access.
+func TestRead_ReadOnlyCredentialServesRead(t *testing.T) {
 	fx := newFixture(t, "agents-payments")
 	fx.secrets.addCred("sa", "a", "tok-a")
 	fx.secrets.addCred("sb", "b", "tok-b")
-	fx.clients[forge.NewToken([]byte("tok-a"))] = &fakeClient{info: forge.Info{DefaultBranch: "main"}}
-	writer := pushable()
-	writer.files[""] = forge.Entry{Dir: true, Children: []forge.Child{{Name: "Jenkinsfile", Type: "file"}}}
-	fx.clients[forge.NewToken([]byte("tok-b"))] = writer
+	reader := &fakeClient{info: forge.Info{DefaultBranch: "main"}, resolveSHA: testSHA,
+		files: map[string]forge.Entry{"": {Dir: true, Children: []forge.Child{{Name: "Jenkinsfile", Type: "file"}}}}}
+	fx.clients[forge.NewToken([]byte("tok-a"))] = reader
+	fx.clients[forge.NewToken([]byte("tok-b"))] = pushable()
 	rep := fx.ops.Read(context.Background(), readReq("."))
-	if !rep.OK || rep.ReadDir == nil {
+	if !rep.OK || rep.ReadDir == nil || len(rep.Entries) != 1 {
 		t.Fatalf("reply %+v", rep)
+	}
+}
+
+// TestRead_RevisionAnswersThatRevision checks that a read at a named revision
+// answers the commit of that revision, not the default branch.
+func TestRead_RevisionAnswersThatRevision(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	c := pushable()
+	c.revs = map[string]string{"main": "sha-new", "v1": "sha-old"}
+	c.bySHA = map[string]map[string]forge.Entry{
+		"sha-new": {"README.md": {Size: 3, Content: []byte("new")}},
+		"sha-old": {"README.md": {Size: 3, Content: []byte("old")}},
+	}
+	oneWriter(fx, c)
+	req := readReq("README.md")
+	req.Revision = "v1"
+	rep := fx.ops.Read(context.Background(), req)
+	if !rep.OK || rep.Revision != "sha-old" || rep.Content != "old" {
+		t.Fatalf("reply %+v, want the v1 commit", rep)
+	}
+}
+
+// TestRead_ForeignHostNoCredential checks that a credential whose allowed-hosts
+// annotation does not list the repository host is never used, so no forge
+// call is made.
+func TestRead_ForeignHostNoCredential(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	fx.secrets.addCred("sa", "a", "tok-a")
+	fx.secrets.ann["sa"]["varroa.dev/allowed-hosts"] = "other.example.org"
+	fx.clients[forge.NewToken([]byte("tok-a"))] = pushable()
+	noForgeCall(fx)
+	rep := fx.ops.Read(context.Background(), readReq("README.md"))
+	if rep.OK || rep.Code != forgeapi.CodeNoMatchingCredential {
+		t.Fatalf("reply %+v, want no_matching_credential", rep)
+	}
+	if len(fx.built) != 0 {
+		t.Fatalf("a client was built for a foreign host: %d", len(fx.built))
 	}
 }
 

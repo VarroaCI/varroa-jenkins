@@ -51,6 +51,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
+	"github.com/varroaci/varroa-jenkins/internal/controller/teamagents"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/forge"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
@@ -82,6 +83,7 @@ func main() {
 	oidcUserClaim := flag.String("oidc-user-claim", envDefault("VARROA_OIDC_USER_CLAIM", "preferred_username,sub"), "comma-separated JWT claims for kind:User bindings")
 	oidcGroupClaim := flag.String("oidc-group-claim", envDefault("VARROA_OIDC_GROUP_CLAIM", "groups"), "comma-separated JWT claims for kind:Group bindings inside Jenkins")
 	defaultRead := flag.Bool("default-read", false, "Allow any authenticated user to read controllers without explicit binding")
+	teamAgents := flag.Bool("team-agents", envBool("VARROA_TEAM_AGENTS", false), "Reconcile Team agent role bindings (core install only)")
 	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "Log format: text, json")
 	maxConcurrent := flag.Int("max-concurrent-reconciles", envInt("VARROA_MAX_CONCURRENT_RECONCILES", 8), "Max concurrent Controller reconciles")
@@ -845,6 +847,10 @@ func main() {
 			handle: func(ctx context.Context, d []byte) []byte {
 				return handleForgeRead(ctx, logger, forgeAnswerer, enterTeam, d)
 			}},
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbIssue, limit: forgeConcurrency, logger: logger,
+			handle: func(ctx context.Context, d []byte) []byte {
+				return handleForgeIssue(ctx, logger, forgeAnswerer, enterTeam, operatorNamespace, d)
+			}},
 	} {
 		if err := mgr.Add(r); err != nil {
 			logger.Error("failed to add forge runner", "verb", r.verb, "error", err)
@@ -1149,6 +1155,31 @@ func main() {
 	}); err != nil {
 		logger.Error("failed to add runner runnable", "error", err)
 		os.Exit(1)
+	}
+
+	// 3d. Team agent bindings (30s, immediate, leader-elected). The bindings
+	// grant each accepted TeamAgent its developer role on its Team. The
+	// ticker runs only on a core install, behind --team-agents.
+	if *teamAgents {
+		teamAgentReconciler := &teamagents.Reconciler{
+			Backend:          clientsetClient,
+			ReleaseNamespace: operatorNamespace,
+			Logger:           logger,
+		}
+		if err := mgr.Add(&tickerRunnable{
+			name:      "teamagent",
+			interval:  30 * time.Second,
+			immediate: true,
+			tick: func(ctx context.Context) {
+				if err := teamAgentReconciler.Tick(ctx); err != nil {
+					logger.Warn("team agent binding reconcile failed", "error", err)
+				}
+			},
+			logger: logger,
+		}); err != nil {
+			logger.Error("failed to add teamagent runnable", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// 4. Built-in role reconciler (60s, immediate).

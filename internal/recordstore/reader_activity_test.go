@@ -22,7 +22,7 @@ func seedActivityEvents(t *testing.T, events []activity.Event) *pgxpool.Pool {
 	ctx := context.Background()
 	for i := range events {
 		events[i].Normalize()
-		key := EventKey(events[i])
+		key := activity.EventKey(events[i])
 		inserted, err := ing.Insert(ctx, events[i], key)
 		if err != nil {
 			t.Fatalf("insert event %d: %v", i, err)
@@ -163,7 +163,7 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 			t.Fatalf("ListActivity backward page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
-			seen[EventKey(e)]++
+			seen[activity.EventKey(e)]++
 		}
 		if !page.HasMore {
 			break
@@ -193,7 +193,7 @@ func TestListActivity_KeysetPaging_NoGapNoRepeat(t *testing.T) {
 			t.Fatalf("ListActivity forward page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
-			seen[EventKey(e)]++
+			seen[activity.EventKey(e)]++
 		}
 		if !page.HasMore {
 			break
@@ -249,7 +249,7 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 			t.Fatalf("ListActivity backward page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
-			seen[EventKey(e)]++
+			seen[activity.EventKey(e)]++
 		}
 		if !page.HasMore {
 			break
@@ -279,7 +279,7 @@ func TestListActivity_KeysetPaging_TiedTimestamps(t *testing.T) {
 			t.Fatalf("ListActivity forward page %d: %v", pages, err)
 		}
 		for _, e := range page.Items {
-			seen[EventKey(e)]++
+			seen[activity.EventKey(e)]++
 		}
 		if !page.HasMore {
 			break
@@ -319,7 +319,7 @@ func TestListActivity_CursorErrors(t *testing.T) {
 		// Force a cursor to exist by requesting a page smaller than the
 		// data: fabricate one from the returned item so this test does not
 		// depend on HasMore with only one seeded row.
-		cur := encodeActivityCursor(activityCursor{Direction: "backward", Filters: activityFilterKey(qA), TS: page.Items[0].Timestamp, EventKey: EventKey(page.Items[0])})
+		cur := encodeActivityCursor(activityCursor{Direction: "backward", Filters: activityFilterKey(qA), TS: page.Items[0].Timestamp, EventKey: activity.EventKey(page.Items[0])})
 		qB := ActivityQuery{Cluster: "c2", Limit: 1, Cursor: cur, Scope: activity.Scope{All: true}}
 		if _, err := r.ListActivity(ctx, qB); !errors.Is(err, activity.ErrInvalidCursor) {
 			t.Fatalf("got err = %v, want ErrInvalidCursor", err)

@@ -163,9 +163,9 @@ func enqueueWebhookDelivery(ctx context.Context, tx pgx.Tx, intent *intentRow, p
 
 	err = tx.QueryRow(ctx, `
 		SELECT delivery_id FROM varroa.webhook_deliveries
-		WHERE run_id = $1 AND delivery_key <> $2
+		WHERE run_id = $1 AND delivery_key LIKE $2
 		ORDER BY created_at DESC LIMIT 1
-	`, intent.runID, webhookKeyCompleted).Scan(&body.Supersedes)
+	`, intent.runID, webhookKeyInterruptedPrefix+"%").Scan(&body.Supersedes)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("read synthetic delivery: %w", err)
 	}
@@ -182,8 +182,8 @@ func enqueueWebhookDelivery(ctx context.Context, tx pgx.Tx, intent *intentRow, p
 	if _, err := tx.Exec(ctx, `
 		UPDATE varroa.webhook_deliveries
 		SET state = 'dropped', last_error = 'superseded by the run completion', updated_at = now()
-		WHERE run_id = $1 AND delivery_key <> $2 AND state = 'pending'
-	`, intent.runID, webhookKeyCompleted); err != nil {
+		WHERE run_id = $1 AND delivery_key LIKE $2 AND state = 'pending'
+	`, intent.runID, webhookKeyInterruptedPrefix+"%"); err != nil {
 		return false, fmt.Errorf("drop superseded synthetic delivery: %w", err)
 	}
 	return true, nil

@@ -70,6 +70,7 @@ control plane's async transport — no other package talks to NATS directly.
   (core NATS request-reply, BFF to recorder, queue group `recorder`:
   force-release one releasing fleet lock; the BFF publishes it and the
   recorder answers on `_INBOX_bff.>`, both gated on `recordStore.enabled`).
+- **Webhook enqueue** (`varroa.recordstore.webhook.enqueue`, queue `recorder`): the Team agent message request. The recorder is the only responder.
 - **Run note post** (`varroa.recordstore.notes.post`, core NATS request-reply,
   BFF to recorder, queue group `recorder`): write one run or job note. The
   body names the run or the job, so the subject carries no cluster token.

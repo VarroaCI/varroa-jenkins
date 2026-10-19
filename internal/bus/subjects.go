@@ -123,6 +123,13 @@ const (
 	// job, so the subject needs no cluster token.
 	RunNotePostSubject = "varroa.recordstore.notes.post"
 
+	// WebhookEnqueueSubject is the core-NATS request-reply subject that the
+	// BFF or the agent runner asks the recorder to enqueue one Team agent
+	// message on a tenant webhook. The recorder is the responder, served by
+	// queue group recorder. The body names the tenant, so the subject needs
+	// no cluster token.
+	WebhookEnqueueSubject = "varroa.recordstore.webhook.enqueue"
+
 	// BuildsStreamName is the JetStream stream name for the build-event
 	// work queue.
 	BuildsStreamName = "varroa_builds"

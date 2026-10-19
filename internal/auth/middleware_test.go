@@ -44,7 +44,7 @@ func TestAuthMiddleware_SSETicketAndQueryTokenRejection(t *testing.T) {
 		ticket, _, _ := iss.Mint(&Claims{Subject: "alice"}, "brood")
 		var claims *Claims
 		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { claims = ClaimsFromContext(r.Context()) })
-		mw := AuthMiddleware(mp, mkv, tv, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, tv, nil, nil, next, logger)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/brood?ticket="+ticket, nil)
 		rec := httptest.NewRecorder()
@@ -62,7 +62,7 @@ func TestAuthMiddleware_SSETicketAndQueryTokenRejection(t *testing.T) {
 		// must not authenticate, on any route (SSE or not).
 		for _, path := range []string{"/api/v1/settings?token=valid-jwt", "/api/v1/stream/brood?token=valid-jwt"} {
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-			mw := AuthMiddleware(mp, mkv, tv, nil, next, logger)
+			mw := AuthMiddleware(mp, mkv, tv, nil, nil, next, logger)
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rec := httptest.NewRecorder()
 			mw.ServeHTTP(rec, req)
@@ -83,7 +83,7 @@ func TestAuthMiddlewareRoutesApiKeys(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			claims = ClaimsFromContext(r.Context())
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 
 		req := httptest.NewRequest("GET", "/api/v1/me", nil)
 		req.Header.Set("Authorization", "Bearer vk_prefix.secret")
@@ -99,7 +99,7 @@ func TestAuthMiddlewareRoutesApiKeys(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			claims = ClaimsFromContext(r.Context())
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 
 		req := httptest.NewRequest("GET", "/api/v1/me", nil)
 		req.Header.Set("Authorization", "Bearer valid-jwt")
@@ -112,7 +112,7 @@ func TestAuthMiddlewareRoutesApiKeys(t *testing.T) {
 
 	t.Run("rejects bad vk_ token with 401", func(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 
 		req := httptest.NewRequest("GET", "/api/v1/me", nil)
 		req.Header.Set("Authorization", "Bearer vk_bad.bad")
@@ -129,7 +129,7 @@ func TestAuthMiddlewareRoutesApiKeys(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			called = true
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 
 		req := httptest.NewRequest("GET", "/health", nil)
 		mw.ServeHTTP(httptest.NewRecorder(), req)
@@ -150,7 +150,7 @@ func TestAuthMiddleware_OpenAPIDocsExemptions(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			called = true
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 		rec := httptest.NewRecorder()
 		mw.ServeHTTP(rec, req)
@@ -167,7 +167,7 @@ func TestAuthMiddleware_OpenAPIDocsExemptions(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			called = true
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil)
 		rec := httptest.NewRecorder()
 		mw.ServeHTTP(rec, req)
@@ -184,7 +184,7 @@ func TestAuthMiddleware_OpenAPIDocsExemptions(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 			called = true
 		})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/docs/rapidoc-min.js", nil)
 		rec := httptest.NewRecorder()
 		mw.ServeHTTP(rec, req)
@@ -198,7 +198,7 @@ func TestAuthMiddleware_OpenAPIDocsExemptions(t *testing.T) {
 
 	t.Run("POST /api/v1/docs still requires auth", func(t *testing.T) {
 		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
-		mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+		mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/docs", nil)
 		rec := httptest.NewRecorder()
 		mw.ServeHTTP(rec, req)
@@ -230,7 +230,7 @@ func TestAuthMiddleware_OIDCAuthEndpoints(t *testing.T) {
 			next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 				called = true
 			})
-			mw := AuthMiddleware(mp, mkv, nil, nil, next, logger)
+			mw := AuthMiddleware(mp, mkv, nil, nil, nil, next, logger)
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rec := httptest.NewRecorder()
 			mw.ServeHTTP(rec, req)
@@ -272,7 +272,7 @@ func TestAuthMiddleware_PipelinesTicketBoundToOneTeam(t *testing.T) {
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			})
-			mw := AuthMiddleware(mp, mkv, tv, nil, next, logger)
+			mw := AuthMiddleware(mp, mkv, tv, nil, nil, next, logger)
 			req := httptest.NewRequest(http.MethodGet, tc.path+"?ticket="+ticket, nil)
 			rec := httptest.NewRecorder()
 			mw.ServeHTTP(rec, req)

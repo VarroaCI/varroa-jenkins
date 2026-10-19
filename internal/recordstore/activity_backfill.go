@@ -116,7 +116,7 @@ func (b *pgBackfill) Query(ctx context.Context, q activity.Query) (activity.Page
 
 		filled := false
 		for _, e := range page.Items {
-			candidate := encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: e.Timestamp, EventKey: EventKey(e)})
+			candidate := encodeActivityCursor(activityCursor{Direction: direction, Filters: filters, TS: e.Timestamp, EventKey: activity.EventKey(e)})
 			if q.Authorize == nil || q.Authorize(e) {
 				accepted = append(accepted, e)
 			}

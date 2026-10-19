@@ -102,7 +102,7 @@ func TestIsBackstopCandidateRejectsRecentActivityRow(t *testing.T) {
 		cluster: testCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: "acme/already-fired", occurrence: occ, grace: backstopTestGrace,
 	}
-	if err := writeBackstopActivity(context.Background(), pool, c, now.Add(-1*time.Minute)); err != nil {
+	if err := writeBackstopActivity(context.Background(), pool, nil, c, now.Add(-1*time.Minute)); err != nil {
 		t.Fatalf("write backstop activity: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestIsBackstopCandidateFiresAgainAfterSuppressionWindowPasses(t *testing.T)
 	}
 	// The prior fire's row is older than the grace window and the answer
 	// wait: the suppression no longer applies.
-	if err := writeBackstopActivity(context.Background(), pool, c, now.Add(-backstopAnswerWait-time.Minute)); err != nil {
+	if err := writeBackstopActivity(context.Background(), pool, nil, c, now.Add(-backstopAnswerWait-time.Minute)); err != nil {
 		t.Fatalf("write backstop activity: %v", err)
 	}
 
@@ -210,7 +210,7 @@ func TestIsBackstopCandidateIgnoresOtherClusterActivityRow(t *testing.T) {
 		cluster: otherCluster, tenant: testTenant, namespace: testNamespace, cell: "cell-a",
 		jobPath: "acme/cross-cluster", occurrence: occ, grace: backstopTestGrace,
 	}
-	if err := writeBackstopActivity(context.Background(), pool, c, now.Add(-1*time.Minute)); err != nil {
+	if err := writeBackstopActivity(context.Background(), pool, nil, c, now.Add(-1*time.Minute)); err != nil {
 		t.Fatalf("write backstop activity: %v", err)
 	}
 

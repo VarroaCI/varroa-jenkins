@@ -373,6 +373,24 @@ func (a *Authorizer) CanUseAssistant(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "assistant", "use")
 }
 
+// CanGrantUnattended reports whether the caller may enable unattended writes
+// on a Team agent. The decision reads the cluster-wide grant only.
+func (a *Authorizer) CanGrantUnattended(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "teamagents", "unattended")
+}
+
+// CanReadAgentSessions reports whether the caller may read every Team agent
+// session. The decision reads the cluster-wide grant only.
+func (a *Authorizer) CanReadAgentSessions(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "agentsessions", "read")
+}
+
 // CanAdminAssistant checks if the caller may change the assistant's global
 // settings, and read every session. Approving a write needs only the owner check.
 // The decision reads the cluster-wide grant only.

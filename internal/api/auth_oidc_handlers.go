@@ -317,6 +317,11 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token validation failed", http.StatusForbidden)
 		return
 	}
+	if auth.ReservedSubject(claims) {
+		s.deps.Logger.Warn("identity provider token refused", "error", auth.ErrReservedSubject, "subject", claims.Subject)
+		http.Error(w, "token validation failed", http.StatusForbidden)
+		return
+	}
 
 	if !hasGroups(claims) {
 		s.deps.Logger.Warn("user has zero groups in ID token, RBAC group-based permissions will not apply",

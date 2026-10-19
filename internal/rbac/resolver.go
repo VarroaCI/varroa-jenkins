@@ -14,6 +14,7 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
 )
 
 // BySubjectIndex is the index name for VarroaRoleBindings indexed by subject.
@@ -184,7 +185,7 @@ func (r *Resolver) EffectiveAPICapabilities(claims *auth.Claims, namespace, cont
 	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
-	for _, v := range claims.UserValues(r.userClaimNames) {
+	for _, v := range userSubjectValues(claims, r.userClaimNames) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
 	}
 
@@ -275,7 +276,7 @@ func (r *Resolver) EffectiveClusterAPICapabilities(claims *auth.Claims) APICapab
 	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
-	for _, v := range claims.UserValues(r.userClaimNames) {
+	for _, v := range userSubjectValues(claims, r.userClaimNames) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
 	}
 
@@ -357,7 +358,7 @@ func (r *Resolver) EffectivePermissionScopes(claims *auth.Claims) PermissionScop
 	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
-	for _, v := range claims.UserValues(r.userClaimNames) {
+	for _, v := range userSubjectValues(claims, r.userClaimNames) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
 	}
 
@@ -535,7 +536,7 @@ func (r *Resolver) CreateScopeNamespaces(claims *auth.Claims) (namespaces []stri
 	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
-	for _, v := range claims.UserValues(r.userClaimNames) {
+	for _, v := range userSubjectValues(claims, r.userClaimNames) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
 	}
 
@@ -649,7 +650,7 @@ func (r *Resolver) EffectiveTenantCapabilities(claims *auth.Claims, ref ParsedTe
 	for _, v := range groupValues(claims) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("Group", v))
 	}
-	for _, v := range claims.UserValues(r.userClaimNames) {
+	for _, v := range userSubjectValues(claims, r.userClaimNames) {
 		subjectKeys = append(subjectKeys, subjectIndexKey("User", v))
 	}
 
@@ -1497,4 +1498,21 @@ func groupValues(c *auth.Claims) []string {
 		}
 	}
 	return vals
+}
+
+// userSubjectValues returns the user identity values that match kind:User
+// bindings. A Team agent subject is the only value, whatever the configured
+// user claims are. A human identity never yields a value with the agent
+// prefix, so an agent binding cannot match a human.
+func userSubjectValues(claims *auth.Claims, claimNames []string) []string {
+	if accept.IsPrincipal(claims.Subject) {
+		return []string{claims.Subject}
+	}
+	var out []string
+	for _, v := range claims.UserValues(claimNames) {
+		if !accept.IsPrincipal(v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }

@@ -25,9 +25,13 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `Controller`, `VarroaRole`/`VarroaRoleBinding`, `JenkinsRole`/`JenkinsRoleBinding`,
   `User`, `Group`, `PodTemplate`, `CatalogSource`, `CatalogItem`,
   `ComposedBundle`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `Team`,
-  `BroodOperation`, `BroodSchedule`, `Runner`, `CellPool`. New Kind → add here + `zz_generated.deepcopy.go`.
+  `BroodOperation`, `BroodSchedule`, `Runner`, `TeamAgent`, `CellPool`. New Kind → add here + `zz_generated.deepcopy.go`.
   `BuildMetric` does not exist: build records live in the record store
   (`internal/recordstore`), not a CRD.
+  `TeamAgent` is namespaced. Its `unattendedWrites` enum is generated from
+  `policy.UnattendedEligible` by `hack/gen-teamagent-enum`, which
+  `go generate ./api/v1alpha1/...` runs. `make generate-crds` runs it first.
+  `TestUnattendedEnumMatchesPolicy` fails on a stale marker.
   `Runner` is cluster-scoped, like `Team`: it binds one external machine to one
   pipelines tenant (`RunnerSpec.Team`), immutable `team` and `launcher`
   (`ssh`/`inbound`), and six CEL `XValidation` rules. `RunnerSpec.Labels`

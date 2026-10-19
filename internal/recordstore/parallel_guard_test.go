@@ -24,6 +24,7 @@ var serialDatabaseTests = map[string]string{
 	"TestEnsureGrantsIdempotent":               serialReasonRole,
 	"TestEnsureGrantsClientAgentTables":        serialReasonRole,
 	"TestEnsureGrantsClientRunNotesSelectOnly": serialReasonRole,
+	"TestTeamAgentSpendClientCannotDelete":     serialReasonRole,
 }
 
 // databaseEntryPoints are the helpers through which a test reaches the

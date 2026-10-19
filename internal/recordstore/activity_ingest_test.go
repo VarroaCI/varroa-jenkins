@@ -24,7 +24,7 @@ func TestActivityIngesterInsertConflictIgnoring(t *testing.T) {
 		Message: "created",
 	}
 	e.Normalize()
-	key := EventKey(e)
+	key := activity.EventKey(e)
 
 	inserted, err := ing.Insert(ctx, e, key)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestActivityIngesterInsertStoresDerivedSeverity(t *testing.T) {
 	if e.Severity != "error" {
 		t.Fatalf("test setup: want Normalize to derive severity=error, got %q", e.Severity)
 	}
-	key := EventKey(e)
+	key := activity.EventKey(e)
 
 	if _, err := ing.Insert(ctx, e, key); err != nil {
 		t.Fatalf("insert: %v", err)
@@ -96,7 +96,7 @@ func TestActivityIngesterInsertNullsZeroBuildNumber(t *testing.T) {
 
 	e := activity.Event{Cluster: "core", Timestamp: time.Now().UTC(), Source: "mite", Type: "heartbeat"}
 	e.Normalize()
-	key := EventKey(e)
+	key := activity.EventKey(e)
 
 	if _, err := ing.Insert(ctx, e, key); err != nil {
 		t.Fatalf("insert: %v", err)

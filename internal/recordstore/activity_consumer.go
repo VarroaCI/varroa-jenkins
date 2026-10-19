@@ -107,7 +107,7 @@ func handleActivityMessage(ctx context.Context, ingester *ActivityIngester, metr
 		return
 	}
 
-	key := EventKey(e)
+	key := activity.EventKey(e)
 	inserted, err := ingester.Insert(ctx, e, key)
 	switch {
 	case err == nil:

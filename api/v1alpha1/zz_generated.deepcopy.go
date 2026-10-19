@@ -4099,3 +4099,249 @@ func (in *PendingCollect) DeepCopy() *PendingCollect {
 	in.DeepCopyInto(out)
 	return out
 }
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgent) DeepCopyInto(out *TeamAgent) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopy creates a new TeamAgent, copied from the receiver.
+func (in *TeamAgent) DeepCopy() *TeamAgent {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgent)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *TeamAgent) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentList) DeepCopyInto(out *TeamAgentList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		out.Items = make([]TeamAgent, len(in.Items))
+		for i := range in.Items {
+			in.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+// DeepCopy creates a new TeamAgentList, copied from the receiver.
+func (in *TeamAgentList) DeepCopy() *TeamAgentList {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyObject implements runtime.Object.
+func (in *TeamAgentList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentSpec) DeepCopyInto(out *TeamAgentSpec) {
+	*out = *in
+	out.TeamRef = in.TeamRef
+	if in.Enabled != nil {
+		v := *in.Enabled
+		out.Enabled = &v
+	}
+	if in.Instructions != nil {
+		v := *in.Instructions
+		out.Instructions = &v
+	}
+	if in.Triggers != nil {
+		out.Triggers = make([]TeamAgentTrigger, len(in.Triggers))
+		for i := range in.Triggers {
+			in.Triggers[i].DeepCopyInto(&out.Triggers[i])
+		}
+	}
+	if in.UnattendedWrites != nil {
+		out.UnattendedWrites = make([]string, len(in.UnattendedWrites))
+		copy(out.UnattendedWrites, in.UnattendedWrites)
+	}
+	in.Outputs.DeepCopyInto(&out.Outputs)
+	if in.Budgets != nil {
+		v := *in.Budgets
+		out.Budgets = &v
+		if in.Budgets.Session != nil {
+			s := *in.Budgets.Session
+			out.Budgets.Session = &s
+		}
+		if in.Budgets.Day != nil {
+			d := *in.Budgets.Day
+			out.Budgets.Day = &d
+		}
+	}
+}
+
+// DeepCopy creates a new TeamAgentSpec, copied from the receiver.
+func (in *TeamAgentSpec) DeepCopy() *TeamAgentSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentStatus) DeepCopyInto(out *TeamAgentStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		out.Conditions = make([]metav1.Condition, len(in.Conditions))
+		for i := range in.Conditions {
+			in.Conditions[i].DeepCopyInto(&out.Conditions[i])
+		}
+	}
+	if in.LastSession != nil {
+		v := *in.LastSession
+		in.LastSession.At.DeepCopyInto(&v.At)
+		out.LastSession = &v
+	}
+}
+
+// DeepCopy creates a new TeamAgentStatus, copied from the receiver.
+func (in *TeamAgentStatus) DeepCopy() *TeamAgentStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentInstructions) DeepCopyInto(out *TeamAgentInstructions) {
+	*out = *in
+}
+
+// DeepCopy creates a new TeamAgentInstructions, copied from the receiver.
+func (in *TeamAgentInstructions) DeepCopy() *TeamAgentInstructions {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentInstructions)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentTrigger) DeepCopyInto(out *TeamAgentTrigger) {
+	*out = *in
+	if in.Debounce != nil {
+		v := *in.Debounce
+		out.Debounce = &v
+	}
+}
+
+// DeepCopy creates a new TeamAgentTrigger, copied from the receiver.
+func (in *TeamAgentTrigger) DeepCopy() *TeamAgentTrigger {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentTrigger)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentOutputs) DeepCopyInto(out *TeamAgentOutputs) {
+	*out = *in
+	if in.Issues != nil {
+		v := *in.Issues
+		if in.Issues.Labels != nil {
+			v.Labels = make([]string, len(in.Issues.Labels))
+			copy(v.Labels, in.Issues.Labels)
+		}
+		out.Issues = &v
+	}
+}
+
+// DeepCopy creates a new TeamAgentOutputs, copied from the receiver.
+func (in *TeamAgentOutputs) DeepCopy() *TeamAgentOutputs {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentOutputs)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentIssueOutput) DeepCopyInto(out *TeamAgentIssueOutput) {
+	*out = *in
+	if in.Labels != nil {
+		out.Labels = make([]string, len(in.Labels))
+		copy(out.Labels, in.Labels)
+	}
+}
+
+// DeepCopy creates a new TeamAgentIssueOutput, copied from the receiver.
+func (in *TeamAgentIssueOutput) DeepCopy() *TeamAgentIssueOutput {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentIssueOutput)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentBudgets) DeepCopyInto(out *TeamAgentBudgets) {
+	*out = *in
+	if in.Session != nil {
+		v := *in.Session
+		out.Session = &v
+	}
+	if in.Day != nil {
+		v := *in.Day
+		out.Day = &v
+	}
+}
+
+// DeepCopy creates a new TeamAgentBudgets, copied from the receiver.
+func (in *TeamAgentBudgets) DeepCopy() *TeamAgentBudgets {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentBudgets)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies the receiver into out. in must be non-nil.
+func (in *TeamAgentLastSession) DeepCopyInto(out *TeamAgentLastSession) {
+	*out = *in
+	in.At.DeepCopyInto(&out.At)
+}
+
+// DeepCopy creates a new TeamAgentLastSession, copied from the receiver.
+func (in *TeamAgentLastSession) DeepCopy() *TeamAgentLastSession {
+	if in == nil {
+		return nil
+	}
+	out := new(TeamAgentLastSession)
+	in.DeepCopyInto(out)
+	return out
+}

@@ -10,6 +10,9 @@ const (
 	VerbCheck       = "check"
 	VerbRead        = "read"
 	VerbPullRequest = "pullrequest"
+	// VerbIssue opens an issue for a Team agent. The operator shard that owns
+	// the Team answers it.
+	VerbIssue = "issue"
 )
 
 // ProposalBranch is the branch that a pipeline proposal writes.
@@ -42,6 +45,32 @@ type Status struct {
 	OK    bool   `json:"ok"`
 	Code  string `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// TeamAgentRef names the TeamAgent object that asks for an issue. The UID
+// must match the stored object.
+type TeamAgentRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	UID       string `json:"uid"`
+}
+
+// IssueRequest asks the operator to open an issue for a Team agent.
+type IssueRequest struct {
+	Team      string       `json:"team"`
+	TeamAgent TeamAgentRef `json:"teamagent"`
+	Title     string       `json:"title"`
+	Body      string       `json:"body"`
+	Labels    []string     `json:"labels,omitempty"`
+	Actor     string       `json:"actor"`
+	SessionID string       `json:"session_id"`
+}
+
+// IssueReply reports the issue that the forge opened.
+type IssueReply struct {
+	Status
+	Number int    `json:"number,omitempty"`
+	URL    string `json:"url,omitempty"`
 }
 
 // CheckRequest asks whether a repository can take a proposal.

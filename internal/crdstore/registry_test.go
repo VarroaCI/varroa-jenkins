@@ -361,3 +361,32 @@ func TestApplyStatusClears_TeamClearsThePendingPurgeKeys(t *testing.T) {
 			got.Status.Pipelines.WebhookToken)
 	}
 }
+
+// TestRegistryTeamAgent proves the TeamAgent kind resolves as a namespaced
+// kind and clears its status fields on an apply.
+func TestRegistryTeamAgent(t *testing.T) {
+	gvr, err := GVRFor[v1alpha1.TeamAgent]()
+	if err != nil {
+		t.Fatalf("GVRFor[TeamAgent]: %v", err)
+	}
+	if gvr.Group != "varroa.dev" || gvr.Version != "v1alpha1" || gvr.Resource != "teamagents" {
+		t.Errorf("unexpected GVR: %+v", gvr)
+	}
+	info, err := gvrInfo[v1alpha1.TeamAgent]()
+	if err != nil {
+		t.Fatalf("gvrInfo[TeamAgent]: %v", err)
+	}
+	if !info.namespaced {
+		t.Error("TeamAgent must be namespaced")
+	}
+	if info.kind != "TeamAgent" {
+		t.Errorf("kind = %q, want TeamAgent", info.kind)
+	}
+	cleared := clearStatusFields[gvr]
+	if _, ok := cleared["lastSession"]; !ok {
+		t.Error("lastSession must be a cleared status field")
+	}
+	if v, ok := cleared["instructionsSHA"]; !ok || v != "" {
+		t.Errorf("instructionsSHA clear value = %v, want empty string", v)
+	}
+}

@@ -251,7 +251,7 @@ func insertRunActivityTx(ctx context.Context, db DBTX, event activity.Event) err
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (ts, event_key) DO NOTHING
 	`,
-		EventKey(event), event.Timestamp, event.Type, event.Source, event.Severity, event.Cluster, event.Namespace,
+		activity.EventKey(event), event.Timestamp, event.Type, event.Source, event.Severity, event.Cluster, event.Namespace,
 		event.Controller, event.Actor, event.Message, event.Phase, event.Reason, event.ItemPath,
 		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
 	); err != nil {

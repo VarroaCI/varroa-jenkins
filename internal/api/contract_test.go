@@ -483,7 +483,7 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 
 	rootMux := http.NewServeMux()
 	// Wrap the router in the auth middleware.
-	apiHandler := auth.AuthMiddleware(mockAuth, kv, ticketVerifier, nil, NewRouter(deps), slog.Default())
+	apiHandler := auth.AuthMiddleware(mockAuth, kv, ticketVerifier, nil, nil, NewRouter(deps), slog.Default())
 	rootMux.Handle("/api/v1/", apiHandler)
 
 	// Stub /healthz — returns 200 text/plain.

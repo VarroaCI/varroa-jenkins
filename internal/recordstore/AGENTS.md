@@ -1499,6 +1499,10 @@ of the fleet's audit activity, once a controller becomes disposable.
   read joins `runs` on its own primary key, answers one class and name of
   one job newest first, and computes no rate. The caller bounds its limit.
 
+- Migration `00040_team_agent_spend.sql` adds `team_agent_spend` (team, day rollup). `varroa_client` holds INSERT and UPDATE only. The retention round drops days outside the `runs` window (`retention_team_agent_spend.go`).
+- Activity rows that the recorder writes publish on `activity.<cluster>.<ns>.<ctrl>` (or `_global`) only after the commit (`activity_publish.go`). A re-ingested copy finds its row through `ON CONFLICT (ts, event_key)` and writes nothing. `activity.EventKey` lives in `internal/api/activity`. Producers: `build.failed` (`ingest_build_failed.go`), `pipeline.branch_scan_failed` (`ingest_branch_scan_failed.go`), `fleetlock.wait_exceeded` (`fleet_lock_wait_exceeded.go`, once per waiter through the backstop round), and the interruption and backstop rows.
+- `varroa.recordstore.webhook.enqueue` (queue `recorder`) enqueues one Team agent message. The delivery key is `team_agent.message:<session>:<call>`, so a retry adds no row. A tenant without a webhook answers `no webhook`. Without a run, the session id is the delivery's `run_id`.
+
 ## Work Guidance
 
 - Every table lives in schema `varroa`. A column, a CHECK constraint, and

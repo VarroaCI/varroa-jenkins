@@ -123,6 +123,9 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*auth.Claims, e
 		return nil, err
 	}
 
+	if auth.ReservedSubject(claims) {
+		return nil, fmt.Errorf("key identity: %w", auth.ErrReservedSubject)
+	}
 	v.cache.set(prefix, storedHash, claims)
 	v.lastSeen.record(prefix)
 	return claims, nil

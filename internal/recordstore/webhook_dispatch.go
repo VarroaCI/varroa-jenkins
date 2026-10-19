@@ -171,6 +171,16 @@ type webhookRow struct {
 	incarnation string
 	body        []byte
 	attempts    int
+	key         string
+}
+
+// webhookEventFor returns the X-Varroa-Event value of a delivery key. A Team
+// agent message is not a run completion, so it carries its own event type.
+func webhookEventFor(key string) string {
+	if strings.HasPrefix(key, teamAgentWebhookKeyPrefix) {
+		return teamAgentWebhookEvent
+	}
+	return webhookEventRunCompleted
 }
 
 // round leases one batch, sends it, and reports how many rows it leased.
@@ -208,7 +218,7 @@ func (d *WebhookDispatcher) lease(ctx context.Context) ([]webhookRow, error) {
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING delivery_id, run_id, cluster, tenant, incarnation, body, attempts
+		RETURNING delivery_id, run_id, cluster, tenant, incarnation, body, attempts, delivery_key
 	`, webhookBatchSize, webhookLease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("lease webhook deliveries: %w", err)
@@ -217,7 +227,7 @@ func (d *WebhookDispatcher) lease(ctx context.Context) ([]webhookRow, error) {
 	var out []webhookRow
 	for rows.Next() {
 		var r webhookRow
-		if err := rows.Scan(&r.deliveryID, &r.runID, &r.cluster, &r.tenant, &r.incarnation, &r.body, &r.attempts); err != nil {
+		if err := rows.Scan(&r.deliveryID, &r.runID, &r.cluster, &r.tenant, &r.incarnation, &r.body, &r.attempts, &r.key); err != nil {
 			return nil, fmt.Errorf("scan leased webhook delivery: %w", err)
 		}
 		out = append(out, r)
@@ -284,7 +294,7 @@ func (d *WebhookDispatcher) deliver(ctx context.Context, row webhookRow) {
 	req.Header.Set("X-Varroa-Signature", SignWebhook([]byte(target.Key), ts, row.body))
 	req.Header.Set("X-Varroa-Timestamp", strconv.FormatInt(ts, 10))
 	req.Header.Set("X-Varroa-Delivery", row.deliveryID.String())
-	req.Header.Set("X-Varroa-Event", webhookEventRunCompleted)
+	req.Header.Set("X-Varroa-Event", webhookEventFor(row.key))
 
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -386,7 +396,7 @@ func (d *WebhookDispatcher) recordFailure(ctx context.Context, row webhookRow, a
 		e.BuildNumber = *buildNumber
 	}
 	e.Normalize()
-	key := EventKey(e)
+	key := activity.EventKey(e)
 	_, insertErr := d.activity.Insert(ctx, e, key)
 	if isNoActivityPartition(insertErr) {
 		if perr := ensureActivityPartitionForTime(ctx, d.pool, e.Timestamp); perr != nil {

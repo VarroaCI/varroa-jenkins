@@ -522,10 +522,15 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			// until its old pod is gone.
 			ConfirmedDeparted: r.confirmDepartedInstances(ctx, lastSync, time.Now()),
 		}
+		previousCell := ""
+		if status.Placement != nil {
+			previousCell = status.Placement.Cell
+		}
 		outcome, placeErr := cells.Place(ctx, placeInputs, team, status)
 		if placeErr != nil {
 			r.logger.Error("placement pass failed", "team", team.Name, "error", placeErr)
 		}
+		r.publishPlacementMoved(team.Name, previousCell, status.Placement)
 		if outcome.SyncCacheUpdate != nil {
 			r.storeSyncCache(team.Name, *outcome.SyncCacheUpdate)
 		}
@@ -1636,6 +1641,38 @@ func (r *TeamReconciler) ensureTenantAgentIdentity(ctx context.Context, team, ag
 	if err := r.client.CreateServiceAccountTokenSecret(ctx, tokenName, agentNamespace, saName); err != nil {
 		r.logger.Error("failed to create tenant agent token secret", "team", team, "error", err)
 	}
+}
+
+// publishPlacementMoved publishes one tenant.placement_moved event when the
+// bound cell of a Team changed between two passes. A nil publisher publishes
+// nothing.
+func (r *TeamReconciler) publishPlacementMoved(team, previousCell string, placement *v1alpha1.TeamPlacementStatus) {
+	if r.activityPublisher == nil {
+		return
+	}
+	if ev, ok := placementMovedEvent(team, previousCell, placement); ok {
+		r.activityPublisher.Publish(ev)
+	}
+}
+
+// placementMovedEvent builds the event of a bound cell that changed. A first
+// bind has no previous cell, so it returns false, and so does an unchanged
+// cell.
+func placementMovedEvent(team, previousCell string, placement *v1alpha1.TeamPlacementStatus) (activity.Event, bool) {
+	if previousCell == "" || placement == nil || placement.Cell == "" || placement.Cell == previousCell {
+		return activity.Event{}, false
+	}
+	return activity.Event{
+		Type:       "tenant.placement_moved",
+		Source:     "operator",
+		Severity:   "info",
+		Cluster:    placement.Cluster,
+		Namespace:  placement.CellNamespace,
+		Controller: placement.Cell,
+		ItemPath:   team,
+		Reason:     previousCell,
+		Message:    "team " + team + " moved from cell " + previousCell + " to cell " + placement.Cell,
+	}, true
 }
 
 // publishTenantEvent publishes one placement-pass activity event.
