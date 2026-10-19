@@ -182,8 +182,8 @@ func (s *Server) servedPlugins(ctx context.Context, core string) map[string]plug
 
 // selectServedVersion applies the total version-precedence rule across every
 // pack holding one plugin name. It replaces the old first-wins dedupe, which
-// resolved by ListManifests order — index.json insertion order for the local
-// layout and tag order for a registry, i.e. a backend-dependent served version.
+// resolved by ListManifests order, a reference-name order that says nothing
+// about which version a store should serve.
 //
 //  1. If the declared set names the plugin at any version, packs matching a
 //     declared version are eligible ahead of all others and the highest such

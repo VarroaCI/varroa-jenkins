@@ -163,14 +163,15 @@ func TestPluginVersions_DuplicateVersionMatchesDownload(t *testing.T) {
 }
 
 // A skipped first pack must keep a later pack's digest out of the document,
-// because the download serves the first pack's bytes.
+// because the download serves the first pack's bytes. Packs list in
+// reference-name order, so the opaque pack's name sorts first.
 func TestPluginVersions_SkippedFirstPackBlocksLaterDigest(t *testing.T) {
 	store := newTestStore(t)
 	opaque := []byte("not-a-zip")
-	seedPluginPack(t, store, "pack:dup2-opaque", []testPlugin{
+	seedPluginPack(t, store, "pack:dup2-a-opaque", []testPlugin{
 		{name: "dup2", version: "1.0", hpiBytes: opaque},
 	})
-	seedAddonPack(t, store, "pack:dup2-known", "dup2", "1.0", newPluginBytes("dup2", "1.0"), []hpi.Dependency{
+	seedAddonPack(t, store, "pack:dup2-b-known", "dup2", "1.0", newPluginBytes("dup2", "1.0"), []hpi.Dependency{
 		{Name: "structs", Min: "1.0", Optional: false},
 	})
 

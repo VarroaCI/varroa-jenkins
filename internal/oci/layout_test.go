@@ -165,3 +165,45 @@ func TestLayoutStore_Resolve_NotFound(t *testing.T) {
 		t.Fatalf("Resolve panicked: %v", err)
 	}
 }
+
+// TestLayoutStore_ListManifests_SortedByRef checks that the list order does
+// not follow the push order. The index writer rebuilds index.json from a map.
+func TestLayoutStore_ListManifests_SortedByRef(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewLayoutStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLayoutStore: %v", err)
+	}
+	for _, ref := range []string{"pack:c", "pack:a", "pack:b"} {
+		content := []byte("layer-" + ref)
+		digest, size, err := store.PushBlob(ctx, "application/octet-stream", bytes.NewReader(content))
+		if err != nil {
+			t.Fatalf("PushBlob %s: %v", ref, err)
+		}
+		m := Manifest{
+			ArtifactType: "application/vnd.varroa.test.v1",
+			Config:       Descriptor{MediaType: "application/octet-stream", Digest: digest, Size: size},
+			Layers:       []Descriptor{{MediaType: "application/octet-stream", Digest: digest, Size: size}},
+		}
+		if err := store.Push(ctx, ref, m); err != nil {
+			t.Fatalf("Push %s: %v", ref, err)
+		}
+	}
+	descs, err := store.ListManifests(ctx)
+	if err != nil {
+		t.Fatalf("ListManifests: %v", err)
+	}
+	refs := make([]string, 0, len(descs))
+	for _, d := range descs {
+		refs = append(refs, d.Annotations["org.opencontainers.image.ref.name"])
+	}
+	want := []string{"pack:a", "pack:b", "pack:c"}
+	if len(refs) != len(want) {
+		t.Fatalf("refs = %v, want %v", refs, want)
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("refs = %v, want %v", refs, want)
+		}
+	}
+}

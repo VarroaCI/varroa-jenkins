@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	godigest "github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go"
@@ -123,6 +124,9 @@ func (l *LayoutStore) FetchBlob(ctx context.Context, digest string) (io.ReadClos
 }
 
 // ListManifests lists all manifests in the store by reading index.json.
+// The index writer rebuilds the list from a map on every push, so the file
+// order changes between pushes. The list is sorted by reference name, then
+// by digest, so every reader sees one stable pack order.
 func (l *LayoutStore) ListManifests(ctx context.Context) ([]Descriptor, error) {
 	indexPath := filepath.Join(l.root, ocispec.ImageIndexFile)
 	data, err := os.ReadFile(indexPath)
@@ -140,6 +144,14 @@ func (l *LayoutStore) ListManifests(ctx context.Context) ([]Descriptor, error) {
 	for _, m := range idx.Manifests {
 		descs = append(descs, descriptorFromOCI(m))
 	}
+	sort.SliceStable(descs, func(i, j int) bool {
+		ri := descs[i].Annotations[ocispec.AnnotationRefName]
+		rj := descs[j].Annotations[ocispec.AnnotationRefName]
+		if ri != rj {
+			return ri < rj
+		}
+		return descs[i].Digest < descs[j].Digest
+	})
 	return descs, nil
 }
 

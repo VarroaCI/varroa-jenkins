@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	godigest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -180,18 +181,35 @@ func (r *RegistryStore) FetchBlob(ctx context.Context, digest string) (io.ReadCl
 
 // ListManifests lists all manifests in the repository (via tag listing).
 func (r *RegistryStore) ListManifests(ctx context.Context) ([]Descriptor, error) {
-	var descs []Descriptor
+	type tagged struct {
+		tag  string
+		desc Descriptor
+	}
+	var entries []tagged
 	if err := r.repo.Tags(ctx, "", func(tags []string) error {
 		for _, tag := range tags {
 			desc, err := r.repo.Resolve(ctx, tag)
 			if err != nil {
 				return fmt.Errorf("resolve tag %q: %w", tag, err)
 			}
-			descs = append(descs, descriptorFromOCI(desc))
+			entries = append(entries, tagged{tag: tag, desc: descriptorFromOCI(desc)})
 		}
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
+	}
+	// A registry lists tags sorted inside one page, but a page boundary or
+	// another implementation can change the order. The sort gives every
+	// backend the same reference-name order.
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].tag != entries[j].tag {
+			return entries[i].tag < entries[j].tag
+		}
+		return entries[i].desc.Digest < entries[j].desc.Digest
+	})
+	descs := make([]Descriptor, 0, len(entries))
+	for _, e := range entries {
+		descs = append(descs, e.desc)
 	}
 	return descs, nil
 }

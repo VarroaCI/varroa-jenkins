@@ -30,5 +30,7 @@ type BlobStore interface {
 	Pull(ctx context.Context, ref string) (Manifest, error)
 	Resolve(ctx context.Context, ref string) (Descriptor, error)
 	FetchBlob(ctx context.Context, digest string) (io.ReadCloser, error)
+	// ListManifests answers every manifest in reference-name order. A reader
+	// that lets the first pack win depends on that order.
 	ListManifests(ctx context.Context) ([]Descriptor, error)
 }
