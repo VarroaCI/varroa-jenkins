@@ -204,3 +204,100 @@ func TestRecordLogin_EmptyNamespace(t *testing.T) {
 		t.Error("expected error for empty namespace")
 	}
 }
+
+func recordLoginTest(t *testing.T, client *stubRecordLoginClient, subject, email, preferred string) {
+	t.Helper()
+	if err := RecordLogin(context.Background(), client, oidcUserName(subject),
+		email, "Dana", nil, subject, preferred, "test-ns"); err != nil {
+		t.Fatalf("RecordLogin(%q, %q): %v", email, preferred, err)
+	}
+}
+
+func TestRecordLogin_DropsPreferredUsernameWhenClaimAbsent(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "subject-drop"
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+	recordLoginTest(t, client, subject, "dana@example.com", "")
+
+	u := client.users[oidcUserName(subject)]
+	if got := u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; got != "" {
+		t.Errorf("current preferred username = %q, want none", got)
+	}
+	if got := FormerIdentifiers(u); len(got) != 1 || got[0] != "dana" {
+		t.Errorf("FormerIdentifiers = %v, want [dana]", got)
+	}
+}
+
+func TestRecordLogin_RenamedPreferredUsernameRecordsFormer(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "subject-rename"
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+	recordLoginTest(t, client, subject, "dana@example.com", "dana2")
+
+	u := client.users[oidcUserName(subject)]
+	if got := u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; got != "dana2" {
+		t.Errorf("current preferred username = %q, want dana2", got)
+	}
+	if got := FormerIdentifiers(u); len(got) != 1 || got[0] != "dana" {
+		t.Errorf("FormerIdentifiers = %v, want [dana]", got)
+	}
+}
+
+func TestRecordLogin_ChangedEmailRecordsFormer(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "subject-email"
+	recordLoginTest(t, client, subject, "a@x", "")
+	recordLoginTest(t, client, subject, "b@x", "")
+
+	u := client.users[oidcUserName(subject)]
+	if u.Spec.Email != "b@x" {
+		t.Errorf("Spec.Email = %q, want b@x", u.Spec.Email)
+	}
+	if got := FormerIdentifiers(u); len(got) != 1 || got[0] != "a@x" {
+		t.Errorf("FormerIdentifiers = %v, want [a@x]", got)
+	}
+}
+
+func TestRecordLogin_UnchangedClaimsWriteNoFormer(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "subject-unchanged"
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+
+	u := client.users[oidcUserName(subject)]
+	if _, ok := u.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers]; ok {
+		t.Errorf("former annotation written for unchanged claims: %v", u.Annotations)
+	}
+}
+
+func TestRecordLogin_FormerIdentifiersAccumulate(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "subject-accumulate"
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+	recordLoginTest(t, client, subject, "dana@example.com", "")
+	if got := FormerIdentifiers(client.users[oidcUserName(subject)]); len(got) != 1 || got[0] != "dana" {
+		t.Fatalf("after drop FormerIdentifiers = %v, want [dana]", got)
+	}
+	recordLoginTest(t, client, subject, "dana@example.com", "dana")
+	recordLoginTest(t, client, subject, "dana@example.com", "dana3")
+
+	u := client.users[oidcUserName(subject)]
+	if got := u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; got != "dana3" {
+		t.Errorf("current preferred username = %q, want dana3", got)
+	}
+	if got := FormerIdentifiers(u); len(got) != 1 || got[0] != "dana" {
+		t.Errorf("FormerIdentifiers = %v, want [dana] with no duplicate", got)
+	}
+}
+
+func TestFormerIdentifiers_MalformedReturnsNil(t *testing.T) {
+	u := &v1alpha1.User{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{v1alpha1.AnnotationOIDCFormerIdentifiers: "not-json"},
+	}}
+	if got := FormerIdentifiers(u); got != nil {
+		t.Errorf("FormerIdentifiers = %v, want nil", got)
+	}
+	if got := FormerIdentifiers(nil); got != nil {
+		t.Errorf("FormerIdentifiers(nil) = %v, want nil", got)
+	}
+}

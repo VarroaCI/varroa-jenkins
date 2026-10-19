@@ -25,8 +25,14 @@ const (
 	// AnnotationOIDCPreferredUsername stores the OIDC preferred_username claim
 	// on a User CRD. RoleBinding subjects may reference an OIDC user by this
 	// value (the resolver's default user claims are preferred_username,sub),
-	// so deprovisioning must be able to recover it.
+	// so deprovisioning must be able to recover it. A login without the claim
+	// deletes the value and moves it to AnnotationOIDCFormerIdentifiers.
 	AnnotationOIDCPreferredUsername = "varroa.dev/oidc-preferred-username"
+
+	// AnnotationOIDCFormerIdentifiers stores a JSON array of the preferred
+	// usernames and emails that a User object held before a later login.
+	// Deprovisioning strips them from bindings. The member role never reads them.
+	AnnotationOIDCFormerIdentifiers = "varroa.dev/oidc-former-identifiers"
 
 	// LabelBuiltin marks a VarroaRole or JenkinsRole as a built-in role
 	// managed by the RoleReconciler.

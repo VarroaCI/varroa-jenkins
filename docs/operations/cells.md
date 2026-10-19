@@ -122,7 +122,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   replays, and input answers check this grant. A `User` subject names a configured user claim
   value, such as the subject of a person. The operator also grants the principal that person has
   on the cell: the preferred username, then the email, then the subject. The operator reads that
-  principal from the person's `User` object. A person gets the grant after the first sign-in, and
+  principal from the person's `User` object. When a later sign-in omits the preferred username, the
+  principal changes to the email, then the subject. A person gets the grant after the first sign-in, and
   the operator applies it on the next reconcile tick. A custom user claim does not reach the cell.
   A cell on a member cluster grants this role to Team-membership subjects only.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity

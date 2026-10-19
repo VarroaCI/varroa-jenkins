@@ -2,7 +2,9 @@ package userdirectory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -47,6 +49,15 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 			return nil
 		}
 
+		// Deprovisioning reads the former names, so a replaced name keeps its record.
+		former := FormerIdentifiers(existing)
+		if prev := existing.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; prev != "" && prev != preferredUsername {
+			former = append(former, prev)
+		}
+		if existing.Spec.Email != "" && existing.Spec.Email != email {
+			former = append(former, existing.Spec.Email)
+		}
+
 		// Refresh claim-derived identity/metadata.
 		existing.Spec.Email = email
 		existing.Spec.DisplayName = displayName
@@ -57,9 +68,12 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 		if existing.Annotations == nil {
 			existing.Annotations = map[string]string{}
 		}
+		// A login without the claim clears the name. The member role must not grant a name that the IdP no longer sends.
+		delete(existing.Annotations, v1alpha1.AnnotationOIDCPreferredUsername)
 		for k, v := range annotations {
 			existing.Annotations[k] = v
 		}
+		setFormerIdentifiers(existing, former)
 		if err := store.ApplyUserCRD(ctx, existing); err != nil {
 			return fmt.Errorf("update user %s: %w", userName, err)
 		}
@@ -86,6 +100,49 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 		return fmt.Errorf("create user %s: %w", userName, err)
 	}
 	return patchObservedStatus(ctx, store, userName, namespace, &now, groups)
+}
+
+// FormerIdentifiers returns the preferred usernames and emails that a User
+// held before a later login. It returns nil for a nil user, a missing
+// annotation, or a value that is not a JSON array.
+func FormerIdentifiers(u *v1alpha1.User) []string {
+	if u == nil {
+		return nil
+	}
+	raw := u.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers]
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	return values
+}
+
+// setFormerIdentifiers writes the sorted, deduplicated former identifiers.
+// It removes the annotation when no value remains.
+func setFormerIdentifiers(u *v1alpha1.User, values []string) {
+	clean := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != "" {
+			clean = append(clean, v)
+		}
+	}
+	slices.Sort(clean)
+	clean = slices.Compact(clean)
+	if len(clean) == 0 {
+		delete(u.Annotations, v1alpha1.AnnotationOIDCFormerIdentifiers)
+		return
+	}
+	raw, err := json.Marshal(clean)
+	if err != nil {
+		return
+	}
+	if u.Annotations == nil {
+		u.Annotations = map[string]string{}
+	}
+	u.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = string(raw)
 }
 
 // patchObservedStatus writes the observed status fields via the status

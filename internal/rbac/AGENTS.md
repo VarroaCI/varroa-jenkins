@@ -71,6 +71,7 @@ with what this package generates.
     `User` subjects of the role also resolve through the idp-managed `User`
     objects of the operator namespace (`SetUserDirectory`, `tenant_member_users.go`):
     each person's principal (preferred username, email, subject) joins the grant.
+    Only the current claim values count; `varroa.dev/oidc-former-identifiers` is for deprovisioning only.
     The operator builds its resolver with a Team informer and a User informer, so the
     Team-membership path reaches the member role.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
