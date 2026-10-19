@@ -619,8 +619,10 @@ sections describe.
   not behind a non-empty guard.
 - **`ItemsApplyFailed` tenant warnings** come from the desired-state result drain
   (`controller_controller.go`). `itemsApplyFailureWarnings` (`cell_items_apply_failure.go`)
-  maps `DesiredStateResult.items_failed_path` to its tenant. The drain replaces only that
-  reason, and only when the result answers the tracked desired-state hash.
+  maps each `DesiredStateResult.item_failures` entry to its tenant and writes one warning per
+  tenant. A result with refused items replaces every `ItemsApplyFailed` entry. A successful
+  items section clears them all. The drain applies this only when the result answers the
+  tracked desired-state hash.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the

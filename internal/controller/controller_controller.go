@@ -3994,7 +3994,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					}
 					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
 				}
-				// A refused tenant item sets that tenant's ItemsApplyFailed entry.
+				// Refused tenant items set one ItemsApplyFailed entry per tenant.
 				// A successful items apply clears every such entry. Any other
 				// result keeps the list.
 				if isCellController(cr) && r.DesiredState.AppliedHash != "" &&

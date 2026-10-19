@@ -90,8 +90,8 @@ const (
 	// tenants. The message names the fault.
 	TeamReasonItemsHeld = "ItemsHeld"
 	// TeamReasonItemsApplyFailed reports a tenant item that Jenkins refused
-	// during the cell's items apply. The message names the item path and
-	// carries the Jenkins error.
+	// during the cell's items apply. The message names each refused item
+	// path and carries its Jenkins error.
 	TeamReasonItemsApplyFailed  = "ItemsApplyFailed"
 	TeamReasonBundleKeysIgnored = "BundleKeysIgnored"
 	// TeamReasonPodTemplateSkipped reports a tenant bundle pod template

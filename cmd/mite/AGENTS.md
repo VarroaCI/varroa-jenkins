@@ -341,8 +341,10 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   does not exist yet, never overwrites an existing build directory, and
   never lowers a stored `nextBuildNumber`. A deferred job's path returns in
   `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
-  A failed items apply sets `DesiredStateResult.items_failed_path` to the item path that
-  stopped the apply. It is empty for a parse error or a deadline.
+  A items apply that refuses some items sets `DesiredStateResult.item_failures` to one
+  entry for each refused item path. The other items still apply. The section stays
+  unconverged, so the operator resends it. The walk also opens the schedule export gate. The list is empty for a parse error, a
+  deadline, or a failed existence check; those abort the apply.
   A second pass after the items apply re-seeds the deferred jobs before the
   items gate opens. After a successful items apply, a job that is still absent
   is an orphan, not a deferral, unless its parent is a multibranch project or

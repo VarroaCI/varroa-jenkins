@@ -91,7 +91,9 @@ reading each package's entry point):
   `Manifest.Retain` lists top-level paths the engine neither writes nor
   deletes: their managed items keep their previous hash in the managed
   cache, matched on whole path segments. Only the cell merge writes it, for
-  a held tenant folder; `ReRoot` drops it. A `gitea` source or navigator
+  a held tenant folder; `ReRoot` drops it. The engine continues past a refused
+  item (generate, create, or update). It keeps that item's previous hash, skips the
+  children of a refused create, and aborts only on a failed existence check. A `gitea` source or navigator
   always renders its discovery traits (the defaults when none are declared)
   and a `WebhookRegistrationTrait` set to `DISABLE`. A `github` source
   renders its declared traits (`githubSkipNotifications` renders the

@@ -1627,7 +1627,9 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 
 	if w.desiredStateCmd != nil {
 		result := a.handleDesiredState(cctx, w.desiredStateCmd)
-		if result.ItemsSuccess {
+		// A completed items walk with refusals still applied the other items,
+		// so the home is no longer empty and the export may open.
+		if result.ItemsSuccess || len(result.ItemFailures) > 0 {
 			a.openScheduleExport()
 		}
 		if w.span != nil {
@@ -2519,17 +2521,31 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			a.Logger.Debug("applying items", "len", len(cmd.ItemsYaml))
 			itemsEngine := items.NewEngine(jenkinsClient)
 			applyResult, err := itemsEngine.Apply(ctx, cmd.ItemsYaml)
-			if err != nil {
+			switch {
+			case err != nil:
+				// An abort saves nothing and reports no per-item failures.
 				a.Logger.Error("items apply failed", "error", err)
 				result.ItemsSuccess = false
 				result.ItemsError = err.Error()
-				var itemErr *items.ItemError
-				// Only a refused item raises a tenant warning. A failed check of
-				// existence is a transient Jenkins fault, not a judgement of the item.
-				if errors.As(err, &itemErr) && itemErr.Refusal() {
-					result.ItemsFailedPath = itemErr.Path
+			case len(applyResult.Failed) > 0:
+				// Jenkins refused some items. The other items were applied, so
+				// the schedule poller wakes. The section stays unconverged, so
+				// the operator resends it and the refused items are retried.
+				a.Logger.Error("items apply refused items", "count", len(applyResult.Failed))
+				result.ItemsSuccess = false
+				result.ItemsError = applyResult.FailureText()
+				result.ItemFailures = make([]*mitev1.ItemFailure, 0, len(applyResult.Failed))
+				for _, f := range applyResult.Failed {
+					result.ItemFailures = append(result.ItemFailures, &mitev1.ItemFailure{
+						Path:  f.Path,
+						Error: f.Error(),
+					})
 				}
-			} else {
+				if len(applyResult.DeferredDeletions) > 0 {
+					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
+				}
+				a.wakeSchedulePoller()
+			default:
 				result.ItemsSuccess = true
 				if len(applyResult.DeferredDeletions) > 0 {
 					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
