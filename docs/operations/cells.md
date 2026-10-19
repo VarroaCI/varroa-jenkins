@@ -286,7 +286,7 @@ keeping `currentBuild.previousBuild` and the build-number sequence correct.
 Each seed carries the job's next build number, its newest successful build, and up to
 `rehydrateBuilds` further builds, newest first, with parameters and changesets. A multibranch
 child seeds only after branch indexing creates it; the operator retries until then or until
-`rehydrateDeadline` passes. The mite seeds a job that the same push creates, so a roll needs no second push. The mite drops the records of a deleted job.
+`rehydrateDeadline` passes. The mite seeds a job that the same push creates, so a roll needs no second push. The mite drops the records of a deleted job. After a branch scan of the folder finishes with `SUCCESS` and does not list a branch, the next desired-state apply drops that branch's records.
 
 `Team.spec.pipelines` settings for rehydration and the ledger:
 

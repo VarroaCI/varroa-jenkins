@@ -337,68 +337,158 @@ func buildDirExists(buildDir string) bool {
 	return err == nil && info.IsDir()
 }
 
+// branchIndexSucceeded is the index result of a branch scan that finished
+// without error. The plugin reports it on a multibranch project row.
+const branchIndexSucceeded = "SUCCESS"
+
+// jobCreator answers which ancestor of a job path can still create the job.
+type jobCreator struct {
+	// canCreate has the meaning of the old parentCanCreateJob result.
+	canCreate bool
+	// folder is the job path of the multibranch project or organization
+	// folder that decided. It is "" when no such folder decided.
+	folder string
+}
+
 // orphanDeferredJobs splits deferred job paths after a successful items
 // apply. A job whose parent is a multibranch project or an organization
-// folder stays deferred, because branch indexing can still create it. A job
-// whose parent directory exists without a config.xml also stays deferred.
-// Any other job the items apply did not create no longer exists, so its
-// records have nothing to seed.
-func orphanDeferredJobs(jenkinsHome string, deferred []string) (keep, orphans []string) {
+// folder stays deferred while branch indexing can still create it. A job
+// under such a folder orphans once the polled branch inventory shows a
+// completed, successful scan of the folder that does not list the job. The
+// loader returns the inventory and runs at most once. A nil loader, or a nil
+// set, keeps the job. A job whose parent directory exists without a
+// config.xml also stays deferred. Any other job the items apply did not
+// create no longer exists, so its records have nothing to seed.
+func orphanDeferredJobs(jenkinsHome string, deferred []string, loadBranches func() *mitev1.JobBranchSet) (keep, orphans []string) {
+	var (
+		branches *mitev1.JobBranchSet
+		loaded   bool
+	)
 	for _, jobPath := range deferred {
-		if parentCanCreateJob(jenkinsHome, jobPath) {
-			keep = append(keep, jobPath)
-		} else {
+		c := jobCreatorFor(jenkinsHome, jobPath)
+		switch {
+		case !c.canCreate:
 			orphans = append(orphans, jobPath)
+		case c.folder == "":
+			keep = append(keep, jobPath)
+		default:
+			if !loaded {
+				loaded = true
+				if loadBranches != nil {
+					branches = loadBranches()
+				}
+			}
+			if scanOmitsJob(branches, c.folder, jobPath) {
+				orphans = append(orphans, jobPath)
+			} else {
+				keep = append(keep, jobPath)
+			}
 		}
 	}
 	return keep, orphans
 }
 
-// parentCanCreateJob reports whether an ancestor of jobPath can still create
-// it later. The walk starts at the direct parent and goes up one level at a
+// scanOmitsJob reports whether a completed, successful scan of folder,
+// or of a repository below it, lists no child on the path to jobPath.
+// A missing row, a scan that did not succeed, truncated heads, or a job
+// path outside folder all answer false.
+func scanOmitsJob(set *mitev1.JobBranchSet, folder, jobPath string) bool {
+	if set == nil {
+		return false
+	}
+	for {
+		row := branchProjectRow(set, folder)
+		if row == nil || row.IndexResult != branchIndexSucceeded || row.HeadsTruncated {
+			return false
+		}
+		prefix := folder + "/"
+		if !strings.HasPrefix(jobPath, prefix) {
+			return false
+		}
+		rest := strings.TrimPrefix(jobPath, prefix)
+		child := folder + "/" + rest
+		if next := strings.Index(rest, "/"); next >= 0 {
+			child = folder + "/" + rest[:next]
+		}
+		if !hasBranchHead(row, child) {
+			return true
+		}
+		if child == jobPath {
+			return false
+		}
+		folder = child
+	}
+}
+
+// branchProjectRow returns the inventory row of the project at jobPath, or
+// nil when the set holds no such row.
+func branchProjectRow(set *mitev1.JobBranchSet, jobPath string) *mitev1.JobBranchProject {
+	for _, item := range set.Items {
+		if item.JobPath == jobPath {
+			return item
+		}
+	}
+	return nil
+}
+
+// hasBranchHead reports whether the row lists a head at jobPath.
+func hasBranchHead(row *mitev1.JobBranchProject, jobPath string) bool {
+	for _, head := range row.Heads {
+		if head.JobPath == jobPath {
+			return true
+		}
+	}
+	return false
+}
+
+// jobCreatorFor reports whether an ancestor of jobPath can still create it
+// later. The walk starts at the direct parent and goes up one level at a
 // time. The first ancestor that is a directory without a config.xml, or that
 // has a config.xml, decides. A config.xml that names a multibranch project or
-// an organization folder keeps the job. An organization folder indexes the
-// repositories below it, so a job under a repository that is not indexed yet
-// keeps its records. A directory without a config.xml keeps the job too,
-// because Jenkins may not have written the config yet. An absent directory
-// passes the walk on to its own parent. A config.xml of any other kind cannot
-// create the job. Any other read error keeps the job, so an unreadable
-// ancestor never drops records by mistake. A top-level job has no parent and
-// cannot be created later.
-func parentCanCreateJob(jenkinsHome, jobPath string) bool {
+// an organization folder keeps the job, and the result names that folder. An
+// organization folder indexes the repositories below it, so a job under a
+// repository that is not indexed yet keeps its records. A directory without a
+// config.xml keeps the job too, because Jenkins may not have written the
+// config yet. An absent directory passes the walk on to its own parent. A
+// config.xml of any other kind cannot create the job. Any other read error
+// keeps the job, so an unreadable ancestor never drops records by mistake. A
+// top-level job has no parent and cannot be created later.
+func jobCreatorFor(jenkinsHome, jobPath string) jobCreator {
 	idx := strings.LastIndex(jobPath, "/")
 	if idx < 0 {
-		return false
+		return jobCreator{}
 	}
 	for ancestor := jobPath[:idx]; ancestor != ""; {
 		// Map the ancestor through parseRehydrationPath, the one job-path rule.
 		parsed, err := parseRehydrationPath("jobs/" + strings.ReplaceAll(ancestor, "/", "/jobs/") + "/nextBuildNumber")
 		if err != nil {
-			return true
+			return jobCreator{canCreate: true}
 		}
 		dir := filepath.Join(append([]string{jenkinsHome}, parsed.jobDirParts...)...)
 		root, err := rootElementName(filepath.Join(dir, "config.xml"))
 		if err == nil {
-			return strings.HasSuffix(root, "MultiBranchProject") || strings.HasSuffix(root, "OrganizationFolder")
+			if strings.HasSuffix(root, "MultiBranchProject") || strings.HasSuffix(root, "OrganizationFolder") {
+				return jobCreator{canCreate: true, folder: ancestor}
+			}
+			return jobCreator{}
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return true
+			return jobCreator{canCreate: true}
 		}
 		info, statErr := os.Stat(dir)
 		if statErr == nil {
-			return info.IsDir()
+			return jobCreator{canCreate: info.IsDir()}
 		}
 		if !errors.Is(statErr, os.ErrNotExist) {
-			return true
+			return jobCreator{canCreate: true}
 		}
 		next := strings.LastIndex(ancestor, "/")
 		if next < 0 {
-			return false
+			return jobCreator{}
 		}
 		ancestor = ancestor[:next]
 	}
-	return false
+	return jobCreator{}
 }
 
 // rootElementName returns the name of the root element of the XML file at
