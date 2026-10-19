@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -123,11 +124,30 @@ func releaseRunAgents(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn,
 // still lists its name. The pods of such a name belong to the later run.
 func dropNodesHeldByOtherRuns(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate,
 	names []string) ([]string, error) {
+	held, err := heldAgentNodes(ctx, pool, run.cluster, run.tenant, run.runID)
+	if err != nil {
+		return nil, err
+	}
+	out := names[:0:0]
+	for _, name := range names {
+		if _, ok := held[name]; !ok {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+// heldAgentNodes answers the agent node names that a RUNNING run or a
+// heartbeat-lost run of tenant stores, except run except. A resume can
+// still adopt each name. The answer has no time bound: a name that a
+// pod still holds stays in the set until its run ends.
+func heldAgentNodes(ctx context.Context, pool *pgxpool.Pool, cluster, tenant string,
+	except uuid.UUID) (map[string]struct{}, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT payload->'mesh'->'files' FROM varroa.runs
 		 WHERE cluster = $1 AND tenant = $2 AND run_id <> $3
 		   AND (status = 'RUNNING' OR payload->>'interrupted_reason' = '`+ReasonHeartbeatLost+`')
-	`, run.cluster, run.tenant, run.runID)
+	`, cluster, tenant, except)
 	if err != nil {
 		return nil, fmt.Errorf("select other running runs: %w", err)
 	}
@@ -138,18 +158,22 @@ func dropNodesHeldByOtherRuns(ctx context.Context, pool *pgxpool.Pool, run runIn
 		if err := rows.Scan(&raw); err != nil {
 			return nil, fmt.Errorf("scan other running run: %w", err)
 		}
-		for _, name := range agentNodeNames(runStateFilesOrEmpty(raw)) {
+		// A malformed list fails the read. An empty answer would let a
+		// caller release a node that a resume can still adopt.
+		var files []runStateFile
+		if len(raw) != 0 && string(raw) != "null" {
+			decoded, err := decodeRunStateFiles(raw)
+			if err != nil {
+				return nil, fmt.Errorf("decode held agent nodes: %w", err)
+			}
+			files = decoded
+		}
+		for _, name := range agentNodeNames(files) {
 			held[name] = struct{}{}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("select other running runs: %w", err)
 	}
-	out := names[:0:0]
-	for _, name := range names {
-		if _, ok := held[name]; !ok {
-			out = append(out, name)
-		}
-	}
-	return out, nil
+	return held, nil
 }

@@ -89,6 +89,9 @@ After a mark that ends the run, its agent pods go within about one minute. The o
 only the pods that the run's own state names. A `heartbeat-lost` mark releases no pods, because the
 owner can still resume. Other pods keep the bounds above.
 
+When the operator confirms the lost pod gone, it also deletes the instance's idle agent pods within a
+few minutes. A pod that a stored build can still adopt stays.
+
 ## The re-fire
 
 A build can be granted and never start, because its cell dies first. Such a build writes no run

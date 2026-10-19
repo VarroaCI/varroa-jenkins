@@ -1507,6 +1507,18 @@ of the fleet's audit activity, once a controller becomes disposable.
   read joins `runs` on its own primary key, answers one class and name of
   one job newest first, and computes no rate. The caller bounds its limit.
 
+  **`ReleaseGoneInstanceAgents`** (`instance_agents.go`) runs in the backstop
+  round after the sweep. It publishes one `release_instance_agents` action for
+  each `tenant_placements.dead_instances` entry that carries a pod-read
+  confirmation (`ConfirmedGoneAt`) older than the grace and no older than the
+  grace plus five minutes. Each action names the tenant, its `agent_namespace`,
+  the gone instance, and `RefreshedBefore` (the confirmation time). `KeepPods`
+  holds every node that `heldAgentNodes` reads from a `RUNNING` or
+  `heartbeat-lost` run of the tenant. The round repeats the action while the
+  confirmation is fresh. It never publishes when the `heldAgentNodes` read
+  fails, because an empty keep set would delete adoptable pods. The moved and
+  silent arms release nothing.
+
 - Migration `00040_team_agent_spend.sql` adds `team_agent_spend` (team, day rollup). `varroa_client` holds INSERT and UPDATE only. The retention round drops days outside the `runs` window (`retention_team_agent_spend.go`).
 - Activity rows that the recorder writes publish on `activity.<cluster>.<ns>.<ctrl>` (or `_global`) only after the commit (`activity_publish.go`). A re-ingested copy finds its row through `ON CONFLICT (ts, event_key)` and writes nothing. `activity.EventKey` lives in `internal/api/activity`. Producers: `build.failed` (`ingest_build_failed.go`), `pipeline.branch_scan_failed` (`ingest_branch_scan_failed.go`), `fleetlock.wait_exceeded` (`fleet_lock_wait_exceeded.go`, once per waiter through the backstop round), and the interruption and backstop rows.
 - `varroa.recordstore.webhook.enqueue` (queue `recorder`) enqueues one Team agent message. The delivery key is `team_agent.message:<session>:<call>`, so a retry adds no row. A tenant without a webhook answers `no webhook`. Without a run, the session id is the delivery's `run_id`.

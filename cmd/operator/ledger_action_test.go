@@ -39,6 +39,22 @@ type fakeLedgerActionRunner struct {
 	releasedNamespace string
 	releasedNames     []string
 	releaseCalls      int
+
+	instanceReleaseCalls int
+	instanceTeam         string
+	instanceNamespace    string
+	instanceKeep         []string
+	instanceBefore       time.Time
+}
+
+// ReleaseInstanceAgentPods records the call a release_instance_agents
+// action makes.
+func (f *fakeLedgerActionRunner) ReleaseInstanceAgentPods(_ context.Context, team, namespace string, keep []string, refreshedBefore time.Time) {
+	f.instanceReleaseCalls++
+	f.instanceTeam = team
+	f.instanceNamespace = namespace
+	f.instanceKeep = keep
+	f.instanceBefore = refreshedBefore
 }
 
 // ReleaseRunAgentPods records the call a release_agents action makes.
@@ -503,4 +519,78 @@ func TestHandleLedgerAction_ReleaseAgentsWithoutPodsDoesNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHandleLedgerAction_ReleaseInstanceAgents proves a release_instance_agents
+// action hands the tenant, its agent namespace, the keep set, and the
+// confirmation time to the operator's release routine, and sends no
+// imperative command.
+func TestHandleLedgerAction_ReleaseInstanceAgents(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	before := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	action := recordstore.LedgerAction{
+		Kind: recordstore.LedgerActionReleaseInstanceAgents, Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a", Instance: "pod-old",
+		Tenant: "sbsoftware", AgentNamespace: "sbsoftware",
+		KeepPods:        []string{"a", "c"},
+		RefreshedBefore: &before,
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
+
+	if rec.instanceReleaseCalls != 1 {
+		t.Fatalf("ReleaseInstanceAgentPods calls = %d, want 1", rec.instanceReleaseCalls)
+	}
+	if rec.instanceTeam != "sbsoftware" || rec.instanceNamespace != "sbsoftware" {
+		t.Fatalf("released team/namespace = %q/%q", rec.instanceTeam, rec.instanceNamespace)
+	}
+	if !reflect.DeepEqual(rec.instanceKeep, action.KeepPods) {
+		t.Fatalf("keep = %v, want %v", rec.instanceKeep, action.KeepPods)
+	}
+	if !rec.instanceBefore.Equal(before) {
+		t.Fatalf("refreshed before = %v, want %v", rec.instanceBefore, before)
+	}
+	if len(rec.sent) != 0 {
+		t.Fatalf("release_instance_agents sent %d imperative commands, want 0", len(rec.sent))
+	}
+}
+
+// TestHandleLedgerAction_ReleaseInstanceAgentsIncompleteDoesNothing proves an
+// action with no tenant, no namespace, or no confirmation time calls no
+// release. An empty keep set is valid, so that action does call once.
+func TestHandleLedgerAction_ReleaseInstanceAgentsIncompleteDoesNothing(t *testing.T) {
+	before := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	cases := map[string]recordstore.LedgerAction{
+		"no tenant":       {AgentNamespace: "sbsoftware", RefreshedBefore: &before},
+		"no namespace":    {Tenant: "sbsoftware", RefreshedBefore: &before},
+		"no confirmation": {Tenant: "sbsoftware", AgentNamespace: "sbsoftware"},
+	}
+	for name, action := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := &fakeLedgerActionRunner{}
+			action.Kind = recordstore.LedgerActionReleaseInstanceAgents
+			action.Cluster = "core"
+			action.Namespace = "cells-ns"
+			action.Controller = "cell-a"
+			data, _ := json.Marshal(action)
+			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
+			if rec.instanceReleaseCalls != 0 {
+				t.Fatalf("ReleaseInstanceAgentPods calls = %d, want 0", rec.instanceReleaseCalls)
+			}
+		})
+	}
+
+	t.Run("empty keep set still releases", func(t *testing.T) {
+		rec := &fakeLedgerActionRunner{}
+		action := recordstore.LedgerAction{
+			Kind: recordstore.LedgerActionReleaseInstanceAgents, Cluster: "core",
+			Namespace: "cells-ns", Controller: "cell-a",
+			Tenant: "sbsoftware", AgentNamespace: "sbsoftware", RefreshedBefore: &before,
+		}
+		data, _ := json.Marshal(action)
+		handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, nil, data)
+		if rec.instanceReleaseCalls != 1 {
+			t.Fatalf("ReleaseInstanceAgentPods calls = %d, want 1", rec.instanceReleaseCalls)
+		}
+	})
 }

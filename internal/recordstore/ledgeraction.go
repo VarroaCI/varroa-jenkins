@@ -20,6 +20,10 @@ const (
 	// of a run the recorder ended. The pods can hold nodes that only that
 	// run's resume could adopt, so they wait for the run's terminal mark.
 	LedgerActionReleaseAgents = "release_agents"
+	// LedgerActionReleaseInstanceAgents asks the operator to delete the idle
+	// agent pods of a cell instance that the operator confirmed gone. The
+	// action names the nodes a resume can still adopt, and those pods stay.
+	LedgerActionReleaseInstanceAgents = "release_instance_agents"
 	// LedgerActionEndCommitStatus asks the operator to set the pending
 	// commit statuses of a build the recorder ended to error. Only Jenkins
 	// writes a status on build completion, so a synthetic end leaves it
@@ -55,7 +59,9 @@ type LedgerAction struct {
 	Parameters json.RawMessage `json:"parameters,omitempty"`
 
 	// Instance, Files, and Deadline apply to resume_run alone. Instance
-	// names the cell instance that must adopt the run. Files lists the
+	// names the cell instance that must adopt the run. Instance also names
+	// the gone cell instance of release_instance_agents, for the log only.
+	// Files lists the
 	// run's stored state files, because the operator holds no database
 	// connection and cannot read them itself.
 	//
@@ -82,6 +88,17 @@ type LedgerAction struct {
 	Tenant         string   `json:"tenant,omitempty"`
 	AgentNamespace string   `json:"agent_namespace,omitempty"`
 	AgentPods      []string `json:"agent_pods,omitempty"`
+
+	// KeepPods and RefreshedBefore apply to release_instance_agents, along
+	// with Tenant, AgentNamespace, and Instance above. KeepPods names every
+	// agent node that a RUNNING or heartbeat-lost run of Tenant stores, so
+	// a resume can still adopt it. RefreshedBefore is the instance's
+	// ConfirmedGoneAt. The operator deletes only a pod of Tenant in
+	// AgentNamespace that is not in KeepPods, whose last refresh is at or
+	// before RefreshedBefore, and that no live JVM refreshed for three
+	// minutes.
+	KeepPods        []string   `json:"keep_pods,omitempty"`
+	RefreshedBefore *time.Time `json:"refreshed_before,omitempty"`
 
 	// Repo, Revision, and Reason apply to end_commit_status alone, along
 	// with RunID, JobPath, BuildNumber, and Tenant above. Repo is the

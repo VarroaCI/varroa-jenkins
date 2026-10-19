@@ -541,7 +541,8 @@ func TestRunBackstopRoundReleasesConfirmedGoneHolderInOneRound(t *testing.T) {
 // failed on the only home target ends its run in one backstop round: the
 // takeover ends the arm, and the sweep that follows marks the run
 // resume-failed. The mark writes one webhook row and one release_agents
-// action, and no cancel.
+// action, and no cancel. A confirmed dead instance adds one
+// release_instance_agents action.
 func TestRunBackstopRoundEndsAFailedResumeInOneRound(t *testing.T) {
 	t.Parallel()
 
@@ -603,9 +604,13 @@ func TestRunBackstopRoundEndsAFailedResumeInOneRound(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("want a release_agents action published")
 	}
+	// The same round releases the idle pods of the confirmed dead instance.
+	// That action has its own tests, so only another kind fails here.
 	select {
 	case a := <-received:
-		t.Fatalf("want no second action, got %+v", a)
+		if a.Kind != LedgerActionReleaseInstanceAgents {
+			t.Fatalf("want no second action, got %+v", a)
+		}
 	case <-time.After(300 * time.Millisecond):
 	}
 }

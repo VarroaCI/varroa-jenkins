@@ -404,3 +404,99 @@ func TestReleaseNamedAgentPods_OtherErrorIsReported(t *testing.T) {
 		t.Fatalf("deleted = %d %v, want b only", deleted, reaper.deleted)
 	}
 }
+
+// TestStaleInstanceAgentPods proves the instance filter deletes only an idle
+// pod of the tenant that no live JVM refreshed and that no resume can adopt.
+func TestStaleInstanceAgentPods(t *testing.T) {
+	now := time.Now()
+	const sa = "varroa-agent-payments"
+	refreshedBefore := now.Add(-4 * time.Minute)
+	stale := agentPod("stale", sa, true, now.Add(-5*time.Minute))
+	adoptable := agentPod("adoptable", sa, true, now.Add(-5*time.Minute))
+	fresh := agentPod("fresh", sa, true, now.Add(-time.Minute))
+	floorInside := agentPod("floor-inside", sa, true, now.Add(-2*time.Minute))
+	afterConfirm := agentPod("after-confirm", sa, true, now.Add(-3*time.Minute))
+	foreignSA := agentPod("foreign-sa", "jenkins-agent", true, now.Add(-5*time.Minute))
+	unlabelled := agentPod("unlabelled", sa, false, now.Add(-5*time.Minute))
+	unannotated := agentPod("unannotated", sa, true, time.Time{})
+	deleting := agentPod("deleting", sa, true, now.Add(-5*time.Minute))
+	deletedAt := metav1.NewTime(now)
+	deleting.DeletionTimestamp = &deletedAt
+
+	pods := []corev1.Pod{stale, adoptable, fresh, floorInside, afterConfirm, foreignSA, unlabelled, unannotated, deleting}
+	got := staleInstanceAgentPods(pods, "payments", []string{"adoptable"}, refreshedBefore, now)
+	if len(got) != 1 || got[0].Name != "stale" {
+		names := make([]string, 0, len(got))
+		for _, pod := range got {
+			names = append(names, pod.Name)
+		}
+		t.Fatalf("selected = %v, want [stale]", names)
+	}
+
+	// A pod refreshed after the confirmation is kept, even when its refresh
+	// is older than the floor: a live pod at a later refresh is not this
+	// instance's leftover.
+	later := staleInstanceAgentPods([]corev1.Pod{afterConfirm}, "payments", nil,
+		now.Add(-10*time.Minute), now)
+	if len(later) != 0 {
+		t.Fatalf("pod refreshed after the confirmation was selected: %v", later)
+	}
+	// A pod refreshed at or before the confirmation but inside the floor stays.
+	inside := staleInstanceAgentPods([]corev1.Pod{floorInside}, "payments", nil,
+		now.Add(-time.Minute), now)
+	if len(inside) != 0 {
+		t.Fatalf("pod inside the three-minute floor was selected: %v", inside)
+	}
+}
+
+// TestReleaseInstanceAgentPods_DeletesStaleIdleWithUIDAndToleratesNotFoundConflict
+// proves the delete pass names each stale pod with its UID, treats NotFound
+// and Conflict as no error, and keeps going after a Forbidden error.
+func TestReleaseInstanceAgentPods_DeletesStaleIdleWithUIDAndToleratesNotFoundConflict(t *testing.T) {
+	now := time.Now()
+	const sa = "varroa-agent-payments"
+	stale := agentPod("stale", sa, true, now.Add(-5*time.Minute))
+	gone := agentPod("gone", sa, true, now.Add(-5*time.Minute))
+	conflict := agentPod("conflict", sa, true, now.Add(-5*time.Minute))
+	forbidden := agentPod("forbidden", sa, true, now.Add(-5*time.Minute))
+	kept := agentPod("kept", sa, true, now.Add(-5*time.Minute))
+	reaper := &releaseReaper{
+		pods: []corev1.Pod{stale, gone, conflict, forbidden, kept},
+		errs: map[string]error{
+			"gone":      apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "gone"),
+			"conflict":  apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, "conflict", nil),
+			"forbidden": apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "forbidden", nil),
+		},
+	}
+	refreshedBefore := now.Add(-4 * time.Minute)
+	deleted, err := releaseInstanceAgentPods(context.Background(), reaper, "payments", "payments-ns",
+		[]string{"kept"}, refreshedBefore, now)
+	if err == nil {
+		t.Fatal("want the forbidden delete reported")
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	want := []string{"stale"}
+	for _, name := range reaper.deleted {
+		if name != "stale" {
+			t.Fatalf("deleted %v, want only %v", reaper.deleted, want)
+		}
+	}
+	if len(reaper.uids) != 1 || reaper.uids[0] != stale.UID {
+		t.Fatalf("delete UIDs = %v, want the listed UID %q", reaper.uids, stale.UID)
+	}
+
+	// NotFound and Conflict alone return no error.
+	clean := &releaseReaper{
+		pods: []corev1.Pod{gone, conflict},
+		errs: map[string]error{
+			"gone":     apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "gone"),
+			"conflict": apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, "conflict", nil),
+		},
+	}
+	if _, err := releaseInstanceAgentPods(context.Background(), clean, "payments", "payments-ns",
+		nil, refreshedBefore, now); err != nil {
+		t.Fatalf("NotFound or Conflict returned an error: %v", err)
+	}
+}
