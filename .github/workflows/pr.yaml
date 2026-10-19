@@ -132,6 +132,10 @@ jobs:
       - name: Check API client
         if: ${{ !cancelled() }}
         run: make check-client
+      - name: Check challenge bundle
+        if: ${{ !cancelled() }}
+        # The committed bundle must equal the generator output of the case set.
+        run: make challenge-bundle-check
       - name: Check bootstrap closure
         if: ${{ !cancelled() }}
         # Offline: re-verifies the committed bootstrap block against the committed
