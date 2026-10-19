@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../test/render-utils";
-import { ProfileAssistantTab, keyProviderFor, keyStatus } from "./ProfileAssistantTab";
+import { ProfileAssistantTab, keyProviderFor, keyStatus, savedProviderGone } from "./ProfileAssistantTab";
 import { AssistantProvider } from "../components/assistant/AssistantProvider";
 import * as client from "../api/client";
 import { ApiError } from "../hooks/useApi";
@@ -184,6 +184,72 @@ describe("ProfileAssistantTab", () => {
 
     it("returns an empty name when no provider is listed", () => {
       expect(keyProviderFor("", "", [])).toBe("");
+    });
+  });
+
+  describe("removed saved provider", () => {
+    const NOTICE = "The saved provider gone is not available. Pick a provider or Default.";
+
+    beforeEach(() => {
+      vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant({ provider: "gone", model: "old-model" }));
+    });
+
+    it("names a saved provider that the chart no longer lists and shows a notice", async () => {
+      renderTab();
+      const select = (await screen.findByLabelText("Provider")) as HTMLSelectElement;
+      await waitFor(() => expect(select.value).toBe("gone"));
+      expect(select.selectedOptions[0].textContent).toBe("gone (removed)");
+      expect(await screen.findByText(NOTICE)).toBeTruthy();
+      expect((screen.getByLabelText("Model") as HTMLSelectElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("enables the model select after a provider is picked for a removed saved provider", async () => {
+      renderTab();
+      const select = (await screen.findByLabelText("Provider")) as HTMLSelectElement;
+      await waitFor(() => expect(select.value).toBe("gone"));
+      fireEvent.change(select, { target: { value: "smoke" } });
+      await waitFor(() => expect(screen.queryByText(NOTICE)).toBeNull());
+      const model = screen.getByLabelText("Model") as HTMLSelectElement;
+      expect(model.disabled).toBe(false);
+      expect(model.value).toBe("varroa-smoke");
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ provider: "smoke", model: "varroa-smoke" })));
+    });
+
+    it("saves Default when Default is picked for a removed saved provider", async () => {
+      renderTab();
+      const select = (await screen.findByLabelText("Provider")) as HTMLSelectElement;
+      await waitFor(() => expect(select.value).toBe("gone"));
+      fireEvent.change(select, { target: { value: "" } });
+      await waitFor(() => expect(screen.queryByText(NOTICE)).toBeNull());
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ provider: "", model: "" })));
+    });
+
+    it("sends Default with the switch when the saved provider is removed", async () => {
+      renderTab();
+      expect(await screen.findByText(NOTICE)).toBeTruthy();
+      fireEvent.click(screen.getByRole("switch", { name: "Assistant on" }));
+      await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, provider: "", model: "" })));
+    });
+  });
+
+  describe("savedProviderGone", () => {
+    it("is false while the provider list is not loaded", () => {
+      expect(savedProviderGone("gone", [], false)).toBe(false);
+    });
+
+    it("is false for Default", () => {
+      expect(savedProviderGone("", [SMOKE], true)).toBe(false);
+    });
+
+    it("is false for a listed provider", () => {
+      expect(savedProviderGone("smoke", [SMOKE], true)).toBe(false);
+    });
+
+    it("is true for a saved provider that is not listed", () => {
+      expect(savedProviderGone("gone", [SMOKE], true)).toBe(true);
     });
   });
 });
