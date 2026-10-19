@@ -7306,3 +7306,53 @@ MyAssistantKeyRequest:
     provider: {type: string}
     apiKey: {type: string, minLength: 1, writeOnly: true}
   additionalProperties: false
+
+RunNote:
+  type: object
+  description: A note on one build, or on one job. A session note carries the session id.
+  required: [id, runId, cluster, team, jobPath, principal, sessionId, body, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    runId: {type: string, format: uuid, nullable: true}
+    cluster: {type: string}
+    team: {type: string}
+    jobPath: {type: string}
+    principal: {type: string}
+    sessionId: {type: string, format: uuid, nullable: true}
+    body: {type: string}
+    createdAt: {type: string, format: date-time}
+    buildNumber:
+      type: integer
+      format: int64
+      nullable: true
+      description: The build number of the note's run. Set on the job read only.
+  additionalProperties: false
+
+RunNoteList:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/RunNote'
+  additionalProperties: false
+
+CreateRunNoteRequest:
+  type: object
+  description: Send exactly one of body and sessionId.
+  properties:
+    body: {type: string, maxLength: 16384}
+    sessionId: {type: string, format: uuid}
+  additionalProperties: false
+
+RunNoteError:
+  type: object
+  required: [error, code]
+  description: A note refusal. The code names the cause when one applies.
+  properties:
+    error: {type: string}
+    code:
+      type: string
+      enum: [note_too_long, note_session_invalid]
+  additionalProperties: false

@@ -6,8 +6,6 @@ state waits for a person to approve it.
 
 The assistant is off by default. An operator turns it on with the chart.
 
-<!-- A2: UI part -->
-
 ## Configure the assistant
 
 The assistant needs the record store. Its session tables live in the record
@@ -79,6 +77,28 @@ GRANT INSERT, UPDATE ON varroa.agent_sessions, varroa.agent_session_events,
 | `assistant.budgets.teamDay` | `2000000` | Tokens for one team in one UTC day. |
 | `assistant.budgets.steps` | `32` | Provider calls for one session. |
 | `assistant.approvalExpiry` | `24h` | How long an approval waits. |
+
+## Use the assistant
+
+Open the assistant from the top bar, or press `a` on any page. The palette
+also has an "Ask the assistant" row. The button and the key appear only when
+the assistant is on for you.
+
+The drawer shows a context chip. The chip names the build, job, team, or
+controller in view. The assistant reads that context when you start a
+conversation. A follow-up message keeps the first context. Open a new
+conversation to change it.
+
+A tool call that changes something waits for approval. Approve or deny it in
+the drawer. You can only decide an approval that you started.
+
+On a failed build, select **Explain this failure**. The answer is posted as a
+note on the build. Everyone who can read the build sees the note.
+
+Your assistant settings are on the Profile page, in the Assistant tab. Your
+session key is kept for this login only. It is not stored in the browser.
+
+Agent rows appear in the activity feed under the Agents filter.
 
 ## Data levels
 

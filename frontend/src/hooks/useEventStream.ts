@@ -4,6 +4,8 @@ import { bffFetch } from "./useApi";
 export interface SSEEvent<T> {
   type: string;
   data: T;
+  /** The SSE id line of a named frame, when the server sent one. */
+  id?: string;
 }
 
 /**
@@ -159,7 +161,7 @@ export function useEventStream<T>(
           es.addEventListener(name, (e: MessageEvent) => {
             const data = parseFrame(e.data);
             if (data === null) return;
-            deliver({ type: name, data });
+            deliver({ type: name, data, id: e.lastEventId || undefined });
           });
         }
 

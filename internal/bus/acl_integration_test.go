@@ -260,6 +260,7 @@ func startACLTestServer(t *testing.T) *server.Server {
 						"$JS.API.CONSUMER.*.KV_mite_presence.>",
 						// Fleet lock force release request to the recorder.
 						"varroa.recordstore.fleetlock.release",
+						"varroa.recordstore.notes.post",
 					},
 					[]string{
 						"events.brood.>",
@@ -294,6 +295,7 @@ func startACLTestServer(t *testing.T) *server.Server {
 					[]string{
 						"varroa.ledger.claim",
 						"varroa.recordstore.fleetlock.release",
+						"varroa.recordstore.notes.post",
 						"_INBOX_recorder.>",
 					},
 				),
@@ -545,6 +547,29 @@ func TestACLIntegration(t *testing.T) {
 		resp, err := bf.Request(FleetLockReleaseSubject, []byte("{}"), 3*time.Second)
 		if err != nil {
 			t.Fatalf("bff fleet lock release request: %v", err)
+		}
+		if string(resp.Data) != "recorder-reply" {
+			t.Fatalf("expected 'recorder-reply', got %q", string(resp.Data))
+		}
+	})
+
+	// -----------------------------------------------------------------------
+	// ALLOW: the BFF's run note post reaches the recorder, and the reply
+	// reaches the BFF's inbox
+	// -----------------------------------------------------------------------
+	t.Run("bff_recorder_run_note_post", func(t *testing.T) {
+		sub, err := rec.SubscribeRequest(RunNotePostSubject, "recorder", func([]byte) []byte {
+			return []byte("recorder-reply")
+		})
+		if err != nil {
+			t.Fatalf("recorder SubscribeRequest for run note post: %v", err)
+		}
+		defer func() { _ = sub.Unsubscribe() }()
+		rec.NATSConn().Flush()
+
+		resp, err := bf.Request(RunNotePostSubject, []byte("{}"), 3*time.Second)
+		if err != nil {
+			t.Fatalf("bff run note post request: %v", err)
 		}
 		if string(resp.Data) != "recorder-reply" {
 			t.Fatalf("expected 'recorder-reply', got %q", string(resp.Data))

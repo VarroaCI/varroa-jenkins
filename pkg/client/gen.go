@@ -595,6 +595,12 @@ const (
 	ComponentsSchemasRunDetailTriggerSourceWebhook  ComponentsSchemasRunDetailTriggerSource = "webhook"
 )
 
+// Defines values for ComponentsSchemasRunNoteErrorCode.
+const (
+	NoteSessionInvalid ComponentsSchemasRunNoteErrorCode = "note_session_invalid"
+	NoteTooLong        ComponentsSchemasRunNoteErrorCode = "note_too_long"
+)
+
 // Defines values for ComponentsSchemasRunScriptDefinitionKind.
 const (
 	ComponentsSchemasRunScriptDefinitionKindScript   ComponentsSchemasRunScriptDefinitionKind = "script"
@@ -2494,6 +2500,12 @@ type ComponentsSchemasCreateKeyRequest struct {
 	Name *string `json:"name,omitempty"`
 }
 
+// ComponentsSchemasCreateRunNoteRequest Send exactly one of body and sessionId.
+type ComponentsSchemasCreateRunNoteRequest struct {
+	Body      *string             `json:"body,omitempty"`
+	SessionId *openapi_types.UUID `json:"sessionId,omitempty"`
+}
+
 // ComponentsSchemasCreateRunRequest POST /pipelines/{team}/jobs/{job}/runs. clientToken, a UUIDv7, makes the request idempotent: the BFF uses it as the run identifier. A request with no clientToken is not idempotent.
 type ComponentsSchemasCreateRunRequest struct {
 	ClientToken *openapi_types.UUID `json:"clientToken,omitempty"`
@@ -4098,6 +4110,36 @@ type ComponentsSchemasRunLinkPage struct {
 type ComponentsSchemasRunListResponse struct {
 	Items      []ComponentsSchemasRunSummary `json:"items"`
 	NextCursor *string                       `json:"nextCursor,omitempty"`
+}
+
+// ComponentsSchemasRunNote A note on one build, or on one job. A session note carries the session id.
+type ComponentsSchemasRunNote struct {
+	Body string `json:"body"`
+
+	// BuildNumber The build number of the note's run. Set on the job read only.
+	BuildNumber *int64              `json:"buildNumber"`
+	Cluster     string              `json:"cluster"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	Id          openapi_types.UUID  `json:"id"`
+	JobPath     string              `json:"jobPath"`
+	Principal   string              `json:"principal"`
+	RunId       *openapi_types.UUID `json:"runId"`
+	SessionId   *openapi_types.UUID `json:"sessionId"`
+	Team        string              `json:"team"`
+}
+
+// ComponentsSchemasRunNoteError A note refusal. The code names the cause when one applies.
+type ComponentsSchemasRunNoteError struct {
+	Code  ComponentsSchemasRunNoteErrorCode `json:"code"`
+	Error string                            `json:"error"`
+}
+
+// ComponentsSchemasRunNoteErrorCode defines model for ComponentsSchemasRunNoteError.Code.
+type ComponentsSchemasRunNoteErrorCode string
+
+// ComponentsSchemasRunNoteList defines model for components_schemas_RunNoteList.
+type ComponentsSchemasRunNoteList struct {
+	Items []ComponentsSchemasRunNote `json:"items"`
 }
 
 // ComponentsSchemasRunRestart GET /runs/{run}/restart. Whether a completed declarative run restarts from a stage. The stages list is always present, and it is empty when the run does not restart.
@@ -5760,6 +5802,9 @@ type PatchRunnerApplicationMergePatchPlusJSONRequestBody PatchRunnerApplicationM
 // ProceedRunInputJSONRequestBody defines body for ProceedRunInput for application/json ContentType.
 type ProceedRunInputJSONRequestBody ProceedRunInputJSONBody
 
+// CreateRunNoteJSONRequestBody defines body for CreateRunNote for application/json ContentType.
+type CreateRunNoteJSONRequestBody = ComponentsSchemasCreateRunNoteRequest
+
 // ReplayRunJSONRequestBody defines body for ReplayRun for application/json ContentType.
 type ReplayRunJSONRequestBody ReplayRunJSONBody
 
@@ -6744,6 +6789,9 @@ type ClientInterface interface {
 	// ListJobBranches request
 	ListJobBranches(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListJobNotes request
+	ListJobNotes(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListRuns request
 	ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -6856,6 +6904,14 @@ type ClientInterface interface {
 
 	// StreamRunLog request
 	StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRunNotes request
+	ListRunNotes(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateRunNoteWithBody request with any body
+	CreateRunNoteWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateRunNote(ctx context.Context, run ComponentsParametersRun, body CreateRunNoteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ReplayRunWithBody request with any body
 	ReplayRunWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8938,6 +8994,18 @@ func (c *Client) ListJobBranches(ctx context.Context, team ComponentsParametersT
 	return c.Client.Do(req)
 }
 
+func (c *Client) ListJobNotes(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListJobNotesRequest(c.Server, team, job)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ListRuns(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListRunsRequest(c.Server, team, job, params)
 	if err != nil {
@@ -9420,6 +9488,42 @@ func (c *Client) ProceedRunInput(ctx context.Context, run ComponentsParametersRu
 
 func (c *Client) StreamRunLog(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewStreamRunLogRequest(c.Server, run, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListRunNotes(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRunNotesRequest(c.Server, run)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRunNoteWithBody(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunNoteRequestWithBody(c.Server, run, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateRunNote(ctx context.Context, run ComponentsParametersRun, body CreateRunNoteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRunNoteRequest(c.Server, run, body)
 	if err != nil {
 		return nil, err
 	}
@@ -16019,6 +16123,47 @@ func NewListJobBranchesRequest(server string, team ComponentsParametersTeam, job
 	return req, nil
 }
 
+// NewListJobNotesRequest generates requests for ListJobNotes
+func NewListJobNotesRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "job", runtime.ParamLocationPath, job)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/jobs/%s/notes", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListRunsRequest generates requests for ListRuns
 func NewListRunsRequest(server string, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams) (*http.Request, error) {
 	var err error
@@ -17466,6 +17611,87 @@ func NewStreamRunLogRequest(server string, run ComponentsParametersRun, params *
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListRunNotesRequest generates requests for ListRunNotes
+func NewListRunNotesRequest(server string, run ComponentsParametersRun) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/notes", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateRunNoteRequest calls the generic CreateRunNote builder with application/json body
+func NewCreateRunNoteRequest(server string, run ComponentsParametersRun, body CreateRunNoteJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateRunNoteRequestWithBody(server, run, "application/json", bodyReader)
+}
+
+// NewCreateRunNoteRequestWithBody generates requests for CreateRunNote with any type of body
+func NewCreateRunNoteRequestWithBody(server string, run ComponentsParametersRun, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "run", runtime.ParamLocationPath, run)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/runs/%s/notes", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -19010,6 +19236,9 @@ type ClientWithResponsesInterface interface {
 	// ListJobBranchesWithResponse request
 	ListJobBranchesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobBranchesResponse, error)
 
+	// ListJobNotesWithResponse request
+	ListJobNotesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error)
+
 	// ListRunsWithResponse request
 	ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error)
 
@@ -19122,6 +19351,14 @@ type ClientWithResponsesInterface interface {
 
 	// StreamRunLogWithResponse request
 	StreamRunLogWithResponse(ctx context.Context, run ComponentsParametersRun, params *StreamRunLogParams, reqEditors ...RequestEditorFn) (*StreamRunLogResponse, error)
+
+	// ListRunNotesWithResponse request
+	ListRunNotesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunNotesResponse, error)
+
+	// CreateRunNoteWithBodyWithResponse request with any body
+	CreateRunNoteWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunNoteResponse, error)
+
+	CreateRunNoteWithResponse(ctx context.Context, run ComponentsParametersRun, body CreateRunNoteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunNoteResponse, error)
 
 	// ReplayRunWithBodyWithResponse request with any body
 	ReplayRunWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReplayRunResponse, error)
@@ -22429,6 +22666,31 @@ func (r ListJobBranchesResponse) StatusCode() int {
 	return 0
 }
 
+type ListJobNotesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunNoteList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListJobNotesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListJobNotesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListRunsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -23214,6 +23476,60 @@ func (r StreamRunLogResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r StreamRunLogResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListRunNotesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunNoteList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRunNotesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRunNotesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateRunNoteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasRunNote
+	JSON201      *ComponentsSchemasRunNote
+	JSON400      *ComponentsSchemasRunNoteError
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasRunNoteError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateRunNoteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateRunNoteResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -25401,6 +25717,15 @@ func (c *ClientWithResponses) ListJobBranchesWithResponse(ctx context.Context, t
 	return ParseListJobBranchesResponse(rsp)
 }
 
+// ListJobNotesWithResponse request returning *ListJobNotesResponse
+func (c *ClientWithResponses) ListJobNotesWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, reqEditors ...RequestEditorFn) (*ListJobNotesResponse, error) {
+	rsp, err := c.ListJobNotes(ctx, team, job, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListJobNotesResponse(rsp)
+}
+
 // ListRunsWithResponse request returning *ListRunsResponse
 func (c *ClientWithResponses) ListRunsWithResponse(ctx context.Context, team ComponentsParametersTeam, job ComponentsParametersJob, params *ListRunsParams, reqEditors ...RequestEditorFn) (*ListRunsResponse, error) {
 	rsp, err := c.ListRuns(ctx, team, job, params, reqEditors...)
@@ -25758,6 +26083,32 @@ func (c *ClientWithResponses) StreamRunLogWithResponse(ctx context.Context, run 
 		return nil, err
 	}
 	return ParseStreamRunLogResponse(rsp)
+}
+
+// ListRunNotesWithResponse request returning *ListRunNotesResponse
+func (c *ClientWithResponses) ListRunNotesWithResponse(ctx context.Context, run ComponentsParametersRun, reqEditors ...RequestEditorFn) (*ListRunNotesResponse, error) {
+	rsp, err := c.ListRunNotes(ctx, run, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRunNotesResponse(rsp)
+}
+
+// CreateRunNoteWithBodyWithResponse request with arbitrary body returning *CreateRunNoteResponse
+func (c *ClientWithResponses) CreateRunNoteWithBodyWithResponse(ctx context.Context, run ComponentsParametersRun, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRunNoteResponse, error) {
+	rsp, err := c.CreateRunNoteWithBody(ctx, run, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunNoteResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateRunNoteWithResponse(ctx context.Context, run ComponentsParametersRun, body CreateRunNoteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRunNoteResponse, error) {
+	rsp, err := c.CreateRunNote(ctx, run, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRunNoteResponse(rsp)
 }
 
 // ReplayRunWithBodyWithResponse request with arbitrary body returning *ReplayRunResponse
@@ -32004,6 +32355,53 @@ func ParseListJobBranchesResponse(rsp *http.Response) (*ListJobBranchesResponse,
 	return response, nil
 }
 
+// ParseListJobNotesResponse parses an HTTP response from a ListJobNotesWithResponse call
+func ParseListJobNotesResponse(rsp *http.Response) (*ListJobNotesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListJobNotesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunNoteList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListRunsResponse parses an HTTP response from a ListRunsWithResponse call
 func ParseListRunsResponse(rsp *http.Response) (*ListRunsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -33500,6 +33898,128 @@ func ParseStreamRunLogResponse(rsp *http.Response) (*StreamRunLogResponse, error
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRunNotesResponse parses an HTTP response from a ListRunNotesWithResponse call
+func ParseListRunNotesResponse(rsp *http.Response) (*ListRunNotesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRunNotesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunNoteList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateRunNoteResponse parses an HTTP response from a CreateRunNoteWithResponse call
+func ParseCreateRunNoteResponse(rsp *http.Response) (*CreateRunNoteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateRunNoteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasRunNote
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ComponentsSchemasRunNote
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsSchemasRunNoteError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasRunNoteError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable

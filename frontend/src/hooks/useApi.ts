@@ -30,6 +30,15 @@ export class ApiError extends Error {
     }
     return "";
   }
+
+  /** code is the machine code the BFF wrote beside error, or "" when none. */
+  get code(): string {
+    const body = this.body;
+    if (body && typeof body === "object" && "code" in body && typeof body.code === "string") {
+      return body.code;
+    }
+    return "";
+  }
 }
 
 function getToken(): string | null {

@@ -230,10 +230,16 @@ export function passesLane(
   return lane === "All" || laneFor(e) === lane;
 }
 
+/** isAgentRow is the one predicate for an agent row: an assistant or team agent source, or an agent actor. */
+export function isAgentRow(e: ActivityEvent): boolean {
+  return e.source === "assistant" || e.source === "team_agent" || (e.actor ?? "").startsWith("agent:");
+}
+
 export function passesSource(
   e: ActivityEvent,
   source: "All" | string,
 ): boolean {
+  if (source === "agents") return isAgentRow(e);
   return source === "All" || e.source === source;
 }
 
@@ -393,6 +399,8 @@ export const SOURCE_COLORS: Record<string, string> = {
   user: "var(--accent-soft)",
   jenkins: "var(--warn-soft)",
   mcp: "var(--honey-soft)",
+  assistant: "var(--idle-soft)",
+  team_agent: "var(--idle-soft)",
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -401,6 +409,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   user: "User",
   jenkins: "Jenkins",
   mcp: "MCP",
+  assistant: "Assistant",
+  team_agent: "Team agent",
 };
 
 // age renders a relative timestamp. The "heartbeat" variant reports cluster

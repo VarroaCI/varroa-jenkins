@@ -18,7 +18,7 @@ type columnSpec struct {
 	nullable bool
 }
 
-// expectedColumns mirrors the seventeen record-store tables and the four
+// expectedColumns mirrors the eighteen record-store tables and the four
 // agent tables, column for column: migration 00001's seven, plus migration 00002's "activity",
 // migration 00003's "job_schedules" and "job_schedule_cells", migration
 // 00005's "tenant_placements", migration 00006's "fleet_locks", and
@@ -260,6 +260,20 @@ var expectedColumns = map[string][]columnSpec{
 		{"first_seen_at", "timestamp with time zone", false},
 		{"last_seen_at", "timestamp with time zone", false},
 	},
+	// The run_notes table comes from migration 00039. It holds the run and
+	// job notes that the recorder writes for the BFF.
+	"run_notes": {
+		{"id", "uuid", false},
+		{"run_id", "uuid", true},
+		{"run_created_at", "timestamp with time zone", true},
+		{"cluster", "text", false},
+		{"team", "text", false},
+		{"job_path", "text", false},
+		{"principal", "text", false},
+		{"session_id", "uuid", true},
+		{"body", "text", false},
+		{"created_at", "timestamp with time zone", false},
+	},
 	// The four agent tables come from migration 00038. They sit beside the
 	// record tables and do not count toward the record table set.
 	"agent_sessions": {
@@ -359,7 +373,7 @@ var expectedColumns = map[string][]columnSpec{
 }
 
 // TestSchemaMatchesDesign runs every migration and compares the resulting
-// schema against the seventeen record-store tables and the four agent
+// schema against the eighteen record-store tables and the four agent
 // tables, column for column.
 func TestSchemaMatchesDesign(t *testing.T) {
 	t.Parallel()
@@ -531,7 +545,7 @@ func TestNonPartitionedTables(t *testing.T) {
 		"job_numbers", "run_intents", "run_stages", "run_tests",
 		"run_artifacts", "job_schedules", "job_schedule_cells", "tenant_placements",
 		"fleet_locks", "run_test_cases", "webhook_deliveries", "run_waits", "upstream_origins",
-		"agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
+		"run_notes", "agent_sessions", "agent_session_events", "agent_approvals", "agent_settings",
 	} {
 		var relkind string
 		if err := db.QueryRowContext(ctx,
@@ -567,6 +581,7 @@ func TestIndexesExist(t *testing.T) {
 		"run_test_cases":      {"run_test_cases_history_idx", "run_test_cases_created_at_idx"},
 		"agent_sessions":      {"agent_sessions_principal_started_idx", "agent_sessions_team_started_idx", "agent_sessions_lease_idx"},
 		"agent_approvals":     {"agent_approvals_session_idx", "agent_approvals_pending_idx", "agent_approvals_target_idx"},
+		"run_notes":           {"run_notes_run_idx", "run_notes_job_idx", "run_notes_run_created_idx", "run_notes_session_idx"},
 	}
 
 	for table, indexes := range want {

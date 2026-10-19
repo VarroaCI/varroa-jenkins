@@ -1,4 +1,22 @@
 import type {
+  AssistantSession,
+  AssistantSessionContext,
+  AssistantSessionDetail,
+  AssistantSessionList,
+  AssistantApprovalList,
+  AssistantApprovalOutcome,
+  AssistantAcceptedState,
+  AssistantSettings,
+  AssistantSettingsUpdate,
+  AssistantProviderList,
+  MyAssistant,
+  MyAssistantUpdate,
+  MyAssistantKeyRequest,
+  CreateRunNoteRequest,
+  RunNote,
+  RunNoteList,
+} from "../types/assistant";
+import type {
   Controller,
   ControllerList,
   ControllerDiff,
@@ -1451,4 +1469,118 @@ export function patchCellPool(name: string, cluster: string, body: CellPoolScale
 export function getCellGrants(namespace: string, name: string, cluster?: string): Promise<CellGrants> {
   const qs = cluster ? `?cluster=${encodeURIComponent(cluster)}` : "";
   return bffFetch<CellGrants>(`/cells/${enc(namespace)}/${enc(name)}/grants${qs}`);
+}
+
+// ---- Assistant and run notes (add-assistant-ui) ----
+
+/** The request body that starts a session. Send either message or prompt. */
+export interface AssistantSessionCreate {
+  context?: AssistantSessionContext;
+  message?: string;
+  prompt?: string;
+}
+
+export function createAssistantSession(body: AssistantSessionCreate): Promise<AssistantSession> {
+  return bffFetch<AssistantSession>("/assistant/sessions", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function listAssistantSessions(params: { cursor?: string; limit?: number; prompt?: string } = {}): Promise<AssistantSessionList> {
+  const q = new URLSearchParams();
+  if (params.cursor) q.set("cursor", params.cursor);
+  if (params.limit) q.set("limit", String(params.limit));
+  if (params.prompt) q.set("prompt", params.prompt);
+  const qs = q.toString();
+  return bffFetch<AssistantSessionList>(`/assistant/sessions${qs ? `?${qs}` : ""}`);
+}
+
+export function getAssistantSession(id: string): Promise<AssistantSessionDetail> {
+  return bffFetch<AssistantSessionDetail>(`/assistant/sessions/${enc(id)}`);
+}
+
+export function postAssistantMessage(id: string, body: { message: string }): Promise<AssistantAcceptedState> {
+  return bffFetchJSON<AssistantAcceptedState>(`/assistant/sessions/${enc(id)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function cancelAssistantSession(id: string): Promise<AssistantAcceptedState> {
+  return bffFetchJSON<AssistantAcceptedState>(`/assistant/sessions/${enc(id)}/cancel`, { method: "POST" });
+}
+
+export function listAssistantApprovals(params: {
+  state?: string;
+  session?: string;
+  targetKind?: string;
+  targetRef?: string;
+  scope?: string;
+  cursor?: string;
+  limit?: number;
+} = {}): Promise<AssistantApprovalList> {
+  const q = new URLSearchParams();
+  if (params.state) q.set("state", params.state);
+  if (params.session) q.set("session", params.session);
+  if (params.targetKind) q.set("target_kind", params.targetKind);
+  if (params.targetRef) q.set("target_ref", params.targetRef);
+  if (params.scope) q.set("scope", params.scope);
+  if (params.cursor) q.set("cursor", params.cursor);
+  if (params.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return bffFetch<AssistantApprovalList>(`/assistant/approvals${qs ? `?${qs}` : ""}`);
+}
+
+export function approveAssistantApproval(id: string): Promise<AssistantApprovalOutcome> {
+  return bffFetchJSON<AssistantApprovalOutcome>(`/assistant/approvals/${enc(id)}/approve`, { method: "POST" });
+}
+
+export function denyAssistantApproval(id: string, body: { reason?: string } = {}): Promise<AssistantApprovalOutcome> {
+  return bffFetchJSON<AssistantApprovalOutcome>(`/assistant/approvals/${enc(id)}/deny`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getAssistantSettings(): Promise<AssistantSettings> {
+  return bffFetch<AssistantSettings>("/assistant/settings");
+}
+
+export function putAssistantSettings(body: AssistantSettingsUpdate): Promise<AssistantSettings> {
+  return bffFetch<AssistantSettings>("/assistant/settings", { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function listAssistantProviders(): Promise<AssistantProviderList> {
+  return bffFetch<AssistantProviderList>("/assistant/providers");
+}
+
+export function getMyAssistant(): Promise<MyAssistant> {
+  return bffFetch<MyAssistant>("/me/assistant");
+}
+
+export function putMyAssistant(body: MyAssistantUpdate): Promise<MyAssistant> {
+  return bffFetch<MyAssistant>("/me/assistant", { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function putMyAssistantKey(body: MyAssistantKeyRequest): Promise<MyAssistant> {
+  return bffFetch<MyAssistant>("/me/assistant/key", { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function deleteMyAssistantKey(): Promise<void> {
+  return bffFetch<void>("/me/assistant/key", { method: "DELETE" });
+}
+
+export function listRunNotes(runId: string): Promise<RunNoteList> {
+  return bffFetch<RunNoteList>(`/runs/${enc(runId)}/notes`);
+}
+
+export function createRunNote(runId: string, body: CreateRunNoteRequest): Promise<RunNote> {
+  return bffFetch<RunNote>(`/runs/${enc(runId)}/notes`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export function listJobNotes(team: string, jobPath: string): Promise<RunNoteList> {
+  return bffFetch<RunNoteList>(`${jobBase(team, jobPath)}/notes`);
+}
+
+/** assistantEventsUrl is the stream URL of one session, resumed after seq. */
+export function assistantEventsUrl(id: string, after: number): string {
+  return `${BFF_BASE}/assistant/sessions/${enc(id)}/events?after=${after}`;
 }

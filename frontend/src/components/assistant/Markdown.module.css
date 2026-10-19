@@ -1,0 +1,22 @@
+.markdown {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.markdown pre {
+  background: var(--code-bg);
+  color: var(--code-text);
+  color-scheme: dark;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.markdown code {
+  background: var(--code-bg);
+  color: var(--code-text);
+  color-scheme: dark;
+  border-radius: 3px;
+  padding: 0 3px;
+}

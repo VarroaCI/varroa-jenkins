@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { NotesCard } from "./NotesCard";
+import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
+import { useOptionalAuth } from "../../context/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getPipelineJob, listRuns, teamRunStreamUrl, type ListRunsParams } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
@@ -230,6 +233,7 @@ function renderSourceInputRow(declaredBy: JobDeclaredBy) {
 
 export default function PipelinePage() {
   const { team, job } = useParams<{ team: string; job: string }>();
+  const viewer = useOptionalAuth()?.user?.subject ?? "";
   const navigate = useNavigate();
   const { data: permissions } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -373,6 +377,10 @@ export default function PipelinePage() {
           The bundle declares this job, but no cell has created it yet. A cell creates the job at its next apply.
         </p>
       )}
+
+      <NotesCard mode="job" team={team ?? ""} job={job ?? ""} />
+
+      <TargetApprovalsCard kind="job" targetRef={`${team}/${job}`} viewer={viewer} />
 
       <div className={styles.cardGrid}>
         <Card title="Defined by">

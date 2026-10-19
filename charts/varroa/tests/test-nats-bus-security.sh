@@ -490,6 +490,24 @@ else
   check "no identity outside the BFF and the recorder holds varroa.recordstore.fleetlock.release" 0
 fi
 
+# Run notes: the BFF requests varroa.recordstore.notes.post only when the
+# record store is enabled, and the recorder answers it. No other identity
+# holds the subject.
+grep -q 'varroa.recordstore.notes.post' <<<"$bff_rs_block"
+check "bff (recordStore enabled) publishes varroa.recordstore.notes.post" $?
+grep -q 'varroa.recordstore.notes.post' <<<"$recorder_block"
+check "recorder subscribes varroa.recordstore.notes.post" $?
+if grep -q 'varroa.recordstore.notes.post' <<<"$bff_block"; then
+  check "bff (recordStore disabled) does NOT hold varroa.recordstore.notes.post" 1
+else
+  check "bff (recordStore disabled) does NOT hold varroa.recordstore.notes.post" 0
+fi
+if grep -q 'varroa.recordstore.notes.post' <<<"$bff_block$operator_rs_block$gateway_rs_block"; then
+  check "no identity outside the BFF and the recorder holds varroa.recordstore.notes.post" 1
+else
+  check "no identity outside the BFF and the recorder holds varroa.recordstore.notes.post" 0
+fi
+
 echo ""
 if [[ "$failures" -eq 0 ]]; then
   echo "=== ALL ASSERTIONS PASSED ==="

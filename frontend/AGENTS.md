@@ -51,6 +51,7 @@ TypeScript consumer of it.
   tool's own config if you need to touch that integration.
 - Components pair `Foo.tsx` with `Foo.module.css` (CSS Modules) — see
   `src/components/`. Preserve this pairing for new components.
+- **Assistant UI** (`components/assistant/`): `Markdown.tsx` is the only renderer of model and note text; never use `dangerouslySetInnerHTML`. The session key is never stored in the browser. `transcript.ts` folds frames; it drops a replayed seq. `AssistantProvider` is the one place that answers availability.
 - **Tab rows**: `components/Tabs.tsx` is the only tab row. Each caller passes a unique `idBase` and an `ariaLabel`. Each caller spreads `tabPanelProps(idBase, activeTab)` on the element that holds the active panel.
 - **Accent fills that carry text use `--accent-fill` + `--on-accent`, never
   `--accent` + a hardcoded label colour.** `--accent` sits in a luminance

@@ -1902,6 +1902,17 @@ components:
             or empty name carries the old key's name forward.
           type: string
       type: object
+    CreateRunNoteRequest:
+      additionalProperties: false
+      description: Send exactly one of body and sessionId.
+      properties:
+        body:
+          maxLength: 16384
+          type: string
+        sessionId:
+          format: uuid
+          type: string
+      type: object
     CreateRunRequest:
       additionalProperties: false
       description: |
@@ -3417,6 +3428,76 @@ components:
           type: array
         nextCursor:
           type: string
+      required:
+      - items
+      type: object
+    RunNote:
+      additionalProperties: false
+      description: A note on one build, or on one job. A session note carries the
+        session id.
+      properties:
+        body:
+          type: string
+        buildNumber:
+          description: The build number of the note's run. Set on the job read only.
+          format: int64
+          nullable: true
+          type: integer
+        cluster:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        jobPath:
+          type: string
+        principal:
+          type: string
+        runId:
+          format: uuid
+          nullable: true
+          type: string
+        sessionId:
+          format: uuid
+          nullable: true
+          type: string
+        team:
+          type: string
+      required:
+      - id
+      - runId
+      - cluster
+      - team
+      - jobPath
+      - principal
+      - sessionId
+      - body
+      - createdAt
+      type: object
+    RunNoteError:
+      additionalProperties: false
+      description: A note refusal. The code names the cause when one applies.
+      properties:
+        code:
+          enum:
+          - note_too_long
+          - note_session_invalid
+          type: string
+        error:
+          type: string
+      required:
+      - error
+      - code
+      type: object
+    RunNoteList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunNote'
+          type: array
       required:
       - items
       type: object
@@ -7421,6 +7502,17 @@ components:
             or empty name carries the old key's name forward.
           type: string
       type: object
+    components_schemas_CreateRunNoteRequest:
+      additionalProperties: false
+      description: Send exactly one of body and sessionId.
+      properties:
+        body:
+          maxLength: 16384
+          type: string
+        sessionId:
+          format: uuid
+          type: string
+      type: object
     components_schemas_CreateRunRequest:
       additionalProperties: false
       description: |
@@ -10257,6 +10349,76 @@ components:
           type: array
         nextCursor:
           type: string
+      required:
+      - items
+      type: object
+    components_schemas_RunNote:
+      additionalProperties: false
+      description: A note on one build, or on one job. A session note carries the
+        session id.
+      properties:
+        body:
+          type: string
+        buildNumber:
+          description: The build number of the note's run. Set on the job read only.
+          format: int64
+          nullable: true
+          type: integer
+        cluster:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        jobPath:
+          type: string
+        principal:
+          type: string
+        runId:
+          format: uuid
+          nullable: true
+          type: string
+        sessionId:
+          format: uuid
+          nullable: true
+          type: string
+        team:
+          type: string
+      required:
+      - id
+      - runId
+      - cluster
+      - team
+      - jobPath
+      - principal
+      - sessionId
+      - body
+      - createdAt
+      type: object
+    components_schemas_RunNoteError:
+      additionalProperties: false
+      description: A note refusal. The code names the cause when one applies.
+      properties:
+        code:
+          enum:
+          - note_too_long
+          - note_session_invalid
+          type: string
+        error:
+          type: string
+      required:
+      - error
+      - code
+      type: object
+    components_schemas_RunNoteList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_RunNote'
+          type: array
       required:
       - items
       type: object
@@ -16277,6 +16439,30 @@ paths:
         discovered.
       tags:
       - Pipelines
+  /api/v1/pipelines/{team}/jobs/{job}/notes:
+    get:
+      description: |
+        Each run note carries the build number of its run when the record store still holds the run. A job note carries a null runId.
+      operationId: listJobNotes
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - $ref: '#/components/parameters/components_parameters_job'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNoteList'
+          description: The newest notes of the job.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists the newest notes of one job, newest first, up to ten.
+      tags:
+      - Pipelines
   /api/v1/pipelines/{team}/jobs/{job}/runs:
     get:
       operationId: listRuns
@@ -17221,6 +17407,78 @@ paths:
       tags:
       - Pipelines
       x-sse: true
+  /api/v1/runs/{run}/notes:
+    get:
+      description: |
+        The route reads the run first, so a caller the run read check refuses gets 404. The list is never null.
+      operationId: listRunNotes
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNoteList'
+          description: The notes of the build.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Lists the notes of one build, oldest first.
+      tags:
+      - Pipelines
+    post:
+      description: |
+        Send exactly one of body and sessionId. A body writes a human note, and the caller needs the tenant write check on the build. A sessionId writes the newest final answer of that assistant session, and only the session owner may send it. A session can write its note once. A repeat returns the stored note with 200.
+      operationId: createRunNote
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_run'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_CreateRunNoteRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNote'
+          description: The stored note of the session, written earlier.
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNote'
+          description: The note that this call wrote.
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNoteError'
+          description: |
+            A plain refusal for a malformed request, or a RunNoteError with code note_too_long for a body over 16384 bytes.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_RunNoteError'
+          description: The session cannot write a note on this build.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Adds a human note to a build, or the assistant answer of a session.
+      tags:
+      - Pipelines
   /api/v1/runs/{run}/replay:
     post:
       description: |

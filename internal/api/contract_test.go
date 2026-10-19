@@ -225,6 +225,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/pipelines/{team}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/branches"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/notes"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/runs"},
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/jobs/{job}/scan"},
@@ -252,6 +253,8 @@ var routeManifest = []route{
 	{Method: "POST", Path: "/api/v1/runs/{run}/replay"},
 	{Method: "GET", Path: "/api/v1/runs/{run}/restart"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/restart"},
+	{Method: "GET", Path: "/api/v1/runs/{run}/notes"},
+	{Method: "POST", Path: "/api/v1/runs/{run}/notes"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/inputs/{input}/proceed"},
 	{Method: "POST", Path: "/api/v1/runs/{run}/inputs/{input}/abort"},
 }

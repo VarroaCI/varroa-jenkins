@@ -700,3 +700,6 @@ make lint
 go test -race -count=1 ./internal/api/...
 make check-client   # if any route/payload shape changed
 ```
+
+- **Run notes** (`handlers_run_notes.go`, `run_notes.go`): `GET`/`POST /runs/{run}/notes` and `GET /pipelines/{team}/jobs/{job}/notes`. Reads go to `deps.RecordStore`. Writes go through `deps.RunNotePoster` to the recorder; nil means 503. A session note reads `deps.Assistant.Store` and copies the newest final answer of a completed session the caller owns. Refusals carry `code` `note_too_long` or `note_session_invalid`.
+

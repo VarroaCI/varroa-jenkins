@@ -1,3 +1,4 @@
+import { Sparkles } from "lucide-react";
 import { useState, useMemo, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -13,6 +14,7 @@ import {
   passesLane,
   passesSource,
   passesSelection,
+  isAgentRow,
   activityTypeMeta,
   SOURCE_COLORS,
   SOURCE_LABELS,
@@ -41,7 +43,7 @@ const LANE_TO_FILTER: Record<LaneChip, "All" | Lane> = {
   Builds: "builds",
 };
 
-const SOURCE_CHIPS = ["All", "Operator", "Mite", "User", "Jenkins", "MCP"] as const;
+const SOURCE_CHIPS = ["All", "Operator", "Mite", "User", "Jenkins", "MCP", "Agents"] as const;
 const SOURCE_CHIP_TO_VALUE: Record<string, "All" | string> = {
   All: "All",
   Operator: "operator",
@@ -49,6 +51,7 @@ const SOURCE_CHIP_TO_VALUE: Record<string, "All" | string> = {
   User: "user",
   Jenkins: "jenkins",
   MCP: "mcp",
+  Agents: "agents",
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -115,6 +118,7 @@ export default function ActivityTimeline({
       const s = e.source;
       counts[s] = (counts[s] ?? 0) + 1;
     }
+    counts.agents = scopedEvents.filter(isAgentRow).length;
     return counts;
   }, [scopedEvents]);
 
@@ -182,6 +186,7 @@ export default function ActivityTimeline({
         <div className={styles.eventBody}>
           <div className={styles.eventHeader}>
             <span className={styles.eventType}>{event.type}</span>
+            {isAgentRow(event) && <Sparkles size={12} aria-label="Agent" />}
             <span
               className={styles.sourceChip}
               style={{
@@ -191,7 +196,9 @@ export default function ActivityTimeline({
               {sourceLabel}
             </span>
             {event.actor && (
-              <span className={styles.actor}>{event.actor}</span>
+              <span className={styles.actor}>
+                {event.source === "assistant" ? `approved by ${event.actor}` : event.actor}
+              </span>
             )}
           </div>
           <div className={styles.eventMessage}>
@@ -244,6 +251,7 @@ export default function ActivityTimeline({
             {event.buildNumber != null && (
               <span className={styles.buildNumber}>#{event.buildNumber}</span>
             )}
+            {isAgentRow(event) && <Sparkles size={12} aria-label="Agent" />}
             <span
               className={styles.sourceChip}
               style={{

@@ -11,6 +11,8 @@ import type { Permissions, MeResponse } from "../types/auth";
 interface RenderWithProvidersOptions extends Omit<RenderOptions, "wrapper"> {
   /** Initial route path (default: "/") */
   route?: string;
+  /** Router location state for the initial entry. */
+  routerState?: unknown;
   /** Override the QueryClient (default: retry: false, no auto-refetch) */
   queryClient?: QueryClient;
   /** Pre-seeded permissions for the auth context */
@@ -56,6 +58,7 @@ export function renderWithProviders(
 ) {
   const {
     route = "/",
+    routerState,
     queryClient = createTestQueryClient(),
     permissions,
     authMode = "local",
@@ -82,7 +85,7 @@ export function renderWithProviders(
 
   function Wrapper({ children }: { children: React.ReactNode }) {
     return (
-      <MemoryRouter initialEntries={[route]}>
+      <MemoryRouter initialEntries={[{ pathname: route.split("?")[0], search: route.includes("?") ? "?" + route.split("?")[1] : "", state: routerState }]}>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <ToastProvider>

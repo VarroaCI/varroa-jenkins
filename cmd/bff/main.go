@@ -715,6 +715,9 @@ func main() {
 			// write to varroa.fleet_locks. It needs the bus for that.
 			if busConn != nil {
 				apiDeps.FleetLockReleaser = api.NewBusFleetLockReleaser(busConn)
+				// The run notes go to the recorder, which owns every write to
+				// varroa.run_notes.
+				apiDeps.RunNotePoster = api.NewBusRunNotePoster(busConn)
 			}
 
 			apiDeps.RecordStoreRunRetention = 365 * 24 * time.Hour

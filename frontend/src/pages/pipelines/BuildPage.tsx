@@ -53,6 +53,10 @@ import { PendingInputCard } from "./PendingInputCard";
 import { ReplayDrawer } from "./ReplayDrawer";
 import { RestartDrawer } from "./RestartDrawer";
 import { RunLinksCard } from "./RunLinksCard";
+import { NotesCard } from "./NotesCard";
+import { useAssistant } from "../../components/assistant/AssistantProvider";
+import { TargetApprovalsCard } from "../../components/assistant/TargetApprovalsCard";
+import { useOptionalAuth } from "../../context/AuthContext";
 import styles from "./BuildPage.module.css";
 
 /** The frames the run log stream carries. */
@@ -280,6 +284,8 @@ export default function BuildPage() {
 
   const { data: permissions } = usePermissions();
   const folderRelativeJobPath = run ? stripTenantFolder(run.tenantFolder, run.jobPath) : undefined;
+  const viewerSubject = useOptionalAuth()?.user?.subject ?? "";
+  const assistantSwitchOn = useAssistant().switchOn;
   const canWrite = run ? canAccessTenantPipeline(permissions, run.tenant, "write", folderRelativeJobPath) : false;
 
   // The log tab keeps every log frame, because the viewer unmounts while
@@ -735,7 +741,11 @@ export default function BuildPage() {
               >
                 <Keyboard size={14} aria-hidden="true" /> Shortcuts
               </Button>
-              <ShortcutLegend open={legendOpen} onClose={closeLegend} />
+              <ShortcutLegend
+                open={legendOpen}
+                onClose={closeLegend}
+                extra={assistantSwitchOn ? [{ key: "a", action: "Open the assistant" }] : []}
+              />
             </span>
           </nav>
         </div>
@@ -822,6 +832,10 @@ export default function BuildPage() {
       )}
 
       <RunLinksCard runId={run.runId} upstream={run.upstream} downstream={run.downstream} />
+
+      <NotesCard mode="run" runId={run.runId} canWrite={canWrite} hasDigest={!!run.digest} />
+
+      <TargetApprovalsCard kind="run" targetRef={run.runId} run={{ tenant: run.tenant, tenantFolder: run.tenantFolder, jobPath: run.jobPath }} viewer={viewerSubject} />
 
       {/* The digest card sits above the Pipeline card and under the
           interrupted banner. Each part renders on its own, so a digest that

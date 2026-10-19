@@ -25,7 +25,8 @@ export function canAdminArea(perms: Permissions | undefined): boolean {
     canDoGlobal(perms, "rolebindings", "read") ||
     canDoGlobal(perms, "jenkinsroles", "read") ||
     canDoGlobal(perms, "jenkinsrolebindings", "read") ||
-    canDoGlobal(perms, "provisioningdefaults", "update")
+    canDoGlobal(perms, "provisioningdefaults", "update") ||
+    canDoGlobal(perms, "assistant", "admin")
   );
 }
 

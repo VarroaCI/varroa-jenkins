@@ -1,6 +1,8 @@
 import { useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import { ProfileMenu } from "./ProfileMenu";
+import { useAssistant } from "./assistant/AssistantProvider";
+import { Sparkles } from "lucide-react";
 import styles from "./Topbar.module.css";
 
 interface TopbarProps {
@@ -10,6 +12,7 @@ interface TopbarProps {
 }
 
 export function Topbar({ query = "", onQueryChange = () => {}, onSearchOpen = () => {} }: TopbarProps) {
+  const assistant = useAssistant();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,6 +44,19 @@ export function Topbar({ query = "", onQueryChange = () => {}, onSearchOpen = ()
       </div>
 
       <div className={styles.topActions}>
+        {assistant.switchOn && (
+          <button
+            ref={assistant.registerDoor}
+            className={styles.iconBtn}
+            aria-label="Assistant"
+            title="Open the assistant (a)"
+            aria-keyshortcuts="a"
+            aria-expanded={assistant.drawerOpen}
+            onClick={assistant.toggleDrawer}
+          >
+            <Sparkles size={16} aria-hidden />
+          </button>
+        )}
         <button
           className={styles.iconBtn + " " + styles.dotBadge}
           title="Activity feed"

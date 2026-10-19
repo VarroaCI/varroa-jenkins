@@ -227,6 +227,8 @@ stringData:
               // Fleet lock force release: ask the recorder to delete a
               // releasing lock that no live pod holds.
               "varroa.recordstore.fleetlock.release"
+              // Run notes: ask the recorder to write a run note.
+              "varroa.recordstore.notes.post"
 {{- end }}
             ]
             subscribe: [
@@ -305,6 +307,8 @@ stringData:
               "varroa.recordstore.tenant.sync"
               // Fleet lock force release: answer the BFF's request.
               "varroa.recordstore.fleetlock.release"
+              // Run notes: answer the BFF's note post.
+              "varroa.recordstore.notes.post"
               "_INBOX_recorder.>"
             ]
           }

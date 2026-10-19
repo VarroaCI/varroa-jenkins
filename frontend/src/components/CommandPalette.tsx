@@ -25,6 +25,8 @@ interface CommandPaletteProps {
   query?: string;
   onOpenChange?: (open: boolean) => void;
   onQueryChange?: (query: string) => void;
+  /** onAsk opens the assistant with the query as its first message. */
+  onAsk?: (text: string) => void;
 }
 
 const categoryLabels = ["Controllers", "Namespaces", "Groups", "Catalog Items", "Jobs", "Runs", "Activity"];
@@ -97,15 +99,25 @@ export function CommandPalette(props: CommandPaletteProps) {
     navigate(link);
   };
 
+  // The "Ask the assistant" row is selectable only once the search answered.
+  const askRow = !!props.onAsk && query.trim() !== "" && !isLoading;
+  const total = results.length + (askRow ? 1 : 0);
+
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelected((s) => Math.min(s + 1, results.length - 1));
+      setSelected((s) => Math.min(s + 1, total - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelected((s) => Math.max(s - 1, 0));
-    } else if (e.key === "Enter" && results[selected]) {
-      go(results[selected].link);
+    } else if (e.key === "Enter") {
+      if (isLoading) return;
+      if (askRow && selected === results.length) {
+        onOpenChange(false);
+        props.onAsk?.(query.trim());
+      } else if (results[selected]) {
+        go(results[selected].link);
+      }
     }
   };
 
@@ -167,6 +179,21 @@ export function CommandPalette(props: CommandPaletteProps) {
           ))}
           {query.trim() && !isLoading && !error && results.length === 0 && (
             <div className={styles.empty}>No results for "{query}"</div>
+          )}
+          {askRow && (
+            <div className={styles.results}>
+              <button
+                type="button"
+                className={`${styles.item} ${selected === results.length ? styles.selected : ""}`}
+                onMouseEnter={() => setSelected(results.length)}
+                onClick={() => {
+                  onOpenChange(false);
+                  props.onAsk?.(query.trim());
+                }}
+              >
+                <div className={styles.itemName}>Ask the assistant: {query.trim()}</div>
+              </button>
+            </div>
           )}
         </div>
       </div>
