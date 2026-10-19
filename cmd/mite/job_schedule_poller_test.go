@@ -579,3 +579,44 @@ func TestJobSchedulesExcludedFromStateHash(t *testing.T) {
 			withSet.ActualStateHash, withoutSet.ActualStateHash)
 	}
 }
+
+// TestPollJobSchedulesStampsTakenTimeBeforeRequest proves the taken time
+// is read before the plugin walk starts and no later than the walk ends.
+func TestPollJobSchedulesStampsTakenTimeBeforeRequest(t *testing.T) {
+	var handlerMillis atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerMillis.Store(time.Now().UnixMilli())
+		_, _ = w.Write([]byte(`{"schedules":[],"total":0}`))
+	}))
+	defer srv.Close()
+
+	a := newJobScheduleTestAgent(t, srv.URL)
+	before := time.Now().UnixMilli()
+	set, _, err := a.pollJobSchedules(context.Background())
+	if err != nil {
+		t.Fatalf("poll job schedules: %v", err)
+	}
+	if set.TakenAtMillis < before || set.TakenAtMillis > handlerMillis.Load() {
+		t.Fatalf("TakenAtMillis = %d, want between %d and %d", set.TakenAtMillis, before, handlerMillis.Load())
+	}
+}
+
+// TestMaybeAttachJobSchedulesReconnectKeepsTakenTime proves a resent set
+// keeps the taken time of the poll that produced it.
+func TestMaybeAttachJobSchedulesReconnectKeepsTakenTime(t *testing.T) {
+	a := newJobScheduleTestAgent(t, "http://localhost:1")
+	a.jobScheduleSet = &mitev1.JobScheduleSet{Hash: "hash-1", TakenAtMillis: 1000}
+	a.jobScheduleLastSentHash = "hash-1"
+	a.jobScheduleLastSendTime = time.Now()
+	a.jobScheduleResendAfter = time.Hour
+
+	a.markStreamReconnected()
+	snap := &mitev1.StateSnapshot{}
+	a.maybeAttachJobSchedules(snap)
+	if snap.JobSchedules == nil {
+		t.Fatal("expected the set carried after reconnect")
+	}
+	if got := snap.JobSchedules.TakenAtMillis; got != 1000 {
+		t.Fatalf("resent TakenAtMillis = %d, want 1000", got)
+	}
+}

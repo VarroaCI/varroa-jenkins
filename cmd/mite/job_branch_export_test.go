@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -137,5 +139,26 @@ func TestMaybeAttachJobBranchesGate(t *testing.T) {
 	a.maybeAttachJobBranches(closed)
 	if closed.JobBranches != nil {
 		t.Fatalf("closed export gate sent a branch set")
+	}
+}
+
+// TestPollJobBranchesStampsTakenTime proves the taken time is read before
+// the plugin walk starts and no later than the walk ends.
+func TestPollJobBranchesStampsTakenTime(t *testing.T) {
+	var handlerMillis atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		handlerMillis.Store(time.Now().UnixMilli())
+		_, _ = w.Write([]byte(`{"projects":[],"total":0}`))
+	}))
+	defer srv.Close()
+
+	a := newJobScheduleTestAgent(t, srv.URL)
+	before := time.Now().UnixMilli()
+	set, err := a.pollJobBranches(context.Background())
+	if err != nil {
+		t.Fatalf("poll job branches: %v", err)
+	}
+	if set.TakenAtMillis < before || set.TakenAtMillis > handlerMillis.Load() {
+		t.Fatalf("TakenAtMillis = %d, want between %d and %d", set.TakenAtMillis, before, handlerMillis.Load())
 	}
 }

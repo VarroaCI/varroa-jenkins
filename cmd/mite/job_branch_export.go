@@ -155,6 +155,9 @@ func (a *Agent) pollJobBranchesOnce(ctx context.Context, logger *slog.Logger) {
 func (a *Agent) pollJobBranches(ctx context.Context) (*mitev1.JobBranchSet, error) {
 	client := a.getJenkinsClient()
 
+	// The time is read before the request. A run created before it names a
+	// job that the plugin walk saw, so the time is a safe lower bound.
+	takenAt := time.Now()
 	httpResp, err := client.DoGet(ctx, jobBranchesPath)
 	if err != nil {
 		return nil, fmt.Errorf("do get: %w", err)
@@ -204,10 +207,11 @@ func (a *Agent) pollJobBranches(ctx context.Context) (*mitev1.JobBranchSet, erro
 	}
 
 	return &mitev1.JobBranchSet{
-		Hash:      computeJobBranchHash(projects),
-		Items:     items,
-		Truncated: resp.Truncated,
-		Total:     resp.Total,
+		Hash:          computeJobBranchHash(projects),
+		Items:         items,
+		Truncated:     resp.Truncated,
+		Total:         resp.Total,
+		TakenAtMillis: takenAt.UnixMilli(),
 	}, nil
 }
 

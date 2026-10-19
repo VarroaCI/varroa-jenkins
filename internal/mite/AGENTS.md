@@ -282,6 +282,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   An unresolved tenant, an unparsable pending message, and a marshal fault
   all still ack, because a redelivery would trigger the same build again and
   change nothing.
+- **Job inventory envelope time** — `publishJobSchedules` and `publishJobBranches`
+  set `OccurredAt` to the set's `taken_at_millis`, never to the publish time. A set
+  with no taken time publishes nothing and counts a drop; the mite and gateway roll together.
 - **Cross-tenant bridge** (`crosstenant_bridge.go`, `crosstenant_timeout.go`) —
   `BusHandler.OnCrossTenantRequest` relays a `varroa.build`/`lastSuccessful`/
   `copyArtifact`/`lock` step call to the record store's

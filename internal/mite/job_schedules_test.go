@@ -2,6 +2,7 @@ package mite
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
+
+// testTakenAtMillis is the taken time that the job inventory test sets are
+// stamped with. The gateway publishes envelopes at this time.
+const testTakenAtMillis int64 = 1791000000000
 
 // stubJobTenantResolver implements CellTenantResolver for job.schedules
 // tests, with a per-job-path lookup table. ResolveTenant (the claim
@@ -92,7 +97,8 @@ func decodeJobSchedulePayload(t *testing.T, env ingestEnvelope) jobScheduleEnvel
 
 func oneRowSet() *mitev1.JobScheduleSet {
 	return &mitev1.JobScheduleSet{
-		Hash: "sh1",
+		TakenAtMillis: testTakenAtMillis,
+		Hash:          "sh1",
 		Items: []*mitev1.JobSchedule{
 			{
 				JobPath:       "team-a/build",
@@ -207,8 +213,8 @@ func TestOnSnapshot_JobScheduleEnvelopeFields(t *testing.T) {
 	if env.CellInstance != "uid-1" {
 		t.Errorf("CellInstance = %q, want uid-1", env.CellInstance)
 	}
-	if env.OccurredAt.IsZero() {
-		t.Error("OccurredAt is zero, want the publish time")
+	if want := time.UnixMilli(testTakenAtMillis).UTC(); !env.OccurredAt.Equal(want) {
+		t.Errorf("OccurredAt = %v, want the taken time %v", env.OccurredAt, want)
 	}
 
 	payload := decodeJobSchedulePayload(t, env)
@@ -236,7 +242,8 @@ func TestOnSnapshot_JobScheduleEnvelope_TwoTenantsOneCell(t *testing.T) {
 	h, _ := newJobScheduleTestHandler(t, pub, resolver)
 
 	snap := &mitev1.StateSnapshot{JobSchedules: &mitev1.JobScheduleSet{
-		Hash: "sh1",
+		TakenAtMillis: testTakenAtMillis,
+		Hash:          "sh1",
 		Items: []*mitev1.JobSchedule{
 			{JobPath: "team-a/build", TriggerType: "cron", Spec: "H * * * *"},
 			{JobPath: "team-b/build", TriggerType: "varroa-upstream",
@@ -284,7 +291,8 @@ func TestOnSnapshot_JobSchedule_OneUnresolvedRowRejectsWholeEnvelope(t *testing.
 	h, _ := newJobScheduleTestHandler(t, pub, resolver)
 
 	snap := &mitev1.StateSnapshot{JobSchedules: &mitev1.JobScheduleSet{
-		Hash: "sh1",
+		TakenAtMillis: testTakenAtMillis,
+		Hash:          "sh1",
 		Items: []*mitev1.JobSchedule{
 			{JobPath: "team-a/build", TriggerType: "cron"},
 			{JobPath: "team-b/build", TriggerType: "cron"},
@@ -325,7 +333,8 @@ func TestOnSnapshot_JobSchedule_NilRowRejectsWholeEnvelope(t *testing.T) {
 	h, _ := newJobScheduleTestHandler(t, pub, resolver)
 
 	snap := &mitev1.StateSnapshot{JobSchedules: &mitev1.JobScheduleSet{
-		Hash: "sh1",
+		TakenAtMillis: testTakenAtMillis,
+		Hash:          "sh1",
 		Items: []*mitev1.JobSchedule{
 			{JobPath: "team-a/build", TriggerType: "cron"},
 			nil,
@@ -402,3 +411,37 @@ var errStreamMissingForTest = errStreamMissing{}
 type errStreamMissing struct{}
 
 func (errStreamMissing) Error() string { return "stream not found" }
+
+// TestOnSnapshot_JobSchedule_RetainedSetKeepsTakenTime asserts a set kept
+// after a failed publish keeps the time the cell took it, on the retry.
+func TestOnSnapshot_JobSchedule_RetainedSetKeepsTakenTime(t *testing.T) {
+	pub := &fakePublisher{syncFailLeft: 1, syncErr: errors.New("jetstream down")}
+	h, _ := newJobScheduleTestHandler(t, pub, nil)
+	h.scheduleStreamMissingTTL = time.Millisecond
+
+	h.OnSnapshot("ctrl1", "ns1", &mitev1.StateSnapshot{JobSchedules: oneRowSet()})
+	time.Sleep(5 * time.Millisecond)
+	h.OnSnapshot("ctrl1", "ns1", &mitev1.StateSnapshot{})
+
+	waitFor(t, func() bool { return pub.publishedCount() == 1 }, 5*time.Second, "retained set never published")
+	want := time.UnixMilli(testTakenAtMillis).UTC()
+	if got := pub.envelopeAt(0).OccurredAt; !got.Equal(want) {
+		t.Errorf("retried OccurredAt = %v, want the taken time %v", got, want)
+	}
+}
+
+// TestOnSnapshot_JobSchedule_MissingTakenTimeRejectsEnvelope asserts a set
+// with no taken time publishes nothing, and does not fall back to the
+// publish time.
+func TestOnSnapshot_JobSchedule_MissingTakenTimeRejectsEnvelope(t *testing.T) {
+	pub := &fakePublisher{}
+	h, _ := newJobScheduleTestHandler(t, pub, nil)
+
+	set := oneRowSet()
+	set.TakenAtMillis = 0
+	h.OnSnapshot("ctrl1", "ns1", &mitev1.StateSnapshot{JobSchedules: set})
+	time.Sleep(20 * time.Millisecond)
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("publishedCount() = %d, want 0 (a set with no taken time publishes nothing)", got)
+	}
+}

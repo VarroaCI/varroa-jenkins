@@ -499,10 +499,11 @@ type JobBranchProject struct {
 
 // JobBranchSet wraps the branch inventory with presence: an unset field
 type JobBranchSet struct {
-	Hash      string              `json:"hash,omitempty"`
-	Items     []*JobBranchProject `json:"items,omitempty"`
-	Truncated bool                `json:"truncated,omitempty"`
-	Total     int                 `json:"total,omitempty"`
+	Hash          string              `json:"hash,omitempty"`
+	Items         []*JobBranchProject `json:"items,omitempty"`
+	Truncated     bool                `json:"truncated,omitempty"`
+	Total         int                 `json:"total,omitempty"`
+	TakenAtMillis int64               `json:"taken_at_millis,omitempty"`
 }
 
 // JobSchedule is one job/trigger row of the live job-schedule inventory.
@@ -520,10 +521,11 @@ type JobSchedule struct {
 
 // JobScheduleSet wraps the job-schedule rows with presence: an unset field
 type JobScheduleSet struct {
-	Hash      string         `json:"hash,omitempty"`
-	Items     []*JobSchedule `json:"items,omitempty"`
-	Truncated bool           `json:"truncated,omitempty"`
-	Total     int            `json:"total,omitempty"`
+	Hash          string         `json:"hash,omitempty"`
+	Items         []*JobSchedule `json:"items,omitempty"`
+	Truncated     bool           `json:"truncated,omitempty"`
+	Total         int            `json:"total,omitempty"`
+	TakenAtMillis int64          `json:"taken_at_millis,omitempty"`
 }
 
 type LogAck struct {

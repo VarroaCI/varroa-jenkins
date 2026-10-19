@@ -13,7 +13,8 @@ import (
 // oneBranchSet is a branch inventory with one project and one head.
 func oneBranchSet() *mitev1.JobBranchSet {
 	return &mitev1.JobBranchSet{
-		Hash: "bh1",
+		TakenAtMillis: testTakenAtMillis,
+		Hash:          "bh1",
 		Items: []*mitev1.JobBranchProject{{
 			JobPath:   "team-a/mb",
 			IndexedAt: "2026-10-12T10:00:00Z",
@@ -135,5 +136,42 @@ func TestPublishJobBranchesRetainsOnFailure(t *testing.T) {
 	h.scheduleMu.Unlock()
 	if stillRetained {
 		t.Fatalf("the published set is still retained")
+	}
+}
+
+// TestPublishJobBranchesCarriesTakenTime asserts the envelope time is the
+// time the cell took the branch inventory.
+func TestPublishJobBranchesCarriesTakenTime(t *testing.T) {
+	pub := &fakePublisher{}
+	resolver := stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{
+		"team-a/mb": {tenant: "alpha", generation: 1},
+	}}
+	h, _ := newJobScheduleTestHandler(t, pub, resolver)
+
+	if ok := h.publishJobBranches("ns1", "ctrl1", oneBranchSet()); !ok {
+		t.Fatalf("publishJobBranches reported failure")
+	}
+	want := time.UnixMilli(testTakenAtMillis).UTC()
+	if got := pub.envelopeAt(0).OccurredAt; !got.Equal(want) {
+		t.Errorf("OccurredAt = %v, want the taken time %v", got, want)
+	}
+}
+
+// TestPublishJobBranchesMissingTakenTimeRejectsEnvelope asserts a branch
+// set with no taken time publishes nothing.
+func TestPublishJobBranchesMissingTakenTimeRejectsEnvelope(t *testing.T) {
+	pub := &fakePublisher{}
+	resolver := stubJobTenantResolver{byJobPath: map[string]stubTenantEntry{
+		"team-a/mb": {tenant: "alpha", generation: 1},
+	}}
+	h, _ := newJobScheduleTestHandler(t, pub, resolver)
+
+	set := oneBranchSet()
+	set.TakenAtMillis = 0
+	if ok := h.publishJobBranches("ns1", "ctrl1", set); ok {
+		t.Fatalf("publishJobBranches reported success with no taken time")
+	}
+	if got := pub.publishedCount(); got != 0 {
+		t.Fatalf("publishedCount() = %d, want 0", got)
 	}
 }

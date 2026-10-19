@@ -16,10 +16,11 @@ import (
 //
 // It row-locks the cell's job_schedule_cells watermark first, inserting
 // it with the sentinel observed_at "-infinity" when absent so a cell's
-// first envelope always has a row to lock. It applies the envelope only
-// when the envelope's time is newer than the stored watermark; an older
-// or equal envelope changes no row and is reported through
-// ApplyResult.ScheduleStale. Deleting every row the envelope omits is
+// first envelope always has a row to lock. The envelope's time is the time
+// the cell took the set, so a resent set keeps its time. It applies the
+// envelope only when that time is newer than the stored watermark; an older
+// or equal envelope, such as a resent set, changes no row and is reported
+// through ApplyResult.ScheduleStale. Deleting every row the envelope omits is
 // skipped when the envelope reports truncation, reported through
 // ApplyResult.Truncated.
 func (g *Ingester) applyJobSchedules(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
