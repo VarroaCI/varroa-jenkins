@@ -117,7 +117,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
-  with no user record.
+  with no user record. A scan of a multibranch project or an organization folder runs as the system identity, so it can read the folder credentials.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at
   `spec.pipelines.agentNamespace`. A pipeline selects it with `agent { label '<team>-default' }` or `cloud: '<team>'`;
   `agent any` lands on the default cloud, which the agent fence refuses.
@@ -204,7 +204,7 @@ Five controls confine a tenant:
 3. **Agent fence.** The plugin refuses a build on a node labelled for another tenant or on an
    unlabelled node.
 4. **Build identity.** The plugin authenticates every build, including a Pipeline `node` block, as
-   `svc-<team>`. That identity reads only its own folder's credentials and items.
+   `svc-<team>`. That identity reads only its own folder's credentials and items. A scan of a multibranch project or an organization folder runs as the system identity instead.
 5. **Script sandbox.** Tenant code is sandboxed. See [Script approvals](script-approvals.md).
 
 ## The tenant webhook door

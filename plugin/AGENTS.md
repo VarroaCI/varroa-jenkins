@@ -748,7 +748,7 @@ the root AGENTS.md greenfield rule.
   `@Extension(ordinal = 1000)`, above core's ordinal 100 and the pinned
   `workflow-durable-task-step`'s `AuthenticationFromBuild` at ordinal 959) answers
   `svc-<team>` with authorities `authenticated` and `ROLE:varroa:tenant:<team>` for a
-  resolved tenant, else `null`. `VarroaQueueTaskDispatcher`
+  resolved tenant, else `null`. It answers `null` for a `ComputedFolder` task, so a folder computation runs as SYSTEM. `VarroaQueueTaskDispatcher`
   (`QueueTaskDispatcher.canTake`) blocks a build from a node that carries no reserved
   `varroa-tenant-<team>` label (the fence fails closed) or carries another tenant's
   label; it never parses the readability-only `<team>-` node-name prefix, and never
