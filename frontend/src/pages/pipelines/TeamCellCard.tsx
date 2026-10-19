@@ -146,6 +146,14 @@ export default function TeamCellCard({ team }: { team: string }) {
         </div>
       )}
 
+      {data.warning && (
+        <div className={styles.warning} role="alert">
+          <span className={styles.warningLabel}>Warning</span>
+          <span className={styles.warningReason}>{data.warning.reason}</span>
+          <p className={styles.warningMessage}>{data.warning.message}</p>
+        </div>
+      )}
+
       {explanation && <p className={styles.explain}>{explanation}</p>}
 
       {full && (

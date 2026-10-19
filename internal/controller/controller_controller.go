@@ -3994,6 +3994,16 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					}
 					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
 				}
+				// A refused tenant item sets that tenant's ItemsApplyFailed entry.
+				// A successful items apply clears every such entry. Any other
+				// result keeps the list.
+				if isCellController(cr) && r.DesiredState.AppliedHash != "" &&
+					r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
+					if cr.Status.Cell == nil {
+						cr.Status.Cell = &v1alpha1.CellStatus{}
+					}
+					cr.Status.Cell.TenantWarnings = itemsApplyFailedAfter(cr.Status.Cell.TenantWarnings, cr.Status.Cell, r.DesiredState)
+				}
 				// Rehydration result (design D13, task 6.2): update only
 				// the entries whose CommandID matches this result. The
 				// in-flight push maps each command that carried its bundle

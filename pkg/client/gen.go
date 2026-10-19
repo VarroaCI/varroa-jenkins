@@ -4461,7 +4461,7 @@ type ComponentsSchemasSuspendBroodRequest struct {
 	Suspend bool `json:"suspend"`
 }
 
-// ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the states unplaced and notCellHosted every field other than state and reason is absent. The body carries no other tenant's name, job path, run, or count.
+// ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.
 type ComponentsSchemasTeamCell struct {
 	// CanOpenCell True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.
 	CanOpenCell    bool    `json:"canOpenCell"`
@@ -4487,6 +4487,9 @@ type ComponentsSchemasTeamCell struct {
 	RunningNow  *int64                         `json:"runningNow,omitempty"`
 	RunsLast24h *int64                         `json:"runsLast24h,omitempty"`
 	State       ComponentsSchemasTeamCellState `json:"state"`
+
+	// Warning The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
+	Warning *ComponentsSchemasTeamCellWarning `json:"warning,omitempty"`
 }
 
 // ComponentsSchemasTeamCellState defines model for ComponentsSchemasTeamCell.State.
@@ -4504,6 +4507,15 @@ type ComponentsSchemasTeamCellMember struct {
 	Role        string `json:"role"`
 	RunningNow  int64  `json:"runningNow"`
 	RunsLast24h int64  `json:"runsLast24h"`
+}
+
+// ComponentsSchemasTeamCellWarning The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.
+type ComponentsSchemasTeamCellWarning struct {
+	// Message The warning message, which names the fault.
+	Message string `json:"message"`
+
+	// Reason The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or HibernationIgnored.
+	Reason string `json:"reason"`
 }
 
 // ComponentsSchemasTeamConcurrencyLimit A cap on the builds of a named set of jobs that run at once.

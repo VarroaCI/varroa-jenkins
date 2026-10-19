@@ -15,6 +15,7 @@ const (
 // missing here is treated as unclassified and needs the logs level.
 var classes = map[string]DataClass{
 	"get_run_log":                  ClassLogs,
+	"get_team_cell":                ClassMetadata,
 	"get_controller_logs":          ClassLogs,
 	"get_run":                      ClassMetadataFiltered,
 	"list_controllers":             ClassMetadata,

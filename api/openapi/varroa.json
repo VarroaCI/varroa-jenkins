@@ -14545,7 +14545,7 @@
       },
       "components_schemas_TeamCell": {
         "additionalProperties": false,
-        "description": "The tenant's own view of the cell that hosts it. For the states unplaced and notCellHosted every field other than state and reason is absent. The body carries no other tenant's name, job path, run, or count.",
+        "description": "The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.",
         "properties": {
           "canOpenCell": {
             "description": "True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.",
@@ -14618,6 +14618,9 @@
               "notCellHosted"
             ],
             "type": "string"
+          },
+          "warning": {
+            "$ref": "#/components/schemas/components_schemas_TeamCellWarning"
           }
         },
         "required": [
@@ -14669,6 +14672,25 @@
           "runsLast24h",
           "failedLast24h",
           "jobs"
+        ],
+        "type": "object"
+      },
+      "components_schemas_TeamCellWarning": {
+        "additionalProperties": false,
+        "description": "The Team's TenantWarnings condition, verbatim, while its status is True. It is absent otherwise.",
+        "properties": {
+          "message": {
+            "description": "The warning message, which names the fault.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or HibernationIgnored.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "message"
         ],
         "type": "object"
       },

@@ -2655,6 +2655,11 @@ export interface TeamCell {
    * describes the tenant's slot 0.
    */
   members?: TeamCellMember[];
+  /**
+   * The Team's TenantWarnings condition, verbatim, while its status is True.
+   * Absent otherwise.
+   */
+  warning?: { reason: string; message: string };
 }
 
 /**

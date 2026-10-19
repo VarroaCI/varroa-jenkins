@@ -617,6 +617,10 @@ sections describe.
   only ones that can be cleared. When adding a status field, decide up front whether
   it must ever be cleared; if so it must be unconditional in `controllerStatusPatch`,
   not behind a non-empty guard.
+- **`ItemsApplyFailed` tenant warnings** come from the desired-state result drain
+  (`controller_controller.go`). `itemsApplyFailureWarnings` (`cell_items_apply_failure.go`)
+  maps `DesiredStateResult.items_failed_path` to its tenant. The drain replaces only that
+  reason, and only when the result answers the tracked desired-state hash.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the

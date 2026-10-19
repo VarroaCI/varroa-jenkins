@@ -96,6 +96,31 @@ describe("TeamCellCard", () => {
     expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
   });
 
+  it("renders the tenant warning", async () => {
+    mockGetTeamCell.mockResolvedValue(
+      placedCell({
+        warning: {
+          reason: "ItemsApplyFailed",
+          message: "create acme/repos: HTTP 500: Jenkins internal error",
+        },
+      }),
+    );
+    renderCard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Warning");
+    expect(alert).toHaveTextContent("ItemsApplyFailed");
+    expect(alert).toHaveTextContent("create acme/repos: HTTP 500: Jenkins internal error");
+  });
+
+  it("renders no warning block without a warning", async () => {
+    mockGetTeamCell.mockResolvedValue(placedCell());
+    renderCard();
+
+    expect(await screen.findByText("Placed")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("explains a move", async () => {
     mockGetTeamCell.mockResolvedValue(placedCell({ state: "moving", reason: "TenantMoving" }));
     renderCard();

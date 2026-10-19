@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -1305,6 +1307,16 @@ type teamCellJSON struct {
 	// cell name. It is absent for unplaced and notCellHosted. Every
 	// top-level field above keeps describing slot 0.
 	Members []teamCellMemberJSON `json:"members,omitempty"`
+	// Warning is the Team's TenantWarnings condition, verbatim, when its
+	// status is True. This surface owns no reason vocabulary.
+	Warning *teamCellWarningJSON `json:"warning,omitempty"`
+}
+
+// teamCellWarningJSON is the Team's TenantWarnings condition on the team
+// cell read.
+type teamCellWarningJSON struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 // teamCellMemberJSON is one member of the tenant on the team cell read.
@@ -1319,6 +1331,20 @@ type teamCellMemberJSON struct {
 	RunsLast24h   int64  `json:"runsLast24h"`
 	FailedLast24h int64  `json:"failedLast24h"`
 	Jobs          int64  `json:"jobs"`
+}
+
+// tenantWarning returns the Team's TenantWarnings condition as a warning,
+// or nil when the condition is absent or not True.
+func tenantWarning(team *v1alpha1.Team) *teamCellWarningJSON {
+	if team == nil {
+		return nil
+	}
+	for _, c := range team.Status.Conditions {
+		if c.Type == v1alpha1.TeamConditionTenantWarnings && c.Status == metav1.ConditionTrue {
+			return &teamCellWarningJSON{Reason: c.Reason, Message: c.Message}
+		}
+	}
+	return nil
 }
 
 // placedConditionReason returns the Team's Placed condition reason, or
@@ -1339,20 +1365,27 @@ func placedConditionReason(team *v1alpha1.Team) string {
 // pipelines path whose subject is the placement, not the jobs, so it
 // resolves the Team object first and falls back to the tenant resolver.
 func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
-	if s.deps.RecordStore == nil {
-		s.pipelinesUnavailable(w)
+	body, serr := s.TeamCell(r.Context(), auth.ClaimsFromContext(r.Context()), r.PathValue("team"))
+	if serr != nil {
+		s.writeServiceError(w, serr)
 		return
 	}
-	ctx := r.Context()
-	claims := auth.ClaimsFromContext(ctx)
-	teamName := r.PathValue("team")
+	s.writeJSON(w, http.StatusOK, body)
+}
+
+// TeamCell answers the tenant's own cell read for one Team. The HTTP
+// handler and the MCP tool both call it, so they share one body and one
+// authorization check.
+func (s *Server) TeamCell(ctx context.Context, claims *auth.Claims, teamName string) (any, *ServiceError) {
+	if s.deps.RecordStore == nil {
+		return nil, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
+	}
 
 	team, err := crdstore.Get[v1alpha1.Team](ctx, s.deps.Store, teamName, "")
 	if err != nil || team == nil || team.Spec.Pipelines == nil {
 		refs, serr := s.resolveTeamTenants(ctx, claims, teamName)
 		if serr != nil {
-			s.writeServiceError(w, serr)
-			return
+			return nil, serr
 		}
 		// A Team that only a member cluster holds resolves to one placed
 		// tenant of its own name. The member's API server holds the Team
@@ -1361,16 +1394,13 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 		if len(refs) == 1 && refs[0].Tenant == teamName && refs[0].Controller != "" {
 			body, serr := s.buildTeamCell(ctx, claims, refs[0], "", nil)
 			if serr != nil {
-				s.writeServiceError(w, serr)
-				return
+				return nil, serr
 			}
-			s.writeJSON(w, http.StatusOK, body)
-			return
+			return body, nil
 		}
 		// Step 2: every surviving candidate is a single-controller
 		// tenant, so the answer is notCellHosted.
-		s.writeJSON(w, http.StatusOK, teamCellJSON{State: teamCellNotCellHosted})
-		return
+		return teamCellJSON{State: teamCellNotCellHosted}, nil
 	}
 
 	// Step 1: a pipelines Team authorizes through the tenant read check
@@ -1383,22 +1413,19 @@ func (s *Server) handleGetTeamCell(w http.ResponseWriter, r *http.Request) {
 		ref.Controller = p.Cell
 	}
 	if !s.canReadPipeline(claims, ref, "") {
-		s.writeJSONError(w, http.StatusNotFound, "team not found")
-		return
+		return nil, &ServiceError{Status: http.StatusNotFound, Message: "team not found"}
 	}
 
 	reason := placedConditionReason(team)
 	if ref.Controller == "" {
-		s.writeJSON(w, http.StatusOK, teamCellJSON{State: teamCellUnplaced, Reason: reason})
-		return
+		return teamCellJSON{State: teamCellUnplaced, Reason: reason, Warning: tenantWarning(team)}, nil
 	}
 
 	body, serr := s.buildTeamCell(ctx, claims, ref, reason, team)
 	if serr != nil {
-		s.writeServiceError(w, serr)
-		return
+		return nil, serr
 	}
-	s.writeJSON(w, http.StatusOK, body)
+	return body, nil
 }
 
 // buildTeamCell fills the placed, moving, and rehydrating body. Rule 4
@@ -1451,6 +1478,7 @@ func (s *Server) buildTeamCell(ctx context.Context, claims *auth.Claims, ref Ten
 		body.CanOpenCell = s.deps.Authorizer.CanReadController(claims, ref.Namespace, ref.Controller)
 	}
 	body.Members = s.teamCellMembers(ctx, claims, ref, team)
+	body.Warning = tenantWarning(team)
 	return body, nil
 }
 

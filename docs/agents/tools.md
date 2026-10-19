@@ -54,9 +54,9 @@ it is not wired, `search` still returns the first four.
 The result also carries `clusters`, one read status for each cluster with `name`, `ok`, and `error`.
 A cluster with `ok: false` returned incomplete results.
 
-The MCP server also exposes twelve pipeline tools: `run_pipeline`, `list_runs`,
+The MCP server also exposes thirteen pipeline tools: `run_pipeline`, `list_runs`,
 `get_run`, `get_run_log`, `list_job_branches`, `list_fleet_locks`, `release_fleet_lock`,
-`proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, and `scan_multibranch`. They operate on the
+`proceed_run_input`, `abort_run_input`, `replay_run`, `restart_run`, `scan_multibranch`, and `get_team_cell`. They operate on the
 build record store. The `scan_multibranch` tool starts a scan of a multibranch job and returns
 a `scanId` and the state `requested`. Read the result with `list_job_branches`, in `lastScan`. The `run_pipeline` tool starts a build and returns a
 `runId`, an `intentKey`, and the state `requested`. A refused trigger ends the run with status `COMPLETED`
@@ -75,6 +75,8 @@ The `proceed_run_input` tool answers a paused input step of a run. It takes
 The `abort_run_input` tool rejects that step, and takes `run` and `input`. An
 agent reads the run's `inputs` array with `get_run` first. Both tools answer
 that the request was sent, so the agent reads the run again for the outcome.
+
+The `get_team_cell` tool takes `team` and returns the cell that hosts the team's tenant. It carries the Team's tenant warning when one holds. It gives the same answer as `GET /api/v1/pipelines/{team}/cell`.
 
 The server also exposes one cell read tool, `get_cell_usage`. It takes
 `namespace`, `name`, and an optional `cluster` that defaults to the local

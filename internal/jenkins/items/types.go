@@ -1218,6 +1218,21 @@ func (i *Item) Validate() error {
 				}
 			}
 		}
+		for n, pf := range i.ProjectFactories {
+			if pf.VarroaMarker != nil {
+				return fmt.Errorf("item %q: projectFactories[%d]: varroaMarkerProjectFactory is a multibranch factory and does not apply to kind=organizationFolder", i.Name, n)
+			}
+			set := 0
+			if pf.MultiBranch != nil {
+				set++
+			}
+			if pf.WorkflowBranch != nil {
+				set++
+			}
+			if set != 1 {
+				return fmt.Errorf("item %q: projectFactories[%d] must set exactly one of multiBranchProjectFactory and workflowBranchProjectFactory", i.Name, n)
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("item %q: unknown kind %q", i.Name, i.Kind)

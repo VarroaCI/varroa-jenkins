@@ -88,6 +88,33 @@ func (e *Engine) ensureRootPath(ctx context.Context, root string) error {
 	return nil
 }
 
+// The steps that fail an item apply. ItemError.Op holds one of them.
+const (
+	ItemOpCreate   = "create"
+	ItemOpUpdate   = "update"
+	ItemOpGenerate = "generate config.xml for"
+	ItemOpCheck    = "check existence of"
+)
+
+// ItemError is the failure of one declared item. Path is the full item path.
+// Op names the step that failed.
+type ItemError struct {
+	Op   string
+	Path string
+	Err  error
+}
+
+func (e *ItemError) Error() string { return fmt.Sprintf("%s %s: %v", e.Op, e.Path, e.Err) }
+
+// Refusal reports whether the failed step judged the item itself. A check of
+// existence fails on the connection instead, so it does not name the item.
+func (e *ItemError) Refusal() bool {
+	return e.Op == ItemOpCreate || e.Op == ItemOpUpdate || e.Op == ItemOpGenerate
+}
+
+// Unwrap returns the underlying error.
+func (e *ItemError) Unwrap() error { return e.Err }
+
 // applyIncremental walks each item, creates or updates, then handles remove.
 // All strategies (NONE, SYNC, REMOVE_SUPPORTED, REMOVE_ALL) use create/update
 // in place for declared items and remove only mite-managed items no longer
@@ -101,25 +128,25 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 	for _, ip := range flattened {
 		configXML, err := GenerateConfigXML(ip.Item)
 		if err != nil {
-			return nil, fmt.Errorf("generate config.xml for %s: %w", ip.Path, err)
+			return nil, &ItemError{Op: ItemOpGenerate, Path: ip.Path, Err: err}
 		}
 		h := hashConfig(configXML)
 
 		_, exists, err := e.client.GetItemConfig(ctx, ip.Path)
 		if err != nil {
-			return nil, fmt.Errorf("check existence of %s: %w", ip.Path, err)
+			return nil, &ItemError{Op: ItemOpCheck, Path: ip.Path, Err: err}
 		}
 
 		if exists && prev[ip.Path] == h {
 			res.Skipped++
 		} else if exists {
 			if err := e.client.UpdateItemConfig(ctx, ip.Path, configXML); err != nil {
-				return nil, fmt.Errorf("update %s: %w", ip.Path, err)
+				return nil, &ItemError{Op: ItemOpUpdate, Path: ip.Path, Err: err}
 			}
 			res.Written++
 		} else {
 			if err := e.client.CreateItem(ctx, ip.Path, ip.Item.JenkinsClass(), configXML); err != nil {
-				return nil, fmt.Errorf("create %s: %w", ip.Path, err)
+				return nil, &ItemError{Op: ItemOpCreate, Path: ip.Path, Err: err}
 			}
 			res.Written++
 		}
