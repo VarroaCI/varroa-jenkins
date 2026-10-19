@@ -297,8 +297,8 @@ func TestInventory_IdenticalEntriesCollapse(t *testing.T) {
 	}
 }
 
-// reverseListStore flips ListManifests order, standing in for the unordered
-// enumeration both real backends actually perform.
+// reverseListStore flips ListManifests order, so a test proves the inventory
+// does not depend on the reference-name order the real backends answer.
 type reverseListStore struct{ oci.BlobStore }
 
 func (r *reverseListStore) ListManifests(ctx context.Context) ([]oci.Descriptor, error) {

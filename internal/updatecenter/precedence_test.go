@@ -105,9 +105,8 @@ func TestPrecedence_DeclaredButNotStoredFallsThrough(t *testing.T) {
 }
 
 // TestSelectServedVersion_Deterministic covers the properties a live store
-// cannot: order-independence across both ListManifests orders (index.json
-// insertion order locally, tag order on a registry), and the equal-version
-// tie-break.
+// cannot: order-independence across a forward and a reversed ListManifests
+// order, and the equal-version tie-break.
 func TestSelectServedVersion_Deterministic(t *testing.T) {
 	a := pluginLayerInfo{Name: "x", Version: "1.0", SHA256: "sha256:aaa"}
 	b := pluginLayerInfo{Name: "x", Version: "1.0", SHA256: "sha256:bbb"}

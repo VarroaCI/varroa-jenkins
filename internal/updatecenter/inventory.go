@@ -141,8 +141,8 @@ func (e inventoryEntry) canonicalize() inventoryEntry {
 // compareEntries is the total order the response is sorted by, over canonical
 // entries: name, version, sha256, then the remaining fields in declaration
 // order. Being total over every field is what makes both the payload and the
-// operator's inventory digest stable across scans, given ListManifests is
-// unordered on both backends.
+// operator's inventory digest stable across scans, independent of the pack
+// order ListManifests answers.
 func compareEntries(a, b inventoryEntry) int {
 	if c := cmpStr(a.Name, b.Name); c != 0 {
 		return c

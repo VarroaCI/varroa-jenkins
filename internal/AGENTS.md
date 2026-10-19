@@ -389,8 +389,9 @@ reading each package's entry point):
   with no conditional-push primitive, so a second writer cannot be excluded by
   any in-process lock. `/api/v1/inventory` additively carries the five
   `dev.varroa.plugin.*` metadata fields, dedupes on the **whole canonical
-  entry** rather than `(name, version)` — `ListManifests` is unordered on both
-  backends, so first-wins was never deterministic — and **degrades gracefully
+  entry** rather than `(name, version)` — `ListManifests` answers
+  reference-name order on both backends (the layout store sorts; a registry
+  lists tags sorted), so the first pack for a `(name, version)` is stable — and **degrades gracefully
   on an incomplete store scan**: it serves every readable pack and discloses
   each unreadable one by ref+error in the response's `skippedPacks` array
   (empty/`omitempty` when nothing was skipped), only failing closed with 503
@@ -419,7 +420,8 @@ reading each package's entry point):
   has no Kubernetes client; an UNREADABLE file rejects an upload rather than
   being treated as "nothing is declared". Served-metadata version precedence is
   total: declared-version eligibility, then highest by `pluginver`, then lowest
-  layer sha256 — never `ListManifests` order, which is backend-dependent.
+  layer sha256 — never `ListManifests` order, which is a reference-name order
+  and not a version order.
 - **`jenkinsver/`** — parses/compares Jenkins version strings from container
   tags (e.g. `2.479.3-jdk17`); backs `JenkinsVersionProfile` resolution
   (exact → LTS-line → embedded baseline). **Core tags only.** It cuts at the
