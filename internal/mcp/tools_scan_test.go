@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -15,6 +16,7 @@ func TestScanMultibranchToolPublishesOneScan(t *testing.T) {
 	sent := &fakePipelineTransport{}
 	deps := &api.Dependencies{
 		Authorizer:     pipelinesTestAuthorizer("write"),
+		Store:          crdstore.NewFake(),
 		RecordStore:    newFakePipelineReader(),
 		TenantResolver: &fakePipelineTenantResolver{refs: []api.TenantRef{{Tenant: "team-a", Team: "team-a", Folder: "team-a"}}},
 		MiteRegistry:   sent,

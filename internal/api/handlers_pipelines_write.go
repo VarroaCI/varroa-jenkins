@@ -620,8 +620,9 @@ type scanRequestedResponse struct {
 // job's builds run. It answers the cluster the command reached, so the
 // caller's activity audit names it.
 //
-// The route reports no outcome. The plugin records the scan's state, and
-// the branch inventory carries it.
+// The route refuses a job that cannot be scanned before it publishes. The
+// plugin records the outcome of an accepted scan, and the branch inventory
+// carries it.
 func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, team, jobPath, cluster string) (scanID string, target TenantRef, serr *ServiceError) {
 	if s.deps.RecordStore == nil {
 		return "", TenantRef{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "record store not configured"}
@@ -636,6 +637,9 @@ func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, team,
 	}
 	if !s.canWritePipeline(claims, ref, jobPath) {
 		return "", TenantRef{}, &ServiceError{Status: http.StatusForbidden, Message: "forbidden"}
+	}
+	if serr := s.scanTargetError(ctx, ref, jobPath); serr != nil {
+		return "", TenantRef{}, serr
 	}
 
 	id, mintErr := uuid.NewV7()
@@ -663,6 +667,39 @@ func (s *Server) scanMultibranch(ctx context.Context, claims *auth.Claims, team,
 		return "", TenantRef{}, &ServiceError{Status: http.StatusInternalServerError, Message: "publish scan multibranch failed"}
 	}
 	return scanID, target, nil
+}
+
+// scanTargetError answers the refusal for a job a scan cannot run on, or nil
+// when the scan may run. A job declared as a pipeline cannot be scanned. A
+// declared multibranch or organization folder can. So can a job the inventory
+// reports as a project. Any other job is refused only when the inventory is
+// complete, because an incomplete inventory cannot prove the job absent.
+func (s *Server) scanTargetError(ctx context.Context, ref TenantRef, jobPath string) *ServiceError {
+	notScannable := &ServiceError{
+		Status:  http.StatusConflict,
+		Message: jobPath + " is not a multibranch project or an organization folder",
+	}
+	declaredKind := ""
+	for _, dj := range s.catalogDeclaredJobPaths(ctx, ref) {
+		if dj.Path == jobPath {
+			declaredKind = dj.Kind
+			break
+		}
+	}
+	switch declaredKind {
+	case "pipeline":
+		return notScannable
+	case "multibranch", "organizationFolder":
+		return nil
+	}
+	inv := s.readJobInventory(ctx, ref)
+	if _, ok := inv.Projects[jobPath]; ok {
+		return nil
+	}
+	if inv.ProjectsKnown {
+		return notScannable
+	}
+	return nil
 }
 
 // handleScanMultibranch answers POST /pipelines/{team}/jobs/{job}/scan. It

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,9 +77,10 @@ type runningRunJSON struct {
 type pipelineSummaryJSON struct {
 	JobPath string `json:"jobPath"`
 	Health  string `json:"health"`
-	// Kind is the item kind the tenant's bundle declares: "pipeline",
-	// "multibranch", or "unknown". It is set at assembly, never on the row,
-	// because a record summary replaces the whole row.
+	// Kind is "pipeline", "multibranch", "organizationFolder", "branch", or
+	// "unknown". A declared item sets it. Otherwise the inventory and the
+	// run history set it. It is set at assembly, never on the row, because
+	// a record summary replaces the whole row.
 	Kind string `json:"kind"`
 	// Pending is true when the tenant's complete inventory lacks this
 	// declared job. It is set at assembly, like Kind.
@@ -153,8 +155,8 @@ type pipelineParameterJSON struct {
 
 type pipelineJobDetailJSON struct {
 	JobPath string `json:"jobPath"`
-	// Kind is pipeline, multibranch, or unknown. The job page reads it to
-	// choose its card.
+	// Kind is pipeline, multibranch, organizationFolder, branch, or unknown.
+	// The job page reads it to choose its card.
 	Kind string `json:"kind"`
 	// Pending is true when the tenant's complete inventory lacks this
 	// declared job. It is set at assembly, like Kind.
@@ -520,10 +522,16 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	jobs := map[string]pipelineSummaryJSON{}
 	trendByJob := map[string][]int64{}
+	// kindByJob holds only the kinds the tenants' declared items give. An
+	// inventory-derived kind is computed after every tenant is read.
 	kindByJob := map[string]string{}
 	pendingByJob := map[string]bool{}
 	hasRun := map[string]bool{}
+	declaredPaths := map[string]bool{}
+	runningPaths := map[string]bool{}
+	projectPaths := map[string]struct{}{}
 	var runningRuns []recordstore.Run
+	var listings []tenantListing
 	truncated := false
 
 	// Every tenant one team resolves to shares one folder, so one envelope
@@ -539,46 +547,34 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 	// measures a different 30 days than the first.
 	since := time.Now().UTC().AddDate(0, 0, -pipelineWindowDays)
 
+	// Each tenant is read before any row is decided, because a row's drop
+	// and its kind depend on the declared items and inventories of every
+	// tenant. The grants resolve once per tenant, never once per row.
 	for _, ref := range refs {
-		// The grants resolve once per tenant, never once per row. The row
-		// filter then runs before the rows of this ref reach the shared
-		// maps, so a refused row of one tenant cannot replace an admitted
-		// row of another tenant that carries the same job path.
 		grants, granted := s.deps.Authorizer.tenantGrants(claims, ref.Tenant, ref.Folder)
+		allowed := func(jobPath string) bool {
+			return granted && grantsAllow(grants, ref.Folder, jobPath, "read")
+		}
 
 		summaries, err := s.deps.RecordStore.ListJobSummaries(ctx, ref.Cluster, ref.Tenant, since)
 		if s.handleReaderError(w, err, "list job summaries") {
 			return
 		}
-		for _, js := range summaries {
-			if !granted || !grantsAllow(grants, ref.Folder, js.JobPath, "read") {
-				continue
-			}
-			jobs[js.JobPath] = buildPipelineSummary(js)
-			if len(js.DurationTrendMs) > 0 {
-				trendByJob[js.JobPath] = js.DurationTrendMs
-			}
-			if js.LastRun != nil {
-				hasRun[js.JobPath] = true
-			}
-		}
 		declared := s.catalogDeclaredJobPaths(ctx, ref)
-		var inv recordstore.JobInventory
-		if len(declared) > 0 {
-			inv = s.readJobInventory(ctx, ref)
-		}
+		inv := s.readJobInventory(ctx, ref)
 		for _, dj := range declared {
-			if !granted || !grantsAllow(grants, ref.Folder, dj.Path, "read") {
+			declaredPaths[dj.Path] = true
+			if !allowed(dj.Path) {
 				continue
 			}
 			if _, ok := jobs[dj.Path]; !ok {
 				jobs[dj.Path] = pipelineSummaryJSON{JobPath: dj.Path, Health: "unknown"}
 			}
 			// A record summary writes no kind. A declared item sets the
-			// kind when none is set, and "multibranch" replaces a stored
+			// kind when none is set, and a declared kind replaces a stored
 			// "pipeline", so two tenants that declare one job path with
 			// different kinds agree whichever one the handler reads first.
-			if stored, ok := kindByJob[dj.Path]; !ok || (stored == "pipeline" && dj.Kind == "multibranch") {
+			if stored, ok := kindByJob[dj.Path]; !ok || (stored == "pipeline" && dj.Kind != "pipeline") {
 				kindByJob[dj.Path] = dj.Kind
 			}
 			// Any tenant that does not report the job pending wins.
@@ -589,13 +585,17 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 				pendingByJob[dj.Path] = p
 			}
 		}
+		for p := range inv.Projects {
+			projectPaths[p] = struct{}{}
+		}
 
 		runs, tenantTruncated, err := s.runningNowForTenant(ctx, ref)
 		if s.handleReaderError(w, err, "list running runs") {
 			return
 		}
 		for _, run := range runs {
-			if !granted || !grantsAllow(grants, ref.Folder, run.JobPath, "read") {
+			runningPaths[run.JobPath] = true
+			if !allowed(run.JobPath) {
 				continue
 			}
 			runningRuns = append(runningRuns, run)
@@ -605,14 +605,41 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 		// cannot narrow the query, and a narrowed caller reads fewer tiles
 		// than the page held.
 		truncated = truncated || tenantTruncated
+		listings = append(listings, tenantListing{allowed: allowed, summaries: summaries, inv: inv})
+	}
+
+	for _, l := range listings {
+		for _, js := range l.summaries {
+			if !l.allowed(js.JobPath) {
+				continue
+			}
+			if inventoryDropsRun(js, l.inv, declaredPaths[js.JobPath], runningPaths[js.JobPath]) {
+				continue
+			}
+			jobs[js.JobPath] = buildPipelineSummary(js)
+			if len(js.DurationTrendMs) > 0 {
+				trendByJob[js.JobPath] = js.DurationTrendMs
+			}
+			if js.LastRun != nil {
+				hasRun[js.JobPath] = true
+			}
+		}
+		// A repository or a multibranch project the inventory reports
+		// has a row even before it has a run.
+		for p := range l.inv.Projects {
+			if _, ok := jobs[p]; ok || !l.allowed(p) {
+				continue
+			}
+			jobs[p] = pipelineSummaryJSON{JobPath: p, Health: "unknown"}
+		}
 	}
 
 	items := make([]pipelineSummaryJSON, 0, len(jobs))
 	for _, js := range jobs {
-		js.Kind = kindByJob[js.JobPath]
-		if js.Kind == "" {
-			js.Kind = "unknown"
-		}
+		_, inProjects := projectPaths[js.JobPath]
+		js.Kind = pipelineJobKind(kindByJob[js.JobPath],
+			parentIsMultibranch(js.JobPath, kindByJob, projectPaths),
+			inProjects, hasRun[js.JobPath])
 		js.Pending = pendingByJob[js.JobPath] && !hasRun[js.JobPath]
 		items = append(items, js)
 	}
@@ -756,7 +783,13 @@ func (s *Server) handleGetPipelineJob(w http.ResponseWriter, r *http.Request) {
 	if item != nil {
 		declaredKind = item.Kind
 	}
-	detail.Kind = pipelineJobKind(declaredKind, hasBranches, summary.LastRun != nil)
+	declaredKinds := map[string]string{}
+	for _, dj := range s.catalogDeclaredJobPaths(ctx, ref) {
+		declaredKinds[dj.Path] = dj.Kind
+	}
+	inv := s.readJobInventory(ctx, ref)
+	detail.Kind = pipelineJobKind(declaredKind,
+		parentIsMultibranch(jobPath, declaredKinds, inv.Projects), hasBranches, summary.LastRun != nil)
 	if summary.LastRun == nil {
 		detail.Pending = s.jobPendingAcross(ctx, claims, refs, jobPath)
 	}
@@ -774,7 +807,7 @@ func declaredJobPending(inv recordstore.JobInventory, path, kind string) bool {
 		}
 		_, ok := inv.Jobs[path]
 		return !ok
-	case "multibranch":
+	case "multibranch", "organizationFolder":
 		if !inv.ProjectsKnown {
 			return false
 		}
@@ -835,14 +868,74 @@ func (s *Server) readJobInventory(ctx context.Context, ref TenantRef) recordstor
 	return inv
 }
 
-// pipelineJobKind answers the kind the job page renders. A declared
-// pipeline or multibranch item wins. Without one, a branch inventory row
-// marks a multibranch job, and a run marks a pipeline job. Any other job
-// is unknown.
-func pipelineJobKind(declaredKind string, hasBranches, hasRun bool) string {
+// tenantListing is one tenant's share of the pipelines list. It keeps
+// the tenant's grant check, its run-history rows, and its job inventory,
+// so the rows can be decided once every tenant is read.
+type tenantListing struct {
+	allowed   func(jobPath string) bool
+	summaries []recordstore.JobSummary
+	inv       recordstore.JobInventory
+}
+
+// inventoryDropsRun reports whether the complete job inventory proves a
+// run-history row names a job the cell no longer has. A declared job, a
+// job with a run in progress, and an inventory without a complete job set
+// keep their row. So does a job that is in the inventory, and a job whose
+// last run is not older than the inventory's observation time, because
+// that job may have been created after the cell last reported.
+func inventoryDropsRun(js recordstore.JobSummary, inv recordstore.JobInventory, declared, running bool) bool {
+	if declared || running || !inv.JobsKnown || js.LastRun == nil || inv.JobsObservedAt.IsZero() {
+		return false
+	}
+	if _, ok := inv.Jobs[js.JobPath]; ok {
+		return false
+	}
+	if _, ok := inv.Projects[js.JobPath]; ok {
+		return false
+	}
+	return js.LastRun.CreatedAt.Before(inv.JobsObservedAt)
+}
+
+// parentIsMultibranch reports whether the parent folder of jobPath holds
+// branch jobs. A declared multibranch parent does. A parent the inventory
+// reports as a project does too, unless the inventory also reports a project
+// directly below it: a multibranch project holds only branch jobs, while an
+// organization folder holds repositories, which are projects. A declared
+// organization folder never holds branches.
+func parentIsMultibranch(jobPath string, declaredKinds map[string]string, projects map[string]struct{}) bool {
+	idx := strings.LastIndex(jobPath, "/")
+	if idx < 0 {
+		return false
+	}
+	parent := jobPath[:idx]
+	switch declaredKinds[parent] {
+	case "organizationFolder":
+		return false
+	case "multibranch":
+		return true
+	}
+	if _, ok := projects[parent]; !ok {
+		return false
+	}
+	for path := range projects {
+		if rest, found := strings.CutPrefix(path, parent+"/"); found && !strings.Contains(rest, "/") {
+			return false
+		}
+	}
+	return true
+}
+
+// pipelineJobKind answers the kind of a job row. A declared pipeline,
+// multibranch, or organizationFolder item wins. Without one, a child of a
+// multibranch parent is a branch. A project the inventory reports is a
+// multibranch job, and a run marks a pipeline job. Any other job is unknown.
+func pipelineJobKind(declaredKind string, parentIsMultibranch, hasBranches, hasRun bool) string {
 	switch declaredKind {
-	case "pipeline", "multibranch":
+	case "pipeline", "multibranch", "organizationFolder":
 		return declaredKind
+	}
+	if parentIsMultibranch {
+		return "branch"
 	}
 	if hasBranches {
 		return "multibranch"

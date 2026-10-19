@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -23,6 +24,11 @@ type JobInventory struct {
 	ProjectsKnown bool
 	// Projects holds the job paths of the tenant's job_branch_projects rows.
 	Projects map[string]struct{}
+	// JobsObservedAt is the earliest time an active member cell reported its
+	// job.schedules set. It is zero when any active member has not reported
+	// one. A job with a run that started before this time may predate the
+	// set, so a reader must not judge it deleted.
+	JobsObservedAt time.Time
 }
 
 // JobInventory reads the job inventory of cluster/tenant. A tenant with no
@@ -43,6 +49,8 @@ func (r *pgReader) JobInventory(ctx context.Context, cluster, tenant string) (Jo
 	}
 
 	inv := JobInventory{JobsKnown: true, ProjectsKnown: true}
+	observedKnown := true
+	var earliest time.Time
 	active := 0
 	for _, m := range row.members {
 		if m.Role != MemberRoleActive || m.Slot == nil {
@@ -50,27 +58,35 @@ func (r *pgReader) JobInventory(ctx context.Context, cluster, tenant string) (Jo
 		}
 		active++
 		if m.Cell == "" {
+			observedKnown = false
 			inv.JobsKnown = false
 			inv.ProjectsKnown = false
 			continue
 		}
-		var hasSchedules, hasBranches, schedulesTruncated, branchesTruncated bool
+		var schedulesAt *time.Time
+		var hasBranches, schedulesTruncated, branchesTruncated bool
 		err := r.pool.QueryRow(ctx, `
-			SELECT observed_at > '-infinity'::timestamptz,
+			SELECT CASE WHEN observed_at > '-infinity'::timestamptz THEN observed_at END,
 			       branches_observed_at > '-infinity'::timestamptz,
 			       schedules_truncated, branches_truncated
 			FROM varroa.job_schedule_cells
 			WHERE cluster = $1 AND namespace = $2 AND cell = $3
-		`, cluster, m.Namespace, m.Cell).Scan(&hasSchedules, &hasBranches, &schedulesTruncated, &branchesTruncated)
+		`, cluster, m.Namespace, m.Cell).Scan(&schedulesAt, &hasBranches, &schedulesTruncated, &branchesTruncated)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
+			observedKnown = false
 			inv.JobsKnown = false
 			inv.ProjectsKnown = false
 			continue
 		case err != nil:
 			return JobInventory{}, fmt.Errorf("read job inventory cell watermark: %w", err)
 		}
-		if !hasSchedules || schedulesTruncated {
+		if schedulesAt == nil {
+			observedKnown = false
+		} else if earliest.IsZero() || schedulesAt.Before(earliest) {
+			earliest = *schedulesAt
+		}
+		if schedulesAt == nil || schedulesTruncated {
 			inv.JobsKnown = false
 		}
 		if !hasBranches || branchesTruncated {
@@ -79,6 +95,9 @@ func (r *pgReader) JobInventory(ctx context.Context, cluster, tenant string) (Jo
 	}
 	if active == 0 {
 		return JobInventory{}, nil
+	}
+	if observedKnown {
+		inv.JobsObservedAt = earliest
 	}
 
 	inv.Jobs, err = r.readInventoryPaths(ctx,

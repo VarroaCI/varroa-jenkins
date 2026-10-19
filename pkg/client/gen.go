@@ -503,9 +503,11 @@ const (
 
 // Defines values for ComponentsSchemasPipelineJobDetailKind.
 const (
-	ComponentsSchemasPipelineJobDetailKindMultibranch ComponentsSchemasPipelineJobDetailKind = "multibranch"
-	ComponentsSchemasPipelineJobDetailKindPipeline    ComponentsSchemasPipelineJobDetailKind = "pipeline"
-	ComponentsSchemasPipelineJobDetailKindUnknown     ComponentsSchemasPipelineJobDetailKind = "unknown"
+	ComponentsSchemasPipelineJobDetailKindBranch             ComponentsSchemasPipelineJobDetailKind = "branch"
+	ComponentsSchemasPipelineJobDetailKindMultibranch        ComponentsSchemasPipelineJobDetailKind = "multibranch"
+	ComponentsSchemasPipelineJobDetailKindOrganizationFolder ComponentsSchemasPipelineJobDetailKind = "organizationFolder"
+	ComponentsSchemasPipelineJobDetailKindPipeline           ComponentsSchemasPipelineJobDetailKind = "pipeline"
+	ComponentsSchemasPipelineJobDetailKindUnknown            ComponentsSchemasPipelineJobDetailKind = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineMarkerFindingSeverity.
@@ -538,9 +540,11 @@ const (
 
 // Defines values for ComponentsSchemasPipelineSummaryKind.
 const (
-	Multibranch ComponentsSchemasPipelineSummaryKind = "multibranch"
-	Pipeline    ComponentsSchemasPipelineSummaryKind = "pipeline"
-	Unknown     ComponentsSchemasPipelineSummaryKind = "unknown"
+	Branch             ComponentsSchemasPipelineSummaryKind = "branch"
+	Multibranch        ComponentsSchemasPipelineSummaryKind = "multibranch"
+	OrganizationFolder ComponentsSchemasPipelineSummaryKind = "organizationFolder"
+	Pipeline           ComponentsSchemasPipelineSummaryKind = "pipeline"
+	Unknown            ComponentsSchemasPipelineSummaryKind = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineTemplateInfoSource.
@@ -2919,8 +2923,11 @@ type ComponentsSchemasJobBranchList struct {
 	LastScan *ComponentsSchemasBranchScan `json:"lastScan,omitempty"`
 
 	// ObservedAt When the cell last exported this job. Absent before the first export.
-	ObservedAt *time.Time                       `json:"observedAt,omitempty"`
-	Tags       []ComponentsSchemasJobBranchHead `json:"tags"`
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
+
+	// Repositories The repositories of an organization folder, sorted by name. A multibranch job has none.
+	Repositories []ComponentsSchemasJobBranchHead `json:"repositories"`
+	Tags         []ComponentsSchemasJobBranchHead `json:"tags"`
 
 	// Truncated True when the cell capped the number of heads it exported.
 	Truncated bool `json:"truncated"`
@@ -3253,7 +3260,7 @@ type ComponentsSchemasPipelineJobDetail struct {
 	Health          ComponentsSchemasPipelineJobDetailHealth `json:"health"`
 	JobPath         string                                   `json:"jobPath"`
 
-	// Kind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+	// Kind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
 	Kind ComponentsSchemasPipelineJobDetailKind `json:"kind"`
 
 	// Last30Days Null when the record store could not answer the window query; the rest of the job page still renders.
@@ -3283,7 +3290,7 @@ type ComponentsSchemasPipelineJobDetail struct {
 // ComponentsSchemasPipelineJobDetailHealth defines model for ComponentsSchemasPipelineJobDetail.Health.
 type ComponentsSchemasPipelineJobDetailHealth string
 
-// ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline or multibranch item sets it. Otherwise a branch inventory row marks a multibranch job, and a run marks a pipeline job.
+// ComponentsSchemasPipelineJobDetailKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job.
 type ComponentsSchemasPipelineJobDetailKind string
 
 // ComponentsSchemasPipelineJobRetention One per-job window rule of a pipelines team.
@@ -3402,7 +3409,7 @@ type ComponentsSchemasPipelineSummary struct {
 	Health  ComponentsSchemasPipelineSummaryHealth `json:"health"`
 	JobPath string                                 `json:"jobPath"`
 
-	// Kind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+	// Kind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
 	Kind ComponentsSchemasPipelineSummaryKind `json:"kind"`
 
 	// LastBuild One run, condensed for a list or a card.
@@ -3418,7 +3425,7 @@ type ComponentsSchemasPipelineSummary struct {
 // ComponentsSchemasPipelineSummaryHealth The weather glyph, computed from the last five runs: clear when all passed, cloudy when one or two failed, rain when three or more failed, unknown for a job that has never run.
 type ComponentsSchemasPipelineSummaryHealth string
 
-// ComponentsSchemasPipelineSummaryKind The item kind the tenant's bundle declares. A job the record store alone holds reports unknown. A declared item of any other kind also reports unknown.
+// ComponentsSchemasPipelineSummaryKind The job's kind. A declared pipeline, multibranch, or organization folder item sets it. Otherwise a child of a multibranch job or of a project the inventory reports is a branch, and a project the inventory reports is a multibranch job. A run alone marks a pipeline job. Any other job reports unknown.
 type ComponentsSchemasPipelineSummaryKind string
 
 // ComponentsSchemasPipelineTeam One row of GET /pipelines. cell and cellNamespace are set only on a placed row.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
+import { buildJobTree, defaultOpenPaths, isFoldable, visibleRows } from "./jobTree";
 import { createPipelineSummary, createRunningRun } from "../../test/factories";
 
 describe("buildJobTree", () => {
@@ -34,6 +34,39 @@ describe("buildJobTree", () => {
     expect(tree).toHaveLength(1);
     expect(tree[0]).toMatchObject({ name: "checkout-api", kind: "multibranch", branchCount: 2 });
     expect(tree[0].children.map((c) => c.name)).toEqual(["dev", "main"]);
+  });
+
+  it("makes an organization folder own its repositories and folds it", () => {
+    const tree = buildJobTree(
+      [
+        createPipelineSummary({ jobPath: "payments/repos", kind: "organizationFolder" }),
+        createPipelineSummary({ jobPath: "payments/repos/projgen", kind: "multibranch" }),
+        createPipelineSummary({ jobPath: "payments/repos/projgen/main", kind: "branch" }),
+        createPipelineSummary({ jobPath: "payments/repos/tools", kind: "multibranch" }),
+      ],
+      [],
+      "payments",
+    );
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ name: "repos", kind: "organizationFolder", repositoryCount: 2 });
+    expect(isFoldable(tree[0])).toBe(true);
+    expect(tree[0].children.map((c) => [c.name, c.kind])).toEqual([
+      ["projgen", "multibranch"],
+      ["tools", "multibranch"],
+    ]);
+    expect(tree[0].children[0].children[0]).toMatchObject({ name: "main", kind: "job" });
+  });
+
+  it("renders a branch item as an ordinary job node", () => {
+    const tree = buildJobTree(
+      [
+        createPipelineSummary({ jobPath: "payments/checkout-api", kind: "multibranch" }),
+        createPipelineSummary({ jobPath: "payments/checkout-api/main", kind: "branch" }),
+      ],
+      [],
+      "payments",
+    );
+    expect(tree[0].children[0]).toMatchObject({ name: "main", kind: "job" });
   });
 
   it("keeps a multibranch node with no branch, reporting zero branches", () => {

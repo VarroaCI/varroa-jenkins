@@ -19,8 +19,9 @@ Unknown kinds reject the bundle. Unknown fields are ignored.
 
 Every `multibranch` job and every `organizationFolder` item carries the
 `SkipInitialBuildOnFirstBranchIndexing` build strategy. A branch-indexing scan creates or
-updates a branch's job without starting a build. Start it from the dashboard, or push a
-commit.
+updates a branch's job without starting a build. The cell starts one scan when it creates
+or changes a `multibranch` or `organizationFolder` item. Start a later scan from the
+dashboard, or push a commit.
 
 A `JenkinsVersionProfile` that replaces the default plugin set must still pin
 `basic-branch-build-strategies`. The operator refuses a manifest declaring either kind

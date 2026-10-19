@@ -156,16 +156,18 @@ func registerReplayRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 }
 
 // registerScanMultibranchTool registers scan_multibranch: it starts a scan
-// of a multibranch job's branches as the calling user. The command goes to
-// the job's home member, and the tool reports no outcome. The branch
-// inventory of list_job_branches carries the scan's result.
+// of a multibranch job's branches, or of an organization folder's
+// repositories, as the calling user. The route refuses a job that cannot be
+// scanned. The command goes to the job's home member, and the tool reports
+// no outcome. The branch inventory of list_job_branches carries the scan's
+// result.
 func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	scanTool := mcp.NewTool("scan_multibranch",
-		mcp.WithDescription("Start a scan of a multibranch job's branches and pull requests, as the calling user. "+
-			"The scan runs on the job's home member and reports no outcome here. Use list_job_branches to follow "+
-			"its result in lastScan."),
+		mcp.WithDescription("Start a scan of a multibranch job's branches and pull requests, or of an organization folder's "+
+			"repositories, as the calling user. A job that is neither answers an error. The scan runs on the job's home "+
+			"member and reports no outcome here. Use list_job_branches to follow its result in lastScan."),
 		mcp.WithString("team", mcp.Required(), mcp.Description("Team name")),
-		mcp.WithString("job", mcp.Required(), mcp.Description("Multibranch job path, as the job page names it")),
+		mcp.WithString("job", mcp.Required(), mcp.Description("A multibranch job or an organization folder path, as the job page names it")),
 		mcp.WithString("cluster", mcp.Description("Cluster to select, when team and job resolve to more than one tenant")),
 	)
 	addTool(mcpServer, kindAction, scanTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -471,7 +473,7 @@ func registerGetRunLogTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 // inventory of one job. Each head array holds api head objects.
 var jobBranchesOutputSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["jobPath", "truncated", "branches", "changeRequests", "tags"],
+  "required": ["jobPath", "truncated", "branches", "changeRequests", "tags", "repositories"],
   "properties": {
     "jobPath": {"type": "string", "description": "Multibranch job path."},
     "observedAt": {"type": "string", "description": "When the cell last exported this job, RFC3339. Absent before the first export."},
@@ -481,6 +483,7 @@ var jobBranchesOutputSchema = json.RawMessage(`{
     "branches": {"type": "array", "items": {"type": "object", "description": "Branch head: name, jobPath, orphaned, revision, changeRequest, lastRun."}},
     "changeRequests": {"type": "array", "items": {"type": "object", "description": "Change request head, newest id first."}},
     "tags": {"type": "array", "items": {"type": "object", "description": "Tag head."}},
+    "repositories": {"type": "array", "items": {"type": "object", "description": "Repository of an organization folder, sorted by name. Empty for a multibranch job."}},
     "lastScan": {"type": "object", "description": "Last requested scan. Absent until a scan has run."}
   }
 }`)

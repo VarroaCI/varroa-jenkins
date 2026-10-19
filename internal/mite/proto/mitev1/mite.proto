@@ -138,7 +138,7 @@ message JobScheduleSet {
 message JobBranchHead {
   string name = 1;
   string job_path = 2;
-  string kind = 3;          // branch | changeRequest | tag
+  string kind = 3;          // branch | changeRequest | tag | repository
   bool orphaned = 4;
   string revision = 5;
   ChangeRequestInfo change_request = 6;

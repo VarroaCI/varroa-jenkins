@@ -10,8 +10,10 @@ import PipelinePage from "./PipelinePage";
 const mockGetPipelineJob = vi.fn();
 const mockListRuns = vi.fn();
 const mockCreateRun = vi.fn();
+const mockListJobBranches = vi.fn();
 vi.mock("../../api/client", () => ({
   getPipelineJob: (...args: unknown[]) => mockGetPipelineJob(...args),
+  listJobBranches: (...args: unknown[]) => mockListJobBranches(...args),
   listRuns: (...args: unknown[]) => mockListRuns(...args),
   createRun: (...args: unknown[]) => mockCreateRun(...args),
   teamRunStreamUrl: (team: string) => `/api/v1/pipelines/${encodeURIComponent(team)}/stream`,
@@ -248,6 +250,28 @@ describe("PipelinePage", () => {
     mockGetPipelineJob.mockResolvedValue(jobDetail());
     renderPage();
     await waitFor(() => expect(screen.getByText("payments/checkout-api/main")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
+  });
+
+  it("renders an organization folder as its repository card, with no Run control", async () => {
+    vi.mocked(usePermissions).mockReturnValue({
+      data: {
+        global: {},
+        scopes: [],
+        tenants: [{ tenant: "acme", jobs: [], capabilities: { pipelines: { write: true } } }],
+      },
+    } as unknown as ReturnType<typeof usePermissions>);
+    mockGetPipelineJob.mockResolvedValue(jobDetail({ jobPath: "payments/repos", kind: "organizationFolder" }));
+    mockListJobBranches.mockResolvedValue({
+      jobPath: "payments/repos",
+      truncated: false,
+      branches: [],
+      changeRequests: [],
+      tags: [],
+      repositories: [],
+    });
+    renderPage("/pipelines/acme/payments%2Frepos");
+    await screen.findByRole("button", { name: "Scan now" });
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
   });
 

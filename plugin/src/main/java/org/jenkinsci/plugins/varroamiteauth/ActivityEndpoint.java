@@ -4,7 +4,9 @@ import hudson.Extension;
 import com.cloudbees.hudson.plugins.folder.computed.FolderComputation;
 import jenkins.branch.Branch;
 import jenkins.branch.BranchProjectFactory;
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import jenkins.branch.MultiBranchProject;
+import jenkins.branch.OrganizationFolder;
 import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
 import jenkins.scm.api.mixin.ChangeRequestSCMHead;
@@ -392,8 +394,9 @@ public class ActivityEndpoint implements RootAction {
     // ---- Multibranch inventory export ----
 
     /**
-     * Builds the branch-inventory envelope. A project that fails to read is skipped, and
-     * the response stays valid. Package-private for testing.
+     * Builds the branch-inventory envelope. It holds every multibranch project and every
+     * organization folder. A project that fails to read is skipped, and the response
+     * stays valid. Package-private for testing.
      */
     @SuppressWarnings({"rawtypes"})
     static JSONObject buildBranchEnvelope(Jenkins jenkins) {
@@ -402,7 +405,10 @@ public class ActivityEndpoint implements RootAction {
         boolean truncated = false;
         int bytes = 0;
         if (jenkins != null) {
-            for (MultiBranchProject project : jenkins.getAllItems(MultiBranchProject.class)) {
+            for (ComputedFolder<?> project : jenkins.getAllItems(ComputedFolder.class)) {
+                if (!(project instanceof MultiBranchProject) && !(project instanceof OrganizationFolder)) {
+                    continue;
+                }
                 total++;
                 if (projects.size() >= MAX_BRANCH_PROJECTS) {
                     truncated = true;
@@ -435,28 +441,43 @@ public class ActivityEndpoint implements RootAction {
     }
 
     /**
-     * Builds one project entry with its heads. The project path is the multibranch
-     * project's full name. Each head carries the full name of its own child job.
+     * Builds one project entry with its heads. The project path is the project's full
+     * name. A multibranch project lists its branch heads, and each head carries the full
+     * name of its own child job. An organization folder lists one repository head per
+     * child multibranch project.
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
-    static JSONObject buildBranchProjectRow(MultiBranchProject project) {
-        BranchProjectFactory factory = project.getProjectFactory();
+    static JSONObject buildBranchProjectRow(ComputedFolder<?> project) {
         JSONArray heads = new JSONArray();
         boolean headsTruncated = false;
-        for (Object child : project.getItems()) {
-            Job job = factory.asProject((Item) child);
-            if (job == null) {
-                continue;
+        if (project instanceof OrganizationFolder) {
+            for (Object child : project.getItems()) {
+                if (!(child instanceof MultiBranchProject)) {
+                    continue;
+                }
+                if (heads.size() >= MAX_BRANCH_HEADS) {
+                    headsTruncated = true;
+                    break;
+                }
+                heads.add(buildRepositoryHeadRow((MultiBranchProject) child));
             }
-            Branch branch = factory.getBranch(job);
-            if (branch == null) {
-                continue;
+        } else {
+            BranchProjectFactory factory = ((MultiBranchProject) project).getProjectFactory();
+            for (Object child : project.getItems()) {
+                Job job = factory.asProject((Item) child);
+                if (job == null) {
+                    continue;
+                }
+                Branch branch = factory.getBranch(job);
+                if (branch == null) {
+                    continue;
+                }
+                if (heads.size() >= MAX_BRANCH_HEADS) {
+                    headsTruncated = true;
+                    break;
+                }
+                heads.add(buildBranchHeadRow(job.getFullName(), revisionOf(factory, job), branch));
             }
-            if (heads.size() >= MAX_BRANCH_HEADS) {
-                headsTruncated = true;
-                break;
-            }
-            heads.add(buildBranchHeadRow(job.getFullName(), revisionOf(factory, job), branch));
         }
         FolderComputation computation = project.getComputation();
         String indexedAt = "";
@@ -476,6 +497,20 @@ public class ActivityEndpoint implements RootAction {
         row.put("heads", heads);
         row.put("headsTruncated", headsTruncated);
         row.put("lastScan", VarroaBranchScans.lastScanJson(project.getFullName()));
+        return row;
+    }
+
+    /**
+     * Builds one repository head of an organization folder. The job path is the full
+     * name of the repository's multibranch project. Its branch heads stay in its own row.
+     */
+    static JSONObject buildRepositoryHeadRow(MultiBranchProject repository) {
+        JSONObject row = new JSONObject();
+        row.put("name", repository.getName());
+        row.put("jobPath", repository.getFullName());
+        row.put("kind", "repository");
+        row.put("orphaned", repository.isDisabled());
+        row.put("revision", "");
         return row;
     }
 

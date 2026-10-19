@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -56,6 +56,12 @@ beforeEach(() => {
 });
 
 describe("Layout assistant doors", () => {
+  // Layout loads the drawer with React.lazy. The first load in a cold worker
+  // can outlast the default findBy timeout, so the module loads before any test.
+  beforeAll(async () => {
+    await import("./assistant/AssistantDrawer");
+  });
+
   it("shows no assistant door when the assistant is not available", async () => {
     vi.mocked(client.getMyAssistant).mockRejectedValue(new Error("403"));
     renderShell();

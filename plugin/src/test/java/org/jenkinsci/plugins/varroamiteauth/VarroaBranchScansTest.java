@@ -171,4 +171,16 @@ public class VarroaBranchScansTest {
     public void jobWithoutScanAnswersNull() {
         assertTrue(VarroaBranchScans.lastScanJson("never-scanned/mb") instanceof net.sf.json.JSONNull);
     }
+
+    @Test
+    public void repositoryHeadsOfAnOrganizationFolderDiffByJobPath() {
+        // An organization folder records one head per repository, with an empty hash.
+        VarroaBranchScans.Diff d = VarroaBranchScans.diff(
+                heads("org/repo-a", "repo-a", "", true, "org/repo-gone", "repo-gone", "", true),
+                heads("org/repo-a", "repo-a", "", true, "org/repo-new", "repo-new", "", true));
+
+        assertEquals(List.of("repo-new@org/repo-new"), refs(d.newHeads));
+        assertEquals(List.of("repo-gone@org/repo-gone"), refs(d.orphanedHeads));
+        assertTrue(d.changedHeads.isEmpty());
+    }
 }

@@ -1672,6 +1672,8 @@ export interface JobBranchList {
   branches: JobBranchHead[];
   changeRequests: JobBranchHead[];
   tags: JobBranchHead[];
+  /** The repositories of an organization folder. A multibranch job has none. */
+  repositories: JobBranchHead[];
   lastScan?: BranchScan;
 }
 
@@ -1723,7 +1725,12 @@ export interface RunningRun {
  * record store alone holds reports "unknown", and so does a declared item
  * of any other kind.
  */
-export type PipelineItemKind = "pipeline" | "multibranch" | "unknown";
+export type PipelineItemKind =
+  | "pipeline"
+  | "multibranch"
+  | "organizationFolder"
+  | "branch"
+  | "unknown";
 
 /**
  * One job's run-history summary for the Pipelines table. A job that has
@@ -1926,7 +1933,7 @@ export interface PipelineJobDetail {
   waiting?: RunWaitEntry[];
   jobPath: string;
   /** pipeline, multibranch, or unknown. The job page picks its card from it. */
-  kind: "pipeline" | "multibranch" | "unknown";
+  kind: PipelineItemKind;
   /** True when every tenant that declares this job reports a complete job list that lacks it. */
   pending: boolean;
   /** The tenant's Jenkins folder prefix (for example "payments"). Empty for

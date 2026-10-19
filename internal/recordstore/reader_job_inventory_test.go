@@ -361,3 +361,21 @@ func TestJobInventoryMigratedTruncatedRowIsUnknown(t *testing.T) {
 		t.Fatal("a complete set from the cell must make the jobs known")
 	}
 }
+
+func TestJobInventoryJobsObservedAt(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seedJobInventoryPlacement(t, db, jiMembersActiveAndStandby)
+	g := NewIngester(pool, nil, nil)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+
+	if got := readInventory(t, NewReader(pool)).JobsObservedAt; !got.IsZero() {
+		t.Fatalf("JobsObservedAt before any report = %v, want zero", got)
+	}
+	applyInventorySchedules(t, g, jsTestCell, at, false)
+
+	if got := readInventory(t, NewReader(pool)).JobsObservedAt; !got.Equal(at) {
+		t.Fatalf("JobsObservedAt = %v, want %v", got, at)
+	}
+}

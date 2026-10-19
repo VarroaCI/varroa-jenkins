@@ -25,7 +25,10 @@ type JobBranchList struct {
 	Branches       []jobBranchHeadJSON `json:"branches"`
 	ChangeRequests []jobBranchHeadJSON `json:"changeRequests"`
 	Tags           []jobBranchHeadJSON `json:"tags"`
-	LastScan       *branchScanJSON     `json:"lastScan,omitempty"`
+	// Repositories lists the repositories of an organization folder. A
+	// multibranch job has none.
+	Repositories []jobBranchHeadJSON `json:"repositories"`
+	LastScan     *branchScanJSON     `json:"lastScan,omitempty"`
 }
 
 // jobBranchHeadJSON is one head of a multibranch job. LastRun is the
@@ -90,6 +93,7 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 		Branches:       []jobBranchHeadJSON{},
 		ChangeRequests: []jobBranchHeadJSON{},
 		Tags:           []jobBranchHeadJSON{},
+		Repositories:   []jobBranchHeadJSON{},
 	}
 	project, found, err := s.deps.RecordStore.GetJobBranches(ctx, ref.Cluster, ref.Tenant, jobPath)
 	if err != nil {
@@ -166,6 +170,8 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 			out.ChangeRequests = append(out.ChangeRequests, row)
 		case "tag":
 			out.Tags = append(out.Tags, row)
+		case "repository":
+			out.Repositories = append(out.Repositories, row)
 		default:
 			out.Branches = append(out.Branches, row)
 		}
@@ -173,6 +179,7 @@ func (s *Server) ListJobBranches(ctx context.Context, claims *auth.Claims, team,
 
 	sort.SliceStable(out.Branches, func(i, j int) bool { return out.Branches[i].Name < out.Branches[j].Name })
 	sort.SliceStable(out.Tags, func(i, j int) bool { return out.Tags[i].Name < out.Tags[j].Name })
+	sort.SliceStable(out.Repositories, func(i, j int) bool { return out.Repositories[i].Name < out.Repositories[j].Name })
 	sort.SliceStable(out.ChangeRequests, func(i, j int) bool {
 		return changeRequestIDLess(out.ChangeRequests[j], out.ChangeRequests[i])
 	})

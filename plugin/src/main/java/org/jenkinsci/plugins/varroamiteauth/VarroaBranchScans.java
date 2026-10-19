@@ -1,5 +1,6 @@
 package org.jenkinsci.plugins.varroamiteauth;
 
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import com.cloudbees.hudson.plugins.folder.computed.FolderComputation;
 import hudson.model.Item;
 import hudson.security.ACL;
@@ -24,14 +25,16 @@ import java.util.logging.Logger;
 import jenkins.branch.Branch;
 import jenkins.branch.BranchProjectFactory;
 import jenkins.branch.MultiBranchProject;
+import jenkins.branch.OrganizationFolder;
 import jenkins.util.Timer;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONNull;
 import net.sf.json.JSONObject;
 
 /**
- * Tracks the branch scans the mite requests on a multibranch job. A scan
- * records the heads of the job before it starts. A timer compares the heads
+ * Tracks the branch scans the mite requests on a multibranch job or an
+ * organization folder. A scan records the heads of the job before it starts.
+ * For an organization folder, a head is one repository. A timer compares the heads
  * after the folder computation ends with that record. The result answers
  * the {@code lastScan} key of the branch inventory row. Each head in the
  * result carries its job path, so a head that the scan deleted stays
@@ -107,7 +110,7 @@ public final class VarroaBranchScans {
         final String scanId;
         final String actor;
         final long requestedAt;
-        final MultiBranchProject project;
+        final ComputedFolder<?> project;
         final Map<String, Head> before;
         volatile String state;
         volatile String result = "";
@@ -117,7 +120,7 @@ public final class VarroaBranchScans {
         volatile List<Ref> changedHeads = Collections.emptyList();
         volatile List<Ref> orphanedHeads = Collections.emptyList();
 
-        Scan(String scanId, String actor, long requestedAt, MultiBranchProject project,
+        Scan(String scanId, String actor, long requestedAt, ComputedFolder<?> project,
                 Map<String, Head> before) {
             this.scanId = scanId;
             this.actor = actor;
@@ -133,7 +136,7 @@ public final class VarroaBranchScans {
      * heads of the job before the scan. The timer then checks the job until
      * the folder computation that the scan starts ends.
      */
-    static void arm(MultiBranchProject project, String scanId, String actor) {
+    static void arm(ComputedFolder<?> project, String scanId, String actor) {
         Scan scan = new Scan(scanId, actor, System.currentTimeMillis(), project, snapshot(project));
         RECORDS.put(project.getFullName(), scan);
         ensureTimer();
@@ -350,10 +353,31 @@ public final class VarroaBranchScans {
      * The snapshot runs as the system identity, so the before and after records
      * hold the same heads whichever identity requested the scan.
      */
-    static Map<String, Head> snapshot(MultiBranchProject project) {
+    static Map<String, Head> snapshot(ComputedFolder<?> folder) {
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
-            return snapshotAsCurrentIdentity(project);
+            if (folder instanceof OrganizationFolder) {
+                return snapshotOrganizationFolder((OrganizationFolder) folder);
+            }
+            return snapshotAsCurrentIdentity((MultiBranchProject) folder);
         }
+    }
+
+    /**
+     * Answers one head per repository of an organization folder. The head
+     * name is the repository name, and its job path is the repository's
+     * full name. The branch heads of a repository stay in its own record.
+     */
+    private static Map<String, Head> snapshotOrganizationFolder(OrganizationFolder folder) {
+        Map<String, Head> out = new LinkedHashMap<>();
+        for (Object child : folder.getItems()) {
+            if (!(child instanceof MultiBranchProject)) {
+                continue;
+            }
+            MultiBranchProject repository = (MultiBranchProject) child;
+            out.put(repository.getFullName(), new Head(repository.getName(), "",
+                    !repository.isDisabled()));
+        }
+        return out;
     }
 
     private static Map<String, Head> snapshotAsCurrentIdentity(MultiBranchProject project) {
