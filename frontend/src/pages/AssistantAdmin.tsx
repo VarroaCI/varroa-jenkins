@@ -13,6 +13,7 @@ import { ApiError } from "../hooks/useApi";
 import { SectionPage } from "../components/SectionPage";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
+import { PROVIDERS_FAILED, savedProviderGone } from "../components/assistant/providerChoice";
 import type { AssistantSettings, AssistantSettingsUpdate, DataSharingLevel } from "../types/assistant";
 
 const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
@@ -68,6 +69,9 @@ export function AssistantAdmin() {
   const tenants = Object.entries(s?.tenantDataSharing ?? {});
   const shownProvider = defaultProvider ?? s?.defaultProvider ?? "";
   const shownModel = defaultModel ?? s?.defaultModel ?? "";
+  const providerListLoaded = providers.data !== undefined;
+  const gone = savedProviderGone(shownProvider, providerList, providerListLoaded);
+  const listFailed = providers.isError && !providerListLoaded;
 
   return (
     <SectionPage title="Assistant" loading={settings.isLoading} empty={!settings.isLoading && !s}>
@@ -114,18 +118,29 @@ export function AssistantAdmin() {
         <Card title="Defaults">
           <label>
             Provider{" "}
-            <select aria-label="Default provider" value={shownProvider} onChange={(e) => setDefaultProvider(e.target.value)}>
+            <select
+              aria-label="Default provider"
+              value={shownProvider}
+              onChange={(e) => {
+                setDefaultProvider(e.target.value);
+                if (gone) setDefaultModel("");
+              }}
+            >
               <option value="">Chart default</option>
+              {gone && <option value={shownProvider} disabled>{`${shownProvider} (removed)`}</option>}
+              {listFailed && shownProvider !== "" && <option value={shownProvider} disabled>{shownProvider}</option>}
               {providerList.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
           </label>{" "}
           <label>
             Model{" "}
-            <input aria-label="Default model" value={shownModel} onChange={(e) => setDefaultModel(e.target.value)} />
+            <input aria-label="Default model" value={shownModel} disabled={gone} onChange={(e) => setDefaultModel(e.target.value)} />
           </label>{" "}
-          <Button size="sm" onClick={() => update.mutate({ defaultProvider: shownProvider, defaultModel: shownModel })}>
+          <Button size="sm" disabled={gone} onClick={() => update.mutate({ defaultProvider: shownProvider, defaultModel: shownModel })}>
             Save defaults
           </Button>
+          {gone && <p role="status">The saved default provider {shownProvider} is not available. Pick a listed provider or Chart default.</p>}
+          {listFailed && <p role="alert">{PROVIDERS_FAILED}</p>}
         </Card>
       )}
 

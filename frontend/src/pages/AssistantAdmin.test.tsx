@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
-import { renderWithProviders } from "../test/render-utils";
+import { createTestQueryClient, renderWithProviders } from "../test/render-utils";
 import { AssistantAdmin, pendingCountText } from "./AssistantAdmin";
+import { PROVIDERS_FAILED } from "../components/assistant/providerChoice";
 import * as client from "../api/client";
 import { ApiError } from "../hooks/useApi";
 import { createAssistantApproval, createAssistantSettings } from "../test/assistantFactories";
@@ -118,5 +119,66 @@ describe("AssistantAdmin", () => {
     renderAdmin();
     fireEvent.click(await screen.findByRole("button", { name: "Save defaults" }));
     expect(await screen.findByText("provider is unknown")).toBeTruthy();
+  });
+});
+
+describe("removed default provider", () => {
+  const NOTICE = "The saved default provider gone is not available. Pick a listed provider or Chart default.";
+
+  beforeEach(() => {
+    vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ defaultProvider: "gone", defaultModel: "old-model" }));
+  });
+
+  it("names the removed default provider, shows a notice, and disables Save defaults", async () => {
+    renderAdmin();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("gone"));
+    expect(select.selectedOptions[0].textContent).toBe("gone (removed)");
+    expect(await screen.findByText(NOTICE)).toBeTruthy();
+    expect((screen.getByLabelText("Default model") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("clears the stale model when a listed provider is picked, and saves it", async () => {
+    renderAdmin();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("gone"));
+    fireEvent.change(select, { target: { value: "smoke" } });
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    expect((screen.getByLabelText("Default model") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "smoke", defaultModel: "" }));
+  });
+
+  it("saves Chart default for a removed default provider", async () => {
+    renderAdmin();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("gone"));
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "", defaultModel: "" }));
+  });
+
+  it("keeps the cached list and its notice when a background refresh fails", async () => {
+    const queryClient = createTestQueryClient();
+    vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ defaultProvider: "gone", defaultModel: "old-model" }));
+    renderWithProviders(<AssistantAdmin />, { permissions: perms, route: "/administration/assistant", queryClient });
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("gone"));
+    vi.mocked(client.listAssistantProviders).mockRejectedValue(new ApiError(500, "boom"));
+    await queryClient.refetchQueries({ queryKey: ["assistant-providers"] });
+    expect(select.value).toBe("gone");
+    expect(screen.getByText(NOTICE)).toBeTruthy();
+    expect(screen.queryByText(PROVIDERS_FAILED)).toBeNull();
+    expect((screen.getByRole("button", { name: "Save defaults" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows a notice when the provider list does not load", async () => {
+    vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ defaultProvider: "smoke", defaultModel: "varroa-smoke" }));
+    vi.mocked(client.listAssistantProviders).mockRejectedValue(new ApiError(500, "boom"));
+    renderAdmin();
+    expect(await screen.findByText(PROVIDERS_FAILED)).toBeTruthy();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    expect(select.value).toBe("smoke");
   });
 });

@@ -251,23 +251,25 @@ func (s *Server) assistantContext(ctx context.Context, claims *auth.Claims, valu
 }
 
 // chooseProvider picks the provider and model of a new session. A provider
-// named in the request must exist. Otherwise the user setting, the global
-// default, then the registry default apply, and the entry may be nil.
+// named in the request must exist. Otherwise the first known of the user
+// setting, the global default, and the registry default applies. The entry
+// may be nil.
 func (rt *AssistantRuntime) chooseProvider(reqProvider, reqModel string, user, global agent.Settings) (string, string, *provider.Entry, error) {
 	if rt.Registry == nil {
 		return "", "", nil, nil
 	}
 	var entry provider.Entry
 	var ok bool
-	switch {
-	case reqProvider != "":
+	if reqProvider != "" {
 		entry, ok = rt.Registry.Get(reqProvider)
 		if !ok {
 			return "", "", nil, failWith(http.StatusBadRequest, "", "unknown provider")
 		}
-	case user.Provider != "":
+	}
+	if !ok && user.Provider != "" {
 		entry, ok = rt.Registry.Get(user.Provider)
-	case global.DefaultProvider != "":
+	}
+	if !ok && global.DefaultProvider != "" {
 		entry, ok = rt.Registry.Get(global.DefaultProvider)
 	}
 	if !ok {

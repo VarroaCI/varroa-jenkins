@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "../test/render-utils";
-import { ProfileAssistantTab, keyProviderFor, keyStatus, savedProviderGone } from "./ProfileAssistantTab";
+import { ProfileAssistantTab, keyProviderFor, keyStatus } from "./ProfileAssistantTab";
+import { PROVIDERS_FAILED } from "../components/assistant/providerChoice";
 import { AssistantProvider } from "../components/assistant/AssistantProvider";
 import * as client from "../api/client";
 import { ApiError } from "../hooks/useApi";
@@ -187,6 +188,35 @@ describe("ProfileAssistantTab", () => {
     });
   });
 
+  describe("provider list that does not load", () => {
+    beforeEach(() => {
+      vi.mocked(client.getMyAssistant).mockResolvedValue(createMyAssistant({ provider: "smoke", model: "varroa-smoke" }));
+      vi.mocked(client.listAssistantProviders).mockRejectedValue(new ApiError(500, "boom"));
+    });
+
+    afterEach(() => {
+      vi.mocked(client.listAssistantProviders).mockResolvedValue({ items: [SMOKE] });
+    });
+
+    it("shows a notice and keeps the saved provider and model in view", async () => {
+      renderTab();
+      expect(await screen.findByText(PROVIDERS_FAILED)).toBeTruthy();
+      await waitFor(() => expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("smoke"));
+      const model = screen.getByLabelText("Model") as HTMLSelectElement;
+      expect(model.value).toBe("varroa-smoke");
+      expect(model.disabled).toBe(true);
+    });
+
+    it("still saves the saved values", async () => {
+      renderTab();
+      expect(await screen.findByText(PROVIDERS_FAILED)).toBeTruthy();
+      const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+      expect(save.disabled).toBe(false);
+      fireEvent.click(save);
+      await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ provider: "smoke", model: "varroa-smoke" })));
+    });
+  });
+
   describe("removed saved provider", () => {
     const NOTICE = "The saved provider gone is not available. Pick a provider or Default.";
 
@@ -232,24 +262,6 @@ describe("ProfileAssistantTab", () => {
       expect(await screen.findByText(NOTICE)).toBeTruthy();
       fireEvent.click(screen.getByRole("switch", { name: "Assistant on" }));
       await waitFor(() => expect(client.putMyAssistant).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, provider: "", model: "" })));
-    });
-  });
-
-  describe("savedProviderGone", () => {
-    it("is false while the provider list is not loaded", () => {
-      expect(savedProviderGone("gone", [], false)).toBe(false);
-    });
-
-    it("is false for Default", () => {
-      expect(savedProviderGone("", [SMOKE], true)).toBe(false);
-    });
-
-    it("is false for a listed provider", () => {
-      expect(savedProviderGone("smoke", [SMOKE], true)).toBe(false);
-    });
-
-    it("is true for a saved provider that is not listed", () => {
-      expect(savedProviderGone("gone", [SMOKE], true)).toBe(true);
     });
   });
 });

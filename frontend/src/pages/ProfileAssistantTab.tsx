@@ -18,6 +18,7 @@ import { Button } from "../components/Button";
 import { useAssistant } from "../components/assistant/AssistantProvider";
 import { PausedBanner } from "../components/assistant/PausedBanner";
 import { HTTP_LABELS } from "../components/assistant/labels";
+import { PROVIDERS_FAILED, savedProviderGone } from "../components/assistant/providerChoice";
 import type { AssistantProvider, DataSharingLevel, MyAssistant, MyAssistantUpdate } from "../types/assistant";
 
 const LEVELS: DataSharingLevel[] = ["none", "metadata", "logs"];
@@ -33,11 +34,6 @@ export function keyProviderFor(chosen: string, saved: string, list: AssistantPro
   if (list.some((p) => p.name === chosen)) return chosen;
   if (list.some((p) => p.name === saved)) return saved;
   return list.find((p) => p.default)?.name ?? list[0]?.name ?? "";
-}
-
-/** savedProviderGone is true when the saved provider is not in the loaded chart provider list. */
-export function savedProviderGone(saved: string, list: AssistantProvider[], loaded: boolean): boolean {
-  return loaded && saved !== "" && !list.some((p) => p.name === saved);
 }
 
 export function ProfileAssistantTab() {
@@ -67,7 +63,9 @@ export function ProfileAssistantTab() {
   const providerList = providers.data?.items ?? [];
   const keyProviderShown = keyProviderFor(keyProvider, current.provider, providerList);
   const selectedProvider = providerList.find((p) => p.name === current.provider);
-  const gone = savedProviderGone(current.provider, providerList, providers.isSuccess);
+  const providerListLoaded = providers.data !== undefined;
+  const gone = savedProviderGone(current.provider, providerList, providerListLoaded);
+  const listFailed = providers.isError && !providerListLoaded;
   const explained = (location.state as { from?: string } | null)?.from === "explain";
 
   // Saves all four fields, so a switch and a model change cannot drift apart.
@@ -160,6 +158,7 @@ export function ProfileAssistantTab() {
           >
             <option value="">Default</option>
             {gone && <option value={current.provider} disabled>{`${current.provider} (removed)`}</option>}
+            {listFailed && current.provider !== "" && <option value={current.provider} disabled>{current.provider}</option>}
             {providerList.map((p) => (
               <option key={p.name} value={p.name}>{p.available ? p.name : `${p.name} (unavailable)`}</option>
             ))}
@@ -167,8 +166,9 @@ export function ProfileAssistantTab() {
         </label>{" "}
         <label>
           Model{" "}
-          <select aria-label="Model" value={current.model} disabled={gone} onChange={(e) => setModel({ ...current, model: e.target.value })}>
+          <select aria-label="Model" value={current.model} disabled={gone || listFailed} onChange={(e) => setModel({ ...current, model: e.target.value })}>
             <option value="">Default</option>
+            {listFailed && current.model !== "" && <option value={current.model} disabled>{current.model}</option>}
             {(selectedProvider?.models ?? []).map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
@@ -185,6 +185,7 @@ export function ProfileAssistantTab() {
           </select>
         </label>
         {gone && <p role="status">The saved provider {current.provider} is not available. Pick a provider or Default.</p>}
+        {listFailed && <p role="alert">{PROVIDERS_FAILED}</p>}
         <div>
           <Button size="sm" disabled={gone} onClick={() => save.mutate(current)}>Save</Button>
         </div>
