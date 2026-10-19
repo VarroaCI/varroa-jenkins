@@ -253,3 +253,97 @@ func releaseNamedAgentPods(ctx context.Context, reaper tenantAgentPodReaper, tea
 	}
 	return deleted, first
 }
+
+// ReleaseInstanceAgentPods deletes the idle tenant agent pods of a cell
+// instance that the operator confirmed gone. The recorder names the nodes
+// that a resume can still adopt in keep, and those pods stay. Any operator
+// replica can run this. Each delete carries the listed UID, so a repeat or
+// a parallel action is harmless.
+func (r *Reconciler) ReleaseInstanceAgentPods(ctx context.Context, team, namespace string, keep []string, refreshedBefore time.Time) {
+	reaper, ok := r.client.(tenantAgentPodReaper)
+	if !ok {
+		return
+	}
+	deleted, err := releaseInstanceAgentPods(ctx, reaper, team, namespace, keep, refreshedBefore, time.Now())
+	if err != nil {
+		r.Logger.Warn("release instance agent pods failed", "team", team, "namespace", namespace, "error", err)
+	}
+	for range deleted {
+		r.Logger.Info("released an instance agent pod", "team", team, "namespace", namespace, "reason", "instance-gone")
+	}
+}
+
+// releaseInstanceAgentPods deletes the pods that staleInstanceAgentPods
+// selects, each with its listed UID as a precondition. It answers the count
+// of pods it deleted. NotFound and Conflict are not errors. A later error
+// does not stop the pass: the first other error is returned after the rest
+// of the pods were tried.
+func releaseInstanceAgentPods(ctx context.Context, reaper tenantAgentPodReaper, team, namespace string,
+	keep []string, refreshedBefore, now time.Time) (int, error) {
+	if namespace == "" {
+		return 0, nil
+	}
+	pods, err := reaper.ListTenantAgentPods(ctx, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("list the tenant agent pods in namespace %q: %w", namespace, err)
+	}
+	deleted := 0
+	var first error
+	for _, pod := range staleInstanceAgentPods(pods, team, keep, refreshedBefore, now) {
+		if err := reaper.DeletePodWithUID(ctx, namespace, pod.Name, pod.UID); err != nil {
+			if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+				continue
+			}
+			if first == nil {
+				first = fmt.Errorf("delete the instance agent pod %q in namespace %q: %w", pod.Name, namespace, err)
+			}
+			continue
+		}
+		deleted++
+	}
+	return deleted, first
+}
+
+// staleInstanceAgentPods answers the pods of team that a confirmed gone
+// cell instance left idle. A pod qualifies when it runs as the tenant agent
+// ServiceAccount, carries the plugin's controller label, is not being
+// deleted, is not named in keep, and has a parseable last refresh that is
+// at or before refreshedBefore and more than tenantAgentPendingReapAfter
+// old at now. The pod phase does not matter. The three-minute floor reuses
+// the three-missed-refresh bound, because a live sibling slot's pod can show
+// a refresh just before the confirmation. A pod with no annotation, or one
+// that does not parse, always stays.
+func staleInstanceAgentPods(pods []corev1.Pod, team string, keep []string, refreshedBefore, now time.Time) []corev1.Pod {
+	kept := make(map[string]struct{}, len(keep))
+	for _, name := range keep {
+		kept[name] = struct{}{}
+	}
+	sa := tenantAgentServiceAccountName(team)
+	var out []corev1.Pod
+	for _, pod := range pods {
+		if pod.Spec.ServiceAccountName != sa {
+			continue
+		}
+		if _, ok := pod.Labels[agentPodControllerLabel]; !ok {
+			continue
+		}
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if _, ok := kept[pod.Name]; ok {
+			continue
+		}
+		refreshed, ok := agentPodLastRefresh(pod)
+		if !ok {
+			continue
+		}
+		if refreshed.After(refreshedBefore) {
+			continue
+		}
+		if now.Sub(refreshed) <= tenantAgentPendingReapAfter {
+			continue
+		}
+		out = append(out, pod)
+	}
+	return out
+}

@@ -56,6 +56,7 @@ type ledgerActionRunner interface {
 	SendImperativeCommand(ctx context.Context, namespace, name string, cmd *mitev1.ImperativeCommand) error
 	WakeHibernatedController(ctx context.Context, namespace, name string)
 	ReleaseRunAgentPods(ctx context.Context, team, namespace string, names []string)
+	ReleaseInstanceAgentPods(ctx context.Context, team, namespace string, keep []string, refreshedBefore time.Time)
 }
 
 // commitStatusEnder ends the pending commit statuses of one build. The
@@ -181,6 +182,8 @@ func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatu
 // the target through the same call before they send the command. An
 // unknown kind takes no action and is counted. end_commit_status asks the
 // forge answerer to end the pending commit statuses of the build.
+// release_instance_agents deletes the idle agent pods of a confirmed gone
+// cell instance, except the nodes the action names.
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
@@ -321,6 +324,16 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledge
 			return
 		}
 		rec.ReleaseRunAgentPods(ctx, action.Tenant, action.AgentNamespace, action.AgentPods)
+	case recordstore.LedgerActionReleaseInstanceAgents:
+		// The operator confirmed the instance gone. Its idle pods have no node on
+		// any JVM. The recorder names the nodes a resume can still adopt, and
+		// those pods stay.
+		if action.AgentNamespace == "" || action.Tenant == "" || action.RefreshedBefore == nil {
+			logger.Info("release_instance_agents incomplete, nothing to do",
+				"tenant", action.Tenant, "instance", action.Instance)
+			return
+		}
+		rec.ReleaseInstanceAgentPods(ctx, action.Tenant, action.AgentNamespace, action.KeepPods, *action.RefreshedBefore)
 	case recordstore.LedgerActionEndCommitStatus:
 		dispatchEndCommitStatus(ctx, logger, forge, action)
 	default:

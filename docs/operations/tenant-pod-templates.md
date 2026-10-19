@@ -74,7 +74,11 @@ it until a resume adopts it. These mechanisms delete such a pod:
 | The operator, for a Running pod | An unschedulable slot holder, a removed slot, a plugin fault | About 46 minutes |
 | The operator, during teardown | A dropped `spec.pipelines` or a deleted `Team` | At once |
 | The operator, for the agent pods of a run that the mark ends | A run with replicated state | About 1 minute after the mark |
+| The operator, after it confirms a cell instance gone | A hard kill of a cell pod | About 1 to 4 minutes after the operator confirms the instance gone |
 | Graceful cell stop | Idle pod kept by `idleMinutes` | At stop |
+
+The release after a confirmed cell instance keeps every pod whose node a running or `heartbeat-lost`
+build stores, because a resume can adopt it.
 
 A pod that is not Running never ran a build step, so no resume adopts it. A Running pod can hold
 a node that a late resume adopts, so it outlives the longest resume window.

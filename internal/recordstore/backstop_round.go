@@ -85,7 +85,8 @@ func (cfg BackstopConfig) grace() time.Duration {
 
 // RunBackstopRound tries the backstop advisory lock on one acquired
 // connection, and on success runs the mesh takeover, the end of marked
-// lost runs, D9's interrupted sweep, the claim-expiry sweep, the
+// lost runs, D9's interrupted sweep, the gone-instance agent release, the
+// claim-expiry sweep, the
 // unstarted-intent re-fire, the fleet lock holder move, the fleet lock
 // release check, and D11's backstop cron round, in that order, before
 // releasing it. It reports whether this call took the lock; a replica
@@ -133,6 +134,12 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)
+	}
+
+	// The instance release runs after the sweep, so a run the sweep just ended
+	// no longer shields its nodes.
+	if _, err := ReleaseGoneInstanceAgents(ctx, pool, conn, cfg.ActionMetrics, now, grace, logger); err != nil {
+		logger.Warn("gone instance agent release round failed", "error", err)
 	}
 
 	if _, err := ExpireUnclaimedRuns(ctx, pool, cfg.RunNotifier, cfg.ClaimExpiryMetrics, now, logger); err != nil {

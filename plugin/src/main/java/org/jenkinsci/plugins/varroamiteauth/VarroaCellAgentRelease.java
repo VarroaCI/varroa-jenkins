@@ -43,8 +43,8 @@ import jenkins.model.Jenkins;
  * <p>The release is active only when {@code VARROA_CELL} is {@code true}.
  * It reads that value once. A change needs a pod restart.
  *
- * <p>A hard kill skips this release. The plugin garbage collection then
- * removes the pods.
+ * <p>A hard kill skips this release. When the operator confirms the instance
+ * gone, it deletes the idle pods that no resume can adopt.
  */
 public final class VarroaCellAgentRelease {
 

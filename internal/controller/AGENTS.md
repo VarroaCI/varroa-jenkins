@@ -901,8 +901,9 @@ sections describe.
     (`tenantAgentRunningReapAfter`, the plugin timeout plus 5 minutes).
     `TestTenantAgentTimeoutsCoverTheResumeWindow` pins this order.
     At a graceful cell stop, the cell's plugin terminates its idle cloud agents
-    (`VarroaCellAgentRelease`). The garbage collection and the operator's long age then
-    cover only busy pods and hard kills.
+    (`VarroaCellAgentRelease`). After a hard kill, the operator's
+    `ReleaseInstanceAgentPods` deletes the idle pods of a confirmed gone instance.
+    The garbage collection and the operator's long age then cover only busy pods.
     `orphanTenantAgentPods` is pure: a candidate runs as
     `varroa-agent-<team>`, carries the `kubernetes.jenkins.io/controller`
     label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
@@ -911,7 +912,13 @@ sections describe.
     once in teardown. An API cancel deletes no agent pod. A run that the
     recorder ends releases its own pods: `ReleaseRunAgentPods` (called for the
     `release_agents` action) deletes only the named pods that run as the
-    tenant ServiceAccount and carry the controller label, each with its UID. `syncPipelinesChildren` runs the steady-state pass,
+    tenant ServiceAccount and carry the controller label, each with its UID.
+    `ReleaseInstanceAgentPods` (called for `release_instance_agents`) deletes the
+    stale pods of a confirmed gone cell instance, in any operator replica. Its
+    filter (`staleInstanceAgentPods`) keeps a pod named in `keep` (the nodes a
+    resume can adopt), a pod with a last refresh after `refreshedBefore`, a pod
+    refreshed within `tenantAgentPendingReapAfter`, and a pod that is missing the
+    annotation or the label. Each delete carries the listed UID. `syncPipelinesChildren` runs the steady-state pass,
     rate-limited by `reapTenantAgentPodsDue` to one list per Team per
     `tenantAgentReapInterval` (1 minute), and never fails the tick on it.
     `Reconcile` runs the teardown pass before `cells.Place`, on the same
