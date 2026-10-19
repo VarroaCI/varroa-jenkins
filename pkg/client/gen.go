@@ -3863,6 +3863,7 @@ type ComponentsSchemasProvisioningDefaultsSpec struct {
 	IngressClassName              *string                                `json:"ingressClassName,omitempty"`
 	LiveFingerprintIntervalSec    *int                                   `json:"liveFingerprintIntervalSec,omitempty"`
 	Namespaces                    *[]string                              `json:"namespaces,omitempty"`
+	PluginInfoURL                 *string                                `json:"pluginInfoURL,omitempty"`
 	PluginUpdateCenterDownloadURL *string                                `json:"pluginUpdateCenterDownloadURL,omitempty"`
 	PluginUpdateCenterURL         *string                                `json:"pluginUpdateCenterURL,omitempty"`
 	ProvisioningTimeoutSec        *int                                   `json:"provisioningTimeoutSec,omitempty"`

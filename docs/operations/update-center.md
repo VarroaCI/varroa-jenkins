@@ -76,11 +76,15 @@ The value of `ProvisioningDefaults.spec.pluginUpdateCenterDownloadURL` must be `
 | `DownloadURLNotFound` | The download URL answers `404` or `410` for the first pin. |
 | `PluginArchiveFallback` | Some plugins came from the public archive. The message names the first one. |
 
+Set `ProvisioningDefaults.spec.pluginInfoURL` to a mirror of `plugin-versions.json`. Without it, plugins-init reads `<update center>/plugin-versions.json` when the update center is Ready. When the update center is enabled but not Ready, and `pluginInfoURL` is unset, provisioning falls back online with pull-through, or waits in air-gap mode.
+
 ## Plugin dependencies
 
 The metadata document `update-center.actual.json` lists the dependencies of each served plugin. Each entry names a dependency, its minimum version, and whether it is optional. The list comes from the plugin's own manifest. The document also gives each plugin its required Jenkins core version. The served entry always carries `requiredCore`, which is an empty string when the plugin declares none.
 
-The Jenkins plugin installer reads these entries for the `latest` version of a plugin. For an explicit version, the installer does not read these entries from this document.
+The Jenkins plugin installer reads these entries for the `latest` version of a plugin.
+
+The service also serves `plugin-versions.json`. It lists every stored version of each plugin, with its sha256, `requiredCore`, and dependencies. The installer reads this document for an explicit version. A version whose dependency list is unknown is left out. The installer then reads that plugin's manifest.
 
 A plugin whose manifest cannot be read is left out of the metadata document. The service logs a warning. The plugin stays downloadable at its explicit version. The operator reports these plugins in `status.unknownDependencies`. See [Check readiness](#check-readiness). A slow blob store can delay a manifest read. The inventory waits at most 15 seconds for these reads, reports a plugin whose read is not complete as unknown, and lists it on the next pass.
 

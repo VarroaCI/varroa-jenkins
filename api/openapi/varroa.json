@@ -3904,6 +3904,9 @@
             },
             "type": "array"
           },
+          "pluginInfoURL": {
+            "type": "string"
+          },
           "pluginUpdateCenterDownloadURL": {
             "type": "string"
           },
@@ -13042,6 +13045,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "pluginInfoURL": {
+            "type": "string"
           },
           "pluginUpdateCenterDownloadURL": {
             "type": "string"

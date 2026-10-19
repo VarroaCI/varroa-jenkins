@@ -174,6 +174,7 @@ func (s *Server) isReady() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.sto
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/update-center.actual.json", s.handleMetadataPlain)
 	mux.HandleFunc("/update-center.json", s.handleMetadataJSONP)
+	mux.HandleFunc("/plugin-versions.json", s.handlePluginVersions)
 	mux.HandleFunc("/download/plugins/", s.handleDownload)
 	mux.HandleFunc("/api/v1/import", s.handleImport)
 	mux.HandleFunc("/api/v1/plugins", s.handleUpload)

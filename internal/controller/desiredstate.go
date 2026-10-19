@@ -60,7 +60,9 @@ const (
 // outcome.
 type ucGateResult struct {
 	URL, DownloadURL string
-	Outcome          ucGateOutcome
+	// PluginInfoURL is JENKINS_PLUGIN_INFO. The tool reads it for every exact pin.
+	PluginInfoURL string
+	Outcome       ucGateOutcome
 	// DownloadURLExplicit is true when DownloadURL comes from
 	// ProvisioningDefaults. Plugin downloads then never touch the in-cluster
 	// update center, so the clear outcome must not claim
@@ -73,8 +75,8 @@ type ucGateResult struct {
 // the §5.2 fallback semantics. Pure: uc is nil when the UpdateCenter CR is
 // absent; ucBaseURL is empty when the in-cluster UC component is disabled.
 func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alpha1.UpdateCenter, ucBaseURL string) ucGateResult {
-	url, downloadURL := resolvePluginUpdateCenterURLs(defaults, uc, ucBaseURL)
-	res := ucGateResult{URL: url, DownloadURL: downloadURL, Outcome: ucGateClear}
+	url, downloadURL, infoURL := resolvePluginUpdateCenterURLs(defaults, uc, ucBaseURL)
+	res := ucGateResult{URL: url, DownloadURL: downloadURL, PluginInfoURL: infoURL, Outcome: ucGateClear}
 	res.DownloadURLExplicit = defaults != nil && defaults.Spec.PluginUpdateCenterDownloadURL != ""
 
 	ucReady := uc != nil && ucConditionTrue(uc.Status.Conditions, "Ready") && ucBaseURL != ""
@@ -85,7 +87,8 @@ func resolveUpdateCenterGate(defaults *v1alpha1.ProvisioningDefaults, uc *v1alph
 	// through to the (empty) UC tier.
 	urlNeedsUC := defaults == nil || defaults.Spec.PluginUpdateCenterURL == ""
 	dlNeedsUC := defaults == nil || defaults.Spec.PluginUpdateCenterDownloadURL == ""
-	if !urlNeedsUC && !dlNeedsUC {
+	infoNeedsUC := defaults == nil || defaults.Spec.PluginInfoURL == ""
+	if !urlNeedsUC && !dlNeedsUC && !infoNeedsUC {
 		res.Outcome = ucGateNoop
 		return res
 	}
@@ -112,7 +115,7 @@ func ucBlockAirgapMessage(uc *v1alpha1.UpdateCenter) string {
 	}
 	if ready := conditionPtr(uc.Status.Conditions, condTypeReady); ready != nil && ready.Reason == reasonPluginsUnservable {
 		return fmt.Sprintf(
-			"%s The update center cannot serve %d declared plugin(s). Seed the missing plugins (spec.seed.refs or `varroactl export`/`import`), enable spec.pullThrough with working egress, or set explicit pluginUpdateCenterURL and pluginUpdateCenterDownloadURL in ProvisioningDefaults to bypass the in-cluster update center.",
+			"%s The update center cannot serve %d declared plugin(s). Seed the missing plugins (spec.seed.refs or `varroactl export`/`import`), enable spec.pullThrough with working egress, or set explicit pluginUpdateCenterURL, pluginUpdateCenterDownloadURL, and pluginInfoURL in ProvisioningDefaults to bypass the in-cluster update center.",
 			base, uc.Status.UnservableCount,
 		)
 	}

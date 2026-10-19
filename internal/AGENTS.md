@@ -352,7 +352,7 @@ reading each package's entry point):
   upload and are empty for every other producer.
 - **`updatecenter/`** — the in-cluster Jenkins update center service behind
   `cmd/updatecenter`: metadata generation (`update-center.actual.json` +
-  JSONP wrapper; each plugin's dependencies come from the layer annotation,
+  JSONP wrapper, and `plugin-versions.json`, which lists every stored version for exact pins; each plugin's dependencies come from the layer annotation,
   with a lazy read of the stored manifest as fallback, cached by layer digest;
   a plugin whose list is unknown is left out of the metadata but stays
   downloadable), blob download with sha256-verified pull-through from

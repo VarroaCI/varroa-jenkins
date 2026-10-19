@@ -196,6 +196,11 @@ spec:
                 items:
                   type: string
                 type: array
+              pluginInfoURL:
+                description: |-
+                  PluginInfoURL is the plugin-versions document that plugins-init reads
+                  for the dependencies and checksums of exact pins (maps to JENKINS_PLUGIN_INFO).
+                type: string
               pluginUpdateCenterDownloadURL:
                 description: |-
                   PluginUpdateCenterDownloadURL is the Jenkins update-center binary download URL

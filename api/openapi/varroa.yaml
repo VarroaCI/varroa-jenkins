@@ -2868,6 +2868,8 @@ components:
           items:
             type: string
           type: array
+        pluginInfoURL:
+          type: string
         pluginUpdateCenterDownloadURL:
           type: string
         pluginUpdateCenterURL:
@@ -9763,6 +9765,8 @@ components:
           items:
             type: string
           type: array
+        pluginInfoURL:
+          type: string
         pluginUpdateCenterDownloadURL:
           type: string
         pluginUpdateCenterURL:

@@ -383,12 +383,14 @@ func (r *Reconciler) SetArtifactSecretBase(base string) {
 
 // resolvePluginUpdateCenterURLs resolves the plugin update center URLs for the
 // init container using the 3-tier precedence:
-//  1. explicit ProvisioningDefaults.pluginUpdateCenterURL/DownloadURL (user override)
+//  1. explicit ProvisioningDefaults.pluginUpdateCenterURL/DownloadURL/pluginInfoURL (user override)
 //  2. in-cluster UC URL when the UpdateCenter CR is Ready
+//     (<base>/update-center.actual.json, <base>/download/plugins, <base>/plugin-versions.json)
 //  3. "" (tool default upstream)
 //
-// url and downloadURL resolve independently.
-func resolvePluginUpdateCenterURLs(defaults *v1alpha1.ProvisioningDefaults, uc *v1alpha1.UpdateCenter, ucBaseURL string) (url, downloadURL string) {
+// url, downloadURL, and infoURL resolve independently. infoURL is the
+// JENKINS_PLUGIN_INFO location of the plugin-versions document.
+func resolvePluginUpdateCenterURLs(defaults *v1alpha1.ProvisioningDefaults, uc *v1alpha1.UpdateCenter, ucBaseURL string) (url, downloadURL, infoURL string) {
 	ucReady := uc != nil && ucConditionTrue(uc.Status.Conditions, "Ready") && ucBaseURL != ""
 
 	// URL (metadata endpoint)
@@ -410,7 +412,15 @@ func resolvePluginUpdateCenterURLs(defaults *v1alpha1.ProvisioningDefaults, uc *
 	}
 	// else: downloadURL stays ""
 
-	return url, downloadURL
+	// Plugin info (plugin-versions.json)
+	if defaults != nil && defaults.Spec.PluginInfoURL != "" {
+		infoURL = defaults.Spec.PluginInfoURL
+	} else if ucReady {
+		infoURL = ucBaseURL + "/plugin-versions.json"
+	}
+	// else: infoURL stays "" (tool default upstream)
+
+	return url, downloadURL, infoURL
 }
 
 // ucConditionTrue returns true if the condition with the given type exists
@@ -874,6 +884,7 @@ type StatefulSetSpec struct {
 	DrainTimeoutSec               int64
 	PluginUpdateCenterURL         string
 	PluginUpdateCenterDownloadURL string
+	PluginInfoURL                 string
 	VarroaBaseURL                 string
 
 	// ClaimGate is "1" when the record store is enabled, else "0". Stamped
@@ -3651,6 +3662,7 @@ log.info('Varroa init: realm and RBAC are managed declaratively by JCasC')
 	ucGate := resolveUpdateCenterGate(defaults, uc, r.ucBaseURL)
 	stsSpec.PluginUpdateCenterURL = ucGate.URL
 	stsSpec.PluginUpdateCenterDownloadURL = ucGate.DownloadURL
+	stsSpec.PluginInfoURL = ucGate.PluginInfoURL
 
 	// §5.2 fallback semantics — the decision is table-tested in
 	// desiredstate_test.go; this switch only applies it.

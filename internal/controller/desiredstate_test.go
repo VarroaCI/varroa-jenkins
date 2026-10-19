@@ -91,6 +91,11 @@ func TestResolveUpdateCenterGate(t *testing.T) {
 	overrideBoth := &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{
 		PluginUpdateCenterURL:         "https://example.org/uc.json",
 		PluginUpdateCenterDownloadURL: "https://example.org/dl",
+		PluginInfoURL:                 "https://example.org/plugin-versions.json",
+	}}
+	overrideNoInfo := &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{
+		PluginUpdateCenterURL:         "https://example.org/uc.json",
+		PluginUpdateCenterDownloadURL: "https://example.org/dl",
 	}}
 	overrideURLOnly := &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{
 		PluginUpdateCenterURL: "https://example.org/uc.json",
@@ -110,6 +115,8 @@ func TestResolveUpdateCenterGate(t *testing.T) {
 		{name: "uc not ready pull-through falls back online", uc: notReadyUC(true), ucBaseURL: "http://uc:8080", want: ucGateFallbackOnline},
 		{name: "defaults override both tiers noop", defaults: overrideBoth, uc: notReadyUC(false), ucBaseURL: "http://uc:8080", want: ucGateNoop},
 		{name: "partial override still gates on the missing tier", defaults: overrideURLOnly, uc: notReadyUC(false), ucBaseURL: "http://uc:8080", want: ucGateBlockAirgap},
+		{name: "url and download override without plugin info gates", defaults: overrideNoInfo, uc: notReadyUC(false), ucBaseURL: "http://uc:8080", want: ucGateBlockAirgap},
+		{name: "url and download override without plugin info falls back online", defaults: overrideNoInfo, uc: notReadyUC(true), ucBaseURL: "http://uc:8080", want: ucGateFallbackOnline},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -436,4 +443,24 @@ func TestDeriveMiteHealth(t *testing.T) {
 			t.Errorf("live drift = %+v, want nil (unchanged)", got.LiveDrift)
 		}
 	})
+}
+
+// TestResolveUpdateCenterGate_PluginInfoURL checks the plugin-versions location
+// that the gate hands to the StatefulSet.
+func TestResolveUpdateCenterGate_PluginInfoURL(t *testing.T) {
+	readyUC := &v1alpha1.UpdateCenter{Status: v1alpha1.UpdateCenterStatus{Conditions: []v1alpha1.UpdateCenterCondition{
+		{Type: "Ready", Status: metav1.ConditionTrue},
+	}}}
+	got := resolveUpdateCenterGate(nil, readyUC, "http://uc:8080")
+	if got.PluginInfoURL != "http://uc:8080/plugin-versions.json" {
+		t.Errorf("PluginInfoURL = %q, want the in-cluster plugin-versions document", got.PluginInfoURL)
+	}
+
+	explicit := &v1alpha1.ProvisioningDefaults{Spec: v1alpha1.ProvisioningDefaultsSpec{
+		PluginInfoURL: "https://mirror.example.org/plugin-versions.json",
+	}}
+	got = resolveUpdateCenterGate(explicit, readyUC, "http://uc:8080")
+	if got.PluginInfoURL != "https://mirror.example.org/plugin-versions.json" {
+		t.Errorf("PluginInfoURL = %q, want the explicit pluginInfoURL", got.PluginInfoURL)
+	}
 }

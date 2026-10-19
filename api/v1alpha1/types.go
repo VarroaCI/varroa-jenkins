@@ -2786,6 +2786,10 @@ type ProvisioningDefaultsSpec struct {
 	// <mirror>/download/plugins, for example https://updates.jenkins.io/download/plugins.
 	// +optional
 	PluginUpdateCenterDownloadURL string `json:"pluginUpdateCenterDownloadURL,omitempty"`
+	// PluginInfoURL is the plugin-versions document that plugins-init reads
+	// for the dependencies and checksums of exact pins (maps to JENKINS_PLUGIN_INFO).
+	// +optional
+	PluginInfoURL string `json:"pluginInfoURL,omitempty"`
 	// BroodPolicy constrains which brood operation verbs may run in this cluster.
 	// Nil means every verb is allowed — the singleton is optional and its absence
 	// must not disable functionality.

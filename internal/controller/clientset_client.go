@@ -1595,13 +1595,19 @@ func buildStatefulSet(spec StatefulSetSpec) *unstructured.Unstructured {
 									return mounts
 								}(),
 							}
-							if spec.PluginUpdateCenterURL != "" || spec.PluginUpdateCenterDownloadURL != "" {
+							if spec.PluginUpdateCenterURL != "" || spec.PluginUpdateCenterDownloadURL != "" || spec.PluginInfoURL != "" {
 								var env []map[string]interface{}
 								if spec.PluginUpdateCenterURL != "" {
 									env = append(env, map[string]interface{}{"name": "JENKINS_UC", "value": spec.PluginUpdateCenterURL})
+									// The Jenkins image sets JENKINS_UC_EXPERIMENTAL to upstream. The tool
+									// reads that document for every exact pin. Keep it equal to JENKINS_UC.
+									env = append(env, map[string]interface{}{"name": "JENKINS_UC_EXPERIMENTAL", "value": spec.PluginUpdateCenterURL})
 								}
 								if spec.PluginUpdateCenterDownloadURL != "" {
 									env = append(env, map[string]interface{}{"name": "JENKINS_UC_DOWNLOAD_URL", "value": spec.PluginUpdateCenterDownloadURL})
+								}
+								if spec.PluginInfoURL != "" {
+									env = append(env, map[string]interface{}{"name": "JENKINS_PLUGIN_INFO", "value": spec.PluginInfoURL})
 								}
 								pluginsInit["env"] = env
 							}

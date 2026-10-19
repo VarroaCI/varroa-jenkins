@@ -2563,6 +2563,8 @@ ProvisioningDefaultsSpec:
       type: string
     pluginUpdateCenterDownloadURL:
       type: string
+    pluginInfoURL:
+      type: string
     broodPolicy:
       $ref: '#/BroodPolicy'
   additionalProperties: false
