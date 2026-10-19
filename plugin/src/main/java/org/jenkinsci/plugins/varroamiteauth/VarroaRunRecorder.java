@@ -49,6 +49,7 @@ import jenkins.scm.api.SCMRevisionAction;
 import jenkins.scm.api.metadata.ObjectMetadataAction;
 import jenkins.scm.api.mixin.ChangeRequestSCMHead;
 import jenkins.scm.api.mixin.ChangeRequestSCMHead2;
+import jenkins.scm.api.mixin.ChangeRequestSCMRevision;
 
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.actions.LabelAction;
@@ -1602,9 +1603,37 @@ public final class VarroaRunRecorder {
         if (scmRevision != null) {
             SCMHead scmHead = scmRevision.getHead();
             head = scmHead != null ? orEmpty(scmHead.getName()) : "";
-            revision = stringOf(invokeNoArg(scmRevision, "getHash"));
+            revision = truncate(revisionHash(scmRevision), MAX_FIELD_512);
         }
         return new SourceFacts(head, head, revision, "", "", "", List.of(), List.of());
+    }
+
+    /**
+     * Returns the commit the forge knows for a revision. The forge writes
+     * a change-request status on the head commit of the change request,
+     * so a change-request revision answers its head commit and never the
+     * local merge commit of the checkout. GitHub exposes the head as
+     * {@code getPullHash}. Gitea exposes it as the origin revision's
+     * {@code getHash}. A change-request revision with no other accessor
+     * answers its own {@code getHash}, as before. Any other revision
+     * answers its own hash.
+     */
+    static String revisionHash(SCMRevision revision) {
+        if (revision == null) {
+            return "";
+        }
+        if (revision instanceof ChangeRequestSCMRevision) {
+            String pullHash = stringOf(invokeNoArg(revision, "getPullHash"));
+            if (!pullHash.isEmpty()) {
+                return pullHash;
+            }
+            Object origin = invokeNoArg(revision, "getOrigin");
+            String originHash = origin == null ? "" : stringOf(invokeNoArg(origin, "getHash"));
+            if (!originHash.isEmpty()) {
+                return originHash;
+            }
+        }
+        return stringOf(invokeNoArg(revision, "getHash"));
     }
 
     /**

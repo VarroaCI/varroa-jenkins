@@ -246,6 +246,28 @@ public class VarroaRunSourceTest {
                 "", sources.get(0).getBranch());
     }
 
+    /**
+     * A pull-request merge build checks out the local merge commit. The
+     * record must carry the pull-request head, which the forge knows, and
+     * never the merge commit.
+     */
+    @Test
+    public void aPullRequestMergeRunReportsTheHeadHashNotTheMergeCommit() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "pr-merge-run");
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = new VarroaRunRecorderChangeRequestTest.PullRequestHead(
+                "PR-12", "12", new SCMHead("main"), "fix/cache");
+        SCMRevision revision = new VarroaRunRecorderChangeRequestTest.GitHubStyleRevision(
+                head, new FakeRevision(new SCMHead("main"), "base111"), "head222", "merge333");
+        job.setDefinition(new SourceFactsFlowDefinition("echo 'hi'", revision));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        BuildEvent e2 = sources.get(sources.size() - 1);
+        assertEquals("head222", e2.getScmRevision());
+        assertEquals("PR-12", e2.getScmHead());
+    }
+
     // --- E3: the first allocation ---
 
     @Test
@@ -614,6 +636,11 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
     private final String libraryName;
     private final Boolean libraryTrusted;
     private final Object scm;
+    private final SCMRevision revision;
+
+    SourceFactsFlowDefinition(String script, SCMRevision revision) {
+        this(script, true, "shared-lib", null, null, revision);
+    }
 
     SourceFactsFlowDefinition(String script, boolean attachRevisionAction) {
         this(script, attachRevisionAction, "shared-lib", null, null);
@@ -626,11 +653,17 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
     /** A definition whose {@code scm} is the job's SCM. A null {@code scm} is an inline script. */
     SourceFactsFlowDefinition(String script, boolean attachRevisionAction, String libraryName,
             Boolean libraryTrusted, Object scm) {
+        this(script, attachRevisionAction, libraryName, libraryTrusted, scm, null);
+    }
+
+    SourceFactsFlowDefinition(String script, boolean attachRevisionAction, String libraryName,
+            Boolean libraryTrusted, Object scm, SCMRevision revision) {
         this.script = script;
         this.attachRevisionAction = attachRevisionAction;
         this.libraryName = libraryName;
         this.libraryTrusted = libraryTrusted;
         this.scm = scm;
+        this.revision = revision;
     }
 
     /** The Jenkinsfile path a consumer repository's CpsScmFlowDefinition answers. */
@@ -649,7 +682,8 @@ final class SourceFactsFlowDefinition extends FlowDefinition {
         Run<?, ?> run = (Run<?, ?>) owner.getExecutable();
         run.addAction(new LibrariesAction(libraryName, libraryTrusted));
         if (attachRevisionAction) {
-            run.addAction(new SCMRevisionAction(new FakeRevision(new SCMHead("main"), "abc123")));
+            SCMRevision attached = revision != null ? revision : new FakeRevision(new SCMHead("main"), "abc123");
+            run.addAction(new SCMRevisionAction(attached));
         }
         return new CpsFlowDefinition(script, true).create(owner, listener, actions);
     }
