@@ -60,6 +60,9 @@ const (
 	// value to avoid re-applying unchanged desired state (convergence gate).
 	lastAppliedHashName = "last-applied-hash"
 
+	// managedItemsName is the items engine's managed-items cache, kept under miteDir.
+	managedItemsName = "managed-items.json"
+
 	// defaultDrainMarkerPath is the default path for the drain-done marker
 	// shared between the mite and jenkins containers via the varroa-run emptyDir.
 	defaultDrainMarkerPath = "/var/run/varroa/run/drain.done"
@@ -101,8 +104,8 @@ type Agent struct {
 	heartbeatInterval time.Duration
 	Logger            *slog.Logger
 
-	// miteDir is the base directory for mite state markers (convergence hash,
-	// boot-restarted). Defaults to varroaMiteDir; overridable in tests.
+	// miteDir is the base directory for mite state (identity, convergence markers,
+	// managed-items cache). Defaults to varroaMiteDir; overridable in tests.
 	miteDir string
 
 	// jenkinsHomeDir is the root the rehydration section writes under.
@@ -427,6 +430,9 @@ func NewAgent(mp metric.MeterProvider, cfg Config) (*Agent, error) {
 func (a *Agent) lastAppliedHashPath() string {
 	return filepath.Join(a.miteDir, lastAppliedHashName)
 }
+
+// managedItemsPath returns the items engine's managed-items cache path rooted at miteDir.
+func (a *Agent) managedItemsPath() string { return filepath.Join(a.miteDir, managedItemsName) }
 
 // writeDrainMarker creates/overwrites the drain-done marker file so the
 // jenkins preStop can observe it and proceed. Best-effort: a warning is
@@ -2519,7 +2525,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			result.ItemsSuccess = true
 		} else {
 			a.Logger.Debug("applying items", "len", len(cmd.ItemsYaml))
-			itemsEngine := items.NewEngine(jenkinsClient)
+			itemsEngine := items.NewEngine(jenkinsClient, a.managedItemsPath())
 			applyResult, err := itemsEngine.Apply(ctx, cmd.ItemsYaml)
 			switch {
 			case err != nil:

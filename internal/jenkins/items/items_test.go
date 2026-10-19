@@ -701,7 +701,7 @@ func TestApplyAllStrategiesAreNonDestructive(t *testing.T) {
       name: sub-folder
 `, strategy)
 
-			engine := NewEngine(client)
+			engine := NewEngine(client, filepath.Join(t.TempDir(), "managed-items.json"))
 			_, err := engine.Apply(ctx, yamlContent)
 			if err == nil {
 				// Success means no destructive path was taken.
@@ -740,7 +740,7 @@ func TestDeclaredItemUpdatedInPlace(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	client := jenkins.NewClient(srv.URL, "test", "token")
-	engine := NewEngine(client)
+	engine := NewEngine(client, filepath.Join(t.TempDir(), "managed-items.json"))
 
 	yamlContent := `items:
   removeStrategy: {items: "none"}
