@@ -236,6 +236,8 @@ helm_deploy() {
     --set recordStore.blobs.mode=postgres \
     --set recorder.image.repository=varroa-jenkins \
     --set recorder.image.tag="$BACKEND_TAG" \
+    --set agentRunner.image.repository=varroa-jenkins \
+    --set agentRunner.image.tag="$BACKEND_TAG" \
     ${LOCALDEV_OFFLINE:+--set updateCenter.pullThrough.enabled=false} >/dev/null
   for d in "$RELEASE-varroa-operator" "$RELEASE-varroa-gateway" "$RELEASE-varroa-bff" "$RELEASE-frontend" "$RELEASE-updatecenter" "varroa-recorder"; do
     wait_for "deployment $d rollout" 60 5 \
