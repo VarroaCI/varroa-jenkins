@@ -3991,20 +3991,22 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				if r.DesiredState.RbacSuccess {
 					cr.Status.RBACHash = r.DesiredState.AppliedHash
 				}
-				// status.cell.appliedTenants (task 5.3b): advance only on a
-				// successful items apply whose hash still matches the
-				// tracked desired-state hash — the only success signal,
-				// since ControllerStatus carries no applied-hash field of
-				// its own. A hash match implies a tenant-set match too,
-				// because the tenant items pipeline folds every tenant's
-				// folder, or its retain entry, into the hashed items_yaml.
-				// A tenant the cell holds keeps its previous state.
-				if isCellController(cr) && r.DesiredState.ItemsSuccess &&
+				// status.cell.appliedTenants: the list advances on an items
+				// apply that walked every item, with or without refusals,
+				// when the hash matches the tracked desired-state hash. The
+				// hash is the only success signal, because ControllerStatus
+				// carries no applied-hash field of its own. A hash match
+				// implies a tenant-set match too. A walk with refusals sets
+				// item_failures. A parse error, a deadline, or a failed
+				// existence check does not set it, so those results do not
+				// advance the list. A tenant that the cell holds, or that
+				// owns a refused item, keeps its previous state.
+				if isCellController(cr) && (r.DesiredState.ItemsSuccess || len(r.DesiredState.ItemFailures) > 0) &&
 					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
 					if cr.Status.Cell == nil {
 						cr.Status.Cell = &v1alpha1.CellStatus{}
 					}
-					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell)
+					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell, itemFailurePaths(r.DesiredState))
 				}
 				// Refused tenant items set one ItemsApplyFailed entry per tenant.
 				// A successful items apply clears every such entry. Any other

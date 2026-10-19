@@ -1025,10 +1025,51 @@ func TestAppliedTenantsAfterItemsApply_HeldTenantKeepsPriorState(t *testing.T) {
 			{Tenant: "plain", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: "m"},
 		},
 	}
-	got := appliedTenantsAfterItemsApply(cell)
+	got := appliedTenantsAfterItemsApply(cell, nil)
 	want := []string{"fresh", "held-old", "plain"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("appliedTenantsAfterItemsApply = %v, want %v", got, want)
+	}
+}
+
+func TestAppliedTenantsAfterItemsApply_RefusedTenantKeepsPriorState(t *testing.T) {
+	cell := func() *v1alpha1.CellStatus {
+		return &v1alpha1.CellStatus{
+			Tenants:        []string{"healthy", "refused-new", "refused-old", "held-new"},
+			AppliedTenants: []string{"refused-old", "gone"},
+			TenantWarnings: []v1alpha1.TenantWarning{
+				{Tenant: "held-new", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"},
+			},
+		}
+	}
+	cases := []struct {
+		name    string
+		refused []string
+		want    []string
+	}{
+		{
+			name:    "mixed failures",
+			refused: []string{"refused-new/a", "refused-old", "refused-old/b/c", "other/x"},
+			want:    []string{"healthy", "refused-old"},
+		},
+		{
+			name:    "no failures",
+			refused: nil,
+			want:    []string{"healthy", "refused-new", "refused-old"},
+		},
+		{
+			name:    "prefix trap",
+			refused: []string{"healthy-x/job"},
+			want:    []string{"healthy", "refused-new", "refused-old"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := appliedTenantsAfterItemsApply(cell(), tc.refused)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("appliedTenantsAfterItemsApply = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

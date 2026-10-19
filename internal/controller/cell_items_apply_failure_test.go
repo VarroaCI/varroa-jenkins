@@ -236,3 +236,65 @@ func TestCellItemsApplyFailureReplacesEveryTenantWarning(t *testing.T) {
 		t.Fatalf("warnings after success = %d, want 0 (%+v)", n, cr.Status.Cell.TenantWarnings)
 	}
 }
+
+func TestCellItemsApplyFailureAdvancesHealthyTenant(t *testing.T) {
+	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+	cr := newItemsFailureCell("hash-1")
+	cr.Status.Cell.AppliedTenants = nil
+
+	transport.drainResults = []*mitev1.CommandResult{mkItemsFailureDSR("payments/repos")}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if got := strings.Join(cr.Status.Cell.AppliedTenants, ","); got != "search" {
+		t.Fatalf("appliedTenants = %q, want %q", got, "search")
+	}
+}
+
+func TestCellItemsApplyFailureKeepsRefusedAppliedTenant(t *testing.T) {
+	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+	cr := newItemsFailureCell("hash-1")
+	cr.Status.Cell.AppliedTenants = []string{"payments"}
+
+	transport.drainResults = []*mitev1.CommandResult{mkItemsFailureDSR("payments/repos")}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if got := strings.Join(cr.Status.Cell.AppliedTenants, ","); got != "payments,search" {
+		t.Fatalf("appliedTenants = %q, want %q", got, "payments,search")
+	}
+}
+
+func TestCellItemsApplyFailureStaleHashKeepsAppliedTenants(t *testing.T) {
+	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+	cr := newItemsFailureCell("hash-2")
+	cr.Status.Cell.AppliedTenants = nil
+
+	transport.drainResults = []*mitev1.CommandResult{mkItemsFailureDSR("payments/repos")}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if len(cr.Status.Cell.AppliedTenants) != 0 {
+		t.Fatalf("appliedTenants = %v, want none for a result that answers another hash", cr.Status.Cell.AppliedTenants)
+	}
+}
+
+func TestCellItemsApplyPathlessFailureKeepsAppliedTenants(t *testing.T) {
+	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+	cr := newItemsFailureCell("hash-1")
+	cr.Status.Cell.AppliedTenants = nil
+
+	transport.drainResults = []*mitev1.CommandResult{
+		mkDSR(true, true, true, false, "", "", "", "parse items: bad yaml", "hash-1"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if len(cr.Status.Cell.AppliedTenants) != 0 {
+		t.Fatalf("appliedTenants = %v, want none for a result with no item_failures", cr.Status.Cell.AppliedTenants)
+	}
+}

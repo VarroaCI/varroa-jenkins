@@ -623,7 +623,8 @@ sections describe.
   maps each `DesiredStateResult.item_failures` entry to its tenant and writes one warning per
   tenant. A result with refused items replaces every `ItemsApplyFailed` entry. A successful
   items section clears them all. The drain applies this only when the result answers the
-  tracked desired-state hash.
+  tracked desired-state hash. The same drain also advances `status.cell.appliedTenants` on a
+  result with `item_failures`. Each tenant that owns a refused item keeps its previous membership.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
@@ -1164,7 +1165,7 @@ sections describe.
     other read error, of the `ComposedBundle` or of its content ConfigMap,
     for a non-draining tenant still fails the assembly: it is an API
     fault, and a hold would push the cloud with no pod template.
-    `appliedTenantsAfterItemsApply` keeps a held tenant's previous
+    `appliedTenantsAfterItemsApply` keeps a held tenant's, or a refused tenant's, previous
     `status.cell.appliedTenants` membership, so a held applied folder never
     reads as drained; `updateCellInstance` calls `dropHeldTenants` on a pod
     change, because the new pod's empty home holds no held folder. A draining
