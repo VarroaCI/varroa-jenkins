@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,10 +13,17 @@ import (
 )
 
 // mkItemsFailureDSR builds a desired-state result whose items section
-// failed at itemPath.
-func mkItemsFailureDSR(itemPath string) *mitev1.CommandResult {
-	res := mkDSR(true, true, true, false, "", "", "", "create "+itemPath+": HTTP 500: Jenkins", "hash-1")
-	res.GetDesiredState().ItemsFailedPath = itemPath
+// refused each item path.
+func mkItemsFailureDSR(itemPaths ...string) *mitev1.CommandResult {
+	failures := make([]*mitev1.ItemFailure, 0, len(itemPaths))
+	msgs := make([]string, 0, len(itemPaths))
+	for _, p := range itemPaths {
+		text := "create " + p + ": HTTP 500: Jenkins"
+		failures = append(failures, &mitev1.ItemFailure{Path: p, Error: text})
+		msgs = append(msgs, text)
+	}
+	res := mkDSR(true, true, true, false, "", "", "", strings.Join(msgs, "; "), "hash-1")
+	res.GetDesiredState().ItemFailures = failures
 	return res
 }
 
@@ -38,9 +46,37 @@ func TestItemsApplyFailureWarningsAttributesTenant(t *testing.T) {
 func TestItemsApplyFailureWarningsNoneOnSuccess(t *testing.T) {
 	cell := &v1alpha1.CellStatus{Tenants: []string{"payments"}}
 	d := mkDSR(true, true, true, true, "", "", "", "", "hash-1").GetDesiredState()
-	d.ItemsFailedPath = "payments/repos"
+	d.ItemFailures = []*mitev1.ItemFailure{{Path: "payments/repos", Error: "create payments/repos: HTTP 500"}}
 	if got := itemsApplyFailureWarnings(cell, d); got != nil {
 		t.Fatalf("warnings = %+v, want none on a successful items section", got)
+	}
+}
+
+func TestItemsApplyFailureWarningsOneEntryPerTenant(t *testing.T) {
+	cell := &v1alpha1.CellStatus{Tenants: []string{"payments", "search"}}
+	d := mkItemsFailureDSR("payments/repos", "payments/x", "search/y").GetDesiredState()
+
+	got := itemsApplyFailureWarnings(cell, d)
+	if len(got) != 2 {
+		t.Fatalf("warnings = %+v, want one entry per tenant", got)
+	}
+	byTenant := map[string]string{}
+	for _, w := range got {
+		byTenant[w.Tenant] = w.Message
+	}
+	payments, ok := byTenant["payments"]
+	if !ok || !strings.Contains(payments, "payments/repos") || !strings.Contains(payments, "payments/x") {
+		t.Fatalf("payments message = %q, want both payments items", payments)
+	}
+	if strings.Contains(payments, "search/y") {
+		t.Errorf("payments message = %q, must not name another tenant's item", payments)
+	}
+	search, ok := byTenant["search"]
+	if !ok || !strings.Contains(search, "search/y") {
+		t.Fatalf("search message = %q, want its own item", search)
+	}
+	if strings.Contains(search, "payments") {
+		t.Errorf("search message = %q, must not name a payments item", search)
 	}
 }
 
@@ -170,7 +206,7 @@ func TestCellItemsApplyStaleHashKeepsTenantWarning(t *testing.T) {
 	}
 }
 
-func TestCellItemsApplyFailureKeepsOtherTenantsWarning(t *testing.T) {
+func TestCellItemsApplyFailureReplacesEveryTenantWarning(t *testing.T) {
 	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
 	transport := &captureTransport{}
 	rec.miteTransport = transport
@@ -179,13 +215,13 @@ func TestCellItemsApplyFailureKeepsOtherTenantsWarning(t *testing.T) {
 		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
 	}}
 
-	// The engine stops at the first refused item. A new failure that names
-	// search must not clear the payments entry.
+	// The walk covers every tenant. A result that refuses only a search item
+	// replaces the whole set, so the payments entry clears.
 	transport.drainResults = []*mitev1.CommandResult{mkItemsFailureDSR("search/repos")}
 	_ = rec.reconcileController(context.Background(), cr)
 
-	if n := itemsFailureCount(cr, "payments"); n != 1 {
-		t.Fatalf("payments warnings = %d, want 1 (%+v)", n, cr.Status.Cell.TenantWarnings)
+	if n := itemsFailureCount(cr, "payments"); n != 0 {
+		t.Fatalf("payments warnings = %d, want 0 once its items apply (%+v)", n, cr.Status.Cell.TenantWarnings)
 	}
 	if n := itemsFailureCount(cr, "search"); n != 1 {
 		t.Fatalf("search warnings = %d, want 1 (%+v)", n, cr.Status.Cell.TenantWarnings)

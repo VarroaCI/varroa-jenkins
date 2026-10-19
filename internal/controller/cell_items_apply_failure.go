@@ -1,24 +1,39 @@
 package controller
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // itemsApplyFailureWarnings answers the ItemsApplyFailed entries for one
-// desired-state result. A successful items section answers none. A failure
-// whose path no tenant of the cell owns answers none.
+// desired-state result. The mite sets ItemFailures only when its items apply
+// walked every item, so the list covers every tenant of the cell. Each tenant
+// gets one warning that names only its own refused items. A failure whose path
+// no tenant of the cell owns answers no entry.
 func itemsApplyFailureWarnings(cell *v1alpha1.CellStatus, d *mitev1.DesiredStateResult) []v1alpha1.TenantWarning {
-	if cell == nil || d == nil || d.ItemsSuccess || d.ItemsFailedPath == "" {
+	if cell == nil || d == nil || d.ItemsSuccess || len(d.ItemFailures) == 0 {
 		return nil
 	}
-	byTenant := partitionJobPathsByTenant([]string{d.ItemsFailedPath}, cell.Tenants)
+	errorsByTenant := make(map[string][]string)
+	for _, f := range d.ItemFailures {
+		for tenant := range partitionJobPathsByTenant([]string{f.Path}, cell.Tenants) {
+			errorsByTenant[tenant] = append(errorsByTenant[tenant], f.Error)
+		}
+	}
+	tenants := make([]string, 0, len(errorsByTenant))
+	for tenant := range errorsByTenant {
+		tenants = append(tenants, tenant)
+	}
+	sort.Strings(tenants)
 	var out []v1alpha1.TenantWarning
-	for tenant := range byTenant {
+	for _, tenant := range tenants {
 		out = append(out, v1alpha1.TenantWarning{
 			Tenant:  tenant,
 			Reason:  v1alpha1.TeamReasonItemsApplyFailed,
-			Message: truncate(d.ItemsError, 1024),
+			Message: truncate(strings.Join(errorsByTenant[tenant], "; "), 1024),
 		})
 	}
 	return out
@@ -26,10 +41,10 @@ func itemsApplyFailureWarnings(cell *v1alpha1.CellStatus, d *mitev1.DesiredState
 
 // itemsApplyFailedAfter returns the TenantWarnings list after one
 // desired-state result. A successful items section clears every
-// ItemsApplyFailed entry. A failure that names a tenant-owned item replaces
-// only that tenant's entry, because the engine stops at the first failure
-// and never reached the other tenants. Any other result keeps the list
-// unchanged.
+// ItemsApplyFailed entry. A result with refused items replaces every
+// ItemsApplyFailed entry with the fresh per-tenant set, because the walk
+// covered every tenant. The fresh set also clears a tenant whose items now
+// apply. Any other result keeps the list unchanged.
 func itemsApplyFailedAfter(existing []v1alpha1.TenantWarning, cell *v1alpha1.CellStatus, d *mitev1.DesiredStateResult) []v1alpha1.TenantWarning {
 	if d == nil {
 		return existing
@@ -37,17 +52,8 @@ func itemsApplyFailedAfter(existing []v1alpha1.TenantWarning, cell *v1alpha1.Cel
 	if d.ItemsSuccess {
 		return replaceTenantWarnings(existing, v1alpha1.TeamReasonItemsApplyFailed, nil)
 	}
-	fresh := itemsApplyFailureWarnings(cell, d)
-	if len(fresh) == 0 {
+	if len(d.ItemFailures) == 0 {
 		return existing
 	}
-	tenant := fresh[0].Tenant
-	kept := make([]v1alpha1.TenantWarning, 0, len(existing)+len(fresh))
-	for _, w := range existing {
-		if w.Reason == v1alpha1.TeamReasonItemsApplyFailed && w.Tenant == tenant {
-			continue
-		}
-		kept = append(kept, w)
-	}
-	return append(kept, fresh...)
+	return replaceTenantWarnings(existing, v1alpha1.TeamReasonItemsApplyFailed, itemsApplyFailureWarnings(cell, d))
 }

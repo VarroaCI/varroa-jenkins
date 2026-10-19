@@ -30,6 +30,18 @@ type ApplyResult struct {
 	DeferredDeletions []DeferredDeletion
 	Written           int
 	Skipped           int
+	// Failed lists each item that Jenkins refused. The walk continues past
+	// a refused item, so one apply can report several failures.
+	Failed []*ItemError
+}
+
+// FailureText joins the refusals of Failed into one message, separated by "; ".
+func (r *ApplyResult) FailureText() string {
+	parts := make([]string, 0, len(r.Failed))
+	for _, f := range r.Failed {
+		parts = append(parts, f.Error())
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Engine manages Jenkins items based on items.yaml declarations.
@@ -119,16 +131,35 @@ func (e *ItemError) Unwrap() error { return e.Err }
 // All strategies (NONE, SYNC, REMOVE_SUPPORTED, REMOVE_ALL) use create/update
 // in place for declared items and remove only mite-managed items no longer
 // declared. Declared items are NEVER delete-recreated.
+//
+// A refused item (generate, create, or update) does not stop the walk. It is
+// recorded in res.Failed, and it keeps its previous managed hash, so the remove
+// step does not delete a live item. The descendants of a refused generate or
+// create are skipped and keep their previous hash too, because the parent
+// refusal covers them. A failed check of existence and a cancelled context abort the walk with
+// an error, and nothing is saved.
 func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strategy string) (*ApplyResult, error) {
 	prev := e.loadManaged()
 	next := make(map[string]string)
 	res := &ApplyResult{}
 	flattened := manifest.Flatten()
+	var failedCreates []string
 
 	for _, ip := range flattened {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if underFailedCreate(ip.Path, failedCreates) {
+			keepPrevious(next, prev, ip.Path)
+			continue
+		}
+
 		configXML, err := GenerateConfigXML(ip.Item)
 		if err != nil {
-			return nil, &ItemError{Op: ItemOpGenerate, Path: ip.Path, Err: err}
+			res.Failed = append(res.Failed, &ItemError{Op: ItemOpGenerate, Path: ip.Path, Err: err})
+			failedCreates = append(failedCreates, ip.Path)
+			keepPrevious(next, prev, ip.Path)
+			continue
 		}
 		h := hashConfig(configXML)
 
@@ -141,12 +172,17 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 			res.Skipped++
 		} else if exists {
 			if err := e.client.UpdateItemConfig(ctx, ip.Path, configXML); err != nil {
-				return nil, &ItemError{Op: ItemOpUpdate, Path: ip.Path, Err: err}
+				res.Failed = append(res.Failed, &ItemError{Op: ItemOpUpdate, Path: ip.Path, Err: err})
+				keepPrevious(next, prev, ip.Path)
+				continue
 			}
 			res.Written++
 		} else {
 			if err := e.client.CreateItem(ctx, ip.Path, ip.Item.JenkinsClass(), configXML); err != nil {
-				return nil, &ItemError{Op: ItemOpCreate, Path: ip.Path, Err: err}
+				res.Failed = append(res.Failed, &ItemError{Op: ItemOpCreate, Path: ip.Path, Err: err})
+				failedCreates = append(failedCreates, ip.Path)
+				keepPrevious(next, prev, ip.Path)
+				continue
 			}
 			res.Written++
 		}
@@ -175,6 +211,24 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 
 	e.saveManaged(next)
 	return res, nil
+}
+
+// underFailedCreate reports whether path is a refused create or lies below one.
+func underFailedCreate(path string, failedCreates []string) bool {
+	for _, fc := range failedCreates {
+		if path == fc || strings.HasPrefix(path, fc+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// keepPrevious copies the previous managed hash of path into next, when one
+// exists. The remove step then keeps an item that the apply did not write.
+func keepPrevious(next, prev map[string]string, path string) {
+	if h, ok := prev[path]; ok {
+		next[path] = h
+	}
 }
 
 // removeUndeclared deletes managed items not in the current manifest.

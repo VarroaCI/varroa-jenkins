@@ -403,7 +403,7 @@ type DesiredStateResult struct {
 	RehydrationError          string                      `json:"rehydration_error,omitempty"`
 	RehydrationDeferredJobs   []string                    `json:"rehydration_deferred_jobs,omitempty"`
 	RehydrationReloadFailures []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
-	ItemsFailedPath           string                      `json:"items_failed_path,omitempty"`
+	ItemFailures              []*ItemFailure              `json:"item_failures,omitempty"`
 }
 
 type EventAck struct {
@@ -458,6 +458,12 @@ type InstalledPlugin struct {
 	Detached string       `json:"detached,omitempty"`
 	Bundled  string       `json:"bundled,omitempty"`
 	Deps     []*PluginDep `json:"deps,omitempty"`
+}
+
+// ItemFailure is one item that Jenkins refused during the items apply.
+type ItemFailure struct {
+	Path  string `json:"path,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type JenkinsActivityEvent struct {
