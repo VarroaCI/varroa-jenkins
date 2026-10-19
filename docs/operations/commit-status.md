@@ -145,10 +145,11 @@ These builds keep their `pending` status:
 - A provisional end: `heartbeat-lost` and `start-lost`. The build can still finish. The build's own
   completion then writes its status.
 - A build with no recorded commit or no recorded repository.
-- A pull-request merge build. The forge reports the status on the pull-request head, and the
-  recorder does not record that commit. The operator finds no matching status and writes nothing.
 - A tenant whose only credential is a `githubApp` credential. The operator does not end a status
   with a GitHub App credential.
+
+For a pull-request build, the recorder keeps the head commit of the pull request. The forge reports
+the status on that commit.
 
 A failed write leaves the status `pending`. The operator logs the failure and does not retry.
 
