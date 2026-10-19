@@ -862,7 +862,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Forge check and read run on every replica; only the Team's shard owner replies.
+	// Forge check, read, issue, and pullrequest run on every replica; only the Team's shard owner replies.
 	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	enterTeam := func(ctx context.Context, key string) (context.Context, func(), bool) {
 		return shardSet.Enter(ctx, ring.ShardFor(key))
@@ -879,6 +879,10 @@ func main() {
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbIssue, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
 				return handleForgeIssue(ctx, logger, forgeAnswerer, enterTeam, operatorNamespace, d)
+			}},
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbPullRequest, limit: forgePullRequestConcurrency, logger: logger,
+			handle: func(ctx context.Context, d []byte) []byte {
+				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTeam, d)
 			}},
 	} {
 		if err := mgr.Add(r); err != nil {

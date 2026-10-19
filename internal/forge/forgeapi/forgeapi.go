@@ -25,6 +25,10 @@ const MaxRead = 262144
 // RequestTimeout bounds one check or read request on the requester side.
 const RequestTimeout = 30 * time.Second
 
+// PullRequestTimeout bounds one pull-request request on the requester side. A
+// pull request takes many forge calls.
+const PullRequestTimeout = 90 * time.Second
+
 // Reply codes. A reply with OK false sets exactly one of these.
 const (
 	CodeRepoURLInvalid       = "repo_url_invalid"
@@ -35,9 +39,12 @@ const (
 	CodeForgeUnreachable     = "forge_unreachable"
 	CodeJenkinsfileExists    = "jenkinsfile_exists"
 	CodeProposalBranchExists = "proposal_branch_exists"
-	CodeInvalidRequest       = "invalid_request"
-	CodeNotFound             = "not_found"
-	CodeInternal             = "internal"
+	// CodeProposalBaseMoved refuses a pull request whose base branch no
+	// longer holds the commit that the check read.
+	CodeProposalBaseMoved = "proposal_base_moved"
+	CodeInvalidRequest    = "invalid_request"
+	CodeNotFound          = "not_found"
+	CodeInternal          = "internal"
 )
 
 // Status is the envelope of every forge reply.
@@ -85,6 +92,8 @@ type CheckReply struct {
 	Forge        string `json:"forge,omitempty"`
 	BaseBranch   string `json:"baseBranch,omitempty"`
 	CredentialID string `json:"credentialId,omitempty"`
+	// Revision is the commit of the base branch that the check read.
+	Revision string `json:"revision,omitempty"`
 }
 
 // ReadRequest asks for a directory listing or a file of a repository.
@@ -144,6 +153,9 @@ type PullRequestRequest struct {
 	Body          string `json:"body"`
 	Files         []File `json:"files"`
 	CommitMessage string `json:"commitMessage"`
+	// BaseRevision, when set, is the base commit that the check read. The
+	// pull request refuses when the base branch has moved past it.
+	BaseRevision string `json:"baseRevision,omitempty"`
 }
 
 // PullRequestReply answers a pull-request request.

@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTeam, getTeamCell, listFleetLocks, listPipelines, listRunners, teamRunStreamUrl } from "../../api/client";
 import type { TeamEntry } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { canAccessTenantPipeline, usePermissions } from "../../hooks/usePermissions";
+import { useAssistant } from "../../components/assistant/AssistantProvider";
 import { useDocumentTitle } from "../../hooks/useDocumentTitle";
 import { useEventStream } from "../../hooks/useEventStream";
 import {
@@ -21,6 +23,7 @@ import JobTree, { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
 import TeamAgentCard from "./TeamAgentCard";
+import ProposePipelineCard from "./ProposePipelineCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
 import { teamTitle } from "./pageTitles";
 import styles from "./TeamHome.module.css";
@@ -304,6 +307,13 @@ export default function TeamHome() {
   }, [searchParams, tree]);
 
   const rows = useMemo(() => visibleRows(tree, openPaths), [tree, openPaths]);
+  const assistant = useAssistant();
+  const perms = usePermissions(assistant.available);
+  // The proposal card shows on a placed pipelines tenant with no job, to a
+  // writer, when the assistant is available.
+  const showPropose =
+    rows.length === 0 && data?.tenantFolder === team && assistant.available &&
+    canAccessTenantPipeline(perms.data, team!, "write", "");
 
   const lockItems = useMemo(() => locksQuery.data?.items ?? [], [locksQuery.data]);
 
@@ -444,7 +454,7 @@ export default function TeamHome() {
       <div className={styles.sectionTitle}>Pipelines</div>
       {rows.length === 0 ? (
         <div className={styles.empty}>
-          <div>No pipelines yet.</div>
+          {showPropose ? <ProposePipelineCard team={team!} /> : <div>No pipelines yet.</div>}
           <div className={styles.emptyNote}>This list shows only the jobs your access covers.</div>
         </div>
       ) : (

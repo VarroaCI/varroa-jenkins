@@ -22,6 +22,7 @@ var expectedToolKinds = map[string]toolKind{
 	"read_repo_file":       kindRead,
 	"post_note":            kindCreate,
 	"open_issue":           kindCreate,
+	"open_pull_request":    kindCreate,
 	"send_webhook":         kindAction,
 	"get_controller_logs":  kindRead,
 	"create_controller":    kindCreate,

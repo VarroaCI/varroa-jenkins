@@ -1,0 +1,87 @@
+/* The proposal card uses only the tokens of styles/tokens.css. */
+.line {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 280px;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.reasonForm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.facts dt {
+  color: var(--text-2);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.path {
+  margin: 8px 0 4px;
+  font-size: 13px;
+}
+
+.body,
+.file {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  color: var(--code-text);
+  color-scheme: dark;
+  padding: 6px;
+  border-radius: 4px;
+  margin: 0;
+  font-size: 12px;
+  max-height: 480px;
+  overflow: auto;
+}
+
+.muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.error {
+  margin: 0;
+  color: var(--bad-text);
+}

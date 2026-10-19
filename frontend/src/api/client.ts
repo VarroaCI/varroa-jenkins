@@ -94,6 +94,7 @@ import type {
   FleetLockReleaseRequest,
   FleetLockReleaseResponse,
   PipelineTeamList,
+  ProposePipelineResponse,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
 import type {
@@ -1491,13 +1492,24 @@ export function createAssistantSession(body: AssistantSessionCreate): Promise<As
   return bffFetch<AssistantSession>("/assistant/sessions", { method: "POST", body: JSON.stringify(body) });
 }
 
-export function listAssistantSessions(params: { cursor?: string; limit?: number; prompt?: string } = {}): Promise<AssistantSessionList> {
+export function listAssistantSessions(
+  params: { cursor?: string; limit?: number; prompt?: string; team?: string } = {},
+): Promise<AssistantSessionList> {
   const q = new URLSearchParams();
   if (params.cursor) q.set("cursor", params.cursor);
   if (params.limit) q.set("limit", String(params.limit));
   if (params.prompt) q.set("prompt", params.prompt);
+  if (params.team) q.set("team", params.team);
   const qs = q.toString();
   return bffFetch<AssistantSessionList>(`/assistant/sessions${qs ? `?${qs}` : ""}`);
+}
+
+/** Starts a session that proposes a first Jenkinsfile for a repository of a team. */
+export function proposePipeline(team: string, repo: string): Promise<ProposePipelineResponse> {
+  return bffFetch<ProposePipelineResponse>(`${pipelinesBase(team)}/propose`, {
+    method: "POST",
+    body: JSON.stringify({ repo }),
+  });
 }
 
 /** Reads the accepted Team agent of a pipelines tenant. 404 when none is accepted. */

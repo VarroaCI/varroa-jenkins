@@ -100,6 +100,8 @@ session key is kept for this login only. It is not stored in the browser.
 
 Agent rows appear in the activity feed under the Agents filter.
 
+The team home card starts a proposal. See [Propose a pipeline](../tutorials/propose-a-pipeline.md).
+
 ## Data levels
 
 Each session has one data level. The level is the lowest of three limits:

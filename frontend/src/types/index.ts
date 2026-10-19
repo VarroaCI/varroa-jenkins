@@ -2850,3 +2850,32 @@ export interface CellGrants {
 }
 
 export * from "./assistant";
+
+/** The codes that a refused pipeline proposal carries. */
+export type ProposePipelineErrorCode =
+  | "assistant_disabled"
+  | "assistant_off"
+  | "assistant_busy"
+  | "kill_switch"
+  | "repo_url_invalid"
+  | "data_sharing_too_low"
+  | "no_matching_credential"
+  | "forge_unsupported"
+  | "forge_auth_failed"
+  | "forge_write_denied"
+  | "forge_unreachable"
+  | "jenkinsfile_exists"
+  | "proposal_branch_exists"
+  | "not_found"
+  | "invalid_request"
+  | "internal";
+
+/** A started pipeline proposal. */
+export interface ProposePipelineResponse {
+  sessionId: string;
+  state: import("./assistant").AssistantSessionState;
+  repo: string;
+  forge: "github" | "gitea";
+  baseBranch: string;
+  credentialId: string;
+}

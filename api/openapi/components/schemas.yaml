@@ -7073,6 +7073,48 @@ AssistantError:
       enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch]
   additionalProperties: false
 
+ProposePipelineRequest:
+  type: object
+  required: [repo]
+  description: The repository to propose a first Jenkinsfile for.
+  properties:
+    repo:
+      type: string
+      maxLength: 2048
+  additionalProperties: false
+
+ProposePipelineResponse:
+  type: object
+  required: [sessionId, state, repo, forge, baseBranch, credentialId]
+  description: The session that the proposal started, and the forge facts of the check.
+  properties:
+    sessionId:
+      type: string
+    state:
+      type: string
+    repo:
+      type: string
+    forge:
+      type: string
+      enum: [github, gitea]
+    baseBranch:
+      type: string
+    credentialId:
+      type: string
+  additionalProperties: false
+
+ProposePipelineError:
+  type: object
+  required: [error, code]
+  description: A refusal of a proposal. The code names the cause, and error gives the text.
+  properties:
+    error:
+      type: string
+    code:
+      type: string
+      enum: [assistant_disabled, assistant_off, assistant_busy, kill_switch, repo_url_invalid, data_sharing_too_low, no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied, forge_unreachable, jenkinsfile_exists, proposal_branch_exists, not_found, invalid_request, internal]
+  additionalProperties: false
+
 AssistantSessionContext:
   type: object
   description: The client context of a session. Each key names one object the session is about.

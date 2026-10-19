@@ -476,7 +476,7 @@ reading each package's entry point):
   constants, the BFF/operator wake interstitial renderer, and the operator's
   informer-backed `wakeserver` HTTP handler.
 - **`forge/`** — operator-only client for a repository forge (GitHub REST and Gitea API). Stdlib only. `NewHTTPClient` refuses non-global addresses and redirects. `Token` never renders its value. `forge/forgeapi/` holds the stdlib wire types of the operator forge verbs.
-- **`forgeurl/`** — leaf rules for the forge path: repository URL normalization, branch names, revisions, file paths, file sets, titles, and bodies. Stdlib only.
+- **`forgeurl/`** — leaf rules for the forge path: repository URL normalization, branch names, revisions, file paths, file sets, titles, bodies, relayed bodies, and commit messages. Stdlib only.
 - **`secretredact/`** — replaces secret values in JCasC (`JCasC`) and items
   (`Items`) YAML with `<redacted>`. A key that contains `password`, `secret`,
   `passphrase`, `privatekey`, or `token`, and does not end in `id`, marks a
@@ -510,5 +510,5 @@ go test -race -count=1 ./internal/<pkg>/...        # single package
 - [bus](bus/AGENTS.md) — NATS/JetStream transport: subjects, streams, KV buckets, cluster directory, subscription-denial watchers, the self-healing request responder and listener, the `bustest` deny server
 - [agent](agent/AGENTS.md) — assistant and team-agent core: session, event, approval, and settings types; the tool policy, data-sharing, budget, and prompt packages; the session store (`store/`); the model-provider contract and adapters (`provider/`); the sandbox contract (`sandbox/v1`).
 - [teamagent](teamagent/AGENTS.md) — Team agent core: `accept/` (the one rule that maps a `TeamAgent` to its principal), `token/` (the HS256 session credential, redacted), `instructions/` (the standing-instruction read through the forge relay), and the runner's `cache/` (TeamAgent objects from informers), `config/`, `store/` (record-store queries), `triggers/` (the audit-feed path), and `sessions/` (the session runtime).
-- `forgerelay/` — bus framing of the forge `read` and `issue` requests. It has no child doc. Requesters call it and the operator shard answers.
+- `forgerelay/` — bus framing of the forge `check`, `read`, `pullrequest`, and `issue` requests. It has no child doc. Requesters call it and the operator shard answers. `forgeops` answers `pullrequest` one at a time per replica.
 - [recordstore](recordstore/AGENTS.md) — build-record Postgres store: schema, migrations, ledger, the placement fence, the cross-tenant grant evaluator and responder, the upstream fan-out, the fleet lock table, the tenant-sync responder, the backstop scheduler, blob abstraction; the `runs` row carries the `source`, `summary`, `inputs`, and `replay_of` columns

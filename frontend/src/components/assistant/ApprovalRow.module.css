@@ -49,3 +49,18 @@
 .error {
   margin: 0;
 }
+
+/* A file of a proposal, shown in full as plain text. */
+.file {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code-bg);
+  color: var(--code-text);
+  color-scheme: dark;
+  padding: 6px;
+  border-radius: 4px;
+  margin: 0;
+  font-size: 12px;
+  max-height: 480px;
+  overflow: auto;
+}

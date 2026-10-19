@@ -360,6 +360,8 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1markers~1validate'
   /api/v1/pipelines/{team}/cell:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1cell'
+  /api/v1/pipelines/{team}/propose:
+    $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1propose'
   /api/v1/pipelines/{team}/stream:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1stream'
   /api/v1/pipelines/{team}/agent:

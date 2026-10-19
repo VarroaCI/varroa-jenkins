@@ -259,3 +259,33 @@ func ValidateBody(b string) error {
 	}
 	return nil
 }
+
+// MaxRelayBodyBytes bounds a pull-request body after the BFF appends its fixed line.
+const MaxRelayBodyBytes = MaxBodyBytes + 1024
+
+// MaxCommitMessageBytes bounds a commit message: the title and one trailer.
+const MaxCommitMessageBytes = 1024
+
+// ValidateRelayBody accepts a relayed body of at most MaxRelayBodyBytes.
+func ValidateRelayBody(b string) error {
+	if len(b) > MaxRelayBodyBytes {
+		return refuse("body", "body exceeds 9 KiB")
+	}
+	return nil
+}
+
+// ValidateCommitMessage accepts a non-empty UTF-8 message without NUL of at
+// most MaxCommitMessageBytes.
+func ValidateCommitMessage(m string) error {
+	switch {
+	case m == "":
+		return refuse("commitMessage", "message is required")
+	case !utf8.ValidString(m):
+		return refuse("commitMessage", "message must be valid UTF-8")
+	case strings.IndexByte(m, 0) >= 0:
+		return refuse("commitMessage", "message must not hold NUL")
+	case len(m) > MaxCommitMessageBytes:
+		return refuse("commitMessage", "message exceeds 1 KiB")
+	}
+	return nil
+}

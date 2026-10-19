@@ -133,6 +133,23 @@ read grant on the run's own tenant and job path. Answering a run input checks
 the write grant on the run's own tenant and job path. A caller who may not
 read a run gets a not-found error, not a forbidden error.
 
+## Open a pull request
+
+`open_pull_request` creates one pull request from a new branch. It
+always needs approval.
+
+| Argument | Rule |
+|---|---|
+| `team` | A pipelines team that the caller may write. |
+| `repo` | An `https` repository URL. In a session, the session repository. |
+| `branch` | A new branch name, at most 200 characters. |
+| `title` | One line, 1 to 200 characters. Also the commit message. |
+| `body` | At most 8192 bytes. The BFF appends a line that names the actor. |
+| `files` | 1 to 10 files with `path` and `content`. At most 64 KiB each, 256 KiB in total. |
+
+A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. A success logs a
+`pipeline.proposal.opened` event.
+
 ## Account for redaction
 
 MCP and REST results omit credentials and noisy Kubernetes metadata. Removed

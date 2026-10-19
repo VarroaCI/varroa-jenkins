@@ -27,6 +27,10 @@ type teamAgentFakes struct {
 	readReqs   []forgeapi.ReadRequest
 	issueReply forgeapi.IssueReply
 	issueReqs  []forgeapi.IssueRequest
+	checkReply forgeapi.CheckReply
+	checkReqs  []forgeapi.CheckRequest
+	prReply    forgeapi.PullRequestReply
+	prReqs     []forgeapi.PullRequestRequest
 	notes      []recordstore.RunNotePostRequest
 	hooks      []recordstore.TeamAgentWebhookRequest
 	hookReply  recordstore.TeamAgentWebhookResponse
@@ -59,6 +63,16 @@ func (f *teamAgentFakes) Issue(_ context.Context, _ string, req forgeapi.IssueRe
 	return f.issueReply, nil
 }
 
+func (f *teamAgentFakes) Check(_ context.Context, _ string, req forgeapi.CheckRequest) (forgeapi.CheckReply, error) {
+	f.checkReqs = append(f.checkReqs, req)
+	return f.checkReply, nil
+}
+
+func (f *teamAgentFakes) PullRequest(_ context.Context, _ string, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error) {
+	f.prReqs = append(f.prReqs, req)
+	return f.prReply, nil
+}
+
 func (f *teamAgentFakes) PostRunNote(_ context.Context, req recordstore.RunNotePostRequest) (recordstore.RunNotePostResponse, error) {
 	f.notes = append(f.notes, req)
 	return recordstore.RunNotePostResponse{Created: true, Note: &recordstore.RunNote{}}, nil
@@ -76,6 +90,8 @@ func newTeamAgentFakes() *teamAgentFakes {
 	f := &teamAgentFakes{
 		readReply:  forgeapi.ReadReply{Status: forgeapi.Status{OK: true}, Revision: "rev-1", Path: "x.md"},
 		issueReply: forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 7, URL: "https://git.example.org/x/y/issues/7"},
+		checkReply: forgeapi.CheckReply{Status: forgeapi.Status{OK: true}, Forge: "gitea", BaseBranch: "main", CredentialID: "forge-cred"},
+		prReply:    forgeapi.PullRequestReply{Status: forgeapi.Status{OK: true}, Number: 3, URL: "https://git.example.org/x/y/pulls/3"},
 		hookReply:  recordstore.TeamAgentWebhookResponse{OK: true, DeliveryID: "delivery-1"},
 	}
 	f.ta.Name = "triage"

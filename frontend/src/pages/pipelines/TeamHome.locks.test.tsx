@@ -13,6 +13,7 @@ const mockGetTeamCell = vi.fn();
 const mockListFleetLocks = vi.fn();
 const mockGetTeam = vi.fn();
 vi.mock("../../api/client", () => ({
+  getMyPermissions: async () => ({ global: {}, scopes: [], tenants: [] }),
   listPipelines: (...args: unknown[]) => mockListPipelines(...args),
   getTeam: (...args: unknown[]) => mockGetTeam(...args),
   listRunners: (...args: unknown[]) => mockListRunners(...args),

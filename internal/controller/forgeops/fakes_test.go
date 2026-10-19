@@ -75,6 +75,19 @@ type fakeClient struct {
 	// bySHA holds the files of each commit. When set, Read answers from the
 	// commit named in the call instead of files.
 	bySHA map[string]map[string]forge.Entry
+	// Write fakes. calls records each write in order. putErr fails the
+	// PutFile call numbered putErrAt (1-based; 0 fails none).
+	calls     []string
+	createErr error
+	putErr    error
+	putErrAt  int
+	puts      int
+	prErr     error
+	deleteErr error
+	pr        forge.PullRequest
+	// prBodies and prTitles record the arguments of OpenPullRequest.
+	prBodies []string
+	putMsgs  []string
 }
 
 func (f *fakeClient) Repository(context.Context, forge.Repo) (forge.Info, error) {
@@ -121,14 +134,34 @@ func (f *fakeClient) Read(_ context.Context, _ forge.Repo, sha, p string, limit 
 	return e, nil
 }
 
-func (f *fakeClient) CreateBranch(context.Context, forge.Repo, string, string) error { return nil }
-func (f *fakeClient) PutFile(context.Context, forge.Repo, string, string, []byte, string) error {
+func (f *fakeClient) CreateBranch(_ context.Context, _ forge.Repo, branch, from string) error {
+	f.calls = append(f.calls, "create:"+branch+"@"+from)
+	return f.createErr
+}
+
+func (f *fakeClient) PutFile(_ context.Context, _ forge.Repo, _ string, path string, _ []byte, msg string) error {
+	f.puts++
+	f.calls = append(f.calls, "put:"+path)
+	f.putMsgs = append(f.putMsgs, msg)
+	if f.putErr != nil && f.puts == f.putErrAt {
+		return f.putErr
+	}
 	return nil
 }
-func (f *fakeClient) OpenPullRequest(context.Context, forge.Repo, string, string, string, string) (forge.PullRequest, error) {
-	return forge.PullRequest{}, nil
+
+func (f *fakeClient) OpenPullRequest(_ context.Context, _ forge.Repo, base, head, _, body string) (forge.PullRequest, error) {
+	f.calls = append(f.calls, "pr:"+base+"<-"+head)
+	f.prBodies = append(f.prBodies, body)
+	if f.prErr != nil {
+		return forge.PullRequest{}, f.prErr
+	}
+	return f.pr, nil
 }
-func (f *fakeClient) DeleteBranch(context.Context, forge.Repo, string) error { return nil }
+
+func (f *fakeClient) DeleteBranch(_ context.Context, _ forge.Repo, branch string) error {
+	f.calls = append(f.calls, "delete:"+branch)
+	return f.deleteErr
+}
 
 // CreateIssue answers the canned issue, or issueErr, and records the labels.
 func (f *fakeClient) CreateIssue(_ context.Context, _ forge.Repo, _, _ string, labels []string) (forge.Issue, error) {
@@ -200,6 +233,19 @@ func pushable() *fakeClient {
 }
 
 const testSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// prReq returns a valid pull-request request for the tests.
+func prReq() forgeapi.PullRequestRequest {
+	return forgeapi.PullRequestRequest{
+		Team:          "payments",
+		Repo:          testRepoURL,
+		Branch:        forgeapi.ProposalBranch,
+		Title:         "Add a Jenkinsfile proposed by Varroa",
+		Body:          "why",
+		Files:         []forgeapi.File{{Path: "Jenkinsfile", Content: "pipeline {}"}},
+		CommitMessage: "Add a Jenkinsfile proposed by Varroa",
+	}
+}
 
 // checkReq and readReq build the requests of the tests.
 func checkReq() forgeapi.CheckRequest {

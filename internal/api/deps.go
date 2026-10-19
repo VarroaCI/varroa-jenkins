@@ -125,9 +125,9 @@ type Dependencies struct {
 	// TeamAgents is the cached view of the TeamAgent, Team, and CatalogSource
 	// objects. Nil turns the Team agent tools off.
 	TeamAgents TeamAgentSource
-	// ForgeRelay sends forge reads and issues to the core operator. Nil turns
-	// the forge-backed tools off.
-	ForgeRelay TeamAgentForge
+	// ForgeRelay sends forge checks, reads, pull requests, and issues to the
+	// operator of a cluster. Nil turns the forge-backed routes and tools off.
+	ForgeRelay ForgeRelay
 	// WebhookEnqueuer queues a signed tenant webhook through the recorder.
 	WebhookEnqueuer WebhookEnqueuer
 	// CoreCluster names the core cluster, which answers every forge request.

@@ -56,6 +56,7 @@ export interface AssistantSessionContext {
   cell?: string;
   prompt?: string;
   message?: string;
+  repo?: string;
 }
 
 /** One assistant session. */
@@ -100,7 +101,8 @@ export interface AssistantApproval {
   resolvedBy: string | null;
   resolvedAt: string | null;
   reason: string | null;
-  result: { content: string; isError: boolean } | null;
+  /** The tool result text. Null until the approval runs. */
+  result: string | null;
 }
 
 export interface AssistantApprovalList {

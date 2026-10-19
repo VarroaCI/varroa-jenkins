@@ -10,7 +10,6 @@ import { Button } from "../Button";
 import { useAssistant } from "./AssistantProvider";
 import { approveBlockReason, canDeny, type ApprovalRun } from "./approvalHint";
 import type { ApprovalView } from "./transcript";
-import { Markdown } from "./Markdown";
 import styles from "./ApprovalRow.module.css";
 
 export interface ApprovalRowProps {
@@ -79,7 +78,7 @@ export function ApprovalRow({ approval: a, viewer, principal, run, onResolved }:
         return args.files.map((f) => (
           <div key={f.path}>
             <h4 className={styles.path}>{f.path}</h4>
-            <Markdown text={"```\n" + f.content + "\n```"} />
+            <pre className={styles.file}>{f.content}</pre>
           </div>
         ));
       })()}

@@ -18,15 +18,24 @@ import (
 // returns its own reply first.
 const forgeRequestTimeout = 25 * time.Second
 
+// forgePullRequestTimeout bounds one pull-request request on the operator.
+// It stays under the requester's forgeapi.PullRequestTimeout.
+const forgePullRequestTimeout = 80 * time.Second
+
 // forgeConcurrency limits the forge requests that one replica runs at a
 // time on one verb subject.
 const forgeConcurrency = 4
+
+// forgePullRequestConcurrency runs one pull request at a time on each
+// replica, so two calls for one Team never race on one branch.
+const forgePullRequestConcurrency = 1
 
 // forgeOps is the slice of *forgeops.Ops that the forge handlers call.
 type forgeOps interface {
 	Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.CheckReply
 	Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadReply
 	Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply
+	PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply
 }
 
 // shardEnterer registers work on a held ring shard. It returns false when the
@@ -87,6 +96,24 @@ func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
 	defer cancel()
 	return encodeForgeReply(ops.Issue(rctx, req, releaseNamespace))
+}
+
+// handleForgePullRequest answers one operator.<cluster>.forge.pullrequest
+// request. The ownership rule is the same as handleForgeCheck.
+func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
+	var req forgeapi.PullRequestRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("forge pullrequest decode failed", "error", err)
+		return encodeForgeReply(forgeapi.PullRequestReply{Status: invalidForgeStatus()})
+	}
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	if !ok {
+		return nil
+	}
+	defer leave()
+	rctx, cancel := context.WithTimeout(wctx, forgePullRequestTimeout)
+	defer cancel()
+	return encodeForgeReply(ops.PullRequest(rctx, req))
 }
 
 // invalidForgeStatus is the reply to a request that does not decode.

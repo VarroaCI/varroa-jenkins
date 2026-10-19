@@ -35,6 +35,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Operate a run](tutorials/run-operations.md)
 - [Move a Jenkinsfile onto a cell](tutorials/move-to-a-cell.md)
 - [Work with multibranch jobs](tutorials/multibranch.md)
+- [Propose a pipeline from a repository](tutorials/propose-a-pipeline.md)
 
 ## Configuration
 
