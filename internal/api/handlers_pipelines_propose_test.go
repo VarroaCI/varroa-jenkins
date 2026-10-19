@@ -381,3 +381,11 @@ func TestProposePipeline_SkippedSessionAnswers201(t *testing.T) {
 		t.Fatalf("state = %s, want skipped", body.State)
 	}
 }
+
+// TestForgeCodeStatus_RequestExpired checks that an expired pull request
+// maps to a gateway timeout.
+func TestForgeCodeStatus_RequestExpired(t *testing.T) {
+	if got := forgeCodeStatus(forgeapi.CodeRequestExpired); got != http.StatusGatewayTimeout {
+		t.Fatalf("status %d, want %d", got, http.StatusGatewayTimeout)
+	}
+}

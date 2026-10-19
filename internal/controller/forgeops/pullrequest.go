@@ -11,9 +11,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forgeurl"
 )
 
-// cleanupTimeout bounds the branch delete after a failed write. It runs on
+// CleanupTimeout bounds the branch delete after a failed write. It runs on
 // a fresh context, so a spent request deadline does not skip the delete.
-const cleanupTimeout = 15 * time.Second
+const CleanupTimeout = 15 * time.Second
 
 // PullRequest opens one pull request: a new branch from the base head, one
 // commit per file, and the pull request. A failure after the branch exists
@@ -96,7 +96,7 @@ func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) 
 
 // cleanup deletes the branch once and returns the reply for the first error.
 func (o *Ops) cleanup(ctx context.Context, w writer, fr forge.Repo, branch string, first error) forgeapi.PullRequestReply {
-	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), CleanupTimeout)
 	defer cancel()
 	st := asStatus(first)
 	if err := w.Client.DeleteBranch(dctx, fr, branch); err != nil {

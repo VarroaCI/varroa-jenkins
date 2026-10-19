@@ -45,6 +45,7 @@ Merge the pull request on the forge. See
 | `forge_unreachable` | 502 | Add the forge to `gitEgress`. |
 | `jenkinsfile_exists` | 409 | Add the repository as a job. |
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |
+| `request_expired` | 504 | Approve the call again. |
 | `assistant_busy` | 429 | Wait for a session to end. |
 | `kill_switch` | 503 | Wait for the assistant to resume. |
 | `invalid_request` | 400 | Send a body with a `repo` field only. |
