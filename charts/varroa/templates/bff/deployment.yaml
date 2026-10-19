@@ -145,6 +145,10 @@ spec:
                   name: varroa-updatecenter-import-token
                   key: token
 {{- end }}
+{{- if .Values.assistant.enabled }}
+            - name: VARROA_ASSISTANT_CONFIG
+              value: {{ include "varroa.assistant.config" . | quote }}
+{{- end }}
 {{- if .Values.recordStore.enabled }}
             - name: VARROA_ACTIVITY_RETENTION_DAYS
               value: {{ trimSuffix "d" .Values.recordStore.retention.activity | quote }}
@@ -185,6 +189,15 @@ spec:
             - name: nats-creds
               mountPath: /etc/nats-creds
               readOnly: true
+{{- if .Values.assistant.enabled }}
+{{- range $i, $p := .Values.assistant.providers }}
+{{- if $p.secretRef }}
+            - name: assistant-key-{{ $i }}
+              mountPath: /etc/varroa/assistant/{{ $p.name }}
+              readOnly: true
+{{- end }}
+{{- end }}
+{{- end }}
             - name: tmp
               mountPath: /tmp
           {{- with .Values.bff.resources }}
@@ -212,6 +225,19 @@ spec:
         - name: nats-creds
           secret:
             secretName: varroa-nats-creds
+{{- if .Values.assistant.enabled }}
+{{- range $i, $p := .Values.assistant.providers }}
+{{- if $p.secretRef }}
+        - name: assistant-key-{{ $i }}
+          secret:
+            secretName: {{ $p.secretRef }}
+            optional: true
+            items:
+              - key: apiKey
+                path: apiKey
+{{- end }}
+{{- end }}
+{{- end }}
         - name: tmp
           emptyDir: {}
 ---

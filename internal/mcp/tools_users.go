@@ -167,7 +167,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, user); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create user: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "user.created",
 			Message:   "User " + strArg(args, "name") + " created in " + strArg(args, "namespace"),
 			Namespace: strArg(args, "namespace"),
@@ -218,7 +218,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "user.updated",
 			Message:   "User " + name + " updated in " + ns,
 			Namespace: ns,
@@ -247,7 +247,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if err := crdstore.Delete[v1alpha1.User](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError("failed to delete user: " + err.Error()), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "user.deleted",
 			Message:   "User " + name + " deleted in " + ns,
 			Namespace: ns,

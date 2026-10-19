@@ -155,7 +155,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, source); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create catalog source: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "catalogsource.created",
 			Message:   "CatalogSource " + strArg(args, "name") + " created in " + ns,
 			Namespace: ns,
@@ -245,7 +245,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update catalog source: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "catalogsource.updated",
 			Message:   "CatalogSource " + name + " updated in " + ns,
 			Namespace: ns,
@@ -277,7 +277,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := crdstore.Delete[v1alpha1.CatalogSource](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete catalog source: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "catalogsource.deleted",
 			Message:   "CatalogSource " + name + " deleted in " + ns,
 			Namespace: ns,
@@ -314,7 +314,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		if err := deps.ConfigBrood.SyncCatalogSource(ctx, cluster, ns, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to sync catalog source: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "catalogsource.synced",
 			Message:   "CatalogSource " + name + " synced in " + ns,
 			Namespace: ns,

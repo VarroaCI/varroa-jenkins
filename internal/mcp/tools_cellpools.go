@@ -147,7 +147,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		if serr != nil {
 			return cellPoolToolError(serr, "update"), nil
 		}
-		emitActivityForCluster(deps, claims, pool.Cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, pool.Cluster, activity.Event{
 			Type:    "cellpool.updated",
 			Message: "CellPool " + name + " scaled on cluster " + pool.Cluster,
 		})

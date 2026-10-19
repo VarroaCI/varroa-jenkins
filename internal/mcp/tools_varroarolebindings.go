@@ -99,7 +99,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, binding); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarolebinding.created",
 			Message: "VarroaRoleBinding " + strArg(args, "name") + " created",
 		})
@@ -146,7 +146,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarolebinding.updated",
 			Message: "VarroaRoleBinding " + name + " updated",
 		})
@@ -172,7 +172,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Delete[v1alpha1.VarroaRoleBinding](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarolebinding.deleted",
 			Message: "VarroaRoleBinding " + name + " deleted",
 		})

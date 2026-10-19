@@ -101,7 +101,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, role); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarole.created",
 			Message: "VarroaRole " + strArg(args, "name") + " created",
 		})
@@ -153,7 +153,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarole.updated",
 			Message: "VarroaRole " + name + " updated",
 		})
@@ -179,7 +179,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Delete[v1alpha1.VarroaRole](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "varroarole.deleted",
 			Message: "VarroaRole " + name + " deleted",
 		})

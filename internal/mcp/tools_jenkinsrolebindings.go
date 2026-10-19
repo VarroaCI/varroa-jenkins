@@ -88,7 +88,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrolebinding.created",
 			Message: "JenkinsRoleBinding " + strArg(args, "name") + " created",
 		})
@@ -127,7 +127,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrolebinding.updated",
 			Message: "JenkinsRoleBinding " + name + " updated",
 		})
@@ -153,7 +153,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrolebinding.deleted",
 			Message: "JenkinsRoleBinding " + name + " deleted",
 		})

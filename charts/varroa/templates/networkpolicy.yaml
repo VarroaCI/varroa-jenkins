@@ -425,6 +425,9 @@ spec:
 {{ include "varroa.np.recordStorePostgresEgress" . | nindent 4 }}
 {{ include "varroa.np.recordStoreBlobEgress" . | nindent 4 }}
 {{- end }}
+{{- if .Values.assistant.enabled }}
+{{ include "varroa.np.assistantEgress" . | nindent 4 }}
+{{- end }}
 {{- end }}
 
 {{- if and $full .Values.frontend.enabled }}

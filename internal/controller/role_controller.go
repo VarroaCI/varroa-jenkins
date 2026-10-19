@@ -219,6 +219,9 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"version-profiles"}, Verbs: []string{"read", "create", "update", "delete"}},
 				{Resources: []string{"updatecenter"}, Verbs: []string{"upload"}},
 				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write", "admin"}},
+				// The assistant use verb is cluster-wide. A namespace-scoped
+				// binding gains no assistant access.
+				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
 			},
 			operatorPermissions(),
 			"varroa-operator"),
@@ -230,6 +233,9 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"catalogitems"}, Verbs: []string{"read"}},
 				{Resources: []string{"composedbundles"}, Verbs: []string{"read", "create", "update"}},
 				{Resources: []string{"pipelines"}, Verbs: []string{"read", "write"}},
+				// The assistant use verb is cluster-wide. A namespace-scoped
+				// binding gains no assistant access.
+				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
 			},
 			developerPermissions(),
 			"varroa-developer"),
@@ -238,6 +244,9 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"controllers", "templates", "provisioningdefaults", "roles", "rolebindings", "jenkinsroles", "jenkinsrolebindings", "runners"}, Verbs: []string{"read"}},
 				{Resources: []string{"catalogsources", "catalogitems", "composedbundles"}, Verbs: []string{"read"}},
 				{Resources: []string{"pipelines"}, Verbs: []string{"read"}},
+				// The assistant use verb is cluster-wide. A namespace-scoped
+				// binding gains no assistant access.
+				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
 			},
 			viewerPermissions(),
 			"varroa-viewer"),

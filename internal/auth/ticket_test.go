@@ -124,10 +124,31 @@ func TestSSEScope(t *testing.T) {
 		"/api/v1/pipelines/payments/stream":        "pipelines:payments",
 		"/api/v1/pipelines//stream":                "",
 		"/api/v1/pipelines/payments/cell":          "",
+		"/api/v1/assistant/sessions/s-1/events":    "assistant:s-1",
+		"/api/v1/assistant/sessions/s-1":           "",
+		"/api/v1/assistant/sessions//events":       "",
 	}
 	for path, want := range cases {
 		if got := sseScope(path); got != want {
 			t.Errorf("sseScope(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// TestTicket_AssistantScopeBinds proves an assistant ticket opens only the
+// session it was minted for.
+func TestTicket_AssistantScopeBinds(t *testing.T) {
+	signer := newTestSigner(t)
+	iss := NewTicketIssuer(signer, "iss", time.Minute)
+	ver := NewTicketVerifier(signer.PublicKey(), "iss")
+	ticket, _, err := iss.Mint(&Claims{Subject: "a"}, "assistant:s-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ver.Verify(context.Background(), ticket, "assistant:s-1"); err != nil {
+		t.Errorf("own session: %v", err)
+	}
+	if _, err := ver.Verify(context.Background(), ticket, "assistant:s-2"); err == nil {
+		t.Error("a ticket for session s-1 opened session s-2")
 	}
 }

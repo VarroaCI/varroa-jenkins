@@ -82,6 +82,10 @@ func (s *Server) handleStreamTicket(w http.ResponseWriter, r *http.Request) {
 		if !s.mintPipelinesTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "pipelines:")) {
 			return
 		}
+	case strings.HasPrefix(scope, "assistant:"):
+		if !s.mintAssistantTicketAuthorized(w, r, claims, strings.TrimPrefix(scope, "assistant:")) {
+			return
+		}
 	}
 
 	ticket, ttl, err := s.deps.TicketIssuer.Mint(claims, scope)
@@ -125,6 +129,9 @@ func validStreamScope(scope string) bool {
 	if rest, ok := strings.CutPrefix(scope, "pipelines:"); ok {
 		return rest != "" && !strings.Contains(rest, "/")
 	}
+	if rest, ok := strings.CutPrefix(scope, "assistant:"); ok {
+		return rest != "" && !strings.Contains(rest, "/")
+	}
 	return false
 }
 
@@ -151,6 +158,27 @@ func (s *Server) mintRunTicketAuthorized(w http.ResponseWriter, r *http.Request,
 	}
 	if !s.canReadRun(claims, run.Tenant, run.JobPath) {
 		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
+}
+
+// mintAssistantTicketAuthorized checks that the caller owns the session, or
+// is an admin, before an "assistant:" ticket mints. Any other caller gets
+// not found, so the answer does not reveal the session.
+func (s *Server) mintAssistantTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, sessionID string) bool {
+	rt, ok := s.assistantOrDisabled(w)
+	if !ok {
+		return false
+	}
+	id, ok := sessionUUID(sessionID)
+	if !ok {
+		s.writeJSONError(w, http.StatusNotFound, "not found")
+		return false
+	}
+	sess, err := rt.Store.GetSession(r.Context(), id)
+	if err != nil || (sess.Principal != claims.Subject && !s.assistantIsAdmin(claims)) {
+		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return false
 	}
 	return true

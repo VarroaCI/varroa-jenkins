@@ -144,7 +144,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, deps.Store, bundle); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create composed bundle: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "composedbundle.created",
 			Message:   "ComposedBundle " + strArg(args, "name") + " created in " + ns,
 			Namespace: ns,
@@ -219,7 +219,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update composed bundle: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "composedbundle.updated",
 			Message:   "ComposedBundle " + name + " updated in " + ns,
 			Namespace: ns,
@@ -248,7 +248,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		if err := crdstore.Delete[v1alpha1.ComposedBundle](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError("failed to delete composed bundle: " + err.Error()), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:      "composedbundle.deleted",
 			Message:   "ComposedBundle " + name + " deleted in " + ns,
 			Namespace: ns,

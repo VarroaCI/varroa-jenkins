@@ -2896,7 +2896,7 @@ ActivityEvent:
       type: string
     source:
       type: string
-      enum: [mite, operator, user, api, jenkins, mcp]
+      enum: [mite, operator, user, api, jenkins, mcp, assistant]
     severity:
       type: string
       enum: [info, warning, error]
@@ -7026,4 +7026,263 @@ TeamCellMember:
     jobs:
       type: integer
       format: int64
+  additionalProperties: false
+
+# Assistant schemas. The assistant routes are in paths/assistant.yaml.
+
+AssistantError:
+  type: object
+  required: [error, code]
+  description: An assistant refusal. The code names the cause, and error gives the text.
+  properties:
+    error:
+      type: string
+    code:
+      type: string
+      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch]
+  additionalProperties: false
+
+AssistantSessionContext:
+  type: object
+  description: The client context of a session. Each key names one object the session is about.
+  properties:
+    route: {type: string}
+    team: {type: string}
+    job: {type: string}
+    run: {type: string}
+    controller: {type: string}
+    cell: {type: string}
+  additionalProperties: false
+
+AssistantSessionCreateRequest:
+  type: object
+  description: Send either message or prompt, never both.
+  properties:
+    context:
+      $ref: '#/AssistantSessionContext'
+    message: {type: string, maxLength: 8000}
+    prompt: {type: string, description: 'The id of a fixed prompt, such as explain-failure.'}
+    provider: {type: string}
+    model: {type: string}
+  additionalProperties: false
+
+AssistantSession:
+  type: object
+  required: [id, kind, principal, cluster, state, context, keySource, dataSharing, promptTokens, completionTokens, steps, startedAt]
+  properties:
+    id: {type: string}
+    kind: {type: string, enum: [assistant, team_agent]}
+    principal: {type: string}
+    team: {type: string}
+    cluster: {type: string}
+    trigger: {type: string}
+    context: {type: object, additionalProperties: true}
+    provider: {type: string}
+    model: {type: string}
+    keySource: {type: string, enum: [chart, user]}
+    dataSharing: {type: string, enum: [none, metadata, logs]}
+    state: {type: string, enum: [running, waiting_approval, completed, failed, cancelled, skipped, expired]}
+    skipReason:
+      type: string
+      nullable: true
+      enum: [budget_day, kill_switch, data_sharing_none, provider_unavailable]
+    promptTokens: {type: integer, format: int64}
+    completionTokens: {type: integer, format: int64}
+    steps: {type: integer}
+    startedAt: {type: string, format: date-time}
+    endedAt: {type: string, format: date-time, nullable: true}
+
+AssistantSessionList:
+  type: object
+  required: [items, nextCursor]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/AssistantSession'
+    nextCursor: {type: string}
+
+AssistantApproval:
+  type: object
+  required: [id, sessionId, callId, tool, arguments, targetKind, state, requestedAt, expiresAt]
+  properties:
+    id: {type: string}
+    sessionId: {type: string}
+    callId: {type: string}
+    tool: {type: string}
+    arguments: {type: object, additionalProperties: true}
+    targetKind: {type: string}
+    targetRef: {type: string}
+    state: {type: string, enum: [pending, approved, denied, expired]}
+    requestedAt: {type: string, format: date-time}
+    expiresAt: {type: string, format: date-time}
+    resolvedBy: {type: string}
+    resolvedAt: {type: string, format: date-time, nullable: true}
+    reason: {type: string}
+    result:
+      type: string
+      nullable: true
+
+AssistantApprovalList:
+  type: object
+  required: [items, nextCursor]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/AssistantApproval'
+    nextCursor: {type: string}
+
+AssistantSessionDetail:
+  type: object
+  required: [session, approvals]
+  properties:
+    session:
+      $ref: '#/AssistantSession'
+    approvals:
+      type: array
+      items:
+        $ref: '#/AssistantApproval'
+
+AssistantMessageRequest:
+  type: object
+  required: [message]
+  properties:
+    message: {type: string, minLength: 1, maxLength: 8000}
+  additionalProperties: false
+
+AssistantAcceptedState:
+  type: object
+  required: [state]
+  properties:
+    state: {type: string}
+
+AssistantDenyRequest:
+  type: object
+  properties:
+    reason: {type: string, maxLength: 500}
+  additionalProperties: false
+
+AssistantApprovalOutcome:
+  type: object
+  required: [approval, result]
+  properties:
+    approval:
+      $ref: '#/AssistantApproval'
+    result:
+      type: object
+      required: [content, isError]
+      properties:
+        content: {type: string}
+        isError: {type: boolean}
+
+AssistantLimits:
+  type: object
+  properties:
+    budgets:
+      type: object
+      properties:
+        session: {type: integer, format: int64}
+        userDay: {type: integer, format: int64}
+        teamDay: {type: integer, format: int64}
+        steps: {type: integer}
+    externalDataSharing: {type: string}
+    approvalExpiry: {type: string}
+    egress:
+      type: object
+      additionalProperties: true
+
+AssistantSettings:
+  type: object
+  required: [paused]
+  properties:
+    paused: {type: boolean}
+    pausedBy: {type: string}
+    pausedAt: {type: string, format: date-time, nullable: true}
+    defaultProvider: {type: string}
+    defaultModel: {type: string}
+    tenantDataSharing:
+      type: object
+      additionalProperties: {type: string, enum: [none, metadata, logs]}
+    updatedAt: {type: string, format: date-time}
+    updatedBy: {type: string}
+    limits:
+      $ref: '#/AssistantLimits'
+
+AssistantSettingsUpdate:
+  type: object
+  properties:
+    paused: {type: boolean}
+    defaultProvider: {type: string}
+    defaultModel: {type: string}
+    tenantDataSharing:
+      type: object
+      properties:
+        set:
+          type: object
+          required: [tenant, level]
+          properties:
+            tenant: {type: string}
+            level: {type: string, enum: [none, metadata, logs]}
+        remove: {type: string}
+  additionalProperties: false
+
+AssistantProvider:
+  type: object
+  required: [name, kind, models, trust, default, available]
+  properties:
+    name: {type: string}
+    kind: {type: string, enum: [anthropic, openai-compatible]}
+    models:
+      type: array
+      items: {type: string}
+    trust: {type: string, enum: [internal, external]}
+    default: {type: boolean}
+    available: {type: boolean}
+    baseURL: {type: string, description: 'Shown to admins only.'}
+
+AssistantProviderList:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/AssistantProvider'
+
+MyAssistant:
+  type: object
+  required: [available]
+  properties:
+    available: {type: boolean}
+    enabled: {type: boolean}
+    provider: {type: string}
+    model: {type: string}
+    dataSharing: {type: string, enum: [none, metadata, logs]}
+    sessionKey:
+      type: object
+      nullable: true
+      properties:
+        provider: {type: string}
+    effectiveLevels:
+      type: object
+      additionalProperties: {type: string, enum: [none, metadata, logs]}
+    dayTokens: {type: integer, format: int64}
+    dayBudget: {type: integer, format: int64}
+
+MyAssistantUpdate:
+  type: object
+  properties:
+    enabled: {type: boolean}
+    provider: {type: string}
+    model: {type: string}
+    dataSharing: {type: string, enum: [none, metadata, logs]}
+  additionalProperties: false
+
+MyAssistantKeyRequest:
+  type: object
+  required: [provider, apiKey]
+  properties:
+    provider: {type: string}
+    apiKey: {type: string, minLength: 1, writeOnly: true}
   additionalProperties: false

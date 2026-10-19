@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"context"
+
+	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
@@ -11,11 +14,30 @@ import (
 // human one in the activity feed.
 const mcpSource = "mcp"
 
+// OriginAssistant marks a tool call that the assistant loop made. Such a call
+// stamps its activity event with the assistant source.
+const OriginAssistant = agent.ActivitySourceAssistant
+
+type originKey struct{}
+
+// WithOrigin returns a context that names the origin of the tool calls it
+// carries.
+func WithOrigin(ctx context.Context, origin string) context.Context {
+	return context.WithValue(ctx, originKey{}, origin)
+}
+
+// OriginFrom returns the origin set by WithOrigin, or "" when none is set.
+func OriginFrom(ctx context.Context) string {
+	o, _ := ctx.Value(originKey{}).(string)
+	return o
+}
+
 // emitActivity publishes an activity event for an MCP-originated mutation.
 //
 // Callers supply Type, Message, Namespace and (for controller-scoped tools
 // only) Controller. Actor, Source and a default Severity are stamped here, and
-// Timestamp by activity.Publisher.Publish.
+// Timestamp by activity.Publisher.Publish. The Source is "assistant" when the
+// call carries OriginAssistant, and "mcp" otherwise.
 //
 // Cluster is left empty here, which makes Publish default it to the publishing
 // BFF's own identity — correct only for a mutation on the local cluster.
@@ -24,12 +46,15 @@ const mcpSource = "mcp"
 //
 // Leaving Controller empty routes the event to activity.<cluster>._global,
 // which is where a role, user, group, bundle or catalog-source event belongs.
-func emitActivity(deps *api.Dependencies, claims *auth.Claims, e activity.Event) {
+func emitActivity(ctx context.Context, deps *api.Dependencies, claims *auth.Claims, e activity.Event) {
 	if deps == nil || deps.ActivityPublisher == nil {
 		return
 	}
 	e.Actor = api.ActorFrom(claims)
 	e.Source = mcpSource
+	if OriginFrom(ctx) == OriginAssistant {
+		e.Source = OriginAssistant
+	}
 	if e.Severity == "" {
 		e.Severity = "info"
 	}
@@ -49,7 +74,7 @@ func emitActivity(deps *api.Dependencies, claims *auth.Claims, e activity.Event)
 // crdstore no matter what `cluster` argument the caller passed, so stamping it
 // there would invent a mutation on a cluster that was never touched. Those call
 // emitActivity and let the publisher stamp its own identity.
-func emitActivityForCluster(deps *api.Dependencies, claims *auth.Claims, cluster string, e activity.Event) {
+func emitActivityForCluster(ctx context.Context, deps *api.Dependencies, claims *auth.Claims, cluster string, e activity.Event) {
 	e.Cluster = cluster
-	emitActivity(deps, claims, e)
+	emitActivity(ctx, deps, claims, e)
 }

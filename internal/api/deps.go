@@ -123,6 +123,9 @@ type Dependencies struct {
 	// check for nil before use.
 	RecordStore recordstore.Reader
 
+	// Assistant is the assistant runtime. Nil turns every assistant route off.
+	Assistant *AssistantRuntime
+
 	// RecordStoreRunRetention is the store-wide runs window, from
 	// VARROA_RETENTION_RUNS. It caps every tenant and job window. Zero
 	// means the 365d default.

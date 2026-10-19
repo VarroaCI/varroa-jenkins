@@ -121,9 +121,9 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			Message: "ProvisioningDefaults " + name + " updated",
 		}
 		if routed {
-			emitActivityForCluster(deps, claims, cluster, ev)
+			emitActivityForCluster(ctx, deps, claims, cluster, ev)
 		} else {
-			emitActivity(deps, claims, ev)
+			emitActivity(ctx, deps, claims, ev)
 		}
 		return resultJSON(json.RawMessage(raw))
 	})
@@ -214,7 +214,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 			if err != nil {
 				return mcp.NewToolResultError("failed to " + verb + " version profile: " + err.Error()), nil
 			}
-			emitActivityForCluster(deps, claims, cluster, activity.Event{
+			emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 				Type:    "versionprofile." + verb + "d",
 				Message: "JenkinsVersionProfile " + name + " " + verb + "d",
 			})
@@ -282,7 +282,7 @@ func registerProvisioningDefaultsTools(mcpServer *server.MCPServer, deps *api.De
 		if err := deps.ConfigBrood.DeleteVersionProfile(ctx, cluster, name); err != nil {
 			return mcp.NewToolResultError("failed to delete version profile: " + err.Error()), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:    "versionprofile.deleted",
 			Message: "JenkinsVersionProfile " + name + " deleted",
 		})

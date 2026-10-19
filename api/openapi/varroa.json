@@ -379,7 +379,8 @@
               "user",
               "api",
               "jenkins",
-              "mcp"
+              "mcp",
+              "assistant"
             ],
             "type": "string"
           },
@@ -492,6 +493,558 @@
         "required": [
           "error"
         ],
+        "type": "object"
+      },
+      "AssistantAcceptedState": {
+        "properties": {
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "AssistantApproval": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "callId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "result": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "targetKind": {
+            "type": "string"
+          },
+          "targetRef": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "callId",
+          "tool",
+          "arguments",
+          "targetKind",
+          "state",
+          "requestedAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "AssistantApprovalList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "AssistantApprovalOutcome": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+          },
+          "result": {
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "isError": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "content",
+              "isError"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "approval",
+          "result"
+        ],
+        "type": "object"
+      },
+      "AssistantDenyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AssistantError": {
+        "additionalProperties": false,
+        "description": "An assistant refusal. The code names the cause, and error gives the text.",
+        "properties": {
+          "code": {
+            "enum": [
+              "assistant_disabled",
+              "assistant_key_unavailable",
+              "assistant_off",
+              "assistant_busy",
+              "prompt_not_startable",
+              "kill_switch"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ],
+        "type": "object"
+      },
+      "AssistantLimits": {
+        "properties": {
+          "approvalExpiry": {
+            "type": "string"
+          },
+          "budgets": {
+            "properties": {
+              "session": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "steps": {
+                "type": "integer"
+              },
+              "teamDay": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "userDay": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "egress": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "externalDataSharing": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AssistantMessageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "AssistantProvider": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "baseURL": {
+            "description": "Shown to admins only.",
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "anthropic",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trust": {
+            "enum": [
+              "internal",
+              "external"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "models",
+          "trust",
+          "default",
+          "available"
+        ],
+        "type": "object"
+      },
+      "AssistantProviderList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantProvider"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AssistantSession": {
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "completionTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "context": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "keySource": {
+            "enum": [
+              "chart",
+              "user"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "assistant",
+              "team_agent"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "promptTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "skipReason": {
+            "enum": [
+              "budget_day",
+              "kill_switch",
+              "data_sharing_none",
+              "provider_unavailable"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "waiting_approval",
+              "completed",
+              "failed",
+              "cancelled",
+              "skipped",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "principal",
+          "cluster",
+          "state",
+          "context",
+          "keySource",
+          "dataSharing",
+          "promptTokens",
+          "completionTokens",
+          "steps",
+          "startedAt"
+        ],
+        "type": "object"
+      },
+      "AssistantSessionContext": {
+        "additionalProperties": false,
+        "description": "The client context of a session. Each key names one object the session is about.",
+        "properties": {
+          "cell": {
+            "type": "string"
+          },
+          "controller": {
+            "type": "string"
+          },
+          "job": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AssistantSessionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Send either message or prompt, never both.",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/components_schemas_AssistantSessionContext"
+          },
+          "message": {
+            "maxLength": 8000,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The id of a fixed prompt, such as explain-failure.",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AssistantSessionDetail": {
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+            },
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/components_schemas_AssistantSession"
+          }
+        },
+        "required": [
+          "session",
+          "approvals"
+        ],
+        "type": "object"
+      },
+      "AssistantSessionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantSession"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "AssistantSettings": {
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/components_schemas_AssistantLimits"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "pausedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "pausedBy": {
+            "type": "string"
+          },
+          "tenantDataSharing": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "metadata",
+                "logs"
+              ],
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "type": "object"
+      },
+      "AssistantSettingsUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "tenantDataSharing": {
+            "properties": {
+              "remove": {
+                "type": "string"
+              },
+              "set": {
+                "properties": {
+                  "level": {
+                    "enum": [
+                      "none",
+                      "metadata",
+                      "logs"
+                    ],
+                    "type": "string"
+                  },
+                  "tenant": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tenant",
+                  "level"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        },
         "type": "object"
       },
       "BindingFederationStatus": {
@@ -2523,6 +3076,103 @@
           "groups",
           "authMode"
         ],
+        "type": "object"
+      },
+      "MyAssistant": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "dayBudget": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dayTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "effectiveLevels": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "metadata",
+                "logs"
+              ],
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "sessionKey": {
+            "nullable": true,
+            "properties": {
+              "provider": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "type": "object"
+      },
+      "MyAssistantKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "apiKey"
+        ],
+        "type": "object"
+      },
+      "MyAssistantUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "ObjectMeta": {
@@ -5178,7 +5828,8 @@
               "user",
               "api",
               "jenkins",
-              "mcp"
+              "mcp",
+              "assistant"
             ],
             "type": "string"
           },
@@ -5291,6 +5942,558 @@
         "required": [
           "error"
         ],
+        "type": "object"
+      },
+      "components_schemas_AssistantAcceptedState": {
+        "properties": {
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantApproval": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "callId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "result": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "targetKind": {
+            "type": "string"
+          },
+          "targetRef": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "callId",
+          "tool",
+          "arguments",
+          "targetKind",
+          "state",
+          "requestedAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantApprovalList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantApprovalOutcome": {
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+          },
+          "result": {
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "isError": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "content",
+              "isError"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "approval",
+          "result"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantDenyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantError": {
+        "additionalProperties": false,
+        "description": "An assistant refusal. The code names the cause, and error gives the text.",
+        "properties": {
+          "code": {
+            "enum": [
+              "assistant_disabled",
+              "assistant_key_unavailable",
+              "assistant_off",
+              "assistant_busy",
+              "prompt_not_startable",
+              "kill_switch"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "code"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantLimits": {
+        "properties": {
+          "approvalExpiry": {
+            "type": "string"
+          },
+          "budgets": {
+            "properties": {
+              "session": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "steps": {
+                "type": "integer"
+              },
+              "teamDay": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "userDay": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "egress": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "externalDataSharing": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantMessageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantProvider": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "baseURL": {
+            "description": "Shown to admins only.",
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "anthropic",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trust": {
+            "enum": [
+              "internal",
+              "external"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "models",
+          "trust",
+          "default",
+          "available"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantProviderList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantProvider"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantSession": {
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "completionTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "context": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "keySource": {
+            "enum": [
+              "chart",
+              "user"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "assistant",
+              "team_agent"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "promptTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "skipReason": {
+            "enum": [
+              "budget_day",
+              "kill_switch",
+              "data_sharing_none",
+              "provider_unavailable"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "waiting_approval",
+              "completed",
+              "failed",
+              "cancelled",
+              "skipped",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "principal",
+          "cluster",
+          "state",
+          "context",
+          "keySource",
+          "dataSharing",
+          "promptTokens",
+          "completionTokens",
+          "steps",
+          "startedAt"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantSessionContext": {
+        "additionalProperties": false,
+        "description": "The client context of a session. Each key names one object the session is about.",
+        "properties": {
+          "cell": {
+            "type": "string"
+          },
+          "controller": {
+            "type": "string"
+          },
+          "job": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantSessionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Send either message or prompt, never both.",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/components_schemas_AssistantSessionContext"
+          },
+          "message": {
+            "maxLength": 8000,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The id of a fixed prompt, such as explain-failure.",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_AssistantSessionDetail": {
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantApproval"
+            },
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/components_schemas_AssistantSession"
+          }
+        },
+        "required": [
+          "session",
+          "approvals"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantSessionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/components_schemas_AssistantSession"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantSettings": {
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/components_schemas_AssistantLimits"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "pausedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "pausedBy": {
+            "type": "string"
+          },
+          "tenantDataSharing": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "metadata",
+                "logs"
+              ],
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "type": "object"
+      },
+      "components_schemas_AssistantSettingsUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "tenantDataSharing": {
+            "properties": {
+              "remove": {
+                "type": "string"
+              },
+              "set": {
+                "properties": {
+                  "level": {
+                    "enum": [
+                      "none",
+                      "metadata",
+                      "logs"
+                    ],
+                    "type": "string"
+                  },
+                  "tenant": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tenant",
+                  "level"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        },
         "type": "object"
       },
       "components_schemas_BackupSpec": {
@@ -10067,6 +11270,103 @@
               }
             },
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "components_schemas_MyAssistant": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "dayBudget": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dayTokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "effectiveLevels": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "metadata",
+                "logs"
+              ],
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "sessionKey": {
+            "nullable": true,
+            "properties": {
+              "provider": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "type": "object"
+      },
+      "components_schemas_MyAssistantKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "apiKey"
+        ],
+        "type": "object"
+      },
+      "components_schemas_MyAssistantUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "dataSharing": {
+            "enum": [
+              "none",
+              "metadata",
+              "logs"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -14926,7 +16226,8 @@
                 "user",
                 "api",
                 "jenkins",
-                "mcp"
+                "mcp",
+                "assistant"
               ],
               "type": "string"
             }
@@ -15123,6 +16424,781 @@
           "activity"
         ],
         "x-sse": true
+      }
+    },
+    "/api/v1/assistant/approvals": {
+      "get": {
+        "operationId": "listAssistantApprovals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_ref",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "all lists every approval and needs the admin verb.",
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "enum": [
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantApprovalList"
+                }
+              }
+            },
+            "description": "One page of approvals."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Lists approvals of the caller's sessions.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/approvals/{id}/approve": {
+      "post": {
+        "description": "The tool runs under the session context, with the approver's grants. A kill switch refuses the approval. The session resumes when every approval of it has its result.\n",
+        "operationId": "approveAssistantApproval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantApprovalOutcome"
+                }
+              }
+            },
+            "description": "The approval and the tool result."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The approval is not pending, has expired, or the assistant is paused."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Approves one write tool call and runs it as the approver.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/approvals/{id}/deny": {
+      "post": {
+        "operationId": "denyAssistantApproval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantDenyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantApprovalOutcome"
+                }
+              }
+            },
+            "description": "The approval and the denial result."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The approval is not pending or has expired."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Denies one write tool call. Nothing runs.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/providers": {
+      "get": {
+        "operationId": "listAssistantProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantProviderList"
+                }
+              }
+            },
+            "description": "The providers. The base URL is for admins only."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Lists the configured model providers and whether each can be called.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions": {
+      "get": {
+        "operationId": "listAssistantSessions",
+        "parameters": [
+          {
+            "description": "all lists every session and needs the admin verb.",
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "enum": [
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "prompt",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "team",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantSessionList"
+                }
+              }
+            },
+            "description": "One page of sessions."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Lists the caller's assistant sessions, newest first.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "post": {
+        "description": "Creates one session. The session runs when the gates pass. A session that a gate refuses is stored as skipped, with its skip reason. The context names what the session is about. The server adds the prompt id and the repository, and a client cannot set them.\n",
+        "operationId": "createAssistantSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantSessionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantSession"
+                }
+              }
+            },
+            "description": "The session, running or skipped."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The caller lacks the assistant use verb, or the prompt cannot start a session."
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is off for this user."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The user already runs the maximum number of sessions."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled, or a dependency is missing."
+          }
+        },
+        "summary": "Starts an assistant session from a message or a fixed prompt.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{id}": {
+      "get": {
+        "operationId": "getAssistantSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantSessionDetail"
+                }
+              }
+            },
+            "description": "The session and its approvals."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Returns one session with its approvals and their results.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{id}/cancel": {
+      "post": {
+        "operationId": "cancelAssistantSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The session is cancelled."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The session already ended."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Cancels a running or waiting session.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{id}/events": {
+      "get": {
+        "description": "Sends every event after the cursor, then each new event. Each frame carries its sequence number as its id. The stream closes after a done event. The stream reads the ticket of the session scope, because a browser EventSource cannot set headers.\n",
+        "operationId": "streamAssistantEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The last sequence number that the client read.",
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Streams the transcript of one session as server-sent events.",
+        "tags": [
+          "Assistant"
+        ],
+        "x-sse": true,
+        "x-sse-events": [
+          "user",
+          "assistant",
+          "tool_call",
+          "tool_result",
+          "approval_requested",
+          "approval_resolved",
+          "error",
+          "done"
+        ]
+      }
+    },
+    "/api/v1/assistant/sessions/{id}/messages": {
+      "post": {
+        "operationId": "postAssistantMessage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantAcceptedState"
+                }
+              }
+            },
+            "description": "The session runs again."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The session is not waiting, its budget is spent, or its key is not available."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Sends a message to a completed session and runs it again.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/assistant/settings": {
+      "get": {
+        "operationId": "getAssistantSettings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantSettings"
+                }
+              }
+            },
+            "description": "The global assistant settings."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Returns the kill switch, and for an admin the defaults and limits.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "put": {
+        "operationId": "putAssistantSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_AssistantSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantSettings"
+                }
+              }
+            },
+            "description": "The global assistant settings after the change."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Changes the kill switch, the defaults, or a tenant data level. Admin only.",
+        "tags": [
+          "Assistant"
+        ]
       }
     },
     "/api/v1/auth-config": {
@@ -20143,6 +22219,161 @@
         ]
       }
     },
+    "/api/v1/me/assistant": {
+      "get": {
+        "description": "With the assistant off, the answer is available false and no other field.",
+        "operationId": "getMyAssistant",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_MyAssistant"
+                }
+              }
+            },
+            "description": "The caller's assistant view."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          }
+        },
+        "summary": "Returns the caller's assistant settings, key state, and day spend.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "put": {
+        "operationId": "putMyAssistant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_MyAssistantUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_MyAssistant"
+                }
+              }
+            },
+            "description": "The caller's assistant view after the change."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Changes the caller's provider, model, data level, or enabled flag.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
+    "/api/v1/me/assistant/key": {
+      "delete": {
+        "operationId": "deleteMyAssistantKey",
+        "responses": {
+          "204": {
+            "description": "The key cookie is cleared."
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "The assistant is not enabled."
+          }
+        },
+        "summary": "Clears the sealed provider key cookie.",
+        "tags": [
+          "Assistant"
+        ]
+      },
+      "put": {
+        "description": "The cookie is HttpOnly, SameSite Strict, scoped to the API path, and cleared at logout. An API key caller has no login session, so the call answers 409.\n",
+        "operationId": "putMyAssistantKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/components_schemas_MyAssistantKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The key is stored."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_Error"
+                }
+              }
+            },
+            "description": "The caller has no login session."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/components_schemas_AssistantError"
+                }
+              }
+            },
+            "description": "Sealing is not configured."
+          }
+        },
+        "summary": "Stores a provider key in a session-only, sealed cookie.",
+        "tags": [
+          "Assistant"
+        ]
+      }
+    },
     "/api/v1/me/password": {
       "put": {
         "operationId": "changeMyPassword",
@@ -23408,6 +25639,10 @@
     }
   ],
   "tags": [
+    {
+      "description": "The agent assistant. Sessions, approvals, settings, and the caller view.",
+      "name": "assistant"
+    },
     {
       "description": "Infrastructure operations (health, version, docs).",
       "name": "ops"

@@ -43,6 +43,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/agent/loop"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/api/sse"
@@ -284,6 +285,21 @@ func main() {
 	fanout.Logger = logger
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The assistant runtime is built before the fanout starts, so the fanout
+	// subscribes to the session notices only when the assistant is on.
+	assistantPEM := ""
+	if tokenSigner != nil {
+		if pem, err := tokenSigner.Signer().PrivateKeyPEM(); err == nil {
+			assistantPEM = pem
+		}
+	}
+	assistantRT, err := buildAssistant(ctx, os.Getenv("VARROA_ASSISTANT_CONFIG"), os.Getenv("VARROA_RECORDSTORE_DSN"),
+		cluster, assistantPEM, busConn.Publish, logger)
+	if err != nil {
+		logger.Error("assistant did not start", "error", err)
+		os.Exit(1)
+	}
+	fanout.AgentSessions = assistantRT != nil
 	go func() {
 		if err := fanout.Start(ctx); err != nil {
 			logger.Error("sse fanout error", "error", err)
@@ -736,6 +752,15 @@ func main() {
 		api.WithMemberPlacements(placements))
 	apiDeps.JenkinsTokenSigner = tokenSigner
 
+	// One MCP server serves the HTTP endpoint and the assistant's in-process host.
+	mcpSrv := mcp.NewServer(apiDeps)
+	if assistantRT != nil {
+		assistantRT.HostFor = func(c *auth.Claims) loop.ToolHost { return mcp.NewInProcessHost(mcpSrv, c) }
+		apiDeps.Assistant = assistantRT
+		go loop.StartSweeper(ctx, assistantRT.Store, time.Minute, logger)
+		logger.Info("assistant enabled", "cluster", cluster)
+	}
+
 	// Create a controller-runtime client for read-only CRD operations
 	// (e.g., ResolveTargets preview). Uses the same REST config as the
 	// dynamic client above.
@@ -772,7 +797,7 @@ func main() {
 	})
 	// MCP endpoint for AI agent tool discovery and invocation.
 	// Registered before /api/v1/ to take priority as a more specific pattern.
-	mux.Handle("/api/v1/mcp", mcp.NewHandler(apiDeps))
+	mux.Handle("/api/v1/mcp", mcp.HTTPHandler(mcpSrv))
 	// OIDC auth endpoints (registered before /api/v1/ catch-all for priority).
 	mux.HandleFunc("/api/v1/auth/login", apiServer.HandleOIDCLogin)
 	mux.HandleFunc("/api/v1/callback", apiServer.HandleOIDCCallback)

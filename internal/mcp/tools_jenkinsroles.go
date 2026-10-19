@@ -90,7 +90,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if err := crdstore.Apply[v1alpha1.JenkinsRole](ctx, deps.Store, role); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrole.created",
 			Message: "JenkinsRole " + strArg(args, "name") + " created",
 		})
@@ -133,7 +133,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if err := crdstore.Apply[v1alpha1.JenkinsRole](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update Jenkins role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrole.updated",
 			Message: "JenkinsRole " + name + " updated",
 		})
@@ -159,7 +159,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		if err := crdstore.Delete[v1alpha1.JenkinsRole](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:    "jenkinsrole.deleted",
 			Message: "JenkinsRole " + name + " deleted",
 		})

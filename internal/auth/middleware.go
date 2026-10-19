@@ -155,6 +155,12 @@ func sseScope(path string) string {
 			}
 		}
 	}
+	if strings.HasPrefix(p, "/assistant/sessions/") {
+		segs := strings.Split(strings.TrimPrefix(p, "/assistant/sessions/"), "/")
+		if len(segs) == 2 && segs[1] == "events" && segs[0] != "" {
+			return "assistant:" + segs[0]
+		}
+	}
 	if strings.HasPrefix(p, "/clusters/") {
 		rest := strings.TrimPrefix(p, "/clusters/")
 		segs := strings.Split(rest, "/")
