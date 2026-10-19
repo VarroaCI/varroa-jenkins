@@ -18,7 +18,16 @@ export const BUILD_PAGE_SHORTCUTS = [
  * page keys do not act; only ? and Escape act on it. The close button takes
  * focus when the list opens.
  */
-export function ShortcutLegend({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ShortcutLegend({
+  open,
+  onClose,
+  extra = [],
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Extra rows appended after the page keys, such as the assistant key. */
+  extra?: readonly { key: string; action: string }[];
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -33,7 +42,7 @@ export function ShortcutLegend({ open, onClose }: { open: boolean; onClose: () =
         Keyboard shortcuts
       </h2>
       <dl className={styles.list}>
-        {BUILD_PAGE_SHORTCUTS.map((s) => (
+        {[...BUILD_PAGE_SHORTCUTS, ...extra].map((s) => (
           <div key={s.key} className={styles.row}>
             <dt>
               <kbd className={styles.key}>{s.key}</kbd>

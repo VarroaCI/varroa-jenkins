@@ -223,6 +223,12 @@ func runMaintenanceSteps(ctx context.Context, db maintTxDB, cfg MaintenanceConfi
 		return fmt.Errorf("delete expired agent sessions: %w", err)
 	}
 
+	// The notes step runs after the agent step. A note follows its run, and
+	// a job note follows its tenant window.
+	if err := deleteExpiredRunNotes(ctx, db, now, cfg.RunRetention); err != nil {
+		return fmt.Errorf("delete expired run notes: %w", err)
+	}
+
 	if _, err := finalizeStaleLogs(ctx, db, cfg.Liveness, cfg.FinalizeWait, now); err != nil {
 		return fmt.Errorf("finalize stale logs: %w", err)
 	}

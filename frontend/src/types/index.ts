@@ -2841,3 +2841,5 @@ export interface CellGrants {
   cell: string;
   tenants: CellTenantGrants[];
 }
+
+export * from "./assistant";

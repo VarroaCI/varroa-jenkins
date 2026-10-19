@@ -1,0 +1,105 @@
+# notes: run and job notes. A run note hangs on one build. A job note hangs
+# on one job. An assistant note reaches the record store through the
+# recorder, and a human note reaches it the same way.
+
+/api/v1/runs/{run}/notes:
+  get:
+    operationId: listRunNotes
+    tags: [Pipelines]
+    summary: Lists the notes of one build, oldest first.
+    description: >
+      The route reads the run first, so a caller the run read check refuses
+      gets 404. The list is never null.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    responses:
+      "200":
+        description: The notes of the build.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNoteList'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+  post:
+    operationId: createRunNote
+    tags: [Pipelines]
+    summary: Adds a human note to a build, or the assistant answer of a session.
+    description: >
+      Send exactly one of body and sessionId. A body writes a human note, and
+      the caller needs the tenant write check on the build. A sessionId writes
+      the newest final answer of that assistant session, and only the session
+      owner may send it. A session can write its note once. A repeat returns
+      the stored note with 200.
+    parameters:
+      - $ref: '../components/parameters.yaml#/run'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/CreateRunNoteRequest'
+    responses:
+      "200":
+        description: The stored note of the session, written earlier.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNote'
+      "201":
+        description: The note that this call wrote.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNote'
+      "400":
+        description: >
+          A plain refusal for a malformed request, or a RunNoteError with
+          code note_too_long for a body over 16384 bytes.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNoteError'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The session cannot write a note on this build.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNoteError'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'
+
+/api/v1/pipelines/{team}/jobs/{job}/notes:
+  get:
+    operationId: listJobNotes
+    tags: [Pipelines]
+    summary: Lists the newest notes of one job, newest first, up to ten.
+    description: >
+      Each run note carries the build number of its run when the record
+      store still holds the run. A job note carries a null runId.
+    parameters:
+      - $ref: '../components/parameters.yaml#/team'
+      - $ref: '../components/parameters.yaml#/job'
+    responses:
+      "200":
+        description: The newest notes of the job.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/RunNoteList'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        $ref: '../components/responses.yaml#/ServiceUnavailable'

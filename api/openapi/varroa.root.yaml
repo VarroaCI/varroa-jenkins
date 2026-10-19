@@ -390,6 +390,10 @@ paths:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1replay'
   /api/v1/runs/{run}/restart:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1restart'
+  /api/v1/runs/{run}/notes:
+    $ref: './paths/notes.yaml#/~1api~1v1~1runs~1{run}~1notes'
+  /api/v1/pipelines/{team}/jobs/{job}/notes:
+    $ref: './paths/notes.yaml#/~1api~1v1~1pipelines~1{team}~1jobs~1{job}~1notes'
   /api/v1/runs/{run}/inputs/{input}/proceed:
     $ref: './paths/runs.yaml#/~1api~1v1~1runs~1{run}~1inputs~1{input}~1proceed'
   /api/v1/runs/{run}/inputs/{input}/abort:
@@ -408,6 +412,14 @@ components:
       $ref: './components/schemas.yaml#/AssistantError'
     AssistantSessionContext:
       $ref: './components/schemas.yaml#/AssistantSessionContext'
+    RunNote:
+      $ref: './components/schemas.yaml#/RunNote'
+    RunNoteList:
+      $ref: './components/schemas.yaml#/RunNoteList'
+    CreateRunNoteRequest:
+      $ref: './components/schemas.yaml#/CreateRunNoteRequest'
+    RunNoteError:
+      $ref: './components/schemas.yaml#/RunNoteError'
     AssistantSessionCreateRequest:
       $ref: './components/schemas.yaml#/AssistantSessionCreateRequest'
     AssistantSession:

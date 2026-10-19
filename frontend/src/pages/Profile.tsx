@@ -1,5 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Tabs, tabPanelProps } from "../components/Tabs";
+import { useAssistant } from "../components/assistant/AssistantProvider";
+import { ProfileAssistantTab } from "./ProfileAssistantTab";
 import { useAuth } from "../context/AuthContext";
 import { bffFetch } from "../hooks/useApi";
 import { useTheme } from "../context/ThemeContext";
@@ -40,6 +44,22 @@ export default function Profile() {
   const [pwError, setPwError] = useState("");
 
   const isLocal = data?.authMode === "local";
+
+  const assistant = useAssistant();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabs = [
+    { id: "account", label: "Account" },
+    ...(assistant.available ? [{ id: "assistant", label: "Assistant" }] : []),
+  ];
+  const requested = searchParams.get("tab") ?? "account";
+  const active = tabs.some((t) => t.id === requested) ? requested : "account";
+  // An unknown tab, or the Assistant tab while the assistant is hidden, falls
+  // back to Account once the availability question has an answer.
+  useEffect(() => {
+    if (assistant.answered && active !== requested) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [assistant.answered, active, requested, setSearchParams]);
 
   const pwMutation = useMutation({
     mutationFn: () => changePassword({ oldPassword: oldPw, newPassword: newPw }),
@@ -121,6 +141,23 @@ export default function Profile() {
           <div className={styles.pageDesc}>Account, preferences, and session</div>
         </div>
       </div>
+
+      {tabs.length > 1 && (
+        <Tabs
+          tabs={tabs}
+          activeTab={active}
+          idBase="profile"
+          ariaLabel="Profile sections"
+          onSelect={(id) => setSearchParams(id === "account" ? {} : { tab: id })}
+        />
+      )}
+
+      {active === "assistant" ? (
+        <div {...tabPanelProps("profile", "assistant")}>
+          <ProfileAssistantTab />
+        </div>
+      ) : (
+      <div {...tabPanelProps("profile", "account")}>
 
       <div className={styles.twoCol}>
         <Card title="◉ Account">
@@ -243,6 +280,8 @@ export default function Profile() {
           )}
         </div>
       </div>
+    </div>
+      )}
     </div>
   );
 }

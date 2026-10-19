@@ -1,4 +1,4 @@
-import { Cable, Fingerprint, GitBranch, GitCompareArrows, Link2, PackageCheck, PackageSearch, Boxes, Settings2, Shield, Users, Users2, UsersRound, Wrench, type LucideIcon } from "lucide-react";
+import { Cable, Sparkles, Fingerprint, GitBranch, GitCompareArrows, Link2, PackageCheck, PackageSearch, Boxes, Settings2, Shield, Users, Users2, UsersRound, Wrench, type LucideIcon } from "lucide-react";
 import { canDoAnywhere, canDoGlobal } from "../hooks/usePermissions";
 import type { Permissions } from "../types/auth";
 
@@ -24,6 +24,7 @@ export const SETTINGS_ITEMS: AreaNavItem[] = [
   { to: "/administration/versions", label: "Versions", icon: GitCompareArrows, description: "Jenkins version profiles and channels", gate: { resource: "provisioningdefaults", verb: "update", globalOnly: true } },
   { to: "/administration/identity", label: "Identity", icon: Fingerprint, description: "OIDC identity provider settings", gate: "admin" },
   { to: "/administration/update-center", label: "Update Center", icon: PackageSearch, description: "Update center status and plugin inventory", gate: "admin" },
+  { to: "/administration/assistant", label: "Assistant", icon: Sparkles, description: "Assistant providers, budgets, and the kill switch", gate: { resource: "assistant", verb: "admin", globalOnly: true } },
 ];
 
 export const CATALOG_ITEMS: AreaNavItem[] = [

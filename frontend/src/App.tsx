@@ -63,6 +63,7 @@ import NoAccessibleClusters from "./components/NoAccessibleClusters";
 import { useConfigurationCluster } from "./hooks/useConfigurationCluster";
 import { PermissionRoute } from "./components/PermissionRoute";
 import { NotFoundPage } from "./components/RecoveryState";
+import { AssistantAdmin } from "./pages/AssistantAdmin";
 import { BuiltinRolesPage, GroupsPage, IdentityPage, ProvisioningPage, UpdateCenterPage, UsersPage, VersionsPage } from "./pages/AdministrationPages";
 import { AreaShell } from "./components/AreaShell";
 import { SETTINGS_ITEMS, CATALOG_ITEMS } from "./lib/navAreas";
@@ -154,6 +155,7 @@ function AppRoutes() {
                     <Route path="administration/versions" element={<PermissionRoute resource="provisioningdefaults" verb="update" globalOnly><VersionsPage /></PermissionRoute>} />
                     <Route path="administration/identity" element={<PermissionRoute admin><IdentityPage /></PermissionRoute>} />
                     <Route path="administration/update-center" element={<PermissionRoute admin><UpdateCenterPage /></PermissionRoute>} />
+                    <Route path="administration/assistant" element={<PermissionRoute resource="assistant" verb="admin" globalOnly><AssistantAdmin /></PermissionRoute>} />
                   </Route>
 
                   {/* Create/edit routes stay outside the settings shell */}

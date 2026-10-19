@@ -159,6 +159,14 @@ type Reader interface {
 	// its run.
 	ListFleetLocks(ctx context.Context, cluster, tenant string) ([]FleetLock, error)
 
+	// ListRunNotes answers the notes of one run, oldest first. A run is
+	// identified by run id and created_at together, as the runs key is.
+	ListRunNotes(ctx context.Context, runID uuid.UUID, runCreatedAt time.Time) ([]RunNote, error)
+
+	// ListJobNotes answers the newest notes of one job, newest first,
+	// limited to limit rows (1 to 10; other values fall back to 10).
+	ListJobNotes(ctx context.Context, cluster, team, jobPath string, limit int) ([]RunNote, error)
+
 	// ListAllFleetLocks answers every fleet_locks row of every cluster,
 	// with no tenant filter.
 	ListAllFleetLocks(ctx context.Context) ([]FleetLock, error)

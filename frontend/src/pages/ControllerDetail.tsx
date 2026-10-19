@@ -26,7 +26,6 @@ import { DeliveryPipeline, isAsleep } from "../components/DeliveryPipeline";
 import { ATTENTION_LABEL } from "../components/StatusPill";
 import { useControllerDiff } from "../hooks/useControllerDiff";
 import { useActivityFeed } from "../hooks/useActivityFeed";
-import { useAuth } from "../context/AuthContext";
 import { canDoInNamespace } from "../hooks/usePermissions";
 import type {
   ReconciliationPolicy,
@@ -42,6 +41,9 @@ import { PROBE_DEFAULTS } from "../types";
 import ConflictDialog from "../components/ConflictDialog";
 import SpecEditorCard from "../components/specform/SpecEditorCard";
 import { CellTab } from "./CellTab";
+import { TargetApprovalsCard } from "../components/assistant/TargetApprovalsCard";
+import { useAssistantContextHint } from "../components/assistant/AssistantProvider";
+import { useAuth } from "../context/AuthContext";
 import styles from "./ControllerDetail.module.css";
 
 const TABS = [
@@ -251,6 +253,8 @@ function ProbePanel({
 export default function ControllerDetail() {
   const { cluster = "", namespace = "", name = "" } = useParams();
   const { data: ctrl, isLoading, error } = useController(cluster, namespace, name);
+  useAssistantContextHint(ctrl?.kind === "cell" ? { cell: true } : {});
+  const viewer = useAuth().user?.subject ?? "";
   const { data: clusters } = useClusters();
   const core = coreOf(clusters);
   const isCore = core != null && cluster === core.name;
@@ -477,6 +481,8 @@ export default function ControllerDetail() {
           </div>
         </div>
       )}
+
+      <TargetApprovalsCard kind="controller" targetRef={`${cluster}/${namespace}/${name}`} viewer={viewer} />
 
       <Tabs
         tabs={cellTabVisible ? TABS : TABS.filter((t) => t.id !== "cell")}

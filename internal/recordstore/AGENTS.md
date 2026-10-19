@@ -1540,3 +1540,6 @@ it can run longer than Go's default 10-minute test timeout, so the job sets
 
 - [blob](blob/AGENTS.md) — the `Store` interface, `pgblob`, and the
   `gocloud.dev` adapter for build logs and build artifacts.
+
+- **Run notes** (`migrations/00039_run_notes.sql`, `run_notes_responder.go`, `reader_notes.go`, `retention_notes.go`): `varroa.run_notes` holds run and job notes. The recorder is its only writer, through the `varroa.recordstore.notes.post` responder. A session note is unique per session. The retention step drops a run note with its run and a job note with its tenant window.
+

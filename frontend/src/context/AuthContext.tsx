@@ -206,6 +206,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** useOptionalAuth reads the auth state, or null outside an AuthProvider. */
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext);
+}
+
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) {

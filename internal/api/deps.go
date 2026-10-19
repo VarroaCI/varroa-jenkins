@@ -118,6 +118,10 @@ type Dependencies struct {
 	// answers 503.
 	FleetLockReleaser FleetLockReleaser
 
+	// RunNotePoster asks the recorder to write a run or job note. Nil when
+	// the record store or the bus is off, so the note write answers 503.
+	RunNotePoster RunNotePoster
+
 	// RecordStore reads build records the recorder wrote. Nil when
 	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
 	// check for nil before use.

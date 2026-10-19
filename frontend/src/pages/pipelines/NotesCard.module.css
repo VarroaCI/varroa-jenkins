@@ -1,0 +1,48 @@
+.explainRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.empty {
+  color: var(--text-2);
+  margin: 0 0 8px;
+}
+
+.note {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.compose textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.count {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.error {
+  color: var(--text);
+  margin: 0;
+}
