@@ -96,6 +96,13 @@ import type {
   PipelineTeamList,
 } from "../types";
 import type { ControllerDetail } from "../hooks/useControllers";
+import type {
+  TeamAgent,
+  TeamAgentCapabilities,
+  TeamAgentItemList,
+  TeamAgentSessionList,
+  TeamAgentUnattendedResult,
+} from "../types/teamAgent";
 import type { Permissions } from "../types/auth";
 import { ApiError, bffFetch, bffFetchText, bffUpload, getToken } from "../hooks/useApi";
 
@@ -1491,6 +1498,45 @@ export function listAssistantSessions(params: { cursor?: string; limit?: number;
   if (params.prompt) q.set("prompt", params.prompt);
   const qs = q.toString();
   return bffFetch<AssistantSessionList>(`/assistant/sessions${qs ? `?${qs}` : ""}`);
+}
+
+/** Reads the accepted Team agent of a pipelines tenant. 404 when none is accepted. */
+export function getTeamAgent(team: string): Promise<TeamAgent> {
+  return bffFetch<TeamAgent>(`${pipelinesBase(team)}/agent`);
+}
+
+export function listTeamAgentSessions(
+  team: string,
+  params: { state?: string; cursor?: string; limit?: number } = {},
+): Promise<TeamAgentSessionList> {
+  const q = new URLSearchParams();
+  if (params.state) q.set("state", params.state);
+  if (params.cursor) q.set("cursor", params.cursor);
+  if (params.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return bffFetch<TeamAgentSessionList>(`${pipelinesBase(team)}/agent/sessions${qs ? `?${qs}` : ""}`);
+}
+
+export function getTeamAgentCapabilities(team: string): Promise<TeamAgentCapabilities> {
+  return bffFetch<TeamAgentCapabilities>(`${pipelinesBase(team)}/agent/capabilities`);
+}
+
+export function runTeamAgent(team: string, body: { job?: string; run?: string } = {}): Promise<{ state: string }> {
+  return bffFetchJSON<{ state: string }>(`${pipelinesBase(team)}/agent/run`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listAgents(): Promise<TeamAgentItemList> {
+  return bffFetch<TeamAgentItemList>("/agents");
+}
+
+export function putAgentUnattended(namespace: string, name: string, enabled: boolean): Promise<TeamAgentUnattendedResult> {
+  return bffFetchJSON<TeamAgentUnattendedResult>(`/agents/${enc(namespace)}/${enc(name)}/unattended`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export function getAssistantSession(id: string): Promise<AssistantSessionDetail> {

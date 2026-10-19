@@ -33,6 +33,9 @@ const (
 	assistantErrBusy          = "assistant_busy"
 	assistantErrPromptNoStart = "prompt_not_startable"
 	assistantErrKillSwitch    = "kill_switch"
+	// assistantErrTeamAgent answers a message to a Team agent session. Its
+	// turns come from the runner, so a person cannot add one.
+	assistantErrTeamAgent = "team_agent_session"
 )
 
 // AssistantRuntime holds the parts of the assistant that the BFF wires at
@@ -45,6 +48,10 @@ type AssistantRuntime struct {
 	Store store.Store
 	// HostFor returns the tool host that acts as the caller.
 	HostFor func(*auth.Claims) loop.ToolHost
+	// HostForOrigin returns the tool host that acts as the caller and stamps
+	// origin on its activity. A Team agent approval uses it with the
+	// team_agent origin.
+	HostForOrigin func(*auth.Claims, string) loop.ToolHost
 	// Sealer opens and seals user keys. Nil turns PUT /me/assistant/key off.
 	Sealer  *sealedkey.Sealer
 	Owner   string

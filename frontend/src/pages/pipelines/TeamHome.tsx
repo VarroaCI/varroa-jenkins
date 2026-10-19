@@ -20,6 +20,7 @@ import type { FleetLock, RunNotification, RunnerEntry, RunningRun } from "../../
 import JobTree, { formatDuration } from "./JobTree";
 import { breakablePath } from "./breakablePath";
 import TeamCellCard, { CELL_STATE_LABELS } from "./TeamCellCard";
+import TeamAgentCard from "./TeamAgentCard";
 import { buildJobTree, defaultOpenPaths, visibleRows } from "./jobTree";
 import { teamTitle } from "./pageTitles";
 import styles from "./TeamHome.module.css";
@@ -384,6 +385,7 @@ export default function TeamHome() {
   const cellDisclosure = (
     <div id="team-cell-disclosure" className={styles.cellDisclosure} hidden={!cellOpen}>
       <TeamCellCard team={team!} />
+      <TeamAgentCard team={team!} />
     </div>
   );
 

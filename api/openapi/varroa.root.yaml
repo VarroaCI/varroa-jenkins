@@ -65,6 +65,8 @@ tags:
     description: Team management (admin).
   - name: runners
     description: External agent (runner) registration for a pipelines tenant.
+  - name: TeamAgents
+    description: The Team agent of a pipelines tenant, its sessions, capabilities, and unattended grants.
   - name: identity
     description: Identity settings and built-in roles (admin).
   - name: controllers
@@ -360,6 +362,18 @@ paths:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1cell'
   /api/v1/pipelines/{team}/stream:
     $ref: './paths/pipelines.yaml#/~1api~1v1~1pipelines~1{team}~1stream'
+  /api/v1/pipelines/{team}/agent:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent'
+  /api/v1/pipelines/{team}/agent/sessions:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1sessions'
+  /api/v1/pipelines/{team}/agent/capabilities:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1capabilities'
+  /api/v1/pipelines/{team}/agent/run:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1pipelines~1{team}~1agent~1run'
+  /api/v1/agents:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1agents'
+  /api/v1/agents/{namespace}/{name}/unattended:
+    $ref: './paths/teamagents.yaml#/~1api~1v1~1agents~1{namespace}~1{name}~1unattended'
   /api/v1/cells/usage:
     $ref: './paths/cells.yaml#/~1api~1v1~1cells~1usage'
   /api/v1/cells/{namespace}/{name}/usage:

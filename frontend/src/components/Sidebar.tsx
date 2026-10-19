@@ -1,14 +1,14 @@
 import { useState, type FocusEvent, type MouseEvent } from "react";
 import { NavLink } from "react-router-dom";
-import { Activity, Boxes, ChevronRight, CircleUserRound, Clock3, Hexagon, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, PlugZap, Server, Shield, Waypoints, Workflow, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Boxes, ChevronRight, CircleUserRound, Clock3, Hexagon, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, PlugZap, Server, Shield, Waypoints, Workflow, type LucideIcon } from "lucide-react";
 import { Pulse } from "./Pulse";
 import { NavIcon } from "./NavIcon";
 import { usePermissions, canSeePipelines } from "../hooks/usePermissions";
-import { canCatalogArea, canAdminArea, canCellsRow } from "../lib/navPermissions";
+import { canCatalogArea, canAdminArea, canCellsRow, canAgentsRow } from "../lib/navPermissions";
 import { useControllers } from "../hooks/useControllers";
 import styles from "./Sidebar.module.css";
 
-interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean; gate?: "pipelines" | "cells" }
+interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean; door?: boolean; gate?: "pipelines" | "cells" | "agents" }
 interface NavGroup { label: string; items: NavItem[] }
 
 const GROUPS: NavGroup[] = [
@@ -17,6 +17,7 @@ const GROUPS: NavGroup[] = [
     { to: "/pipelines", label: "Pipelines", icon: Waypoints, gate: "pipelines" },
     { to: "/controllers", label: "Controllers", icon: Server },
     { to: "/cells", label: "Cells", icon: Hexagon, gate: "cells" },
+    { to: "/agents", label: "Team agents", icon: Bot, gate: "agents" },
     { to: "/plugins", label: "Plugins", icon: PlugZap },
     { to: "/clusters", label: "Clusters", icon: Network },
     { to: "/activity", label: "Activity", icon: Activity },
@@ -37,6 +38,7 @@ function isItemVisible(item: NavItem, permissions: ReturnType<typeof usePermissi
   if (item.gate === "pipelines") return canSeePipelines(permissions);
   // CellPool is cluster scoped, so the row takes the cluster-wide partition.
   if (item.gate === "cells") return canCellsRow(permissions);
+  if (item.gate === "agents") return canAgentsRow(permissions);
   if (!item.door) return true;
   if (item.to === "/catalog") return canCatalogArea(permissions);
   if (item.to === "/settings") return canAdminArea(permissions);

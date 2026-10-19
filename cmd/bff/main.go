@@ -777,6 +777,9 @@ func main() {
 	mcpSrv := mcp.NewServer(apiDeps)
 	if assistantRT != nil {
 		assistantRT.HostFor = func(c *auth.Claims) loop.ToolHost { return mcp.NewInProcessHost(mcpSrv, c) }
+		assistantRT.HostForOrigin = func(c *auth.Claims, origin string) loop.ToolHost {
+			return mcp.NewInProcessHostWithOrigin(mcpSrv, c, origin)
+		}
 		apiDeps.Assistant = assistantRT
 		go loop.StartSweeper(ctx, assistantRT.Store, time.Minute, logger)
 		logger.Info("assistant enabled", "cluster", cluster)

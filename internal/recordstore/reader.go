@@ -48,6 +48,9 @@ type Reader interface {
 	// longest waiting first.
 	ListJobRunWaits(ctx context.Context, cluster, tenant, jobPath string) ([]RunWait, error)
 
+	// TeamAgentSpend answers the Team agent rollup row of a Team on one UTC day.
+	TeamAgentSpend(ctx context.Context, team string, day time.Time) (TeamAgentSpendRow, error)
+
 	// TenantRetention answers the tenant's record-store windows. A tenant
 	// with no placement row, or no retention key, answers the zero policy.
 	TenantRetention(ctx context.Context, cluster, tenant string) (TenantRetentionPolicy, error)

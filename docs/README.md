@@ -66,6 +66,8 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Agents overview](agents/overview.md)
 - [Connect a client](agents/connecting.md)
 - [Assistant](agents/assistant.md)
+- [Team agents](agents/team-agents.md)
+- [Team agent safety](agents/safety.md)
 - [Identity and auditing](agents/identity.md)
 - [Jenkins controller tools](agents/jenkins-tools.md)
 - [Tool reference](agents/tools.md)

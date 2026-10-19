@@ -163,9 +163,10 @@ func (s *Server) mintRunTicketAuthorized(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
-// mintAssistantTicketAuthorized checks that the caller owns the session, or
-// is an admin, before an "assistant:" ticket mints. Any other caller gets
-// not found, so the answer does not reveal the session.
+// mintAssistantTicketAuthorized checks that the caller may view the session
+// before an "assistant:" ticket mints. An assistant session needs its owner or
+// an admin. A Team agent session needs the tenant read check. Any other
+// caller gets not found, so the answer does not reveal the session.
 func (s *Server) mintAssistantTicketAuthorized(w http.ResponseWriter, r *http.Request, claims *auth.Claims, sessionID string) bool {
 	rt, ok := s.assistantOrDisabled(w)
 	if !ok {
@@ -177,7 +178,7 @@ func (s *Server) mintAssistantTicketAuthorized(w http.ResponseWriter, r *http.Re
 		return false
 	}
 	sess, err := rt.Store.GetSession(r.Context(), id)
-	if err != nil || (sess.Principal != claims.Subject && !s.assistantIsAdmin(claims)) {
+	if err != nil || !s.sessionAllowed(r.Context(), claims, sess, sessionView) {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return false
 	}

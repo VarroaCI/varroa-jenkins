@@ -704,5 +704,7 @@ go test -race -count=1 ./internal/api/...
 make check-client   # if any route/payload shape changed
 ```
 
+- **Team agent routes** (`handlers_teamagents.go`): `GET /pipelines/{team}/agent`, `.../agent/sessions`, `.../agent/capabilities`, `POST .../agent/run`, `GET /agents`, and `PUT /agents/{namespace}/{name}/unattended`. The tenant read or write check decides each `{team}` route; `GET /agents` needs `agentsessions:read`, and the unattended grant needs `teamagents:unattended`. `TeamAgentSource` (the cache in `internal/teamagent/cache`) is nil when the runner is off, and then no Team agent is accepted. The record-store spend row comes from `Reader.TeamAgentSpend`.
+- **Assistant session access** (`assistant_access.go`): every A1 session route calls `sessionFor` or `sessionAllowed`. An assistant session keeps the owner rules. A `team_agent` session follows the tenant table. A team_agent approval runs through `AssistantRuntime.HostForOrigin` with origin `team_agent`, and it does not resume the session.
 - **Run notes** (`handlers_run_notes.go`, `run_notes.go`): `GET`/`POST /runs/{run}/notes` and `GET /pipelines/{team}/jobs/{job}/notes`. Reads go to `deps.RecordStore`. Writes go through `deps.RunNotePoster` to the recorder; nil means 503. A session note reads `deps.Assistant.Store` and copies the newest final answer of a completed session the caller owns. Refusals carry `code` `note_too_long` or `note_session_invalid`.
 
