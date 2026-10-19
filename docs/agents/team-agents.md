@@ -102,10 +102,11 @@ The token needs these permissions on Gitea or Forgejo:
 | Use | Token scope | Repository access |
 |---|---|---|
 | Instructions and repository reads | `read:repository` | Read |
-| `open_issue` | `write:repository` and `write:issue` | Write |
+| `open_issue` | `read:repository` and `write:issue` | Read |
 
-A token without `write:issue` answers `forge_write_denied`. On GitHub, give the
-token read access to contents and write access to issues.
+`open_issue` needs no push access. The forge decides the issue write. A token
+without `write:issue` answers `forge_write_denied`. On GitHub, give the token
+read access to contents and write access to issues.
 
 The instructions source must follow the default branch. Set no
 `spec.revision` on the `CatalogSource`. A source that pins `revision: main`
