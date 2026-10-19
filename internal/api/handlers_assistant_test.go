@@ -98,7 +98,7 @@ func newAssistantFixture(t *testing.T, turns ...[]provider.Delta) *assistantFixt
 	rt := &AssistantRuntime{
 		Config:   cfg,
 		Registry: reg,
-		Store:    newNotifyingStore(mem, nil, logger),
+		Store:    store.WithNotify(mem, nil, logger),
 		HostFor:  func(*auth.Claims) loop.ToolHost { return assistantTestHost{} },
 		Owner:    "owner-test",
 		Cluster:  "core",

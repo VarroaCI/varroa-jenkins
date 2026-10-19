@@ -281,6 +281,7 @@ components:
           - jenkins
           - mcp
           - assistant
+          - team_agent
           type: string
         timestamp:
           format: date-time
@@ -4424,6 +4425,7 @@ components:
           - jenkins
           - mcp
           - assistant
+          - team_agent
           type: string
         timestamp:
           format: date-time
@@ -12430,6 +12432,7 @@ paths:
           - jenkins
           - mcp
           - assistant
+          - team_agent
           type: string
       - in: query
         name: severity

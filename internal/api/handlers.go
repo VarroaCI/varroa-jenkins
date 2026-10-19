@@ -2622,7 +2622,7 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 		}
 		return slices.Contains(allowed, value)
 	}
-	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant") || !valid(q.Severity, "info", "warning", "error") {
+	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant", "team_agent") || !valid(q.Severity, "info", "warning", "error") {
 		return q, fmt.Errorf("invalid activity filter")
 	}
 	return q, nil

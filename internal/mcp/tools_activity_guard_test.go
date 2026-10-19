@@ -16,9 +16,11 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/controller"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore/blob"
+	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
 	"github.com/varroaci/varroa-jenkins/internal/transport"
 )
 
@@ -207,7 +209,71 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 		BlobStore: guardBlobStore{},
 		// release_fleet_lock asks the recorder through this seam.
 		FleetLockReleaser: guardFleetLockReleaser{},
+		// The Team agent tools answer through these seams.
+		TeamAgents:      guardTeamAgents{},
+		ForgeRelay:      guardForge{},
+		WebhookEnqueuer: guardWebhooks{},
+		RunNotePoster:   guardNotePoster{},
+		CoreCluster:     "core",
 	}
+}
+
+// guardTeamAgents holds one accepted TeamAgent for team obj in namespace
+// team-a, with every output on.
+type guardTeamAgents struct{}
+
+func (guardTeamAgents) teamAgent() v1alpha1.TeamAgent {
+	var ta v1alpha1.TeamAgent
+	ta.Name = "triage"
+	ta.Namespace = "team-a"
+	ta.UID = "uid-triage"
+	ta.Spec.TeamRef.Name = "obj"
+	ta.Spec.Outputs.Notes = true
+	ta.Spec.Outputs.Webhook = true
+	ta.Spec.Outputs.Issues = &v1alpha1.TeamAgentIssueOutput{Repo: "https://git.example.org/x/y", Forge: "gitea"}
+	return ta
+}
+
+func (g guardTeamAgents) List() []v1alpha1.TeamAgent { return []v1alpha1.TeamAgent{g.teamAgent()} }
+
+func (g guardTeamAgents) ByUID(uid string) (*v1alpha1.TeamAgent, bool) {
+	ta := g.teamAgent()
+	return &ta, string(ta.UID) == uid
+}
+
+func (g guardTeamAgents) AcceptInput() accept.Input {
+	return accept.Input{TeamAgents: g.List(), ReleaseNamespace: "team-a"}
+}
+
+func (guardTeamAgents) CatalogSource(string, string) (*v1alpha1.CatalogSource, bool) {
+	return nil, false
+}
+
+func (guardTeamAgents) Synced() bool { return true }
+
+// guardForge answers every forge call with success.
+type guardForge struct{}
+
+func (guardForge) Read(context.Context, string, forgeapi.ReadRequest) (forgeapi.ReadReply, error) {
+	return forgeapi.ReadReply{}, nil
+}
+
+func (guardForge) Issue(context.Context, string, forgeapi.IssueRequest) (forgeapi.IssueReply, error) {
+	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 7, URL: "https://git.example.org/x/y/issues/7"}, nil
+}
+
+// guardWebhooks answers every enqueue with success.
+type guardWebhooks struct{}
+
+func (guardWebhooks) Enqueue(context.Context, recordstore.TeamAgentWebhookRequest) (recordstore.TeamAgentWebhookResponse, error) {
+	return recordstore.TeamAgentWebhookResponse{OK: true, DeliveryID: "delivery-1"}, nil
+}
+
+// guardNotePoster answers every note post as a new note.
+type guardNotePoster struct{}
+
+func (guardNotePoster) PostRunNote(context.Context, recordstore.RunNotePostRequest) (recordstore.RunNotePostResponse, error) {
+	return recordstore.RunNotePostResponse{Created: true, Note: &recordstore.RunNote{}}, nil
 }
 
 // seedGuardObjects seeds the target object for every store-based update tool,
@@ -335,6 +401,10 @@ func guardArgsFor(name string) map[string]interface{} {
 		"release_fleet_lock": {"name": "team-a/obj/deploy", "runId": obj, "reason": "the old pod is gone"},
 		// CellPools (cluster-scoped, direct store)
 		"update_cell_pool": {"name": obj, "warm": 2},
+		// Team agent writes (the fakes in guardEmitDeps answer them)
+		"post_note":    {"team": "obj", "job": "build", "body": "the build failed at deploy"},
+		"open_issue":   {"team": "obj", "title": "deploy failed", "body": "see the run"},
+		"send_webhook": {"team": "obj", "body": map[string]any{"status": "failed"}},
 	}
 	args, ok := byName[name]
 	if !ok {

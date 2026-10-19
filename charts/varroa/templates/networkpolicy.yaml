@@ -343,6 +343,16 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.bff.service.port }}
+{{- if .Values.agentRunner.enabled }}
+    # Team agent sessions call the BFF MCP endpoint on 8080.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-agent
+      ports:
+        - protocol: TCP
+          port: {{ .Values.bff.service.port }}
+{{- end }}
 {{- if include "varroa.localIssuerInUse" . }}
     # Local issuer: the Jenkins JVM of each controller pod fetches the BFF's
     # OIDC discovery document and JWKS to verify a BFF-issued session.
@@ -553,6 +563,15 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: varroa-bff
+      ports:
+        - protocol: TCP
+          port: 4222
+{{- end }}
+{{- if .Values.agentRunner.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-agent
       ports:
         - protocol: TCP
           port: 4222
@@ -782,6 +801,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: varroa-gateway
+{{- if .Values.agentRunner.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: varroa-agent
+{{- end }}
         - podSelector:
             matchLabels:
               cnpg.io/cluster: varroa-recordstore

@@ -2896,7 +2896,7 @@ ActivityEvent:
       type: string
     source:
       type: string
-      enum: [mite, operator, user, api, jenkins, mcp, assistant]
+      enum: [mite, operator, user, api, jenkins, mcp, assistant, team_agent]
     severity:
       type: string
       enum: [info, warning, error]

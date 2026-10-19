@@ -67,6 +67,22 @@ connections:
     control: the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts
     disable: "Yes. Create no tenant credential whose varroa.dev/allowed-hosts lists a non-GitHub forge host."
 
+  - component: operator
+    destination: Issue repository named by a TeamAgent (spec.outputs.issues.repo)
+    hosts: []
+    purpose: Open a GitHub or Gitea issue for a Team agent session.
+    protocol: HTTPS 443
+    control: TeamAgent spec.outputs.issues.repo and spec.outputs.issues.forge
+    disable: "Yes. Leave spec.outputs.issues unset on every TeamAgent."
+
+  - component: operator
+    destination: Repository of a CatalogSource (spec.repoURL)
+    hosts: []
+    purpose: Read the Team agent instructions file, and any repository that a session names with read_repo_file.
+    protocol: HTTPS 443
+    control: CatalogSource spec.repoURL and the repo argument of read_repo_file
+    disable: "Yes. Leave TeamAgent spec.instructions unset and keep agentRunner.enabled false."
+
   # Gateway
 
   - component: gateway
@@ -170,6 +186,24 @@ connections:
     protocol: HTTPS 443
     control: Team spec.pipelines.notifications.webhook and networkPolicy.recorderWebhookEgress
     disable: "Yes. Leave the webhook unset. The webhook egress rule is off by default."
+
+  # Team agent runner
+
+  - component: agentrunner
+    destination: Configured assistant provider base URLs
+    hosts: []
+    purpose: Send Team agent session requests to the configured model provider.
+    protocol: HTTPS 443
+    control: assistant.providers[].baseURL
+    disable: "Yes. Keep agentRunner.enabled false."
+
+  - component: agentrunner
+    destination: api.anthropic.com
+    hosts: [api.anthropic.com]
+    purpose: "Send Team agent session requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty."
+    protocol: HTTPS 443
+    control: "assistant.providers[].baseURL (the adapter default when it is empty)"
+    disable: "Yes. Keep agentRunner.enabled false."
 
   # Mite
 

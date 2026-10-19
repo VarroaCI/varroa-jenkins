@@ -6,7 +6,7 @@
 #   - The recorder holds the JetStream operations for varroa_activity: stream
 #     create/update/info, consumer create/durable-create/info/msg-next, and
 #     the stream's ack subject.
-#   - The recorder holds no core activity.> publish or subscribe grant.
+#   - The recorder publishes core activity.> (TR3) and holds no activity.> subscribe grant.
 #   - The bff holds no JetStream operation on varroa_activity.
 #   - The bff keeps its core activity.> publish and subscribe grant.
 # =============================================================================
@@ -42,6 +42,7 @@ RENDER=$(helm template "$ROOT" $COMMON --set recordStore.enabled=true -s templat
 }
 
 recorder_block=$(user_block recorder "$RENDER")
+recorder_subscribe=$(awk '/subscribe: \[/{capture=1} capture{print} capture && /\]/{exit}' <<<"$recorder_block")
 bff_block=$(user_block bff "$RENDER")
 
 echo ""
@@ -60,14 +61,18 @@ for subj in \
 done
 
 echo ""
-echo "--- recorder: no core activity.> grant ---"
+echo "--- recorder: publishes activity.> (TR3), never subscribes to it ---"
 # The quoted literal distinguishes the core "activity.>" subject from the
 # recorder's legitimate "varroa_activity" JetStream subjects, which end in
-# the same four characters.
-if grep -q '"activity\.>"' <<<"$recorder_block"; then
-  check "recorder does NOT hold activity.>" 1
+# the same four characters. The recorder publishes the audit producers'
+# subject; it reads nothing from it.
+recorder_publish=$(awk '/publish: \[/{capture=1} capture{print} capture && /\]/{exit}' <<<"$recorder_block")
+grep -q '"activity\.>"' <<<"$recorder_publish"
+check "recorder publishes activity.>" $?
+if grep -q '"activity\.>"' <<<"$recorder_subscribe"; then
+  check "recorder does NOT subscribe to activity.>" 1
 else
-  check "recorder does NOT hold activity.>" 0
+  check "recorder does NOT subscribe to activity.>" 0
 fi
 
 echo ""

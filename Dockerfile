@@ -50,6 +50,7 @@ COPY --from=binaries /build/bin/varroa-bff /app/varroa-bff
 COPY --from=binaries /build/bin/varroa-operator /app/varroa-operator
 COPY --from=binaries /build/bin/varroa-updatecenter /app/varroa-updatecenter
 COPY --from=binaries /build/bin/varroa-recorder /app/varroa-recorder
+COPY --from=binaries /build/bin/varroa-agent /app/varroa-agent
 COPY --from=binaries /build/bin/varroactl /app/varroactl
 
 # Bake the auth plugin HPI into the image for init-container delivery.

@@ -14,7 +14,7 @@ func NewAssistantRuntime(cfg provider.Config, reg *provider.Registry, st store.S
 	return &AssistantRuntime{
 		Config:   cfg,
 		Registry: reg,
-		Store:    newNotifyingStore(st, publish, logger),
+		Store:    store.WithNotify(st, publish, logger),
 		Sealer:   sealer,
 		Owner:    owner,
 		Cluster:  cluster,

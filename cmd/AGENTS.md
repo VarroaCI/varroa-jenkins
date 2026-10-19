@@ -124,6 +124,7 @@ stating what it is/is not responsible for:
   `update-center.actual.json` + plugin `.hpi` blobs from an `internal/oci`
   BlobStore; local storage mode is single-replica (PVC), oci mode is stateless.
   Built by `make build` into the same product image as the other backends.
+- **`agentrunner/`** (`bin/varroa-agent`) — the Team agent runner. It consumes `varroa_activity`, starts Team agent sessions, and runs them through the BFF MCP endpoint. HTTP on `:8080` with `/healthz`, `/readyz`, `/metrics`. It flags `-bus-url`, `-bus-ca-file`, `-bus-pass-file`, and `-port`; the rest comes from the environment (`internal/teamagent/config`). It connects as the NATS user `agentrunner` and answers no request.
 - **`recorder/`** (`bin/varroa-recorder`) — the build-record store
   recorder; HTTP on `:8080` with only `/healthz`, `/readyz`, `/metrics`.
   The only writer of `internal/recordstore`'s Postgres tables, the only

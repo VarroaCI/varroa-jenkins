@@ -122,6 +122,17 @@ type Dependencies struct {
 	// the record store or the bus is off, so the note write answers 503.
 	RunNotePoster RunNotePoster
 
+	// TeamAgents is the cached view of the TeamAgent, Team, and CatalogSource
+	// objects. Nil turns the Team agent tools off.
+	TeamAgents TeamAgentSource
+	// ForgeRelay sends forge reads and issues to the core operator. Nil turns
+	// the forge-backed tools off.
+	ForgeRelay TeamAgentForge
+	// WebhookEnqueuer queues a signed tenant webhook through the recorder.
+	WebhookEnqueuer WebhookEnqueuer
+	// CoreCluster names the core cluster, which answers every forge request.
+	CoreCluster string
+
 	// RecordStore reads build records the recorder wrote. Nil when
 	// VARROA_RECORDSTORE_DSN is unset, so a handler on this surface must
 	// check for nil before use.

@@ -96,7 +96,7 @@ func (s *Server) startAssistantSession(ctx context.Context, rt *AssistantRuntime
 	if err != nil {
 		return agent.Session{}, err
 	}
-	if running >= assistantMaxRunning {
+	if running >= agent.MaxRunningSessions {
 		return agent.Session{}, failWith(http.StatusTooManyRequests, assistantErrBusy, "too many sessions are running")
 	}
 

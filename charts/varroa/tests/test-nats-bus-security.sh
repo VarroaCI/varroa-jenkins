@@ -267,11 +267,11 @@ else
   check "recorder does NOT subscribe to ledger actions" 0
 fi
 
-# The recorder holds no core activity.> grant, no KV grant, no mite grant, and
-# no wake grant. The quoted form distinguishes the core "activity.>" subject
-# from the recorder's legitimate "varroa_activity" JetStream subjects, which
-# end in the same four characters.
-for forbidden in '"activity.>"' '\$KV.' 'mite.' 'wake.>'; do
+# The recorder holds no KV grant, no mite grant, and no wake grant. Its
+# publish of the core "activity.>" subject (TR3) is checked in
+# test-activity-stream-acl.sh. The quoted form distinguishes the core subject
+# from the recorder's "varroa_activity" JetStream subjects.
+for forbidden in '\$KV.' 'mite.' 'wake.>'; do
   if grep -q "$forbidden" <<<"$recorder_block"; then
     check "recorder does NOT hold $forbidden" 1
   else

@@ -20,6 +20,8 @@ A build check fails when a source adds a host that this page does not list.
 | OCI registries of catalog sources and bundle inputs | Pull catalog and bundle artifacts. | HTTPS 443 | CatalogSource.spec.ociRef and ComposedBundle ociSource inputs | Yes. Do not declare the source or the input. |
 | api.github.com | Read a proposed repository and open a pull request on GitHub. | HTTPS 443 | the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts | Yes. Create no tenant credential that lists github.com. |
 | Forge API of a proposed repository | Read a proposed repository and open a pull request on a Gitea-API forge. | HTTPS 443 | the repo field of POST /pipelines/{team}/propose and of the open_pull_request tool, and a tenant credential's varroa.dev/allowed-hosts | Yes. Create no tenant credential whose varroa.dev/allowed-hosts lists a non-GitHub forge host. |
+| Issue repository named by a TeamAgent (spec.outputs.issues.repo) | Open a GitHub or Gitea issue for a Team agent session. | HTTPS 443 | TeamAgent spec.outputs.issues.repo and spec.outputs.issues.forge | Yes. Leave spec.outputs.issues unset on every TeamAgent. |
+| Repository of a CatalogSource (spec.repoURL) | Read the Team agent instructions file, and any repository that a session names with read_repo_file. | HTTPS 443 | CatalogSource spec.repoURL and the repo argument of read_repo_file | Yes. Leave TeamAgent spec.instructions unset and keep agentRunner.enabled false. |
 
 ## Gateway
 
@@ -52,6 +54,13 @@ A build check fails when a source adds a host that this page does not list.
 | S3-compatible blob store (recordStore.blobs.s3.url) | Store build logs and artifacts in object storage. | HTTPS 443 | recordStore.blobs.mode and s3.url | Yes. Set recordStore.blobs.mode to postgres. In s3 mode, networkPolicy.recordStoreBlobEgress.cidrs must name the store. |
 | STS endpoint (recordStore.blobs.s3.artifactSTS.endpoint) | Issue a scoped artifact credential for each cell. | HTTPS 443 | recordStore.blobs.s3.artifactSTS.endpoint | Yes. Set artifactSTS.enabled to false. |
 | Completion webhook URL of a Team | Post a signed message when a tenant run completes. | HTTPS 443 | Team spec.pipelines.notifications.webhook and networkPolicy.recorderWebhookEgress | Yes. Leave the webhook unset. The webhook egress rule is off by default. |
+
+## Team agent runner
+
+| Destination | Purpose | Protocol | Control | Can a deny-all cluster disable it? |
+| --- | --- | --- | --- | --- |
+| Configured assistant provider base URLs | Send Team agent session requests to the configured model provider. | HTTPS 443 | assistant.providers[].baseURL | Yes. Keep agentRunner.enabled false. |
+| api.anthropic.com | Send Team agent session requests to the Anthropic Messages API when a provider of kind anthropic leaves baseURL empty. | HTTPS 443 | assistant.providers[].baseURL (the adapter default when it is empty) | Yes. Keep agentRunner.enabled false. |
 
 ## Mite
 

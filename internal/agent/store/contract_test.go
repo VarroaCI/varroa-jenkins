@@ -46,6 +46,8 @@ func runContract(t *testing.T, f factory) {
 		{"SettingsUserDefaults", testSettingsUserDefaults},
 		{"SettingsPerFieldWrite", testSettingsPerFieldWrite},
 		{"TwoAdminsTwoTenants", testTwoAdminsTwoTenants},
+		{"SetInstructionsSHA", testSetInstructionsSHA},
+		{"PutTeamAgentUnattended", testPutTeamAgentUnattended},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -144,6 +144,13 @@ const (
 	TriggerManual = "manual"
 
 	ActivitySourceAssistant = "assistant"
+	// ActivitySourceTeamAgent stamps activity written by a Team agent session.
+	ActivitySourceTeamAgent = "team_agent"
+
+	// MaxRunningSessions caps the sessions one principal runs at once. The
+	// create path counts running rows against it; a race between two creates
+	// can exceed it by one, which the create path accepts.
+	MaxRunningSessions = 3
 
 	ScopeGlobal       = "global"
 	UserScopePrefix   = "user:"
@@ -350,8 +357,22 @@ type Settings struct {
 	Model       string
 	DataSharing DataSharing
 
+	// TeamAgentUnattended maps a TeamAgent's namespace/name to its grant.
+	// Only the global scope carries it.
+	TeamAgentUnattended map[string]UnattendedGrant
+
 	UpdatedAt time.Time
 	UpdatedBy string
+}
+
+// UnattendedGrant names the write tools that one TeamAgent may run without an
+// approval. UID pins the grant to one object, so a recreated object with the
+// same name gets no grant.
+type UnattendedGrant struct {
+	UID       string    `json:"uid"`
+	Tools     []string  `json:"tools"`
+	GrantedBy string    `json:"granted_by"`
+	GrantedAt time.Time `json:"granted_at"`
 }
 
 // NewID returns a new UUIDv7 for a session, approval, or ticket.
