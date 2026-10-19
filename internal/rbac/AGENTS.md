@@ -76,6 +76,13 @@ with what this package generates.
     Only the current claim values count; `varroa.dev/oidc-former-identifiers` is for deprovisioning only.
     The operator builds its resolver with a Team informer and a User informer, so the
     Team-membership path reaches the member role.
+    Tenant-member copies (`federatedTenantMemberSources`) reach the member role of their
+    tenant. A copy is a `JenkinsRoleBinding` labelled `varroa.dev/federated-tenant-member`
+    and annotated `varroa.dev/federated-tenant`, with an optional `varroa.dev/federated-tenant-jobs`
+    JSON list. A copy with an unreadable job list grants nothing. The generic
+    `collectFromJenkinsRoleBindings` skips every copy. The narrowed role name uses the copy name.
+    `DesiredFederatedCRs` (`federation.go`) writes the copies. Its `expandSubjects` argument
+    comes from `TenantMemberSubjectExpander`.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
     `scopeSuffix`) implements namespace/controller-name/label scoping shared
     by both binding kinds.

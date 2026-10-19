@@ -605,3 +605,108 @@ func (f *fakeConfigBrood) DeleteVersionProfile(context.Context, string, string) 
 func (f *fakeConfigBrood) ViewVersionProfiles(context.Context, string) ([]bus.VersionProfileView, error) {
 	panic("not implemented")
 }
+
+// addPipelinesWriteRole adds a VarroaRole that grants pipelines write to the
+// reconciler's role snapshot.
+func addPipelinesWriteRole(r *RBACFederationReconciler) {
+	r.roles.(*fakeFederationStore).items["pipelines-writer"] = &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "pipelines-writer"},
+		Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+			{Resources: []string{"pipelines"}, Verbs: []string{"write"}},
+		}},
+	}
+}
+
+// tenantWriteBindingFixture returns a tenant-scoped binding with pipelines write.
+func tenantWriteBindingFixture(jobs []string) *v1alpha1.VarroaRoleBinding {
+	return &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "tenant-write"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "pipelines-writer",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "team-a", Jobs: jobs}},
+			},
+		},
+	}
+}
+
+// addTenantWriteBinding adds the tenant-scoped binding to the reconciler's
+// binding snapshot only.
+func addTenantWriteBinding(r *RBACFederationReconciler, jobs []string) {
+	r.bindings.(*fakeFederationStore).items["tenant-write"] = tenantWriteBindingFixture(jobs)
+}
+
+func TestRBACFederationReconcilerWritesAndDeletesTenantChildren(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	addPipelinesWriteRole(reconciler)
+	addTenantWriteBinding(reconciler, []string{"a/*"})
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("first pass warnings = %v", warnings)
+	}
+	first := reconciler.desiredBindingsForTest()
+	var firstTenant []string
+	for _, b := range first {
+		if b.Labels[rbac.LabelFederatedTenantMember] == "true" {
+			firstTenant = append(firstTenant, b.Name)
+		}
+	}
+	if len(firstTenant) != 1 || brood.bindings["dev-cluster"][firstTenant[0]] == nil {
+		t.Fatalf("first pass did not write one tenant copy: %v", brood.bindings["dev-cluster"])
+	}
+
+	// A change to the job globs gives the copy a new name. The pass writes
+	// the new copy and deletes the old one.
+	source := reconciler.bindings.(*fakeFederationStore).items["tenant-write"].(*v1alpha1.VarroaRoleBinding)
+	source.Spec.Scope.Tenants[0].Jobs = []string{"a/*", "b/*"}
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("second pass warnings = %v", warnings)
+	}
+	if len(brood.bindings["dev-cluster"]) != 2 {
+		t.Fatalf("hive bindings = %v, want the team-admin copy and one tenant copy", brood.bindings["dev-cluster"])
+	}
+	if brood.bindings["dev-cluster"][firstTenant[0]] != nil {
+		t.Fatalf("the earlier tenant copy %s was not deleted", firstTenant[0])
+	}
+
+	// Removing the grant deletes the copy.
+	delete(reconciler.bindings.(*fakeFederationStore).items, "tenant-write")
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("third pass warnings = %v", warnings)
+	}
+	if len(brood.bindings["dev-cluster"]) != 1 {
+		t.Fatalf("hive bindings = %v, want only the team-admin copy", brood.bindings["dev-cluster"])
+	}
+}
+
+func TestBindingDriftedComparesTenantAnnotations(t *testing.T) {
+	base := func() *v1alpha1.JenkinsRoleBinding {
+		return &v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "varroa-fed-tenant-x",
+				Labels:      map[string]string{rbac.LabelFederatedFrom: "pipelines-writer", rbac.LabelFederatedTenantMember: "true"},
+				Annotations: map[string]string{rbac.AnnotationFederatedBindings: "tw", rbac.AnnotationFederatedTenant: "team-a"},
+			},
+			Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: "varroa:tenant-member:team-a", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}},
+		}
+	}
+	desired := base()
+	if bindingDrifted(base(), desired) {
+		t.Fatalf("identical copies drift")
+	}
+	moved := base()
+	moved.Annotations[rbac.AnnotationFederatedTenant] = "team-b"
+	if !bindingDrifted(moved, desired) {
+		t.Fatalf("a changed tenant annotation does not drift")
+	}
+	narrowed := base()
+	narrowed.Annotations[rbac.AnnotationFederatedTenantJobs] = `["a/*"]`
+	if !bindingDrifted(narrowed, desired) {
+		t.Fatalf("a changed jobs annotation does not drift")
+	}
+	empty := base()
+	empty.Annotations[rbac.AnnotationFederatedTenantJobs] = ""
+	if !bindingDrifted(empty, desired) {
+		t.Fatalf("an empty jobs annotation matches an absent one (absent is the whole folder)")
+	}
+}

@@ -3065,8 +3065,8 @@ BindingFederationStatus:
     reason:
       type: string
       description: >-
-        CamelCase code for the state. Skipped codes are NoSubjects, TenantScope,
-        RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
+        CamelCase code for the state. Skipped codes are NoSubjects, NoTenantWrite,
+        NoTenantJobs, RoleNotFound, NoJenkinsProjection, JenkinsRoleNotFound,
         NonGlobalJenkinsRole, and ReservedRole. Failed codes are
         HiveUnavailable, JenkinsRoleCollision, JenkinsRoleWriteFailed,
         JenkinsRoleBindingCollision, JenkinsRoleBindingWriteFailed,

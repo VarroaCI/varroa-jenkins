@@ -257,7 +257,12 @@ federation, activity persistence, and SSE fanout.
   `cluster <c>: delete orphaned JenkinsRoleBinding <name>`. The stale fault
   comes after the binding write faults and before `Federated`, and it also
   replaces a projector skip on that hive. `bindingDrifted` compares the
-  owner annotation key, so an owner change updates the child.
+  owner and tenant annotation keys, so an owner or tenant change updates the child.
+  A tenant-scoped binding with pipelines `write` projects one `varroa-fed-tenant-*`
+  copy for each tenant. `federationEntry` reports the first fault of those copies in
+  sorted name order. A `SetTenantMemberSubjectExpander` hook expands the User subjects
+  of each copy from the User directory on every pass. The BFF registers the User informer
+  with the federation handler, so a User change runs a pass.
   `writeStatuses` builds one entry per visited hive and
   patches the status subresource through `crdstore.PatchStatus`. It patches
   only a status that differs from the stored one, and `lastTransitionTime`

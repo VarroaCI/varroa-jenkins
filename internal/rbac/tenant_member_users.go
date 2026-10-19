@@ -94,3 +94,14 @@ func expandMemberUserSubjects(subjects []v1alpha1.SubjectRef, aliases map[string
 	}
 	return out
 }
+
+// TenantMemberSubjectExpander returns a function that expands the User
+// subjects of a grant the same way the member role does. The aliases are
+// read once, when the function is returned. The federation projection uses
+// it, so a copy carries the principal names of its users.
+func (r *Resolver) TenantMemberSubjectExpander() func([]v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
+	aliases := r.userPrincipalAliases()
+	return func(subjects []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
+		return expandMemberUserSubjects(subjects, aliases)
+	}
+}

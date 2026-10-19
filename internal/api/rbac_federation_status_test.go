@@ -102,7 +102,7 @@ func TestFederationStatusRecordsSkipOnEveryHive(t *testing.T) {
 	}})
 
 	r.Reconcile(context.Background())
-	for name, reason := range map[string]string{"team-empty": rbac.SkipNoSubjects, "tenant": rbac.SkipTenantScope} {
+	for name, reason := range map[string]string{"team-empty": rbac.SkipNoSubjects, "tenant": rbac.SkipNoTenantWrite} {
 		status := storedStatus(t, store, name)
 		if len(status.Federation) != 2 {
 			t.Fatalf("%s federation = %#v, want one entry per hive", name, status.Federation)
@@ -369,7 +369,7 @@ func TestFederationStatusPairsOutcomeWithSnapshotGeneration(t *testing.T) {
 
 	r.Reconcile(context.Background())
 	status = storedStatus(t, store, "bind-admin")
-	if status.ObservedGeneration != 2 || status.Federation[0].Reason != rbac.SkipTenantScope {
+	if status.ObservedGeneration != 2 || status.Federation[0].Reason != rbac.SkipNoTenantWrite {
 		t.Fatalf("status = %#v, want generation 2 skipped TenantScope", status)
 	}
 }
@@ -463,7 +463,7 @@ func TestFederationStatusStaleDeleteFallsBackToRoleLabel(t *testing.T) {
 	}})
 
 	r.Reconcile(context.Background())
-	if e := entryFor(t, storedStatus(t, store, "tenant"), "dev-cluster"); e.Reason != rbac.SkipTenantScope {
+	if e := entryFor(t, storedStatus(t, store, "tenant"), "dev-cluster"); e.Reason != rbac.SkipNoTenantWrite {
 		t.Fatalf("tenant entry = %#v, want skipped TenantScope: a skipped binding is no fallback owner", e)
 	}
 	if got := brood.bindings["dev-cluster"][desired.Name].Annotations[rbac.AnnotationFederatedBindings]; got != "bind-admin" {
@@ -554,5 +554,35 @@ func TestFederationStatusStaleDeleteReplacesSkip(t *testing.T) {
 	}
 	if e := entryFor(t, status, "edge"); e.State != v1alpha1.BindingSkipped || e.Reason != rbac.SkipNoSubjects {
 		t.Fatalf("edge entry = %#v, want skipped NoSubjects", e)
+	}
+}
+
+func TestFederationStatusTenantBindingFederated(t *testing.T) {
+	r, _, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	addPipelinesWriteRole(r)
+	addSourceBinding(t, r, store, tenantWriteBindingFixture([]string{"a/*"}))
+	r.Reconcile(context.Background())
+
+	status := storedStatus(t, store, "tenant-write")
+	e := entryFor(t, status, "dev-cluster")
+	if e.State != v1alpha1.BindingFederated || !strings.Contains(e.Message, "varroa-fed-tenant-") {
+		t.Fatalf("entry = %#v, want federated with a tenant copy name", e)
+	}
+}
+
+func TestFederationStatusTenantChildFaultReported(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	addPipelinesWriteRole(r)
+	addSourceBinding(t, r, store, tenantWriteBindingFixture([]string{"a/*"}))
+	for _, b := range r.desiredBindingsForTest() {
+		if b.Labels[rbac.LabelFederatedTenantMember] == "true" {
+			brood.failBindingCreate = map[string]bool{b.Name: true}
+		}
+	}
+
+	r.Reconcile(context.Background())
+	e := entryFor(t, storedStatus(t, store, "tenant-write"), "dev-cluster")
+	if e.State != v1alpha1.BindingFailed || e.Reason != "JenkinsRoleBindingWriteFailed" {
+		t.Fatalf("entry = %#v, want failed JenkinsRoleBindingWriteFailed", e)
 	}
 }

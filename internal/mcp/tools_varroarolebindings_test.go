@@ -107,7 +107,7 @@ func TestSummarizeVarroaRoleBinding_CountsHivesByState(t *testing.T) {
 			{Cluster: "a", State: v1alpha1.BindingFederated, LastTransitionTime: now},
 			{Cluster: "b", State: v1alpha1.BindingFederated, LastTransitionTime: now},
 			{Cluster: "c", State: v1alpha1.BindingFailed, Reason: "HiveUnavailable", LastTransitionTime: now},
-			{Cluster: "d", State: v1alpha1.BindingSkipped, Reason: "TenantScope", LastTransitionTime: now},
+			{Cluster: "d", State: v1alpha1.BindingSkipped, Reason: "NoTenantWrite", LastTransitionTime: now},
 		}},
 	})
 	if got.HivesFederated != 2 || got.HivesFailed != 1 || got.HivesSkipped != 1 {

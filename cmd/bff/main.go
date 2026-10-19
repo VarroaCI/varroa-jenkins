@@ -627,7 +627,8 @@ func main() {
 		cluster,
 		logger,
 	)
-	registerRBACFederationHandlers(roleInformer, roleBindingInformer, rbacFederation, logger)
+	rbacFederation.SetTenantMemberSubjectExpander(rbacResolver.TenantMemberSubjectExpander)
+	registerRBACFederationHandlers(roleInformer, roleBindingInformer, userInformer, rbacFederation, logger)
 
 	// Start informers and wait for cache sync.
 	go roleInformer.Run(ctx.Done())
@@ -1200,7 +1201,7 @@ func unindexRunnerToken(idx *api.RunnerTokenIndex, obj interface{}) {
 	idx.Remove(runner.Name)
 }
 
-func registerRBACFederationHandlers(roleInformer, bindingInformer cache.SharedIndexInformer, reconciler *api.RBACFederationReconciler, logger *slog.Logger) {
+func registerRBACFederationHandlers(roleInformer, bindingInformer, userInformer cache.SharedIndexInformer, reconciler *api.RBACFederationReconciler, logger *slog.Logger) {
 	handler := cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) { reconciler.Enqueue() },
 		UpdateFunc: func(oldObj, newObj interface{}) { reconciler.Enqueue() },
@@ -1211,6 +1212,10 @@ func registerRBACFederationHandlers(roleInformer, bindingInformer cache.SharedIn
 	}
 	if _, err := bindingInformer.AddEventHandler(handler); err != nil {
 		logger.Warn("failed to register VarroaRoleBinding federation handler", "error", err)
+	}
+	// A User change can move the Jenkins principal of a tenant member copy.
+	if _, err := userInformer.AddEventHandler(handler); err != nil {
+		logger.Warn("failed to register User federation handler", "error", err)
 	}
 }
 

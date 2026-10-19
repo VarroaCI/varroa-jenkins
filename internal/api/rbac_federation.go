@@ -44,6 +44,16 @@ type RBACFederationReconciler struct {
 	resyncInterval   time.Duration
 	warningsMu       sync.Mutex
 	lastWarnings     map[string]struct{}
+	// subjectExpander returns the subject expansion of a tenant-member copy.
+	// It is read once per pass, so the User aliases follow the User objects.
+	subjectExpander func() func([]v1alpha1.SubjectRef) []v1alpha1.SubjectRef
+}
+
+// SetTenantMemberSubjectExpander sets the function that expands the User
+// subjects of a tenant-member copy. The expander is read on each pass. A nil
+// expander copies the subjects unchanged.
+func (r *RBACFederationReconciler) SetTenantMemberSubjectExpander(f func() func([]v1alpha1.SubjectRef) []v1alpha1.SubjectRef) {
+	r.subjectExpander = f
 }
 
 // NewRBACFederationReconciler builds a reconciler over the core's VarroaRole,
@@ -188,6 +198,10 @@ func (r *RBACFederationReconciler) sourceRoles() map[string]*v1alpha1.VarroaRole
 }
 
 func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBinding, varroaRoles map[string]*v1alpha1.VarroaRole) ([]*v1alpha1.JenkinsRole, []*v1alpha1.JenkinsRoleBinding, []string, map[string]rbac.BindingOutcome) {
+	var expand func([]v1alpha1.SubjectRef) []v1alpha1.SubjectRef
+	if r.subjectExpander != nil {
+		expand = r.subjectExpander()
+	}
 	return rbac.DesiredFederatedCRs(bindings, func(name string) (*v1alpha1.VarroaRole, bool) {
 		role, ok := varroaRoles[name]
 		return role, ok
@@ -198,7 +212,7 @@ func (r *RBACFederationReconciler) desired(bindings []*v1alpha1.VarroaRoleBindin
 		}
 		role, ok := obj.(*v1alpha1.JenkinsRole)
 		return role, ok
-	})
+	}, expand)
 }
 
 // reconcileCluster converges one hive. Only a list failure stops the pass for
@@ -473,12 +487,23 @@ func roleDrifted(actual, desired *v1alpha1.JenkinsRole) bool {
 		!reflect.DeepEqual(actual.Spec, desired.Spec)
 }
 
-// bindingDrifted compares only the owner annotation key, so an annotation that
-// another writer adds does not cause an update on each pass.
+// bindingDrifted compares only the owner and tenant annotation keys, so an
+// annotation that another writer adds does not cause an update on each pass.
 func bindingDrifted(actual, desired *v1alpha1.JenkinsRoleBinding) bool {
 	return !reflect.DeepEqual(actual.Labels, desired.Labels) ||
 		actual.Annotations[rbac.AnnotationFederatedBindings] != desired.Annotations[rbac.AnnotationFederatedBindings] ||
+		actual.Annotations[rbac.AnnotationFederatedTenant] != desired.Annotations[rbac.AnnotationFederatedTenant] ||
+		jobsAnnotationDrifted(actual, desired) ||
 		!reflect.DeepEqual(actual.Spec, desired.Spec)
+}
+
+// jobsAnnotationDrifted compares the jobs annotation by presence as well as by
+// value. An absent annotation grants the whole folder, and an empty one grants
+// nothing, so the two must not compare equal.
+func jobsAnnotationDrifted(actual, desired *v1alpha1.JenkinsRoleBinding) bool {
+	actualJobs, actualHas := actual.Annotations[rbac.AnnotationFederatedTenantJobs]
+	desiredJobs, desiredHas := desired.Annotations[rbac.AnnotationFederatedTenantJobs]
+	return actualHas != desiredHas || actualJobs != desiredJobs
 }
 
 // staleOwnerIndex finds the core bindings that own a stale federated
