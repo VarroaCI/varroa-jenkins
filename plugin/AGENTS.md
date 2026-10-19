@@ -77,7 +77,8 @@ the root AGENTS.md greenfield rule.
   An organization folder is a row too: its heads are its repositories (`kind`
   `repository`, job path = the repository's full name). `POST /varroa-run/scan` accepts
   both kinds. `VarroaComputedFolderFirstScan` starts the first computation of a folder or
-  multibranch project that is created or saved through config.xml.
+  multibranch project when the item is created, or when a POST to its config.xml
+  or configuration form (configSubmit) replaces its configuration; a plain save starts none.
   `doScriptApprovals` serves `GET /varroa-activity/script-approvals`, which reads
   script-security's pending list through `pendingRows()`. That one restricted call
   carries `@SuppressRestrictedWarnings(ScriptApproval.class)`, and the script-security
