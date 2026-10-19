@@ -91,6 +91,10 @@ type runInterruptCandidate struct {
 	heartbeatReceivedAt *time.Time
 	acceptedAt          *time.Time
 	mesh                *runMeshRecord
+	// scmRevision and scmURL are the commit and repository of the run,
+	// empty when the run recorded neither. The commit-status end needs them.
+	scmRevision string
+	scmURL      string
 }
 
 // livenessBaseline is the moved and silent tests' anchor: the recorder's
@@ -227,7 +231,7 @@ func scanCandidates(rows pgx.Rows) ([]runInterruptCandidate, error) {
 		)
 		if err := rows.Scan(&c.runID, &c.createdAt, &c.cluster, &c.namespace, &c.cell, &c.tenant, &c.jobPath,
 			&c.status, &c.buildNumber, &actor, &c.params, &c.heartbeatReceivedAt, &c.acceptedAt, &owningInstance,
-			&meshRaw); err != nil {
+			&meshRaw, &c.scmRevision, &c.scmURL); err != nil {
 			return nil, fmt.Errorf("scan interrupt candidate: %w", err)
 		}
 		c.mesh = decodeMeshRecord(meshRaw)
@@ -251,7 +255,9 @@ const candidatesQuery = `
 	       r.status, r.build_number, r.actor, r.params, r.heartbeat_received_at,
 	       (r.payload->>'accepted_at')::timestamptz,
 	       COALESCE(NULLIF(ri.cell_instance, ''), r.payload->>'accepted_instance'),
-	       r.payload->'mesh'
+	       r.payload->'mesh',
+	       COALESCE(r.scm_revision, ''),
+	       COALESCE(NULLIF(r.payload->'run.source'->>'scm_url', ''), r.payload->'run.started'->'payload'->>'scm_url', '')
 	FROM varroa.runs r
 	LEFT JOIN varroa.run_intents ri ON ri.run_id = r.run_id
 	WHERE r.status IN ('QUEUED', 'RUNNING')`
@@ -434,8 +440,11 @@ func decodeInterruptedRetry(policy json.RawMessage) string {
 }
 
 // afterMark publishes the actions a successful mark triggers: one
-// cancel_run for the silent reason alone, and one automatic retry_run
-// when the tenant's policy calls for it. Neither publish is
+// end_commit_status for a run with a recorded commit, one cancel_run for
+// the silent reason alone, and one automatic retry_run when the tenant's
+// policy calls for it. The retry names a new build number, so its own
+// status never overlaps the ended one. None of
+// these publishes is
 // transactional with markInterrupted's write: a lost action produces no
 // retry and no cancel, per design D14, and the recorder never
 // republishes.
@@ -484,6 +493,8 @@ func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
 		return
 	}
 
+	publishEndCommitStatus(ctx, conn, actionMetrics, run, reason, logger)
+
 	if reason == ReasonNoHeartbeat || (reason == ReasonResumeTimeout && run.resumeDispatched()) {
 		action := LedgerAction{
 			Kind:        LedgerActionCancelRun,
@@ -531,6 +542,38 @@ func afterMark(ctx context.Context, conn *bus.Conn, home JobHome,
 		metrics.addRetryPublished(ctx)
 		actionMetrics.addPublished(ctx, action.Kind)
 	}
+}
+
+// publishEndCommitStatus asks the operator to end the pending commit
+// statuses of the build. It publishes nothing when the run recorded no
+// commit or no repository, or when it has no build number, because the
+// operator cannot find the status without them. The caller runs it only
+// after a mark that is not provisional, so a live owner's status is never
+// ended early.
+func publishEndCommitStatus(ctx context.Context, conn *bus.Conn, actionMetrics *ActionMetrics,
+	run runInterruptCandidate, reason string, logger *slog.Logger) {
+	if run.scmRevision == "" || run.scmURL == "" || run.buildNumber == nil {
+		return
+	}
+	action := LedgerAction{
+		Kind:        LedgerActionEndCommitStatus,
+		Cluster:     run.cluster,
+		Namespace:   run.namespace,
+		Controller:  run.cell,
+		Actor:       LedgerActionRecorder,
+		RunID:       run.runID.String(),
+		JobPath:     run.jobPath,
+		BuildNumber: run.buildNumber,
+		Tenant:      run.tenant,
+		Repo:        run.scmURL,
+		Revision:    run.scmRevision,
+		Reason:      reason,
+	}
+	if err := PublishLedgerAction(conn, action); err != nil {
+		logger.Warn("publish end_commit_status action failed", "run_id", run.runID, "error", err)
+		return
+	}
+	actionMetrics.addPublished(ctx, action.Kind)
 }
 
 // retryAddress answers the namespace and cell an automatic retry of run

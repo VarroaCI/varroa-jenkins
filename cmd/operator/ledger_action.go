@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/recordstore"
 )
@@ -55,6 +56,12 @@ type ledgerActionRunner interface {
 	SendImperativeCommand(ctx context.Context, namespace, name string, cmd *mitev1.ImperativeCommand) error
 	WakeHibernatedController(ctx context.Context, namespace, name string)
 	ReleaseRunAgentPods(ctx context.Context, team, namespace string, names []string)
+}
+
+// commitStatusEnder ends the pending commit statuses of one build. The
+// forgeops answerer implements it.
+type commitStatusEnder interface {
+	EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusRequest) (int, error)
 }
 
 // ledgerActionBuildNumber answers *bn, or 0 for a nil bn.
@@ -109,6 +116,62 @@ func ledgerActionStateFiles(files []recordstore.ResumeFile) []*mitev1.ResumeStat
 // value leaves the resume's own six-minute deadline room for a retry.
 const resumeCommandDeadlineSec = 120
 
+// endStatusSlots bounds the forge writes that run at once on this replica.
+// A full set drops the write, as a lost publish does.
+var endStatusSlots = make(chan struct{}, 4)
+
+// dispatchEndCommitStatus runs endCommitStatus off the subscriber callback,
+// so a slow forge does not hold up the cancel, retry, and wake actions of the
+// cluster. When endStatusSlots is full the write is dropped and logged at
+// Info. A dropped write leaves the status pending.
+//
+// Constraint: the write races the retry's own pending status. If the retry's
+// pending status lands first and the error write lands after it, the context
+// shows error until the retry build completes and writes its own end state,
+// which supersedes it. The target_url build-number match keeps the write off
+// the retry's own status row.
+func dispatchEndCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusEnder, action recordstore.LedgerAction) {
+	select {
+	case endStatusSlots <- struct{}{}:
+	default:
+		logger.Info("end_commit_status dropped, forge writes at capacity",
+			"run_id", action.RunID, "tenant", action.Tenant)
+		return
+	}
+	go func() {
+		defer func() { <-endStatusSlots }()
+		endCommitStatus(ctx, logger, forge, action)
+	}()
+}
+
+// endCommitStatus asks the forge answerer to end the pending commit
+// statuses of a build that the recorder ended. It runs only when the
+// action names the tenant, the repository, the commit, and the build
+// number, and the operator has a forge answerer. A failure is logged and
+// never retried: the status then stays pending.
+func endCommitStatus(ctx context.Context, logger *slog.Logger, forge commitStatusEnder, action recordstore.LedgerAction) {
+	if forge == nil || action.Tenant == "" || action.Repo == "" || action.Revision == "" || action.BuildNumber == nil {
+		logger.Info("end_commit_status skipped, nothing to end",
+			"run_id", action.RunID, "tenant", action.Tenant, "forge", forge != nil)
+		return
+	}
+	fctx, cancel := context.WithTimeout(ctx, forgeRequestTimeout)
+	defer cancel()
+	written, err := forge.EndPendingStatus(fctx, forgeapi.CommitStatusRequest{
+		Team:        action.Tenant,
+		Repo:        action.Repo,
+		SHA:         action.Revision,
+		JobPath:     action.JobPath,
+		BuildNumber: *action.BuildNumber,
+		Reason:      action.Reason,
+	})
+	if err != nil {
+		logger.Warn("end_commit_status failed", "run_id", action.RunID, "tenant", action.Tenant, "error", err)
+		return
+	}
+	logger.Info("end_commit_status done", "run_id", action.RunID, "tenant", action.Tenant, "written", written)
+}
+
 // handleLedgerAction implements design D8a/D7 / the mite-command-transport
 // spec's operator subscriber (task 9.1a, task 7.1): it decodes one action
 // published on varroa.ledger.actions.<cluster>, ignores, logs, and counts
@@ -116,11 +179,12 @@ const resumeCommandDeadlineSec = 120
 // matching imperative command or wake_cell to a direct
 // WakeHibernatedController call. trigger_run and resume_run both wake
 // the target through the same call before they send the command. An
-// unknown kind takes no action and is counted.
+// unknown kind takes no action and is counted. end_commit_status asks the
+// forge answerer to end the pending commit statuses of the build.
 //
 // The imperative command's subject comes from the action's own namespace
 // and controller fields only — no other field ever names the target.
-func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledgerActionMetrics, subject, ownCluster string, rec ledgerActionRunner, data []byte) {
+func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledgerActionMetrics, subject, ownCluster string, rec ledgerActionRunner, forge commitStatusEnder, data []byte) {
 	var action recordstore.LedgerAction
 	if err := json.Unmarshal(data, &action); err != nil {
 		logger.Warn("ledger action decode failed", "error", err)
@@ -257,6 +321,8 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledge
 			return
 		}
 		rec.ReleaseRunAgentPods(ctx, action.Tenant, action.AgentNamespace, action.AgentPods)
+	case recordstore.LedgerActionEndCommitStatus:
+		dispatchEndCommitStatus(ctx, logger, forge, action)
 	default:
 		logger.Warn("ledger action unknown kind rejected", "kind", action.Kind)
 		metrics.rejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "unknown_kind")))

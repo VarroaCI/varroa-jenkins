@@ -64,7 +64,8 @@ stating what it is/is not responsible for:
   group and NATS gives a share of one cluster's actions to the others.
   `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run`/`resume_run`
   to the matching mite imperative command, `wake_cell` to a direct
-  hibernation wake, and `release_agents` to `ReleaseRunAgentPods`, which
+  hibernation wake, `end_commit_status` to `forgeops.EndPendingStatus` (the forge
+  answerer is passed in, nil-safe), and `release_agents` to `ReleaseRunAgentPods`, which
   deletes only the named agent pods of the action's tenant. `cancel_run` and `retry_run` copy the action's `actor`
   onto the command, so the operator's outcome row names the recorder. The one core recorder publishes the actions of every
   cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
