@@ -98,9 +98,8 @@ A cell has no executors. By default, each build runs on a new agent pod. Each bu
 empty workspace, also on one slot. `ws`, `dir`, and `customWorkspace` select a path in that pod.
 Check out the source in each build. Keep caches in an external store.
 
-A pod template with `idleMinutes` can keep a pod for a later build on the same cell. A restart of
-the cell ends that pod. A move ends it too. An idle pod keeps a workspace only on an uninterrupted
-cell.
+A pod template with `idleMinutes` can keep a pod for a later build on the same cell. A restart or move
+ends that pod. An idle pod keeps a workspace only on an uninterrupted cell.
 
 A resume does not keep a running `node` block today. The resumed build waits five minutes for its
 agent, then ends `ABORTED`. Rerun the build.

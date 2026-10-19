@@ -898,6 +898,9 @@ sections describe.
     operator also covers a Running pod no live JVM holds
     (`tenantAgentRunningReapAfter`, the plugin timeout plus 5 minutes).
     `TestTenantAgentTimeoutsCoverTheResumeWindow` pins this order.
+    At a graceful cell stop, the cell's plugin terminates its idle cloud agents
+    (`VarroaCellAgentRelease`). The garbage collection and the operator's long age then
+    cover only busy pods and hard kills.
     `orphanTenantAgentPods` is pure: a candidate runs as
     `varroa-agent-<team>`, carries the `kubernetes.jenkins.io/controller`
     label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
