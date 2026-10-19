@@ -19,6 +19,8 @@ const (
 	folderConfig      = `<com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder"/>`
 	multibranchConfig = `<org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject plugin="workflow-multibranch"/>`
 	orgFolderConfig   = `<jenkins.branch.OrganizationFolder plugin="branch-api"/>`
+	// jenkinsXMLProlog is the declaration Jenkins writes on every item.
+	jenkinsXMLProlog = "<?xml version='1.1' encoding='UTF-8'?>\n"
 )
 
 // writeJobConfig writes a config.xml under the job directory of jobPath.
@@ -32,7 +34,7 @@ func writeJobConfig(t *testing.T, home, jobPath, config string) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.xml"), []byte(config), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.xml"), []byte(jenkinsXMLProlog+config), 0644); err != nil {
 		t.Fatal(err)
 	}
 }

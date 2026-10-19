@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -409,7 +410,7 @@ func rootElementName(path string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
-	dec := xml.NewDecoder(io.LimitReader(f, 64<<10))
+	dec := xml.NewDecoder(jenkinsXMLReader(io.LimitReader(f, 64<<10)))
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -420,6 +421,40 @@ func rootElementName(path string) (string, error) {
 		}
 	}
 }
+
+// jenkinsXMLVersion11 matches the version attribute of a declaration that
+// names version 1.1. The XML grammar allows white space around the equals
+// sign and either quote mark.
+var jenkinsXMLVersion11 = regexp.MustCompile(`(version\s*=\s*)(['"])1\.1(['"])`)
+
+// jenkinsXMLHeadBytes is how much of a stream jenkinsXMLReader inspects.
+// Jenkins writes a declaration of 38 bytes. A longer declaration passes
+// through unchanged.
+const jenkinsXMLHeadBytes = 1024
+
+// jenkinsXMLReader returns a reader over r whose leading XML declaration
+// names version 1.0. Jenkins saves every item with version 1.1, which
+// encoding/xml refuses, and the two versions differ in nothing the mite
+// reads. A stream with no declaration passes through unchanged.
+func jenkinsXMLReader(r io.Reader) io.Reader {
+	head := make([]byte, jenkinsXMLHeadBytes)
+	n, err := io.ReadFull(r, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return io.MultiReader(bytes.NewReader(head[:n]), errReader{err: err})
+	}
+	head = head[:n]
+	if end := bytes.Index(head, []byte("?>")); bytes.HasPrefix(head, []byte("<?xml")) && end >= 0 {
+		decl := string(head[:end+2])
+		fixed := jenkinsXMLVersion11.ReplaceAllString(decl, "${1}${2}1.0${3}")
+		head = append([]byte(fixed), head[end+2:]...)
+	}
+	return io.MultiReader(bytes.NewReader(head), r)
+}
+
+// errReader answers the same read error on every call.
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 // rehydrationApplyResult is the outcome of applying one RehydrationBundle.
 type rehydrationApplyResult struct {
@@ -637,7 +672,7 @@ func itemNameFromConfig(configPath, sub string) (name string, ok bool, err error
 			stack[2] == "jenkins.branch.ProjectNameProperty" && stack[3] == "name"
 	}
 
-	dec := xml.NewDecoder(io.LimitReader(f, maxItemConfigBytes))
+	dec := xml.NewDecoder(jenkinsXMLReader(io.LimitReader(f, maxItemConfigBytes)))
 	var stack []string
 	captureDepth := 0
 	var text strings.Builder
