@@ -12,7 +12,8 @@ import (
 
 // memberRoleTestTeam returns a Team whose managed Group is ready and whose
 // spec subjects hold the given roleRef.
-func memberRoleTestTeam(name, roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Team {
+func memberRoleTestTeam(roleRef string, subjects ...v1alpha1.SubjectRef) *v1alpha1.Team {
+	const name = "sbsoftware"
 	return &v1alpha1.Team{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec:       v1alpha1.TeamSpec{RoleRef: roleRef, Subjects: subjects},
@@ -42,7 +43,7 @@ func memberRoleTestController() *v1alpha1.Controller {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_TeamSubjects(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("sbsoftware", "developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
 	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
 
 	assignments, err := r.JenkinsRoleAssignments(controller)
@@ -87,7 +88,7 @@ func TestJenkinsRoleAssignments_TenantMemberRole_TeamSubjects(t *testing.T) {
 
 func TestJenkinsRoleAssignments_TenantMemberRole_ReadOnlyGrantExcluded(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("sbsoftware", "viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
+	team := memberRoleTestTeam("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
 	r := testTenantResolver([]*v1alpha1.VarroaRole{viewerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
 
 	assignments, err := r.JenkinsRoleAssignments(controller)
@@ -205,7 +206,7 @@ func TestJenkinsRoleAssignments_TenantMemberRole_NotCapped(t *testing.T) {
 
 func TestGenerate_TenantMemberRoleRendered(t *testing.T) {
 	controller := memberRoleTestController()
-	team := memberRoleTestTeam("sbsoftware", "developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	team := memberRoleTestTeam("developer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
 	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
 
 	yamlOut, err := NewGenerator(r).Generate(controller)

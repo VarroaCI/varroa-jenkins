@@ -110,6 +110,20 @@ type Resolver struct {
 	teamLister              cache.GenericLister
 	defaultRead             bool
 	userClaimNames          []string // e.g. ["sub", "preferred_username"]
+	// userIndex holds the idp-managed User objects. It is nil until
+	// SetUserDirectory wires it, and then the member role resolves User
+	// subjects through it.
+	userIndex     cache.Indexer
+	userNamespace string
+}
+
+// SetUserDirectory wires the User objects of the operator namespace. The
+// member role reads them to add each person's Jenkins principal next to a
+// User subject that names a claim value. A nil index keeps the subjects as
+// they are.
+func (r *Resolver) SetUserDirectory(idx cache.Indexer, namespace string) {
+	r.userIndex = idx
+	r.userNamespace = namespace
 }
 
 // NewResolver creates a new Resolver backed by the given informers.
@@ -1236,6 +1250,7 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 	// on the tenant's pod templates. Ownership is the fence's job: it
 	// refuses every node that does not carry the tenant's own label.
 	if controller.Status.Cell != nil {
+		aliases := r.userPrincipalAliases()
 		for _, team := range controller.Status.Cell.Tenants {
 			itemRole := TenantItemRoleName(team)
 			tenantSubj := SubjectAssignment{Kind: "Group", Name: "ROLE:" + itemRole}
@@ -1287,8 +1302,7 @@ func (r *Resolver) JenkinsRoleAssignments(controller *v1alpha1.Controller) ([]Ro
 				if !slices.Contains(src.Verbs, "write") {
 					continue
 				}
-				subjects := make([]v1alpha1.SubjectRef, 0, len(src.Subjects))
-				subjects = append(subjects, src.Subjects...)
+				subjects := expandMemberUserSubjects(src.Subjects, aliases)
 				if src.Jobs == nil {
 					upsertAssignment(acc, TenantMemberRoleName(team), "Item",
 						TenantMemberRolePattern(team), tenantMemberPermissions, subjects)
