@@ -66,7 +66,9 @@ with what this package generates.
     grant gets `varroa:tenant-member:<team>:<binding>` with the job globs
     (`TenantMemberNarrowedPattern`). The member walk
     (`allTenantGrantSources`) is uncapped, because a cut list drops a
-    Jenkins subject silently. No generated name may equal
+    Jenkins subject silently. `Resolver.TenantMemberRoles` is the single
+    source of these roles. `JenkinsRoleAssignments` and the BFF cell grants
+    read both call it. No generated name may equal
     `varroa:tenant:<team>`: the plugin looks that exact name up.
     `User` subjects of the role also resolve through the idp-managed `User`
     objects of the operator namespace (`SetUserDirectory`, `tenant_member_users.go`):

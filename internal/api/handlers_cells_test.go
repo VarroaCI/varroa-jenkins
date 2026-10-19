@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -517,6 +518,77 @@ func TestCellGrantsAnswersEachTenant(t *testing.T) {
 	}
 	if beta.ItemRole != "varroa:tenant:beta" {
 		t.Errorf("beta item role = %q", beta.ItemRole)
+	}
+	// Acme has one narrowed write grant, so one member role holds its subject.
+	if len(acme.MemberRoles) != 1 {
+		t.Fatalf("acme member roles = %+v, want one narrowed role", acme.MemberRoles)
+	}
+	mr := acme.MemberRoles[0]
+	if mr.Name != "varroa:tenant-member:acme:acme-release" || mr.Binding != "acme-release" {
+		t.Errorf("member role = %+v", mr)
+	}
+	if want := rbac.TenantMemberNarrowedPattern("acme", []string{"release/*"}); mr.Pattern != want {
+		t.Errorf("member role pattern = %q, want %q", mr.Pattern, want)
+	}
+	if len(mr.Subjects) != 1 || mr.Subjects[0] != (CellGrantSubject{Kind: "Group", Name: "acme-devs"}) {
+		t.Errorf("member role subjects = %+v", mr.Subjects)
+	}
+	if len(mr.Permissions) == 0 {
+		t.Error("member role carries no permissions")
+	}
+	if beta.MemberRoles == nil || len(beta.MemberRoles) != 0 {
+		t.Errorf("beta member roles = %+v, want an empty list", beta.MemberRoles)
+	}
+}
+
+func TestCellGrantsMemberRolesNeverNull(t *testing.T) {
+	srv := cellGrantsServer(cellGrantsBindings())
+	rec := doCellRequest(t, srv.handleCellGrants, "/cells/ns-a/cell-a/grants",
+		map[string]string{"namespace": "ns-a", "name": "cell-a"}, cellOperatorClaims)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := strings.Count(rec.Body.String(), `"memberRoles":[]`); n != 2 {
+		t.Errorf("expected two empty memberRoles arrays, got %d in %s", n, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"memberRoles":null`) {
+		t.Errorf("memberRoles must never be null: %s", rec.Body.String())
+	}
+}
+
+func TestCellGrantsMemberRolesNotCapped(t *testing.T) {
+	var extra []*v1alpha1.VarroaRoleBinding
+	for i := 0; i < rbac.MaxTenantGrants+10; i++ {
+		extra = append(extra, &v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("wide-%03d", i)},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "Group", Name: fmt.Sprintf("team-%03d", i)}},
+				RoleRef:  "pipelines-developer",
+			},
+		})
+	}
+	srv := cellGrantsServer(cellGrantsBindings(extra...))
+	rec := doCellRequest(t, srv.handleCellGrants, "/cells/ns-a/cell-a/grants",
+		map[string]string{"namespace": "ns-a", "name": "cell-a"}, cellOperatorClaims)
+	body := decodeCellGrants(t, rec)
+	entry := body.Tenants[0]
+	if !entry.Truncated {
+		t.Error("expected truncated true")
+	}
+	if len(entry.Grants) != rbac.MaxTenantGrants {
+		t.Errorf("grants = %d, want %d", len(entry.Grants), rbac.MaxTenantGrants)
+	}
+	var subtree *CellMemberRole
+	for i := range entry.MemberRoles {
+		if entry.MemberRoles[i].Binding == "" {
+			subtree = &entry.MemberRoles[i]
+		}
+	}
+	if subtree == nil {
+		t.Fatalf("no subtree member role in %+v", entry.MemberRoles)
+	}
+	if len(subtree.Subjects) != rbac.MaxTenantGrants+10 {
+		t.Errorf("subtree member role holds %d subjects, want %d", len(subtree.Subjects), rbac.MaxTenantGrants+10)
 	}
 }
 

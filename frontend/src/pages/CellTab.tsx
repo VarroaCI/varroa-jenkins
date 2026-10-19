@@ -409,6 +409,36 @@ function PermissionsPanel({
                 { key: "Folder pattern", value: <span className={styles.mono}>{entry.itemPattern}</span> },
               ]}
             />
+            <h5 className={styles.subTitle}>Jenkins member roles</h5>
+            {entry.memberRoles.length === 0 ? (
+              <p className={styles.empty}>
+                No member role exists on this tenant.
+              </p>
+            ) : (
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>Folder pattern</th>
+                    <th>Subjects</th>
+                    <th>Permissions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entry.memberRoles.map((r) => (
+                    <tr key={r.name}>
+                      <td className={styles.mono}>{r.name}</td>
+                      <td className={styles.mono}>{r.pattern}</td>
+                      <td>{r.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
+                      <td className={styles.mono}>{r.permissions.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className={styles.note}>
+              Scans, runs, replays, restarts, and input answers check the member role.
+            </p>
             {entry.grants.length === 0 ? (
               <p className={styles.empty}>
                 No binding and no Team membership reaches this tenant. Nobody may build on it.

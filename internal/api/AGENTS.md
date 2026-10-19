@@ -147,7 +147,10 @@ federation, activity persistence, and SSE fanout.
   cell exists. It is resolver backed (`Authorizer.TenantGrantSources` over
   `rbac.TenantGrantSourcesTruncated`), reads no record store, and therefore
   answers no `503`. `jobs` carries `omitempty` and is never an empty array:
-  an absent list narrows nothing.
+  an absent list narrows nothing. `memberRoles` comes from
+  `Authorizer.TenantMemberRoles` and is never capped. It is never `null`.
+  The BFF wires the `User` directory (`SetUserDirectory`), so it resolves
+  the same principals as the operator.
 - **Retention** (`handlers_pipelines_retention.go`): `GET /pipelines/{team}`
   carries a required `retention` block (store, tenant, and effective days,
   plus the job rules). It reads `Reader.TenantRetention` for the first

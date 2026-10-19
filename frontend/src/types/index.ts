@@ -2831,7 +2831,17 @@ export interface CellGrant {
   jobs?: string[];
 }
 
-/** Every grant that reaches one tenant, with its generated Jenkins item role. */
+/** One generated Jenkins member role of a tenant. */
+export interface CellMemberRole {
+  name: string;
+  pattern: string;
+  /** The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree. */
+  binding?: string;
+  permissions: string[];
+  subjects: CellGrantSubject[];
+}
+
+/** Every grant that reaches one tenant, with its generated Jenkins item role and member roles. */
 export interface CellTenantGrants {
   tenant: string;
   itemRole: string;
@@ -2839,6 +2849,8 @@ export interface CellTenantGrants {
   /** True only when the 50-grant cap dropped a grant of this tenant. */
   truncated: boolean;
   grants: CellGrant[];
+  /** The generated member roles of the tenant. Never capped. */
+  memberRoles: CellMemberRole[];
 }
 
 /** One entry for each tenant of a cell, naming the subjects that may build on it. */

@@ -6783,13 +6783,38 @@ CellGrant:
         type: string
   additionalProperties: false
 
+CellMemberRole:
+  type: object
+  description: >-
+    One generated Jenkins member role of a tenant. The role holds the person
+    checks of the acting-user routes for its subjects.
+  required: [name, pattern, permissions, subjects]
+  properties:
+    name:
+      type: string
+    pattern:
+      type: string
+    binding:
+      type: string
+      description: The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.
+    permissions:
+      type: array
+      items:
+        type: string
+    subjects:
+      type: array
+      items:
+        $ref: '#/CellGrantSubject'
+  additionalProperties: false
+
 CellTenantGrants:
   type: object
   description: >-
     Every grant that reaches one tenant of a cell, with the tenant's
-    generated Jenkins item role. The item role and its pattern come from
-    the tenant name, so the read opens no JenkinsRole object.
-  required: [tenant, itemRole, itemPattern, truncated, grants]
+    generated Jenkins item role and its generated member roles. The item role
+    and its pattern come from the tenant name, so the read opens no
+    JenkinsRole object.
+  required: [tenant, itemRole, itemPattern, truncated, grants, memberRoles]
   properties:
     tenant:
       type: string
@@ -6804,6 +6829,14 @@ CellTenantGrants:
       type: array
       items:
         $ref: '#/CellGrant'
+    memberRoles:
+      type: array
+      description: >-
+        The generated Jenkins member roles of the tenant. Each subject with
+        pipelines write gets the person checks of the acting-user routes. The
+        list is never capped.
+      items:
+        $ref: '#/CellMemberRole'
   additionalProperties: false
 
 CellGrants:
