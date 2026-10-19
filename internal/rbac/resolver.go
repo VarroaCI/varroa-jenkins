@@ -849,6 +849,12 @@ func (r *Resolver) roleCapabilities(roleRef string) (APICapabilitySet, bool) {
 	if !ok {
 		return nil, false
 	}
+	return roleAPICapabilities(role), true
+}
+
+// roleAPICapabilities flattens the API rules of a VarroaRole into a
+// capability set.
+func roleAPICapabilities(role *v1alpha1.VarroaRole) APICapabilitySet {
 	caps := make(APICapabilitySet)
 	for _, rule := range role.Spec.APIRules {
 		for _, resource := range rule.Resources {
@@ -860,7 +866,7 @@ func (r *Resolver) roleCapabilities(roleRef string) (APICapabilitySet, bool) {
 			}
 		}
 	}
-	return caps, true
+	return caps
 }
 
 // pipelinesVerbs lists the verbs D2 defines for the "pipelines" resource.
@@ -1318,6 +1324,11 @@ func (r *Resolver) collectFromJenkinsRoleBindings(controller *v1alpha1.Controlle
 	for _, obj := range objs {
 		binding, ok := obj.(*v1alpha1.JenkinsRoleBinding)
 		if !ok {
+			continue
+		}
+		// A tenant-member copy grants through the member role of its tenant,
+		// never through the generic collector.
+		if binding.Labels[LabelFederatedTenantMember] == "true" {
 			continue
 		}
 		if !controllerScopeMatches(binding.Spec.ControllerScope, controller) {

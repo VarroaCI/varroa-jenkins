@@ -44,12 +44,12 @@ func TestDesiredFederatedCRsReportsOneOutcomePerBinding(t *testing.T) {
 	}
 	_, bindings, _, outcomes := DesiredFederatedCRs(vrbs,
 		func(name string) (*v1alpha1.VarroaRole, bool) { r, ok := roles[name]; return r, ok },
-		func(name string) (*v1alpha1.JenkinsRole, bool) { r, ok := jenkinsRoles[name]; return r, ok },
+		func(name string) (*v1alpha1.JenkinsRole, bool) { r, ok := jenkinsRoles[name]; return r, ok }, nil,
 	)
 
 	wantSkip := map[string]string{
 		"no-subjects":          SkipNoSubjects,
-		"tenant":               SkipTenantScope,
+		"tenant":               SkipNoTenantWrite,
 		"missing-role":         SkipRoleNotFound,
 		"pipelines-only":       SkipNoJenkinsProjection,
 		"missing-jenkins-role": SkipJenkinsRoleNotFound,
@@ -67,7 +67,7 @@ func TestDesiredFederatedCRsReportsOneOutcomePerBinding(t *testing.T) {
 		if got.SkipReason != reason || got.SkipMessage == "" {
 			t.Fatalf("outcome[%s] = %#v, want skip reason %s with a message", name, got, reason)
 		}
-		if got.RoleName != "" || got.BindingName != "" {
+		if got.RoleName != "" || len(got.BindingNames) != 0 {
 			t.Fatalf("outcome[%s] names children for a skip: %#v", name, got)
 		}
 	}
@@ -80,8 +80,88 @@ func TestDesiredFederatedCRsReportsOneOutcomePerBinding(t *testing.T) {
 	}
 	for _, name := range []string{"projected", "projected-twin"} {
 		got := outcomes[name]
-		if got.SkipReason != "" || got.RoleName != "jenkins-admin" || got.BindingName != bindings[0].Name {
+		if got.SkipReason != "" || got.RoleName != "jenkins-admin" || len(got.BindingNames) != 1 || got.BindingNames[0] != bindings[0].Name {
 			t.Fatalf("outcome[%s] = %#v, want role jenkins-admin and binding %s", name, got, bindings[0].Name)
 		}
+	}
+}
+
+// A tenant-scoped binding whose role grants pipelines write gets one copy for
+// each tenant. A narrowed tenant gets the job globs, and a whole-folder tenant
+// gets no annotation.
+func TestDesiredFederatedCRsTenantWriteGetsOneChildPerTenant(t *testing.T) {
+	alice := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
+	scope := &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{
+		{Name: "team-a", Jobs: []string{"deploy/*"}},
+		{Name: "team-b"},
+	}}
+	vrbs := []*v1alpha1.VarroaRoleBinding{outcomeBinding("tenant-write", "pipelines-writer", alice, scope)}
+	roles := map[string]*v1alpha1.VarroaRole{
+		"pipelines-writer": {
+			ObjectMeta: metav1.ObjectMeta{Name: "pipelines-writer"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: []string{"pipelines"}, Verbs: []string{"write"}},
+			}},
+		},
+	}
+	_, bindings, _, outcomes := DesiredFederatedCRs(vrbs,
+		func(name string) (*v1alpha1.VarroaRole, bool) { r, ok := roles[name]; return r, ok },
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
+	)
+	got := outcomes["tenant-write"]
+	if got.SkipReason != "" || len(got.BindingNames) != 2 {
+		t.Fatalf("outcome = %#v, want two child names", got)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("bindings = %d, want 2", len(bindings))
+	}
+	byTeam := map[string]*v1alpha1.JenkinsRoleBinding{}
+	for _, b := range bindings {
+		if b.Labels[LabelFederatedTenantMember] != "true" || b.Labels[LabelFederatedFrom] != "pipelines-writer" {
+			t.Fatalf("labels = %#v, want tenant-member and federated-from", b.Labels)
+		}
+		if b.Spec.ControllerScope != nil || b.Spec.JenkinsScope != nil {
+			t.Fatalf("spec scopes = %#v / %#v, want none", b.Spec.ControllerScope, b.Spec.JenkinsScope)
+		}
+		byTeam[b.Annotations[AnnotationFederatedTenant]] = b
+	}
+	narrowed := byTeam["team-a"]
+	if narrowed == nil || narrowed.Spec.RoleRef != "varroa:tenant-member:team-a" {
+		t.Fatalf("team-a copy = %#v", narrowed)
+	}
+	if narrowed.Annotations[AnnotationFederatedTenantJobs] != `["deploy/*"]` {
+		t.Fatalf("team-a jobs annotation = %q", narrowed.Annotations[AnnotationFederatedTenantJobs])
+	}
+	whole := byTeam["team-b"]
+	if whole == nil || whole.Spec.RoleRef != "varroa:tenant-member:team-b" {
+		t.Fatalf("team-b copy = %#v", whole)
+	}
+	if _, has := whole.Annotations[AnnotationFederatedTenantJobs]; has {
+		t.Fatalf("team-b carries a jobs annotation: %#v", whole.Annotations)
+	}
+}
+
+// A tenant entry with an empty job list grants nothing, so the binding skips.
+func TestDesiredFederatedCRsTenantEmptyJobsSkips(t *testing.T) {
+	alice := []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}
+	scope := &v1alpha1.VarroaRoleBindingScope{Tenants: []v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{}}}}
+	vrbs := []*v1alpha1.VarroaRoleBinding{outcomeBinding("empty", "pipelines-writer", alice, scope)}
+	roles := map[string]*v1alpha1.VarroaRole{
+		"pipelines-writer": {
+			ObjectMeta: metav1.ObjectMeta{Name: "pipelines-writer"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: []string{"pipelines"}, Verbs: []string{"write"}},
+			}},
+		},
+	}
+	_, bindings, _, outcomes := DesiredFederatedCRs(vrbs,
+		func(name string) (*v1alpha1.VarroaRole, bool) { r, ok := roles[name]; return r, ok },
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
+	)
+	if got := outcomes["empty"]; got.SkipReason != SkipNoTenantJobs {
+		t.Fatalf("outcome = %#v, want %s", got, SkipNoTenantJobs)
+	}
+	if len(bindings) != 0 {
+		t.Fatalf("bindings = %d, want 0", len(bindings))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -130,13 +131,20 @@ func federationEntry(cluster, binding string, outcome rbac.BindingOutcome, resul
 	if f, ok := result.roleFaults[outcome.RoleName]; ok {
 		return fault(f)
 	}
-	if f, ok := result.bindingFaults[outcome.BindingName]; ok {
-		return fault(f)
+	// A projected binding can own several children. The first fault in
+	// sorted name order is reported.
+	names := append([]string(nil), outcome.BindingNames...)
+	sort.Strings(names)
+	for _, name := range names {
+		if f, ok := result.bindingFaults[name]; ok {
+			return fault(f)
+		}
 	}
+	joined := strings.Join(names, ", ")
 	if hasStale {
-		return fault(federationFault{reason: reasonStaleBindingDeleteFailed, message: fmt.Sprintf("JenkinsRoleBinding %s applied; delete of earlier copy %s failed: %s", outcome.BindingName, stale.child, stale.err)})
+		return fault(federationFault{reason: reasonStaleBindingDeleteFailed, message: fmt.Sprintf("JenkinsRoleBinding %s applied; delete of earlier copy %s failed: %s", joined, stale.child, stale.err)})
 	}
-	entry.State, entry.Reason, entry.Message = v1alpha1.BindingFederated, reasonFederated, "JenkinsRoleBinding "+outcome.BindingName
+	entry.State, entry.Reason, entry.Message = v1alpha1.BindingFederated, reasonFederated, "JenkinsRoleBinding "+joined
 	return entry
 }
 

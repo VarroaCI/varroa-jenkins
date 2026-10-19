@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"encoding/json"
 	"regexp"
 	"slices"
 	"sort"
@@ -22,6 +23,7 @@ const (
 	GrantSourceTeamMembership      = "teamMembership"
 	GrantSourceTenantScopedBinding = "tenantScopedBinding"
 	GrantSourceClusterWideBinding  = "clusterWideBinding"
+	GrantSourceFederatedBinding    = "federatedBinding"
 )
 
 // sourceRank orders the three grant sources.
@@ -139,7 +141,9 @@ func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) [
 	var subtree *TenantMemberRole
 	narrowed := map[string]*tenantMemberNarrowing{}
 	var narrowedOrder []string
-	for _, src := range r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team}) {
+	grants := append(r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team}),
+		r.federatedTenantMemberSources(team)...)
+	for _, src := range grants {
 		if !slices.Contains(src.Verbs, "write") {
 			continue
 		}
@@ -263,6 +267,49 @@ func (r *Resolver) allTenantGrantSources(tenant ParsedTenant) []TenantGrantSourc
 		}
 		return out[i].Binding < out[j].Binding
 	})
+	return out
+}
+
+// VarroaRolePipelinesVerbs lists the pipelines verbs a VarroaRole grants.
+// The federation projection uses it to decide whether a tenant-scoped
+// binding needs a member copy on the hives.
+func VarroaRolePipelinesVerbs(vr *v1alpha1.VarroaRole) []string {
+	return grantedPipelinesVerbs(roleAPICapabilities(vr))
+}
+
+// federatedTenantMemberSources lists the tenant-member copies that the
+// federation projection placed on this cluster for one tenant. Each copy
+// is a grant with pipelines write. A copy with an unreadable job list is
+// skipped, so the grant fails closed.
+func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource {
+	if r == nil || r.jenkinsRoleBindingIndex == nil {
+		return nil
+	}
+	var out []TenantGrantSource
+	for _, obj := range r.jenkinsRoleBindingIndex.List() {
+		b, ok := obj.(*v1alpha1.JenkinsRoleBinding)
+		if !ok || b.Labels[LabelFederatedTenantMember] != "true" || b.Labels[LabelFederatedFrom] == "" {
+			continue
+		}
+		if b.Annotations[AnnotationFederatedTenant] != team || len(b.Spec.Subjects) == 0 {
+			continue
+		}
+		var jobs []string
+		if raw, present := b.Annotations[AnnotationFederatedTenantJobs]; present {
+			if err := json.Unmarshal([]byte(raw), &jobs); err != nil || len(jobs) == 0 {
+				continue
+			}
+		}
+		out = append(out, TenantGrantSource{
+			Source:   GrantSourceFederatedBinding,
+			Binding:  b.Name,
+			RoleRef:  b.Spec.RoleRef,
+			Subjects: append([]v1alpha1.SubjectRef(nil), b.Spec.Subjects...),
+			Verbs:    []string{"write"},
+			Jobs:     jobs,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Binding < out[j].Binding })
 	return out
 }
 

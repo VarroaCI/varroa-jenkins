@@ -345,3 +345,152 @@ func TestTenantMemberRoles_NonTeamTenantYieldsNil(t *testing.T) {
 		t.Errorf("nil resolver must yield nil, got %+v", roles)
 	}
 }
+
+// federatedTenantCopy returns a tenant-member copy as the hive projection
+// writes it. The jobs argument is the raw annotation value; an empty
+// string leaves the annotation absent.
+func federatedTenantCopy(name, team, jobs string, subjects ...v1alpha1.SubjectRef) *v1alpha1.JenkinsRoleBinding {
+	annotations := map[string]string{AnnotationFederatedTenant: team}
+	if jobs != "" {
+		annotations[AnnotationFederatedTenantJobs] = jobs
+	}
+	return &v1alpha1.JenkinsRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Labels:      map[string]string{LabelFederatedFrom: "pipelines-writer", LabelFederatedTenantMember: "true"},
+			Annotations: annotations,
+		},
+		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: TenantMemberRoleName(team), Subjects: subjects},
+	}
+}
+
+// withFederatedCopies gives the resolver the copies as its JenkinsRoleBinding index.
+func withFederatedCopies(r *Resolver, copies ...*v1alpha1.JenkinsRoleBinding) *Resolver {
+	r.jenkinsRoleBindingIndex = NewTestResolverWithJenkins(nil, copies).jenkinsRoleBindingIndex
+	return r
+}
+
+func TestMemberRoleIncludesFederatedTenantBinding(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-whole", "sbsoftware", "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"}))
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := memberRoleTestAssignment(assignments, "varroa:tenant-member:sbsoftware")
+	if a == nil {
+		t.Fatalf("expected the whole-folder member role, got %+v", assignments)
+	}
+	if len(a.Subjects) != 1 || a.Subjects[0].Name != "alice" {
+		t.Errorf("subjects = %+v, want alice", a.Subjects)
+	}
+}
+
+func TestMemberRoleFederatedNarrowedUsesChildName(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-narrow", "sbsoftware", `["repos/projgen/*"]`,
+		v1alpha1.SubjectRef{Kind: "User", Name: "bob"}))
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := memberRoleTestAssignment(assignments, "varroa:tenant-member:sbsoftware:varroa-fed-tenant-narrow")
+	if a == nil {
+		t.Fatalf("expected the narrowed member role named by the copy, got %+v", assignments)
+	}
+	re := regexp.MustCompile(a.Pattern)
+	if !re.MatchString("sbsoftware/repos/projgen/main") || re.MatchString("sbsoftware/repos") {
+		t.Errorf("pattern %q does not follow the job glob", a.Pattern)
+	}
+}
+
+// A copy reaches only the cell that hosts its tenant. A cell without a cell
+// role gets no member role from it.
+func TestFederatedTenantBindingIgnoredOnOtherTenantAndNonCell(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-other", "other-team", "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"}))
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a := memberRoleTestAssignment(assignments, "varroa:tenant-member:sbsoftware"); a != nil {
+		t.Errorf("a copy for another tenant reached sbsoftware: %+v", a)
+	}
+	if a := memberRoleTestAssignment(assignments, "varroa:tenant-member:other-team"); a != nil {
+		t.Errorf("a copy reached a tenant this cell does not host: %+v", a)
+	}
+
+	plain := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "plain", Namespace: "varroa-system"}}
+	assignments, err = r.JenkinsRoleAssignments(plain)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range assignments {
+		if strings.HasPrefix(a.RoleName, "varroa:tenant-member:") {
+			t.Errorf("a non-cell controller got member role %s", a.RoleName)
+		}
+	}
+}
+
+// A copy with an unreadable or empty job list grants nothing.
+func TestFederatedTenantBindingBadJobsAnnotationFailsClosed(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r,
+		federatedTenantCopy("varroa-fed-tenant-bad", "sbsoftware", `not-json`,
+			v1alpha1.SubjectRef{Kind: "User", Name: "alice"}),
+		federatedTenantCopy("varroa-fed-tenant-empty", "sbsoftware", `[]`,
+			v1alpha1.SubjectRef{Kind: "User", Name: "carol"}),
+	)
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range assignments {
+		for _, s := range a.Subjects {
+			if s.Name == "alice" || s.Name == "carol" {
+				t.Errorf("a copy with a bad jobs annotation granted %s in %s", s.Name, a.RoleName)
+			}
+		}
+	}
+}
+
+// The generic collector skips a tenant-member copy, so its subjects reach a
+// Jenkins role only through the member role.
+func TestCollectFromJenkinsRoleBindingsSkipsTenantMemberChildren(t *testing.T) {
+	controller := memberRoleTestController()
+	jr := &v1alpha1.JenkinsRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "generic-jr"},
+		Spec:       v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}},
+	}
+	member := federatedTenantCopy("varroa-fed-tenant-generic", "sbsoftware", "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "dave"})
+	member.Spec.RoleRef = "generic-jr"
+	r := NewTestResolverWithJenkins([]*v1alpha1.JenkinsRole{jr}, []*v1alpha1.JenkinsRoleBinding{member})
+
+	acc := map[accKey]*RoleAssignment{}
+	r.collectFromJenkinsRoleBindings(controller, acc)
+	if len(acc) != 0 {
+		t.Fatalf("generic collector used a tenant-member copy: %+v", acc)
+	}
+}
+
+func TestTenantMemberRolesListsFederatedCopy(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-narrow", "sbsoftware", `["repos/projgen/*"]`,
+		v1alpha1.SubjectRef{Kind: "User", Name: "bob"}))
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	if len(roles) != 1 || roles[0].Binding != "varroa-fed-tenant-narrow" {
+		t.Fatalf("roles = %+v, want the narrowed federated copy", roles)
+	}
+}

@@ -26,7 +26,7 @@ func TestDesiredFederatedCRsRefPath(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Administer"}, Description: "copied"}}, true
-		},
+		}, nil,
 	)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v", warnings)
@@ -60,7 +60,7 @@ func TestDesiredFederatedCRsLegacyPath(t *testing.T) {
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Job/Build"}}}, true
 		},
-		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
 	)
 	if len(warnings) != 0 || len(roles) != 1 || len(bindings) != 1 {
 		t.Fatalf("roles=%#v bindings=%#v warnings=%v", roles, bindings, warnings)
@@ -81,7 +81,7 @@ func TestDesiredFederatedCRsSkipsNonGlobalRef(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Item", Permissions: []string{"Job/Read"}}}, true
-		},
+		}, nil,
 	)
 	if len(roles) != 0 || len(bindings) != 0 || len(warnings) != 1 {
 		t.Fatalf("roles=%#v bindings=%#v warnings=%v", roles, bindings, warnings)
@@ -108,7 +108,7 @@ func TestDesiredFederatedCRsDedupsRolesAndSkipsMite(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}}}, true
-		},
+		}, nil,
 	)
 	if len(roles) != 1 || roles[0].Name != "jenkins-admin" {
 		t.Fatalf("roles = %#v", roles)
@@ -147,7 +147,7 @@ func TestDesiredFederatedCRsSkipsSystemOperator(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}}}, true
-		},
+		}, nil,
 	)
 	if len(roles) != 1 || roles[0].Name != "jenkins-admin" {
 		t.Fatalf("roles = %#v", roles)
@@ -178,7 +178,7 @@ func TestDesiredFederatedCRsLabelIsDeterministic(t *testing.T) {
 			},
 			func(name string) (*v1alpha1.JenkinsRole, bool) {
 				return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}, true
-			},
+			}, nil,
 		)
 		if len(roles) != 1 {
 			t.Fatalf("roles = %#v", roles)
@@ -207,7 +207,7 @@ func TestDesiredFederatedCRsPipelinesOnlyRoleFederatesNothing(t *testing.T) {
 				Spec:       v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}}},
 			}, true
 		},
-		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
 	)
 	if len(roles) != 0 || len(bindings) != 0 {
 		t.Fatalf("roles=%#v bindings=%#v, want no federated objects", roles, bindings)
@@ -242,7 +242,7 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}, true
-		},
+		}, nil,
 	)
 	if len(roles) != 1 || roles[0].Name != "jenkins-admin" {
 		t.Fatalf("roles = %#v", roles)
@@ -257,14 +257,10 @@ func TestDesiredFederatedCRsSkipsTenantScopedBinding(t *testing.T) {
 			}
 		}
 	}
-	found := false
 	for _, w := range warnings {
 		if strings.Contains(w, "bind-tenant") {
-			found = true
+			t.Fatalf("a tenant binding without pipelines write warns: %v", warnings)
 		}
-	}
-	if !found {
-		t.Fatalf("expected a warning naming bind-tenant, got %v", warnings)
 	}
 }
 
@@ -286,7 +282,7 @@ func TestDesiredFederatedCRsSkipsEmptySubjects(t *testing.T) {
 		},
 		func(name string) (*v1alpha1.JenkinsRole, bool) {
 			return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global"}}, true
-		},
+		}, nil,
 	)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none for a binding with no subjects", warnings)
@@ -307,7 +303,7 @@ func TestDesiredFederatedCRsSubjectsNeverNull(t *testing.T) {
 		func(name string) (*v1alpha1.VarroaRole, bool) {
 			return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true
 		},
-		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+		func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
 	)
 	if len(bindings) != 1 {
 		t.Fatalf("bindings = %#v", bindings)
@@ -353,7 +349,7 @@ func TestDesiredFederatedCRsAnnotatesOwners(t *testing.T) {
 			func(name string) (*v1alpha1.VarroaRole, bool) {
 				return &v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.VarroaRoleSpec{JenkinsPermissions: []string{"Overall/Read"}}}, true
 			},
-			func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false },
+			func(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }, nil,
 		)
 		return bindings
 	}
@@ -393,7 +389,7 @@ func TestDesiredFederatedCRsAnnotatesRoleSources(t *testing.T) {
 			func(name string) (*v1alpha1.VarroaRole, bool) { vr, ok := varroaRoles[name]; return vr, ok },
 			func(name string) (*v1alpha1.JenkinsRole, bool) {
 				return &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: []string{"Overall/Read"}}}, true
-			},
+			}, nil,
 		)
 		return roles
 	}
@@ -409,5 +405,77 @@ func TestDesiredFederatedCRsAnnotatesRoleSources(t *testing.T) {
 		if got := roles[0].Labels[LabelFederatedFrom]; got != "alpha" {
 			t.Fatalf("role label = %q, want alpha", got)
 		}
+	}
+}
+
+func tenantWriteRoleFixture() func(string) (*v1alpha1.VarroaRole, bool) {
+	role := &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "pipelines-writer"},
+		Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+			{Resources: []string{"pipelines"}, Verbs: []string{"write"}},
+		}},
+	}
+	return func(name string) (*v1alpha1.VarroaRole, bool) {
+		if name == role.Name {
+			return role, true
+		}
+		return nil, false
+	}
+}
+
+func tenantWriteBinding(tenants []v1alpha1.TenantScope, subjects ...v1alpha1.SubjectRef) *v1alpha1.VarroaRoleBinding {
+	return &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "tw"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "pipelines-writer",
+			Subjects: subjects,
+			Scope:    &v1alpha1.VarroaRoleBindingScope{Tenants: tenants},
+		},
+	}
+}
+
+func noJenkinsRole(string) (*v1alpha1.JenkinsRole, bool) { return nil, false }
+
+func TestDesiredFederatedCRsExpandsTenantSubjects(t *testing.T) {
+	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a"}},
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"})
+	expand := func(in []v1alpha1.SubjectRef) []v1alpha1.SubjectRef {
+		return append(append([]v1alpha1.SubjectRef(nil), in...),
+			v1alpha1.SubjectRef{Kind: "User", Name: "alice@example.com"})
+	}
+	_, bindings, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{vrb}, tenantWriteRoleFixture(), noJenkinsRole, expand)
+	if len(bindings) != 1 || len(bindings[0].Spec.Subjects) != 2 {
+		t.Fatalf("bindings = %#v, want one copy with two subjects", bindings)
+	}
+	_, plain, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{vrb}, tenantWriteRoleFixture(), noJenkinsRole, nil)
+	if plain[0].Name != bindings[0].Name {
+		t.Fatalf("expander changed the copy name: %q vs %q", plain[0].Name, bindings[0].Name)
+	}
+}
+
+func TestDesiredFederatedCRsTenantChildNameChangesWithJobs(t *testing.T) {
+	alice := v1alpha1.SubjectRef{Kind: "User", Name: "alice"}
+	narrow := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*"}}}, alice)
+	wider := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*", "b/*"}}}, alice)
+	_, b1, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{narrow}, tenantWriteRoleFixture(), noJenkinsRole, nil)
+	_, b2, _, _ := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{wider}, tenantWriteRoleFixture(), noJenkinsRole, nil)
+	if len(b1) != 1 || len(b2) != 1 || b1[0].Name == b2[0].Name {
+		t.Fatalf("names %v and %v, want different names for different jobs", b1, b2)
+	}
+}
+
+func TestDesiredFederatedCRsKeepsOwnerAnnotationBesideTenantAnnotations(t *testing.T) {
+	alice := v1alpha1.SubjectRef{Kind: "User", Name: "alice"}
+	vrb := tenantWriteBinding([]v1alpha1.TenantScope{{Name: "team-a", Jobs: []string{"a/*"}}}, alice)
+	_, bindings, _, outcomes := DesiredFederatedCRs([]*v1alpha1.VarroaRoleBinding{vrb}, tenantWriteRoleFixture(), noJenkinsRole, nil)
+	if len(bindings) != 1 {
+		t.Fatalf("bindings = %d, want 1", len(bindings))
+	}
+	ann := bindings[0].Annotations
+	if ann[AnnotationFederatedBindings] != "tw" || ann[AnnotationFederatedTenant] != "team-a" || ann[AnnotationFederatedTenantJobs] == "" {
+		t.Fatalf("annotations = %#v, want owner, tenant, and jobs", ann)
+	}
+	if got := outcomes["tw"].BindingNames; len(got) != 1 || got[0] != bindings[0].Name {
+		t.Fatalf("outcome names = %v, want %s", got, bindings[0].Name)
 	}
 }
