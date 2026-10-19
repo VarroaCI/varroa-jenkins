@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -482,8 +484,77 @@ func writeConfigAt(t *testing.T, dir, config string) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.xml"), []byte(config), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.xml"), []byte(jenkinsXMLProlog+config), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestJenkinsXMLReader checks the declaration rewrite. A stream without a
+// version 1.1 declaration must pass through unchanged.
+func TestJenkinsXMLReader(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"jenkins single quotes", "<?xml version='1.1' encoding='UTF-8'?>\n<hudson/>", "<?xml version='1.0' encoding='UTF-8'?>\n<hudson/>"},
+		{"double quotes", `<?xml version="1.1"?><hudson/>`, `<?xml version="1.0"?><hudson/>`},
+		{"white space around equals", "<?xml version = '1.1' encoding='UTF-8'?><hudson/>", "<?xml version = '1.0' encoding='UTF-8'?><hudson/>"},
+		{"version 1.0 unchanged", "<?xml version='1.0' encoding='UTF-8'?>\n<hudson/>", "<?xml version='1.0' encoding='UTF-8'?>\n<hudson/>"},
+		{"long declaration", "<?xml version='1.1'" + strings.Repeat(" ", 200) + "encoding='UTF-8'?><hudson/>", "<?xml version='1.0'" + strings.Repeat(" ", 200) + "encoding='UTF-8'?><hudson/>"},
+		{"no declaration", "<hudson/>", "<hudson/>"},
+		{"empty stream", "", ""},
+		{"declaration without end", "<?xml version='1.1'", "<?xml version='1.1'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := io.ReadAll(jenkinsXMLReader(strings.NewReader(tc.in)))
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRootElementName_JenkinsVersion11 reads a root element from a file
+// that carries the version 1.1 declaration Jenkins writes.
+func TestRootElementName_JenkinsVersion11(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.xml")
+	body := jenkinsXMLProlog + `<jenkins.branch.OrganizationFolder plugin="branch-api@2.1280.v0d4e5b_b_460ef">` +
+		`</jenkins.branch.OrganizationFolder>`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := rootElementName(path)
+	if err != nil {
+		t.Fatalf("rootElementName: %v", err)
+	}
+	if want := "jenkins.branch.OrganizationFolder"; got != want {
+		t.Errorf("rootElementName = %q, want %q", got, want)
+	}
+}
+
+// TestItemNameFromConfig_JenkinsVersion11 reads a branch name and a
+// repository name from files that carry the version 1.1 declaration.
+func TestItemNameFromConfig_JenkinsVersion11(t *testing.T) {
+	dir := t.TempDir()
+	branchPath := filepath.Join(dir, "branch.xml")
+	if err := os.WriteFile(branchPath, []byte(jenkinsXMLProlog+fmt.Sprintf(branchJobConfig, "main")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	name, ok, err := itemNameFromConfig(branchPath, "branches")
+	if err != nil || !ok || name != "main" {
+		t.Errorf("branch: itemNameFromConfig = (%q, %v, %v), want (main, true, nil)", name, ok, err)
+	}
+
+	repoPath := filepath.Join(dir, "repo.xml")
+	if err := os.WriteFile(repoPath, []byte(jenkinsXMLProlog+fmt.Sprintf(repoProjectConfig, "projgen")), 0644); err != nil {
+		t.Fatal(err)
+	}
+	name, ok, err = itemNameFromConfig(repoPath, "jobs")
+	if err != nil || !ok || name != "projgen" {
+		t.Errorf("repo: itemNameFromConfig = (%q, %v, %v), want (projgen, true, nil)", name, ok, err)
 	}
 }
 

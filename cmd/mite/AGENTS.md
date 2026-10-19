@@ -343,6 +343,8 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   does not exist yet, never overwrites an existing build directory, and
   never lowers a stored `nextBuildNumber`. A deferred job's path returns in
   `DesiredStateResult.RehydrationDeferredJobs` for the operator to retry.
+  Every read of a Jenkins-saved XML file goes through `jenkinsXMLReader`,
+  because Jenkins writes XML version 1.1 and `encoding/xml` accepts 1.0 only.
   The wire path always uses the `jobs/<seg>` form. A job with no `config.xml`
   at that logical directory resolves through its parent's Jenkins metadata
   (`jobDirResolver`). A child of a multibranch project resolves to
