@@ -47,6 +47,7 @@ Each provider has these fields:
 - `models` lists the model ids that a user may choose.
 - `trust` is `internal` when the endpoint runs inside your network, and `external` otherwise.
 - `default: true` marks the provider for new sessions. Exactly one provider sets it.
+  A new session uses your saved provider. When the chart does not list it, the session uses the admin default provider, then the chart default.
 - `secretRef` names a Secret that holds the key under the `apiKey` key.
 
 Rotate a key by updating the Secret. The BFF reads the key file on every call.
@@ -99,6 +100,7 @@ Your assistant settings are on the Profile page, in the Assistant tab. Your
 session key is kept for this login only. It is not stored in the browser.
 
 When an admin removes your saved provider, the Assistant tab shows a notice. Pick a provider or Default, then save.
+When the provider list does not load, the Assistant tab shows a notice. The Administration page shows the same notices for the default provider.
 
 Agent rows appear in the activity feed under the Agents filter.
 
