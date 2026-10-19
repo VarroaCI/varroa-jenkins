@@ -37,3 +37,11 @@ export function canAdminArea(perms: Permissions | undefined): boolean {
 export function canCellsRow(perms: Permissions | undefined): boolean {
   return canDoGlobal(perms, "cellpools", "read");
 }
+
+/**
+ * Whether the user can see the Team agents row. The agent sessions read is
+ * cluster-wide, so a namespace-scoped grant admits nothing.
+ */
+export function canAgentsRow(perms: Permissions | undefined): boolean {
+  return canDoGlobal(perms, "agentsessions", "read");
+}

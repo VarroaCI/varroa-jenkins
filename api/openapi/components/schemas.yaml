@@ -7367,3 +7367,230 @@ RunNoteError:
       type: string
       enum: [note_too_long, note_session_invalid]
   additionalProperties: false
+
+TeamAgentSpec:
+  type: object
+  description: The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
+  required: [teamRef]
+  properties:
+    teamRef:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+    enabled: {type: boolean}
+    provider: {type: string}
+    model: {type: string}
+    instructions:
+      type: object
+      required: [source]
+      properties:
+        source: {type: string}
+        path: {type: string}
+    triggers:
+      type: array
+      items:
+        type: object
+        required: [type]
+        properties:
+          type:
+            type: string
+            enum: [run.failed, run.interrupted, cron.missed, signature.refused, scan.failed, lock.held, placement.moved, manual]
+          debounce: {type: string, description: "A Go duration, such as 10m."}
+    unattendedWrites:
+      type: array
+      items: {type: string}
+    outputs:
+      type: object
+      properties:
+        notes: {type: boolean}
+        issues:
+          type: object
+          required: [repo, forge]
+          properties:
+            repo: {type: string}
+            forge: {type: string}
+            labels:
+              type: array
+              items: {type: string}
+        webhook: {type: boolean}
+    budgets:
+      type: object
+      properties:
+        session: {type: integer, format: int64}
+        day: {type: integer, format: int64}
+    dataSharing:
+      type: string
+      enum: [none, metadata, logs]
+
+TeamAgentCondition:
+  type: object
+  required: [type, status, reason, lastTransitionTime]
+  properties:
+    type: {type: string}
+    status: {type: string, enum: ["True", "False", "Unknown"]}
+    reason: {type: string}
+    message: {type: string}
+    lastTransitionTime: {type: string, format: date-time}
+    observedGeneration: {type: integer, format: int64}
+
+TeamAgent:
+  type: object
+  required: [namespace, name, team, cluster, spec, status, accepted, pendingApprovals, spendToday, dayLimit]
+  properties:
+    namespace: {type: string}
+    name: {type: string}
+    team: {type: string}
+    cluster: {type: string}
+    spec:
+      $ref: '#/TeamAgentSpec'
+    status:
+      type: object
+      properties:
+        conditions:
+          type: array
+          items:
+            $ref: '#/TeamAgentCondition'
+        instructionsSHA: {type: string}
+        lastSession:
+          type: object
+          properties:
+            id: {type: string}
+            trigger: {type: string}
+            state: {type: string}
+            at: {type: string, format: date-time}
+        spendToday: {type: integer, format: int64}
+        observedGeneration: {type: integer, format: int64}
+    accepted: {type: boolean}
+    pendingApprovals: {type: integer}
+    spendToday: {type: integer, format: int64}
+    dayLimit: {type: integer, format: int64}
+
+TeamAgentSession:
+  type: object
+  description: One Team agent session. It carries the AssistantSession fields and its pending approvals.
+  allOf:
+    - $ref: '#/AssistantSession'
+    - type: object
+      required: [pendingApprovals]
+      properties:
+        pendingApprovals:
+          type: array
+          items:
+            $ref: '#/AssistantApproval'
+
+TeamAgentSessionList:
+  type: object
+  required: [items, nextCursor]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/TeamAgentSession'
+    nextCursor: {type: string}
+
+TeamAgentCapability:
+  type: object
+  required: [name, description, kind]
+  properties:
+    name: {type: string}
+    description: {type: string}
+    kind:
+      type: string
+      description: The tool class read or write, or the output kind note, issue, or webhook on an output tool.
+
+TeamAgentCapabilities:
+  type: object
+  required: [reads, writesByApproval, unattended, never]
+  properties:
+    reads:
+      type: array
+      items: {$ref: '#/TeamAgentCapability'}
+    writesByApproval:
+      type: array
+      items: {$ref: '#/TeamAgentCapability'}
+    unattended:
+      type: array
+      items: {$ref: '#/TeamAgentCapability'}
+    never:
+      type: array
+      items: {$ref: '#/TeamAgentCapability'}
+
+TeamAgentRunRequest:
+  type: object
+  properties:
+    job: {type: string, description: A job path under the Team. Empty names the whole Team.}
+    run: {type: string, description: A run id to note in the request.}
+
+TeamAgentError:
+  type: object
+  required: [error, code]
+  description: A Team agent refusal. The code names the cause, and error gives the text.
+  properties:
+    error: {type: string}
+    code:
+      type: string
+      enum: [team_agent_session, not_accepted, disabled, manual_not_enabled, nothing_to_grant]
+  additionalProperties: false
+
+TeamAgentPaused:
+  type: object
+  required: [reason, message]
+  properties:
+    reason: {type: string}
+    message: {type: string}
+
+TeamAgentItem:
+  type: object
+  required: [namespace, name, team, cluster, enabled, sessionsToday, spendToday, failedToday, conditions, unattendedRequested, unattendedGranted]
+  properties:
+    namespace: {type: string}
+    name: {type: string}
+    team: {type: string}
+    cluster: {type: string}
+    enabled: {type: boolean}
+    paused:
+      nullable: true
+      allOf:
+        - $ref: '#/TeamAgentPaused'
+    sessionsToday: {type: integer}
+    spendToday: {type: integer, format: int64}
+    failedToday: {type: integer}
+    conditions:
+      type: array
+      description: The conditions whose status is not True.
+      items:
+        $ref: '#/TeamAgentCondition'
+    unattendedRequested:
+      type: array
+      items: {type: string}
+    unattendedGranted:
+      type: array
+      items: {type: string}
+
+TeamAgentItemList:
+  type: object
+  required: [items]
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/TeamAgentItem'
+
+TeamAgentUnattendedRequest:
+  type: object
+  required: [enabled]
+  properties:
+    enabled: {type: boolean}
+  additionalProperties: false
+
+TeamAgentUnattendedResult:
+  type: object
+  required: [namespace, name, enabled, unattendedGranted]
+  properties:
+    namespace: {type: string}
+    name: {type: string}
+    enabled: {type: boolean}
+    unattendedGranted:
+      type: array
+      items: {type: string}

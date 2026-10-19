@@ -41,6 +41,8 @@ import BroodSchedules from "./pages/BroodSchedules";
 import BroodScheduleDetail from "./pages/BroodScheduleDetail";
 import FleetPlugins from "./pages/FleetPlugins";
 import Cells from "./pages/Cells";
+import Agents from "./pages/Agents";
+import TeamAgentPage from "./pages/pipelines/TeamAgentPage";
 import Locks from "./pages/Locks";
 import PipelinesIndex from "./pages/pipelines/PipelinesIndex";
 import TeamHome from "./pages/pipelines/TeamHome";
@@ -192,6 +194,15 @@ function AppRoutes() {
                   <Route path="plugins" element={<PermissionRoute resource="controllers" verb="read"><FleetPlugins /></PermissionRoute>} />
                   <Route path="pipelines" element={<PipelinesIndex />} />
                   <Route path="pipelines/:team" element={<TeamHome />} />
+                  <Route path="pipelines/:team/agent" element={<TeamAgentPage />} />
+                  <Route
+                    path="agents"
+                    element={
+                      <PermissionRoute resource="agentsessions" verb="read" globalOnly>
+                        <Agents />
+                      </PermissionRoute>
+                    }
+                  />
                   <Route path="pipelines/:team/:job" element={<PipelinePage />} />
                   <Route path="pipelines/:team/:job/:run" element={<BuildPageRoute />} />
                   {/* The case route holds five segments and the run route four, so the two never match one URL. */}

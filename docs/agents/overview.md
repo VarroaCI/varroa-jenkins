@@ -9,6 +9,7 @@ as an administrator token.
 |---|---|---|---|
 | Your own MCP client | You, through your API key | The client calls write tools directly. Your grants are the gate. | [Connect a client](connecting.md) |
 | The assistant in the dashboard | You, while you are signed in | Every write waits for your approval. | [Assistant](assistant.md) |
+| A Team agent for a pipelines Team | The Team agent principal, with the grants of its Team | A write waits for approval, unless the object grants it. | [Team agents](team-agents.md) |
 
 ## What every agent shares
 
@@ -42,6 +43,8 @@ Credentials and sensitive status fields are removed from tool results. See
 
 - [Connect a client](connecting.md)
 - [Assistant](assistant.md)
+- [Team agents](team-agents.md)
+- [Team agent safety](safety.md)
 - [Identity and auditing](identity.md)
 - [Jenkins controller tools](jenkins-tools.md)
 - [Tool reference](tools.md)

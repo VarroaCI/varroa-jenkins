@@ -246,6 +246,12 @@ export function passesSource(
 // ── Source metadata (moved from Activity.tsx) ──────────────────────────────
 
 export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> = {
+  "build.failed": { icon: "✕", style: "softBad" },
+  "pipeline.branch_scan_failed": { icon: "⌕", style: "softBad" },
+  "fleetlock.wait_exceeded": { icon: "◷", style: "softWarn" },
+  "cell.signature_refused": { icon: "⊘", style: "softBad" },
+  "tenant.placement_moved": { icon: "⇄", style: "softInfo" },
+  "teamagent.run_requested": { icon: "▶", style: "softInfo" },
   connected: { icon: "⇡", style: "softInfo" },
   disconnected: { icon: "⇣", style: "softBad" },
   phase: { icon: "◴", style: "softWarn" },

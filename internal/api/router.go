@@ -132,6 +132,12 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.HandleFunc("GET /pipelines/{team}/cell", srv.handleGetTeamCell)
 	mux.HandleFunc("GET /pipelines/{team}/locks", srv.handleListTeamFleetLocks)
 	mux.HandleFunc("GET /pipelines/{team}/stream", srv.handleTeamRunStream)
+	mux.HandleFunc("GET /pipelines/{team}/agent", srv.handleGetTeamAgent)
+	mux.HandleFunc("GET /pipelines/{team}/agent/sessions", srv.handleListTeamAgentSessions)
+	mux.HandleFunc("GET /pipelines/{team}/agent/capabilities", srv.handleTeamAgentCapabilities)
+	mux.HandleFunc("POST /pipelines/{team}/agent/run", srv.handleRunTeamAgent)
+	mux.HandleFunc("GET /agents", srv.handleListAgents)
+	mux.HandleFunc("PUT /agents/{namespace}/{name}/unattended", srv.handlePutAgentUnattended)
 	// Runs: detail, log stream, artifacts, tests, changes, downstream, script, restart,
 	// cancel, rerun, replay, and the two input routes.
 	mux.HandleFunc("GET /runs/{run}", srv.handleGetRun)

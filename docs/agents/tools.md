@@ -155,6 +155,22 @@ Do not build workflows that expect these fields from MCP.
 | Oversized list | Use filters or `get_*` |
 | Jenkins tool failure | Re-discover the controller tools |
 
+## Team agent tools
+
+A Team agent calls four tools. A person can call them too, with the same grants
+that the tool checks. See [Team agents](team-agents.md).
+
+| Tool | Kind | Arguments | Effect |
+|---|---|---|---|
+| `read_repo_file` | read | `team`, `path`, optional `repo` | Reads a file from the instructions repository at the tracked revision. With `repo`, it reads that repository's default branch. A file is at most 256 KiB. A directory answers its entry names. |
+| `post_note` | create | `run` or `team` with `job`, and `body` | Writes one note on a run or a job. A session writes one note only. |
+| `open_issue` | create | `team`, `title`, `body`, `labels` | Opens one issue in the repository of `spec.outputs.issues`. Each label must be in `spec.outputs.issues.labels`. The operator chooses the credential. |
+| `send_webhook` | action | `team`, `body` | Sends one signed message to the Team's completion webhook. |
+
+An output tool answers `disabled` when the object does not enable its output.
+On a member-placed Team, the instructions read and `open_issue` answer
+`no_matching_credential` on the core cluster.
+
 ## Related pages
 
 - [Connect an MCP client](connecting.md)

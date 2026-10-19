@@ -4,11 +4,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
-import { useEventStream, type SSEEvent } from "../../hooks/useEventStream";
 import { ApiError } from "../../hooks/useApi";
 import {
   approveAssistantApproval,
-  assistantEventsUrl,
   cancelAssistantSession,
   denyAssistantApproval,
   getAssistantSession,
@@ -17,65 +15,12 @@ import {
 } from "../../api/client";
 import { useAssistant } from "./AssistantProvider";
 import { useNarrowViewport } from "../../hooks/useNarrowViewport";
-import { applyEvent, callLabel, cutUtf8, emptyModel, type TranscriptModel } from "./transcript";
+import { emptyModel, type TranscriptModel } from "./transcript";
 import { contextLabel, contextDiffers, routeContext } from "./routeContext";
-import { Markdown } from "./Markdown";
+import { TranscriptView } from "./TranscriptView";
+import { TranscriptStream } from "./TranscriptStream";
 import styles from "./AssistantDrawer.module.css";
-import type { AssistantEventType, AssistantFrame, AssistantSession, AssistantSessionState } from "../../types/assistant";
-
-const EVENT_NAMES: AssistantEventType[] = [
-  "user", "assistant", "tool_call", "tool_result", "approval_requested", "approval_resolved", "error", "done",
-];
-
-/** TranscriptStream streams one session and folds its frames into a model. */
-function TranscriptStream({
-  sessionId,
-  onModel,
-  onDone,
-  resumeFrom,
-}: {
-  sessionId: string;
-  onModel: (m: TranscriptModel) => void;
-  onDone: (state: string) => void;
-  resumeFrom: number;
-}) {
-  const modelRef = useRef<TranscriptModel>({ ...emptyModel(), lastSeq: resumeFrom });
-  const doneRef = useRef(onDone);
-  doneRef.current = onDone;
-  const queryClient = useQueryClient();
-
-  const onEvent = (ev: SSEEvent<unknown>) => {
-    const seq = Number(ev.id);
-    if (!ev.id || Number.isNaN(seq)) return;
-    const frame: AssistantFrame = {
-      seq,
-      type: ev.type as AssistantEventType,
-      data: (ev.data ?? {}) as AssistantFrame["data"],
-    };
-    const next = applyEvent(modelRef.current, frame);
-    if (next === modelRef.current) return;
-    modelRef.current = next;
-    onModel(next);
-    if (frame.type === "assistant" || frame.type === "tool_result") {
-      void queryClient.invalidateQueries({ queryKey: ["assistant-session", sessionId] });
-    }
-    if (frame.type === "done") {
-      void queryClient.invalidateQueries({ queryKey: ["assistant-session", sessionId] });
-      doneRef.current(String(frame.data.state ?? ""));
-    }
-  };
-
-  useEventStream<unknown>(
-    assistantEventsUrl(sessionId, resumeFrom),
-    `assistant:${sessionId}`,
-    EVENT_NAMES,
-    {
-      onEvent,
-      resumeUrl: () => assistantEventsUrl(sessionId, modelRef.current.lastSeq),
-    },
-  );
-  return null;
-}
+import type { AssistantSession, AssistantSessionState } from "../../types/assistant";
 
 /** AssistantDrawer renders the open session panel. */
 export default function AssistantDrawer() {
@@ -252,38 +197,12 @@ export default function AssistantDrawer() {
         />
       )}
 
-      <div className={styles.transcript}>
-        {model.rows.map((row, i) => {
-          if (row.kind === "user") return <p key={i} className={styles.user}>{row.text}</p>;
-          if (row.kind === "turn") {
-            const t = model.turns[row.turn];
-            return (
-              <div key={i} className={styles.assistant}>
-                <Markdown text={t?.text ?? ""} />
-                {!t?.final && <span aria-hidden="true">…</span>}
-              </div>
-            );
-          }
-          if (row.kind === "call") {
-            const c = model.calls[row.callId];
-            if (!c) return null;
-            return (
-              <details key={i} className={styles.call}>
-                <summary>{c.name} · {callLabel(c)}</summary>
-                <pre>{JSON.stringify(c.arguments, null, 2)}</pre>
-                {c.result && <pre className={c.result.isError ? styles.error : undefined}>{cutUtf8(c.result.content, 2048)}</pre>}
-                {c.approval?.state === "pending" && (
-                  <div className={styles.approval}>
-                    <button type="button" onClick={() => void decide(c.approval!.id, true)}>Approve</button>
-                    <button type="button" onClick={() => void decide(c.approval!.id, false)}>Deny</button>
-                  </div>
-                )}
-              </details>
-            );
-          }
-          return <p key={i} role="alert" className={styles.error}>{row.code}: {row.message}</p>;
-        })}
-      </div>
+      <TranscriptView model={model} approvalActions={(id) => (
+        <>
+          <button type="button" onClick={() => void decide(id, true)}>Approve</button>
+          <button type="button" onClick={() => void decide(id, false)}>Deny</button>
+        </>
+      )} />
 
       {refusal && <p role="alert" className={styles.error}>{refusal}</p>}
 

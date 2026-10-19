@@ -329,12 +329,12 @@ const (
 
 // Defines values for ComponentsSchemasControllerAttentionKind.
 const (
-	ApplyFailed      ComponentsSchemasControllerAttentionKind = "applyFailed"
-	BootFailed       ComponentsSchemasControllerAttentionKind = "bootFailed"
-	Failed           ComponentsSchemasControllerAttentionKind = "failed"
-	MiteUnreachable  ComponentsSchemasControllerAttentionKind = "miteUnreachable"
-	PluginRollFailed ComponentsSchemasControllerAttentionKind = "pluginRollFailed"
-	ReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
+	ComponentsSchemasControllerAttentionKindApplyFailed      ComponentsSchemasControllerAttentionKind = "applyFailed"
+	ComponentsSchemasControllerAttentionKindBootFailed       ComponentsSchemasControllerAttentionKind = "bootFailed"
+	ComponentsSchemasControllerAttentionKindFailed           ComponentsSchemasControllerAttentionKind = "failed"
+	ComponentsSchemasControllerAttentionKindMiteUnreachable  ComponentsSchemasControllerAttentionKind = "miteUnreachable"
+	ComponentsSchemasControllerAttentionKindPluginRollFailed ComponentsSchemasControllerAttentionKind = "pluginRollFailed"
+	ComponentsSchemasControllerAttentionKindReconcileBlocked ComponentsSchemasControllerAttentionKind = "reconcileBlocked"
 )
 
 // Defines values for ComponentsSchemasControllerDetailKind.
@@ -541,11 +541,11 @@ const (
 
 // Defines values for ComponentsSchemasPipelineSummaryKind.
 const (
-	Branch             ComponentsSchemasPipelineSummaryKind = "branch"
-	Multibranch        ComponentsSchemasPipelineSummaryKind = "multibranch"
-	OrganizationFolder ComponentsSchemasPipelineSummaryKind = "organizationFolder"
-	Pipeline           ComponentsSchemasPipelineSummaryKind = "pipeline"
-	Unknown            ComponentsSchemasPipelineSummaryKind = "unknown"
+	ComponentsSchemasPipelineSummaryKindBranch             ComponentsSchemasPipelineSummaryKind = "branch"
+	ComponentsSchemasPipelineSummaryKindMultibranch        ComponentsSchemasPipelineSummaryKind = "multibranch"
+	ComponentsSchemasPipelineSummaryKindOrganizationFolder ComponentsSchemasPipelineSummaryKind = "organizationFolder"
+	ComponentsSchemasPipelineSummaryKindPipeline           ComponentsSchemasPipelineSummaryKind = "pipeline"
+	ComponentsSchemasPipelineSummaryKindUnknown            ComponentsSchemasPipelineSummaryKind = "unknown"
 )
 
 // Defines values for ComponentsSchemasPipelineTemplateInfoSource.
@@ -556,10 +556,10 @@ const (
 
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
-	Admin     ComponentsSchemasRBACGroupBindingRole = "admin"
-	Developer ComponentsSchemasRBACGroupBindingRole = "developer"
-	Operator  ComponentsSchemasRBACGroupBindingRole = "operator"
-	Viewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
+	ComponentsSchemasRBACGroupBindingRoleAdmin     ComponentsSchemasRBACGroupBindingRole = "admin"
+	ComponentsSchemasRBACGroupBindingRoleDeveloper ComponentsSchemasRBACGroupBindingRole = "developer"
+	ComponentsSchemasRBACGroupBindingRoleOperator  ComponentsSchemasRBACGroupBindingRole = "operator"
+	ComponentsSchemasRBACGroupBindingRoleViewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
 )
 
 // Defines values for ComponentsSchemasRunActionResponseState.
@@ -666,6 +666,79 @@ const (
 	ComponentsSchemasSubjectRefKindUser  ComponentsSchemasSubjectRefKind = "User"
 )
 
+// Defines values for ComponentsSchemasTeamAgentConditionStatus.
+const (
+	ComponentsSchemasTeamAgentConditionStatusFalse   ComponentsSchemasTeamAgentConditionStatus = "False"
+	ComponentsSchemasTeamAgentConditionStatusTrue    ComponentsSchemasTeamAgentConditionStatus = "True"
+	ComponentsSchemasTeamAgentConditionStatusUnknown ComponentsSchemasTeamAgentConditionStatus = "Unknown"
+)
+
+// Defines values for ComponentsSchemasTeamAgentErrorCode.
+const (
+	Disabled         ComponentsSchemasTeamAgentErrorCode = "disabled"
+	ManualNotEnabled ComponentsSchemasTeamAgentErrorCode = "manual_not_enabled"
+	NotAccepted      ComponentsSchemasTeamAgentErrorCode = "not_accepted"
+	NothingToGrant   ComponentsSchemasTeamAgentErrorCode = "nothing_to_grant"
+	TeamAgentSession ComponentsSchemasTeamAgentErrorCode = "team_agent_session"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSessionDataSharing.
+const (
+	ComponentsSchemasTeamAgentSessionDataSharingLogs     ComponentsSchemasTeamAgentSessionDataSharing = "logs"
+	ComponentsSchemasTeamAgentSessionDataSharingMetadata ComponentsSchemasTeamAgentSessionDataSharing = "metadata"
+	ComponentsSchemasTeamAgentSessionDataSharingNone     ComponentsSchemasTeamAgentSessionDataSharing = "none"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSessionKeySource.
+const (
+	Chart ComponentsSchemasTeamAgentSessionKeySource = "chart"
+	User  ComponentsSchemasTeamAgentSessionKeySource = "user"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSessionKind.
+const (
+	ComponentsSchemasTeamAgentSessionKindAssistant ComponentsSchemasTeamAgentSessionKind = "assistant"
+	ComponentsSchemasTeamAgentSessionKindTeamAgent ComponentsSchemasTeamAgentSessionKind = "team_agent"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSessionSkipReason.
+const (
+	BudgetDay           ComponentsSchemasTeamAgentSessionSkipReason = "budget_day"
+	DataSharingNone     ComponentsSchemasTeamAgentSessionSkipReason = "data_sharing_none"
+	KillSwitch          ComponentsSchemasTeamAgentSessionSkipReason = "kill_switch"
+	ProviderUnavailable ComponentsSchemasTeamAgentSessionSkipReason = "provider_unavailable"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSessionState.
+const (
+	ComponentsSchemasTeamAgentSessionStateCancelled       ComponentsSchemasTeamAgentSessionState = "cancelled"
+	ComponentsSchemasTeamAgentSessionStateCompleted       ComponentsSchemasTeamAgentSessionState = "completed"
+	ComponentsSchemasTeamAgentSessionStateExpired         ComponentsSchemasTeamAgentSessionState = "expired"
+	ComponentsSchemasTeamAgentSessionStateFailed          ComponentsSchemasTeamAgentSessionState = "failed"
+	ComponentsSchemasTeamAgentSessionStateRunning         ComponentsSchemasTeamAgentSessionState = "running"
+	ComponentsSchemasTeamAgentSessionStateSkipped         ComponentsSchemasTeamAgentSessionState = "skipped"
+	ComponentsSchemasTeamAgentSessionStateWaitingApproval ComponentsSchemasTeamAgentSessionState = "waiting_approval"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSpecDataSharing.
+const (
+	ComponentsSchemasTeamAgentSpecDataSharingLogs     ComponentsSchemasTeamAgentSpecDataSharing = "logs"
+	ComponentsSchemasTeamAgentSpecDataSharingMetadata ComponentsSchemasTeamAgentSpecDataSharing = "metadata"
+	ComponentsSchemasTeamAgentSpecDataSharingNone     ComponentsSchemasTeamAgentSpecDataSharing = "none"
+)
+
+// Defines values for ComponentsSchemasTeamAgentSpecTriggersType.
+const (
+	ComponentsSchemasTeamAgentSpecTriggersTypeCronMissed       ComponentsSchemasTeamAgentSpecTriggersType = "cron.missed"
+	ComponentsSchemasTeamAgentSpecTriggersTypeLockHeld         ComponentsSchemasTeamAgentSpecTriggersType = "lock.held"
+	ComponentsSchemasTeamAgentSpecTriggersTypeManual           ComponentsSchemasTeamAgentSpecTriggersType = "manual"
+	ComponentsSchemasTeamAgentSpecTriggersTypePlacementMoved   ComponentsSchemasTeamAgentSpecTriggersType = "placement.moved"
+	ComponentsSchemasTeamAgentSpecTriggersTypeRunFailed        ComponentsSchemasTeamAgentSpecTriggersType = "run.failed"
+	ComponentsSchemasTeamAgentSpecTriggersTypeRunInterrupted   ComponentsSchemasTeamAgentSpecTriggersType = "run.interrupted"
+	ComponentsSchemasTeamAgentSpecTriggersTypeScanFailed       ComponentsSchemasTeamAgentSpecTriggersType = "scan.failed"
+	ComponentsSchemasTeamAgentSpecTriggersTypeSignatureRefused ComponentsSchemasTeamAgentSpecTriggersType = "signature.refused"
+)
+
 // Defines values for ComponentsSchemasTeamCellState.
 const (
 	Moving        ComponentsSchemasTeamCellState = "moving"
@@ -695,8 +768,8 @@ const (
 
 // Defines values for ComponentsSchemasTeamPipelinesInterruptedRetry.
 const (
-	Automatic ComponentsSchemasTeamPipelinesInterruptedRetry = "automatic"
-	Manual    ComponentsSchemasTeamPipelinesInterruptedRetry = "manual"
+	ComponentsSchemasTeamPipelinesInterruptedRetryAutomatic ComponentsSchemasTeamPipelinesInterruptedRetry = "automatic"
+	ComponentsSchemasTeamPipelinesInterruptedRetryManual    ComponentsSchemasTeamPipelinesInterruptedRetry = "manual"
 )
 
 // Defines values for ComponentsSchemasUpdateCenterClosureEntrySource.
@@ -790,6 +863,17 @@ const (
 	ApproveControllerJSONBodyActionPluginRoll   ApproveControllerJSONBodyAction = "plugin-roll"
 	ApproveControllerJSONBodyActionReload       ApproveControllerJSONBodyAction = "reload"
 	ApproveControllerJSONBodyActionRestart      ApproveControllerJSONBodyAction = "restart"
+)
+
+// Defines values for ListTeamAgentSessionsParamsState.
+const (
+	Cancelled       ListTeamAgentSessionsParamsState = "cancelled"
+	Completed       ListTeamAgentSessionsParamsState = "completed"
+	Expired         ListTeamAgentSessionsParamsState = "expired"
+	Failed          ListTeamAgentSessionsParamsState = "failed"
+	Running         ListTeamAgentSessionsParamsState = "running"
+	Skipped         ListTeamAgentSessionsParamsState = "skipped"
+	WaitingApproval ListTeamAgentSessionsParamsState = "waiting_approval"
 )
 
 // ComponentsSchemasAPICapabilitySet Resource-to-verb-to-allowed capability map.
@@ -4512,6 +4596,207 @@ type ComponentsSchemasSuspendBroodRequest struct {
 	Suspend bool `json:"suspend"`
 }
 
+// ComponentsSchemasTeamAgent defines model for components_schemas_TeamAgent.
+type ComponentsSchemasTeamAgent struct {
+	Accepted         bool   `json:"accepted"`
+	Cluster          string `json:"cluster"`
+	DayLimit         int64  `json:"dayLimit"`
+	Name             string `json:"name"`
+	Namespace        string `json:"namespace"`
+	PendingApprovals int    `json:"pendingApprovals"`
+
+	// Spec The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
+	Spec       ComponentsSchemasTeamAgentSpec `json:"spec"`
+	SpendToday int64                          `json:"spendToday"`
+	Status     struct {
+		Conditions      *[]ComponentsSchemasTeamAgentCondition `json:"conditions,omitempty"`
+		InstructionsSHA *string                                `json:"instructionsSHA,omitempty"`
+		LastSession     *struct {
+			At      *time.Time `json:"at,omitempty"`
+			Id      *string    `json:"id,omitempty"`
+			State   *string    `json:"state,omitempty"`
+			Trigger *string    `json:"trigger,omitempty"`
+		} `json:"lastSession,omitempty"`
+		ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+		SpendToday         *int64 `json:"spendToday,omitempty"`
+	} `json:"status"`
+	Team string `json:"team"`
+}
+
+// ComponentsSchemasTeamAgentCapabilities defines model for components_schemas_TeamAgentCapabilities.
+type ComponentsSchemasTeamAgentCapabilities struct {
+	Never            []ComponentsSchemasTeamAgentCapability `json:"never"`
+	Reads            []ComponentsSchemasTeamAgentCapability `json:"reads"`
+	Unattended       []ComponentsSchemasTeamAgentCapability `json:"unattended"`
+	WritesByApproval []ComponentsSchemasTeamAgentCapability `json:"writesByApproval"`
+}
+
+// ComponentsSchemasTeamAgentCapability defines model for components_schemas_TeamAgentCapability.
+type ComponentsSchemasTeamAgentCapability struct {
+	Description string `json:"description"`
+
+	// Kind The tool class read or write, or the output kind note, issue, or webhook on an output tool.
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// ComponentsSchemasTeamAgentCondition defines model for components_schemas_TeamAgentCondition.
+type ComponentsSchemasTeamAgentCondition struct {
+	LastTransitionTime time.Time                                 `json:"lastTransitionTime"`
+	Message            *string                                   `json:"message,omitempty"`
+	ObservedGeneration *int64                                    `json:"observedGeneration,omitempty"`
+	Reason             string                                    `json:"reason"`
+	Status             ComponentsSchemasTeamAgentConditionStatus `json:"status"`
+	Type               string                                    `json:"type"`
+}
+
+// ComponentsSchemasTeamAgentConditionStatus defines model for ComponentsSchemasTeamAgentCondition.Status.
+type ComponentsSchemasTeamAgentConditionStatus string
+
+// ComponentsSchemasTeamAgentError A Team agent refusal. The code names the cause, and error gives the text.
+type ComponentsSchemasTeamAgentError struct {
+	Code  ComponentsSchemasTeamAgentErrorCode `json:"code"`
+	Error string                              `json:"error"`
+}
+
+// ComponentsSchemasTeamAgentErrorCode defines model for ComponentsSchemasTeamAgentError.Code.
+type ComponentsSchemasTeamAgentErrorCode string
+
+// ComponentsSchemasTeamAgentItem defines model for components_schemas_TeamAgentItem.
+type ComponentsSchemasTeamAgentItem struct {
+	Cluster string `json:"cluster"`
+
+	// Conditions The conditions whose status is not True.
+	Conditions          []ComponentsSchemasTeamAgentCondition `json:"conditions"`
+	Enabled             bool                                  `json:"enabled"`
+	FailedToday         int                                   `json:"failedToday"`
+	Name                string                                `json:"name"`
+	Namespace           string                                `json:"namespace"`
+	Paused              *ComponentsSchemasTeamAgentPaused     `json:"paused"`
+	SessionsToday       int                                   `json:"sessionsToday"`
+	SpendToday          int64                                 `json:"spendToday"`
+	Team                string                                `json:"team"`
+	UnattendedGranted   []string                              `json:"unattendedGranted"`
+	UnattendedRequested []string                              `json:"unattendedRequested"`
+}
+
+// ComponentsSchemasTeamAgentItemList defines model for components_schemas_TeamAgentItemList.
+type ComponentsSchemasTeamAgentItemList struct {
+	Items []ComponentsSchemasTeamAgentItem `json:"items"`
+}
+
+// ComponentsSchemasTeamAgentPaused defines model for components_schemas_TeamAgentPaused.
+type ComponentsSchemasTeamAgentPaused struct {
+	Message string `json:"message"`
+	Reason  string `json:"reason"`
+}
+
+// ComponentsSchemasTeamAgentRunRequest defines model for components_schemas_TeamAgentRunRequest.
+type ComponentsSchemasTeamAgentRunRequest struct {
+	// Job A job path under the Team. Empty names the whole Team.
+	Job *string `json:"job,omitempty"`
+
+	// Run A run id to note in the request.
+	Run *string `json:"run,omitempty"`
+}
+
+// ComponentsSchemasTeamAgentSession defines model for components_schemas_TeamAgentSession.
+type ComponentsSchemasTeamAgentSession struct {
+	Cluster          string                                       `json:"cluster"`
+	CompletionTokens int64                                        `json:"completionTokens"`
+	Context          map[string]interface{}                       `json:"context"`
+	DataSharing      ComponentsSchemasTeamAgentSessionDataSharing `json:"dataSharing"`
+	EndedAt          *time.Time                                   `json:"endedAt"`
+	Id               string                                       `json:"id"`
+	KeySource        ComponentsSchemasTeamAgentSessionKeySource   `json:"keySource"`
+	Kind             ComponentsSchemasTeamAgentSessionKind        `json:"kind"`
+	Model            *string                                      `json:"model,omitempty"`
+	PendingApprovals []ComponentsSchemasAssistantApproval         `json:"pendingApprovals"`
+	Principal        string                                       `json:"principal"`
+	PromptTokens     int64                                        `json:"promptTokens"`
+	Provider         *string                                      `json:"provider,omitempty"`
+	SkipReason       *ComponentsSchemasTeamAgentSessionSkipReason `json:"skipReason"`
+	StartedAt        time.Time                                    `json:"startedAt"`
+	State            ComponentsSchemasTeamAgentSessionState       `json:"state"`
+	Steps            int                                          `json:"steps"`
+	Team             *string                                      `json:"team,omitempty"`
+	Trigger          *string                                      `json:"trigger,omitempty"`
+}
+
+// ComponentsSchemasTeamAgentSessionDataSharing defines model for ComponentsSchemasTeamAgentSession.DataSharing.
+type ComponentsSchemasTeamAgentSessionDataSharing string
+
+// ComponentsSchemasTeamAgentSessionKeySource defines model for ComponentsSchemasTeamAgentSession.KeySource.
+type ComponentsSchemasTeamAgentSessionKeySource string
+
+// ComponentsSchemasTeamAgentSessionKind defines model for ComponentsSchemasTeamAgentSession.Kind.
+type ComponentsSchemasTeamAgentSessionKind string
+
+// ComponentsSchemasTeamAgentSessionSkipReason defines model for ComponentsSchemasTeamAgentSession.SkipReason.
+type ComponentsSchemasTeamAgentSessionSkipReason string
+
+// ComponentsSchemasTeamAgentSessionState defines model for ComponentsSchemasTeamAgentSession.State.
+type ComponentsSchemasTeamAgentSessionState string
+
+// ComponentsSchemasTeamAgentSessionList defines model for components_schemas_TeamAgentSessionList.
+type ComponentsSchemasTeamAgentSessionList struct {
+	Items      []ComponentsSchemasTeamAgentSession `json:"items"`
+	NextCursor string                              `json:"nextCursor"`
+}
+
+// ComponentsSchemasTeamAgentSpec The desired state of one TeamAgent. The acceptance rule picks the one object of a Team that runs.
+type ComponentsSchemasTeamAgentSpec struct {
+	Budgets *struct {
+		Day     *int64 `json:"day,omitempty"`
+		Session *int64 `json:"session,omitempty"`
+	} `json:"budgets,omitempty"`
+	DataSharing  *ComponentsSchemasTeamAgentSpecDataSharing `json:"dataSharing,omitempty"`
+	Enabled      *bool                                      `json:"enabled,omitempty"`
+	Instructions *struct {
+		Path   *string `json:"path,omitempty"`
+		Source string  `json:"source"`
+	} `json:"instructions,omitempty"`
+	Model   *string `json:"model,omitempty"`
+	Outputs *struct {
+		Issues *struct {
+			Forge  string    `json:"forge"`
+			Labels *[]string `json:"labels,omitempty"`
+			Repo   string    `json:"repo"`
+		} `json:"issues,omitempty"`
+		Notes   *bool `json:"notes,omitempty"`
+		Webhook *bool `json:"webhook,omitempty"`
+	} `json:"outputs,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+	TeamRef  struct {
+		Name string `json:"name"`
+	} `json:"teamRef"`
+	Triggers *[]struct {
+		// Debounce A Go duration, such as 10m.
+		Debounce *string                                    `json:"debounce,omitempty"`
+		Type     ComponentsSchemasTeamAgentSpecTriggersType `json:"type"`
+	} `json:"triggers,omitempty"`
+	UnattendedWrites *[]string `json:"unattendedWrites,omitempty"`
+}
+
+// ComponentsSchemasTeamAgentSpecDataSharing defines model for ComponentsSchemasTeamAgentSpec.DataSharing.
+type ComponentsSchemasTeamAgentSpecDataSharing string
+
+// ComponentsSchemasTeamAgentSpecTriggersType defines model for ComponentsSchemasTeamAgentSpec.Triggers.Type.
+type ComponentsSchemasTeamAgentSpecTriggersType string
+
+// ComponentsSchemasTeamAgentUnattendedRequest defines model for components_schemas_TeamAgentUnattendedRequest.
+type ComponentsSchemasTeamAgentUnattendedRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ComponentsSchemasTeamAgentUnattendedResult defines model for components_schemas_TeamAgentUnattendedResult.
+type ComponentsSchemasTeamAgentUnattendedResult struct {
+	Enabled           bool     `json:"enabled"`
+	Name              string   `json:"name"`
+	Namespace         string   `json:"namespace"`
+	UnattendedGranted []string `json:"unattendedGranted"`
+}
+
 // ComponentsSchemasTeamCell The tenant's own view of the cell that hosts it. For the state notCellHosted only state is present. For the state unplaced every field other than state, reason, and warning is absent. The body carries no other tenant's name, job path, run, or count.
 type ComponentsSchemasTeamCell struct {
 	// CanOpenCell True when the caller also holds the controller read grant on the cell. The hint gates no other field of this body.
@@ -5561,6 +5846,16 @@ type ChangeMyPasswordJSONBody struct {
 	OldPassword string `json:"oldPassword"`
 }
 
+// ListTeamAgentSessionsParams defines parameters for ListTeamAgentSessions.
+type ListTeamAgentSessionsParams struct {
+	State  *ListTeamAgentSessionsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	Cursor *string                           `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTeamAgentSessionsParamsState defines parameters for ListTeamAgentSessions.
+type ListTeamAgentSessionsParamsState string
+
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
 	Branch *string `form:"branch,omitempty" json:"branch,omitempty"`
@@ -5657,6 +5952,9 @@ type UploadUpdateCenterPluginParams struct {
 type SetUserPasswordJSONBody struct {
 	NewPassword string `json:"newPassword"`
 }
+
+// PutAgentUnattendedJSONRequestBody defines body for PutAgentUnattended for application/json ContentType.
+type PutAgentUnattendedJSONRequestBody = ComponentsSchemasTeamAgentUnattendedRequest
 
 // DenyAssistantApprovalJSONRequestBody defines body for DenyAssistantApproval for application/json ContentType.
 type DenyAssistantApprovalJSONRequestBody = ComponentsSchemasAssistantDenyRequest
@@ -5780,6 +6078,9 @@ type ChangeMyPasswordJSONRequestBody ChangeMyPasswordJSONBody
 
 // UpdateMyPreferencesJSONRequestBody defines body for UpdateMyPreferences for application/json ContentType.
 type UpdateMyPreferencesJSONRequestBody = ComponentsSchemasPreferences
+
+// RunTeamAgentJSONRequestBody defines body for RunTeamAgent for application/json ContentType.
+type RunTeamAgentJSONRequestBody = ComponentsSchemasTeamAgentRunRequest
 
 // CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
 type CreateRunJSONRequestBody = ComponentsSchemasCreateRunRequest
@@ -6347,6 +6648,14 @@ type ClientInterface interface {
 	// ListActivity request
 	ListActivity(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAgents request
+	ListAgents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutAgentUnattendedWithBody request with any body
+	PutAgentUnattendedWithBody(ctx context.Context, namespace string, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutAgentUnattended(ctx context.Context, namespace string, name string, body PutAgentUnattendedJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListAssistantApprovals request
 	ListAssistantApprovals(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -6789,6 +7098,20 @@ type ClientInterface interface {
 	// ListPipelines request
 	ListPipelines(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetTeamAgent request
+	GetTeamAgent(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTeamAgentCapabilities request
+	GetTeamAgentCapabilities(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RunTeamAgentWithBody request with any body
+	RunTeamAgentWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	RunTeamAgent(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListTeamAgentSessions request
+	ListTeamAgentSessions(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetTeamCell request
 	GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -7025,6 +7348,42 @@ type ClientInterface interface {
 
 func (c *Client) ListActivity(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListActivityRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAgents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAgentsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAgentUnattendedWithBody(ctx context.Context, namespace string, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAgentUnattendedRequestWithBody(c.Server, namespace, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAgentUnattended(ctx context.Context, namespace string, name string, body PutAgentUnattendedJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAgentUnattendedRequest(c.Server, namespace, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -8967,6 +9326,66 @@ func (c *Client) ListPipelines(ctx context.Context, team ComponentsParametersTea
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetTeamAgent(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTeamAgentRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetTeamAgentCapabilities(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTeamAgentCapabilitiesRequest(c.Server, team)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RunTeamAgentWithBody(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRunTeamAgentRequestWithBody(c.Server, team, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RunTeamAgent(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRunTeamAgentRequest(c.Server, team, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListTeamAgentSessions(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTeamAgentSessionsRequest(c.Server, team, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetTeamCell(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTeamCellRequest(c.Server, team)
 	if err != nil {
@@ -10180,6 +10599,87 @@ func NewListActivityRequest(server string, params *ListActivityParams) (*http.Re
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListAgentsRequest generates requests for ListAgents
+func NewListAgentsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agents")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutAgentUnattendedRequest calls the generic PutAgentUnattended builder with application/json body
+func NewPutAgentUnattendedRequest(server string, namespace string, name string, body PutAgentUnattendedJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutAgentUnattendedRequestWithBody(server, namespace, name, "application/json", bodyReader)
+}
+
+// NewPutAgentUnattendedRequestWithBody generates requests for PutAgentUnattended with any type of body
+func NewPutAgentUnattendedRequestWithBody(server string, namespace string, name string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "namespace", runtime.ParamLocationPath, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/agents/%s/%s/unattended", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -16016,6 +16516,209 @@ func NewListPipelinesRequest(server string, team ComponentsParametersTeam) (*htt
 	return req, nil
 }
 
+// NewGetTeamAgentRequest generates requests for GetTeamAgent
+func NewGetTeamAgentRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/agent", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetTeamAgentCapabilitiesRequest generates requests for GetTeamAgentCapabilities
+func NewGetTeamAgentCapabilitiesRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/agent/capabilities", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRunTeamAgentRequest calls the generic RunTeamAgent builder with application/json body
+func NewRunTeamAgentRequest(server string, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRunTeamAgentRequestWithBody(server, team, "application/json", bodyReader)
+}
+
+// NewRunTeamAgentRequestWithBody generates requests for RunTeamAgent with any type of body
+func NewRunTeamAgentRequestWithBody(server string, team ComponentsParametersTeam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/agent/run", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListTeamAgentSessionsRequest generates requests for ListTeamAgentSessions
+func NewListTeamAgentSessionsRequest(server string, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "team", runtime.ParamLocationPath, team)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/pipelines/%s/agent/sessions", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "state", runtime.ParamLocationQuery, *params.State); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetTeamCellRequest generates requests for GetTeamCell
 func NewGetTeamCellRequest(server string, team ComponentsParametersTeam) (*http.Request, error) {
 	var err error
@@ -18794,6 +19497,14 @@ type ClientWithResponsesInterface interface {
 	// ListActivityWithResponse request
 	ListActivityWithResponse(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*ListActivityResponse, error)
 
+	// ListAgentsWithResponse request
+	ListAgentsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAgentsResponse, error)
+
+	// PutAgentUnattendedWithBodyWithResponse request with any body
+	PutAgentUnattendedWithBodyWithResponse(ctx context.Context, namespace string, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAgentUnattendedResponse, error)
+
+	PutAgentUnattendedWithResponse(ctx context.Context, namespace string, name string, body PutAgentUnattendedJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAgentUnattendedResponse, error)
+
 	// ListAssistantApprovalsWithResponse request
 	ListAssistantApprovalsWithResponse(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*ListAssistantApprovalsResponse, error)
 
@@ -19236,6 +19947,20 @@ type ClientWithResponsesInterface interface {
 	// ListPipelinesWithResponse request
 	ListPipelinesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*ListPipelinesResponse, error)
 
+	// GetTeamAgentWithResponse request
+	GetTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentResponse, error)
+
+	// GetTeamAgentCapabilitiesWithResponse request
+	GetTeamAgentCapabilitiesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentCapabilitiesResponse, error)
+
+	// RunTeamAgentWithBodyWithResponse request with any body
+	RunTeamAgentWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error)
+
+	RunTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error)
+
+	// ListTeamAgentSessionsWithResponse request
+	ListTeamAgentSessionsWithResponse(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTeamAgentSessionsResponse, error)
+
 	// GetTeamCellWithResponse request
 	GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error)
 
@@ -19494,6 +20219,58 @@ func (r ListActivityResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListActivityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAgentsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamAgentItemList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAgentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAgentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutAgentUnattendedResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamAgentUnattendedResult
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasTeamAgentError
+	JSON503      *ComponentsResponsesServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r PutAgentUnattendedResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutAgentUnattendedResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -22600,6 +23377,112 @@ func (r ListPipelinesResponse) StatusCode() int {
 	return 0
 }
 
+type GetTeamAgentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamAgent
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTeamAgentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTeamAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetTeamAgentCapabilitiesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamAgentCapabilities
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTeamAgentCapabilitiesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTeamAgentCapabilitiesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RunTeamAgentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *struct {
+		State RunTeamAgent202State `json:"state"`
+	}
+	JSON400 *ComponentsResponsesBadRequest
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+	JSON404 *ComponentsResponsesNotFound
+	JSON409 *ComponentsSchemasTeamAgentError
+	JSON503 *ComponentsResponsesServiceUnavailable
+}
+type RunTeamAgent202State string
+
+// Status returns HTTPResponse.Status
+func (r RunTeamAgentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RunTeamAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListTeamAgentSessionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasTeamAgentSessionList
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListTeamAgentSessionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListTeamAgentSessionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetTeamCellResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -24291,6 +25174,32 @@ func (c *ClientWithResponses) ListActivityWithResponse(ctx context.Context, para
 	return ParseListActivityResponse(rsp)
 }
 
+// ListAgentsWithResponse request returning *ListAgentsResponse
+func (c *ClientWithResponses) ListAgentsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAgentsResponse, error) {
+	rsp, err := c.ListAgents(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAgentsResponse(rsp)
+}
+
+// PutAgentUnattendedWithBodyWithResponse request with arbitrary body returning *PutAgentUnattendedResponse
+func (c *ClientWithResponses) PutAgentUnattendedWithBodyWithResponse(ctx context.Context, namespace string, name string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAgentUnattendedResponse, error) {
+	rsp, err := c.PutAgentUnattendedWithBody(ctx, namespace, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAgentUnattendedResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutAgentUnattendedWithResponse(ctx context.Context, namespace string, name string, body PutAgentUnattendedJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAgentUnattendedResponse, error) {
+	rsp, err := c.PutAgentUnattended(ctx, namespace, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAgentUnattendedResponse(rsp)
+}
+
 // ListAssistantApprovalsWithResponse request returning *ListAssistantApprovalsResponse
 func (c *ClientWithResponses) ListAssistantApprovalsWithResponse(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*ListAssistantApprovalsResponse, error) {
 	rsp, err := c.ListAssistantApprovals(ctx, params, reqEditors...)
@@ -25699,6 +26608,50 @@ func (c *ClientWithResponses) ListPipelinesWithResponse(ctx context.Context, tea
 	return ParseListPipelinesResponse(rsp)
 }
 
+// GetTeamAgentWithResponse request returning *GetTeamAgentResponse
+func (c *ClientWithResponses) GetTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentResponse, error) {
+	rsp, err := c.GetTeamAgent(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTeamAgentResponse(rsp)
+}
+
+// GetTeamAgentCapabilitiesWithResponse request returning *GetTeamAgentCapabilitiesResponse
+func (c *ClientWithResponses) GetTeamAgentCapabilitiesWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamAgentCapabilitiesResponse, error) {
+	rsp, err := c.GetTeamAgentCapabilities(ctx, team, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTeamAgentCapabilitiesResponse(rsp)
+}
+
+// RunTeamAgentWithBodyWithResponse request with arbitrary body returning *RunTeamAgentResponse
+func (c *ClientWithResponses) RunTeamAgentWithBodyWithResponse(ctx context.Context, team ComponentsParametersTeam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error) {
+	rsp, err := c.RunTeamAgentWithBody(ctx, team, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRunTeamAgentResponse(rsp)
+}
+
+func (c *ClientWithResponses) RunTeamAgentWithResponse(ctx context.Context, team ComponentsParametersTeam, body RunTeamAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*RunTeamAgentResponse, error) {
+	rsp, err := c.RunTeamAgent(ctx, team, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRunTeamAgentResponse(rsp)
+}
+
+// ListTeamAgentSessionsWithResponse request returning *ListTeamAgentSessionsResponse
+func (c *ClientWithResponses) ListTeamAgentSessionsWithResponse(ctx context.Context, team ComponentsParametersTeam, params *ListTeamAgentSessionsParams, reqEditors ...RequestEditorFn) (*ListTeamAgentSessionsResponse, error) {
+	rsp, err := c.ListTeamAgentSessions(ctx, team, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListTeamAgentSessionsResponse(rsp)
+}
+
 // GetTeamCellWithResponse request returning *GetTeamCellResponse
 func (c *ClientWithResponses) GetTeamCellWithResponse(ctx context.Context, team ComponentsParametersTeam, reqEditors ...RequestEditorFn) (*GetTeamCellResponse, error) {
 	rsp, err := c.GetTeamCell(ctx, team, reqEditors...)
@@ -26469,6 +27422,114 @@ func ParseListActivityResponse(rsp *http.Response) (*ListActivityResponse, error
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAgentsResponse parses an HTTP response from a ListAgentsWithResponse call
+func ParseListAgentsResponse(rsp *http.Response) (*ListAgentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAgentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamAgentItemList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutAgentUnattendedResponse parses an HTTP response from a PutAgentUnattendedWithResponse call
+func ParsePutAgentUnattendedResponse(rsp *http.Response) (*PutAgentUnattendedResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutAgentUnattendedResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamAgentUnattendedResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasTeamAgentError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -32213,6 +33274,217 @@ func ParseListPipelinesResponse(rsp *http.Response) (*ListPipelinesResponse, err
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTeamAgentResponse parses an HTTP response from a GetTeamAgentWithResponse call
+func ParseGetTeamAgentResponse(rsp *http.Response) (*GetTeamAgentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTeamAgentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamAgent
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetTeamAgentCapabilitiesResponse parses an HTTP response from a GetTeamAgentCapabilitiesWithResponse call
+func ParseGetTeamAgentCapabilitiesResponse(rsp *http.Response) (*GetTeamAgentCapabilitiesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTeamAgentCapabilitiesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamAgentCapabilities
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRunTeamAgentResponse parses an HTTP response from a RunTeamAgentWithResponse call
+func ParseRunTeamAgentResponse(rsp *http.Response) (*RunTeamAgentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RunTeamAgentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest struct {
+			State RunTeamAgent202State `json:"state"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasTeamAgentError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsResponsesServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListTeamAgentSessionsResponse parses an HTTP response from a ListTeamAgentSessionsWithResponse call
+func ParseListTeamAgentSessionsResponse(rsp *http.Response) (*ListTeamAgentSessionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListTeamAgentSessionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasTeamAgentSessionList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

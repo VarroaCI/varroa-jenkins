@@ -29,11 +29,7 @@ func (s *Server) handleStreamAssistantEvents(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-	sess, ok := s.visibleSession(w, r, rt, claims)
+	sess, ok := s.visibleSession(w, r, rt, claims, sessionView)
 	if !ok {
 		return
 	}

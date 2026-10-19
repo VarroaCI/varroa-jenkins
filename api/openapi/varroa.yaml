@@ -11115,6 +11115,370 @@ components:
       required:
       - suspend
       type: object
+    components_schemas_TeamAgent:
+      properties:
+        accepted:
+          type: boolean
+        cluster:
+          type: string
+        dayLimit:
+          format: int64
+          type: integer
+        name:
+          type: string
+        namespace:
+          type: string
+        pendingApprovals:
+          type: integer
+        spec:
+          $ref: '#/components/schemas/components_schemas_TeamAgentSpec'
+        spendToday:
+          format: int64
+          type: integer
+        status:
+          properties:
+            conditions:
+              items:
+                $ref: '#/components/schemas/components_schemas_TeamAgentCondition'
+              type: array
+            instructionsSHA:
+              type: string
+            lastSession:
+              properties:
+                at:
+                  format: date-time
+                  type: string
+                id:
+                  type: string
+                state:
+                  type: string
+                trigger:
+                  type: string
+              type: object
+            observedGeneration:
+              format: int64
+              type: integer
+            spendToday:
+              format: int64
+              type: integer
+          type: object
+        team:
+          type: string
+      required:
+      - namespace
+      - name
+      - team
+      - cluster
+      - spec
+      - status
+      - accepted
+      - pendingApprovals
+      - spendToday
+      - dayLimit
+      type: object
+    components_schemas_TeamAgentCapabilities:
+      properties:
+        never:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentCapability'
+          type: array
+        reads:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentCapability'
+          type: array
+        unattended:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentCapability'
+          type: array
+        writesByApproval:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentCapability'
+          type: array
+      required:
+      - reads
+      - writesByApproval
+      - unattended
+      - never
+      type: object
+    components_schemas_TeamAgentCapability:
+      properties:
+        description:
+          type: string
+        kind:
+          description: The tool class read or write, or the output kind note, issue,
+            or webhook on an output tool.
+          type: string
+        name:
+          type: string
+      required:
+      - name
+      - description
+      - kind
+      type: object
+    components_schemas_TeamAgentCondition:
+      properties:
+        lastTransitionTime:
+          format: date-time
+          type: string
+        message:
+          type: string
+        observedGeneration:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        status:
+          enum:
+          - "True"
+          - "False"
+          - Unknown
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      - status
+      - reason
+      - lastTransitionTime
+      type: object
+    components_schemas_TeamAgentError:
+      additionalProperties: false
+      description: A Team agent refusal. The code names the cause, and error gives
+        the text.
+      properties:
+        code:
+          enum:
+          - team_agent_session
+          - not_accepted
+          - disabled
+          - manual_not_enabled
+          - nothing_to_grant
+          type: string
+        error:
+          type: string
+      required:
+      - error
+      - code
+      type: object
+    components_schemas_TeamAgentItem:
+      properties:
+        cluster:
+          type: string
+        conditions:
+          description: The conditions whose status is not True.
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentCondition'
+          type: array
+        enabled:
+          type: boolean
+        failedToday:
+          type: integer
+        name:
+          type: string
+        namespace:
+          type: string
+        paused:
+          allOf:
+          - $ref: '#/components/schemas/components_schemas_TeamAgentPaused'
+          nullable: true
+        sessionsToday:
+          type: integer
+        spendToday:
+          format: int64
+          type: integer
+        team:
+          type: string
+        unattendedGranted:
+          items:
+            type: string
+          type: array
+        unattendedRequested:
+          items:
+            type: string
+          type: array
+      required:
+      - namespace
+      - name
+      - team
+      - cluster
+      - enabled
+      - sessionsToday
+      - spendToday
+      - failedToday
+      - conditions
+      - unattendedRequested
+      - unattendedGranted
+      type: object
+    components_schemas_TeamAgentItemList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentItem'
+          type: array
+      required:
+      - items
+      type: object
+    components_schemas_TeamAgentPaused:
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+      required:
+      - reason
+      - message
+      type: object
+    components_schemas_TeamAgentRunRequest:
+      properties:
+        job:
+          description: A job path under the Team. Empty names the whole Team.
+          type: string
+        run:
+          description: A run id to note in the request.
+          type: string
+      type: object
+    components_schemas_TeamAgentSession:
+      allOf:
+      - $ref: '#/components/schemas/components_schemas_AssistantSession'
+      - properties:
+          pendingApprovals:
+            items:
+              $ref: '#/components/schemas/components_schemas_AssistantApproval'
+            type: array
+        required:
+        - pendingApprovals
+        type: object
+      description: One Team agent session. It carries the AssistantSession fields
+        and its pending approvals.
+      type: object
+    components_schemas_TeamAgentSessionList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/components_schemas_TeamAgentSession'
+          type: array
+        nextCursor:
+          type: string
+      required:
+      - items
+      - nextCursor
+      type: object
+    components_schemas_TeamAgentSpec:
+      description: The desired state of one TeamAgent. The acceptance rule picks the
+        one object of a Team that runs.
+      properties:
+        budgets:
+          properties:
+            day:
+              format: int64
+              type: integer
+            session:
+              format: int64
+              type: integer
+          type: object
+        dataSharing:
+          enum:
+          - none
+          - metadata
+          - logs
+          type: string
+        enabled:
+          type: boolean
+        instructions:
+          properties:
+            path:
+              type: string
+            source:
+              type: string
+          required:
+          - source
+          type: object
+        model:
+          type: string
+        outputs:
+          properties:
+            issues:
+              properties:
+                forge:
+                  type: string
+                labels:
+                  items:
+                    type: string
+                  type: array
+                repo:
+                  type: string
+              required:
+              - repo
+              - forge
+              type: object
+            notes:
+              type: boolean
+            webhook:
+              type: boolean
+          type: object
+        provider:
+          type: string
+        teamRef:
+          properties:
+            name:
+              type: string
+          required:
+          - name
+          type: object
+        triggers:
+          items:
+            properties:
+              debounce:
+                description: A Go duration, such as 10m.
+                type: string
+              type:
+                enum:
+                - run.failed
+                - run.interrupted
+                - cron.missed
+                - signature.refused
+                - scan.failed
+                - lock.held
+                - placement.moved
+                - manual
+                type: string
+            required:
+            - type
+            type: object
+          type: array
+        unattendedWrites:
+          items:
+            type: string
+          type: array
+      required:
+      - teamRef
+      type: object
+    components_schemas_TeamAgentUnattendedRequest:
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
+      type: object
+    components_schemas_TeamAgentUnattendedResult:
+      properties:
+        enabled:
+          type: boolean
+        name:
+          type: string
+        namespace:
+          type: string
+        unattendedGranted:
+          items:
+            type: string
+          type: array
+      required:
+      - namespace
+      - name
+      - enabled
+      - unattendedGranted
+      type: object
     components_schemas_TeamCell:
       additionalProperties: false
       description: The tenant's own view of the cell that hosts it. For the state
@@ -12554,6 +12918,73 @@ paths:
       tags:
       - activity
       x-sse: true
+  /api/v1/agents:
+    get:
+      description: The cluster-wide view. It needs agentsessions:read.
+      operationId: listAgents
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentItemList'
+          description: Every TeamAgent.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+      summary: Lists every TeamAgent with its state, spend, and unattended grant.
+      tags:
+      - TeamAgents
+  /api/v1/agents/{namespace}/{name}/unattended:
+    put:
+      description: |
+        A true grant copies the object's current unattendedWrites, pinned to its UID. A later spec edit does not extend the grant. It needs teamagents:unattended.
+      operationId: putAgentUnattended
+      parameters:
+      - in: path
+        name: namespace
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_TeamAgentUnattendedRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentUnattendedResult'
+          description: The grant after the change.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentError'
+          description: Nothing can be granted, because the object names no unattended
+            writes.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Grants or revokes the unattended writes of one TeamAgent.
+      tags:
+      - TeamAgents
   /api/v1/assistant/approvals:
     get:
       operationId: listAssistantApprovals
@@ -16384,6 +16815,150 @@ paths:
       summary: Lists a team's pipelines and its unfinished runs.
       tags:
       - Pipelines
+  /api/v1/pipelines/{team}/agent:
+    get:
+      description: |
+        Answers the TeamAgent object that the acceptance rule selects for the Team, its status, the pending approval count of its sessions, and the spend of the current UTC day against the day limit. Answers 404 when the Team has no accepted TeamAgent or the caller may not read the Team.
+      operationId: getTeamAgent
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgent'
+          description: The accepted Team agent.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Returns the accepted Team agent of a pipelines tenant.
+      tags:
+      - TeamAgents
+  /api/v1/pipelines/{team}/agent/capabilities:
+    get:
+      description: |
+        The groups are reads, writesByApproval, unattended, and never. The lists hold only the tools the object's data level and grant make visible. Hidden tools are absent.
+      operationId: getTeamAgentCapabilities
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentCapabilities'
+          description: The four capability groups.
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_AssistantError'
+          description: The assistant is off.
+      summary: Lists what the Team agent may do, in four groups.
+      tags:
+      - TeamAgents
+  /api/v1/pipelines/{team}/agent/run:
+    post:
+      description: |
+        Publishes a teamagent.run_requested activity for the placement cluster of the Team. The run starts later, on the runner. A kill switch or a spent day budget still answers 202, and the session ends skipped.
+      operationId: runTeamAgent
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/components_schemas_TeamAgentRunRequest'
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                properties:
+                  state:
+                    enum:
+                    - requested
+                    type: string
+                required:
+                - state
+                type: object
+          description: The run request is published.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentError'
+          description: The Team agent cannot run now.
+        "503":
+          $ref: '#/components/responses/components_responses_ServiceUnavailable'
+      summary: Requests a manual Team agent run.
+      tags:
+      - TeamAgents
+  /api/v1/pipelines/{team}/agent/sessions:
+    get:
+      description: |
+        Pages the sessions of kind team_agent for the Team. Each item carries its pending approvals. The Approvals tab reads state waiting_approval.
+      operationId: listTeamAgentSessions
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_team'
+      - in: query
+        name: state
+        schema:
+          enum:
+          - running
+          - waiting_approval
+          - completed
+          - failed
+          - cancelled
+          - skipped
+          - expired
+          type: string
+      - in: query
+        name: cursor
+        schema:
+          type: string
+      - in: query
+        name: limit
+        schema:
+          maximum: 200
+          minimum: 1
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_TeamAgentSessionList'
+          description: One page of Team agent sessions.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_AssistantError'
+          description: The assistant is off.
+      summary: Lists the Team agent sessions of a pipelines tenant, newest first.
+      tags:
+      - TeamAgents
   /api/v1/pipelines/{team}/cell:
     get:
       description: |
@@ -18423,6 +18998,9 @@ tags:
   name: teams
 - description: External agent (runner) registration for a pipelines tenant.
   name: runners
+- description: The Team agent of a pipelines tenant, its sessions, capabilities, and
+    unattended grants.
+  name: TeamAgents
 - description: Identity settings and built-in roles (admin).
   name: identity
 - description: Full controller lifecycle management.

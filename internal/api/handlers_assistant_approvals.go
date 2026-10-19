@@ -22,10 +22,6 @@ func (s *Server) handleListAssistantApprovals(w http.ResponseWriter, r *http.Req
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
 	q := r.URL.Query()
 	query := store.ApprovalQuery{
 		Principal:  claims.Subject,
@@ -40,7 +36,19 @@ func (s *Server) handleListAssistantApprovals(w http.ResponseWriter, r *http.Req
 			s.writeJSONError(w, http.StatusBadRequest, "session must be an id")
 			return
 		}
+		// A Team agent session names its approvals by session alone, so a
+		// tenant reader sees them without being the Team agent's principal.
+		sess, ok := s.sessionFor(w, r, rt, claims, id, sessionView)
+		if !ok {
+			return
+		}
 		query.SessionID = id
+		if sess.Kind == agent.KindTeamAgent {
+			query.Principal = ""
+		}
+	} else if !s.assistantCanUse(claims) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
 	}
 	if q.Get("scope") == "all" {
 		if !s.assistantIsAdmin(claims) {
@@ -92,10 +100,6 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
 	id, ok := sessionUUID(r.PathValue("id"))
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
@@ -114,7 +118,14 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 		return
 	}
 	sess, err := rt.Store.GetSession(ctx, ap.SessionID)
-	if err != nil || sess.Principal != claims.Subject {
+	if err != nil {
+		s.writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.assistantGate(w, claims, sess) {
+		return
+	}
+	if !s.sessionAllowed(ctx, claims, sess, sessionDecide) {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -142,7 +153,7 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 		return
 	}
 	res, err := rt.Store.ResolveApproval(ctx, id, store.Resolution{
-		State: state, By: actor, Reason: reason, Owner: claims.Subject,
+		State: state, By: actor, Reason: reason, Owner: sess.Principal,
 		Events: []agent.EventInput{resolvedEv},
 	})
 	if err != nil {
@@ -157,7 +168,7 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), approvedToolTimeout)
 		defer cancelRun()
 		callCtx := agent.WithSessionContext(runCtx, agent.SessionContext{SessionID: sess.ID, Values: sess.Context})
-		out, callErr := rt.HostFor(claims).Call(callCtx, ap.Tool, ap.Arguments)
+		out, callErr := rt.hostForSession(claims, sess).Call(callCtx, ap.Tool, ap.Arguments)
 		if callErr != nil {
 			content, isError = "tool call failed", true
 		} else {
@@ -181,8 +192,11 @@ func (s *Server) resolveAssistantApproval(w http.ResponseWriter, r *http.Request
 
 	// Every decision checks whether the session can resume. A sibling
 	// approver may have written its result after this one counted pending
-	// approvals, so the check does not rely on PendingLeft.
-	s.resumeIfComplete(r, rt, claims, sess)
+	// approvals, so the check does not rely on PendingLeft. A Team agent
+	// session resumes through the runner's resume scan, not here.
+	if sess.Kind != agent.KindTeamAgent {
+		s.resumeIfComplete(r, rt, claims, sess)
+	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"approval": toAssistantApprovalJSON(res.Approval, nil),

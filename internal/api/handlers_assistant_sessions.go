@@ -372,24 +372,16 @@ func (s *Server) handleListAssistantSessions(w http.ResponseWriter, r *http.Requ
 	s.writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": page.NextCursor})
 }
 
-// visibleSession loads a session the caller may read: its owner, or an admin.
-// Any other caller gets not found.
-func (s *Server) visibleSession(w http.ResponseWriter, r *http.Request, rt *AssistantRuntime, claims *auth.Claims) (agent.Session, bool) {
+// visibleSession loads the session in the path and applies the rule of verb.
+// A refusal answers 404, and an assistant session without assistant:use
+// answers 403.
+func (s *Server) visibleSession(w http.ResponseWriter, r *http.Request, rt *AssistantRuntime, claims *auth.Claims, verb sessionVerb) (agent.Session, bool) {
 	id, ok := sessionUUID(r.PathValue("id"))
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return agent.Session{}, false
 	}
-	sess, err := rt.Store.GetSession(r.Context(), id)
-	if err != nil {
-		s.assistantStoreError(w, err)
-		return agent.Session{}, false
-	}
-	if sess.Principal != claims.Subject && !s.assistantIsAdmin(claims) {
-		s.writeJSONError(w, http.StatusNotFound, "not found")
-		return agent.Session{}, false
-	}
-	return sess, true
+	return s.sessionFor(w, r, rt, claims, id, verb)
 }
 
 // handleGetAssistantSession serves GET /assistant/sessions/{id}.
@@ -399,11 +391,7 @@ func (s *Server) handleGetAssistantSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-	sess, ok := s.visibleSession(w, r, rt, claims)
+	sess, ok := s.visibleSession(w, r, rt, claims, sessionView)
 	if !ok {
 		return
 	}
@@ -463,10 +451,6 @@ func (s *Server) handlePostAssistantMessage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
 	id, ok := sessionUUID(r.PathValue("id"))
 	if !ok {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
@@ -480,8 +464,15 @@ func (s *Server) handlePostAssistantMessage(w http.ResponseWriter, r *http.Reque
 		s.writeJSONError(w, http.StatusBadRequest, "message is required")
 		return
 	}
-	sess, err := rt.Store.GetSession(r.Context(), id)
-	if err != nil || sess.Principal != claims.Subject {
+	sess, ok := s.sessionFor(w, r, rt, claims, id, sessionView)
+	if !ok {
+		return
+	}
+	if sess.Kind == agent.KindTeamAgent {
+		writeAssistantError(s, w, http.StatusConflict, assistantErrTeamAgent, "a Team agent session takes no messages")
+		return
+	}
+	if sess.Principal != claims.Subject {
 		s.writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -542,11 +533,7 @@ func (s *Server) handleCancelAssistantSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	claims := auth.ClaimsFromContext(r.Context())
-	if !s.assistantCanUse(claims) {
-		s.writeJSONError(w, http.StatusForbidden, "forbidden")
-		return
-	}
-	sess, ok := s.visibleSession(w, r, rt, claims)
+	sess, ok := s.visibleSession(w, r, rt, claims, sessionCancel)
 	if !ok {
 		return
 	}

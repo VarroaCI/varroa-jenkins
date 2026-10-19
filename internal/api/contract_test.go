@@ -237,6 +237,13 @@ var routeManifest = []route{
 	{Method: "POST", Path: "/api/v1/pipelines/{team}/markers/validate"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/cell"},
 	{Method: "GET", Path: "/api/v1/pipelines/{team}/stream"},
+	// Team agent routes (api/openapi/paths/teamagents.yaml).
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent/sessions"},
+	{Method: "GET", Path: "/api/v1/pipelines/{team}/agent/capabilities"},
+	{Method: "POST", Path: "/api/v1/pipelines/{team}/agent/run"},
+	{Method: "GET", Path: "/api/v1/agents"},
+	{Method: "PUT", Path: "/api/v1/agents/{namespace}/{name}/unattended"},
 	{Method: "GET", Path: "/api/v1/cells/usage"},
 	{Method: "GET", Path: "/api/v1/cells/{namespace}/{name}/usage"},
 	{Method: "GET", Path: "/api/v1/cells/{namespace}/{name}/grants"},
