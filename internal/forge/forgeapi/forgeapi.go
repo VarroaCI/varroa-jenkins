@@ -42,9 +42,12 @@ const (
 	// CodeProposalBaseMoved refuses a pull request whose base branch no
 	// longer holds the commit that the check read.
 	CodeProposalBaseMoved = "proposal_base_moved"
-	CodeInvalidRequest    = "invalid_request"
-	CodeNotFound          = "not_found"
-	CodeInternal          = "internal"
+	// CodeRequestExpired refuses a pull request whose deadline leaves too little
+	// work time, for example after a wait in the operator queue. No forge call was made.
+	CodeRequestExpired = "request_expired"
+	CodeInvalidRequest = "invalid_request"
+	CodeNotFound       = "not_found"
+	CodeInternal       = "internal"
 )
 
 // Status is the envelope of every forge reply.
@@ -156,6 +159,10 @@ type PullRequestRequest struct {
 	// BaseRevision, when set, is the base commit that the check read. The
 	// pull request refuses when the base branch has moved past it.
 	BaseRevision string `json:"baseRevision,omitempty"`
+	// Deadline is the time when the requester stops waiting for the reply. The
+	// operator refuses a request that has too little time left before it, and
+	// makes no forge call.
+	Deadline time.Time `json:"deadline"`
 }
 
 // PullRequestReply answers a pull-request request.

@@ -147,7 +147,7 @@ always needs approval.
 | `body` | At most 8192 bytes. The BFF appends a line that names the actor. |
 | `files` | 1 to 10 files with `path` and `content`. At most 64 KiB each, 256 KiB in total. |
 
-A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. A success logs a
+A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. A success logs a
 `pipeline.proposal.opened` event.
 
 ## Account for redaction

@@ -18,9 +18,24 @@ import (
 // returns its own reply first.
 const forgeRequestTimeout = 25 * time.Second
 
-// forgePullRequestTimeout bounds one pull-request request on the operator.
-// It stays under the requester's forgeapi.PullRequestTimeout.
+// forgePullRequestTimeout limits the work of one pull-request request whose
+// deadline is far in the future. The requester sets the deadline, so this is
+// only an upper limit.
 const forgePullRequestTimeout = 80 * time.Second
+
+// forgeReplyMargin keeps time for the reply to reach the requester after the
+// work ends.
+const forgeReplyMargin = 5 * time.Second
+
+// forgePullRequestReserve is the time that the operator keeps before the
+// requester's deadline. The cleanup after a failed write runs for up to
+// forgeops.CleanupTimeout. The deadline compares the requester's clock with
+// this replica's clock. The reserve also absorbs a small clock skew.
+const forgePullRequestReserve = forgeops.CleanupTimeout + forgeReplyMargin
+
+// forgePullRequestMinBudget is the least work time that a pull request needs.
+// A request with less time left is refused before any forge call.
+const forgePullRequestMinBudget = 15 * time.Second
 
 // forgeConcurrency limits the forge requests that one replica runs at a
 // time on one verb subject.
@@ -111,7 +126,20 @@ func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeO
 		return nil
 	}
 	defer leave()
-	rctx, cancel := context.WithTimeout(wctx, forgePullRequestTimeout)
+	if req.Deadline.IsZero() {
+		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeInvalidRequest, Error: "deadline is required"}})
+	}
+	now := time.Now()
+	work := req.Deadline.Add(-forgePullRequestReserve)
+	if limit := now.Add(forgePullRequestTimeout); work.After(limit) {
+		work = limit
+	}
+	if work.Sub(now) < forgePullRequestMinBudget {
+		logger.Info("forge pullrequest has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
+		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
+			Error: "too little time was left for the pull request, so none was opened. Call again."}})
+	}
+	rctx, cancel := context.WithDeadline(wctx, work)
 	defer cancel()
 	return encodeForgeReply(ops.PullRequest(rctx, req))
 }

@@ -37,8 +37,20 @@ func (r Relay) Read(ctx context.Context, cluster string, req forgeapi.ReadReques
 // PullRequest asks the operator of the cluster to open a pull request.
 func (r Relay) PullRequest(ctx context.Context, cluster string, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error) {
 	var reply forgeapi.PullRequestReply
+	req.Deadline = pullRequestDeadline(ctx, time.Now())
 	err := r.call(ctx, cluster, forgeapi.VerbPullRequest, forgeapi.PullRequestTimeout, req, &reply)
 	return reply, err
+}
+
+// pullRequestDeadline returns the time when this requester stops waiting for
+// a pull-request reply. It is now plus forgeapi.PullRequestTimeout, or the
+// caller's deadline when that is earlier.
+func pullRequestDeadline(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(forgeapi.PullRequestTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		return d
+	}
+	return deadline
 }
 
 // Issue asks the operator of the cluster to open an issue.

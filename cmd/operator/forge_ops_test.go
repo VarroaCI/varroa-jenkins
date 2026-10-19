@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,10 @@ import (
 type stampOps struct {
 	id       string
 	deadline *time.Time
+	// calls counts the PullRequest calls when it is not nil.
+	calls *atomic.Int32
+	// block holds PullRequest until it is closed, when it is not nil.
+	block chan struct{}
 }
 
 func (s stampOps) Check(ctx context.Context, _ forgeapi.CheckRequest) forgeapi.CheckReply {
@@ -40,6 +45,15 @@ func (s stampOps) Issue(_ context.Context, _ forgeapi.IssueRequest, _ string) fo
 }
 
 func (s stampOps) PullRequest(ctx context.Context, _ forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
+	if s.calls != nil {
+		s.calls.Add(1)
+	}
+	if s.block != nil {
+		select {
+		case <-s.block:
+		case <-ctx.Done():
+		}
+	}
 	if s.deadline != nil {
 		if d, ok := ctx.Deadline(); ok {
 			*s.deadline = d
@@ -50,7 +64,13 @@ func (s stampOps) PullRequest(ctx context.Context, _ forgeapi.PullRequestRequest
 
 func prBody(t *testing.T) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: "payments", Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}})
+	return prBodyDeadline(t, time.Now().Add(forgeapi.PullRequestTimeout))
+}
+
+// prBodyDeadline returns a pull-request request that carries the deadline d.
+func prBodyDeadline(t *testing.T, d time.Time) []byte {
+	t.Helper()
+	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: "payments", Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}, Deadline: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,19 +87,75 @@ func TestHandleForgePullRequest_NonOwnerSendsNoReply(t *testing.T) {
 	}
 }
 
-// TestHandleForgePullRequest_SetsLongDeadline checks that the pull-request
-// call runs under the longer deadline, not the check deadline.
-func TestHandleForgePullRequest_SetsLongDeadline(t *testing.T) {
+// TestHandleForgePullRequest_DeadlineLeavesReserve checks that the forge call
+// ends the reserve before the requester's deadline.
+func TestHandleForgePullRequest_DeadlineLeavesReserve(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	var seen time.Time
+	reqDeadline := time.Now().Add(forgeapi.PullRequestTimeout)
+	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBodyDeadline(t, reqDeadline))
+	if seen.IsZero() {
+		t.Fatal("no deadline on the forge call")
+	}
+	want := reqDeadline.Add(-forgePullRequestReserve)
+	if d := seen.Sub(want); d < -2*time.Second || d > 2*time.Second {
+		t.Fatalf("forge deadline %v, want about %v", seen, want)
+	}
+}
+
+// TestHandleForgePullRequest_CapsFarDeadline checks that a far requester
+// deadline gets the upper limit only.
+func TestHandleForgePullRequest_CapsFarDeadline(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	var seen time.Time
 	before := time.Now()
-	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBody(t))
+	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBodyDeadline(t, before.Add(time.Hour)))
 	if seen.IsZero() {
 		t.Fatal("no deadline on the forge call")
 	}
 	if d := seen.Sub(before); d < forgePullRequestTimeout || d > forgePullRequestTimeout+2*time.Second {
 		t.Fatalf("deadline %v after the call start, want about %v", d, forgePullRequestTimeout)
+	}
+}
+
+// TestHandleForgePullRequest_ExpiredRefusesWithoutCall checks that a request
+// with too little time left is refused before any forge call.
+func TestHandleForgePullRequest_ExpiredRefusesWithoutCall(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	var calls atomic.Int32
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring),
+		prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+5*time.Second)))
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Code != forgeapi.CodeRequestExpired {
+		t.Fatalf("code %q, want %q", rep.Code, forgeapi.CodeRequestExpired)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("forge calls %d, want 0", n)
+	}
+}
+
+// TestHandleForgePullRequest_MissingDeadlineIsInvalid checks that a request
+// without a deadline is refused before any forge call.
+func TestHandleForgePullRequest_MissingDeadlineIsInvalid(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	var calls atomic.Int32
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), prBodyDeadline(t, time.Time{}))
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Code != forgeapi.CodeInvalidRequest {
+		t.Fatalf("code %q, want %q", rep.Code, forgeapi.CodeInvalidRequest)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("forge calls %d, want 0", n)
 	}
 }
 
@@ -190,7 +266,7 @@ func TestHandleForge_SetsDeadline(t *testing.T) {
 
 // startForgeReplica runs one forge runner for verb on a replica that holds the
 // shards in held. The runner stops when the test ends.
-func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, held map[int]bool) {
+func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, held map[int]bool, ops stampOps) {
 	t.Helper()
 	conn, err := bus.Connect(url)
 	if err != nil {
@@ -214,11 +290,11 @@ func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, 
 		handle: func(ctx context.Context, data []byte) []byte {
 			switch verb {
 			case forgeapi.VerbCheck:
-				return handleForgeCheck(ctx, logger, stampOps{id: id}, enter, data)
+				return handleForgeCheck(ctx, logger, ops, enter, data)
 			case forgeapi.VerbPullRequest:
-				return handleForgePullRequest(ctx, logger, stampOps{id: id}, enter, data)
+				return handleForgePullRequest(ctx, logger, ops, enter, data)
 			}
-			return handleForgeRead(ctx, logger, stampOps{id: id}, enter, data)
+			return handleForgeRead(ctx, logger, ops, enter, data)
 		},
 	}
 	if verb == forgeapi.VerbPullRequest {
@@ -252,8 +328,8 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 					bHeld[i] = true
 				}
 			}
-			startForgeReplica(t, url, "A", verb, ring, aHeld)
-			startForgeReplica(t, url, "B", verb, ring, bHeld)
+			startForgeReplica(t, url, "A", verb, ring, aHeld, stampOps{id: "A"})
+			startForgeReplica(t, url, "B", verb, ring, bHeld, stampOps{id: "B"})
 
 			client, err := nats.Connect(url)
 			if err != nil {
@@ -307,6 +383,100 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 				t.Fatal("a second reply arrived")
 			}
 		})
+	}
+}
+
+// TestForgeRunners_QueuedPullRequestExpires checks that a request which waits
+// in the queue behind a slow one is refused once its deadline leaves too
+// little work time, and that the forge makes no call for it.
+func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
+	s := startLedgerActionNATS(t)
+	url := s.ClientURL()
+	ring := sharding.NewRing(8)
+	own := ring.ShardFor(forgeops.ShardKey("payments"))
+	held := map[int]bool{own: true}
+	var calls atomic.Int32
+	block := make(chan struct{})
+	startForgeReplica(t, url, "A", forgeapi.VerbPullRequest, ring, held, stampOps{id: "A", calls: &calls, block: block})
+
+	client, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+	subject := bus.OperatorForgeSubject("core", forgeapi.VerbPullRequest)
+
+	// The first request holds the only slot until the test closes block.
+	inboxA := client.NewRespInbox()
+	subA, err := client.SubscribeSync(inboxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The runner subscribes in its own goroutine, so an early publish is
+	// dropped. Publish again until the forge sees the request.
+	bodyA := prBodyDeadline(t, time.Now().Add(forgeapi.PullRequestTimeout))
+	for i := 0; i < 50 && calls.Load() == 0; i++ {
+		if err := client.PublishRequest(subject, inboxA, bodyA); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("the first request did not reach the forge")
+	}
+
+	// The second request has reserve + min budget + 1 s left when it is sent.
+	// The first request holds the slot for 2 s, so less than the minimum
+	// budget is left when the second one runs.
+	inboxB := client.NewRespInbox()
+	subB, err := client.SubscribeSync(inboxB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PublishRequest(subject, inboxB, prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	close(block)
+
+	msgA, err := nextQueuedReply(subA, 5*time.Second)
+	if err != nil {
+		t.Fatalf("no reply to the first request: %v", err)
+	}
+	var repA forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgA.Data, &repA); err != nil {
+		t.Fatal(err)
+	}
+	if !repA.OK {
+		t.Fatalf("first request failed: %+v", repA.Status)
+	}
+	msgB, err := nextQueuedReply(subB, 5*time.Second)
+	if err != nil {
+		t.Fatalf("no reply to the queued request: %v", err)
+	}
+	var repB forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgB.Data, &repB); err != nil {
+		t.Fatal(err)
+	}
+	if repB.Code != forgeapi.CodeRequestExpired {
+		t.Fatalf("queued request code %q, want %q", repB.Code, forgeapi.CodeRequestExpired)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("forge calls %d, want 1", n)
+	}
+}
+
+// nextQueuedReply returns the next reply on sub. It skips the no-responders
+// status that the server sends for a publish that arrived before the runner
+// subscribed.
+func nextQueuedReply(sub *nats.Subscription, wait time.Duration) (*nats.Msg, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		msg, err := sub.NextMsg(time.Until(deadline))
+		if err == nats.ErrNoResponders {
+			continue
+		}
+		return msg, err
 	}
 }
 

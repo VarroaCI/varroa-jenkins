@@ -58,6 +58,8 @@ func forgeCodeStatus(code string) int {
 		return http.StatusNotFound
 	case forgeapi.CodeForgeUnreachable:
 		return http.StatusBadGateway
+	case forgeapi.CodeRequestExpired:
+		return http.StatusGatewayTimeout
 	}
 	return http.StatusInternalServerError
 }
