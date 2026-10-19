@@ -710,7 +710,7 @@ func TestRunnerDoor_BypassesAuthMiddleware(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(runnerDoorPrefix, srv.HandleRunnerDoor)
-	handler := auth.AuthMiddleware(denyAllProvider{}, nil, nil, nil, mux, slog.Default())
+	handler := auth.AuthMiddleware(denyAllProvider{}, nil, nil, nil, nil, mux, slog.Default())
 
 	req := httptest.NewRequest(http.MethodGet, "/runners/tok/login", nil) // no Authorization header
 	rec := httptest.NewRecorder()

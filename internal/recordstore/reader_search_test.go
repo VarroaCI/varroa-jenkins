@@ -113,7 +113,7 @@ func TestSearchRecords_FetchLimit(t *testing.T) {
 		e := activity.Event{Timestamp: base.Add(time.Duration(i) * time.Second), Cluster: "core", Namespace: "jenkins",
 			Controller: fmt.Sprintf("cell-%d", i), Source: "user", Severity: "info", Type: "controller.capcheck", Message: "capcheck row"}
 		e.Normalize()
-		if _, err := ing.Insert(ctx, e, EventKey(e)); err != nil {
+		if _, err := ing.Insert(ctx, e, activity.EventKey(e)); err != nil {
 			t.Fatalf("insert activity event %d: %v", i, err)
 		}
 	}

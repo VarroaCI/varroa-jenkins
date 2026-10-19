@@ -344,6 +344,7 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 		result.RefusedInput = true
 	}
 	result.ReleasedFleetLocks = dispatched.releasedFleetLocks
+	publishActivityAfterCommit(g.conn, &dispatched.activity)
 
 	if dispatched.action != nil && g.conn != nil {
 		if perr := PublishLedgerAction(g.conn, *dispatched.action); perr != nil {
@@ -409,6 +410,10 @@ func (g *Ingester) Apply(ctx context.Context, env IngestEnvelope) (ApplyResult, 
 type dispatchResult struct {
 	action *LedgerAction
 	fanout *FanoutProducer
+
+	// activity holds the activity rows of the terminal write. Apply publishes
+	// them after the commit.
+	activity activityOutbox
 
 	// webhookEnqueued is set when a terminal write enqueued a completion
 	// webhook delivery. Apply nudges the dispatcher after the commit.
@@ -543,6 +548,11 @@ func (g *Ingester) dispatch(ctx context.Context, tx pgx.Tx, intent *intentRow, e
 				return dispatchResult{}, enqErr
 			}
 			res.webhookEnqueued = enqueued
+			if payload.Result != nil && isBuildFailure(*payload.Result) {
+				if err := insertActivityForPublish(ctx, tx, buildFailedEvent(intent, payload, env), &res.activity); err != nil {
+					return dispatchResult{}, err
+				}
+			}
 		}
 		return res, nil
 	case KindRunTests:

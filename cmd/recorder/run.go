@@ -297,6 +297,14 @@ func run(ctx context.Context, cfg Config) error {
 		<-ctx.Done()
 		return sub.Unsubscribe()
 	}
+	webhookEnqueueResponderFn := func(ctx context.Context) error {
+		sub, err := recordstore.RegisterWebhookEnqueueResponder(busConn, pool, webhookDispatcher.Nudge, logger)
+		if err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return sub.Unsubscribe()
+	}
 	runNotePostResponderFn := func(ctx context.Context) error {
 		sub, err := recordstore.RegisterRunNotePostResponder(busConn, pool, logger)
 		if err != nil {
@@ -333,6 +341,7 @@ func run(ctx context.Context, cfg Config) error {
 			namedWorker{"cross-tenant responder", crossTenantResponderFn},
 			namedWorker{"fleet lock release responder", fleetLockReleaseResponderFn},
 			namedWorker{"run note responder", runNotePostResponderFn},
+			namedWorker{"webhook enqueue responder", webhookEnqueueResponderFn},
 			namedWorker{"maintenance", maintenanceFn},
 			namedWorker{"activity ingest", activityIngestFn},
 			namedWorker{"run notifier", runNotifierFn},

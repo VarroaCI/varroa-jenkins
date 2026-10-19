@@ -42,6 +42,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ControllerClass{}, &ControllerClassList{},
 		&Team{}, &TeamList{},
 		&Runner{}, &RunnerList{},
+		&TeamAgent{}, &TeamAgentList{},
 		&CellPool{}, &CellPoolList{},
 		&BroodOperation{}, &BroodOperationList{},
 		&BroodSchedule{}, &BroodScheduleList{},

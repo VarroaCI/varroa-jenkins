@@ -126,6 +126,10 @@ func RunBackstopRound(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c
 		logger.Warn("marked lost intent round failed", "error", err)
 	}
 
+	if _, err := publishLockWaitsExceeded(ctx, pool, conn, now, logger); err != nil {
+		logger.Warn("lock wait exceeded round failed", "error", err)
+	}
+
 	if _, err := SweepInterruptedRuns(ctx, pool, conn, cfg.SweepMetrics, cfg.ActionMetrics,
 		cfg.StateDeleter, cfg.MaxSweepPending, now, grace, cfg.DashboardURL, logger); err != nil {
 		logger.Warn("interrupted sweep failed", "error", err)

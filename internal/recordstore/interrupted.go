@@ -308,29 +308,42 @@ func selectCandidatesForTenant(ctx context.Context, pool *pgxpool.Pool, cluster,
 // A heartbeat-lost mark also keeps the run's pending input set. Its owner
 // can still wait on that input, and no later event restores a set on a
 // completed row. The owner's run.completed clears it.
+// markInterrupted marks one run without publishing. Production paths call
+// markInterruptedAndPublish; this form serves the tests.
+//
+//nolint:unparam // the tests pass no dashboard URL; production passes one through markInterruptedAndPublish
 func markInterrupted(ctx context.Context, pool *pgxpool.Pool, run runInterruptCandidate, reason string, now time.Time,
 	dashboardURL string) (bool, error) {
+	return markInterruptedAndPublish(ctx, pool, nil, run, reason, now, dashboardURL)
+}
+
+// markInterruptedAndPublish marks one run and publishes its activity row on
+// conn after the commit. A nil conn writes the row and publishes nothing.
+func markInterruptedAndPublish(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, run runInterruptCandidate,
+	reason string, now time.Time, dashboardURL string) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("begin interrupted-run marking: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	changed, err := markInterruptedTx(ctx, tx, run, reason, now, dashboardURL)
+	var out activityOutbox
+	changed, err := markInterruptedTx(ctx, tx, run, reason, now, dashboardURL, &out)
 	if err != nil || !changed {
 		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit interrupted-run marking: %w", err)
 	}
+	publishActivityAfterCommit(conn, &out)
 	return true, nil
 }
 
 // markInterruptedTx is markInterrupted's body inside the caller's
 // transaction: the conditional terminal write and the build.interrupted
-// activity row. The caller commits.
+// activity row. The caller commits and then publishes out.
 func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate, reason string, now time.Time,
-	dashboardURL string) (bool, error) {
+	dashboardURL string, out *activityOutbox) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE varroa.runs
 		SET status = 'COMPLETED',
@@ -381,22 +394,7 @@ func markInterruptedTx(ctx context.Context, tx pgx.Tx, run runInterruptCandidate
 		BuildNumber: derefInt64(run.buildNumber),
 		Result:      "INTERRUPTED",
 	}
-	event.Normalize()
-	payloadJSON, err := json.Marshal(event)
-	if err != nil {
-		return false, fmt.Errorf("marshal interrupted activity payload: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO varroa.activity
-			(event_key, ts, type, source, severity, cluster, namespace, controller,
-			 actor, message, phase, reason, item_path, build_number, result, url, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-		ON CONFLICT (ts, event_key) DO NOTHING
-	`,
-		EventKey(event), event.Timestamp, event.Type, event.Source, event.Severity, event.Cluster, event.Namespace,
-		event.Controller, event.Actor, event.Message, event.Phase, event.Reason, event.ItemPath,
-		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
-	); err != nil {
+	if err := insertActivityForPublish(ctx, tx, event, out); err != nil {
 		return false, fmt.Errorf("insert interrupted activity row: %w", err)
 	}
 	// The synthetic delivery shares this transaction, so a rolled-back
@@ -626,7 +624,7 @@ func MarkMovedRunsForTenant(ctx context.Context, pool *pgxpool.Pool, conn *bus.C
 		if !ok || reason == ReasonNoHeartbeat || reason == ReasonHeartbeatLost {
 			continue
 		}
-		changed, err := markInterrupted(ctx, pool, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, conn, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("announce-triggered interrupted marking failed", "run_id", c.runID, "error", err)
 			continue
@@ -716,7 +714,7 @@ func SweepInterruptedRuns(ctx context.Context, pool *pgxpool.Pool, conn *bus.Con
 		if !ok {
 			continue
 		}
-		changed, err := markInterrupted(ctx, pool, c, reason, now, dashboardURL)
+		changed, err := markInterruptedAndPublish(ctx, pool, conn, c, reason, now, dashboardURL)
 		if err != nil {
 			logger.Warn("interrupted sweep: mark failed", "run_id", c.runID, "error", err)
 			continue

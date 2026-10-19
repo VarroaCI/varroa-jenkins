@@ -193,7 +193,7 @@ func (o *Ops) Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadR
 	if err != nil {
 		return fail(err)
 	}
-	w, err := o.pickWriter(ctx, repo.Host, forge.Repo{Owner: repo.Owner, Name: repo.Name}, creds)
+	w, err := o.pickReader(ctx, repo.Host, forge.Repo{Owner: repo.Owner, Name: repo.Name}, creds)
 	if err != nil {
 		return fail(err)
 	}
@@ -294,6 +294,18 @@ func trimPartialRune(b []byte) []byte {
 // A credential that reads but cannot push is not a writer, and it still
 // counts as authenticated.
 func (o *Ops) pickWriter(ctx context.Context, host string, repo forge.Repo, creds []Credential) (writer, error) {
+	return o.pickCredential(ctx, host, repo, creds, true)
+}
+
+// pickReader returns the first credential that may read the repository. A
+// read-only credential serves a read, so a read does not need push access.
+func (o *Ops) pickReader(ctx context.Context, host string, repo forge.Repo, creds []Credential) (writer, error) {
+	return o.pickCredential(ctx, host, repo, creds, false)
+}
+
+// pickCredential returns the first credential that answers the repository
+// read. When needPush is set, the credential must also be allowed to push.
+func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, creds []Credential, needPush bool) (writer, error) {
 	kind, err := o.detect(ctx, o.http, host)
 	if errors.Is(err, forge.ErrUnsupported) {
 		return writer{}, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
@@ -310,7 +322,7 @@ func (o *Ops) pickWriter(ctx context.Context, host string, repo forge.Repo, cred
 		}
 		info, err := cl.Repository(ctx, repo)
 		switch {
-		case err == nil && info.Push:
+		case err == nil && (info.Push || !needPush):
 			return writer{Kind: kind, Client: cl, CredentialID: c.ID, Info: info}, nil
 		case err == nil:
 			authed = true
@@ -323,8 +335,11 @@ func (o *Ops) pickWriter(ctx context.Context, host string, repo forge.Repo, cred
 			return writer{}, forgeFailure(err, c.ID)
 		}
 	}
-	if authed {
+	if authed && needPush {
 		return writer{}, replyErr(forgeapi.CodeForgeWriteDenied, "no credential may push to the repository")
+	}
+	if authed {
+		return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
 	}
 	return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
 }

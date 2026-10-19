@@ -56,6 +56,7 @@ frontend-test:
 	cd frontend && npm run coverage
 
 generate-crds:
+	go generate ./api/v1alpha1/...
 	rm -f charts/varroa/crds/*.yaml
 	docker run --rm --user "$(shell id -u):$(shell id -g)" \
 		-e GOCACHE=/workspace/.cache/go-build \
@@ -66,7 +67,7 @@ generate-crds:
 
 check-crds:
 	$(MAKE) generate-crds
-	git diff --exit-code charts/varroa/crds/ && \
+	git diff --exit-code charts/varroa/crds/ api/v1alpha1/teamagent_types.go && \
 		{ test -z "$$(git status --porcelain charts/varroa/crds/)" || exit 1; }
 
 check-comments:

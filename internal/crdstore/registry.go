@@ -28,6 +28,7 @@ var registry = map[reflect.Type]kindInfo{
 	reflect.TypeOf(v1alpha1.CatalogItem{}):    {catalogItemGVR, "CatalogItem", true},
 	reflect.TypeOf(v1alpha1.ComposedBundle{}): {composedBundleGVR, "ComposedBundle", true},
 	reflect.TypeOf(v1alpha1.BroodOperation{}): {broodOperationGVR, "BroodOperation", true},
+	reflect.TypeOf(v1alpha1.TeamAgent{}):      {teamAgentGVR, "TeamAgent", true},
 	reflect.TypeOf(v1alpha1.User{}):           {userGVR, "User", true},
 
 	// Cluster-scoped kinds.
@@ -124,6 +125,10 @@ var clearStatusFields = map[schema.GroupVersionResource]map[string]any{
 	// clear both, or a merge patch would leave the stale cell binding in
 	// etcd once the owning Team loses its placement.
 	runnerGVR: {"cell": "", "cellNamespace": ""},
+	// lastSession and instructionsSHA are omitempty. A session that ends or an
+	// instructions read that drops its commit must clear them, or a merge patch
+	// keeps the stale value.
+	teamAgentGVR: {"lastSession": nil, "instructionsSHA": ""},
 	// tenants is omitempty. A pool whose last tenant leaves must report an
 	// empty list, or a merge patch leaves the stale names in etcd.
 	cellPoolGVR: {"tenants": nil},
@@ -210,6 +215,7 @@ var (
 	groupGVR                 = gvr("groups")
 	teamGVR                  = gvr("teams")
 	runnerGVR                = gvr("runners")
+	teamAgentGVR             = gvr("teamagents")
 	jenkinsVersionProfileGVR = gvr("jenkinsversionprofiles")
 	controllerClassGVR       = gvr("controllerclasses")
 	updateCentersGVR         = gvr("updatecenters")

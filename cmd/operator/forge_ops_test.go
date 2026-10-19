@@ -35,6 +35,29 @@ func (s stampOps) Read(_ context.Context, _ forgeapi.ReadRequest) forgeapi.ReadR
 	return forgeapi.ReadReply{Status: forgeapi.Status{OK: true}, Revision: s.id}
 }
 
+func (s stampOps) Issue(_ context.Context, _ forgeapi.IssueRequest, _ string) forgeapi.IssueReply {
+	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 1, URL: s.id}
+}
+
+func issueBody(t *testing.T) []byte {
+	t.Helper()
+	b, err := json.Marshal(forgeapi.IssueRequest{Team: "payments", Title: "t", Body: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestHandleForgeIssue_NotShardOwnerSendsNoReply checks that only the shard
+// owner of the Team opens the issue and answers.
+func TestHandleForgeIssue_NotShardOwnerSendsNoReply(t *testing.T) {
+	ring := sharding.NewRing(8)
+	got := handleForgeIssue(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), "varroa-system", issueBody(t))
+	if got != nil {
+		t.Fatalf("non-owner replied: %s", got)
+	}
+}
+
 // ownerEnter holds only the shards in held.
 func ownerEnter(held map[int]bool, ring *sharding.Ring) shardEnterer {
 	return func(ctx context.Context, key string) (context.Context, func(), bool) {

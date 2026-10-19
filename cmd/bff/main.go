@@ -1024,13 +1024,13 @@ func main() {
 	if !telemetryDisabled {
 		otelHandler := otelhttp.NewHandler(mux, "varroa-bff")
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, otelHandler, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, nil, otelHandler, logger)
 		} else {
 			authHandler = otelHandler
 		}
 	} else {
 		if provider != nil {
-			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, mux, logger)
+			authHandler = auth.AuthMiddleware(provider, keyVerifier, ticketVerifier, scheduleVerifier, nil, mux, logger)
 		} else {
 			authHandler = mux
 		}

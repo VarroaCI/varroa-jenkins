@@ -30,7 +30,7 @@ func NewActivityIngester(pool *pgxpool.Pool) *ActivityIngester {
 
 // Insert writes e's typed columns and its complete JSON payload in one
 // statement, with a conflict-ignoring clause on the primary key
-// (ts, event_key). key is the caller's precomputed EventKey(e). Insert
+// (ts, event_key). key is the caller's precomputed activity.EventKey(e). Insert
 // reports whether the row was newly written; false means the conflict
 // clause matched an existing row, which a redelivery relies on to avoid
 // a duplicate.

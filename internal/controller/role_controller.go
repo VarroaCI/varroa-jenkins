@@ -222,6 +222,11 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				// The assistant use verb is cluster-wide. A namespace-scoped
 				// binding gains no assistant access.
 				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
+				// The Team agent verbs are cluster-wide. A namespace-scoped
+				// binding gains neither: the unattended grant and the session
+				// read answer only for the cluster-wide partition.
+				{Resources: []string{"teamagents"}, Verbs: []string{"unattended"}},
+				{Resources: []string{"agentsessions"}, Verbs: []string{"read"}},
 			},
 			operatorPermissions(),
 			"varroa-operator"),

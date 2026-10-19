@@ -32,7 +32,7 @@ func jsonError(w http.ResponseWriter, msg string) {
 }
 
 //nolint:revive // AuthMiddleware is the canonical name, stutter is acceptable
-func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv ScheduleVerifier, next http.Handler, logger *slog.Logger) http.Handler {
+func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv ScheduleVerifier, av TeamAgentVerifier, next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only require auth for /api/ routes.
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -79,6 +79,10 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 					jsonError(w, "invalid stream ticket")
 					return
 				}
+				if ReservedSubject(claims) {
+					jsonError(w, "reserved subject")
+					return
+				}
 				ctx := context.WithValue(r.Context(), claimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -113,7 +117,26 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 						jsonError(w, "invalid schedule token")
 						return
 					}
+					if ReservedSubject(sClaims) {
+						jsonError(w, "reserved subject")
+						return
+					}
 					ctx := context.WithValue(r.Context(), claimsKey, sClaims)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			// A Team agent token names its session. The verifier checks the
+			// audience first, so a token of another kind falls through.
+			if av != nil {
+				if aClaims, sid, matched, verr := av.Verify(r, token); matched {
+					if verr != nil {
+						logger.Warn("team agent token verification failed", "error", verr)
+						jsonError(w, "invalid team agent token")
+						return
+					}
+					ctx := context.WithValue(r.Context(), claimsKey, aClaims)
+					ctx = ContextWithAgentSession(ctx, sid)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -127,6 +150,10 @@ func AuthMiddleware(p Provider, kv APIKeyVerifier, tv *TicketVerifier, sv Schedu
 			}
 		}
 
+		if ReservedSubject(claims) {
+			jsonError(w, "reserved subject")
+			return
+		}
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

@@ -1,10 +1,8 @@
-package recordstore
+package activity
 
 import (
 	"testing"
 	"time"
-
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 )
 
 // TestEventKey covers D1's edge cases: an absent cluster, a zero build
@@ -16,11 +14,11 @@ func TestEventKey(t *testing.T) {
 
 	tests := []struct {
 		name string
-		e    activity.Event
+		e    Event
 	}{
 		{
 			name: "absent cluster",
-			e: activity.Event{
+			e: Event{
 				Cluster:   "",
 				Timestamp: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
 				Source:    "operator",
@@ -30,7 +28,7 @@ func TestEventKey(t *testing.T) {
 		},
 		{
 			name: "zero build number",
-			e: activity.Event{
+			e: Event{
 				Cluster:     "core",
 				Timestamp:   time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
 				Source:      "jenkins",
@@ -41,7 +39,7 @@ func TestEventKey(t *testing.T) {
 		},
 		{
 			name: "empty message",
-			e: activity.Event{
+			e: Event{
 				Cluster:   "core",
 				Timestamp: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
 				Source:    "mite",
@@ -51,7 +49,7 @@ func TestEventKey(t *testing.T) {
 		},
 		{
 			name: "non-UTC timestamp",
-			e: activity.Event{
+			e: Event{
 				Cluster:   "core",
 				Timestamp: time.Date(2026, 9, 10, 5, 0, 0, 0, pdt),
 				Source:    "mite",
@@ -73,14 +71,14 @@ func TestEventKey(t *testing.T) {
 	// A non-UTC timestamp must normalize to the same key as its UTC
 	// equivalent, because EventKey formats the timestamp in UTC before
 	// hashing it.
-	utcEvent := activity.Event{
+	utcEvent := Event{
 		Cluster:   "core",
 		Timestamp: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
 		Source:    "mite",
 		Type:      "heartbeat",
 		Message:   "",
 	}
-	pdtEvent := activity.Event{
+	pdtEvent := Event{
 		Cluster:   "core",
 		Timestamp: time.Date(2026, 9, 10, 5, 0, 0, 0, pdt),
 		Source:    "mite",
@@ -94,7 +92,7 @@ func TestEventKey(t *testing.T) {
 
 	// Two structurally-equal events produce the same key, which is the
 	// property a redelivery relies on to avoid a duplicate row.
-	a := activity.Event{
+	a := Event{
 		Cluster: "core", Timestamp: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC),
 		Source: "operator", Type: "controller.created", Namespace: "jenkins", Controller: "foo",
 		BuildNumber: 5, Message: "created",

@@ -330,6 +330,9 @@ func (p *Provider) Verify(ctx context.Context, rawToken string) (*auth.Claims, e
 	if lc.Iat > 0 {
 		claims.IssuedAt = time.Unix(lc.Iat, 0)
 	}
+	if auth.ReservedSubject(claims) {
+		return nil, auth.ErrReservedSubject
+	}
 	return claims, nil
 }
 

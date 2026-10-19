@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -150,7 +149,7 @@ func fireOne(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, metrics *B
 		metrics.addRefired(ctx)
 	}
 
-	if err := writeBackstopActivity(ctx, pool, c, now); err != nil {
+	if err := writeBackstopActivity(ctx, pool, conn, c, now); err != nil {
 		logger.Warn("backstop fire: write activity row failed", "job_path", c.jobPath, "error", err)
 	}
 }
@@ -168,7 +167,7 @@ func backstopActivityMessage(c backstopFireCandidate) string {
 // writeBackstopActivity writes the fire's build.scheduled.backstop
 // activity row, naming the job path and the occurrence minute so a
 // later round's candidate suppression test can find it.
-func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, c backstopFireCandidate, now time.Time) error {
+func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn, c backstopFireCandidate, now time.Time) error {
 	event := activity.Event{
 		Timestamp:  now,
 		Type:       "build.scheduled.backstop",
@@ -182,23 +181,18 @@ func writeBackstopActivity(ctx context.Context, pool *pgxpool.Pool, c backstopFi
 		Reason:     occurrenceMinuteKey(c.occurrence),
 		ItemPath:   c.jobPath,
 	}
-	event.Normalize()
-	payloadJSON, err := json.Marshal(event)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("marshal backstop activity payload: %w", err)
+		return fmt.Errorf("begin backstop activity write: %w", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO varroa.activity
-			(event_key, ts, type, source, severity, cluster, namespace, controller,
-			 actor, message, phase, reason, item_path, build_number, result, url, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-		ON CONFLICT (ts, event_key) DO NOTHING
-	`,
-		EventKey(event), event.Timestamp, event.Type, event.Source, event.Severity, event.Cluster, event.Namespace,
-		event.Controller, event.Actor, event.Message, event.Phase, event.Reason, event.ItemPath,
-		nullableBuildNumber(event.BuildNumber), event.Result, event.URL, string(payloadJSON),
-	); err != nil {
+	defer func() { _ = tx.Rollback(ctx) }()
+	var out activityOutbox
+	if err := insertActivityForPublish(ctx, tx, event, &out); err != nil {
 		return fmt.Errorf("insert backstop activity row: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit backstop activity write: %w", err)
+	}
+	publishActivityAfterCommit(conn, &out)
 	return nil
 }

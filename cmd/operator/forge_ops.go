@@ -26,6 +26,7 @@ const forgeConcurrency = 4
 type forgeOps interface {
 	Check(ctx context.Context, req forgeapi.CheckRequest) forgeapi.CheckReply
 	Read(ctx context.Context, req forgeapi.ReadRequest) forgeapi.ReadReply
+	Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply
 }
 
 // shardEnterer registers work on a held ring shard. It returns false when the
@@ -67,6 +68,25 @@ func handleForgeRead(ctx context.Context, logger *slog.Logger, ops forgeOps, ent
 	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
 	defer cancel()
 	return encodeForgeReply(ops.Read(rctx, req))
+}
+
+// handleForgeIssue answers one operator.<cluster>.forge.issue request. The
+// ownership rule is the same as handleForgeCheck: the shard owner of the
+// Team's key opens the issue, and no other replica replies.
+func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, releaseNamespace string, data []byte) []byte {
+	var req forgeapi.IssueRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		logger.Warn("forge issue decode failed", "error", err)
+		return encodeForgeReply(forgeapi.IssueReply{Status: invalidForgeStatus()})
+	}
+	wctx, leave, ok := enter(ctx, forgeops.ShardKey(req.Team))
+	if !ok {
+		return nil
+	}
+	defer leave()
+	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
+	defer cancel()
+	return encodeForgeReply(ops.Issue(rctx, req, releaseNamespace))
 }
 
 // invalidForgeStatus is the reply to a request that does not decode.

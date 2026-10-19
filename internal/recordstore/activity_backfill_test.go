@@ -52,7 +52,7 @@ func TestPgBackfillQuery_PredicateRejectsHalf(t *testing.T) {
 	// The next page must not repeat any row from the first.
 	seen := make(map[string]bool, 20)
 	for _, e := range page.Items {
-		seen[EventKey(e)] = true
+		seen[activity.EventKey(e)] = true
 	}
 	q2 := activity.Query{Cluster: "core", Limit: 20, Scope: activity.Scope{All: true}, Authorize: authorize, Cursor: page.NextCursor}
 	page2, err := bf.Query(context.Background(), q2)
@@ -63,7 +63,7 @@ func TestPgBackfillQuery_PredicateRejectsHalf(t *testing.T) {
 		t.Fatalf("got %d accepted items on page 2, want the remaining 10", len(page2.Items))
 	}
 	for _, e := range page2.Items {
-		if seen[EventKey(e)] {
+		if seen[activity.EventKey(e)] {
 			t.Fatalf("row %+v repeated across pages", e)
 		}
 	}
