@@ -177,4 +177,4 @@ curl -i -X POST \
 ```
 
 Expect `202 Accepted`, then a build in the `payments` folder. A push of an already built
-revision starts no build.
+revision starts no build. A push to a new repository or branch starts one build.

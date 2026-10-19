@@ -852,24 +852,30 @@ type branchSourceItemXML struct {
 	BuildStrategies *buildStrategiesXML `xml:"buildStrategies"`
 }
 
-// buildStrategiesXML renders the skip-initial-build strategy every
-// multibranch branch source and every organization folder carries (design
-// D12). The rendering does not depend on the item's own YAML: a scan
-// discovers a branch, a webhook builds it.
+// buildStrategiesXML renders the two build strategies every multibranch
+// branch source and every organization folder carries (design D12). A scan
+// discovers a branch and builds nothing. A push that creates a branch builds
+// it once: the Varroa strategy answers for that branch, and the skip
+// strategy stays in force for scans. The rendering does not depend on the
+// item's own YAML.
 type buildStrategiesXML struct {
-	SkipInitialBuildOnFirstBranchIndexing *skipInitialBuildStrategyXML `xml:"jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing"`
+	SkipInitialBuildOnFirstBranchIndexing *noArgStrategyXML `xml:"jenkins.branch.buildstrategies.basic.SkipInitialBuildOnFirstBranchIndexing"`
+	VarroaPushedBranch                    *noArgStrategyXML `xml:"org.jenkinsci.plugins.varroamiteauth.VarroaPushedBranchBuildStrategy"`
 }
 
-// skipInitialBuildStrategyXML has a no-argument data-bound constructor, so
-// it carries no child element.
-type skipInitialBuildStrategyXML struct {
+// noArgStrategyXML renders a build strategy with a no-argument data-bound
+// constructor, so it carries no child element.
+type noArgStrategyXML struct {
 	Plugin string `xml:"plugin,attr,omitempty"`
 }
 
-func skipInitialBuildStrategies() *buildStrategiesXML {
+func branchBuildStrategies() *buildStrategiesXML {
 	return &buildStrategiesXML{
-		SkipInitialBuildOnFirstBranchIndexing: &skipInitialBuildStrategyXML{
+		SkipInitialBuildOnFirstBranchIndexing: &noArgStrategyXML{
 			Plugin: "basic-branch-build-strategies",
+		},
+		VarroaPushedBranch: &noArgStrategyXML{
+			Plugin: "varroa-mite-auth",
 		},
 	}
 }
@@ -1014,7 +1020,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 		if gh := entry.BranchSource.Source.GitHub; gh != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
 				Source:          gitHubSourceFor(gh),
-				BuildStrategies: skipInitialBuildStrategies(),
+				BuildStrategies: branchBuildStrategies(),
 			})
 			continue
 		}
@@ -1022,7 +1028,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 		if g := entry.BranchSource.Source.Gitea; g != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
 				Source:          giteaSourceFor(g),
-				BuildStrategies: skipInitialBuildStrategies(),
+				BuildStrategies: branchBuildStrategies(),
 			})
 			continue
 		}
@@ -1035,7 +1041,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.BranchSource.Source.Git.Remote,
 					CredentialsID: entry.BranchSource.Source.Git.CredentialsID,
 				},
-				BuildStrategies: skipInitialBuildStrategies(),
+				BuildStrategies: branchBuildStrategies(),
 			})
 			continue
 		}
@@ -1048,7 +1054,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 					Remote:        entry.Git.Remote,
 					CredentialsID: entry.Git.CredentialsID,
 				},
-				BuildStrategies: skipInitialBuildStrategies(),
+				BuildStrategies: branchBuildStrategies(),
 			})
 			continue
 		}
@@ -1056,7 +1062,7 @@ func multibranchConfigXML(item Item) xmlConfig {
 		if entry.GitHub != nil {
 			m.Sources.Data.BranchSource = append(m.Sources.Data.BranchSource, &branchSourceItemXML{
 				Source:          gitHubSourceFor(entry.GitHub),
-				BuildStrategies: skipInitialBuildStrategies(),
+				BuildStrategies: branchBuildStrategies(),
 			})
 			continue
 		}
@@ -1560,7 +1566,7 @@ func orgFolderConfigXML(item Item) xmlConfig {
 		Plugin:          "branch-api",
 		DisplayName:     item.DisplayName,
 		Description:     item.Description,
-		BuildStrategies: skipInitialBuildStrategies(),
+		BuildStrategies: branchBuildStrategies(),
 	}
 	if len(item.Navigators) > 0 {
 		o.Navigators = &navigatorsXML{}
