@@ -12,6 +12,8 @@ permissions separately with [Jenkins RBAC](jenkins-rbac.md).
 | `developer` | Controller and configuration work within the binding scope |
 | `viewer` | Read-only access |
 
+The `assistant` resource has two verbs. `use` opens the assistant and sends it messages: `admin`, `operator`, `developer`, and `viewer` hold it. `admin` changes the kill switch, the defaults, and tenant levels, and reads every session: `admin` only.
+
 Built-in roles are reconciled. Create a custom role when their rules do not fit.
 
 Bind a user or group:

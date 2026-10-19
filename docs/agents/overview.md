@@ -43,3 +43,4 @@ Credentials and sensitive status fields are removed from tool results. See
 - [Tool behavior](tools.md)
 - [Writing through MCP](writing.md)
 - [Jenkins controller tools](jenkins-tools.md)
+- [Assistant](assistant.md)

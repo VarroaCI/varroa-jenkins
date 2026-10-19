@@ -49,6 +49,8 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: assistant
+    description: The agent assistant. Sessions, approvals, settings, and the caller view.
   - name: ops
     description: Infrastructure operations (health, version, docs).
   - name: auth
@@ -100,6 +102,30 @@ tags:
   - name: Cells
     description: Cell load, tenant by tenant, for the operator surfaces.
 paths:
+  /api/v1/assistant/sessions:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1sessions'
+  /api/v1/assistant/sessions/{id}:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1sessions~1{id}'
+  /api/v1/assistant/sessions/{id}/messages:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1sessions~1{id}~1messages'
+  /api/v1/assistant/sessions/{id}/events:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1sessions~1{id}~1events'
+  /api/v1/assistant/sessions/{id}/cancel:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1sessions~1{id}~1cancel'
+  /api/v1/assistant/approvals:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1approvals'
+  /api/v1/assistant/approvals/{id}/approve:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1approvals~1{id}~1approve'
+  /api/v1/assistant/approvals/{id}/deny:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1approvals~1{id}~1deny'
+  /api/v1/assistant/settings:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1settings'
+  /api/v1/assistant/providers:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1assistant~1providers'
+  /api/v1/me/assistant:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1me~1assistant'
+  /api/v1/me/assistant/key:
+    $ref: './paths/assistant.yaml#/~1api~1v1~1me~1assistant~1key'
   /healthz:
     $ref: './paths/ops.yaml#/~1healthz'
   /version:
@@ -378,6 +404,46 @@ components:
         long-lived vk_ API key. The server routes vk_-prefixed tokens
         to the API-key verifier and everything else to the JWT provider.
   schemas:
+    AssistantError:
+      $ref: './components/schemas.yaml#/AssistantError'
+    AssistantSessionContext:
+      $ref: './components/schemas.yaml#/AssistantSessionContext'
+    AssistantSessionCreateRequest:
+      $ref: './components/schemas.yaml#/AssistantSessionCreateRequest'
+    AssistantSession:
+      $ref: './components/schemas.yaml#/AssistantSession'
+    AssistantSessionList:
+      $ref: './components/schemas.yaml#/AssistantSessionList'
+    AssistantApproval:
+      $ref: './components/schemas.yaml#/AssistantApproval'
+    AssistantApprovalList:
+      $ref: './components/schemas.yaml#/AssistantApprovalList'
+    AssistantSessionDetail:
+      $ref: './components/schemas.yaml#/AssistantSessionDetail'
+    AssistantMessageRequest:
+      $ref: './components/schemas.yaml#/AssistantMessageRequest'
+    AssistantAcceptedState:
+      $ref: './components/schemas.yaml#/AssistantAcceptedState'
+    AssistantDenyRequest:
+      $ref: './components/schemas.yaml#/AssistantDenyRequest'
+    AssistantApprovalOutcome:
+      $ref: './components/schemas.yaml#/AssistantApprovalOutcome'
+    AssistantLimits:
+      $ref: './components/schemas.yaml#/AssistantLimits'
+    AssistantSettings:
+      $ref: './components/schemas.yaml#/AssistantSettings'
+    AssistantSettingsUpdate:
+      $ref: './components/schemas.yaml#/AssistantSettingsUpdate'
+    AssistantProvider:
+      $ref: './components/schemas.yaml#/AssistantProvider'
+    AssistantProviderList:
+      $ref: './components/schemas.yaml#/AssistantProviderList'
+    MyAssistant:
+      $ref: './components/schemas.yaml#/MyAssistant'
+    MyAssistantUpdate:
+      $ref: './components/schemas.yaml#/MyAssistantUpdate'
+    MyAssistantKeyRequest:
+      $ref: './components/schemas.yaml#/MyAssistantKeyRequest'
     APIRule:
       $ref: './components/schemas.yaml#/APIRule'
     ActivityEvent:

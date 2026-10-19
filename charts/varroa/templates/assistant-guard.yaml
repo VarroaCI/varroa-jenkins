@@ -1,0 +1,57 @@
+{{- if .Values.assistant.enabled }}
+{{- if not .Values.recordStore.enabled }}
+{{- fail "assistant.enabled needs recordStore.enabled. The assistant session store lives in the record store database." }}
+{{- end }}
+{{- $names := dict }}
+{{- $defaults := 0 }}
+{{- range $i, $p := .Values.assistant.providers }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" (toString $p.name)) }}
+{{- fail (printf "assistant.providers[%d].name must be a lowercase DNS label" $i) }}
+{{- end }}
+{{- if hasKey $names (toString $p.name) }}
+{{- fail (printf "assistant.providers[%d].name %s is not unique" $i (toString $p.name)) }}
+{{- end }}
+{{- $_ := set $names (toString $p.name) true }}
+{{- if not (has (toString $p.kind) (list "anthropic" "openai-compatible")) }}
+{{- fail (printf "assistant.providers[%d].kind must be anthropic or openai-compatible" $i) }}
+{{- end }}
+{{- if not (has (toString $p.trust) (list "internal" "external")) }}
+{{- fail (printf "assistant.providers[%d].trust must be internal or external" $i) }}
+{{- end }}
+{{- if and (eq (toString $p.kind) "openai-compatible") (empty $p.baseURL) }}
+{{- fail (printf "assistant.providers[%d].baseURL is required for an openai-compatible provider" $i) }}
+{{- end }}
+{{- if and $p.baseURL (not (or (hasPrefix "http://" (toString $p.baseURL)) (hasPrefix "https://" (toString $p.baseURL)))) }}
+{{- fail (printf "assistant.providers[%d].baseURL must start with http:// or https://" $i) }}
+{{- end }}
+{{- if empty $p.models }}
+{{- fail (printf "assistant.providers[%d].models must list at least one model" $i) }}
+{{- end }}
+{{- if $p.default }}
+{{- $defaults = add1 $defaults }}
+{{- end }}
+{{- end }}
+{{- if and (gt (len .Values.assistant.providers) 0) (ne (int $defaults) 1) }}
+{{- fail "assistant.providers must mark exactly one provider default: true" }}
+{{- end }}
+{{- if not (has (toString .Values.assistant.externalDataSharing) (list "none" "metadata" "logs")) }}
+{{- fail "assistant.externalDataSharing must be none, metadata, or logs" }}
+{{- end }}
+{{- range $k := list "session" "userDay" "teamDay" "steps" }}
+{{- $v := index $.Values.assistant.budgets $k | default 0 }}
+{{- if le (int64 $v) 0 }}
+{{- fail (printf "assistant.budgets.%s must be a positive whole number" $k) }}
+{{- end }}
+{{- end }}
+{{- if not (regexMatch "^[1-9][0-9]*(m|h)$" (toString .Values.assistant.approvalExpiry)) }}
+{{- fail "assistant.approvalExpiry must be a whole number of minutes or hours, such as 24h" }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (empty (default list .Values.networkPolicy.assistantEgress.cidrs)) }}
+{{- if gt (len .Values.assistant.providers) 0 }}
+{{- fail "networkPolicy.assistantEgress.cidrs must name the model provider address when assistant.enabled is true. Set [\"0.0.0.0/0\"] to allow every address." }}
+{{- end }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (empty (default list .Values.networkPolicy.assistantEgress.ports)) }}
+{{- fail "networkPolicy.assistantEgress.ports must not be empty when assistant.enabled is true, because an empty list allows every port." }}
+{{- end }}
+{{- end }}

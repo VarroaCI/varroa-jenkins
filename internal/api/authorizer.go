@@ -363,6 +363,26 @@ func (a *Authorizer) CanReleaseFleetLocks(claims *auth.Claims) bool {
 	return hasVerb(a.globalEffective(claims), "fleetlocks", "release")
 }
 
+// CanUseAssistant checks if the caller may open the assistant and send it
+// messages. The assistant is one cluster-wide surface, so the decision reads
+// only the cluster-wide grant, as CanReadFleetLocks does.
+func (a *Authorizer) CanUseAssistant(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "assistant", "use")
+}
+
+// CanAdminAssistant checks if the caller may change the assistant's global
+// settings, and read every session. Approving a write needs only the owner check.
+// The decision reads the cluster-wide grant only.
+func (a *Authorizer) CanAdminAssistant(claims *auth.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	return hasVerb(a.globalEffective(claims), "assistant", "admin")
+}
+
 // CanReadCatalogSources checks if the caller can read CatalogSources.
 func (a *Authorizer) CanReadCatalogSources(claims *auth.Claims) bool {
 	if claims == nil {

@@ -156,7 +156,7 @@ func handleCallJenkinsTool(deps *api.Dependencies) func(ctx context.Context, req
 			case deps.ActivityPublisher == nil:
 				return mcp.NewToolResultError("break-glass auditing is unavailable; " + pipelinesToolsHint), nil
 			}
-			emitActivity(deps, claims, activity.Event{
+			emitActivity(ctx, deps, claims, activity.Event{
 				Type:       "controller.breakglass.granted",
 				Severity:   "warning",
 				Namespace:  namespace,

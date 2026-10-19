@@ -1,0 +1,511 @@
+# assistant: the agent assistant. Sessions run a provider loop over the
+# caller's own tools. A write tool call parks the session for an approval.
+# Every route answers 503 with AssistantError when the assistant is off.
+
+/api/v1/assistant/sessions:
+  post:
+    operationId: createAssistantSession
+    tags: [Assistant]
+    summary: Starts an assistant session from a message or a fixed prompt.
+    description: >
+      Creates one session. The session runs when the gates pass. A session
+      that a gate refuses is stored as skipped, with its skip reason. The
+      context names what the session is about. The server adds the prompt
+      id and the repository, and a client cannot set them.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantSessionCreateRequest'
+    responses:
+      "201":
+        description: The session, running or skipped.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantSession'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        description: The caller lacks the assistant use verb, or the prompt cannot start a session.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The assistant is off for this user.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "429":
+        description: The user already runs the maximum number of sessions.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled, or a dependency is missing.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+  get:
+    operationId: listAssistantSessions
+    tags: [Assistant]
+    summary: Lists the caller's assistant sessions, newest first.
+    parameters:
+      - {name: scope, in: query, description: 'all lists every session and needs the admin verb.', schema: {type: string, enum: [all]}}
+      - {name: kind, in: query, schema: {type: string}}
+      - {name: prompt, in: query, schema: {type: string}}
+      - {name: team, in: query, schema: {type: string}}
+      - {name: state, in: query, schema: {type: string}}
+      - {name: cursor, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    responses:
+      "200":
+        description: One page of sessions.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantSessionList'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/sessions/{id}:
+  get:
+    operationId: getAssistantSession
+    tags: [Assistant]
+    summary: Returns one session with its approvals and their results.
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    responses:
+      "200":
+        description: The session and its approvals.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantSessionDetail'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/sessions/{id}/messages:
+  post:
+    operationId: postAssistantMessage
+    tags: [Assistant]
+    summary: Sends a message to a completed session and runs it again.
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantMessageRequest'
+    responses:
+      "202":
+        description: The session runs again.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantAcceptedState'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The session is not waiting, its budget is spent, or its key is not available.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/sessions/{id}/events:
+  get:
+    operationId: streamAssistantEvents
+    tags: [Assistant]
+    summary: Streams the transcript of one session as server-sent events.
+    description: >
+      Sends every event after the cursor, then each new event. Each frame
+      carries its sequence number as its id. The stream closes after a done
+      event. The stream reads the ticket of the session scope, because a
+      browser EventSource cannot set headers.
+    x-sse: true
+    x-sse-events:
+      - user
+      - assistant
+      - tool_call
+      - tool_result
+      - approval_requested
+      - approval_resolved
+      - error
+      - done
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: after, in: query, description: 'The last sequence number that the client read.', schema: {type: integer, minimum: 0, default: 0}}
+    responses:
+      "200":
+        description: The event stream.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/sessions/{id}/cancel:
+  post:
+    operationId: cancelAssistantSession
+    tags: [Assistant]
+    summary: Cancels a running or waiting session.
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    responses:
+      "202":
+        description: The session is cancelled.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The session already ended.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/approvals:
+  get:
+    operationId: listAssistantApprovals
+    tags: [Assistant]
+    summary: Lists approvals of the caller's sessions.
+    parameters:
+      - {name: state, in: query, schema: {type: string}}
+      - {name: session, in: query, schema: {type: string}}
+      - {name: target_kind, in: query, schema: {type: string}}
+      - {name: target_ref, in: query, schema: {type: string}}
+      - {name: scope, in: query, description: 'all lists every approval and needs the admin verb.', schema: {type: string, enum: [all]}}
+      - {name: cursor, in: query, schema: {type: string}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    responses:
+      "200":
+        description: One page of approvals.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantApprovalList'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/approvals/{id}/approve:
+  post:
+    operationId: approveAssistantApproval
+    tags: [Assistant]
+    summary: Approves one write tool call and runs it as the approver.
+    description: >
+      The tool runs under the session context, with the approver's grants. A
+      kill switch refuses the approval. The session resumes when every
+      approval of it has its result.
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    responses:
+      "200":
+        description: The approval and the tool result.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantApprovalOutcome'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The approval is not pending, has expired, or the assistant is paused.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/approvals/{id}/deny:
+  post:
+    operationId: denyAssistantApproval
+    tags: [Assistant]
+    summary: Denies one write tool call. Nothing runs.
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantDenyRequest'
+    responses:
+      "200":
+        description: The approval and the denial result.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantApprovalOutcome'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
+      "409":
+        description: The approval is not pending or has expired.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/settings:
+  get:
+    operationId: getAssistantSettings
+    tags: [Assistant]
+    summary: Returns the kill switch, and for an admin the defaults and limits.
+    responses:
+      "200":
+        description: The global assistant settings.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantSettings'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+  put:
+    operationId: putAssistantSettings
+    tags: [Assistant]
+    summary: Changes the kill switch, the defaults, or a tenant data level. Admin only.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/AssistantSettingsUpdate'
+    responses:
+      "200":
+        description: The global assistant settings after the change.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantSettings'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/assistant/providers:
+  get:
+    operationId: listAssistantProviders
+    tags: [Assistant]
+    summary: Lists the configured model providers and whether each can be called.
+    responses:
+      "200":
+        description: The providers. The base URL is for admins only.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantProviderList'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/me/assistant:
+  get:
+    operationId: getMyAssistant
+    tags: [Assistant]
+    summary: Returns the caller's assistant settings, key state, and day spend.
+    description: With the assistant off, the answer is available false and no other field.
+    responses:
+      "200":
+        description: The caller's assistant view.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/MyAssistant'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+  put:
+    operationId: putMyAssistant
+    tags: [Assistant]
+    summary: Changes the caller's provider, model, data level, or enabled flag.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/MyAssistantUpdate'
+    responses:
+      "200":
+        description: The caller's assistant view after the change.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/MyAssistant'
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+
+/api/v1/me/assistant/key:
+  put:
+    operationId: putMyAssistantKey
+    tags: [Assistant]
+    summary: Stores a provider key in a session-only, sealed cookie.
+    description: >
+      The cookie is HttpOnly, SameSite Strict, scoped to the API path, and
+      cleared at logout. An API key caller has no login session, so the call
+      answers 409.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../components/schemas.yaml#/MyAssistantKeyRequest'
+    responses:
+      "204":
+        description: The key is stored.
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        description: The caller has no login session.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/Error'
+      "503":
+        description: Sealing is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'
+  delete:
+    operationId: deleteMyAssistantKey
+    tags: [Assistant]
+    summary: Clears the sealed provider key cookie.
+    responses:
+      "204":
+        description: The key cookie is cleared.
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "503":
+        description: The assistant is not enabled.
+        content:
+          application/json:
+            schema:
+              $ref: '../components/schemas.yaml#/AssistantError'

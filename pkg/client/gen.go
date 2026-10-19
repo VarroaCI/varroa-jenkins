@@ -33,12 +33,95 @@ const (
 
 // Defines values for ComponentsSchemasActivityEventSource.
 const (
-	ComponentsSchemasActivityEventSourceApi      ComponentsSchemasActivityEventSource = "api"
-	ComponentsSchemasActivityEventSourceJenkins  ComponentsSchemasActivityEventSource = "jenkins"
-	ComponentsSchemasActivityEventSourceMcp      ComponentsSchemasActivityEventSource = "mcp"
-	ComponentsSchemasActivityEventSourceMite     ComponentsSchemasActivityEventSource = "mite"
-	ComponentsSchemasActivityEventSourceOperator ComponentsSchemasActivityEventSource = "operator"
-	ComponentsSchemasActivityEventSourceUser     ComponentsSchemasActivityEventSource = "user"
+	ComponentsSchemasActivityEventSourceApi       ComponentsSchemasActivityEventSource = "api"
+	ComponentsSchemasActivityEventSourceAssistant ComponentsSchemasActivityEventSource = "assistant"
+	ComponentsSchemasActivityEventSourceJenkins   ComponentsSchemasActivityEventSource = "jenkins"
+	ComponentsSchemasActivityEventSourceMcp       ComponentsSchemasActivityEventSource = "mcp"
+	ComponentsSchemasActivityEventSourceMite      ComponentsSchemasActivityEventSource = "mite"
+	ComponentsSchemasActivityEventSourceOperator  ComponentsSchemasActivityEventSource = "operator"
+	ComponentsSchemasActivityEventSourceUser      ComponentsSchemasActivityEventSource = "user"
+)
+
+// Defines values for ComponentsSchemasAssistantApprovalState.
+const (
+	ComponentsSchemasAssistantApprovalStateApproved ComponentsSchemasAssistantApprovalState = "approved"
+	ComponentsSchemasAssistantApprovalStateDenied   ComponentsSchemasAssistantApprovalState = "denied"
+	ComponentsSchemasAssistantApprovalStateExpired  ComponentsSchemasAssistantApprovalState = "expired"
+	ComponentsSchemasAssistantApprovalStatePending  ComponentsSchemasAssistantApprovalState = "pending"
+)
+
+// Defines values for ComponentsSchemasAssistantErrorCode.
+const (
+	ComponentsSchemasAssistantErrorCodeAssistantBusy           ComponentsSchemasAssistantErrorCode = "assistant_busy"
+	ComponentsSchemasAssistantErrorCodeAssistantDisabled       ComponentsSchemasAssistantErrorCode = "assistant_disabled"
+	ComponentsSchemasAssistantErrorCodeAssistantKeyUnavailable ComponentsSchemasAssistantErrorCode = "assistant_key_unavailable"
+	ComponentsSchemasAssistantErrorCodeAssistantOff            ComponentsSchemasAssistantErrorCode = "assistant_off"
+	ComponentsSchemasAssistantErrorCodeKillSwitch              ComponentsSchemasAssistantErrorCode = "kill_switch"
+	ComponentsSchemasAssistantErrorCodePromptNotStartable      ComponentsSchemasAssistantErrorCode = "prompt_not_startable"
+)
+
+// Defines values for ComponentsSchemasAssistantProviderKind.
+const (
+	Anthropic        ComponentsSchemasAssistantProviderKind = "anthropic"
+	OpenaiCompatible ComponentsSchemasAssistantProviderKind = "openai-compatible"
+)
+
+// Defines values for ComponentsSchemasAssistantProviderTrust.
+const (
+	External ComponentsSchemasAssistantProviderTrust = "external"
+	Internal ComponentsSchemasAssistantProviderTrust = "internal"
+)
+
+// Defines values for ComponentsSchemasAssistantSessionDataSharing.
+const (
+	ComponentsSchemasAssistantSessionDataSharingLogs     ComponentsSchemasAssistantSessionDataSharing = "logs"
+	ComponentsSchemasAssistantSessionDataSharingMetadata ComponentsSchemasAssistantSessionDataSharing = "metadata"
+	ComponentsSchemasAssistantSessionDataSharingNone     ComponentsSchemasAssistantSessionDataSharing = "none"
+)
+
+// Defines values for ComponentsSchemasAssistantSessionKeySource.
+const (
+	ComponentsSchemasAssistantSessionKeySourceChart ComponentsSchemasAssistantSessionKeySource = "chart"
+	ComponentsSchemasAssistantSessionKeySourceUser  ComponentsSchemasAssistantSessionKeySource = "user"
+)
+
+// Defines values for ComponentsSchemasAssistantSessionKind.
+const (
+	ComponentsSchemasAssistantSessionKindAssistant ComponentsSchemasAssistantSessionKind = "assistant"
+	ComponentsSchemasAssistantSessionKindTeamAgent ComponentsSchemasAssistantSessionKind = "team_agent"
+)
+
+// Defines values for ComponentsSchemasAssistantSessionSkipReason.
+const (
+	ComponentsSchemasAssistantSessionSkipReasonBudgetDay           ComponentsSchemasAssistantSessionSkipReason = "budget_day"
+	ComponentsSchemasAssistantSessionSkipReasonDataSharingNone     ComponentsSchemasAssistantSessionSkipReason = "data_sharing_none"
+	ComponentsSchemasAssistantSessionSkipReasonKillSwitch          ComponentsSchemasAssistantSessionSkipReason = "kill_switch"
+	ComponentsSchemasAssistantSessionSkipReasonProviderUnavailable ComponentsSchemasAssistantSessionSkipReason = "provider_unavailable"
+)
+
+// Defines values for ComponentsSchemasAssistantSessionState.
+const (
+	ComponentsSchemasAssistantSessionStateCancelled       ComponentsSchemasAssistantSessionState = "cancelled"
+	ComponentsSchemasAssistantSessionStateCompleted       ComponentsSchemasAssistantSessionState = "completed"
+	ComponentsSchemasAssistantSessionStateExpired         ComponentsSchemasAssistantSessionState = "expired"
+	ComponentsSchemasAssistantSessionStateFailed          ComponentsSchemasAssistantSessionState = "failed"
+	ComponentsSchemasAssistantSessionStateRunning         ComponentsSchemasAssistantSessionState = "running"
+	ComponentsSchemasAssistantSessionStateSkipped         ComponentsSchemasAssistantSessionState = "skipped"
+	ComponentsSchemasAssistantSessionStateWaitingApproval ComponentsSchemasAssistantSessionState = "waiting_approval"
+)
+
+// Defines values for ComponentsSchemasAssistantSettingsTenantDataSharing.
+const (
+	ComponentsSchemasAssistantSettingsTenantDataSharingLogs     ComponentsSchemasAssistantSettingsTenantDataSharing = "logs"
+	ComponentsSchemasAssistantSettingsTenantDataSharingMetadata ComponentsSchemasAssistantSettingsTenantDataSharing = "metadata"
+	ComponentsSchemasAssistantSettingsTenantDataSharingNone     ComponentsSchemasAssistantSettingsTenantDataSharing = "none"
+)
+
+// Defines values for ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel.
+const (
+	ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevelLogs     ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel = "logs"
+	ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevelMetadata ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel = "metadata"
+	ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevelNone     ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel = "none"
 )
 
 // Defines values for ComponentsSchemasBindingFederationStatusState.
@@ -368,6 +451,27 @@ const (
 	Never        ComponentsSchemasMiteSpecImagePullPolicy = "Never"
 )
 
+// Defines values for ComponentsSchemasMyAssistantDataSharing.
+const (
+	ComponentsSchemasMyAssistantDataSharingLogs     ComponentsSchemasMyAssistantDataSharing = "logs"
+	ComponentsSchemasMyAssistantDataSharingMetadata ComponentsSchemasMyAssistantDataSharing = "metadata"
+	ComponentsSchemasMyAssistantDataSharingNone     ComponentsSchemasMyAssistantDataSharing = "none"
+)
+
+// Defines values for ComponentsSchemasMyAssistantEffectiveLevels.
+const (
+	ComponentsSchemasMyAssistantEffectiveLevelsLogs     ComponentsSchemasMyAssistantEffectiveLevels = "logs"
+	ComponentsSchemasMyAssistantEffectiveLevelsMetadata ComponentsSchemasMyAssistantEffectiveLevels = "metadata"
+	ComponentsSchemasMyAssistantEffectiveLevelsNone     ComponentsSchemasMyAssistantEffectiveLevels = "none"
+)
+
+// Defines values for ComponentsSchemasMyAssistantUpdateDataSharing.
+const (
+	ComponentsSchemasMyAssistantUpdateDataSharingLogs     ComponentsSchemasMyAssistantUpdateDataSharing = "logs"
+	ComponentsSchemasMyAssistantUpdateDataSharingMetadata ComponentsSchemasMyAssistantUpdateDataSharing = "metadata"
+	ComponentsSchemasMyAssistantUpdateDataSharingNone     ComponentsSchemasMyAssistantUpdateDataSharing = "none"
+)
+
 // Defines values for ComponentsSchemasPipelineDefinitionJenkinsfileForge.
 const (
 	ComponentsSchemasPipelineDefinitionJenkinsfileForgeGitea  ComponentsSchemasPipelineDefinitionJenkinsfileForge = "gitea"
@@ -447,10 +551,10 @@ const (
 
 // Defines values for ComponentsSchemasRBACGroupBindingRole.
 const (
-	ComponentsSchemasRBACGroupBindingRoleAdmin     ComponentsSchemasRBACGroupBindingRole = "admin"
-	ComponentsSchemasRBACGroupBindingRoleDeveloper ComponentsSchemasRBACGroupBindingRole = "developer"
-	ComponentsSchemasRBACGroupBindingRoleOperator  ComponentsSchemasRBACGroupBindingRole = "operator"
-	ComponentsSchemasRBACGroupBindingRoleViewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
+	Admin     ComponentsSchemasRBACGroupBindingRole = "admin"
+	Developer ComponentsSchemasRBACGroupBindingRole = "developer"
+	Operator  ComponentsSchemasRBACGroupBindingRole = "operator"
+	Viewer    ComponentsSchemasRBACGroupBindingRole = "viewer"
 )
 
 // Defines values for ComponentsSchemasRunActionResponseState.
@@ -640,12 +744,13 @@ const (
 
 // Defines values for ListActivityParamsSource.
 const (
-	Api      ListActivityParamsSource = "api"
-	Jenkins  ListActivityParamsSource = "jenkins"
-	Mcp      ListActivityParamsSource = "mcp"
-	Mite     ListActivityParamsSource = "mite"
-	Operator ListActivityParamsSource = "operator"
-	User     ListActivityParamsSource = "user"
+	ListActivityParamsSourceApi       ListActivityParamsSource = "api"
+	ListActivityParamsSourceAssistant ListActivityParamsSource = "assistant"
+	ListActivityParamsSourceJenkins   ListActivityParamsSource = "jenkins"
+	ListActivityParamsSourceMcp       ListActivityParamsSource = "mcp"
+	ListActivityParamsSourceMite      ListActivityParamsSource = "mite"
+	ListActivityParamsSourceOperator  ListActivityParamsSource = "operator"
+	ListActivityParamsSourceUser      ListActivityParamsSource = "user"
 )
 
 // Defines values for ListActivityParamsSeverity.
@@ -653,6 +758,16 @@ const (
 	ListActivityParamsSeverityError   ListActivityParamsSeverity = "error"
 	ListActivityParamsSeverityInfo    ListActivityParamsSeverity = "info"
 	ListActivityParamsSeverityWarning ListActivityParamsSeverity = "warning"
+)
+
+// Defines values for ListAssistantApprovalsParamsScope.
+const (
+	ListAssistantApprovalsParamsScopeAll ListAssistantApprovalsParamsScope = "all"
+)
+
+// Defines values for ListAssistantSessionsParamsScope.
+const (
+	ListAssistantSessionsParamsScopeAll ListAssistantSessionsParamsScope = "all"
 )
 
 // Defines values for ApproveControllerJSONBodyAction.
@@ -728,6 +843,207 @@ type ComponentsSchemasApproveConflict struct {
 	// Error Human-readable error message.
 	Error string `json:"error"`
 }
+
+// ComponentsSchemasAssistantAcceptedState defines model for components_schemas_AssistantAcceptedState.
+type ComponentsSchemasAssistantAcceptedState struct {
+	State string `json:"state"`
+}
+
+// ComponentsSchemasAssistantApproval defines model for components_schemas_AssistantApproval.
+type ComponentsSchemasAssistantApproval struct {
+	Arguments   map[string]interface{}                  `json:"arguments"`
+	CallId      string                                  `json:"callId"`
+	ExpiresAt   time.Time                               `json:"expiresAt"`
+	Id          string                                  `json:"id"`
+	Reason      *string                                 `json:"reason,omitempty"`
+	RequestedAt time.Time                               `json:"requestedAt"`
+	ResolvedAt  *time.Time                              `json:"resolvedAt"`
+	ResolvedBy  *string                                 `json:"resolvedBy,omitempty"`
+	Result      *string                                 `json:"result"`
+	SessionId   string                                  `json:"sessionId"`
+	State       ComponentsSchemasAssistantApprovalState `json:"state"`
+	TargetKind  string                                  `json:"targetKind"`
+	TargetRef   *string                                 `json:"targetRef,omitempty"`
+	Tool        string                                  `json:"tool"`
+}
+
+// ComponentsSchemasAssistantApprovalState defines model for ComponentsSchemasAssistantApproval.State.
+type ComponentsSchemasAssistantApprovalState string
+
+// ComponentsSchemasAssistantApprovalList defines model for components_schemas_AssistantApprovalList.
+type ComponentsSchemasAssistantApprovalList struct {
+	Items      []ComponentsSchemasAssistantApproval `json:"items"`
+	NextCursor string                               `json:"nextCursor"`
+}
+
+// ComponentsSchemasAssistantApprovalOutcome defines model for components_schemas_AssistantApprovalOutcome.
+type ComponentsSchemasAssistantApprovalOutcome struct {
+	Approval ComponentsSchemasAssistantApproval `json:"approval"`
+	Result   struct {
+		Content string `json:"content"`
+		IsError bool   `json:"isError"`
+	} `json:"result"`
+}
+
+// ComponentsSchemasAssistantDenyRequest defines model for components_schemas_AssistantDenyRequest.
+type ComponentsSchemasAssistantDenyRequest struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
+// ComponentsSchemasAssistantError An assistant refusal. The code names the cause, and error gives the text.
+type ComponentsSchemasAssistantError struct {
+	Code  ComponentsSchemasAssistantErrorCode `json:"code"`
+	Error string                              `json:"error"`
+}
+
+// ComponentsSchemasAssistantErrorCode defines model for ComponentsSchemasAssistantError.Code.
+type ComponentsSchemasAssistantErrorCode string
+
+// ComponentsSchemasAssistantLimits defines model for components_schemas_AssistantLimits.
+type ComponentsSchemasAssistantLimits struct {
+	ApprovalExpiry *string `json:"approvalExpiry,omitempty"`
+	Budgets        *struct {
+		Session *int64 `json:"session,omitempty"`
+		Steps   *int   `json:"steps,omitempty"`
+		TeamDay *int64 `json:"teamDay,omitempty"`
+		UserDay *int64 `json:"userDay,omitempty"`
+	} `json:"budgets,omitempty"`
+	Egress              *map[string]interface{} `json:"egress,omitempty"`
+	ExternalDataSharing *string                 `json:"externalDataSharing,omitempty"`
+}
+
+// ComponentsSchemasAssistantMessageRequest defines model for components_schemas_AssistantMessageRequest.
+type ComponentsSchemasAssistantMessageRequest struct {
+	Message string `json:"message"`
+}
+
+// ComponentsSchemasAssistantProvider defines model for components_schemas_AssistantProvider.
+type ComponentsSchemasAssistantProvider struct {
+	Available bool `json:"available"`
+
+	// BaseURL Shown to admins only.
+	BaseURL *string                                 `json:"baseURL,omitempty"`
+	Default bool                                    `json:"default"`
+	Kind    ComponentsSchemasAssistantProviderKind  `json:"kind"`
+	Models  []string                                `json:"models"`
+	Name    string                                  `json:"name"`
+	Trust   ComponentsSchemasAssistantProviderTrust `json:"trust"`
+}
+
+// ComponentsSchemasAssistantProviderKind defines model for ComponentsSchemasAssistantProvider.Kind.
+type ComponentsSchemasAssistantProviderKind string
+
+// ComponentsSchemasAssistantProviderTrust defines model for ComponentsSchemasAssistantProvider.Trust.
+type ComponentsSchemasAssistantProviderTrust string
+
+// ComponentsSchemasAssistantProviderList defines model for components_schemas_AssistantProviderList.
+type ComponentsSchemasAssistantProviderList struct {
+	Items []ComponentsSchemasAssistantProvider `json:"items"`
+}
+
+// ComponentsSchemasAssistantSession defines model for components_schemas_AssistantSession.
+type ComponentsSchemasAssistantSession struct {
+	Cluster          string                                       `json:"cluster"`
+	CompletionTokens int64                                        `json:"completionTokens"`
+	Context          map[string]interface{}                       `json:"context"`
+	DataSharing      ComponentsSchemasAssistantSessionDataSharing `json:"dataSharing"`
+	EndedAt          *time.Time                                   `json:"endedAt"`
+	Id               string                                       `json:"id"`
+	KeySource        ComponentsSchemasAssistantSessionKeySource   `json:"keySource"`
+	Kind             ComponentsSchemasAssistantSessionKind        `json:"kind"`
+	Model            *string                                      `json:"model,omitempty"`
+	Principal        string                                       `json:"principal"`
+	PromptTokens     int64                                        `json:"promptTokens"`
+	Provider         *string                                      `json:"provider,omitempty"`
+	SkipReason       *ComponentsSchemasAssistantSessionSkipReason `json:"skipReason"`
+	StartedAt        time.Time                                    `json:"startedAt"`
+	State            ComponentsSchemasAssistantSessionState       `json:"state"`
+	Steps            int                                          `json:"steps"`
+	Team             *string                                      `json:"team,omitempty"`
+	Trigger          *string                                      `json:"trigger,omitempty"`
+}
+
+// ComponentsSchemasAssistantSessionDataSharing defines model for ComponentsSchemasAssistantSession.DataSharing.
+type ComponentsSchemasAssistantSessionDataSharing string
+
+// ComponentsSchemasAssistantSessionKeySource defines model for ComponentsSchemasAssistantSession.KeySource.
+type ComponentsSchemasAssistantSessionKeySource string
+
+// ComponentsSchemasAssistantSessionKind defines model for ComponentsSchemasAssistantSession.Kind.
+type ComponentsSchemasAssistantSessionKind string
+
+// ComponentsSchemasAssistantSessionSkipReason defines model for ComponentsSchemasAssistantSession.SkipReason.
+type ComponentsSchemasAssistantSessionSkipReason string
+
+// ComponentsSchemasAssistantSessionState defines model for ComponentsSchemasAssistantSession.State.
+type ComponentsSchemasAssistantSessionState string
+
+// ComponentsSchemasAssistantSessionContext The client context of a session. Each key names one object the session is about.
+type ComponentsSchemasAssistantSessionContext struct {
+	Cell       *string `json:"cell,omitempty"`
+	Controller *string `json:"controller,omitempty"`
+	Job        *string `json:"job,omitempty"`
+	Route      *string `json:"route,omitempty"`
+	Run        *string `json:"run,omitempty"`
+	Team       *string `json:"team,omitempty"`
+}
+
+// ComponentsSchemasAssistantSessionCreateRequest Send either message or prompt, never both.
+type ComponentsSchemasAssistantSessionCreateRequest struct {
+	// Context The client context of a session. Each key names one object the session is about.
+	Context *ComponentsSchemasAssistantSessionContext `json:"context,omitempty"`
+	Message *string                                   `json:"message,omitempty"`
+	Model   *string                                   `json:"model,omitempty"`
+
+	// Prompt The id of a fixed prompt, such as explain-failure.
+	Prompt   *string `json:"prompt,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+}
+
+// ComponentsSchemasAssistantSessionDetail defines model for components_schemas_AssistantSessionDetail.
+type ComponentsSchemasAssistantSessionDetail struct {
+	Approvals []ComponentsSchemasAssistantApproval `json:"approvals"`
+	Session   ComponentsSchemasAssistantSession    `json:"session"`
+}
+
+// ComponentsSchemasAssistantSessionList defines model for components_schemas_AssistantSessionList.
+type ComponentsSchemasAssistantSessionList struct {
+	Items      []ComponentsSchemasAssistantSession `json:"items"`
+	NextCursor string                              `json:"nextCursor"`
+}
+
+// ComponentsSchemasAssistantSettings defines model for components_schemas_AssistantSettings.
+type ComponentsSchemasAssistantSettings struct {
+	DefaultModel      *string                                                         `json:"defaultModel,omitempty"`
+	DefaultProvider   *string                                                         `json:"defaultProvider,omitempty"`
+	Limits            *ComponentsSchemasAssistantLimits                               `json:"limits,omitempty"`
+	Paused            bool                                                            `json:"paused"`
+	PausedAt          *time.Time                                                      `json:"pausedAt"`
+	PausedBy          *string                                                         `json:"pausedBy,omitempty"`
+	TenantDataSharing *map[string]ComponentsSchemasAssistantSettingsTenantDataSharing `json:"tenantDataSharing,omitempty"`
+	UpdatedAt         *time.Time                                                      `json:"updatedAt,omitempty"`
+	UpdatedBy         *string                                                         `json:"updatedBy,omitempty"`
+}
+
+// ComponentsSchemasAssistantSettingsTenantDataSharing defines model for ComponentsSchemasAssistantSettings.TenantDataSharing.
+type ComponentsSchemasAssistantSettingsTenantDataSharing string
+
+// ComponentsSchemasAssistantSettingsUpdate defines model for components_schemas_AssistantSettingsUpdate.
+type ComponentsSchemasAssistantSettingsUpdate struct {
+	DefaultModel      *string `json:"defaultModel,omitempty"`
+	DefaultProvider   *string `json:"defaultProvider,omitempty"`
+	Paused            *bool   `json:"paused,omitempty"`
+	TenantDataSharing *struct {
+		Remove *string `json:"remove,omitempty"`
+		Set    *struct {
+			Level  ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel `json:"level"`
+			Tenant string                                                            `json:"tenant"`
+		} `json:"set,omitempty"`
+	} `json:"tenantDataSharing,omitempty"`
+}
+
+// ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel defines model for ComponentsSchemasAssistantSettingsUpdate.TenantDataSharing.Set.Level.
+type ComponentsSchemasAssistantSettingsUpdateTenantDataSharingSetLevel string
 
 // ComponentsSchemasBackupSpec Backup configuration (transcribed from v1alpha1.BackupSpec).
 type ComponentsSchemasBackupSpec struct {
@@ -2736,6 +3052,44 @@ type ComponentsSchemasMiteSpec struct {
 
 // ComponentsSchemasMiteSpecImagePullPolicy Mite sidecar image pull policy override for this Controller.
 type ComponentsSchemasMiteSpecImagePullPolicy string
+
+// ComponentsSchemasMyAssistant defines model for components_schemas_MyAssistant.
+type ComponentsSchemasMyAssistant struct {
+	Available       bool                                                    `json:"available"`
+	DataSharing     *ComponentsSchemasMyAssistantDataSharing                `json:"dataSharing,omitempty"`
+	DayBudget       *int64                                                  `json:"dayBudget,omitempty"`
+	DayTokens       *int64                                                  `json:"dayTokens,omitempty"`
+	EffectiveLevels *map[string]ComponentsSchemasMyAssistantEffectiveLevels `json:"effectiveLevels,omitempty"`
+	Enabled         *bool                                                   `json:"enabled,omitempty"`
+	Model           *string                                                 `json:"model,omitempty"`
+	Provider        *string                                                 `json:"provider,omitempty"`
+	SessionKey      *struct {
+		Provider *string `json:"provider,omitempty"`
+	} `json:"sessionKey"`
+}
+
+// ComponentsSchemasMyAssistantDataSharing defines model for ComponentsSchemasMyAssistant.DataSharing.
+type ComponentsSchemasMyAssistantDataSharing string
+
+// ComponentsSchemasMyAssistantEffectiveLevels defines model for ComponentsSchemasMyAssistant.EffectiveLevels.
+type ComponentsSchemasMyAssistantEffectiveLevels string
+
+// ComponentsSchemasMyAssistantKeyRequest defines model for components_schemas_MyAssistantKeyRequest.
+type ComponentsSchemasMyAssistantKeyRequest struct {
+	ApiKey   *string `json:"apiKey,omitempty"`
+	Provider string  `json:"provider"`
+}
+
+// ComponentsSchemasMyAssistantUpdate defines model for components_schemas_MyAssistantUpdate.
+type ComponentsSchemasMyAssistantUpdate struct {
+	DataSharing *ComponentsSchemasMyAssistantUpdateDataSharing `json:"dataSharing,omitempty"`
+	Enabled     *bool                                          `json:"enabled,omitempty"`
+	Model       *string                                        `json:"model,omitempty"`
+	Provider    *string                                        `json:"provider,omitempty"`
+}
+
+// ComponentsSchemasMyAssistantUpdateDataSharing defines model for ComponentsSchemasMyAssistantUpdate.DataSharing.
+type ComponentsSchemasMyAssistantUpdateDataSharing string
 
 // ComponentsSchemasOCIBundleSource OCI artifact source for a composed bundle input.
 type ComponentsSchemasOCIBundleSource struct {
@@ -4902,6 +5256,43 @@ type ListActivityParamsSource string
 // ListActivityParamsSeverity defines parameters for ListActivity.
 type ListActivityParamsSeverity string
 
+// ListAssistantApprovalsParams defines parameters for ListAssistantApprovals.
+type ListAssistantApprovalsParams struct {
+	State      *string `form:"state,omitempty" json:"state,omitempty"`
+	Session    *string `form:"session,omitempty" json:"session,omitempty"`
+	TargetKind *string `form:"target_kind,omitempty" json:"target_kind,omitempty"`
+	TargetRef  *string `form:"target_ref,omitempty" json:"target_ref,omitempty"`
+
+	// Scope all lists every approval and needs the admin verb.
+	Scope  *ListAssistantApprovalsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Cursor *string                            `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                               `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListAssistantApprovalsParamsScope defines parameters for ListAssistantApprovals.
+type ListAssistantApprovalsParamsScope string
+
+// ListAssistantSessionsParams defines parameters for ListAssistantSessions.
+type ListAssistantSessionsParams struct {
+	// Scope all lists every session and needs the admin verb.
+	Scope  *ListAssistantSessionsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Kind   *string                           `form:"kind,omitempty" json:"kind,omitempty"`
+	Prompt *string                           `form:"prompt,omitempty" json:"prompt,omitempty"`
+	Team   *string                           `form:"team,omitempty" json:"team,omitempty"`
+	State  *string                           `form:"state,omitempty" json:"state,omitempty"`
+	Cursor *string                           `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                              `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListAssistantSessionsParamsScope defines parameters for ListAssistantSessions.
+type ListAssistantSessionsParamsScope string
+
+// StreamAssistantEventsParams defines parameters for StreamAssistantEvents.
+type StreamAssistantEventsParams struct {
+	// After The last sequence number that the client read.
+	After *int `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // AuthLoginParams defines parameters for AuthLogin.
 type AuthLoginParams struct {
 	// Return Optional normalized return path (default /).
@@ -5204,6 +5595,18 @@ type SetUserPasswordJSONBody struct {
 	NewPassword string `json:"newPassword"`
 }
 
+// DenyAssistantApprovalJSONRequestBody defines body for DenyAssistantApproval for application/json ContentType.
+type DenyAssistantApprovalJSONRequestBody = ComponentsSchemasAssistantDenyRequest
+
+// CreateAssistantSessionJSONRequestBody defines body for CreateAssistantSession for application/json ContentType.
+type CreateAssistantSessionJSONRequestBody = ComponentsSchemasAssistantSessionCreateRequest
+
+// PostAssistantMessageJSONRequestBody defines body for PostAssistantMessage for application/json ContentType.
+type PostAssistantMessageJSONRequestBody = ComponentsSchemasAssistantMessageRequest
+
+// PutAssistantSettingsJSONRequestBody defines body for PutAssistantSettings for application/json ContentType.
+type PutAssistantSettingsJSONRequestBody = ComponentsSchemasAssistantSettingsUpdate
+
 // CreateBroodOperationJSONRequestBody defines body for CreateBroodOperation for application/json ContentType.
 type CreateBroodOperationJSONRequestBody = ComponentsSchemasCreateBroodRequest
 
@@ -5302,6 +5705,12 @@ type CreateApiKeyJSONRequestBody = ComponentsSchemasCreateKeyRequest
 
 // RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
 type RotateApiKeyJSONRequestBody = ComponentsSchemasCreateKeyRequest
+
+// PutMyAssistantJSONRequestBody defines body for PutMyAssistant for application/json ContentType.
+type PutMyAssistantJSONRequestBody = ComponentsSchemasMyAssistantUpdate
+
+// PutMyAssistantKeyJSONRequestBody defines body for PutMyAssistantKey for application/json ContentType.
+type PutMyAssistantKeyJSONRequestBody = ComponentsSchemasMyAssistantKeyRequest
 
 // ChangeMyPasswordJSONRequestBody defines body for ChangeMyPassword for application/json ContentType.
 type ChangeMyPasswordJSONRequestBody ChangeMyPasswordJSONBody
@@ -5872,6 +6281,50 @@ type ClientInterface interface {
 	// ListActivity request
 	ListActivity(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAssistantApprovals request
+	ListAssistantApprovals(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApproveAssistantApproval request
+	ApproveAssistantApproval(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DenyAssistantApprovalWithBody request with any body
+	DenyAssistantApprovalWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	DenyAssistantApproval(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListAssistantProviders request
+	ListAssistantProviders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListAssistantSessions request
+	ListAssistantSessions(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateAssistantSessionWithBody request with any body
+	CreateAssistantSessionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateAssistantSession(ctx context.Context, body CreateAssistantSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAssistantSession request
+	GetAssistantSession(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CancelAssistantSession request
+	CancelAssistantSession(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamAssistantEvents request
+	StreamAssistantEvents(ctx context.Context, id string, params *StreamAssistantEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostAssistantMessageWithBody request with any body
+	PostAssistantMessageWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostAssistantMessage(ctx context.Context, id string, body PostAssistantMessageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAssistantSettings request
+	GetAssistantSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutAssistantSettingsWithBody request with any body
+	PutAssistantSettingsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutAssistantSettings(ctx context.Context, body PutAssistantSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetAuthConfig request
 	GetAuthConfig(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -6235,6 +6688,22 @@ type ClientInterface interface {
 
 	RotateApiKey(ctx context.Context, prefix ComponentsParametersPrefix, body RotateApiKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetMyAssistant request
+	GetMyAssistant(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutMyAssistantWithBody request with any body
+	PutMyAssistantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutMyAssistant(ctx context.Context, body PutMyAssistantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteMyAssistantKey request
+	DeleteMyAssistantKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutMyAssistantKeyWithBody request with any body
+	PutMyAssistantKeyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PutMyAssistantKey(ctx context.Context, body PutMyAssistantKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ChangeMyPasswordWithBody request with any body
 	ChangeMyPasswordWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -6479,6 +6948,198 @@ type ClientInterface interface {
 
 func (c *Client) ListActivity(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListActivityRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAssistantApprovals(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAssistantApprovalsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ApproveAssistantApproval(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApproveAssistantApprovalRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DenyAssistantApprovalWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDenyAssistantApprovalRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DenyAssistantApproval(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDenyAssistantApprovalRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAssistantProviders(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAssistantProvidersRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListAssistantSessions(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAssistantSessionsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateAssistantSessionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAssistantSessionRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateAssistantSession(ctx context.Context, body CreateAssistantSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAssistantSessionRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetAssistantSession(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAssistantSessionRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CancelAssistantSession(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCancelAssistantSessionRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamAssistantEvents(ctx context.Context, id string, params *StreamAssistantEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamAssistantEventsRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostAssistantMessageWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostAssistantMessageRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostAssistantMessage(ctx context.Context, id string, body PostAssistantMessageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostAssistantMessageRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetAssistantSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAssistantSettingsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantSettingsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantSettingsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutAssistantSettings(ctx context.Context, body PutAssistantSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutAssistantSettingsRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -8073,6 +8734,78 @@ func (c *Client) RotateApiKey(ctx context.Context, prefix ComponentsParametersPr
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetMyAssistant(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMyAssistantRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMyAssistantWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMyAssistantRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMyAssistant(ctx context.Context, body PutMyAssistantJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMyAssistantRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteMyAssistantKey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteMyAssistantKeyRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMyAssistantKeyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMyAssistantKeyRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PutMyAssistantKey(ctx context.Context, body PutMyAssistantKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutMyAssistantKeyRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) ChangeMyPasswordWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewChangeMyPasswordRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -9322,6 +10055,682 @@ func NewListActivityRequest(server string, params *ListActivityParams) (*http.Re
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewListAssistantApprovalsRequest generates requests for ListAssistantApprovals
+func NewListAssistantApprovalsRequest(server string, params *ListAssistantApprovalsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/approvals")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "state", runtime.ParamLocationQuery, *params.State); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Session != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "session", runtime.ParamLocationQuery, *params.Session); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.TargetKind != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "target_kind", runtime.ParamLocationQuery, *params.TargetKind); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.TargetRef != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "target_ref", runtime.ParamLocationQuery, *params.TargetRef); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Scope != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "scope", runtime.ParamLocationQuery, *params.Scope); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApproveAssistantApprovalRequest generates requests for ApproveAssistantApproval
+func NewApproveAssistantApprovalRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/approvals/%s/approve", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDenyAssistantApprovalRequest calls the generic DenyAssistantApproval builder with application/json body
+func NewDenyAssistantApprovalRequest(server string, id string, body DenyAssistantApprovalJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewDenyAssistantApprovalRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewDenyAssistantApprovalRequestWithBody generates requests for DenyAssistantApproval with any type of body
+func NewDenyAssistantApprovalRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/approvals/%s/deny", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListAssistantProvidersRequest generates requests for ListAssistantProviders
+func NewListAssistantProvidersRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/providers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListAssistantSessionsRequest generates requests for ListAssistantSessions
+func NewListAssistantSessionsRequest(server string, params *ListAssistantSessionsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Scope != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "scope", runtime.ParamLocationQuery, *params.Scope); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Kind != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "kind", runtime.ParamLocationQuery, *params.Kind); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Prompt != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "prompt", runtime.ParamLocationQuery, *params.Prompt); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "team", runtime.ParamLocationQuery, *params.Team); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "state", runtime.ParamLocationQuery, *params.State); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateAssistantSessionRequest calls the generic CreateAssistantSession builder with application/json body
+func NewCreateAssistantSessionRequest(server string, body CreateAssistantSessionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateAssistantSessionRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateAssistantSessionRequestWithBody generates requests for CreateAssistantSession with any type of body
+func NewCreateAssistantSessionRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAssistantSessionRequest generates requests for GetAssistantSession
+func NewGetAssistantSessionRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCancelAssistantSessionRequest generates requests for CancelAssistantSession
+func NewCancelAssistantSessionRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions/%s/cancel", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewStreamAssistantEventsRequest generates requests for StreamAssistantEvents
+func NewStreamAssistantEventsRequest(server string, id string, params *StreamAssistantEventsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions/%s/events", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "after", runtime.ParamLocationQuery, *params.After); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostAssistantMessageRequest calls the generic PostAssistantMessage builder with application/json body
+func NewPostAssistantMessageRequest(server string, id string, body PostAssistantMessageJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostAssistantMessageRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewPostAssistantMessageRequestWithBody generates requests for PostAssistantMessage with any type of body
+func NewPostAssistantMessageRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/sessions/%s/messages", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAssistantSettingsRequest generates requests for GetAssistantSettings
+func NewGetAssistantSettingsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/settings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutAssistantSettingsRequest calls the generic PutAssistantSettings builder with application/json body
+func NewPutAssistantSettingsRequest(server string, body PutAssistantSettingsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutAssistantSettingsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPutAssistantSettingsRequestWithBody generates requests for PutAssistantSettings with any type of body
+func NewPutAssistantSettingsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assistant/settings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -14180,6 +15589,140 @@ func NewRotateApiKeyRequestWithBody(server string, prefix ComponentsParametersPr
 	return req, nil
 }
 
+// NewGetMyAssistantRequest generates requests for GetMyAssistant
+func NewGetMyAssistantRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/me/assistant")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutMyAssistantRequest calls the generic PutMyAssistant builder with application/json body
+func NewPutMyAssistantRequest(server string, body PutMyAssistantJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutMyAssistantRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPutMyAssistantRequestWithBody generates requests for PutMyAssistant with any type of body
+func NewPutMyAssistantRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/me/assistant")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteMyAssistantKeyRequest generates requests for DeleteMyAssistantKey
+func NewDeleteMyAssistantKeyRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/me/assistant/key")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutMyAssistantKeyRequest calls the generic PutMyAssistantKey builder with application/json body
+func NewPutMyAssistantKeyRequest(server string, body PutMyAssistantKeyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutMyAssistantKeyRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPutMyAssistantKeyRequestWithBody generates requests for PutMyAssistantKey with any type of body
+func NewPutMyAssistantKeyRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/me/assistant/key")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewChangeMyPasswordRequest calls the generic ChangeMyPassword builder with application/json body
 func NewChangeMyPasswordRequest(server string, body ChangeMyPasswordJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -17004,6 +18547,50 @@ type ClientWithResponsesInterface interface {
 	// ListActivityWithResponse request
 	ListActivityWithResponse(ctx context.Context, params *ListActivityParams, reqEditors ...RequestEditorFn) (*ListActivityResponse, error)
 
+	// ListAssistantApprovalsWithResponse request
+	ListAssistantApprovalsWithResponse(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*ListAssistantApprovalsResponse, error)
+
+	// ApproveAssistantApprovalWithResponse request
+	ApproveAssistantApprovalWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*ApproveAssistantApprovalResponse, error)
+
+	// DenyAssistantApprovalWithBodyWithResponse request with any body
+	DenyAssistantApprovalWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DenyAssistantApprovalResponse, error)
+
+	DenyAssistantApprovalWithResponse(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*DenyAssistantApprovalResponse, error)
+
+	// ListAssistantProvidersWithResponse request
+	ListAssistantProvidersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssistantProvidersResponse, error)
+
+	// ListAssistantSessionsWithResponse request
+	ListAssistantSessionsWithResponse(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*ListAssistantSessionsResponse, error)
+
+	// CreateAssistantSessionWithBodyWithResponse request with any body
+	CreateAssistantSessionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAssistantSessionResponse, error)
+
+	CreateAssistantSessionWithResponse(ctx context.Context, body CreateAssistantSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAssistantSessionResponse, error)
+
+	// GetAssistantSessionWithResponse request
+	GetAssistantSessionWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetAssistantSessionResponse, error)
+
+	// CancelAssistantSessionWithResponse request
+	CancelAssistantSessionWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*CancelAssistantSessionResponse, error)
+
+	// StreamAssistantEventsWithResponse request
+	StreamAssistantEventsWithResponse(ctx context.Context, id string, params *StreamAssistantEventsParams, reqEditors ...RequestEditorFn) (*StreamAssistantEventsResponse, error)
+
+	// PostAssistantMessageWithBodyWithResponse request with any body
+	PostAssistantMessageWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostAssistantMessageResponse, error)
+
+	PostAssistantMessageWithResponse(ctx context.Context, id string, body PostAssistantMessageJSONRequestBody, reqEditors ...RequestEditorFn) (*PostAssistantMessageResponse, error)
+
+	// GetAssistantSettingsWithResponse request
+	GetAssistantSettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAssistantSettingsResponse, error)
+
+	// PutAssistantSettingsWithBodyWithResponse request with any body
+	PutAssistantSettingsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantSettingsResponse, error)
+
+	PutAssistantSettingsWithResponse(ctx context.Context, body PutAssistantSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantSettingsResponse, error)
+
 	// GetAuthConfigWithResponse request
 	GetAuthConfigWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAuthConfigResponse, error)
 
@@ -17367,6 +18954,22 @@ type ClientWithResponsesInterface interface {
 
 	RotateApiKeyWithResponse(ctx context.Context, prefix ComponentsParametersPrefix, body RotateApiKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RotateApiKeyResponse, error)
 
+	// GetMyAssistantWithResponse request
+	GetMyAssistantWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyAssistantResponse, error)
+
+	// PutMyAssistantWithBodyWithResponse request with any body
+	PutMyAssistantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMyAssistantResponse, error)
+
+	PutMyAssistantWithResponse(ctx context.Context, body PutMyAssistantJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMyAssistantResponse, error)
+
+	// DeleteMyAssistantKeyWithResponse request
+	DeleteMyAssistantKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteMyAssistantKeyResponse, error)
+
+	// PutMyAssistantKeyWithBodyWithResponse request with any body
+	PutMyAssistantKeyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMyAssistantKeyResponse, error)
+
+	PutMyAssistantKeyWithResponse(ctx context.Context, body PutMyAssistantKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMyAssistantKeyResponse, error)
+
 	// ChangeMyPasswordWithBodyWithResponse request with any body
 	ChangeMyPasswordWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ChangeMyPasswordResponse, error)
 
@@ -17633,6 +19236,322 @@ func (r ListActivityResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ListActivityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAssistantApprovalsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantApprovalList
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAssistantApprovalsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAssistantApprovalsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ApproveAssistantApprovalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantApprovalOutcome
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasAssistantError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r ApproveAssistantApprovalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApproveAssistantApprovalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DenyAssistantApprovalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantApprovalOutcome
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasAssistantError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r DenyAssistantApprovalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DenyAssistantApprovalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAssistantProvidersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantProviderList
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAssistantProvidersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAssistantProvidersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListAssistantSessionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantSessionList
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAssistantSessionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAssistantSessionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateAssistantSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *ComponentsSchemasAssistantSession
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsSchemasAssistantError
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasAssistantError
+	JSON429      *ComponentsSchemasAssistantError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateAssistantSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateAssistantSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAssistantSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantSessionDetail
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAssistantSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAssistantSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CancelAssistantSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasAssistantError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r CancelAssistantSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CancelAssistantSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StreamAssistantEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamAssistantEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamAssistantEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostAssistantMessageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON202      *ComponentsSchemasAssistantAcceptedState
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON404      *ComponentsResponsesNotFound
+	JSON409      *ComponentsSchemasAssistantError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PostAssistantMessageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostAssistantMessageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetAssistantSettingsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantSettings
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAssistantSettingsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAssistantSettingsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutAssistantSettingsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasAssistantSettings
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutAssistantSettingsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutAssistantSettingsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -20200,6 +22119,105 @@ func (r RotateApiKeyResponse) StatusCode() int {
 	return 0
 }
 
+type GetMyAssistantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasMyAssistant
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMyAssistantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMyAssistantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutMyAssistantResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ComponentsSchemasMyAssistant
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutMyAssistantResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutMyAssistantResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteMyAssistantKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteMyAssistantKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteMyAssistantKeyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PutMyAssistantKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *ComponentsResponsesBadRequest
+	JSON401      *ComponentsResponsesUnauthorized
+	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsSchemasError
+	JSON503      *ComponentsSchemasAssistantError
+}
+
+// Status returns HTTPResponse.Status
+func (r PutMyAssistantKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutMyAssistantKeyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ChangeMyPasswordResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -21936,6 +23954,146 @@ func (c *ClientWithResponses) ListActivityWithResponse(ctx context.Context, para
 	return ParseListActivityResponse(rsp)
 }
 
+// ListAssistantApprovalsWithResponse request returning *ListAssistantApprovalsResponse
+func (c *ClientWithResponses) ListAssistantApprovalsWithResponse(ctx context.Context, params *ListAssistantApprovalsParams, reqEditors ...RequestEditorFn) (*ListAssistantApprovalsResponse, error) {
+	rsp, err := c.ListAssistantApprovals(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAssistantApprovalsResponse(rsp)
+}
+
+// ApproveAssistantApprovalWithResponse request returning *ApproveAssistantApprovalResponse
+func (c *ClientWithResponses) ApproveAssistantApprovalWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*ApproveAssistantApprovalResponse, error) {
+	rsp, err := c.ApproveAssistantApproval(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApproveAssistantApprovalResponse(rsp)
+}
+
+// DenyAssistantApprovalWithBodyWithResponse request with arbitrary body returning *DenyAssistantApprovalResponse
+func (c *ClientWithResponses) DenyAssistantApprovalWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DenyAssistantApprovalResponse, error) {
+	rsp, err := c.DenyAssistantApprovalWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDenyAssistantApprovalResponse(rsp)
+}
+
+func (c *ClientWithResponses) DenyAssistantApprovalWithResponse(ctx context.Context, id string, body DenyAssistantApprovalJSONRequestBody, reqEditors ...RequestEditorFn) (*DenyAssistantApprovalResponse, error) {
+	rsp, err := c.DenyAssistantApproval(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDenyAssistantApprovalResponse(rsp)
+}
+
+// ListAssistantProvidersWithResponse request returning *ListAssistantProvidersResponse
+func (c *ClientWithResponses) ListAssistantProvidersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAssistantProvidersResponse, error) {
+	rsp, err := c.ListAssistantProviders(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAssistantProvidersResponse(rsp)
+}
+
+// ListAssistantSessionsWithResponse request returning *ListAssistantSessionsResponse
+func (c *ClientWithResponses) ListAssistantSessionsWithResponse(ctx context.Context, params *ListAssistantSessionsParams, reqEditors ...RequestEditorFn) (*ListAssistantSessionsResponse, error) {
+	rsp, err := c.ListAssistantSessions(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAssistantSessionsResponse(rsp)
+}
+
+// CreateAssistantSessionWithBodyWithResponse request with arbitrary body returning *CreateAssistantSessionResponse
+func (c *ClientWithResponses) CreateAssistantSessionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAssistantSessionResponse, error) {
+	rsp, err := c.CreateAssistantSessionWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAssistantSessionResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateAssistantSessionWithResponse(ctx context.Context, body CreateAssistantSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAssistantSessionResponse, error) {
+	rsp, err := c.CreateAssistantSession(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAssistantSessionResponse(rsp)
+}
+
+// GetAssistantSessionWithResponse request returning *GetAssistantSessionResponse
+func (c *ClientWithResponses) GetAssistantSessionWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetAssistantSessionResponse, error) {
+	rsp, err := c.GetAssistantSession(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAssistantSessionResponse(rsp)
+}
+
+// CancelAssistantSessionWithResponse request returning *CancelAssistantSessionResponse
+func (c *ClientWithResponses) CancelAssistantSessionWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*CancelAssistantSessionResponse, error) {
+	rsp, err := c.CancelAssistantSession(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCancelAssistantSessionResponse(rsp)
+}
+
+// StreamAssistantEventsWithResponse request returning *StreamAssistantEventsResponse
+func (c *ClientWithResponses) StreamAssistantEventsWithResponse(ctx context.Context, id string, params *StreamAssistantEventsParams, reqEditors ...RequestEditorFn) (*StreamAssistantEventsResponse, error) {
+	rsp, err := c.StreamAssistantEvents(ctx, id, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamAssistantEventsResponse(rsp)
+}
+
+// PostAssistantMessageWithBodyWithResponse request with arbitrary body returning *PostAssistantMessageResponse
+func (c *ClientWithResponses) PostAssistantMessageWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostAssistantMessageResponse, error) {
+	rsp, err := c.PostAssistantMessageWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostAssistantMessageResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostAssistantMessageWithResponse(ctx context.Context, id string, body PostAssistantMessageJSONRequestBody, reqEditors ...RequestEditorFn) (*PostAssistantMessageResponse, error) {
+	rsp, err := c.PostAssistantMessage(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostAssistantMessageResponse(rsp)
+}
+
+// GetAssistantSettingsWithResponse request returning *GetAssistantSettingsResponse
+func (c *ClientWithResponses) GetAssistantSettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAssistantSettingsResponse, error) {
+	rsp, err := c.GetAssistantSettings(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAssistantSettingsResponse(rsp)
+}
+
+// PutAssistantSettingsWithBodyWithResponse request with arbitrary body returning *PutAssistantSettingsResponse
+func (c *ClientWithResponses) PutAssistantSettingsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutAssistantSettingsResponse, error) {
+	rsp, err := c.PutAssistantSettingsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantSettingsResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutAssistantSettingsWithResponse(ctx context.Context, body PutAssistantSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*PutAssistantSettingsResponse, error) {
+	rsp, err := c.PutAssistantSettings(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutAssistantSettingsResponse(rsp)
+}
+
 // GetAuthConfigWithResponse request returning *GetAuthConfigResponse
 func (c *ClientWithResponses) GetAuthConfigWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAuthConfigResponse, error) {
 	rsp, err := c.GetAuthConfig(ctx, reqEditors...)
@@ -23091,6 +25249,58 @@ func (c *ClientWithResponses) RotateApiKeyWithResponse(ctx context.Context, pref
 	return ParseRotateApiKeyResponse(rsp)
 }
 
+// GetMyAssistantWithResponse request returning *GetMyAssistantResponse
+func (c *ClientWithResponses) GetMyAssistantWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyAssistantResponse, error) {
+	rsp, err := c.GetMyAssistant(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMyAssistantResponse(rsp)
+}
+
+// PutMyAssistantWithBodyWithResponse request with arbitrary body returning *PutMyAssistantResponse
+func (c *ClientWithResponses) PutMyAssistantWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMyAssistantResponse, error) {
+	rsp, err := c.PutMyAssistantWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMyAssistantResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutMyAssistantWithResponse(ctx context.Context, body PutMyAssistantJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMyAssistantResponse, error) {
+	rsp, err := c.PutMyAssistant(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMyAssistantResponse(rsp)
+}
+
+// DeleteMyAssistantKeyWithResponse request returning *DeleteMyAssistantKeyResponse
+func (c *ClientWithResponses) DeleteMyAssistantKeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteMyAssistantKeyResponse, error) {
+	rsp, err := c.DeleteMyAssistantKey(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteMyAssistantKeyResponse(rsp)
+}
+
+// PutMyAssistantKeyWithBodyWithResponse request with arbitrary body returning *PutMyAssistantKeyResponse
+func (c *ClientWithResponses) PutMyAssistantKeyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutMyAssistantKeyResponse, error) {
+	rsp, err := c.PutMyAssistantKeyWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMyAssistantKeyResponse(rsp)
+}
+
+func (c *ClientWithResponses) PutMyAssistantKeyWithResponse(ctx context.Context, body PutMyAssistantKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*PutMyAssistantKeyResponse, error) {
+	rsp, err := c.PutMyAssistantKey(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutMyAssistantKeyResponse(rsp)
+}
+
 // ChangeMyPasswordWithBodyWithResponse request with arbitrary body returning *ChangeMyPasswordResponse
 func (c *ClientWithResponses) ChangeMyPasswordWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ChangeMyPasswordResponse, error) {
 	rsp, err := c.ChangeMyPasswordWithBody(ctx, contentType, body, reqEditors...)
@@ -23887,6 +26097,682 @@ func ParseListActivityResponse(rsp *http.Response) (*ListActivityResponse, error
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAssistantApprovalsResponse parses an HTTP response from a ListAssistantApprovalsWithResponse call
+func ParseListAssistantApprovalsResponse(rsp *http.Response) (*ListAssistantApprovalsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAssistantApprovalsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantApprovalList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApproveAssistantApprovalResponse parses an HTTP response from a ApproveAssistantApprovalWithResponse call
+func ParseApproveAssistantApprovalResponse(rsp *http.Response) (*ApproveAssistantApprovalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApproveAssistantApprovalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantApprovalOutcome
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDenyAssistantApprovalResponse parses an HTTP response from a DenyAssistantApprovalWithResponse call
+func ParseDenyAssistantApprovalResponse(rsp *http.Response) (*DenyAssistantApprovalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DenyAssistantApprovalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantApprovalOutcome
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAssistantProvidersResponse parses an HTTP response from a ListAssistantProvidersWithResponse call
+func ParseListAssistantProvidersResponse(rsp *http.Response) (*ListAssistantProvidersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAssistantProvidersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantProviderList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListAssistantSessionsResponse parses an HTTP response from a ListAssistantSessionsWithResponse call
+func ParseListAssistantSessionsResponse(rsp *http.Response) (*ListAssistantSessionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAssistantSessionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantSessionList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateAssistantSessionResponse parses an HTTP response from a CreateAssistantSessionWithResponse call
+func ParseCreateAssistantSessionResponse(rsp *http.Response) (*CreateAssistantSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateAssistantSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ComponentsSchemasAssistantSession
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAssistantSessionResponse parses an HTTP response from a GetAssistantSessionWithResponse call
+func ParseGetAssistantSessionResponse(rsp *http.Response) (*GetAssistantSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAssistantSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantSessionDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCancelAssistantSessionResponse parses an HTTP response from a CancelAssistantSessionWithResponse call
+func ParseCancelAssistantSessionResponse(rsp *http.Response) (*CancelAssistantSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CancelAssistantSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamAssistantEventsResponse parses an HTTP response from a StreamAssistantEventsWithResponse call
+func ParseStreamAssistantEventsResponse(rsp *http.Response) (*StreamAssistantEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamAssistantEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostAssistantMessageResponse parses an HTTP response from a PostAssistantMessageWithResponse call
+func ParsePostAssistantMessageResponse(rsp *http.Response) (*PostAssistantMessageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostAssistantMessageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest ComponentsSchemasAssistantAcceptedState
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAssistantSettingsResponse parses an HTTP response from a GetAssistantSettingsWithResponse call
+func ParseGetAssistantSettingsResponse(rsp *http.Response) (*GetAssistantSettingsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAssistantSettingsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantSettings
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutAssistantSettingsResponse parses an HTTP response from a PutAssistantSettingsWithResponse call
+func ParsePutAssistantSettingsResponse(rsp *http.Response) (*PutAssistantSettingsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutAssistantSettingsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasAssistantSettings
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -28562,6 +31448,187 @@ func ParseRotateApiKeyResponse(rsp *http.Response) (*RotateApiKeyResponse, error
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetMyAssistantResponse parses an HTTP response from a GetMyAssistantWithResponse call
+func ParseGetMyAssistantResponse(rsp *http.Response) (*GetMyAssistantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMyAssistantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasMyAssistant
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutMyAssistantResponse parses an HTTP response from a PutMyAssistantWithResponse call
+func ParsePutMyAssistantResponse(rsp *http.Response) (*PutMyAssistantResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutMyAssistantResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ComponentsSchemasMyAssistant
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteMyAssistantKeyResponse parses an HTTP response from a DeleteMyAssistantKeyWithResponse call
+func ParseDeleteMyAssistantKeyResponse(rsp *http.Response) (*DeleteMyAssistantKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteMyAssistantKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutMyAssistantKeyResponse parses an HTTP response from a PutMyAssistantKeyWithResponse call
+func ParsePutMyAssistantKeyResponse(rsp *http.Response) (*PutMyAssistantKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutMyAssistantKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsSchemasError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ComponentsSchemasAssistantError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

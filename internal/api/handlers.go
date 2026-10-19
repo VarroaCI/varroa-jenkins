@@ -224,6 +224,14 @@ func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:   "/",
 		MaxAge: -1,
 	})
+	s.setCookie(w, &http.Cookie{
+		Name:     AssistantKeyCookie,
+		Value:    "",
+		Domain:   cookieDomain,
+		Path:     "/api/v1",
+		MaxAge:   -1,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	// Determine redirect destination.
 	redirectTo := "/login"
@@ -903,6 +911,10 @@ func (s *Server) visibleControllers(ctx context.Context, claims *auth.Claims, ns
 // listMiteReadConcurrency bounds the mite KV reads of one controllers list.
 // Each read is a NATS round trip, so a serial loop costs two round trips per row.
 const listMiteReadConcurrency = 16
+
+// AssistantKeyCookie holds a user's sealed provider key. It is session-only,
+// scoped to the API path, and cleared at logout.
+const AssistantKeyCookie = "varroa_assistant_key"
 
 // HandleControllers returns the list of controllers enriched with live mite status.
 // Supports ?namespace= and ?cluster= query parameters.
@@ -2610,7 +2622,7 @@ func parseActivityQuery(r *http.Request, backfill activity.Backfill) (activity.Q
 		}
 		return slices.Contains(allowed, value)
 	}
-	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp") || !valid(q.Severity, "info", "warning", "error") {
+	if !valid(q.Source, "operator", "mite", "jenkins", "user", "api", "mcp", "assistant") || !valid(q.Severity, "info", "warning", "error") {
 		return q, fmt.Errorf("invalid activity filter")
 	}
 	return q, nil

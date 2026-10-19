@@ -233,7 +233,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err != nil {
 			return broodFailureToolError("create controller", err, checks), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.created",
 			Message:    "Controller " + name + " created in " + ns,
 			Namespace:  ns,
@@ -304,7 +304,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err != nil {
 			return broodFailureToolError("update controller", err, checks), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.updated",
 			Message:    "Controller " + name + " updated in " + ns,
 			Namespace:  ns,
@@ -337,7 +337,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			if err := deps.Brood.Delete(ctx, cluster, ns, name); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to delete controller: %v", err)), nil
 			}
-			emitActivityForCluster(deps, claims, cluster, activity.Event{
+			emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 				Type:       "controller.deleted",
 				Message:    "Controller " + name + " deleted in " + ns,
 				Namespace:  ns,
@@ -348,7 +348,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Delete[v1alpha1.Controller](ctx, deps.Store, name, ns); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete controller: %v", err)), nil
 		}
-		emitActivity(deps, claims, activity.Event{
+		emitActivity(ctx, deps, claims, activity.Event{
 			Type:       "controller.deleted",
 			Message:    "Controller " + name + " deleted in " + ns,
 			Namespace:  ns,
@@ -384,7 +384,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			return mcp.NewToolResultError("reconciler not available"), nil
 		}
 		deps.Reconciler.TriggerReconcile(cluster, name, ns)
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "reconcile.triggered",
 			Message:    "Controller " + name + " reconcile triggered in " + ns,
 			Namespace:  ns,
@@ -421,7 +421,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := deps.Reconciler.ApproveRestart(ctx, cluster, ns, name, "restart", ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to restart controller: %v", err)), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "restart.approved",
 			Message:    "Controller " + name + " restart approved in " + ns,
 			Namespace:  ns,
@@ -458,7 +458,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := deps.Reconciler.Hibernate(ctx, cluster, ns, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to hibernate controller: %v", err)), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.hibernated",
 			Message:    "Controller " + name + " hibernated in " + ns,
 			Namespace:  ns,
@@ -494,7 +494,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := deps.Reconciler.Wake(ctx, cluster, ns, name); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to wake controller: %v", err)), nil
 		}
-		emitActivityForCluster(deps, claims, cluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, cluster, activity.Event{
 			Type:       "controller.woken",
 			Message:    "Controller " + name + " woken in " + ns,
 			Namespace:  ns,

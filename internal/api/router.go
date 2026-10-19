@@ -43,6 +43,24 @@ func NewRouter(deps *Dependencies) http.Handler {
 	// family because both are flat fleet views.
 	mux.HandleFunc("GET /locks", srv.handleListAllFleetLocks)
 	mux.HandleFunc("POST /locks/release", srv.handleReleaseFleetLock)
+	// Assistant: sessions, approvals, settings, and the caller's own view.
+	// Every route answers 503 when deps.Assistant is nil.
+	mux.HandleFunc("POST /assistant/sessions", srv.handleCreateAssistantSession)
+	mux.HandleFunc("GET /assistant/sessions", srv.handleListAssistantSessions)
+	mux.HandleFunc("GET /assistant/sessions/{id}", srv.handleGetAssistantSession)
+	mux.HandleFunc("POST /assistant/sessions/{id}/messages", srv.handlePostAssistantMessage)
+	mux.HandleFunc("GET /assistant/sessions/{id}/events", srv.handleStreamAssistantEvents)
+	mux.HandleFunc("POST /assistant/sessions/{id}/cancel", srv.handleCancelAssistantSession)
+	mux.HandleFunc("GET /assistant/approvals", srv.handleListAssistantApprovals)
+	mux.HandleFunc("POST /assistant/approvals/{id}/approve", srv.handleApproveAssistantApproval)
+	mux.HandleFunc("POST /assistant/approvals/{id}/deny", srv.handleDenyAssistantApproval)
+	mux.HandleFunc("GET /assistant/settings", srv.handleGetAssistantSettings)
+	mux.HandleFunc("PUT /assistant/settings", srv.handlePutAssistantSettings)
+	mux.HandleFunc("GET /assistant/providers", srv.handleListAssistantProviders)
+	mux.HandleFunc("GET /me/assistant", srv.handleGetMyAssistant)
+	mux.HandleFunc("PUT /me/assistant", srv.handlePutMyAssistant)
+	mux.HandleFunc("PUT /me/assistant/key", srv.handlePutAssistantKey)
+	mux.HandleFunc("DELETE /me/assistant/key", srv.handleDeleteAssistantKey)
 	// Controllers: GET list (creation is declarative via the Kubernetes API).
 	mux.HandleFunc("/controllers", srv.HandleControllers)
 	// Clusters: GET list, + cluster-scoped dispatch.

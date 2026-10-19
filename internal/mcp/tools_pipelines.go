@@ -85,7 +85,7 @@ func registerRestartRunTool(mcpServer *server.MCPServer, deps *api.Dependencies)
 		}
 		// One activity event records the request, on the cluster the
 		// command reached, which can differ from the cluster this BFF serves.
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.run_restart_requested",
 			Message: fmt.Sprintf("Restart of run %s requested (run %s)", run, runID),
 		})
@@ -121,7 +121,7 @@ func registerReplayRunTool(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		}
 		// One activity event records the request, on the cluster the
 		// command reached, which can differ from the cluster this BFF serves.
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.run_replay_requested",
 			Message: fmt.Sprintf("Replay of run %s requested (run %s)", run, runID),
 		})
@@ -159,7 +159,7 @@ func registerScanMultibranchTool(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		// One activity event records the request, on the cluster the
 		// command reached, which can differ from the cluster this BFF serves.
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.branch_scan_requested",
 			Message: fmt.Sprintf("Scan of %s requested (scan %s)", job, scanID),
 		})
@@ -215,7 +215,7 @@ func registerRunPipelineTool(mcpServer *server.MCPServer, deps *api.Dependencies
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.run_requested",
 			Message: fmt.Sprintf("Pipeline run requested for %s (run %s)", job, runID),
 		})
@@ -259,7 +259,7 @@ func registerProceedRunInputTool(mcpServer *server.MCPServer, deps *api.Dependen
 		}
 		// One activity event records the request, on the run's own
 		// cluster, which can differ from the cluster this BFF serves.
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.run_input_proceeded",
 			Message: fmt.Sprintf("Run %s input %s proceed requested", run, input),
 		})
@@ -293,7 +293,7 @@ func registerAbortRunInputTool(mcpServer *server.MCPServer, deps *api.Dependenci
 		if serr != nil {
 			return mcp.NewToolResultError(serr.Error()), nil
 		}
-		emitActivityForCluster(deps, claims, targetCluster, activity.Event{
+		emitActivityForCluster(ctx, deps, claims, targetCluster, activity.Event{
 			Type:    "pipeline.run_input_aborted",
 			Message: fmt.Sprintf("Run %s input %s abort requested", run, input),
 		})

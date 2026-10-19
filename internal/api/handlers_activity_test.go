@@ -418,7 +418,7 @@ func TestHandleActivityStream_DropsNonActivityRecords(t *testing.T) {
 }
 
 func TestActivityFilter_AcceptsMCPSource(t *testing.T) {
-	for _, src := range []string{"operator", "mite", "jenkins", "user", "api", "mcp"} {
+	for _, src := range []string{"operator", "mite", "jenkins", "user", "api", "mcp", "assistant"} {
 		t.Run(src, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/activity?source="+src, nil)
 			if _, err := parseActivityQuery(req, nil); err != nil {

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"testing"
 
 	"github.com/varroaci/varroa-jenkins/internal/api"
@@ -17,7 +18,7 @@ func TestEmitActivity_StampsActorSourceSeverity(t *testing.T) {
 	deps := &api.Dependencies{ActivityPublisher: sink}
 	claims := &auth.Claims{PreferredUsername: "alice", Subject: "uuid-1"}
 
-	emitActivity(deps, claims, activity.Event{
+	emitActivity(context.Background(), deps, claims, activity.Event{
 		Type:       "controller.updated",
 		Message:    "Controller ctrl1 updated in team-a",
 		Namespace:  "team-a",
@@ -44,8 +45,8 @@ func TestEmitActivity_StampsActorSourceSeverity(t *testing.T) {
 
 func TestEmitActivity_NilPublisherIsNoop(t *testing.T) {
 	deps := &api.Dependencies{ActivityPublisher: nil}
-	emitActivity(deps, &auth.Claims{Subject: "s"}, activity.Event{Type: "x.y"})
-	emitActivity(nil, nil, activity.Event{Type: "x.y"})
+	emitActivity(context.Background(), deps, &auth.Claims{Subject: "s"}, activity.Event{Type: "x.y"})
+	emitActivity(context.Background(), nil, nil, activity.Event{Type: "x.y"})
 	// Reaching here without panicking is the assertion.
 }
 
@@ -53,7 +54,7 @@ func TestEmitActivity_ExplicitSeverityWins(t *testing.T) {
 	sink := &recordingSink{}
 	deps := &api.Dependencies{ActivityPublisher: sink}
 
-	emitActivity(deps, &auth.Claims{Subject: "s"}, activity.Event{
+	emitActivity(context.Background(), deps, &auth.Claims{Subject: "s"}, activity.Event{
 		Type: "controller.deleted", Message: "gone", Severity: "warning",
 	})
 
@@ -75,7 +76,7 @@ func TestEmitActivityForCluster_StampsTarget(t *testing.T) {
 			sink := &recordingSink{}
 			deps := &api.Dependencies{ActivityPublisher: sink, Brood: &recordingBrood{}}
 
-			emitActivityForCluster(deps, &auth.Claims{Subject: "s"}, tc.cluster, activity.Event{
+			emitActivityForCluster(context.Background(), deps, &auth.Claims{Subject: "s"}, tc.cluster, activity.Event{
 				Type:    "controller.created",
 				Message: "Controller c1 created in team-a",
 			})
@@ -99,7 +100,7 @@ func TestStoreOnlyFallback_DoesNotStampCallerCluster(t *testing.T) {
 	sink := &recordingSink{}
 	deps := &api.Dependencies{ActivityPublisher: sink} // Brood nil => store-only
 
-	emitActivity(deps, &auth.Claims{Subject: "s"}, activity.Event{
+	emitActivity(context.Background(), deps, &auth.Claims{Subject: "s"}, activity.Event{
 		Type:    "controller.created",
 		Message: "Controller c1 created in team-a",
 	})

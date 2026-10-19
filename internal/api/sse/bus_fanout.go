@@ -29,6 +29,10 @@ type BusFanout struct {
 	subscribers map[string]map[*subscriber]struct{}
 
 	Logger *slog.Logger
+
+	// AgentSessions subscribes the fanout to the agent session
+	// notifications. Set it before Start when the assistant is enabled.
+	AgentSessions bool
 }
 
 // NewBusFanout creates a BusFanout. Call Start to begin receiving events.
@@ -60,11 +64,21 @@ func (bf *BusFanout) Start(ctx context.Context) error {
 	}
 	defer func() { _ = activitySub.Unsubscribe() }()
 
+	subjects := "events.brood.> + activity.>"
+	if bf.AgentSessions {
+		agentSub, err := bf.conn.Listen(bus.AgentSessionsWildcard, "", bf.deliverAgentSessionEvent)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = agentSub.Unsubscribe() }()
+		subjects += " + agentsessions.>"
+	}
+
 	logger := bf.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	logger.Info("bus fanout started", "subjects", "events.brood.> + activity.>")
+	logger.Info("bus fanout started", "subjects", subjects)
 	<-ctx.Done()
 	logger.Info("bus fanout stopped")
 	return nil
@@ -170,6 +184,37 @@ func (bf *BusFanout) deliverBusEvent(source string, data []byte) {
 	if key != "*" {
 		bf.deliver("*", record)
 	}
+}
+
+// AgentSessionKeyPrefix prefixes the subscription key of one agent session.
+// A stream subscribes to the key of its session and to no other.
+const AgentSessionKeyPrefix = "agentsession:"
+
+// agentSessionNotice is the content-free body of one agent session
+// notification.
+type agentSessionNotice struct {
+	SessionID string `json:"session_id"`
+	Kind      string `json:"kind"`
+	State     string `json:"state"`
+	Seq       int    `json:"seq"`
+}
+
+// deliverAgentSessionEvent fans one session notification out to the stream of
+// that session. It never reaches the brood-wide key. A malformed body or a
+// body with no session id is dropped.
+func (bf *BusFanout) deliverAgentSessionEvent(subject string, data []byte) {
+	var n agentSessionNotice
+	if err := json.Unmarshal(data, &n); err != nil || n.SessionID == "" {
+		logger := bf.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("unparsable agent session notice", "subject", subject)
+		return
+	}
+	bf.mu.RLock()
+	defer bf.mu.RUnlock()
+	bf.deliver(AgentSessionKeyPrefix+n.SessionID, Record{Event: "agentsession", Data: n})
 }
 
 // deliverActivityEvent parses a full Event JSON from an activity.* subject

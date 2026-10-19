@@ -177,6 +177,10 @@ stringData:
             publish: [
               "activity.>"
               "mite.*.*.*.content"
+{{- if .Values.assistant.enabled }}
+              "agentsessions.>"
+              "varroa.assistant.control"
+{{- end }}
               "operator.>"
               "$JS.API.INFO"
               "$JS.API.STREAM.*.KV_mite_snapshots"
@@ -229,6 +233,9 @@ stringData:
               "activity.>"
               "events.brood.>"
               "$KV.mite_snapshots.>"
+{{- if .Values.assistant.enabled }}
+              "agentsessions.>"
+{{- end }}
               "$KV.mite_presence.>"
               "$KV.varroa_clusters.>"
               "_INBOX_bff.>"

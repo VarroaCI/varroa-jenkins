@@ -94,6 +94,7 @@ Every group except `coreNatsEgress` also requires a non-empty `ports` list. An e
 | `coreNatsEgress` | `[]` | Hive mode | Fails the render in hive mode. |
 | `recordStoreBlobEgress` | On, `[]` on 443 | `recordStore.blobs.mode` is `s3` | Fails the render. |
 | `recorderWebhookEgress` | Off, `[]` on 443 | `enabled` is true | Fails the render. |
+| `assistantEgress` | `[]` on 443 | `assistant.enabled` is true | Fails the render when `cidrs` is empty. |
 | `recordStorePostgresEgress` | On, `[]` on 5432 | `recordStore.enabled` is true | In `cnpg` mode, selects the CloudNativePG pods. In `external` mode, fails the render. |
 
 The defaults of `apiServerEgress`, `gitEgress`, `dexConnectorEgress`, and `pullThroughEgress` allow every address on 443. Pin each one to the addresses that it reaches.
