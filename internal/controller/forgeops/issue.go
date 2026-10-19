@@ -20,10 +20,23 @@ import (
 // maxIssueTitle bounds the title of an issue, in runes.
 const maxIssueTitle = 256
 
+// pickIssueCredential returns the first credential that may push to the
+// repository, so a pushing credential is never passed over for a read-only
+// one. When no credential may push, it returns the first credential that reads
+// the repository. The forge decides the issue write either way, and its 403
+// is final.
+func (o *Ops) pickIssueCredential(ctx context.Context, host string, repo forge.Repo, creds []Credential) (writer, error) {
+	if w, err := o.pickWriter(ctx, host, repo, creds); err == nil {
+		return w, nil
+	}
+	return o.pickReader(ctx, host, repo, creds)
+}
+
 // Issue opens an issue for a Team agent. The operator shard that owns the
 // Team answers it. The TeamAgent named by the request must be the accepted,
-// enabled object of the Team, and its outputs must allow issues. The
-// releaseNamespace is the core namespace, which the accept rule needs.
+// enabled object of the Team, and its outputs must allow issues. A credential
+// that reads the repository serves the issue. The releaseNamespace is the core
+// namespace, which the accept rule needs.
 func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply {
 	fail := func(err error) forgeapi.IssueReply { return forgeapi.IssueReply{Status: asStatus(err)} }
 	if req.Team == "" {
@@ -79,7 +92,7 @@ func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNames
 	if err != nil {
 		return fail(err)
 	}
-	w, err := o.pickWriter(ctx, repo.Host, forge.Repo{Owner: repo.Owner, Name: repo.Name}, creds)
+	w, err := o.pickIssueCredential(ctx, repo.Host, forge.Repo{Owner: repo.Owner, Name: repo.Name}, creds)
 	if err != nil {
 		return fail(err)
 	}

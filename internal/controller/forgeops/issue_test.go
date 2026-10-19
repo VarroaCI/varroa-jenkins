@@ -99,10 +99,10 @@ func TestIssue_Refusals(t *testing.T) {
 		{name: "ForgeMismatch", mutate: func(ta *v1alpha1.TeamAgent) { ta.Spec.Outputs.Issues.Forge = "github" },
 			setup: func(t *testing.T, fx *fixture) { writer(fx) }, code: forgeapi.CodeForgeUnsupported},
 		{name: "NoCredential", setup: func(t *testing.T, fx *fixture) {}, code: forgeapi.CodeNoMatchingCredential},
-		{name: "ReadOnlyCredential", setup: func(t *testing.T, fx *fixture) {
+		{name: "NoReadableCredential", setup: func(t *testing.T, fx *fixture) {
 			fx.secrets.addCred("sa", "a", "tok-a")
-			fx.clients[forge.NewToken([]byte("tok-a"))] = &fakeClient{info: forge.Info{DefaultBranch: "main"}}
-		}, code: forgeapi.CodeForgeWriteDenied},
+			fx.clients[forge.NewToken([]byte("tok-a"))] = &fakeClient{repoErr: forge.ErrNotFound}
+		}, code: forgeapi.CodeForgeAuthFailed},
 		{name: "LabelMissingInRepository", setup: func(t *testing.T, fx *fixture) {
 			c := pushable()
 			c.issueErr = &forge.LabelError{Name: "ops"}
@@ -152,5 +152,61 @@ func TestIssue_ForbiddenNamesHint(t *testing.T) {
 	}
 	if strings.Contains(rep.Error, "tok-a") {
 		t.Errorf("reply error %q leaks the token", rep.Error)
+	}
+}
+
+// TestIssue_ReadOnlyCredentialOpens checks that a credential that reads the
+// repository but cannot push opens the issue.
+func TestIssue_ReadOnlyCredentialOpens(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	seedAgent(t, fx, nil)
+	c := pushable()
+	c.info.Push = false
+	oneWriter(fx, c)
+	rep := fx.ops.Issue(context.Background(), issueReq("ops"), "varroa-system")
+	if !rep.OK || rep.Number != 9 {
+		t.Fatalf("reply %+v", rep)
+	}
+	if len(c.issueLabels) != 1 {
+		t.Fatalf("CreateIssue calls = %d, want 1", len(c.issueLabels))
+	}
+}
+
+// TestIssue_ReadOnlyForbiddenNamesHint checks that a read-only credential
+// without issue scope gets the forge 403 as forge_write_denied with the hint.
+func TestIssue_ReadOnlyForbiddenNamesHint(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	seedAgent(t, fx, nil)
+	c := pushable()
+	c.info.Push = false
+	c.issueErr = forge.ErrForbidden
+	oneWriter(fx, c)
+	rep := fx.ops.Issue(context.Background(), issueReq("ops"), "varroa-system")
+	if rep.OK || rep.Code != forgeapi.CodeForgeWriteDenied {
+		t.Fatalf("reply %+v, want code %s", rep, forgeapi.CodeForgeWriteDenied)
+	}
+	if !strings.Contains(rep.Error, "check the token scope") {
+		t.Fatalf("reply error %q lacks the scope hint", rep.Error)
+	}
+}
+
+// TestIssue_PushingCredentialPreferred checks that a pushing credential opens
+// the issue even when a read-only credential sorts before it.
+func TestIssue_PushingCredentialPreferred(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	seedAgent(t, fx, nil)
+	fx.secrets.addCred("sa", "a", "tok-a")
+	fx.secrets.addCred("sb", "b", "tok-b")
+	readOnly := pushable()
+	readOnly.info.Push = false
+	pusher := pushable()
+	fx.clients[forge.NewToken([]byte("tok-a"))] = readOnly
+	fx.clients[forge.NewToken([]byte("tok-b"))] = pusher
+	rep := fx.ops.Issue(context.Background(), issueReq("ops"), "varroa-system")
+	if !rep.OK {
+		t.Fatalf("reply %+v", rep)
+	}
+	if len(readOnly.issueLabels) != 0 || len(pusher.issueLabels) != 1 {
+		t.Fatalf("CreateIssue calls read-only=%d pusher=%d, want 0 and 1", len(readOnly.issueLabels), len(pusher.issueLabels))
 	}
 }
