@@ -573,9 +573,41 @@ func main() {
 		os.Exit(1)
 	}
 
+	// User informer: the member role resolves each User subject to the
+	// Jenkins principal of its person, read from the idp-managed User objects.
+	userGVR := schema.GroupVersionResource{Group: "varroa.dev", Version: "v1alpha1", Resource: "users"}
+	userInformer := cache.NewSharedIndexInformer(
+		&cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+				return dynamicClient.Resource(userGVR).Namespace(operatorNamespace).List(context.TODO(), options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				return dynamicClient.Resource(userGVR).Namespace(operatorNamespace).Watch(context.TODO(), options)
+			},
+		},
+		&unstructured.Unstructured{},
+		0,
+		cache.Indexers{},
+	)
+	if err := userInformer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil
+		}
+		user := &v1alpha1.User{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, user); err != nil {
+			return nil, err
+		}
+		return user, nil
+	}); err != nil {
+		logger.Error("failed to set transform on user informer", "error", err)
+		os.Exit(1)
+	}
+
 	userClaims := auth.ParseClaimNames(*oidcUserClaim)
 	rbacResolver := rbac.NewResolver(roleInformer, roleBindingInformer, jenkinsRoleInformer, jenkinsRoleBindingInformer, controllerInformer, teamInformer,
 		*defaultRead, userClaims)
+	rbacResolver.SetUserDirectory(userInformer.GetIndexer(), operatorNamespace)
 	rbacGen := rbac.NewGenerator(rbacResolver)
 	rbacGen.Logger = logger
 
@@ -953,6 +985,7 @@ func main() {
 	go jenkinsRoleBindingInformer.Run(ctx.Done())
 	go controllerInformer.Run(ctx.Done())
 	go teamInformer.Run(ctx.Done())
+	go userInformer.Run(ctx.Done())
 	// The cell-pool informer runs on every replica. The channel it feeds is
 	// in-process, so a non-leader replica's informer wakes nothing.
 	go cellPoolInformer.Run(ctx.Done())
@@ -963,6 +996,7 @@ func main() {
 		roleBindingInformer.HasSynced,
 		controllerInformer.HasSynced,
 		teamInformer.HasSynced,
+		userInformer.HasSynced,
 	) {
 		logger.Error("failed to sync RBAC informer caches")
 		os.Exit(1)

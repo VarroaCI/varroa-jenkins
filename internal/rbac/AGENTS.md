@@ -68,7 +68,10 @@ with what this package generates.
     (`allTenantGrantSources`) is uncapped, because a cut list drops a
     Jenkins subject silently. No generated name may equal
     `varroa:tenant:<team>`: the plugin looks that exact name up.
-    The operator builds its resolver with a Team informer, so the
+    `User` subjects of the role also resolve through the idp-managed `User`
+    objects of the operator namespace (`SetUserDirectory`, `tenant_member_users.go`):
+    each person's principal (preferred username, email, subject) joins the grant.
+    The operator builds its resolver with a Team informer and a User informer, so the
     Team-membership path reaches the member role.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,
     `scopeSuffix`) implements namespace/controller-name/label scoping shared

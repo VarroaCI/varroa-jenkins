@@ -333,13 +333,7 @@ func ActorFrom(claims *auth.Claims) string {
 	if claims == nil {
 		return ""
 	}
-	if claims.PreferredUsername != "" {
-		return claims.PreferredUsername
-	}
-	if claims.Email != "" {
-		return claims.Email
-	}
-	return claims.Subject
+	return auth.PrincipalName(claims.PreferredUsername, claims.Email, claims.Subject)
 }
 
 func (s *Server) handleDrainCreate(w http.ResponseWriter, r *http.Request, cluster string, claims *auth.Claims) {

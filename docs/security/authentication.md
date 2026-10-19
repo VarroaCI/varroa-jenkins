@@ -57,7 +57,9 @@ Each setting takes a comma-separated list of claim names.
   prefix is reserved for local accounts.
 - Group values from an IdP token are not checked for the prefix. Group subjects use
   a separate key kind, so a group value cannot match a user binding.
-- The same claim names apply to the dashboard and to every Jenkins controller.
+- The same claim names apply to the dashboard. On a Jenkins controller, only
+  `preferred_username`, `email`, and `sub` name a person's Jenkins principal. A
+  binding on a custom claim value reaches the cell only through those three claims.
 
 For AWS Cognito groups, set the group claim to the Cognito claim name:
 
