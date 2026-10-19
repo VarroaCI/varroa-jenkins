@@ -1,13 +1,13 @@
 # Cells and Pipelines Tenants
 
-A cell is a shared Jenkins controller that runs many teams' pipelines as tenants.
+A cell is a shared Jenkins controller that runs many teams' pipelines.
 
 ## What a cell is
 
 A cell is a `Controller` with `spec.cell.enabled: true`. Its Jenkins home is an `emptyDir`, so a
 pod roll loses local state and mite identity. [Rehydration](#rehydration) restores build
 history, and the new instance [deletes the old agent pods](tenant-pod-templates.md#agent-pod-lifetime).
-`spec.cell.enabled` cannot change after creation; patches fail with `cell.enabled is immutable`. A `cell` block without `enabled: true` is not a cell.
+`spec.cell.enabled` cannot change after creation; patches fail with `cell.enabled is immutable`.
 
 A cell has no ingress host. Tenants use the
 [tenant webhook door](webhooks.md).
@@ -19,7 +19,7 @@ Six limitations apply:
 - Every branch source on a cell sees each webhook; only the job whose SCM matches reacts.
 - A rehydrated run shows no stage view, culprits, or test detail.
 - The role-strategy screen shows an unknown service identity until the first build.
-- An ad-hoc job from the UI or script console does not survive a pod roll. Only a job in
+- An ad-hoc job does not survive a pod roll. Only a job in
   the tenant's [`items.yaml`](../config/items.md) bundle does.
 
 ## Prerequisites
@@ -83,7 +83,7 @@ spec:
 `pipelines.agentNamespace` must be one of `spec.namespaces`, and Varroa must manage it.
 A `pipelines` block requires `profile` and `agentNamespace`.
 `pipelines.profile` must name an existing `JenkinsVersionProfile`. An unset
-`pipelines.composedBundleRef` places the tenant with an empty folder. An unset
+`pipelines.composedBundleRef` places the tenant with an empty folder. An `items: []` item also places an empty folder. An unset
 `pipelines.cellPool` resolves to the profile's own pool. For a dedicated cell, name a
 pool whose `maxTenantsPerCell` is 1.
 
@@ -100,7 +100,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
 - **Folder.** The tenant's `items.yaml` goes under one top-level folder named for the `Team`.
   The operator ignores `plugins.yaml`, `rbac.yaml`, and `jenkins.yaml` except its
   [pod templates](tenant-pod-templates.md). A job that the bundle drops leaves the
-  folder; its next trigger fails with `JOB_NOT_FOUND`. See
+  folder; its next trigger fails with `JOB_NOT_FOUND`. An empty `items` list drops every job in the folder. See
   [Build records](build-records.md).
 - **Held folder.** Tenant items resolve only their own variables. The operator
   keeps the folder and jobs on these faults:

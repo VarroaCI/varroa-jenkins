@@ -28,7 +28,8 @@ Two credentials guard the door. Varroa mints each once, and never regenerates th
 | Forge | Path | Verified by | Job trigger |
 |---|---|---|---|
 | GitHub | `github-webhook/` | `X-Hub-Signature-256` (HMAC-SHA256) | `githubPush` |
-| Gitea or Forgejo | `gitea-webhook/` | `X-Gitea-Signature` (or `X-Forgejo-Signature`), HMAC-SHA256 over the bare hex digest | Gitea SCM source job |
+| Gitea or Forgejo | `gitea-webhook/post` | `X-Gitea-Signature` (or `X-Forgejo-Signature`), HMAC-SHA256 over the bare hex digest | Gitea SCM source: a `multibranch` or `organizationFolder` item |
+| Gitea or Forgejo | `generic-webhook-trigger/invoke?token=<team>:<name>` | `X-Gitea-Signature` (or `X-Forgejo-Signature`), HMAC-SHA256 over the bare hex digest | `genericTrigger` on a `pipeline` item |
 | GitLab | `generic-webhook-trigger/invoke?token=<team>:<name>` | `X-Gitlab-Token` | `genericTrigger` |
 | Generic | `generic-webhook-trigger/invoke?token=<team>:<name>` | `X-Varroa-Token` | `genericTrigger` |
 
@@ -47,7 +48,7 @@ checks run in this order:
 2. The forge signature must verify against the tenant secret. A mismatch answers `400`.
 3. The path must match the forge, and the token fence must hold. A failure answers `400`.
 
-The fence has two rules:
+The fence has three rules:
 
 - A `github-webhook/` path needs a GitHub delivery. A GitLab or generic delivery on that path
   answers `400`.
@@ -55,6 +56,10 @@ The fence has two rules:
   answers `400`.
 - A `generic-webhook-trigger/invoke` path needs a `token` query value that starts with
   `<team>:` and has at least one character after the colon. Otherwise the door answers `400`.
+
+The generic path accepts a delivery from any forge, but the forge signature must verify. So a
+Gitea or Forgejo delivery can use `gitea-webhook/` or `generic-webhook-trigger/invoke`. It cannot
+use `github-webhook/`.
 
 The fence keeps one tenant from starting another tenant's jobs. Many tenants share a cell, and
 the generic trigger plugin searches every job on the controller for a matching token. A
@@ -73,6 +78,40 @@ Kubernetes name never contains `:`, so a `<team>:` prefix names exactly one tena
 4. Select the events to send, then save the webhook.
 
 GitLab sends the secret in `X-Gitlab-Token`. The door verifies it and does not forward it.
+
+## Set up a Forgejo or Gitea webhook
+
+Select the path from the job trigger:
+
+- For a `multibranch` or `organizationFolder` item, use `gitea-webhook/post`.
+- For a `pipeline` item with a `genericTrigger`, use
+  `generic-webhook-trigger/invoke?token=<team>:<name>`.
+
+| Field | Value |
+|---|---|
+| Target URL | `https://<host>/hibernation/<token>/teams/<team>/queue/<path>` |
+| Content type | `application/json` |
+| Secret | The value of `status.pipelines.webhookSecret` |
+| Events | Push, and pull request for a source job |
+
+The forge signs the body with the secret. The door verifies the signature.
+
+### One hook for an organization folder
+
+Add the hook to the organization, not to each repository. One organization hook on
+`gitea-webhook/post` reaches an `organizationFolder` item for every repository of the
+organization. A delivery for a new repository adds its project to the folder.
+
+### Source setup
+
+A Gitea source also needs these parts. This page does not repeat them:
+
+- A server entry for the forge. On a cell, set `CellPool.spec.giteaServers`. See
+  [Commit status](commit-status.md#forgejo-and-gitea).
+- A folder credential with an access token. The token needs the `write:repository` and
+  `read:organization` scopes. See [Credentials and webhook](commit-status.md#credentials-and-webhook).
+- The item. An `organizationFolder` item needs a `giteaNavigator`.
+  See [Gitea and Forgejo sources](../config/items.md#gitea-and-forgejo-sources).
 
 ## Send a generic delivery
 

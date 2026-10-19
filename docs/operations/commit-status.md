@@ -64,8 +64,9 @@ kubectl patch cellpool <pool> --type merge -p '{"spec":{"giteaServers":[{"server
 ```
 
 The operator renders each entry as `unclassified.giteaServers` in the cell configuration.
-The operator sets `manageHooks: false` and writes no credential. Varroa registers the
-webhook, so the plugin must not register one.
+The operator sets `manageHooks: false` and writes no credential. The operator does not
+register the webhook on the forge. You add it by hand. See
+[Set up a Forgejo or Gitea webhook](webhooks.md#set-up-a-forgejo-or-gitea-webhook).
 
 The controller reports the result in the `PoolGiteaServers` condition. The condition uses
 these reasons:
@@ -92,7 +93,7 @@ unclassified:
         aliasUrl: ""
 ```
 
-Set `manageHooks: false`. Varroa registers the webhook, so the plugin must not register one.
+Set `manageHooks: false`. The operator does not register the webhook, so you add it by hand.
 
 ### Credentials and webhook
 
@@ -100,7 +101,8 @@ Create a username and password credential in the job's folder. Put an access tok
 password field. The token needs the `write:repository` and `read:organization` scopes. The
 notifier uses the folder credential on the source.
 
-Add a webhook to the repository. Use these values:
+Add a webhook to the repository. Use these values. For an organization folder, add the
+hook to the organization instead. See [Tenant webhooks](webhooks.md).
 
 | Field | Value |
 |---|---|

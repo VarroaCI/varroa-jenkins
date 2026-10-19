@@ -187,6 +187,45 @@ func TestReconcileComposedBundle_ContentConfigMapCarriesPipelineTemplates(t *tes
 	}
 }
 
+// itemsItem builds a valid items CatalogItem with the given content.
+func itemsItem(name, content string) *v1alpha1.CatalogItem {
+	return &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		Spec:       v1alpha1.CatalogItemSpec{Type: v1alpha1.CatalogItemItem},
+		Status:     v1alpha1.CatalogItemStatus{Content: content, Valid: true},
+	}
+}
+
+func TestReconcileComposedBundle_EmptyItemListComposes(t *testing.T) {
+	tc := newCatalogTestClient()
+	tc.seedItem(itemsItem("jobs", "items: []\n"))
+	tc.seedItem(jcascItem("theme", "jenkins:\n  systemMessage: \"hello\"\n"))
+
+	cb := &v1alpha1.ComposedBundle{
+		ObjectMeta: metav1.ObjectMeta{Name: "cb-empty", Namespace: "ns"},
+		Spec: v1alpha1.ComposedBundleSpec{
+			Inputs: []v1alpha1.ComposedInput{
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "jobs"}},
+				{ItemRef: &v1alpha1.ComposedItemRef{Name: "theme"}},
+			},
+		},
+	}
+
+	rec := newComposedBundleReconciler(tc, t)
+	rec.ReconcileComposedBundle(context.Background(), cb)
+
+	if tc.lastStatus() == nil || tc.lastStatus().Phase != v1alpha1.ComposedBundleReady {
+		t.Fatalf("expected Ready, got %+v", tc.lastStatus())
+	}
+	data, ok := tc.configMapData["cb-empty-content"]
+	if !ok {
+		t.Fatal("content ConfigMap not written")
+	}
+	if data["items.yaml"] != "" {
+		t.Errorf("items.yaml = %q, want empty", data["items.yaml"])
+	}
+}
+
 func TestReconcileComposedBundle_MissingItemInvalid(t *testing.T) {
 	tc := newCatalogTestClient()
 	cb := &v1alpha1.ComposedBundle{
