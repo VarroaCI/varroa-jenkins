@@ -901,8 +901,10 @@ sections describe.
     label, and carries a `kubernetes.jenkins.io/last-refresh` annotation that
     parses as epoch milliseconds. It goes when older than
     `agentPodReapAfter` (by pod phase; `Unknown` counts as Running) or at
-    once in teardown. An API cancel deletes no agent pod: a pod belongs to a
-    label, not to a run. `syncPipelinesChildren` runs the steady-state pass,
+    once in teardown. An API cancel deletes no agent pod. A run that the
+    recorder ends releases its own pods: `ReleaseRunAgentPods` (called for the
+    `release_agents` action) deletes only the named pods that run as the
+    tenant ServiceAccount and carry the controller label, each with its UID. `syncPipelinesChildren` runs the steady-state pass,
     rate-limited by `reapTenantAgentPodsDue` to one list per Team per
     `tenantAgentReapInterval` (1 minute), and never fails the tick on it.
     `Reconcile` runs the teardown pass before `cells.Place`, on the same

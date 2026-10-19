@@ -16,6 +16,10 @@ const (
 	LedgerActionWakeCell   = "wake_cell"
 	LedgerActionTriggerRun = "trigger_run"
 	LedgerActionResumeRun  = "resume_run"
+	// LedgerActionReleaseAgents asks the operator to delete the agent pods
+	// of a run the recorder ended. The pods can hold nodes that only that
+	// run's resume could adopt, so they wait for the run's terminal mark.
+	LedgerActionReleaseAgents = "release_agents"
 )
 
 // LedgerActionRecorder is the literal actor value the recorder sets when
@@ -65,6 +69,14 @@ type LedgerAction struct {
 	// this value it starts again at 0, and the gateway drops every chunk
 	// at or below the sequence it already stored. 0 sends no value.
 	LogNextSeq int64 `json:"log_next_seq,omitempty"`
+
+	// Tenant, AgentNamespace, and AgentPods apply to release_agents
+	// alone. AgentPods names the Jenkins agent node names of the run,
+	// which equal the agent pod names. The operator deletes only the
+	// pods of Tenant in AgentNamespace whose names it finds in AgentPods.
+	Tenant         string   `json:"tenant,omitempty"`
+	AgentNamespace string   `json:"agent_namespace,omitempty"`
+	AgentPods      []string `json:"agent_pods,omitempty"`
 }
 
 // ResumeFile is one stored state file of a resume action: the path under

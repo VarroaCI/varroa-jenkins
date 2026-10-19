@@ -73,6 +73,7 @@ it until a resume adopts it. These mechanisms delete such a pod:
 | Kubernetes plugin garbage collection on the tenant cloud | A cell roll, a slot move, a standby promotion | About 41 minutes |
 | The operator, for a Running pod | An unschedulable slot holder, a removed slot, a plugin fault | About 46 minutes |
 | The operator, during teardown | A dropped `spec.pipelines` or a deleted `Team` | At once |
+| The operator, for the agent pods of a run that the mark ends | A run with replicated state | About 1 minute after the mark |
 
 A pod that is not Running never ran a build step, so no resume adopts it. A Running pod can hold
 a node that a late resume adopts, so it outlives the longest resume window.

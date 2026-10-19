@@ -43,6 +43,11 @@ shows a run whose cell is gone, and the run's fleet lock stays held.
 first, reports it. Varroa sends the resume again inside the same arm window, never to a pod
 that already failed. Once a pod loads the build no other may take it.
 
+**A failed resume on the only home pod ends the arm.** The job's home slot holds one pod. When that
+pod fails the resume, the arm holds no candidate, so it ends at once. The run then reads
+`INTERRUPTED` with the reason `resume-failed` about one minute later. A pod that rolls after that
+point does not adopt the run. A resume that the home pod refuses ends the arm; a later roll does not resume the run. The build is gone from that pod, and a new pod starts with the same empty state.
+
 ## The size bound
 
 A run's replicated state stays at or below 64 MiB. Over that bound Varroa deletes it, and the run

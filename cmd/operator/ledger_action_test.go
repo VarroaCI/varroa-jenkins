@@ -34,6 +34,19 @@ type fakeLedgerActionRunner struct {
 
 	hibernated bool
 	events     []string
+
+	releasedTeam      string
+	releasedNamespace string
+	releasedNames     []string
+	releaseCalls      int
+}
+
+// ReleaseRunAgentPods records the call a release_agents action makes.
+func (f *fakeLedgerActionRunner) ReleaseRunAgentPods(_ context.Context, team, namespace string, names []string) {
+	f.releaseCalls++
+	f.releasedTeam = team
+	f.releasedNamespace = namespace
+	f.releasedNames = names
 }
 
 func (f *fakeLedgerActionRunner) SendImperativeCommand(_ context.Context, namespace, name string, cmd *mitev1.ImperativeCommand) error {
@@ -437,5 +450,57 @@ func TestHandleLedgerAction_ResumeRunCarriesTheLogNextSeq(t *testing.T) {
 	}
 	if got := rec.sent[0].ResumeBuild.LogNextSeq; got != 42 {
 		t.Fatalf("log_next_seq = %d, want 42", got)
+	}
+}
+
+// TestHandleLedgerAction_ReleaseAgents proves a release_agents action
+// hands the tenant, its agent namespace, and the run's pod names to the
+// operator's release routine, and sends no imperative command.
+func TestHandleLedgerAction_ReleaseAgents(t *testing.T) {
+	rec := &fakeLedgerActionRunner{}
+	action := recordstore.LedgerAction{
+		Kind: recordstore.LedgerActionReleaseAgents, Cluster: "core",
+		Namespace: "cells-ns", Controller: "cell-a", RunID: "run-9",
+		Tenant: "sbsoftware", AgentNamespace: "sbsoftware",
+		AgentPods: []string{"sbsoftware-deploy-phnq4", "sbsoftware-python-3pzkf"},
+	}
+	data, _ := json.Marshal(action)
+	handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+
+	if rec.releaseCalls != 1 {
+		t.Fatalf("ReleaseRunAgentPods calls = %d, want 1", rec.releaseCalls)
+	}
+	if rec.releasedTeam != "sbsoftware" || rec.releasedNamespace != "sbsoftware" {
+		t.Fatalf("released team/namespace = %q/%q", rec.releasedTeam, rec.releasedNamespace)
+	}
+	if !reflect.DeepEqual(rec.releasedNames, action.AgentPods) {
+		t.Fatalf("released names = %v, want %v", rec.releasedNames, action.AgentPods)
+	}
+	if len(rec.sent) != 0 {
+		t.Fatalf("release_agents sent %d imperative commands, want 0", len(rec.sent))
+	}
+}
+
+// TestHandleLedgerAction_ReleaseAgentsWithoutPodsDoesNothing proves an
+// action that names no tenant, namespace, or pod calls no release.
+func TestHandleLedgerAction_ReleaseAgentsWithoutPodsDoesNothing(t *testing.T) {
+	cases := map[string]recordstore.LedgerAction{
+		"no pods":      {Tenant: "sbsoftware", AgentNamespace: "sbsoftware"},
+		"no tenant":    {AgentNamespace: "sbsoftware", AgentPods: []string{"p"}},
+		"no namespace": {Tenant: "sbsoftware", AgentPods: []string{"p"}},
+	}
+	for name, action := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := &fakeLedgerActionRunner{}
+			action.Kind = recordstore.LedgerActionReleaseAgents
+			action.Cluster = "core"
+			action.Namespace = "cells-ns"
+			action.Controller = "cell-a"
+			data, _ := json.Marshal(action)
+			handleLedgerAction(context.Background(), testLogger(), noopLedgerActionMetrics(t), "varroa.ledger.actions.core", "core", rec, data)
+			if rec.releaseCalls != 0 {
+				t.Fatalf("ReleaseRunAgentPods calls = %d, want 0", rec.releaseCalls)
+			}
+		})
 	}
 }

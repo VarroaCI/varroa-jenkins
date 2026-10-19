@@ -328,3 +328,79 @@ func TestTeamReconciler_TeardownHoldsFinalizerUntilAgentPodsAreGone(t *testing.T
 		t.Fatal("the finalizer was not released once the agent pods were gone")
 	}
 }
+
+// releaseReaper is an in-memory tenantAgentPodReaper whose delete answers
+// the error named for a pod, so NotFound and Conflict paths run.
+type releaseReaper struct {
+	pods    []corev1.Pod
+	errs    map[string]error
+	deleted []string
+	uids    []types.UID
+}
+
+func (r *releaseReaper) ListTenantAgentPods(_ context.Context, _ string) ([]corev1.Pod, error) {
+	return r.pods, nil
+}
+
+func (r *releaseReaper) DeletePodWithUID(_ context.Context, _, name string, uid types.UID) error {
+	if err := r.errs[name]; err != nil {
+		return err
+	}
+	r.deleted = append(r.deleted, name)
+	r.uids = append(r.uids, uid)
+	return nil
+}
+
+// TestReleaseNamedAgentPods_DeletesOnlyNamedTenantPods proves a release
+// deletes only the named pods of the tenant's ServiceAccount that carry
+// the controller label, each with its UID as a precondition, and that
+// NotFound and Conflict are not errors.
+func TestReleaseNamedAgentPods_DeletesOnlyNamedTenantPods(t *testing.T) {
+	now := time.Now()
+	const sa = "varroa-agent-payments"
+	named := agentPod("named", sa, true, now)
+	foreignSA := agentPod("foreign-sa", "jenkins-agent", true, now)
+	unlabelled := agentPod("unlabelled", sa, false, now)
+	unnamed := agentPod("unnamed", sa, true, now)
+	gone := agentPod("gone", sa, true, now)
+	conflict := agentPod("conflict", sa, true, now)
+	reaper := &releaseReaper{
+		pods: []corev1.Pod{named, foreignSA, unlabelled, unnamed, gone, conflict},
+		errs: map[string]error{
+			"gone":     apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "gone"),
+			"conflict": apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, "conflict", nil),
+		},
+	}
+
+	deleted, err := releaseNamedAgentPods(context.Background(), reaper, "payments", "payments-ns",
+		[]string{"named", "foreign-sa", "unlabelled", "gone", "conflict"})
+	if err != nil {
+		t.Fatalf("releaseNamedAgentPods: %v", err)
+	}
+	if deleted != 1 || len(reaper.deleted) != 1 || reaper.deleted[0] != "named" {
+		t.Fatalf("deleted = %d %v, want only named", deleted, reaper.deleted)
+	}
+	if reaper.uids[0] != named.UID {
+		t.Errorf("delete UID = %q, want the listed UID %q", reaper.uids[0], named.UID)
+	}
+}
+
+// TestReleaseNamedAgentPods_OtherErrorIsReported proves a delete that
+// fails for another reason is returned, and the rest still go.
+func TestReleaseNamedAgentPods_OtherErrorIsReported(t *testing.T) {
+	now := time.Now()
+	const sa = "varroa-agent-payments"
+	a := agentPod("a", sa, true, now)
+	b := agentPod("b", sa, true, now)
+	reaper := &releaseReaper{
+		pods: []corev1.Pod{a, b},
+		errs: map[string]error{"a": apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "a", nil)},
+	}
+	deleted, err := releaseNamedAgentPods(context.Background(), reaper, "payments", "payments-ns", []string{"a", "b"})
+	if err == nil {
+		t.Fatal("want the forbidden delete reported")
+	}
+	if deleted != 1 || len(reaper.deleted) != 1 || reaper.deleted[0] != "b" {
+		t.Fatalf("deleted = %d %v, want b only", deleted, reaper.deleted)
+	}
+}

@@ -37,11 +37,12 @@ func failResumeOn(t *testing.T, g *Ingester, runID uuid.UUID, instance string) {
 	}
 }
 
-// TestTakeOverLostRunsRedispatchesAfterFailure is this change's proof.
-// A resume the first target could not apply must not cost the run its
-// remaining arm window: the next round dispatches to the replacement
-// instance the tenant now reports.
-func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
+// TestTakeOverLostRunsEndsArmBeforeAReplacementRolls asserts a resume the
+// only home target could not apply ends the run's arm at once. The next
+// round names the failed target, so it ends the arm and dispatches
+// nothing. A replacement that rolls later finds the arm already ended,
+// so the sweep marks the run resume-failed instead of waiting for it.
+func TestTakeOverLostRunsEndsArmBeforeAReplacementRolls(t *testing.T) {
 	t.Parallel()
 
 	pool, db := setupLedgerPool(t)
@@ -71,45 +72,36 @@ func TestTakeOverLostRunsRedispatchesAfterFailure(t *testing.T) {
 	if first.Instance != resumeFailedTarget {
 		t.Fatalf("first action names %q, want %s", first.Instance, resumeFailedTarget)
 	}
-	_, armExpires, _ := readMeshResume(t, db, runID)
 
 	// The target fails the command. The gateway records that failure.
 	failResumeOn(t, g, runID, resumeFailedTarget)
 
-	// The failed instance is excluded, so a round before the pod rolls
-	// dispatches nothing at all.
+	// The failed instance is the only home candidate, so this round
+	// dispatches nothing and ends the arm.
 	if got := runTakeover(t, pool, conn, metrics, actionMetrics); got != 0 {
-		t.Fatalf("round before the roll published = %d, want 0", got)
+		t.Fatalf("round after the failure published = %d, want 0", got)
+	}
+	_, endedExpires, _ := readMeshResume(t, db, runID)
+	armed, err := time.Parse(time.RFC3339Nano, endedExpires)
+	if err != nil {
+		t.Fatalf("parse arm_expires %q: %v", endedExpires, err)
+	}
+	if armed.After(time.Now()) {
+		t.Fatalf("arm_expires = %v, want the arm ended at the refusal", armed)
 	}
 
-	// The pod rolls, and the tenant reports a new seeded instance.
+	// The pod rolls, and the tenant reports a new seeded instance. The
+	// ended arm dispatches nothing to it.
 	movePlacementInstance(t, db, meshRolledInstance)
-
-	if got := runTakeover(t, pool, conn, metrics, actionMetrics); got != 1 {
-		t.Fatalf("round after the roll published = %d, want 1", got)
+	if got := runTakeover(t, pool, conn, metrics, actionMetrics); got != 0 {
+		t.Fatalf("round after the roll published = %d, want 0: the arm has ended", got)
 	}
-	second := waitForAction(t, received)
-	if second.Kind != LedgerActionResumeRun {
-		t.Fatalf("second action kind = %q, want %s", second.Kind, LedgerActionResumeRun)
-	}
-	if second.Instance != meshRolledInstance {
-		t.Fatalf("second action names %q, want %s", second.Instance, meshRolledInstance)
-	}
-	if second.RunID != runID.String() {
-		t.Fatalf("second action run = %q, want %s", second.RunID, runID)
+	_, _, gotInstance := readMeshResume(t, db, runID)
+	if gotInstance != "" {
+		t.Fatalf("instance = %q, want no dispatch", gotInstance)
 	}
 
-	// The arm window is never extended. The run holds the window it had
-	// before its first target failed.
-	_, gotExpires, gotInstance := readMeshResume(t, db, runID)
-	if gotExpires != armExpires {
-		t.Fatalf("arm_expires moved from %q to %q, want it unchanged", armExpires, gotExpires)
-	}
-	if gotInstance != meshRolledInstance {
-		t.Fatalf("instance = %q, want %s", gotInstance, meshRolledInstance)
-	}
-
-	// The failed instance stays on the list for the rest of the window.
+	// The failed instance stays on the list for the rest of the record.
 	if got := readResumeFailedList(t, db, runID); len(got) != 1 || got[0] != resumeFailedTarget {
 		t.Fatalf("failed list = %v, want [%s]", got, resumeFailedTarget)
 	}

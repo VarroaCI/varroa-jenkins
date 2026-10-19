@@ -133,6 +133,24 @@ of the fleet's audit activity, once a controller becomes disposable.
   repeat and a late result from an earlier attempt both change no row.
   **The run's owner is not moved back**: the failed target keeps it, and
   the next dispatch moves it again.
+  **A refusal on `target-failed` ends the arm.** `dispatchMeshResume` sets
+  `arm_expires` to the takeover's clock when the job's only home instance
+  already failed the resume (`endArmForFailedTarget`). The next interrupted
+  sweep then reads the run as `resume-failed`, because `evaluateResumeGuard`
+  answers that reason for an expired arm with a non-empty `Failed` list. A
+  replacement pod that rolls later cannot adopt the run. `markInterruptedTx`
+  and `afterMark` publish no cancel for this reason.
+  **`releaseRunAgents`** (`interrupted_agents.go`) runs after every mark that
+  ends a `RUNNING` run, except a provisional one (`heartbeat-lost`). It reads
+  the run's `nodes/<name>/config.xml` entries from `mesh.files`, drops every
+  name that another `RUNNING` run or `heartbeat-lost` run of the tenant also lists, and publishes
+  one `release_agents` action with the tenant's `agent_namespace`. The action
+  names no cell instance. The operator's `ReleaseRunAgentPods` checks the
+  pod's tenant ServiceAccount and label. No refresh guard exists: the
+  terminal run state and the cancel for a dispatched resume are the safety.
+  The name filter reads one snapshot, so a pod that a new run takes after
+  the read can still be released. That window is accepted. The filter has no
+  time bound: a kept name costs one pod until the plugin collects it.
 - **Migrations** — `migrations/00001_initial_schema.sql` holds the seven
   build-record tables (`run_intents`, `runs`, `run_stages`, `run_tests`,
   `run_artifacts`, `log_chunks`, `job_numbers`). `00002_activity.sql` adds

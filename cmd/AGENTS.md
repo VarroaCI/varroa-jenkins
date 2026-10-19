@@ -62,8 +62,9 @@ stating what it is/is not responsible for:
   core NATS and the group name, so a wildcard puts all of them in one queue
   group and NATS gives a share of one cluster's actions to the others.
   `handleLedgerAction` maps `cancel_run`/`retry_run`/`trigger_run`/`resume_run`
-  to the matching mite imperative command and `wake_cell` to a direct
-  hibernation wake. `cancel_run` and `retry_run` copy the action's `actor`
+  to the matching mite imperative command, `wake_cell` to a direct
+  hibernation wake, and `release_agents` to `ReleaseRunAgentPods`, which
+  deletes only the named agent pods of the action's tenant. `cancel_run` and `retry_run` copy the action's `actor`
   onto the command, so the operator's outcome row names the recorder. The one core recorder publishes the actions of every
   cluster, so a member operator receives its actions over the shared bus. It logs at Warn and counts an action that names another cluster
   (`reason="foreign_cluster"`) or an unknown kind (`reason="unknown_kind"`)

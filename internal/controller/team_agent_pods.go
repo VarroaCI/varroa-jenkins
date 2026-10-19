@@ -185,3 +185,71 @@ func (r *TeamReconciler) forgetTenantAgentReap(team string) {
 	defer r.reapMu.Unlock()
 	delete(r.lastReap, team)
 }
+
+// ReleaseRunAgentPods deletes the tenant agent pods of one ended run. The
+// recorder names the pods by their Jenkins node names, which equal the
+// pod names. A named pod goes only when it runs as the tenant's agent
+// ServiceAccount and carries the plugin's controller label. Every other
+// pod stays, so a name that a different tenant or controller holds is
+// never deleted.
+func (r *Reconciler) ReleaseRunAgentPods(ctx context.Context, team, namespace string, names []string) {
+	reaper, ok := r.client.(tenantAgentPodReaper)
+	if !ok {
+		return
+	}
+	deleted, err := releaseNamedAgentPods(ctx, reaper, team, namespace, names)
+	if err != nil {
+		r.Logger.Warn("release run agent pods failed", "team", team, "namespace", namespace, "error", err)
+	}
+	for range deleted {
+		r.Logger.Info("released a run agent pod", "team", team, "namespace", namespace, "reason", "run-ended")
+	}
+}
+
+// releaseNamedAgentPods deletes the pods of names that pass the tenant
+// test, each with its listed UID as a precondition. It answers the count
+// of pods it deleted. NotFound and Conflict are not errors: a pod that
+// left the API list, or a pod that a later create replaced under the
+// same name, needs no delete.
+func releaseNamedAgentPods(ctx context.Context, reaper tenantAgentPodReaper, team, namespace string,
+	names []string) (int, error) {
+	if namespace == "" || len(names) == 0 {
+		return 0, nil
+	}
+	want := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		want[name] = struct{}{}
+	}
+	pods, err := reaper.ListTenantAgentPods(ctx, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("list the tenant agent pods in namespace %q: %w", namespace, err)
+	}
+	sa := tenantAgentServiceAccountName(team)
+	deleted := 0
+	var first error
+	for _, pod := range pods {
+		if _, named := want[pod.Name]; !named {
+			continue
+		}
+		if pod.Spec.ServiceAccountName != sa {
+			continue
+		}
+		if _, ok := pod.Labels[agentPodControllerLabel]; !ok {
+			continue
+		}
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if err := reaper.DeletePodWithUID(ctx, namespace, pod.Name, pod.UID); err != nil {
+			if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+				continue
+			}
+			if first == nil {
+				first = fmt.Errorf("delete the run agent pod %q in namespace %q: %w", pod.Name, namespace, err)
+			}
+			continue
+		}
+		deleted++
+	}
+	return deleted, first
+}

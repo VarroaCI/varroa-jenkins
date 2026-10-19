@@ -54,6 +54,7 @@ func subscribeLedgerActions(conn *bus.Conn, cluster, queue string, handler bus.S
 type ledgerActionRunner interface {
 	SendImperativeCommand(ctx context.Context, namespace, name string, cmd *mitev1.ImperativeCommand) error
 	WakeHibernatedController(ctx context.Context, namespace, name string)
+	ReleaseRunAgentPods(ctx context.Context, team, namespace string, names []string)
 }
 
 // ledgerActionBuildNumber answers *bn, or 0 for a nil bn.
@@ -245,6 +246,17 @@ func handleLedgerAction(ctx context.Context, logger *slog.Logger, metrics *ledge
 		}
 	case recordstore.LedgerActionWakeCell:
 		rec.WakeHibernatedController(ctx, action.Namespace, action.Controller)
+	case recordstore.LedgerActionReleaseAgents:
+		// The recorder ended the run. Its agent pods were kept for a
+		// resume that can no longer adopt them, so they go now. The
+		// operator deletes only the pods the action names, of the
+		// action's tenant, in the tenant's agent namespace.
+		if action.AgentNamespace == "" || action.Tenant == "" || len(action.AgentPods) == 0 {
+			logger.Info("release_agents with no agent pods, nothing to do",
+				"run_id", action.RunID, "tenant", action.Tenant)
+			return
+		}
+		rec.ReleaseRunAgentPods(ctx, action.Tenant, action.AgentNamespace, action.AgentPods)
 	default:
 		logger.Warn("ledger action unknown kind rejected", "kind", action.Kind)
 		metrics.rejected.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", "unknown_kind")))

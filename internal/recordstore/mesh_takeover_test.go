@@ -356,7 +356,7 @@ func TestDispatchMeshResumeRollsBackOnRealCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new interrupted metrics: %v", err)
 	}
-	_, ok, err := dispatchMeshResume(context.Background(), pool, metrics, candidate, time.Now())
+	_, ok, err := dispatchMeshResume(context.Background(), pool, metrics, candidate, time.Now(), nil)
 	if err != nil {
 		t.Fatalf("dispatchMeshResume: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestDispatchMeshResumeReadsTheRecordedEpoch(t *testing.T) {
 		c.mesh.Files[i].Epoch = meshPusherEpoch
 	}
 
-	action, ok, err := dispatchMeshResume(context.Background(), pool, metrics, c, now)
+	action, ok, err := dispatchMeshResume(context.Background(), pool, metrics, c, now, nil)
 	if err != nil {
 		t.Fatalf("dispatchMeshResume: %v", err)
 	}
@@ -598,5 +598,82 @@ func TestDispatchMeshResumeIndexReadFailureSendsZero(t *testing.T) {
 	}
 	if after := logNextSeqReadFailures.Load(); after != before+1 {
 		t.Fatalf("read failures = %d, want %d", after, before+1)
+	}
+}
+
+// seedFailedArm rewrites a seeded run's mesh.resume into an unresumed
+// arm that names failed as the instances that already failed it.
+func seedFailedArm(t *testing.T, db *sql.DB, runID uuid.UUID, armExpires time.Time, failed ...string) {
+	t.Helper()
+	raw, err := json.Marshal(failed)
+	if err != nil {
+		t.Fatalf("marshal failed instances: %v", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE varroa.runs
+		   SET payload = jsonb_set(payload, '{mesh,resume}', jsonb_build_object(
+		         'armed_at', now(), 'arm_expires', $2::timestamptz, 'failed', $3::jsonb))
+		 WHERE run_id = $1
+	`, runID, armExpires, string(raw)); err != nil {
+		t.Fatalf("seed failed arm: %v", err)
+	}
+}
+
+// TestTakeOverLostRunsEndsArmWhenHomeTargetFailed asserts a failed resume
+// on the job's only home target ends the arm at once: arm_expires moves
+// to the takeover's own clock, and nothing is dispatched.
+func TestTakeOverLostRunsEndsArmWhenHomeTargetFailed(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+	received := collectActions(t, conn)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshPlacement(t, db, "pod-live", "pod-live")
+	seedFailedArm(t, db, runID, time.Now().Add(resumeArmWindow), "pod-live")
+
+	before := time.Now()
+	if got := runTakeover(t, pool, conn, nil, nil); got != 0 {
+		t.Fatalf("published = %d, want 0: the only home target failed", got)
+	}
+	_, armExpires, instance := readMeshResume(t, db, runID)
+	if instance != "" {
+		t.Fatalf("instance = %q, want no dispatch", instance)
+	}
+	armed, err := time.Parse(time.RFC3339Nano, armExpires)
+	if err != nil {
+		t.Fatalf("parse arm_expires %q: %v", armExpires, err)
+	}
+	if armed.Before(before.Add(-time.Millisecond)) || armed.After(time.Now()) {
+		t.Fatalf("arm_expires = %v, want the takeover's own clock (after %v)", armed, before)
+	}
+	select {
+	case a := <-received:
+		t.Fatalf("want no action, got %+v", a)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestTakeOverLostRunsKeepsArmWhenNoTarget asserts a failure record does
+// not end the arm while the tenant has no live home target: another
+// round may still find one.
+func TestTakeOverLostRunsKeepsArmWhenNoTarget(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	conn := newTestActionConn(t)
+
+	runID := seedMeshRunningRun(t, pool, db)
+	seedMeshPlacement(t, db, "", "")
+	seedFailedArm(t, db, runID, time.Now().Add(resumeArmWindow), "pod-old")
+	_, before, _ := readMeshResume(t, db, runID)
+
+	if got := runTakeover(t, pool, conn, nil, nil); got != 0 {
+		t.Fatalf("published = %d, want 0", got)
+	}
+	_, after, _ := readMeshResume(t, db, runID)
+	if after != before {
+		t.Fatalf("arm_expires changed from %q to %q, want the arm kept", before, after)
 	}
 }

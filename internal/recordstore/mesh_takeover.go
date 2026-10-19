@@ -25,7 +25,9 @@ import (
 // own recovery, which is the longest step of the whole path. Its value
 // is the recorder's existing silent-run window, so the recorder holds
 // one long window and not two. It is a constant, not a setting: a
-// setting could only be set wrong.
+// setting could only be set wrong. The arm ends early when the job's
+// only home target already failed this run's resume, so the arm holds no
+// candidate and would only hold the fleet lock.
 const resumeArmWindow = 15 * time.Minute
 
 // resumeDeadline bounds the dispatched resume, measured from
@@ -278,7 +280,7 @@ func dispatchMeshResumes(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 		if c.mesh.Resume.ArmExpires == nil || !c.mesh.Resume.ArmExpires.After(now) {
 			continue
 		}
-		action, ok, err := dispatchMeshResume(ctx, pool, metrics, c, now)
+		action, ok, err := dispatchMeshResume(ctx, pool, metrics, c, now, logger)
 		if err != nil {
 			logger.Warn("dispatch resume failed", "run_id", c.runID, "error", err)
 			continue
@@ -301,13 +303,31 @@ func dispatchMeshResumes(ctx context.Context, pool *pgxpool.Pool, conn *bus.Conn
 	return published
 }
 
+// endArmForFailedTarget sets the arm's expiry to now, so the marking
+// round that follows answers resume-failed at once. The guard keeps the
+// change to an unresumed arm that has not expired yet: a dispatched run
+// and an expired arm are left as they are. It answers whether the row
+// changed.
+func endArmForFailedTarget(ctx context.Context, tx pgx.Tx, c meshCandidate, now time.Time) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE varroa.runs SET payload = jsonb_set(payload, '{mesh,resume,arm_expires}', to_jsonb($3::timestamptz))
+		 WHERE run_id = $1 AND created_at = $2 AND status = 'RUNNING'
+		   AND payload->'mesh'->'resume'->>'instance' IS NULL
+		   AND (payload->'mesh'->'resume'->>'arm_expires')::timestamptz > $3
+	`, c.runID, c.createdAt, now)
+	if err != nil {
+		return false, fmt.Errorf("end arm after failed target: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // dispatchMeshResume moves one run's ownership in a single transaction
 // and builds the action the caller publishes. It answers ok=false when
 // the transaction changed no run row, which is the whole claim: B1 and
 // the at-most-once dispatch guard both live in that statement's WHERE
 // clause.
 func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *InterruptedMetrics,
-	c meshCandidate, now time.Time) (LedgerAction, bool, error) {
+	c meshCandidate, now time.Time, logger *slog.Logger) (LedgerAction, bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return LedgerAction{}, false, fmt.Errorf("begin resume takeover: %w", err)
@@ -325,6 +345,23 @@ func dispatchMeshResume(ctx context.Context, pool *pgxpool.Pool, metrics *Interr
 	}
 	if refusal != resumeRefusalNone {
 		metrics.addResume(ctx, resumeOutcomeSkipped, string(refusal))
+		if refusal == resumeRefusalTargetFail {
+			// The refusal changes no owner, so the transaction holds only
+			// the arm end and commits it before the caller returns.
+			ended, err := endArmForFailedTarget(ctx, tx, c, now)
+			if err != nil {
+				return LedgerAction{}, false, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return LedgerAction{}, false, fmt.Errorf("commit failed-target arm end: %w", err)
+			}
+			if ended {
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Info("failed resume ended the arm", "run_id", c.runID, "job_path", c.jobPath)
+			}
+		}
 		return LedgerAction{}, false, nil
 	}
 
