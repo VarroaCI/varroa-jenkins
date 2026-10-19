@@ -20,7 +20,10 @@ import (
 // the cell took the set, so a resent set keeps its time. It applies the
 // envelope only when that time is newer than the stored watermark; an older
 // or equal envelope, such as a resent set, changes no row and is reported
-// through ApplyResult.ScheduleStale. Deleting every row the envelope omits is
+// through ApplyResult.ScheduleStale. The recorder refuses a set taken more
+// than jobInventoryMaxSkew ahead of its own clock, reported through
+// ApplyResult.InventoryAhead. A set that is accepted replaces a stored
+// watermark that is past that limit. Deleting every row the envelope omits is
 // skipped when the envelope reports truncation, reported through
 // ApplyResult.Truncated.
 func (g *Ingester) applyJobSchedules(ctx context.Context, env IngestEnvelope) (ApplyResult, error) {
@@ -37,7 +40,7 @@ func (g *Ingester) applyJobSchedules(ctx context.Context, env IngestEnvelope) (A
 		_ = tx.Rollback(ctx)
 	}()
 
-	result, err := applyJobSchedulesTx(ctx, tx, env, payload)
+	result, err := applyJobSchedulesTx(ctx, tx, env, payload, time.Now())
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -50,7 +53,14 @@ func (g *Ingester) applyJobSchedules(ctx context.Context, env IngestEnvelope) (A
 
 // applyJobSchedulesTx runs the guard-then-write sequence for one
 // job.schedules envelope inside tx.
-func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobSchedulesPayload) (ApplyResult, error) {
+func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobSchedulesPayload, now time.Time) (ApplyResult, error) {
+	ceiling := now.Add(jobInventoryMaxSkew)
+	if env.OccurredAt.After(ceiling) {
+		// The cell clock is ahead. The set changes no row, so the
+		// watermark stays at the last set a correct clock took.
+		return ApplyResult{InventoryAhead: true, InventoryAheadBy: env.OccurredAt.Sub(now)}, nil
+	}
+
 	// The sentinel is older than every envelope, so a cell's first
 	// envelope always finds a row to lock and passes the comparison
 	// below. ON CONFLICT DO NOTHING makes two concurrent first
@@ -66,12 +76,15 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 	// The comparison runs in SQL rather than scanning observed_at into a
 	// Go time.Time: the sentinel is the Postgres value -infinity, which
 	// time.Time cannot represent.
+	// A stored watermark past the ceiling came from a clock that was ahead,
+	// so a set from a correct clock replaces it.
 	var isNewer bool
 	if err := tx.QueryRow(ctx, `
-		SELECT $4::timestamptz > observed_at FROM varroa.job_schedule_cells
+		SELECT $4::timestamptz > observed_at OR observed_at > $5::timestamptz
+		FROM varroa.job_schedule_cells
 		WHERE cluster = $1 AND namespace = $2 AND cell = $3
 		FOR UPDATE
-	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt).Scan(&isNewer); err != nil {
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt, ceiling).Scan(&isNewer); err != nil {
 		return ApplyResult{}, fmt.Errorf("lock job schedule cell watermark: %w", err)
 	}
 
@@ -180,10 +193,20 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 		}
 	}
 
+	// Rows past the ceiling came from a clock that was ahead. No set
+	// from a correct clock keeps them, so they go even when the set is
+	// truncated.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM varroa.job_schedules
+		WHERE cluster = $1 AND namespace = $2 AND cell = $3 AND observed_at > $4
+	`, env.Cluster, env.Namespace, env.Cell, ceiling); err != nil {
+		return ApplyResult{}, fmt.Errorf("delete ahead-stamped job schedule rows: %w", err)
+	}
+
 	result := ApplyResult{}
 	if payload.Truncated {
 		// A truncated set is not evidence that an omitted job lost its
-		// trigger, so nothing is deleted.
+		// trigger, so nothing else is deleted.
 		result.Truncated = true
 	} else if _, err := tx.Exec(ctx, `
 		DELETE FROM varroa.job_schedules
@@ -201,6 +224,11 @@ func applyJobSchedulesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, pay
 
 	return result, nil
 }
+
+// jobInventoryMaxSkew is the largest amount by which a job inventory set's
+// taken time can be ahead of the recorder clock. The recorder refuses a set
+// past it, because a watermark in the future rejects every later set.
+const jobInventoryMaxSkew = 5 * time.Minute
 
 // maxPassedOccurrences bounds how many passed occurrences one row
 // keeps, so a dense cron cannot grow the row without limit.

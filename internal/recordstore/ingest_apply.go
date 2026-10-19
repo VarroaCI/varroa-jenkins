@@ -66,6 +66,14 @@ type ApplyResult struct {
 	// newer than its cell's branch watermark. The write changed no row.
 	BranchesStale bool
 
+	// InventoryAhead is true when a job.schedules or job.branches
+	// envelope's taken time was more than jobInventoryMaxSkew ahead of
+	// the recorder clock. The write changed no row and kept the cell's
+	// watermark. InventoryAheadBy is the amount by which the taken time
+	// was ahead.
+	InventoryAhead   bool
+	InventoryAheadBy time.Duration
+
 	// TriggerFailedReason holds the reason code of a run.trigger_failed
 	// envelope the recorder stored, or skipped because a row already
 	// exists. The caller acknowledges the message and counts

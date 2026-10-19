@@ -701,6 +701,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   A kind is known only when every active member holds a `job_schedule_cells` watermark for it
   with its truncation flag false (`schedules_truncated`, `branches_truncated`, migration `00035`).
   The watermark is the cell's taken time (`taken_at_millis`), so a resent set answers stale.
+  The recorder refuses a set taken more than `jobInventoryMaxSkew` (5m) ahead of its clock (`ApplyResult.InventoryAhead`) and replaces a stored watermark past that limit.
   A tenant with no placement, or no active member, answers nothing known. A consumer must read
   an unknown kind as unknown, never as absent.
 - **Fleet locks** (`fleet_lock_acquire.go`, `fleet_lock_renew.go`,
@@ -928,7 +929,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   `cronGrace` comes from `readTenantSchedulePolicy` on the envelope
   transaction, cached per tenant; that function takes any
   `schedulePolicyQuerier`, a pool or a transaction. `IngestMetrics` also holds
-  `recorder_schedules_truncated_total` and `recorder_schedules_stale_total`.
+  `recorder_schedules_truncated_total`, `recorder_schedules_stale_total`, and `recorder_job_inventory_ahead_total`.
   `applyRunCompleted` (`ingest_completed.go`) reports `owner`, whether its
   write was the run's real terminal write, not a foreign instance's
   payload-only merge; on `owner`, in the same transaction as the `runs`
