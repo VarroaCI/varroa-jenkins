@@ -35,6 +35,11 @@ export function keyProviderFor(chosen: string, saved: string, list: AssistantPro
   return list.find((p) => p.default)?.name ?? list[0]?.name ?? "";
 }
 
+/** savedProviderGone is true when the saved provider is not in the loaded chart provider list. */
+export function savedProviderGone(saved: string, list: AssistantProvider[], loaded: boolean): boolean {
+  return loaded && saved !== "" && !list.some((p) => p.name === saved);
+}
+
 export function ProfileAssistantTab() {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -62,6 +67,7 @@ export function ProfileAssistantTab() {
   const providerList = providers.data?.items ?? [];
   const keyProviderShown = keyProviderFor(keyProvider, current.provider, providerList);
   const selectedProvider = providerList.find((p) => p.name === current.provider);
+  const gone = savedProviderGone(current.provider, providerList, providers.isSuccess);
   const explained = (location.state as { from?: string } | null)?.from === "explain";
 
   // Saves all four fields, so a switch and a model change cannot drift apart.
@@ -130,7 +136,9 @@ export function ProfileAssistantTab() {
             aria-label="Assistant on"
             checked={current.enabled}
             onChange={(e) => {
-              const next = { ...current, enabled: e.target.checked };
+              // The server refuses a provider that the chart no longer lists, so the switch saves Default in that case.
+              const base = gone ? { ...current, provider: "", model: "" } : current;
+              const next = { ...base, enabled: e.target.checked };
               setModel(next);
               save.mutate(next);
             }}
@@ -151,6 +159,7 @@ export function ProfileAssistantTab() {
             }}
           >
             <option value="">Default</option>
+            {gone && <option value={current.provider} disabled>{`${current.provider} (removed)`}</option>}
             {providerList.map((p) => (
               <option key={p.name} value={p.name}>{p.available ? p.name : `${p.name} (unavailable)`}</option>
             ))}
@@ -158,7 +167,7 @@ export function ProfileAssistantTab() {
         </label>{" "}
         <label>
           Model{" "}
-          <select aria-label="Model" value={current.model} onChange={(e) => setModel({ ...current, model: e.target.value })}>
+          <select aria-label="Model" value={current.model} disabled={gone} onChange={(e) => setModel({ ...current, model: e.target.value })}>
             <option value="">Default</option>
             {(selectedProvider?.models ?? []).map((m) => (
               <option key={m} value={m}>{m}</option>
@@ -175,8 +184,9 @@ export function ProfileAssistantTab() {
             {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
         </label>
+        {gone && <p role="status">The saved provider {current.provider} is not available. Pick a provider or Default.</p>}
         <div>
-          <Button size="sm" onClick={() => save.mutate(current)}>Save</Button>
+          <Button size="sm" disabled={gone} onClick={() => save.mutate(current)}>Save</Button>
         </div>
         {saveError && <p role="alert">{saveError}</p>}
       </Card>

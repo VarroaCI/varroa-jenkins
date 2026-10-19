@@ -98,6 +98,8 @@ note on the build. Everyone who can read the build sees the note.
 Your assistant settings are on the Profile page, in the Assistant tab. Your
 session key is kept for this login only. It is not stored in the browser.
 
+When an admin removes your saved provider, the Assistant tab shows a notice. Pick a provider or Default, then save.
+
 Agent rows appear in the activity feed under the Agents filter.
 
 The team home card starts a proposal. See [Propose a pipeline](../tutorials/propose-a-pipeline.md).
