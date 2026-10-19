@@ -28,6 +28,7 @@ type IngestMetrics struct {
 	orphan            metric.Int64Counter
 	scheduleTruncated metric.Int64Counter
 	scheduleStale     metric.Int64Counter
+	inventoryAhead    metric.Int64Counter
 	triggerFailed     metric.Int64Counter
 	triggerAccepted   metric.Int64Counter
 	commandRefused    metric.Int64Counter
@@ -86,6 +87,12 @@ func NewIngestMetrics(mp metric.MeterProvider, conn *bus.Conn, streamName, consu
 		metric.WithDescription("job.schedules envelopes acknowledged with no change, because their time was not newer than the cell's stored watermark"))
 	if err != nil {
 		return nil, fmt.Errorf("register recorder_schedules_stale_total: %w", err)
+	}
+
+	m.inventoryAhead, err = meter.Int64Counter("recorder_job_inventory_ahead_total",
+		metric.WithDescription("job.schedules and job.branches envelopes refused because their taken time was more than five minutes ahead of the recorder clock"))
+	if err != nil {
+		return nil, fmt.Errorf("register recorder_job_inventory_ahead_total: %w", err)
 	}
 
 	m.triggerFailed, err = meter.Int64Counter("recorder_ingest_trigger_failed_total",
@@ -184,6 +191,15 @@ func (m *IngestMetrics) addScheduleStale(ctx context.Context) {
 		return
 	}
 	m.scheduleStale.Add(ctx, 1)
+}
+
+// addInventoryAhead counts one recorder_job_inventory_ahead_total event,
+// labelled by envelope kind.
+func (m *IngestMetrics) addInventoryAhead(ctx context.Context, kind string) {
+	if m == nil || m.inventoryAhead == nil {
+		return
+	}
+	m.inventoryAhead.Add(ctx, 1, metric.WithAttributes(attribute.String("kind", kind)))
 }
 
 // addNumberMismatch counts one recorder_ingest_number_mismatch_total

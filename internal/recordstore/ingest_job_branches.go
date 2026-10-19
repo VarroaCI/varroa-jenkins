@@ -90,7 +90,7 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 	}()
 
 	var out activityOutbox
-	result, err := applyJobBranchesTx(ctx, tx, env, payload, &out)
+	result, err := applyJobBranchesTx(ctx, tx, env, payload, &out, time.Now())
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -106,7 +106,16 @@ func (g *Ingester) applyJobBranches(ctx context.Context, env IngestEnvelope) (Ap
 // job.branches envelope inside tx. The watermark row is the one
 // job_schedule_cells row that job.schedules also locks. The branch
 // watermark is its own column, so the two kinds never reject each other.
-func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobBranchesPayload, out *activityOutbox) (ApplyResult, error) {
+// A set taken more than jobInventoryMaxSkew ahead of now is refused, as
+// for job.schedules, and a stored watermark past that limit is replaced.
+func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payload JobBranchesPayload, out *activityOutbox, now time.Time) (ApplyResult, error) {
+	ceiling := now.Add(jobInventoryMaxSkew)
+	if env.OccurredAt.After(ceiling) {
+		// The cell clock is ahead. The set changes no row, so the
+		// watermark stays at the last set a correct clock took.
+		return ApplyResult{InventoryAhead: true, InventoryAheadBy: env.OccurredAt.Sub(now)}, nil
+	}
+
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO varroa.job_schedule_cells (cluster, namespace, cell, observed_at)
 		VALUES ($1, $2, $3, '-infinity')
@@ -115,12 +124,15 @@ func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payl
 		return ApplyResult{}, fmt.Errorf("insert job branch cell watermark: %w", err)
 	}
 
+	// A stored watermark past the ceiling came from a clock that was ahead,
+	// so a set from a correct clock replaces it.
 	var isNewer bool
 	if err := tx.QueryRow(ctx, `
-		SELECT $4::timestamptz > branches_observed_at FROM varroa.job_schedule_cells
+		SELECT $4::timestamptz > branches_observed_at OR branches_observed_at > $5::timestamptz
+		FROM varroa.job_schedule_cells
 		WHERE cluster = $1 AND namespace = $2 AND cell = $3
 		FOR UPDATE
-	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt).Scan(&isNewer); err != nil {
+	`, env.Cluster, env.Namespace, env.Cell, env.OccurredAt, ceiling).Scan(&isNewer); err != nil {
 		return ApplyResult{}, fmt.Errorf("lock job branch cell watermark: %w", err)
 	}
 
@@ -194,10 +206,20 @@ func applyJobBranchesTx(ctx context.Context, tx pgx.Tx, env IngestEnvelope, payl
 		}
 	}
 
+	// Rows past the ceiling came from a clock that was ahead. No set
+	// from a correct clock keeps them, so they go even when the set is
+	// truncated.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM varroa.job_branch_projects
+		WHERE cluster = $1 AND namespace = $2 AND cell = $3 AND observed_at > $4
+	`, env.Cluster, env.Namespace, env.Cell, ceiling); err != nil {
+		return ApplyResult{}, fmt.Errorf("delete ahead-stamped job branch projects: %w", err)
+	}
+
 	result := ApplyResult{}
 	if !payload.Truncated {
 		// A truncated set is not evidence that an omitted project left
-		// the cell, so nothing is deleted.
+		// the cell, so nothing else is deleted.
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM varroa.job_branch_projects
 			WHERE cluster = $1 AND namespace = $2 AND cell = $3 AND observed_at < $4

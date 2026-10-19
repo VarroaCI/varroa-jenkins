@@ -240,12 +240,14 @@ replaces the list.
 `job_schedule_cells` holds one watermark row per cell: the time the cell took its newest accepted set. A resent set keeps the time the cell took it.
 An occurrence that never fired under a watermark at most thirty minutes old is a missed fire. An older watermark means the cell has not reported, so its set is stale.
 
+The recorder refuses a set taken more than five minutes ahead of its own clock and keeps the watermark. It logs the cell and counts `recorder_job_inventory_ahead_total`. A set from a correct clock replaces a watermark that is already past that limit.
+
 A `truncated: true` set means the plugin's walk stopped early, at 5000 rows or 700 KiB, whichever
-came first. The recorder deletes no row, because a partial set would erase schedules the plugin missed.
+came first. The recorder deletes no row, because a partial set would erase schedules the plugin missed. The one exception is a row stamped more than five minutes ahead of the recorder clock, which the recorder always removes.
 
 ## Multibranch inventory
 
-`job_branch_projects` holds each multibranch job's branch inventory, up to ten minutes old.
+`job_branch_projects` holds each multibranch job's branch inventory, up to ten minutes old. The same five-minute limit applies to the branch inventory.
 
 ## Search
 

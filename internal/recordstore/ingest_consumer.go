@@ -178,6 +178,12 @@ func handleIngestMessage(ctx context.Context, ingester *Ingester, metrics *Inges
 			logger.Info("stale job schedule envelope acknowledged with no change",
 				"cluster", env.Cluster, "namespace", env.Namespace, "cell", env.Cell)
 		}
+		if result.InventoryAhead {
+			metrics.addInventoryAhead(ctx, env.Kind)
+			logger.Warn("job inventory set taken ahead of the recorder clock refused; watermark kept",
+				"kind", env.Kind, "cluster", env.Cluster, "namespace", env.Namespace, "cell", env.Cell,
+				"cellInstance", env.CellInstance, "takenAt", env.OccurredAt, "aheadBy", result.InventoryAheadBy)
+		}
 		if env.Kind == KindRunTriggerAccepted {
 			metrics.addTriggerAccepted(ctx, result.TriggerAcceptedStored)
 			if result.TriggerAcceptedStored {
