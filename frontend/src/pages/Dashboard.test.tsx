@@ -21,6 +21,13 @@ vi.mock("../hooks/useApi", () => ({
   bffFetch: vi.fn().mockResolvedValue({items: []}),
 }));
 
+vi.mock("./ConnectClientTile", async () => {
+  const { createElement } = await import("react");
+  return {
+    ConnectClientTile: () => createElement("div", { "data-testid": "connect-client-tile" }),
+  };
+});
+
 import * as useApi from "../hooks/useApi";
 
 describe("Dashboard", () => {
@@ -73,6 +80,19 @@ describe("Dashboard", () => {
   });
 
   describe("Happy path", () => {
+    it("renders the connect tile after the metric cards", () => {
+      mockUseControllers.mockReturnValue({
+        data: [],
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<Dashboard />);
+
+      const metric = screen.getByText("Total controllers");
+      const tile = screen.getByTestId("connect-client-tile");
+      expect(metric.compareDocumentPosition(tile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("renders the page heading and description with total count", () => {
       mockUseControllers.mockReturnValue({
         data: [

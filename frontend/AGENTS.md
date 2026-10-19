@@ -118,6 +118,7 @@ TypeScript consumer of it.
   never label a view with a time window the data does not cover. Relative
   ages use `age()` from `src/components/activityTimeline.util.ts`; it is the
   single relative-time helper.
+- **Dashboard connect tile** (`pages/ConnectClientTile.tsx`): shows between the metric cards and the update-center chip only when the user has no API key and the assistant is not on. Its three snippets come from `lib/mcpClientSnippets.ts`, and `ConnectClientTile.test.tsx` fails when a snippet drifts from `docs/agents/connecting.md`. The card never shows or holds a key.
 - **Activity icons**: `activityTypeMeta` in `src/components/activityTimeline.util.ts`
   is the only type-to-icon source for every activity surface (timeline and
   Dashboard). Live frames pass `isActivityEvent` before they reach the feed buffer.

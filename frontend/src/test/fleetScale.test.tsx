@@ -21,6 +21,8 @@ vi.mock("../api/client", () => ({
   listClusters: vi.fn().mockResolvedValue([]),
   getUpdateCenterStatus: vi.fn().mockResolvedValue({ enabled: false, conditions: [], gaps: [] }),
   getProvisioningConfig: vi.fn(() => Promise.resolve({ versions: [] })),
+  listApiKeys: vi.fn().mockResolvedValue({ items: [] }),
+  getMyAssistant: vi.fn().mockResolvedValue({ available: false }),
 }));
 
 const managePermissions = {

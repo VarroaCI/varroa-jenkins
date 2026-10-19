@@ -1,0 +1,40 @@
+.tile {
+  margin-bottom: 16px;
+}
+
+.urlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.url {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.keyLink {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.code {
+  background: var(--code-bg);
+  color: var(--code-text);
+  color-scheme: dark;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  padding: 12px 14px;
+  margin: 0;
+  border-radius: var(--radius-sm);
+}

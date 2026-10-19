@@ -16,6 +16,7 @@ import { controllerRoute } from "../routing";
 import type { ControllerListItem } from "../hooks/useControllers";
 import type { ClusterEntry } from "../types";
 import styles from "./Dashboard.module.css";
+import { ConnectClientTile } from "./ConnectClientTile";
 
 // HEALTH_LIST_LIMIT caps the brood health card. The card shows a phase bar
 // for the whole brood and this many controller rows.
@@ -156,6 +157,8 @@ export default function Dashboard() {
           accent={attention.length > 0 ? "bad" : "ok"}
         />
       </div>
+
+      <ConnectClientTile />
 
       <UpdateCenterUnservableChip />
 
