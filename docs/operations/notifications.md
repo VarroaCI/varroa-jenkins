@@ -98,7 +98,7 @@ The body is a JSON object:
 | `started_at` | no | The start time. Absent when the record has none. |
 | `completed_at` | yes | The completion time. |
 | `duration_ms` | yes | The run duration in milliseconds. Zero when unknown. |
-| `scm_revision` | no | The source revision, when the run reported one. For a pull-request build, the head commit of the pull request. |
+| `scm_revision` | no | The source revision, when the run reported one. For a pull-request build, the revision action hash of the pull request, else the pre-merge commit of the checkout. Never the local merge commit. See [Pull-request revision](commit-status.md#pull-request-revision). |
 | `rejected_signature` | no | The script signature that the sandbox refused. Present only when `result` is `FAILURE` and a refused signature failed the run. |
 | `url` | no | A link to the run page in the dashboard. Absent when the dashboard URL is not set. |
 | `synthetic` | no | `true` for a synthetic delivery. |

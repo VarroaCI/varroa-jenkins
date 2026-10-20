@@ -149,9 +149,9 @@ These builds keep their `pending` status:
 - A tenant whose only credential is a `githubApp` credential. The operator does not end a status
   with a GitHub App credential.
 
-For a pull-request build, the recorder keeps the head commit of the pull request. The forge reports
-the status on that commit. The start event carries that head commit too, so a build that stops before
-its checkout still names it.
+The forge reports the status on the pull-request revision of the run. See
+[Pull-request revision](#pull-request-revision). The start event carries that revision too, so a build
+that stops before its checkout still names it.
 
 A failed write leaves the status `pending`. The operator logs the failure and does not retry.
 
@@ -161,6 +161,17 @@ operator drops the write and logs it at `Info`. The status then stays `pending`.
 The write can race the retry. If the retry's own `pending` status lands first, the `error` write can
 land after it. The context then shows `error` until the retry build completes. The retry build then
 writes its own end state, which replaces the `error`.
+
+## Pull-request revision
+
+A pull-request build records one revision. The rule has two parts:
+
+- The revision action hash, when the branch source provides one. The GitHub, Gitea, and Forgejo
+  branch sources provide it. It is the head commit of the pull request.
+- The pre-merge commit of the checkout, when the branch source provides no hash. A Bitbucket
+  pull-request build uses this fallback until a Bitbucket accessor exists.
+
+The recorder never records the local merge commit of the checkout, on any forge.
 
 ## Two builds of one pull request
 
