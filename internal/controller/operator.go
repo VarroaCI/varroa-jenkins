@@ -135,10 +135,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// The tick writes status from the read below. An approve that wrote in
 	// between would be lost, so the approve methods take the same lock.
 	lockKey := req.Namespace + "/" + req.Name
-	if err := r.controllerLocks.lock(ctx, lockKey); err != nil {
+	if err := r.controllerLocks.Lock(ctx, lockKey); err != nil {
 		return reconcile.Result{}, err
 	}
-	defer r.controllerLocks.unlock(lockKey)
+	defer r.controllerLocks.Unlock(lockKey)
 
 	// Fetch the controller CRD.
 	cr, err := crdstore.Get[v1alpha1.Controller](ctx, r.store, req.Name, req.Namespace)

@@ -47,6 +47,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/runners"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
+	"github.com/varroaci/varroa-jenkins/internal/keylock"
 	"github.com/varroaci/varroa-jenkins/internal/mite"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 	"github.com/varroaci/varroa-jenkins/internal/overlay"
@@ -273,7 +274,7 @@ type Reconciler struct {
 	// this process is enough. Each path enters the shard first (enterShard),
 	// so a shard release waits for it before another replica can own the
 	// controller.
-	controllerLocks *keyLock
+	controllerLocks *keylock.KeyLock
 	// approveLockWait limits how long an approve waits for a tick that
 	// holds controllerLocks. The approve request has its own deadline.
 	approveLockWait time.Duration
@@ -1246,7 +1247,7 @@ func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceC
 		rehydrationInFlight:     make(map[string]*rehydrationPush),
 		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
 		parkedCellResults:       make(map[string]*mitev1.DesiredStateResult),
-		controllerLocks:         newKeyLock(),
+		controllerLocks:         keylock.New(),
 		approveLockWait:         defaultApproveLockWait,
 	}
 	// Replaces the default allow-all gate with the composed core↔plugin
@@ -2023,10 +2024,10 @@ var ErrControllerStopped = errors.New("controller is stopped (spec.powerState=St
 func (r *Reconciler) lockForApprove(ctx context.Context, key string) (unlock func(), err error) {
 	waitCtx, cancel := context.WithTimeout(ctx, r.approveLockWait)
 	defer cancel()
-	if err := r.controllerLocks.lock(waitCtx, key); err != nil {
+	if err := r.controllerLocks.Lock(waitCtx, key); err != nil {
 		return nil, fmt.Errorf("controller %s is reconciling; retry the approve: %w", key, err)
 	}
-	return func() { r.controllerLocks.unlock(key) }, nil
+	return func() { r.controllerLocks.Unlock(key) }, nil
 }
 
 // ErrNotShardOwner reports that this replica does not own the controller.

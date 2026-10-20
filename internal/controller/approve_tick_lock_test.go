@@ -131,12 +131,12 @@ func TestApproveRestart_WaitsForANormalTick(t *testing.T) {
 	cr.Status.PendingPluginRoll = &v1alpha1.PendingPluginRoll{TargetChecksum: "abc"}
 	crdstore.MustSeed(client.store, cr)
 
-	if err := rec.controllerLocks.lock(context.Background(), "ns/mine"); err != nil {
+	if err := rec.controllerLocks.Lock(context.Background(), "ns/mine"); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		rec.controllerLocks.unlock("ns/mine")
+		rec.controllerLocks.Unlock("ns/mine")
 	}()
 	if err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", ""); err != nil {
 		t.Fatalf("approve plugin roll: %v", err)
@@ -159,10 +159,10 @@ func TestApproveRestart_ReturnsARetryableErrorWhenTheTickHoldsTheLock(t *testing
 	cr.Status.PendingPluginRoll = &v1alpha1.PendingPluginRoll{TargetChecksum: "abc"}
 	crdstore.MustSeed(client.store, cr)
 
-	if err := rec.controllerLocks.lock(context.Background(), "ns/mine"); err != nil {
+	if err := rec.controllerLocks.Lock(context.Background(), "ns/mine"); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
-	defer rec.controllerLocks.unlock("ns/mine")
+	defer rec.controllerLocks.Unlock("ns/mine")
 	err := rec.ApproveRestart(context.Background(), "", "ns", "mine", "plugin-roll", "")
 	if err == nil || !strings.Contains(err.Error(), "retry the approve") {
 		t.Fatalf("err = %v, want a retryable error", err)
@@ -188,10 +188,10 @@ func TestApproveDeletion_ReturnsARetryableErrorWhenTheTickHoldsTheLock(t *testin
 	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{{Path: "team/job"}}
 	crdstore.MustSeed(client.store, cr)
 
-	if err := rec.controllerLocks.lock(context.Background(), "ns/mine"); err != nil {
+	if err := rec.controllerLocks.Lock(context.Background(), "ns/mine"); err != nil {
 		t.Fatalf("lock: %v", err)
 	}
-	defer rec.controllerLocks.unlock("ns/mine")
+	defer rec.controllerLocks.Unlock("ns/mine")
 	err := rec.ApproveDeletion(context.Background(), "", "ns", "mine", "team/job")
 	if err == nil || !strings.Contains(err.Error(), "retry the approve") {
 		t.Fatalf("err = %v, want a retryable error", err)

@@ -56,6 +56,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forge"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/hibernation/wakeserver"
+	"github.com/varroaci/varroa-jenkins/internal/keylock"
 	"github.com/varroaci/varroa-jenkins/internal/logging"
 	mitesrv "github.com/varroaci/varroa-jenkins/internal/mite"
 	"github.com/varroaci/varroa-jenkins/internal/preflight"
@@ -901,6 +902,7 @@ func main() {
 	enterTeam := func(ctx context.Context, key string) (context.Context, func(), bool) {
 		return shardSet.Enter(ctx, ring.ShardFor(key))
 	}
+	forgePullRequestLocks := keylock.New()
 	for _, r := range []*forgeRunner{
 		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbCheck, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
@@ -914,9 +916,9 @@ func main() {
 			handle: func(ctx context.Context, d []byte) []byte {
 				return handleForgeIssue(ctx, logger, forgeAnswerer, enterTeam, operatorNamespace, d)
 			}},
-		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbPullRequest, limit: forgePullRequestConcurrency, logger: logger,
+		{busConn: busConn, cluster: cluster, verb: forgeapi.VerbPullRequest, limit: forgeConcurrency, logger: logger,
 			handle: func(ctx context.Context, d []byte) []byte {
-				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTeam, d)
+				return handleForgePullRequest(ctx, logger, forgeAnswerer, enterTeam, forgePullRequestLocks, d)
 			}},
 	} {
 		if err := mgr.Add(r); err != nil {
