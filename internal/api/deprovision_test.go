@@ -171,3 +171,111 @@ func TestDeprovisionUser_KeepsFormerIdentifierHeldByLiveUser(t *testing.T) {
 		t.Errorf("expected vrb-dana to keep subject dana held by a live user, got %+v", kept)
 	}
 }
+
+func TestDeprovisionUser_StripsCustomUserClaimValue(t *testing.T) {
+	store := crdstore.NewFake()
+	ctx := context.Background()
+
+	user := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "dave",
+			Annotations: map[string]string{
+				v1alpha1.AnnotationOIDCSubject:    "subj-dave",
+				v1alpha1.AnnotationOIDCUserClaims: `{"employee_id":"E123"}`,
+			},
+		},
+		Spec: v1alpha1.UserSpec{Email: "dave@example.com"},
+	}
+
+	crdstore.MustSeed(store,
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-employee"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{
+				subj("User", "E123"), subj("Group", "devs"),
+			}},
+		},
+	)
+
+	if err := deprovisionUser(ctx, store, user, string(auth.AuthModeOIDC)); err != nil {
+		t.Fatalf("deprovisionUser: %v", err)
+	}
+
+	kept, _ := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-employee", "")
+	if kept == nil || len(kept.Spec.Subjects) != 1 || kept.Spec.Subjects[0].Kind != "Group" {
+		t.Errorf("expected vrb-employee to retain only the Group subject, got %+v", kept)
+	}
+}
+
+func TestDeprovisionUser_KeepsFormerCustomClaimHeldByLiveUser(t *testing.T) {
+	store := crdstore.NewFake()
+	ctx := context.Background()
+
+	departing := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "alice",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCFormerIdentifiers: `["E123"]`},
+		},
+	}
+	live := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "bob",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCUserClaims: `{"employee_id":"E123"}`},
+		},
+	}
+
+	crdstore.MustSeed(store,
+		live,
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-e123"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "E123")}},
+		},
+	)
+
+	if err := deprovisionUser(ctx, store, departing, string(auth.AuthModeOIDC)); err != nil {
+		t.Fatalf("deprovisionUser: %v", err)
+	}
+
+	kept, _ := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-e123", "")
+	if kept == nil || len(kept.Spec.Subjects) != 1 || kept.Spec.Subjects[0].Name != "E123" {
+		t.Errorf("expected vrb-e123 to keep subject E123 held by a live user, got %+v", kept)
+	}
+}
+
+func TestDeprovisionUser_KeepsCurrentCustomClaimHeldByLiveUser(t *testing.T) {
+	store := crdstore.NewFake()
+	ctx := context.Background()
+
+	departing := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "alice",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCUserClaims: `{"department":"engineering"}`},
+		},
+	}
+	live := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "bob",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCUserClaims: `{"department":"engineering"}`},
+		},
+	}
+
+	crdstore.MustSeed(store,
+		live,
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-dept"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "engineering")}},
+		},
+	)
+
+	if err := deprovisionUser(ctx, store, departing, string(auth.AuthModeOIDC)); err != nil {
+		t.Fatalf("deprovisionUser: %v", err)
+	}
+
+	kept, _ := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-dept", "")
+	if kept == nil || len(kept.Spec.Subjects) != 1 || kept.Spec.Subjects[0].Name != "engineering" {
+		t.Errorf("expected vrb-dept to keep subject engineering held by a live user, got %+v", kept)
+	}
+}

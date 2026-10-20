@@ -245,3 +245,87 @@ func TestJenkinsRoleAssignments_TenantMemberRole_FormerPreferredUsernameNotGrant
 		t.Errorf("former preferred username granted: %v", got)
 	}
 }
+
+// memberUserTestWithClaims stores custom user claims on a User object, the way
+// a login records them.
+func memberUserTestWithClaims(u *v1alpha1.User) *v1alpha1.User {
+	u.Annotations[v1alpha1.AnnotationOIDCUserClaims] = `{"employee_id":"E123"}`
+	return u
+}
+
+// memberUserTestCustomClaims sets the configured claim names, including the
+// custom claim employee_id.
+func memberUserTestCustomClaims(r *Resolver) {
+	r.userClaimNames = []string{"sub", "preferred_username", "employee_id"}
+}
+
+func TestJenkinsRoleAssignments_TenantMemberRole_UserSubjectByCustomClaimAddsPrincipal(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("developer")
+	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	memberUserTestCustomClaims(r)
+	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
+
+	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
+	if !got["User:E123"] || !got["User:alice"] {
+		t.Errorf("expected User:E123 and User:alice, got %v", got)
+	}
+}
+
+func TestJenkinsRoleAssignments_TenantMemberRole_StoredClaimNotConfiguredNotAliased(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("developer")
+	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	// employee_id is stored on the User but is not a configured claim.
+	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
+
+	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware")
+	if got["User:alice"] {
+		t.Errorf("a stored claim that is not configured must not alias, got %v", got)
+	}
+}
+
+func TestJenkinsRoleAssignments_TenantMemberRole_NarrowedRoleAliasesCustomClaim(t *testing.T) {
+	controller := memberRoleTestController()
+	binding := &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "projgen-devs"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "E123"}},
+			RoleRef:  "developer",
+			Scope: &v1alpha1.VarroaRoleBindingScope{
+				Tenants: []v1alpha1.TenantScope{{Name: "sbsoftware", Jobs: []string{"repos/projgen/*"}}},
+			},
+		},
+	}
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, nil, []*v1alpha1.Controller{controller})
+	memberUserTestCustomClaims(r)
+	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
+
+	got := memberUserTestSubjects(t, r, "varroa:tenant-member:sbsoftware:projgen-devs")
+	if !got["User:alice"] {
+		t.Errorf("expected narrowed role to alias User:alice, got %v", got)
+	}
+}
+
+func TestTenantMemberSubjectExpander_CustomClaim(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("developer")
+	binding := memberUserTestWriterBinding(v1alpha1.SubjectRef{Kind: "User", Name: "E123"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, []*v1alpha1.VarroaRoleBinding{binding}, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+	memberUserTestCustomClaims(r)
+	withUserDirectory(r, memberUserTestWithClaims(memberUserTestUser("alice", memberUserTestNamespace, "alice", "")))
+
+	expand := r.TenantMemberSubjectExpander()
+	out := expand([]v1alpha1.SubjectRef{{Kind: "User", Name: "E123"}})
+	found := false
+	for _, s := range out {
+		if s.Kind == "User" && s.Name == "alice" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected expander to add User:alice, got %v", out)
+	}
+}

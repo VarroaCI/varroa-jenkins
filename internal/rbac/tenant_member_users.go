@@ -5,14 +5,16 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/auth/userdirectory"
 	"github.com/varroaci/varroa-jenkins/internal/teamagent/accept"
 )
 
 // userPrincipalAliases maps each configured user claim value to the Jenkins
 // principal names of the people who hold it. The source is the idp-managed
 // User objects of the operator namespace. Only the configured claim names
-// count, and the display name never does. The former identifiers of a User
-// object never count. A nil directory yields nil.
+// count, including custom claims stored at login, and the display name never
+// does. The former identifiers of a User object never count. A nil directory
+// yields nil.
 func (r *Resolver) userPrincipalAliases() map[string][]string {
 	if r.userIndex == nil {
 		return nil
@@ -36,8 +38,9 @@ func (r *Resolver) userPrincipalAliases() map[string][]string {
 		if principal == "" || accept.IsPrincipal(principal) {
 			continue
 		}
+		stored := userdirectory.UserClaims(u)
 		for _, claim := range r.userClaimNames {
-			v := userClaimValue(u, claim)
+			v := userClaimValue(u, stored, claim)
 			if v == "" || v == principal || accept.IsPrincipal(v) {
 				continue
 			}
@@ -53,8 +56,9 @@ func (r *Resolver) userPrincipalAliases() map[string][]string {
 }
 
 // userClaimValue returns the value of one configured claim for a User object.
-// It returns "" for a claim that the User object does not store.
-func userClaimValue(u *v1alpha1.User, claim string) string {
+// stored holds the custom claims that a login recorded on the object. It
+// returns "" for a claim that the User object does not store.
+func userClaimValue(u *v1alpha1.User, stored map[string]string, claim string) string {
 	switch claim {
 	case "sub":
 		return u.Annotations[v1alpha1.AnnotationOIDCSubject]
@@ -62,8 +66,10 @@ func userClaimValue(u *v1alpha1.User, claim string) string {
 		return u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]
 	case "email":
 		return u.Spec.Email
-	default:
+	case "name":
 		return ""
+	default:
+		return stored[claim]
 	}
 }
 

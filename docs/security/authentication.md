@@ -57,10 +57,11 @@ Each setting takes a comma-separated list of claim names.
   prefix is reserved for local accounts.
 - Group values from an IdP token are not checked for the prefix. Group subjects use
   a separate key kind, so a group value cannot match a user binding.
-- The same claim names apply to the dashboard. On a Jenkins controller, only
-  `preferred_username`, `email`, and `sub` name a person's Jenkins principal. A
-  binding on a custom claim value reaches the cell only through those three claims.
-- When you delete a user, Varroa removes the subject, the current and former preferred usernames, and the current and former emails from every role binding. A former name that another signed-in person now holds stays in the bindings.
+- The same claim names apply to the dashboard. On a Jenkins controller, a binding
+  on a configured custom claim value reaches the cell too. The operator reads the
+  value from the person's `User` object, which stores it at sign-in. Only a string
+  claim counts. The `name` claim never names a principal.
+- When you delete a user, Varroa removes the subject, the current and former preferred usernames, the current and former emails, and the current and former custom claim values from every role binding. A value that another signed-in person now holds stays in the bindings.
 
 For AWS Cognito groups, set the group claim to the Cognito claim name:
 

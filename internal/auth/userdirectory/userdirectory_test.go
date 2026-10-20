@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,7 +75,7 @@ func TestRecordLogin_FirstLogin(t *testing.T) {
 
 	err := RecordLogin(context.Background(), client, userName,
 		"alice@example.com", "Alice Cooper",
-		[]string{"developers", "admins"}, subject, "alice", "test-ns")
+		[]string{"developers", "admins"}, subject, "alice", nil, "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,13 +126,13 @@ func TestRecordLogin_SubsequentRefresh(t *testing.T) {
 
 	if err := RecordLogin(context.Background(), client, userName,
 		"initial@example.com", "Initial Name",
-		[]string{"alpha"}, subject, "user1", "test-ns"); err != nil {
+		[]string{"alpha"}, subject, "user1", nil, "test-ns"); err != nil {
 		t.Fatalf("unexpected error on first login: %v", err)
 	}
 
 	if err := RecordLogin(context.Background(), client, userName,
 		"updated@example.com", "Updated Name",
-		[]string{"beta", "gamma"}, subject, "user1", "test-ns"); err != nil {
+		[]string{"beta", "gamma"}, subject, "user1", nil, "test-ns"); err != nil {
 		t.Fatalf("unexpected error on second login: %v", err)
 	}
 	if len(client.users) != 1 {
@@ -170,7 +171,7 @@ func TestRecordLogin_NeverClobberLocal(t *testing.T) {
 
 	if err := RecordLogin(context.Background(), client, userName,
 		"oidc@example.com", "OIDC Overshadow",
-		[]string{"hackers"}, subject, "overshadow", "test-ns"); err != nil {
+		[]string{"hackers"}, subject, "overshadow", nil, "test-ns"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -192,7 +193,7 @@ func TestRecordLogin_NeverClobberLocal(t *testing.T) {
 func TestRecordLogin_EmptyUserName(t *testing.T) {
 	client := newStubRecordLoginClient()
 	if err := RecordLogin(context.Background(), client, "",
-		"test@example.com", "Test", nil, "subj", "pref", "test-ns"); err == nil {
+		"test@example.com", "Test", nil, "subj", "pref", nil, "test-ns"); err == nil {
 		t.Error("expected error for empty userName")
 	}
 }
@@ -200,7 +201,7 @@ func TestRecordLogin_EmptyUserName(t *testing.T) {
 func TestRecordLogin_EmptyNamespace(t *testing.T) {
 	client := newStubRecordLoginClient()
 	if err := RecordLogin(context.Background(), client, "oidc-testname",
-		"test@example.com", "Test", nil, "subj", "pref", ""); err == nil {
+		"test@example.com", "Test", nil, "subj", "pref", nil, ""); err == nil {
 		t.Error("expected error for empty namespace")
 	}
 }
@@ -208,7 +209,7 @@ func TestRecordLogin_EmptyNamespace(t *testing.T) {
 func recordLoginTest(t *testing.T, client *stubRecordLoginClient, subject, email, preferred string) {
 	t.Helper()
 	if err := RecordLogin(context.Background(), client, oidcUserName(subject),
-		email, "Dana", nil, subject, preferred, "test-ns"); err != nil {
+		email, "Dana", nil, subject, preferred, nil, "test-ns"); err != nil {
 		t.Fatalf("RecordLogin(%q, %q): %v", email, preferred, err)
 	}
 }
@@ -299,5 +300,102 @@ func TestFormerIdentifiers_MalformedReturnsNil(t *testing.T) {
 	}
 	if got := FormerIdentifiers(nil); got != nil {
 		t.Errorf("FormerIdentifiers(nil) = %v, want nil", got)
+	}
+}
+
+func TestRecordLogin_StoresExtraUserClaims(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "oidc:claims1"
+	userName := oidcUserName(subject)
+
+	if err := RecordLogin(context.Background(), client, userName,
+		"alice@example.com", "Alice", nil, subject, "alice",
+		map[string]string{"employee_id": "E123"}, "test-ns"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	u := client.users[userName]
+	if got := u.Annotations[v1alpha1.AnnotationOIDCUserClaims]; got != `{"employee_id":"E123"}` {
+		t.Errorf("user claims annotation = %q, want employee_id E123", got)
+	}
+}
+
+func TestRecordLogin_DropsUserClaimsWhenAbsent(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "oidc:claims2"
+	userName := oidcUserName(subject)
+
+	if err := RecordLogin(context.Background(), client, userName,
+		"alice@example.com", "Alice", nil, subject, "alice",
+		map[string]string{"employee_id": "E123"}, "test-ns"); err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	if err := RecordLogin(context.Background(), client, userName,
+		"alice@example.com", "Alice", nil, subject, "alice", nil, "test-ns"); err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+
+	u := client.users[userName]
+	if _, ok := u.Annotations[v1alpha1.AnnotationOIDCUserClaims]; ok {
+		t.Errorf("expected user claims annotation removed, got %q", u.Annotations[v1alpha1.AnnotationOIDCUserClaims])
+	}
+	if former := FormerIdentifiers(u); !slices.Contains(former, "E123") {
+		t.Errorf("former identifiers = %v, want E123", former)
+	}
+}
+
+func TestRecordLogin_ChangedUserClaimRecordsFormer(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "oidc:claims3"
+	userName := oidcUserName(subject)
+
+	if err := RecordLogin(context.Background(), client, userName,
+		"alice@example.com", "Alice", nil, subject, "alice",
+		map[string]string{"employee_id": "E123"}, "test-ns"); err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	if err := RecordLogin(context.Background(), client, userName,
+		"alice@example.com", "Alice", nil, subject, "alice",
+		map[string]string{"employee_id": "E456"}, "test-ns"); err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+
+	u := client.users[userName]
+	if got := UserClaims(u)["employee_id"]; got != "E456" {
+		t.Errorf("stored employee_id = %q, want E456", got)
+	}
+	if former := FormerIdentifiers(u); !slices.Contains(former, "E123") {
+		t.Errorf("former identifiers = %v, want E123", former)
+	}
+}
+
+func TestRecordLogin_UnchangedUserClaimsWriteNoFormer(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "oidc:claims4"
+	userName := oidcUserName(subject)
+	claims := map[string]string{"employee_id": "E123"}
+
+	for i := 0; i < 2; i++ {
+		if err := RecordLogin(context.Background(), client, userName,
+			"alice@example.com", "Alice", nil, subject, "alice", claims, "test-ns"); err != nil {
+			t.Fatalf("login %d: %v", i, err)
+		}
+	}
+
+	u := client.users[userName]
+	if former := FormerIdentifiers(u); former != nil {
+		t.Errorf("expected no former identifiers, got %v", former)
+	}
+}
+
+func TestUserClaims_MalformedReturnsNil(t *testing.T) {
+	if got := UserClaims(nil); got != nil {
+		t.Errorf("nil user: got %v", got)
+	}
+	u := &v1alpha1.User{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{v1alpha1.AnnotationOIDCUserClaims: `["not","an","object"]`},
+	}}
+	if got := UserClaims(u); got != nil {
+		t.Errorf("malformed annotation: got %v", got)
 	}
 }

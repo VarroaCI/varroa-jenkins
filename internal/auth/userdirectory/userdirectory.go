@@ -27,8 +27,10 @@ type UserStore interface {
 // Identity/metadata (email, display name, labels, annotations) are written via
 // ApplyUserCRD; observed status (last-login, observed groups) is written via
 // PatchUserStatus against the status subresource. Both run on every login so
-// first login provisions and subsequent logins refresh.
-func RecordLogin(ctx context.Context, store UserStore, userName, email, displayName string, groups []string, subject, preferredUsername, namespace string) error {
+// first login provisions and subsequent logins refresh. extraClaims holds the
+// configured custom user claims; a replaced value moves to the former
+// identifiers.
+func RecordLogin(ctx context.Context, store UserStore, userName, email, displayName string, groups []string, subject, preferredUsername string, extraClaims map[string]string, namespace string) error {
 	if userName == "" || namespace == "" {
 		return fmt.Errorf("record login: userName and namespace are required")
 	}
@@ -57,6 +59,11 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 		if existing.Spec.Email != "" && existing.Spec.Email != email {
 			former = append(former, existing.Spec.Email)
 		}
+		for k, v := range UserClaims(existing) {
+			if extraClaims[k] != v {
+				former = append(former, v)
+			}
+		}
 
 		// Refresh claim-derived identity/metadata.
 		existing.Spec.Email = email
@@ -73,6 +80,7 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 		for k, v := range annotations {
 			existing.Annotations[k] = v
 		}
+		setUserClaims(existing, extraClaims)
 		setFormerIdentifiers(existing, former)
 		if err := store.ApplyUserCRD(ctx, existing); err != nil {
 			return fmt.Errorf("update user %s: %w", userName, err)
@@ -96,14 +104,16 @@ func RecordLogin(ctx context.Context, store UserStore, userName, email, displayN
 			DisplayName: displayName,
 		},
 	}
+	setUserClaims(user, extraClaims)
 	if err := store.ApplyUserCRD(ctx, user); err != nil {
 		return fmt.Errorf("create user %s: %w", userName, err)
 	}
 	return patchObservedStatus(ctx, store, userName, namespace, &now, groups)
 }
 
-// FormerIdentifiers returns the preferred usernames and emails that a User
-// held before a later login. It returns nil for a nil user, a missing
+// FormerIdentifiers returns the preferred usernames, emails, and replaced
+// custom user claim values that a User held before a later login. It returns
+// nil for a nil user, a missing
 // annotation, or a value that is not a JSON array.
 func FormerIdentifiers(u *v1alpha1.User) []string {
 	if u == nil {
@@ -118,6 +128,47 @@ func FormerIdentifiers(u *v1alpha1.User) []string {
 		return nil
 	}
 	return values
+}
+
+// UserClaims returns the custom user claims that a login stored on the User.
+// It returns nil for a nil user, a missing annotation, or a value that is not
+// a JSON object of strings.
+func UserClaims(u *v1alpha1.User) map[string]string {
+	if u == nil {
+		return nil
+	}
+	raw := u.Annotations[v1alpha1.AnnotationOIDCUserClaims]
+	if raw == "" {
+		return nil
+	}
+	var claims map[string]string
+	if err := json.Unmarshal([]byte(raw), &claims); err != nil {
+		return nil
+	}
+	return claims
+}
+
+// setUserClaims writes the non-empty custom user claims as a JSON object with
+// sorted keys. It removes the annotation when no claim remains.
+func setUserClaims(u *v1alpha1.User, claims map[string]string) {
+	clean := make(map[string]string, len(claims))
+	for k, v := range claims {
+		if k != "" && v != "" {
+			clean[k] = v
+		}
+	}
+	if len(clean) == 0 {
+		delete(u.Annotations, v1alpha1.AnnotationOIDCUserClaims)
+		return
+	}
+	raw, err := json.Marshal(clean)
+	if err != nil {
+		return
+	}
+	if u.Annotations == nil {
+		u.Annotations = map[string]string{}
+	}
+	u.Annotations[v1alpha1.AnnotationOIDCUserClaims] = string(raw)
 }
 
 // setFormerIdentifiers writes the sorted, deduplicated former identifiers.
