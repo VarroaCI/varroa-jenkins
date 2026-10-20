@@ -107,7 +107,8 @@ The token needs these permissions on Gitea or Forgejo:
 `open_issue` needs no push access. The operator tries each credential that
 reads the repository. It tries the credentials that may push first. A forge 403
 moves to the next credential. When every credential answers 403, `open_issue`
-answers `forge_write_denied`. On GitHub, give the token read access to contents
+answers `forge_write_denied`. A forge rate limit stops the attempt and answers
+`forge_unreachable` with the retry time. On GitHub, give the token read access to contents
 and write access to issues.
 
 The instructions source must follow the default branch. Set no

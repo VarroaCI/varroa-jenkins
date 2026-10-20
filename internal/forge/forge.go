@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Kind names a forge API family.
@@ -203,6 +204,22 @@ type StatusError struct {
 // Error returns the status code only.
 func (e *StatusError) Error() string {
 	return "forge: HTTP " + strconv.Itoa(e.Status)
+}
+
+// RateLimitError reports a forge 403 or 429 that a rate limit caused. Reset
+// is the time the forge states for a retry. It is zero when the forge states
+// no time. It never matches ErrForbidden, so no credential fallback runs.
+type RateLimitError struct {
+	Status int
+	Reset  time.Time
+}
+
+// Error names the status and the reset time. It never holds the response body.
+func (e *RateLimitError) Error() string {
+	if e.Reset.IsZero() {
+		return fmt.Sprintf("forge: rate limited (HTTP %d)", e.Status)
+	}
+	return fmt.Sprintf("forge: rate limited (HTTP %d) until %s", e.Status, e.Reset.UTC().Format(time.RFC3339))
 }
 
 // Detect names the forge API that answers on host. The host github.com

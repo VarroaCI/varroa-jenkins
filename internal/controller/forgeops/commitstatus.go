@@ -25,7 +25,8 @@ const maxUnescapePasses = 3
 // the recorder ends the build. A context is changed only when its latest
 // state is pending and its target URL names this job and build number.
 // A context with an end state is never changed. It tries each pushing
-// credential in id order. A forge 403 moves to the next credential. It
+// credential in id order. A forge 403 moves to the next credential. A rate
+// limit stops the attempt. It
 // returns the number of statuses that it wrote.
 func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusRequest) (int, error) {
 	if req.Team == "" || req.Repo == "" || req.SHA == "" || req.JobPath == "" || req.Reason == "" {

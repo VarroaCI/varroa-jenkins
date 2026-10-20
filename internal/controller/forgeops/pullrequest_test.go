@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/varroaci/varroa-jenkins/internal/forge"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
@@ -295,5 +296,67 @@ func TestPullRequest_ReadOnlyCredentialNeverTried(t *testing.T) {
 	}
 	if strings.Contains(rep.Error, `"b"`) {
 		t.Fatalf("error %q names the read-only credential", rep.Error)
+	}
+}
+
+// rateLimitErr is a forge rate limit with a stated reset time.
+func rateLimitErr() error {
+	return &forge.RateLimitError{Status: 403, Reset: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+}
+
+// TestPullRequest_RateLimitedPRStopsFallback checks that a rate limit on the
+// pull request deletes the branch and stops, without a second credential.
+func TestPullRequest_RateLimitedPRStopsFallback(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = rateLimitErr()
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	wantCode(t, rep, forgeapi.CodeForgeUnreachable)
+	if !strings.Contains(rep.Error, "rate limit") || !strings.Contains(rep.Error, "2026-10-20T12:00:00Z") || !strings.Contains(rep.Error, `"a"`) {
+		t.Fatalf("error %q lacks the rate limit, the reset time, or credential a", rep.Error)
+	}
+	if strings.Contains(rep.Error, `"b"`) {
+		t.Fatalf("error %q names credential b", rep.Error)
+	}
+	if len(b.calls) != 0 {
+		t.Fatalf("b was tried after a rate limit: %v", b.calls)
+	}
+	if got := a.calls[len(a.calls)-1]; got != "delete:"+forgeapi.ProposalBranch {
+		t.Fatalf("a calls %v, want the branch deleted last", a.calls)
+	}
+}
+
+// TestPullRequest_RateLimitedCreateBranchStops checks that a rate limit on the
+// branch create stops without a delete and without a fallback.
+func TestPullRequest_RateLimitedCreateBranchStops(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.createErr = rateLimitErr()
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	wantCode(t, fx.ops.PullRequest(context.Background(), prReq()), forgeapi.CodeForgeUnreachable)
+	for _, call := range a.calls {
+		if strings.HasPrefix(call, "delete:") {
+			t.Fatalf("a deleted a branch it never created: %v", a.calls)
+		}
+	}
+	if len(b.calls) != 0 {
+		t.Fatalf("b was tried after a rate limit: %v", b.calls)
+	}
+}
+
+// TestPullRequest_RateLimitedProbeSkipsCredential checks that a rate-limited
+// probe skips its credential and the next pushing credential opens the PR.
+func TestPullRequest_RateLimitedProbeSkipsCredential(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.repoErr = rateLimitErr()
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	if !rep.OK || rep.Number != 4 {
+		t.Fatalf("reply %+v", rep)
 	}
 }
