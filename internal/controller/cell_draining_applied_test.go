@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -257,5 +258,202 @@ func TestCellBufferedResultFromReplacedPodDoesNotReaddDroppedTenant(t *testing.T
 
 	if want := []string{"search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
 		t.Fatalf("AppliedTenants = %v, want %v: a buffered result from the replaced pod re-added a dropped tenant", cr.Status.Cell.AppliedTenants, want)
+	}
+}
+
+// parkedCellResultCount reports how many results the reconciler holds for a
+// controller key.
+func parkedCellResultCount(rec *Reconciler, key string) int {
+	rec.cellResultMu.Lock()
+	defer rec.cellResultMu.Unlock()
+	if _, ok := rec.parkedCellResults[key]; ok {
+		return 1
+	}
+	return 0
+}
+
+// newParkingCellFixture returns a cell on pod-old with payments refused and
+// search applied, and a reconciler whose pod read the test controls.
+func newParkingCellFixture(t *testing.T) (*testClient, *Reconciler, *captureTransport, *v1alpha1.Controller) {
+	t.Helper()
+	client := newTestClientWithBundle()
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-old")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	rec := newTestReconcilerWithTokenSigner(client)
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+
+	cr := newItemsFailureCell("")
+	// A warm-up tick pushes the desired state, so the hash is stable before
+	// the test drains a result for it.
+	_ = rec.reconcileController(context.Background(), cr)
+	cr.Status.Cell.Instance = "pod-old"
+	cr.Status.Cell.AppliedTenants = []string{"search"}
+	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
+		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+	}}
+	return client, rec, transport, cr
+}
+
+// TestCellResultDuringFailedPodReadAppliesAfterNextRead pins that a result
+// from the new pod, drained while the pod read fails, applies on the next
+// successful read instead of being lost.
+func TestCellResultDuringFailedPodReadAppliesAfterNextRead(t *testing.T) {
+	client, rec, transport, cr := newParkingCellFixture(t)
+	key := cr.Namespace + "/" + cr.Name
+
+	client.controllerPodErr = errors.New("apiserver unavailable")
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, true, "", "", "", "", cr.Status.DesiredStateHash), "pod-new"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("tick 1 AppliedTenants = %v, want %v", cr.Status.Cell.AppliedTenants, want)
+	}
+	if n := itemsFailureCount(cr, "payments"); n != 1 {
+		t.Fatalf("tick 1 payments ItemsApplyFailed warnings = %d, want 1", n)
+	}
+	if n := parkedCellResultCount(rec, key); n != 1 {
+		t.Fatalf("tick 1 parked results = %d, want 1", n)
+	}
+
+	client.controllerPodErr = nil
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	transport.drainResults = nil
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"payments", "search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("tick 2 AppliedTenants = %v, want %v", cr.Status.Cell.AppliedTenants, want)
+	}
+	if n := itemsFailureCount(cr, "payments"); n != 0 {
+		t.Fatalf("tick 2 payments ItemsApplyFailed warnings = %d, want 0", n)
+	}
+	if n := parkedCellResultCount(rec, key); n != 0 {
+		t.Fatalf("tick 2 parked results = %d, want 0", n)
+	}
+}
+
+// TestCellParkedResultDroppedWhenHashMoves pins that a parked result for an
+// older desired-state hash is dropped on replay and never applied.
+func TestCellParkedResultDroppedWhenHashMoves(t *testing.T) {
+	client, rec, transport, cr := newParkingCellFixture(t)
+	key := cr.Namespace + "/" + cr.Name
+
+	client.controllerPodErr = errors.New("apiserver unavailable")
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, true, "", "", "", "", cr.Status.DesiredStateHash), "pod-new"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	client.controllerPodErr = nil
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	transport.drainResults = nil
+	cr.Status.DesiredStateHash = "hash-2"
+	rec.updateCellInstance(context.Background(), cr)
+
+	if want := []string{"search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("AppliedTenants = %v, want %v: a result for a moved hash was applied", cr.Status.Cell.AppliedTenants, want)
+	}
+	if n := parkedCellResultCount(rec, key); n != 0 {
+		t.Fatalf("parked results = %d, want 0", n)
+	}
+}
+
+// TestCellParkedResultDroppedForReplacedPod pins that a result from a pod
+// that was replaced again is dropped on the next successful read.
+func TestCellParkedResultDroppedForReplacedPod(t *testing.T) {
+	client, rec, transport, cr := newParkingCellFixture(t)
+	key := cr.Namespace + "/" + cr.Name
+
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, true, "", "", "", "", cr.Status.DesiredStateHash), "pod-old"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	transport.drainResults = nil
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("AppliedTenants = %v, want %v: a result from a replaced pod was applied", cr.Status.Cell.AppliedTenants, want)
+	}
+	if n := parkedCellResultCount(rec, key); n != 0 {
+		t.Fatalf("parked results = %d, want 0", n)
+	}
+}
+
+// TestCellParkedResultKeptWhileReadFails pins that a parked result survives
+// failed pod reads and applies on the first successful read.
+func TestCellParkedResultKeptWhileReadFails(t *testing.T) {
+	client, rec, transport, cr := newParkingCellFixture(t)
+
+	client.controllerPodErr = errors.New("apiserver unavailable")
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, true, "", "", "", "", cr.Status.DesiredStateHash), "pod-new"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+	transport.drainResults = nil
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("while reads fail AppliedTenants = %v, want %v", cr.Status.Cell.AppliedTenants, want)
+	}
+
+	client.controllerPodErr = nil
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"payments", "search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("after the read succeeds AppliedTenants = %v, want %v", cr.Status.Cell.AppliedTenants, want)
+	}
+}
+
+// TestCellParkedWalkResultNotReplacedByNonWalkResult pins that a result with
+// no items walk, drained from the new pod later, does not overwrite the
+// parked walk result that would re-add the refused tenant.
+func TestCellParkedWalkResultNotReplacedByNonWalkResult(t *testing.T) {
+	client, rec, transport, cr := newParkingCellFixture(t)
+	key := cr.Namespace + "/" + cr.Name
+
+	client.controllerPodErr = errors.New("apiserver unavailable")
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, true, "", "", "", "", cr.Status.DesiredStateHash), "pod-new"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	transport.drainResults = []*mitev1.CommandResult{
+		withCellInstance(mkDSR(true, true, true, false, "", "", "", "deadline", cr.Status.DesiredStateHash), "pod-new"),
+	}
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if n := parkedCellResultCount(rec, key); n != 1 {
+		t.Fatalf("parked results = %d, want 1", n)
+	}
+
+	client.controllerPodErr = nil
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	transport.drainResults = nil
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if want := []string{"payments", "search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("AppliedTenants = %v, want %v: a non-walk result replaced the parked walk", cr.Status.Cell.AppliedTenants, want)
 	}
 }

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // TestUpdateCellInstance_RunningPod covers task 6.0: a running pod's UID
@@ -177,5 +179,39 @@ func TestUpdateCellInstance_ReplacedPodDropsHeldApplied(t *testing.T) {
 	rec.updateCellInstance(context.Background(), cr)
 	if got := cr.Status.Cell.AppliedTenants; len(got) != 1 || got[0] != "plain" {
 		t.Errorf("expected a new pod to drop the held tenant, got %v", got)
+	}
+}
+
+// TestUpdateCellInstance_ReplaysParkedResultAfterDrop pins the order inside
+// updateCellInstance: the pod change drops the refused tenant first, and the
+// parked result from the new pod then re-adds it.
+func TestUpdateCellInstance_ReplaysParkedResultAfterDrop(t *testing.T) {
+	client := newTestClientWithBundle()
+	client.controllerPod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-new")},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	rec := newTestReconcilerWithTokenSigner(client)
+
+	cr := newItemsFailureCell("hash-1")
+	cr.Status.Cell.Instance = "pod-old"
+	cr.Status.Cell.AppliedTenants = []string{"payments", "search"}
+	cr.Status.Cell.TenantWarnings = []v1alpha1.TenantWarning{{
+		Tenant: "payments", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "create payments/repos: boom",
+	}}
+
+	rec.parkCellResult(cr.Namespace+"/"+cr.Name, &mitev1.DesiredStateResult{
+		ItemsSuccess: true,
+		AppliedHash:  "hash-1",
+		CellInstance: "pod-new",
+	})
+
+	rec.updateCellInstance(context.Background(), cr)
+
+	if want := []string{"payments", "search"}; !slices.Equal(cr.Status.Cell.AppliedTenants, want) {
+		t.Fatalf("AppliedTenants = %v, want %v", cr.Status.Cell.AppliedTenants, want)
+	}
+	if n := itemsFailureCount(cr, "payments"); n != 0 {
+		t.Fatalf("payments ItemsApplyFailed warnings = %d, want 0", n)
 	}
 }

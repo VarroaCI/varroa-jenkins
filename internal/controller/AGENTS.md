@@ -631,7 +631,7 @@ sections describe.
   tracked desired-state hash. The same drain also advances `status.cell.appliedTenants` on a
   result with `item_failures`. Each tenant that owns a refused item keeps its previous membership.
   The drain advances `appliedTenants` and `ItemsApplyFailed` only for a result whose
-  `cell_instance` equals `status.cell.instance`. A result from a replaced pod changes neither.
+  `cell_instance` equals `status.cell.instance`. A result from a replaced pod changes neither. The drain parks an items-walk result from another instance in memory. The next successful pod read replays it when its instance and hash still match. A failed pod read therefore delays a new pod's result by one tick.
   A tenant in `status.cell.drainingTenants` never enters `appliedTenants`. The draining set is
   written with `desiredStateHash` on a delivered push only. A pod change drops each tenant with an
   `ItemsApplyFailed` entry from `appliedTenants`.
