@@ -87,6 +87,33 @@ func TestJenkinsRoleAssignments_TenantMemberRole_TeamSubjects(t *testing.T) {
 	}
 }
 
+func TestJenkinsRoleAssignments_TenantMemberRole_DefaultRoleRef(t *testing.T) {
+	controller := memberRoleTestController()
+	team := memberRoleTestTeam("", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Owners"})
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, []*v1alpha1.Team{team}, []*v1alpha1.Controller{controller})
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := memberRoleTestAssignment(assignments, "varroa:tenant-member:sbsoftware")
+	if a == nil {
+		t.Fatalf("expected varroa:tenant-member:sbsoftware for an empty roleRef, got %+v", assignments)
+	}
+	if !equalStringSets(a.Permissions, tenantMemberPermissions) {
+		t.Errorf("expected permissions %v, got %v", tenantMemberPermissions, a.Permissions)
+	}
+	hasTeamGroup := false
+	for _, s := range a.Subjects {
+		if s.Kind == "Group" && s.Name == "team-sbsoftware" {
+			hasTeamGroup = true
+		}
+	}
+	if !hasTeamGroup {
+		t.Errorf("expected subject Group:team-sbsoftware, got %+v", a.Subjects)
+	}
+}
+
 func TestJenkinsRoleAssignments_TenantMemberRole_ReadOnlyGrantExcluded(t *testing.T) {
 	controller := memberRoleTestController()
 	team := memberRoleTestTeam("viewer", v1alpha1.SubjectRef{Kind: "Group", Name: "sbsoftware:Readers"})
