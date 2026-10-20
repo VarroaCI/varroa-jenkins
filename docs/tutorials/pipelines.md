@@ -215,6 +215,8 @@ The setting is per tenant, and the group it cancels within is the job path itsel
 build. A multibranch child job's path includes its branch, so a new build on one branch never
 cancels another branch's build.
 
+Use `cancelInProgress` when a pull request builds again against a new target commit. The newer build then usually sets the last commit status.
+
 ## Next steps
 
 [Operate a run](run-operations.md) covers fleet locks, the failure digest, the summary line, and

@@ -162,6 +162,22 @@ The write can race the retry. If the retry's own `pending` status lands first, t
 land after it. The context then shows `error` until the retry build completes. The retry build then
 writes its own end state, which replaces the `error`.
 
+## Two builds of one pull request
+
+A pull request can build again when its target branch moves. The new build and the older build
+share the head commit. Both builds report the same status context on that commit. The plugin
+writes the context when each build completes. The build that completes last sets the context, so
+an older build can replace the result of the newer build.
+
+To keep the newer result, set `Team.spec.pipelines.concurrency` to `cancelInProgress`. The newer
+build then cancels the older build when it claims its build number. The recorder publishes the cancel asynchronously. The older build therefore usually completes
+first. The newer build then usually writes the last status. The order of those writes is not
+guaranteed. Until the newer build completes, the context can show the cancelled build's state.
+
+Varroa does not set the context name. The plugin sets it. The `github-branch-source` plugin uses
+`continuous-integration/jenkins/pr-merge` by default. Read the context name on the forge before
+you set a required status check.
+
 ## Status links
 
 The status link of a build points to the Varroa build page. A plain job without a `targetUrl`

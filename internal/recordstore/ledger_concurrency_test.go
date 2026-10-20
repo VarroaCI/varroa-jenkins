@@ -121,6 +121,60 @@ func TestConcurrencyCancelPublishesForOlderRun(t *testing.T) {
 	}
 }
 
+// TestConcurrencyCancelCancelsOlderSCMRunOfOneHeadCommit asserts a granted
+// claim for a cancelInProgress tenant cancels an older run of the same job
+// path whose scm key names the same head commit with another base. The
+// test checks only that the cancel is published. It does not check the
+// order of the forge status writes.
+func TestConcurrencyCancelCancelsOlderSCMRunOfOneHeadCommit(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+	seedTenantPlacementPolicy(t, db, `{"concurrency":"cancelInProgress"}`)
+
+	req := newTestClaimRequest("scm:"+testJobPath+":head222+base999", 0)
+	olderID := uuid.Must(uuid.NewV7())
+	if _, err := db.Exec(`
+		INSERT INTO varroa.runs (run_id, created_at, intent_key, cluster, namespace, cell, tenant, job_path, status, scm_revision)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'RUNNING', 'head222')
+	`, olderID, time.Now().UTC().Add(-10*time.Minute), "scm:"+testJobPath+":head222+base111",
+		req.Cluster, req.Namespace, req.Cell, req.Tenant, req.JobPath); err != nil {
+		t.Fatalf("seed older scm run: %v", err)
+	}
+
+	conn := newTestActionConn(t)
+	received := subscribeCancelActions(t, conn, 4)
+
+	mp, _ := newTestMeterProvider(t)
+	concurrencyMetrics, err := NewConcurrencyMetrics(mp)
+	if err != nil {
+		t.Fatalf("new concurrency metrics: %v", err)
+	}
+	actionMetrics, err := NewActionMetrics(mp)
+	if err != nil {
+		t.Fatalf("new action metrics: %v", err)
+	}
+
+	ledger := NewLedger(pool, nil)
+	ledger.SetConcurrencyCancel(conn, concurrencyMetrics, actionMetrics, nil)
+	resp := ledger.Claim(context.Background(), req)
+	if resp.Decision != DecisionGranted {
+		t.Fatalf("claim: want granted, got %+v", resp)
+	}
+
+	select {
+	case a := <-received:
+		if a.Kind != LedgerActionCancelRun || a.RunID != olderID.String() || a.JobPath != testJobPath {
+			t.Fatalf("got %+v, want a cancel_run for the older head run %s", a, olderID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("want a cancel_run action for the older run of the same head commit")
+	}
+
+	// The cancel adds to the counters after its publish returns.
+	ledger.waitConcurrencyCancel()
+}
+
 // TestConcurrencyCancelBoundedAtEight asserts eleven older non-terminal
 // runs produce eight published cancels, oldest first, and three counted
 // skipped.
