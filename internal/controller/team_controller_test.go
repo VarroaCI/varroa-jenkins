@@ -11,7 +11,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -925,73 +924,6 @@ func TestTeamReconciler_Pipelines_ManuallyCreatedCellResolvesProfileFromVersion(
 	}
 }
 
-// seedRetiredPipelinesRoleBinding seeds the binding an earlier release wrote,
-// with roleRef developer, which no JenkinsRole defines.
-func seedRetiredPipelinesRoleBinding(client *testClient, labels map[string]string, owners []metav1.OwnerReference) {
-	crdstore.MustSeed(client.store, &v1alpha1.JenkinsRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "team-payments-pipelines",
-			Labels:          labels,
-			OwnerReferences: owners,
-		},
-		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: "developer"},
-	})
-}
-
-func TestTeamReconciler_Pipelines_DeletesOwnedRetiredPipelinesRoleBinding(t *testing.T) {
-	client := newTeamTestClient()
-	client.namespaces["payments-ns"] = true
-	seedJenkinsVersionProfile(client)
-	seedCellController(client, nil)
-
-	uid := types.UID("10000000-0000-0000-0000-000000000003")
-	teamWith(client, "payments", v1alpha1.TeamSpec{
-		Members:    []string{"alice"},
-		Namespaces: []string{"payments-ns"},
-		Pipelines: &v1alpha1.TeamPipelinesSpec{
-			Profile:        "jenkins-lts",
-			AgentNamespace: "payments-ns",
-		},
-	}, uid)
-	seedRetiredPipelinesRoleBinding(client, nil, []metav1.OwnerReference{{
-		APIVersion: "varroa.dev/v1alpha1", Kind: "Team", Name: "payments", UID: uid,
-	}})
-
-	rec := newPipelinesTeamReconciler(client, nil)
-	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", ""); !apierrors.IsNotFound(err) {
-		t.Errorf("expected the owned retired binding to be deleted, got err %v", err)
-	}
-}
-
-func TestTeamReconciler_Pipelines_KeepsUnownedPipelinesRoleBinding(t *testing.T) {
-	client := newTeamTestClient()
-	client.namespaces["payments-ns"] = true
-	seedJenkinsVersionProfile(client)
-	seedCellController(client, nil)
-
-	uid := types.UID("10000000-0000-0000-0000-000000000004")
-	teamWith(client, "payments", v1alpha1.TeamSpec{
-		Members:    []string{"alice"},
-		Namespaces: []string{"payments-ns"},
-		Pipelines: &v1alpha1.TeamPipelinesSpec{
-			Profile:        "jenkins-lts",
-			AgentNamespace: "payments-ns",
-		},
-	}, uid)
-	seedRetiredPipelinesRoleBinding(client, nil, nil)
-
-	rec := newPipelinesTeamReconciler(client, nil)
-	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", ""); err != nil {
-		t.Errorf("expected the hand-authored binding to stay, got err %v", err)
-	}
-}
-
 func TestTeamReconciler_Pipelines_TeardownDeletesChildrenAndHoldsFinalizer(t *testing.T) {
 	client := newTeamTestClient()
 	client.namespaces["payments-ns"] = true
@@ -1017,10 +949,6 @@ func TestTeamReconciler_Pipelines_TeardownDeletesChildrenAndHoldsFinalizer(t *te
 	}
 	client.teams["payments"] = team
 	crdstore.MustSeed(client.store, team)
-	seedRetiredPipelinesRoleBinding(client, map[string]string{
-		v1alpha1.LabelManagedBy: "team",
-		v1alpha1.LabelTeamName:  "payments",
-	}, nil)
 
 	rec := newPipelinesTeamReconciler(client, nil)
 	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
@@ -1041,14 +969,10 @@ func TestTeamReconciler_Pipelines_TeardownDeletesChildrenAndHoldsFinalizer(t *te
 		t.Errorf("expected Placed=False/TenantTeardownPending, got %+v", status.Conditions)
 	}
 
-	// The four teardown-stage-one deletions: the tenant dropped from the
-	// cell's tenant list, the JenkinsRoleBinding, the ServiceAccount, and
-	// its token Secret.
+	// The three teardown-stage-one deletions that remain: the tenant dropped
+	// from the cell's tenant list, the ServiceAccount, and its token Secret.
 	if len(client.cellStatusPatches) != 1 || len(client.cellStatusPatches[0].cell.Tenants) != 0 {
 		t.Errorf("expected the tenant dropped from the cell's tenant list: %+v", client.cellStatusPatches)
-	}
-	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", ""); err == nil {
-		t.Error("expected the pipelines JenkinsRoleBinding to be deleted")
 	}
 	var deletedSA bool
 	for _, d := range client.deleted {
@@ -1343,8 +1267,7 @@ func TestTeamReconciler_Pipelines_TeardownWaitCreatesNothing(t *testing.T) {
 }
 
 // callOrderBackend wraps a crdstore.Backend and appends to one shared,
-// ordered call log every time it patches a Team's status or writes a
-// JenkinsRoleBinding (task 9.2's pipelines child). It shares the log with
+// ordered call log every time it patches a Team's status or a cell's status. It shares the log with
 // callOrderClient below, so the two together record one call order across
 // the fake store and the fake client.
 type callOrderBackend struct {
@@ -1360,20 +1283,6 @@ func (b *callOrderBackend) PatchObjectStatus(ctx context.Context, gvr schema.Gro
 		*b.calls = append(*b.calls, "cell-claim-patch")
 	}
 	return b.Backend.PatchObjectStatus(ctx, gvr, namespace, name, status)
-}
-
-func (b *callOrderBackend) CreateObject(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	if jrbGVR, _ := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding](); gvr == jrbGVR {
-		*b.calls = append(*b.calls, "child-jenkinsrolebinding")
-	}
-	return b.Backend.CreateObject(ctx, gvr, namespace, obj)
-}
-
-func (b *callOrderBackend) UpdateObject(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	if jrbGVR, _ := crdstore.GVRFor[v1alpha1.JenkinsRoleBinding](); gvr == jrbGVR {
-		*b.calls = append(*b.calls, "child-jenkinsrolebinding")
-	}
-	return b.Backend.UpdateObject(ctx, gvr, namespace, obj)
 }
 
 // callOrderClient wraps a *testClient and appends to the same shared,
@@ -1451,7 +1360,7 @@ func TestTeamReconciler_Pipelines_StatusPatchPrecedesCellPatchAndChildren(t *tes
 		switch c {
 		case "cell-tenant-patch":
 			sawCellPatch = true
-		case "child-jenkinsrolebinding", "child-agent-serviceaccount":
+		case "child-agent-serviceaccount":
 			sawChildWrite = true
 		case "team-status-patch":
 			t.Fatalf("expected exactly one Team status patch, got a second one in order %v", calls)
