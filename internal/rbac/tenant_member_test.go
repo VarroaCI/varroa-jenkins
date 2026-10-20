@@ -521,3 +521,83 @@ func TestTenantMemberRolesListsFederatedCopy(t *testing.T) {
 		t.Fatalf("roles = %+v, want the narrowed federated copy", roles)
 	}
 }
+
+// An all-tenants copy reaches the member role of every tenant the cell hosts.
+func TestMemberRoleIncludesAllTenantsFederatedCopy(t *testing.T) {
+	controller := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "cell-a", Namespace: "varroa-system"},
+		Status:     v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{Tenants: []string{"sbsoftware", "other"}}},
+	}
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-all-x", FederatedAllTenants, "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"}))
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, team := range []string{"sbsoftware", "other"} {
+		a := memberRoleTestAssignment(assignments, "varroa:tenant-member:"+team)
+		if a == nil {
+			t.Fatalf("expected the member role of %s, got %+v", team, assignments)
+		}
+		if len(a.Subjects) != 1 || a.Subjects[0].Name != "alice" {
+			t.Errorf("%s subjects = %+v, want alice", team, a.Subjects)
+		}
+		perms := strings.Join(a.Permissions, " ")
+		if !strings.Contains(perms, "Cancel") || !strings.Contains(perms, "Replay") {
+			t.Errorf("%s permissions = %v, want Item.Cancel and Run.Replay", team, a.Permissions)
+		}
+	}
+}
+
+// A cluster-wide copy never narrows. A copy with a job list fails closed.
+func TestAllTenantsCopyWithJobsAnnotationFailsClosed(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-all-bad", FederatedAllTenants, `["repos/*"]`,
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"}))
+
+	assignments, err := r.JenkinsRoleAssignments(controller)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range assignments {
+		for _, s := range a.Subjects {
+			if s.Name == "alice" {
+				t.Errorf("a narrowed all-tenants copy granted alice in %s", a.RoleName)
+			}
+		}
+	}
+}
+
+// An all-tenants copy on a controller with no cell role grants nothing.
+func TestAllTenantsCopyIgnoredOnNonCell(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-all-y", FederatedAllTenants, "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "alice"}))
+
+	plain := &v1alpha1.Controller{ObjectMeta: metav1.ObjectMeta{Name: "plain", Namespace: "varroa-system"}}
+	assignments, err := r.JenkinsRoleAssignments(plain)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range assignments {
+		if strings.HasPrefix(a.RoleName, "varroa:tenant-member:") {
+			t.Errorf("a non-cell controller got member role %s", a.RoleName)
+		}
+	}
+}
+
+// TenantMemberRoles lists the whole-folder role that an all-tenants copy gives.
+func TestTenantMemberRolesListsAllTenantsCopy(t *testing.T) {
+	controller := memberRoleTestController()
+	r := testTenantResolver([]*v1alpha1.VarroaRole{developerRole()}, nil, nil, []*v1alpha1.Controller{controller})
+	r = withFederatedCopies(r, federatedTenantCopy("varroa-fed-tenant-all-z", FederatedAllTenants, "",
+		v1alpha1.SubjectRef{Kind: "User", Name: "bob"}))
+	roles := r.TenantMemberRoles(ParsedTenant{Kind: TenantTeam, Team: "sbsoftware", Folder: "sbsoftware"})
+	if len(roles) != 1 || roles[0].Binding != "" || len(roles[0].Subjects) != 1 {
+		t.Fatalf("roles = %+v, want the whole-folder role with bob", roles)
+	}
+}

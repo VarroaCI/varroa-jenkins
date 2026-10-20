@@ -46,12 +46,18 @@ const (
 
 // LabelFederatedTenantMember marks a federated JenkinsRoleBinding that carries
 // a tenant-scoped grant ("true"). A hive holds one copy for each tenant the
-// grant names. A member cell reads the copy for its own tenant only, and the
-// generic JenkinsRoleBinding collector ignores it.
+// grant names, and one all-tenants copy for a cluster-wide pipelines write
+// grant. A member cell reads the copies for its own tenant only, and the
+// generic JenkinsRoleBinding collector ignores them.
 const LabelFederatedTenantMember = "varroa.dev/federated-tenant-member"
 
-// AnnotationFederatedTenant names the tenant of a tenant-member copy.
+// AnnotationFederatedTenant names the tenant of a tenant-member copy. The
+// value FederatedAllTenants marks a copy that reaches every tenant on a cell.
 const AnnotationFederatedTenant = "varroa.dev/federated-tenant"
+
+// FederatedAllTenants is the tenant annotation value of a copy that reaches
+// every tenant on a cell. It cannot be a Team name.
+const FederatedAllTenants = "*"
 
 // AnnotationFederatedTenantJobs holds the job globs of a tenant-member copy as
 // a JSON array of strings. An absent annotation means the whole tenant folder.
@@ -167,6 +173,11 @@ func DesiredFederatedCRs(
 			continue
 		}
 
+		// A cluster-wide grant with pipelines write also reaches every tenant
+		// on a member cell. Its Global projection is optional: the all-tenants
+		// copy below is written even when the role has no Jenkins projection.
+		memberWrite := vrb.Spec.Scope == nil && slices.Contains(VarroaRolePipelinesVerbs(vr), "write")
+
 		roleName := ""
 		var roleSpec v1alpha1.JenkinsRoleSpec
 		switch {
@@ -187,67 +198,98 @@ func DesiredFederatedCRs(
 		case len(vr.Spec.JenkinsPermissions) > 0:
 			roleName = vr.Name
 			roleSpec = v1alpha1.JenkinsRoleSpec{RoleType: "Global", Permissions: append([]string(nil), vr.Spec.JenkinsPermissions...)}
+		case memberWrite:
+			// No Global projection. The all-tenants copy below is the only object federated.
 		default:
 			skip(vrb, SkipNoJenkinsProjection, fmt.Sprintf("VarroaRole %s grants no Jenkins permissions", vr.Name))
 			continue
 		}
 
-		// Never project onto the reserved system-mite / system-operator roles:
-		// source-1 derivation forms the Jenkins role name as varroa:<roleRef>, so a
-		// roleName of "system-mite" or "system-operator" would collide with the
-		// resolver's synthesized varroa:system-mite / varroa:system-operator
-		// assignment — attaching extra subjects to, or overriding the forced
-		// Administer permission of, those reserved machine-identity roles.
-		if roleName == "system-mite" || roleName == "system-operator" {
-			warnings = append(warnings, fmt.Sprintf("varroarole %s projects to the reserved %s role; skipped", vr.Name, roleName))
-			skip(vrb, SkipReservedRole, fmt.Sprintf("role %s is reserved", roleName))
-			continue
-		}
-
-		if existing, exists := roleByName[roleName]; !exists {
-			roleByName[roleName] = &v1alpha1.JenkinsRole{
-				TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "JenkinsRole"},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   roleName,
-					Labels: map[string]string{LabelFederatedFrom: vr.Name},
-				},
-				Spec: roleSpec,
+		if roleName != "" {
+			// Never project onto the reserved system-mite / system-operator roles:
+			// source-1 derivation forms the Jenkins role name as varroa:<roleRef>, so a
+			// roleName of "system-mite" or "system-operator" would collide with the
+			// resolver's synthesized varroa:system-mite / varroa:system-operator
+			// assignment — attaching extra subjects to, or overriding the forced
+			// Administer permission of, those reserved machine-identity roles.
+			if roleName == "system-mite" || roleName == "system-operator" {
+				warnings = append(warnings, fmt.Sprintf("varroarole %s projects to the reserved %s role; skipped", vr.Name, roleName))
+				skip(vrb, SkipReservedRole, fmt.Sprintf("role %s is reserved", roleName))
+				continue
 			}
-		} else if vr.Name < existing.Labels[LabelFederatedFrom] {
-			// Multiple VarroaRoles can map to one roleName (e.g. two roles sharing
-			// a jenkinsRoleRef). Informer iteration order is unspecified, so pin the
-			// federated-from label to the lexicographically-smallest source name for
-			// a deterministic desired state (avoids reflect.DeepEqual drift churn).
-			existing.Labels[LabelFederatedFrom] = vr.Name
+
+			if existing, exists := roleByName[roleName]; !exists {
+				roleByName[roleName] = &v1alpha1.JenkinsRole{
+					TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "JenkinsRole"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   roleName,
+						Labels: map[string]string{LabelFederatedFrom: vr.Name},
+					},
+					Spec: roleSpec,
+				}
+			} else if vr.Name < existing.Labels[LabelFederatedFrom] {
+				// Multiple VarroaRoles can map to one roleName (e.g. two roles sharing
+				// a jenkinsRoleRef). Informer iteration order is unspecified, so pin the
+				// federated-from label to the lexicographically-smallest source name for
+				// a deterministic desired state (avoids reflect.DeepEqual drift churn).
+				existing.Labels[LabelFederatedFrom] = vr.Name
+			}
+
+			if sourcesByRole[roleName] == nil {
+				sourcesByRole[roleName] = map[string]bool{}
+			}
+			sourcesByRole[roleName][vr.Name] = true
 		}
 
-		if sourcesByRole[roleName] == nil {
-			sourcesByRole[roleName] = map[string]bool{}
+		names := []string{}
+		if roleName != "" {
+			childName := fedBindingName(vr, vrb)
+			names = append(names, childName)
+			ownersByChild[childName] = append(ownersByChild[childName], vrb.Name)
+			// Bindings with the same role, scope, and subjects hash to one child
+			// name. The child is projected once, so no two desired bindings share
+			// a name.
+			if !bindingByName[childName] {
+				bindingByName[childName] = true
+				bindings = append(bindings, &v1alpha1.JenkinsRoleBinding{
+					TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "JenkinsRoleBinding"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   childName,
+						Labels: map[string]string{LabelFederatedFrom: vr.Name},
+					},
+					Spec: v1alpha1.JenkinsRoleBindingSpec{
+						RoleRef:         roleName,
+						Subjects:        copySubjects(vrb.Spec.Subjects),
+						ControllerScope: vrb.Spec.Scope,
+					},
+				})
+			}
 		}
-		sourcesByRole[roleName][vr.Name] = true
-
-		childName := fedBindingName(vr, vrb)
-		outcomes[vrb.Name] = BindingOutcome{RoleName: roleName, BindingNames: []string{childName}}
-		ownersByChild[childName] = append(ownersByChild[childName], vrb.Name)
-		// Bindings with the same role, scope, and subjects hash to one child
-		// name. The child is projected once, so no two desired bindings share
-		// a name.
-		if bindingByName[childName] {
-			continue
+		if memberWrite {
+			allName := fedAllTenantsBindingName(vr, vrb)
+			names = append(names, allName)
+			ownersByChild[allName] = append(ownersByChild[allName], vrb.Name)
+			if !bindingByName[allName] {
+				bindingByName[allName] = true
+				bindings = append(bindings, &v1alpha1.JenkinsRoleBinding{
+					TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "JenkinsRoleBinding"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: allName,
+						Labels: map[string]string{
+							LabelFederatedFrom:         vr.Name,
+							LabelFederatedTenantMember: "true",
+						},
+						Annotations: map[string]string{AnnotationFederatedTenant: FederatedAllTenants},
+					},
+					Spec: v1alpha1.JenkinsRoleBindingSpec{
+						RoleRef:  TenantMemberRoleName(FederatedAllTenants),
+						Subjects: copySubjects(expand(vrb.Spec.Subjects)),
+					},
+				})
+			}
 		}
-		bindingByName[childName] = true
-		bindings = append(bindings, &v1alpha1.JenkinsRoleBinding{
-			TypeMeta: metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "JenkinsRoleBinding"},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   childName,
-				Labels: map[string]string{LabelFederatedFrom: vr.Name},
-			},
-			Spec: v1alpha1.JenkinsRoleBindingSpec{
-				RoleRef:         roleName,
-				Subjects:        copySubjects(vrb.Spec.Subjects),
-				ControllerScope: vrb.Spec.Scope,
-			},
-		})
+		slices.Sort(names)
+		outcomes[vrb.Name] = BindingOutcome{RoleName: roleName, BindingNames: names}
 	}
 
 	roleNames := make([]string, 0, len(roleByName))
@@ -359,6 +401,19 @@ func fedTenantBindingName(vr *v1alpha1.VarroaRole, vrb *v1alpha1.VarroaRoleBindi
 	b, _ := json.Marshal(payload)
 	sum := sha256.Sum256(b)
 	return "varroa-fed-tenant-" + hex.EncodeToString(sum[:])[:12]
+}
+
+// fedAllTenantsBindingName names the all-tenants copy of one cluster-wide
+// source binding. The name hashes the role and the source subjects.
+func fedAllTenantsBindingName(vr *v1alpha1.VarroaRole, vrb *v1alpha1.VarroaRoleBinding) string {
+	payload := struct {
+		Role       string                `json:"role"`
+		AllTenants bool                  `json:"allTenants"`
+		Subjects   []v1alpha1.SubjectRef `json:"subjects"`
+	}{Role: vr.Name, AllTenants: true, Subjects: sortedSubjects(vrb.Spec.Subjects)}
+	b, _ := json.Marshal(payload)
+	sum := sha256.Sum256(b)
+	return "varroa-fed-tenant-all-" + hex.EncodeToString(sum[:])[:12]
 }
 
 // sortedSubjects returns a sorted copy of the subjects.

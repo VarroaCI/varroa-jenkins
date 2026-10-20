@@ -259,7 +259,8 @@ federation, activity persistence, and SSE fanout.
   replaces a projector skip on that hive. `bindingDrifted` compares the
   owner and tenant annotation keys, so an owner or tenant change updates the child.
   A tenant-scoped binding with pipelines `write` projects one `varroa-fed-tenant-*`
-  copy for each tenant. `federationEntry` reports the first fault of those copies in
+  copy for each tenant. A cluster-wide binding with pipelines `write` projects one
+  `varroa-fed-tenant-all-*` copy. `federationEntry` reports the first fault of those copies in
   sorted name order. A `SetTenantMemberSubjectExpander` hook expands the User subjects
   of each copy from the User directory on every pass. The BFF registers the User informer
   with the federation handler, so a User change runs a pass.

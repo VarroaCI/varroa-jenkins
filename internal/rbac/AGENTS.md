@@ -79,7 +79,8 @@ with what this package generates.
     The operator builds its resolver with a Team informer and a User informer, so the
     Team-membership path reaches the member role.
     Tenant-member copies (`federatedTenantMemberSources`) reach the member role of their
-    tenant. A copy is a `JenkinsRoleBinding` labelled `varroa.dev/federated-tenant-member`
+    tenant. A copy annotated `"*"` (`FederatedAllTenants`) reaches the member role of every
+    tenant the cell hosts; it never narrows, and a copy with a jobs annotation fails closed. A copy is a `JenkinsRoleBinding` labelled `varroa.dev/federated-tenant-member`
     and annotated `varroa.dev/federated-tenant`, with an optional `varroa.dev/federated-tenant-jobs`
     JSON list. A copy with an unreadable job list grants nothing. The generic
     `collectFromJenkinsRoleBindings` skips every copy. The narrowed role name uses the copy name.
@@ -118,9 +119,14 @@ with what this package generates.
   projection (a Global `jenkinsRoleRef` or legacy `jenkinsPermissions`) onto
   each non-core (hive) cluster as a generated `JenkinsRole` plus a
   `varroa-fed-<role>-<hash>` `JenkinsRoleBinding` (`fedBindingName`, a
-  `sha256` of the scope and subjects). It skips these bindings: a binding
-  whose scope carries `tenants` (with a warning), a projection onto the
-  reserved `system-mite` or `system-operator` role (with a warning), and a
+  `sha256` of the scope and subjects). A binding with a `tenants` scope projects
+  tenant copies instead (`varroa-fed-tenant-*`). A cluster-wide binding (nil scope)
+  whose role grants pipelines `write` also projects one all-tenants copy
+  (`varroa-fed-tenant-all-*`, annotation `"*"`, `RoleRef` `varroa:tenant-member:*`),
+  even when the role has no Jenkins projection. It skips these bindings: a projection
+  onto the reserved `system-mite` or `system-operator` role (with a warning), a
+  binding with no Jenkins projection (`NoJenkinsProjection`) unless it is a
+  cluster-wide pipelines write, and a
   binding with no subjects (silent, because a Team with no members is a
   normal state). The empty-subjects skip comes first, before every check that
   warns and before the role is recorded, so a role that only empty bindings

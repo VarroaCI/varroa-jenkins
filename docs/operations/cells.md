@@ -129,8 +129,8 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   The operator reads that claim value from the person's `User` object, which stores it at sign-in.
   Only a string claim counts.
   The Cell tab Permissions panel lists the member roles of each tenant.
-  A cell on a member cluster also grants this role to the subjects of core tenant-scoped bindings with
-  pipelines write. A cluster-wide binding reaches a member cell only through its Global Jenkins role.
+  A cell on a member cluster also grants this role to the subjects of core bindings with pipelines write:
+  a tenant-scoped binding for its tenants, and a cluster-wide binding for every tenant.
 - **Service identity.** Builds in the folder run as `svc-<team>`, a synthesized identity
   with no user record. A scan of a multibranch project or an organization folder runs as the system identity, so it can read the folder credentials.
 - **Cloud and agent namespace.** The tenant gets one restricted Kubernetes cloud pointed at

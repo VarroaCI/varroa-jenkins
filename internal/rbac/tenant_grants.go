@@ -278,9 +278,10 @@ func VarroaRolePipelinesVerbs(vr *v1alpha1.VarroaRole) []string {
 }
 
 // federatedTenantMemberSources lists the tenant-member copies that the
-// federation projection placed on this cluster for one tenant. Each copy
-// is a grant with pipelines write. A copy with an unreadable job list is
-// skipped, so the grant fails closed.
+// federation projection placed on this cluster for one tenant. A copy names
+// the tenant or the all-tenants value. Each copy is a grant with pipelines
+// write. A copy with an unreadable job list is skipped, so the grant fails
+// closed.
 func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource {
 	if r == nil || r.jenkinsRoleBindingIndex == nil {
 		return nil
@@ -291,7 +292,12 @@ func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource
 		if !ok || b.Labels[LabelFederatedTenantMember] != "true" || b.Labels[LabelFederatedFrom] == "" {
 			continue
 		}
-		if b.Annotations[AnnotationFederatedTenant] != team || len(b.Spec.Subjects) == 0 {
+		tenant := b.Annotations[AnnotationFederatedTenant]
+		if (tenant != team && tenant != FederatedAllTenants) || len(b.Spec.Subjects) == 0 {
+			continue
+		}
+		if _, narrowed := b.Annotations[AnnotationFederatedTenantJobs]; narrowed && tenant == FederatedAllTenants {
+			// A cluster-wide grant never narrows. A copy that carries a job list is malformed and fails closed.
 			continue
 		}
 		var jobs []string
