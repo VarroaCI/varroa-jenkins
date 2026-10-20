@@ -69,6 +69,7 @@ jobs:
               - 'charts/varroa/crds/**'
               - 'docs/security/outbound-connections.md'
               - 'docs/install/examples/**'
+              - 'internal/jenkins/items/testdata/challenge/**'
             charts:
               - 'charts/**'
               - 'frontend/nginx.conf'
