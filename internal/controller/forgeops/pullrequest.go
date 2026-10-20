@@ -17,7 +17,9 @@ const CleanupTimeout = 15 * time.Second
 
 // PullRequest opens one pull request: a new branch from the base head, one
 // commit per file, and the pull request. A failure after the branch exists
-// deletes the branch once.
+// deletes the branch once. It tries each pushing credential in id order. A
+// forge 403 on a write deletes the branch, then moves to the next credential.
+// A failed delete stops the attempt.
 func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
 	fail := func(err error) forgeapi.PullRequestReply { return forgeapi.PullRequestReply{Status: asStatus(err)} }
 	if req.Team == "" {
@@ -41,11 +43,29 @@ func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) 
 		return fail(err)
 	}
 	fr := forge.Repo{Owner: repo.Owner, Name: repo.Name}
-	w, err := o.pickWriter(ctx, repo.Host, fr, creds)
+	cands, err := o.candidates(ctx, repo.Host, fr, creds, true)
 	if err != nil {
 		return fail(err)
 	}
+	var forbidden []string
+	for _, w := range cands {
+		rep, next := o.pullRequestWith(ctx, w, fr, req)
+		if !next {
+			return rep
+		}
+		o.logger.Info("forge pull request forbidden; trying the next credential", "credential", w.CredentialID, "host", repo.Host)
+		forbidden = append(forbidden, w.CredentialID)
+	}
+	return fail(forbiddenRefusal(forbidden))
+}
 
+// pullRequestWith opens the pull request with credential w. The bool is true
+// only when the forge refused a write with 403 and the branch is gone, so the
+// next credential may try. Every other outcome returns the reply and false.
+func (o *Ops) pullRequestWith(ctx context.Context, w writer, fr forge.Repo, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, bool) {
+	fail := func(err error) (forgeapi.PullRequestReply, bool) {
+		return forgeapi.PullRequestReply{Status: asStatus(err)}, false
+	}
 	base := w.Info.DefaultBranch
 	baseSHA, ok, err := w.Client.BranchHead(ctx, fr, base)
 	if err != nil {
@@ -72,14 +92,18 @@ func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) 
 		if errors.Is(err, forge.ErrConflict) {
 			return fail(replyErr(forgeapi.CodeProposalBranchExists, "branch %q already exists", req.Branch))
 		}
+		if errors.Is(err, forge.ErrForbidden) {
+			return forgeapi.PullRequestReply{}, true
+		}
 		return fail(forgeFailure(err, w.CredentialID))
 	}
 	for _, f := range req.Files {
 		if err := w.Client.PutFile(ctx, fr, req.Branch, f.Path, []byte(f.Content), req.CommitMessage); err != nil {
 			if errors.Is(err, forge.ErrConflict) {
-				return o.cleanup(ctx, w, fr, req.Branch, replyErr(forgeapi.CodeInvalidRequest, "path %q conflicts with a directory", f.Path))
+				rep, _ := o.cleanup(ctx, w, fr, req.Branch, replyErr(forgeapi.CodeInvalidRequest, "path %q conflicts with a directory", f.Path))
+				return rep, false
 			}
-			return o.cleanup(ctx, w, fr, req.Branch, forgeFailure(err, w.CredentialID))
+			return o.cleanupForbidden(ctx, w, fr, req.Branch, err)
 		}
 	}
 	pr, err := w.Client.OpenPullRequest(ctx, fr, base, req.Branch, req.Title, req.Body)
@@ -89,21 +113,30 @@ func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) 
 			// close it, so the branch stays.
 			return fail(replyErr(forgeapi.CodeProposalBranchExists, "a pull request for branch %q already exists", req.Branch))
 		}
-		return o.cleanup(ctx, w, fr, req.Branch, forgeFailure(err, w.CredentialID))
+		return o.cleanupForbidden(ctx, w, fr, req.Branch, err)
 	}
-	return forgeapi.PullRequestReply{Status: forgeapi.Status{OK: true}, URL: pr.URL, Number: pr.Number}
+	return forgeapi.PullRequestReply{Status: forgeapi.Status{OK: true}, URL: pr.URL, Number: pr.Number}, false
+}
+
+// cleanupForbidden deletes the branch after a failed write. The bool is true
+// when the write was a forge 403 and the delete succeeded.
+func (o *Ops) cleanupForbidden(ctx context.Context, w writer, fr forge.Repo, branch string, err error) (forgeapi.PullRequestReply, bool) {
+	rep, deleted := o.cleanup(ctx, w, fr, branch, forgeFailure(err, w.CredentialID))
+	return rep, deleted && errors.Is(err, forge.ErrForbidden)
 }
 
 // cleanup deletes the branch once and returns the reply for the first error.
-func (o *Ops) cleanup(ctx context.Context, w writer, fr forge.Repo, branch string, first error) forgeapi.PullRequestReply {
+// The bool is true when the delete succeeded.
+func (o *Ops) cleanup(ctx context.Context, w writer, fr forge.Repo, branch string, first error) (forgeapi.PullRequestReply, bool) {
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), CleanupTimeout)
 	defer cancel()
 	st := asStatus(first)
 	if err := w.Client.DeleteBranch(dctx, fr, branch); err != nil {
 		o.logger.Warn("forge branch cleanup failed", "branch", branch, "credential", w.CredentialID, "error", err)
 		st.Error += fmt.Sprintf("; the branch %q was not deleted, delete it by hand", branch)
+		return forgeapi.PullRequestReply{Status: st}, false
 	}
-	return forgeapi.PullRequestReply{Status: st}
+	return forgeapi.PullRequestReply{Status: st}, true
 }
 
 // toRuleFiles converts the wire files to the rule type.

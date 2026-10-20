@@ -74,9 +74,12 @@ type fakeClient struct {
 	issueLabels [][]string
 	// Commit status fakes. statuses is the canned answer of CommitStatuses.
 	// statusWrites records each SetCommitStatus call with its commit.
-	statuses        []forge.CommitStatus
-	statusErr       error
-	setStatusErr    error
+	statuses     []forge.CommitStatus
+	statusErr    error
+	setStatusErr error
+	// setStatusErrAt limits setStatusErr to the write numbered setStatusErrAt
+	// (1-based). Zero fails every write.
+	setStatusErrAt  int
 	statusReads     []string
 	statusWrites    []forge.CommitStatus
 	statusWriteSHAs []string
@@ -193,7 +196,10 @@ func (f *fakeClient) CommitStatuses(_ context.Context, _ forge.Repo, sha string)
 func (f *fakeClient) SetCommitStatus(_ context.Context, _ forge.Repo, sha string, s forge.CommitStatus) error {
 	f.statusWrites = append(f.statusWrites, s)
 	f.statusWriteSHAs = append(f.statusWriteSHAs, sha)
-	return f.setStatusErr
+	if f.setStatusErrAt == 0 || len(f.statusWrites) == f.setStatusErrAt {
+		return f.setStatusErr
+	}
+	return nil
 }
 
 // fixture wires an Ops over a Team and a fake forge. clients maps a token

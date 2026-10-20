@@ -3,7 +3,6 @@ package forgeops
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -20,70 +19,6 @@ import (
 
 // maxIssueTitle bounds the title of an issue, in runes.
 const maxIssueTitle = 256
-
-// issueCandidates returns every credential that reads the repository, in
-// order: the credentials that may push first, then the read-only ones. Each
-// group keeps the credential id order. The forge decides the issue write.
-func (o *Ops) issueCandidates(ctx context.Context, host string, repo forge.Repo, creds []Credential) ([]writer, error) {
-	kind, err := o.detect(ctx, o.http, host)
-	if errors.Is(err, forge.ErrUnsupported) {
-		return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
-	}
-	if err != nil {
-		o.logger.Warn("forge detect failed", "host", host, "error", err)
-		return nil, replyErr(forgeapi.CodeForgeUnreachable, "forge %q is unreachable", host)
-	}
-	var pushers, readers []writer
-	var otherErr error
-	otherID := ""
-	authed := false
-	for _, c := range creds {
-		cl := o.newClient(kind, host, c.Token, o.http)
-		if cl == nil {
-			return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
-		}
-		info, err := cl.Repository(ctx, repo)
-		w := writer{Kind: kind, Client: cl, CredentialID: c.ID, Info: info}
-		switch {
-		case err == nil && info.Push:
-			pushers = append(pushers, w)
-		case err == nil:
-			readers = append(readers, w)
-		case errors.Is(err, forge.ErrAuth):
-			o.logger.Warn("forge credential refused", "credential", c.ID, "host", host)
-		case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
-			authed = true
-		default:
-			o.logger.Warn("forge repository read failed", "credential", c.ID, "host", host, "error", err)
-			if otherErr == nil {
-				otherErr, otherID = err, c.ID
-			}
-		}
-	}
-	if cands := append(pushers, readers...); len(cands) > 0 {
-		return cands, nil
-	}
-	if otherErr != nil {
-		return nil, forgeFailure(otherErr, otherID)
-	}
-	if authed {
-		return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
-	}
-	return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
-}
-
-// issueForbidden is the refusal when every candidate answered 403. One
-// credential keeps the single-credential message. Several name each one.
-func issueForbidden(ids []string) error {
-	if len(ids) == 1 {
-		return forgeFailure(forge.ErrForbidden, ids[0])
-	}
-	quoted := make([]string, len(ids))
-	for i, id := range ids {
-		quoted[i] = strconv.Quote(id)
-	}
-	return replyErr(forgeapi.CodeForgeWriteDenied, "credentials %s are forbidden; check the token scope and the repository access of each credential", strings.Join(quoted, ", "))
-}
 
 // Issue opens an issue for a Team agent. The operator shard that owns the
 // Team answers it. The TeamAgent named by the request must be the accepted,
@@ -148,7 +83,7 @@ func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNames
 		return fail(err)
 	}
 	fr := forge.Repo{Owner: repo.Owner, Name: repo.Name}
-	cands, err := o.issueCandidates(ctx, repo.Host, fr, creds)
+	cands, err := o.candidates(ctx, repo.Host, fr, creds, false)
 	if err != nil {
 		return fail(err)
 	}
@@ -175,7 +110,7 @@ func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNames
 		o.logger.Info("forge issue opened", "credential", w.CredentialID, "host", repo.Host, "number", issue.Number, "forbiddenBefore", len(forbidden))
 		return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: issue.Number, URL: issue.URL}
 	}
-	return fail(issueForbidden(forbidden))
+	return fail(forbiddenRefusal(forbidden))
 }
 
 // acceptInput lists the TeamAgent and Team objects that accept.Decide needs.

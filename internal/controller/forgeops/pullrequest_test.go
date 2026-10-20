@@ -167,3 +167,133 @@ func TestPullRequest_BaseMovedRefused(t *testing.T) {
 		t.Fatalf("writes after the base moved: %v", c.calls)
 	}
 }
+
+// TestPullRequest_ForbiddenPRFallsBackToNextPusher checks that a 403 on the
+// pull request deletes the branch and opens the pull request with the next
+// pushing credential.
+func TestPullRequest_ForbiddenPRFallsBackToNextPusher(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = forge.ErrForbidden
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	if !rep.OK || rep.URL != prURL || rep.Number != 4 {
+		t.Fatalf("reply %+v", rep)
+	}
+	if got := a.calls[len(a.calls)-1]; got != "delete:"+forgeapi.ProposalBranch {
+		t.Fatalf("a calls %v, want the branch deleted last", a.calls)
+	}
+	want := []string{
+		"create:" + forgeapi.ProposalBranch + "@" + testSHA,
+		"put:Jenkinsfile",
+		"pr:main<-" + forgeapi.ProposalBranch,
+	}
+	if !reflect.DeepEqual(b.calls, want) {
+		t.Fatalf("b calls %v, want %v", b.calls, want)
+	}
+	if !strings.Contains(fx.logBuf.String(), "trying the next credential") {
+		t.Fatalf("log %q lacks the fallback line", fx.logBuf.String())
+	}
+}
+
+// TestPullRequest_ForbiddenCreateBranchFallsBack checks that a 403 on the
+// branch create moves on without a delete, since no branch exists yet.
+func TestPullRequest_ForbiddenCreateBranchFallsBack(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.createErr = forge.ErrForbidden
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	if !rep.OK {
+		t.Fatalf("reply %+v", rep)
+	}
+	for _, call := range a.calls {
+		if strings.HasPrefix(call, "delete:") {
+			t.Fatalf("a deleted a branch it never created: %v", a.calls)
+		}
+	}
+	if len(b.calls) == 0 {
+		t.Fatal("b was not tried")
+	}
+}
+
+// TestPullRequest_AllForbiddenNamesEachCredential checks the refusal when
+// every pushing credential answers 403. It names each credential and never
+// a token.
+func TestPullRequest_AllForbiddenNamesEachCredential(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = forge.ErrForbidden
+	b := pushable()
+	b.prErr = forge.ErrForbidden
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	wantCode(t, rep, forgeapi.CodeForgeWriteDenied)
+	for _, want := range []string{`"a"`, `"b"`, "check the token scope"} {
+		if !strings.Contains(rep.Error, want) {
+			t.Fatalf("error %q lacks %q", rep.Error, want)
+		}
+	}
+	if strings.Contains(rep.Error, "tok-") {
+		t.Fatalf("error %q names a token", rep.Error)
+	}
+	for name, c := range map[string]*fakeClient{"a": a, "b": b} {
+		if got := c.calls[len(c.calls)-1]; got != "delete:"+forgeapi.ProposalBranch {
+			t.Fatalf("%s calls %v, want the branch deleted last", name, c.calls)
+		}
+	}
+}
+
+// TestPullRequest_ForbiddenCleanupFailureStops checks that a failed delete
+// after a 403 stops the attempt. The next credential is never tried.
+func TestPullRequest_ForbiddenCleanupFailureStops(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = forge.ErrForbidden
+	a.deleteErr = errors.New("x")
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	wantCode(t, rep, forgeapi.CodeForgeWriteDenied)
+	if !strings.Contains(rep.Error, "was not deleted") {
+		t.Fatalf("error %q", rep.Error)
+	}
+	if len(b.calls) != 0 {
+		t.Fatalf("b was tried after a failed delete: %v", b.calls)
+	}
+}
+
+// TestPullRequest_NoFallbackOnOtherError checks that a non-403 error stops
+// the attempt, and the next credential is never tried.
+func TestPullRequest_NoFallbackOnOtherError(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = errors.New("boom")
+	b := prWriter(fx, pushable())
+	twoCredentials(fx, a, b)
+	wantCode(t, fx.ops.PullRequest(context.Background(), prReq()), forgeapi.CodeForgeUnreachable)
+	if len(b.calls) != 0 {
+		t.Fatalf("b was tried after a non-403 error: %v", b.calls)
+	}
+}
+
+// TestPullRequest_ReadOnlyCredentialNeverTried checks that a read-only
+// credential is not a fallback for a write.
+func TestPullRequest_ReadOnlyCredentialNeverTried(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.prErr = forge.ErrForbidden
+	b := prWriter(fx, pushable())
+	b.info.Push = false
+	twoCredentials(fx, a, b)
+	rep := fx.ops.PullRequest(context.Background(), prReq())
+	wantCode(t, rep, forgeapi.CodeForgeWriteDenied)
+	if len(b.calls) != 0 {
+		t.Fatalf("read-only credential wrote: %v", b.calls)
+	}
+	if strings.Contains(rep.Error, `"b"`) {
+		t.Fatalf("error %q names the read-only credential", rep.Error)
+	}
+}

@@ -2,6 +2,7 @@ package forgeops
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -23,8 +24,9 @@ const maxUnescapePasses = 3
 // Only the branch-source plugins write a status, and they never end it when
 // the recorder ends the build. A context is changed only when its latest
 // state is pending and its target URL names this job and build number.
-// A context with an end state is never changed. It returns the number of
-// statuses that it wrote.
+// A context with an end state is never changed. It tries each pushing
+// credential in id order. A forge 403 moves to the next credential. It
+// returns the number of statuses that it wrote.
 func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusRequest) (int, error) {
 	if req.Team == "" || req.Repo == "" || req.SHA == "" || req.JobPath == "" || req.Reason == "" {
 		return 0, replyErr(forgeapi.CodeInvalidRequest, "team, repo, sha, jobPath and reason are required")
@@ -41,15 +43,38 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 		return 0, err
 	}
 	fr := forge.Repo{Owner: repo.Owner, Name: repo.Name}
-	w, err := o.pickWriter(ctx, repo.Host, fr, creds)
+	cands, err := o.candidates(ctx, repo.Host, fr, creds, true)
 	if err != nil {
 		return 0, err
 	}
+	description := interruptedStatusDescription(req.Reason)
+	written := 0
+	var forbidden []string
+	for _, w := range cands {
+		n, err := o.endStatusesWith(ctx, w, fr, req, description)
+		written += n
+		if errors.Is(err, forge.ErrForbidden) {
+			o.logger.Info("forge commit status forbidden; trying the next credential", "credential", w.CredentialID, "host", repo.Host)
+			forbidden = append(forbidden, w.CredentialID)
+			continue
+		}
+		if err != nil {
+			return written, forgeFailure(err, w.CredentialID)
+		}
+		return written, nil
+	}
+	return written, forbiddenRefusal(forbidden)
+}
+
+// endStatusesWith ends the pending statuses of the build with credential w. It
+// returns the count written and the first forge error, unchanged. A later
+// credential lists the statuses again. A status that an earlier credential
+// ended is not pending, so it is not written twice.
+func (o *Ops) endStatusesWith(ctx context.Context, w writer, fr forge.Repo, req forgeapi.CommitStatusRequest, description string) (int, error) {
 	statuses, err := w.Client.CommitStatuses(ctx, fr, req.SHA)
 	if err != nil {
-		return 0, forgeFailure(err, w.CredentialID)
+		return 0, err
 	}
-	description := interruptedStatusDescription(req.Reason)
 	written := 0
 	for _, s := range statuses {
 		if s.State != forge.StatePending || !buildURLMatches(s.TargetURL, req.JobPath, req.BuildNumber) {
@@ -62,7 +87,7 @@ func (o *Ops) EndPendingStatus(ctx context.Context, req forgeapi.CommitStatusReq
 			Description: description,
 		}
 		if err := w.Client.SetCommitStatus(ctx, fr, req.SHA, next); err != nil {
-			return written, forgeFailure(err, w.CredentialID)
+			return written, err
 		}
 		written++
 	}
