@@ -280,7 +280,10 @@ the root AGENTS.md greenfield rule.
   `grantedNumber` rides the `STARTED` event as `granted_build_number`;
   `VarroaRunRecorder.changeRequestOf` maps a multibranch branch head onto `BuildEvent`
   field 56, `change_request`, on the `STARTED` event; `resolveChangeRequest` reads the
-  head through the run's `BranchJobProperty`),
+  head through the run's `BranchJobProperty`; `IntentKey.derive` also answers the forge
+  revision (`VarroaRunRecorder.revisionHash` of an `SCMRevision`). The claimer stores it on
+  `VarroaIntentAction`. `run.started` sends it as `scm_revision`, else the claim revision.
+  The intent key keeps the claim revision),
   `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +
   `DeliveryRegistry.java` (records `X-Varroa-Delivery` for the claimer). Every class in

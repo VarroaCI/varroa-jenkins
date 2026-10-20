@@ -8,6 +8,8 @@ import hudson.model.Cause;
 import hudson.model.InvisibleAction;
 import hudson.model.Job;
 import hudson.model.Queue;
+import jenkins.scm.api.SCMHead;
+import jenkins.scm.api.SCMRevision;
 
 import java.util.List;
 import org.junit.Test;
@@ -27,6 +29,19 @@ public class IntentKeyTest {
         }
 
         public Object getRevision() {
+            return revision;
+        }
+    }
+
+    /** Test double: a branch project factory whose getRevision answers any object. */
+    static class ObjectFactory {
+        private final Object revision;
+
+        ObjectFactory(Object revision) {
+            this.revision = revision;
+        }
+
+        public Object getRevision(Object project) {
             return revision;
         }
     }
@@ -99,10 +114,12 @@ public class IntentKeyTest {
         VarroaIntentAction action = new VarroaIntentAction("run-1", "", null, 0L);
         action.setOrigin(IntentKey.ORIGIN_VARROA_INTENT);
         action.setIntentKey("manual:11111111-1111-7111-8111-111111111111");
+        action.setForgeRevision("head9");
 
         IntentKey.Result result = IntentKey.derive(item, job, action, 0L, 0L);
         assertEquals(IntentKey.ORIGIN_VARROA_INTENT, result.origin);
         assertEquals("manual:11111111-1111-7111-8111-111111111111", result.intentKey);
+        assertEquals("head9", result.forgeRevision);
     }
 
     @Test
@@ -114,6 +131,66 @@ public class IntentKeyTest {
         assertEquals(IntentKey.ORIGIN_SCM, result.origin);
         assertEquals("scm:folder/job:abc123", result.intentKey);
         assertEquals("abc123", result.revision);
+        assertEquals("", result.forgeRevision);
+    }
+
+    private static VarroaRunRecorderChangeRequestTest.PullRequestHead pullRequest() {
+        return new VarroaRunRecorderChangeRequestTest.PullRequestHead("PR-12", "12", new SCMHead("main"),
+                "fix/cache");
+    }
+
+    @Test
+    public void aChangeRequestRevisionActionKeysOnTheClaimRevisionAndAnswersTheHeadCommit() {
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = pullRequest();
+        SCMRevision target = new VarroaRunRecorderChangeRequestTest.BranchStyleRevision(head.getTarget(), "base111");
+        Object revision = new VarroaRunRecorderChangeRequestTest.GitHubStyleRevision(head, target, "head222",
+                "merge333");
+        Job<?, ?> job = job("folder/job", null);
+        Queue.Item item = item(List.of(new SCMRevisionAction(revision)), List.of());
+
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L);
+        String claimRevision = IntentKey.normalizeRevision(String.valueOf(revision));
+        assertEquals("scm:folder/job:" + claimRevision, result.intentKey);
+        assertEquals(claimRevision, result.revision);
+        assertEquals("head222", result.forgeRevision);
+    }
+
+    @Test
+    public void aGiteaChangeRequestRevisionAnswersTheOriginHash() {
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = pullRequest();
+        SCMRevision target = new VarroaRunRecorderChangeRequestTest.BranchStyleRevision(head.getTarget(), "base111");
+        Object revision = new VarroaRunRecorderChangeRequestTest.GiteaStyleRevision(head, target,
+                new VarroaRunRecorderChangeRequestTest.OriginHash("head444"));
+        Job<?, ?> job = job("folder/job", null);
+        Queue.Item item = item(List.of(new SCMRevisionAction(revision)), List.of());
+
+        assertEquals("head444", IntentKey.derive(item, job, null, 0L, 0L).forgeRevision);
+    }
+
+    @Test
+    public void aBranchRevisionAnswersItsHashAsTheForgeRevision() {
+        Object revision = new VarroaRunRecorderChangeRequestTest.BranchStyleRevision(
+                new SCMHead("feature"), "branch555");
+        Job<?, ?> job = job("folder/job", null);
+        Queue.Item item = item(List.of(new SCMRevisionAction(revision)), List.of());
+
+        assertEquals("branch555", IntentKey.derive(item, job, null, 0L, 0L).forgeRevision);
+    }
+
+    @Test
+    public void theBranchFactoryChangeRequestRevisionAnswersTheHeadCommit() {
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = pullRequest();
+        SCMRevision target = new VarroaRunRecorderChangeRequestTest.BranchStyleRevision(head.getTarget(), "base111");
+        Object revision = new VarroaRunRecorderChangeRequestTest.GitHubStyleRevision(head, target, "head222",
+                "merge333");
+        MultiBranchProject parent = new MultiBranchProject(new ObjectFactory(revision));
+        Job<?, ?> job = job("folder/job", null);
+        Queue.Item item = item(List.of(), List.of(new IntentKeyDispatchTest.BranchEventCause()));
+
+        IntentKey.Result result = IntentKey.derive(item, job, null, 0L, 0L, () -> parent);
+        assertEquals("head222", result.forgeRevision);
+        assertEquals("scm:folder/job:" + IntentKey.normalizeRevision(String.valueOf(revision)),
+                result.intentKey);
     }
 
     @Test

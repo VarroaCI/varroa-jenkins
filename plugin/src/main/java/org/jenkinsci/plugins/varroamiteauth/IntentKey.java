@@ -8,6 +8,7 @@ import hudson.model.ParametersAction;
 import hudson.model.Queue;
 import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
+import jenkins.scm.api.SCMRevision;
 
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -31,10 +32,9 @@ import java.util.logging.Logger;
  * D5: derives the origin, the intent key, the accepted revision, the
  * params digest, and the delivery id, from a queue item at claim time.
  *
- * <p>The revision read has two reflective sources — an {@code
- * SCMRevisionAction} on the item, or the job's branch project factory —
- * because C2 adds no {@code scm-api} or {@code branch-api} compile
- * dependency.
+ * <p>The action and factory revision reads stay reflective, because no
+ * {@code branch-api} compile dependency exists. The forge revision read
+ * uses the {@code scm-api} type {@link SCMRevision}.
  */
 public final class IntentKey {
 
@@ -62,16 +62,25 @@ public final class IntentKey {
     private IntentKey() {
     }
 
-    /** The derived origin, intent key, and accepted revision (empty when none applies). */
+    /**
+     * The derived origin, intent key, accepted revision, and forge
+     * revision (each empty when none applies).
+     */
     public static final class Result {
         public final String origin;
         public final String intentKey;
         public final String revision;
+        public final String forgeRevision;
 
         Result(String origin, String intentKey, String revision) {
+            this(origin, intentKey, revision, "");
+        }
+
+        Result(String origin, String intentKey, String revision, String forgeRevision) {
             this.origin = origin;
             this.intentKey = intentKey;
             this.revision = revision != null ? revision : "";
+            this.forgeRevision = forgeRevision != null ? forgeRevision : "";
         }
     }
 
@@ -107,24 +116,29 @@ public final class IntentKey {
     static Result derive(Queue.Item item, Job<?, ?> job, VarroaIntentAction action, long nowMillis,
             long revisionDeadlineMillis, java.util.function.Supplier<Object> parentSupplier) {
         if (action != null && !action.getIntentKey().isEmpty()) {
-            return new Result(action.getOrigin(), action.getIntentKey(), action.getRevision());
+            return new Result(action.getOrigin(), action.getIntentKey(), action.getRevision(),
+                    action.getForgeRevision());
         }
 
         String jobPath = job.getFullName();
         List<Cause> causes = item.getCauses();
 
-        String actionRevision = readRevisionFromAction(item);
-        if (actionRevision != null) {
-            return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + actionRevision, actionRevision);
+        Object actionRaw = rawRevisionFromAction(item);
+        if (actionRaw != null) {
+            String actionRevision = normalizeRevision(String.valueOf(actionRaw));
+            return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + actionRevision, actionRevision,
+                    forgeRevision(actionRaw));
         }
 
         String admissionRevision = action != null ? action.getAdmissionRevision() : null;
         if (hasBranchCause(causes)) {
             Object factory = branchProjectFactory(parentSupplier);
             if (factory != null) {
-                String candidate = readFactoryRevision(factory, job);
+                Object raw = rawFactoryRevision(factory, job);
+                String candidate = raw != null ? normalizeRevision(String.valueOf(raw)) : null;
                 if (candidate != null && !candidate.equals(admissionRevision)) {
-                    return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + candidate, candidate);
+                    return new Result(ORIGIN_SCM, SCHEME_SCM + jobPath + ":" + candidate, candidate,
+                            forgeRevision(raw));
                 }
                 if (nowMillis < revisionDeadlineMillis) {
                     return null;
@@ -158,17 +172,31 @@ public final class IntentKey {
         if (factory == null) {
             return null;
         }
-        return readFactoryRevision(factory, job);
+        Object raw = rawFactoryRevision(factory, job);
+        return raw != null ? normalizeRevision(String.valueOf(raw)) : null;
+    }
+
+    /**
+     * Returns the forge revision of a revision object: the commit the
+     * forge knows, which {@link VarroaRunRecorder#revisionHash} reads from
+     * an {@code SCMRevision}. Any other object answers {@code ""}.
+     *
+     * <p>The intent key keeps the claim revision text. A rebuild against
+     * a new base therefore gets its own key. The forge revision feeds the
+     * {@code scm_revision} of the start event alone.
+     */
+    static String forgeRevision(Object revision) {
+        return revision instanceof SCMRevision ? VarroaRunRecorder.revisionHash((SCMRevision) revision) : "";
     }
 
     // --- Revision sources ---
 
-    private static String readRevisionFromAction(Queue.Item item) {
+    private static Object rawRevisionFromAction(Queue.Item item) {
         for (Action action : item.getActions()) {
             if (hasSimpleNameInHierarchy(action.getClass(), "SCMRevisionAction")) {
                 Object revision = invokeNoArg(action, "getRevision");
                 if (revision != null) {
-                    return normalizeRevision(String.valueOf(revision));
+                    return revision;
                 }
             }
         }
@@ -183,12 +211,12 @@ public final class IntentKey {
         return invokeNoArg(parent, "getProjectFactory");
     }
 
-    private static String readFactoryRevision(Object factory, Job<?, ?> job) {
+    private static Object rawFactoryRevision(Object factory, Job<?, ?> job) {
         Object revision = invokeWithArg(factory, "getRevision", job);
         if (revision == null) {
             revision = invokeWithArg(factory, "getLastSeenRevision", job);
         }
-        return revision != null ? normalizeRevision(String.valueOf(revision)) : null;
+        return revision;
     }
 
     // --- Cause classification ---

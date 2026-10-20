@@ -1193,6 +1193,24 @@ public class VarroaClaimQueueTest {
     }
 
     @Test
+    public void aGrantStoresTheForgeRevisionOnTheAction() throws Exception {
+        FreeStyleProject project = j.createFreeStyleProject("forge-revision-grant");
+        Queue.Item item = scheduleItem(project);
+        responder = n -> new Reply(200, GRANT_BODY);
+        VarroaClaimQueue.Deriver deriver = (i, jb, a, now, deadline) ->
+                new IntentKey.Result(IntentKey.ORIGIN_SCM, "scm:forge-revision-grant:claim", "claim", "head9");
+        VarroaClaimQueue queue = new VarroaClaimQueue(newClient(), System::currentTimeMillis, (task, d) -> task.run(),
+                VarroaHomeCache.get(), BuildNumberGate.get(), VarroaClaimQueue.CAPACITY, deriver);
+        queue.offer(item, project);
+
+        VarroaIntentAction action = item.getAction(VarroaIntentAction.class);
+        awaitTrue(action::isGranted, "the grant");
+        assertEquals("claim", action.getRevision());
+        assertEquals("head9", action.getForgeRevision());
+        queue.shutdown();
+    }
+
+    @Test
     public void aReadyJobClaimsWhileFourClaimsWaitOnARevision() throws Exception {
         responder = n -> new Reply(200, GRANT_BODY);
         AtomicInteger waits = new AtomicInteger();
