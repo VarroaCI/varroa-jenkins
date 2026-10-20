@@ -120,7 +120,7 @@ different run already claimed it.
 
 For a pull-request build, the key keeps the revision text that the branch source reports. A rebuild
 against a new target commit therefore gets a new key. The build record keeps the head commit of the
-pull request. The completion event sends that head commit too, and never the merge commit of the checkout. Two builds of one pull request against different target commits both run. The record store does not mark the newer build as a duplicate.
+pull request. The completion event sends that head commit too, and never the merge commit of the checkout. Two builds of one pull request against different target commits both run. The record store does not mark the newer build as a duplicate. Both builds report one status context. See [Two builds of one pull request](commit-status.md#two-builds-of-one-pull-request).
 
 ## Build numbers in a burst
 
