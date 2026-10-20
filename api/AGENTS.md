@@ -168,8 +168,8 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `controller-gen object`** — nukes this file on this type set. Hand-add
   `DeepCopyInto`/`DeepCopy` for new types/fields.
 - CRD manifests: `make generate-crds` runs `controller-gen` in Docker, writes
-  `charts/varroa/crds/*.yaml`. `make check-crds` regenerates and fails on
-  diff (CI gate) — run after any kubebuilder-marker change.
+  `charts/varroa/crds/*.yaml`. `make check-crds` regenerates and fails on a
+  changed, deleted, or untracked file (CI gate) — run after any kubebuilder-marker change.
 
 ### OpenAPI contract (`api/openapi/`)
 
@@ -185,7 +185,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
   `docs/VENDORED.md`).
 - `make generate-client`: bundles via `hack/openapi-bundle` → `oapi-codegen`
   → `gofmt pkg/client`. `make check-client` requires a clean tree first, then
-  regenerates and diffs — spec and generated client are committed together.
+  regenerates and fails on a changed, deleted, or untracked file — spec and generated client are committed together.
 - Endpoint changes flow: `paths/`+`components/schemas.yaml` → `internal/api`
   (BFF) → `pkg/client` (regenerated) → frontend. No dual-shape responses.
   `ControllerDetail` carries `pluginInventory` (bounded summary from

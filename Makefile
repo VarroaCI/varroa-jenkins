@@ -1,4 +1,4 @@
-.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-comments check-outbound outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
+.PHONY: lint test build build-cli docker-build clean frontend-install frontend-dev frontend-build frontend-docker-build frontend-test generate-crds check-crds check-generated-test check-comments check-outbound outbound-doc export-gate chart-test generate-proto check-proto generate-client check-client challenge-bundle challenge-bundle-check publish-challenge-bundle localdev localdev-down localdev-images localdev-controller
 
 GIT_SHA=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -67,8 +67,7 @@ generate-crds:
 
 check-crds:
 	$(MAKE) generate-crds
-	git diff --exit-code charts/varroa/crds/ api/v1alpha1/teamagent_types.go && \
-		{ test -z "$$(git status --porcelain charts/varroa/crds/)" || exit 1; }
+	hack/check-generated.sh generate-crds charts/varroa/crds api/v1alpha1/teamagent_types.go
 
 check-comments:
 	go run ./hack/checkcomments .
@@ -113,7 +112,7 @@ generate-proto:
 
 check-proto:
 	$(MAKE) generate-proto
-	git diff --exit-code internal/mite/proto/mitev1/mitev1_gen.go
+	hack/check-generated.sh generate-proto internal/mite/proto/mitev1/mitev1_gen.go
 
 generate-plugin-lock:
 	bash hack/gen-plugin-lock.sh
@@ -142,15 +141,16 @@ generate-client:
 check-client:
 	git diff --quiet -- api/openapi pkg/client || (echo "run make generate-client" && exit 1)
 	$(MAKE) generate-client
-	git diff --exit-code -- api/openapi pkg/client
+	hack/check-generated.sh generate-client api/openapi pkg/client
 
 challenge-bundle:
 	go run ./internal/jenkins/items/cmd/challengegen
 
 challenge-bundle-check: challenge-bundle
-	git diff --exit-code -- internal/jenkins/items/testdata/challenge/bundle-challenge
-	@untracked="$$(git ls-files --others --exclude-standard -- internal/jenkins/items/testdata/challenge/bundle-challenge)"; \
-	if [ -n "$$untracked" ]; then echo "untracked challenge bundle files; run make challenge-bundle and commit them:" >&2; echo "$$untracked" >&2; exit 1; fi
+	hack/check-generated.sh challenge-bundle internal/jenkins/items/testdata/challenge/bundle-challenge
+
+check-generated-test:
+	bash hack/check-generated_test.sh
 
 publish-challenge-bundle: challenge-bundle
 	@test -n "$$VARROA_CONTROLLERS_REPO" || { echo "VARROA_CONTROLLERS_REPO must point at a CasC bundle repo checkout" >&2; exit 1; }
