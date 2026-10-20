@@ -282,7 +282,7 @@ the root AGENTS.md greenfield rule.
   field 56, `change_request`, on the `STARTED` event; `resolveChangeRequest` reads the
   head through the run's `BranchJobProperty`; `IntentKey.derive` also answers the forge
   revision (`VarroaRunRecorder.revisionHash` of an `SCMRevision`). The claimer stores it on
-  `VarroaIntentAction`. `run.started` sends it as `scm_revision`, else the claim revision.
+  `VarroaIntentAction`. `run.started` sends it as `scm_revision`, else the claim revision. `run.completed` sends `completedRevision`: the revision action's `revisionHash`, else nothing for a change request, else the newest changelog commit.
   The intent key keeps the claim revision),
   `VarroaHomeCache.java` + `VarroaHomeRefresher.java` (the tenant home map, below),
   `DuplicateRegistry.java`, `ClaimRegistry.java`, and `VarroaDeliveryFilter.java` +

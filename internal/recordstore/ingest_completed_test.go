@@ -145,7 +145,7 @@ func TestApplyRunCompletedForeignInstanceIsAuditOnly(t *testing.T) {
 }
 
 // TestApplyRunCompletedFillsAbsentRevision asserts a completion writes
-// the newest changelog entry's revision when the row holds none.
+// the completion event's revision when the row holds none.
 func TestApplyRunCompletedFillsAbsentRevision(t *testing.T) {
 	t.Parallel()
 

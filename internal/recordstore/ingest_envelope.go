@@ -162,9 +162,10 @@ type RunCompletedPayload struct {
 	Result     *string    `json:"result,omitempty"`
 	EndedAt    *time.Time `json:"ended_at,omitempty"`
 	DurationMs *int64     `json:"duration_ms,omitempty"`
-	// SCMRevision carries the newest changelog entry's revision. A
-	// run.completed write fills an absent runs.scm_revision from it,
-	// and never replaces a stored value.
+	// SCMRevision carries the completion event's revision: the head
+	// commit for a change request, else the newest changelog entry's
+	// commit. A run.completed write fills an absent runs.scm_revision
+	// from it, and never replaces a stored value.
 	SCMRevision *string `json:"scm_revision,omitempty"`
 	Summary     *string `json:"summary,omitempty"`
 	// RejectedSignature names the script signature that the sandbox
