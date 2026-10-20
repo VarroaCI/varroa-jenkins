@@ -100,7 +100,8 @@ reading each package's entry point):
   renders its declared traits (`githubSkipNotifications` renders the
   `skip-notifications-trait` plugin's `GithubSkipNotifications`), and renders no
   `traits` element when it declares none. The sibling
-  `items/lint` package owns the cell rule set (`lint.CellRules`: `no-poll-scm`,
+  `items/challengecorpus` loads the challenge corpus manifest. It refuses a case directory with no manifest entry, and a manifest entry with no directory.
+  The `items/lint` package owns the cell rule set (`lint.CellRules`: `no-poll-scm`,
   `no-global-credentials`, `no-controller-config-dependency`, `no-job-dsl`) and
   `lint.Summary`. The cell runs it over each tenant's re-rooted manifest before a
   push, and the pipelines read runs it too. `no-job-dsl` also runs over the

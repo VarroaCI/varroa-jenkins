@@ -7,37 +7,22 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/challengecorpus"
 )
 
 var update = flag.Bool("update", false, "regenerate challenge goldens")
 
-// challengeCase describes one case from manifest.yaml.
-type challengeCase struct {
-	Name   string `yaml:"name"`
-	Tier   string `yaml:"tier"`
-	Status string `yaml:"status"`
-}
-
-type challengeManifest struct {
-	Cases []challengeCase `yaml:"cases"`
-}
-
 func TestChallenge(t *testing.T) {
 	base := filepath.Join("testdata", "challenge")
-	manifestData, err := os.ReadFile(filepath.Join(base, "manifest.yaml"))
+	mf, err := challengecorpus.Load(base)
 	if err != nil {
-		t.Fatalf("read manifest: %v", err)
-	}
-	var mf challengeManifest
-	if err := yaml.Unmarshal(manifestData, &mf); err != nil {
-		t.Fatalf("parse manifest: %v", err)
+		t.Fatalf("challenge corpus: %v", err)
 	}
 
 	for _, c := range mf.Cases {
 		c := c
 		t.Run(c.Tier+"/"+c.Name, func(t *testing.T) {
-			caseDir := filepath.Join(base, "cases", c.Tier, c.Name)
+			caseDir := c.Dir(base)
 			itemsData, err := os.ReadFile(filepath.Join(caseDir, "items.yaml"))
 			if err != nil {
 				t.Fatalf("read items.yaml: %v", err)
