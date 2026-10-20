@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -12,6 +14,29 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/auth/userdirectory"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// ErrUserNotFound reports that the User to delete does not exist.
+var ErrUserNotFound = errors.New("user not found")
+
+// DeleteUser strips the user from every role binding and, for a local
+// account, from every group. Then it deletes the User object. Every delete
+// surface calls this function, so no surface leaves a binding behind.
+func DeleteUser(ctx context.Context, store crdstore.Backend, namespace, name, mode string) error {
+	user, err := crdstore.Get[v1alpha1.User](ctx, store, name, namespace)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: %v", ErrUserNotFound, err)
+		}
+		return fmt.Errorf("get user: %w", err)
+	}
+	if err := deprovisionUser(ctx, store, user, mode); err != nil {
+		return fmt.Errorf("deprovision failed: %w", err)
+	}
+	if err := crdstore.Delete[v1alpha1.User](ctx, store, name, namespace); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}
 
 // deprovisionUser strips a user from all VarroaRoleBindings and
 // JenkinsRoleBindings, deletes bindings left empty, and removes a local
