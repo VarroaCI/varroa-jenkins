@@ -127,6 +127,11 @@ jobs:
       - name: Check outbound connections
         if: ${{ !cancelled() }}
         run: make check-outbound
+      - name: Check generated-file helper
+        if: ${{ !cancelled() }}
+        run: |
+          shellcheck hack/check-generated.sh hack/check-generated_test.sh
+          make check-generated-test
       - name: Check Proto
         if: ${{ !cancelled() }}
         run: make check-proto

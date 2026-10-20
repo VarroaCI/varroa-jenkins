@@ -62,6 +62,10 @@ func main() {
 		wrappers = append(wrappers, wrapper)
 	}
 
+	// The generator owns every file in outDir. A removal first makes a file it no longer writes show as a deletion.
+	if err := os.RemoveAll(outDir); err != nil {
+		die("remove %s: %v", outDir, err)
+	}
 	// Write bundle-challenge/items.yaml.
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		die("mkdir %s: %v", outDir, err)
