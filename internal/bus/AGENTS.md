@@ -50,7 +50,10 @@ control plane's async transport — no other package talks to NATS directly.
   (BFF→operator remote-cluster RPCs, see `config.go`; this includes
   `operator.<cluster>.cellpools.{list,get,scale}`, where `scale` carries
   `CellPoolScaleRequest` — the pool name and the four dials only — and the
-  member operator runs the read-modify-write on its own apiserver),
+  member operator runs the read-modify-write on its own apiserver;
+  `operator.<cluster>.cells.grants` takes `CellGrantsRequest` (tenant names)
+  and answers `CellGrantsResponse`, the grants and member roles each tenant
+  holds on that member, read from the member operator's own RBAC state),
   `builds.<cluster>.<ns>.<cell>` (build event ingest into the
   `varroa_builds` stream), `varroa.ledger.claim` (core NATS request-reply
   build-number claim, queue group `recorder`),

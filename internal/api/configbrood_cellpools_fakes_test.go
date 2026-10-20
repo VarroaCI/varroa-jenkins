@@ -59,3 +59,19 @@ func (f *scopeTestConfigBrood) GetCellPool(context.Context, string, string) (*v1
 func (f *scopeTestConfigBrood) ScaleCellPool(context.Context, string, bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error) {
 	return nil, errNoCellPools
 }
+
+func (f *stubConfigBrood) CellGrants(context.Context, string, []string) ([]bus.CellTenantGrants, error) {
+	return nil, errNoCellPools
+}
+
+func (f *fakeConfigBrood) CellGrants(context.Context, string, []string) ([]bus.CellTenantGrants, error) {
+	return nil, errNoCellPools
+}
+
+func (f *fakeConfigBroodForTest) CellGrants(context.Context, string, []string) ([]bus.CellTenantGrants, error) {
+	return nil, errNoCellPools
+}
+
+func (f *scopeTestConfigBrood) CellGrants(context.Context, string, []string) ([]bus.CellTenantGrants, error) {
+	return nil, errNoCellPools
+}

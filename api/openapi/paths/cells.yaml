@@ -84,8 +84,11 @@
       the caller's cluster-wide capability partition. It answers 404 for an
       unknown controller, a controller that is not a cell, and a caller the
       controller read check refuses. It answers 403 when the controller
-      check passes and the caller holds no rolebindings:read. The read is
-      resolver backed, so it touches no record store and answers no 503.
+      check passes and the caller holds no rolebindings:read. A member
+      cell's grants and member roles come from that member's operator,
+      which holds the Team and binding state the member renders. The read
+      touches no record store, so it answers no 503. It answers 502 when
+      the member cluster does not answer.
     parameters:
       - name: namespace
         in: path
@@ -113,3 +116,5 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "502":
+        $ref: '../components/responses.yaml#/ClusterUnreachable'

@@ -2808,7 +2808,11 @@ export interface CellPoolScaleRequest {
 }
 
 /** Where a grant on a tenant comes from. */
-export type CellGrantSource = "teamMembership" | "tenantScopedBinding" | "clusterWideBinding";
+export type CellGrantSource =
+  | "teamMembership"
+  | "tenantScopedBinding"
+  | "federatedBinding"
+  | "clusterWideBinding";
 
 /** One subject of a grant. */
 export interface CellGrantSubject {
@@ -2823,12 +2827,15 @@ export interface CellGrantSubject {
  */
 export interface CellGrant {
   source: CellGrantSource;
-  /** The VarroaRoleBinding name. Absent for the teamMembership source. */
+  /** The VarroaRoleBinding name. For federatedBinding, the JenkinsRoleBinding copy. Absent for teamMembership. */
   binding?: string;
+  /** The VarroaRole of the grant. For federatedBinding, the source VarroaRole. */
   roleRef: string;
   subjects: CellGrantSubject[];
   verbs: string[];
   jobs?: string[];
+  /** The core VarroaRoleBindings of a federated copy. */
+  federatedFrom?: string[];
 }
 
 /** One generated Jenkins member role of a tenant. */

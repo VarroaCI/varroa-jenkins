@@ -323,6 +323,24 @@ describe("Permissions panel", () => {
     expect(screen.queryByText("varroa:tenant:acme")).not.toBeInTheDocument();
   });
 
+  it("renders a federatedBinding row with its jobs and source bindings", () => {
+    const grants = makeGrants();
+    grants.tenants[0].grants.push({
+      source: "federatedBinding",
+      binding: "varroa-fed-tenant-acme",
+      roleRef: "pipelines-writer",
+      subjects: [{ kind: "User", name: "bob" }],
+      verbs: ["write"],
+      federatedFrom: ["acme-writers", "beta-writers"],
+    });
+    mockUseCellGrants.mockReturnValue({ data: grants, isLoading: false, error: null });
+    renderTab();
+    expect(screen.getByText("federatedBinding")).toBeInTheDocument();
+    expect(screen.getByText("varroa-fed-tenant-acme")).toBeInTheDocument();
+    expect(screen.getByText("acme-writers, beta-writers")).toBeInTheDocument();
+    expect(screen.getByText(/A federatedBinding row is a copy of a core binding/)).toBeInTheDocument();
+  });
+
   it("states that no binding reaches a tenant instead of a blank block", () => {
     renderTab();
     expect(screen.getByText(/No binding and no Team membership reaches this tenant/)).toBeInTheDocument();

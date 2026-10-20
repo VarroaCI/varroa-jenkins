@@ -111,12 +111,15 @@ The read applies the controller read check first, then cluster-wide `rolebinding
 | `200` | Both gates pass |
 | `403` | The controller check passes and the caller holds no `rolebindings:read` |
 | `404` | No such controller, a controller that is not a cell, or a refused controller check |
+| `502` | The cell runs on a member cluster and that cluster's operator does not answer |
 
 One code for the three `404` conditions confirms no cell's existence.
 
-The RBAC resolver backs the read, so it answers no `503`. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
+The read touches no record store, so it answers no `503`. It returns at most 50 grants for each tenant, narrowing grants first, and flags a cut list as `truncated`.
 
-Each tenant also carries `memberRoles`, the generated Jenkins member roles. This list is never capped. Its `User` subjects include the principal of each person that the `User` objects name. On a member cluster, the panel lists binding subjects that the cell grants only after binding federation reaches that cluster.
+A cell on a member cluster answers from that member's operator. The member operator reads its own Team and binding state, the state the member cell renders. Core tenant-scoped bindings appear there as `federatedBinding` rows. Each row names its JenkinsRoleBinding copy in `binding`, its source VarroaRole in `roleRef`, and its core VarroaRoleBindings in `federatedFrom`. A core cluster-wide binding with pipelines write appears through its all-tenants copy, as described in `cells.md`.
+
+Each tenant also carries `memberRoles`, the generated Jenkins member roles. This list is never capped. Its `User` subjects include the principal of each person that the `User` objects name. On a member cluster, the list shows the member roles that the member operator renders.
 
 ## Refresh
 

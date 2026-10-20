@@ -6761,12 +6761,18 @@ CellGrant:
   properties:
     source:
       type: string
-      enum: [teamMembership, tenantScopedBinding, clusterWideBinding]
+      enum: [teamMembership, tenantScopedBinding, federatedBinding, clusterWideBinding]
     binding:
       type: string
-      description: The VarroaRoleBinding name. Absent for the teamMembership source.
+      description: >-
+        The VarroaRoleBinding name. For the federatedBinding source it names the
+        JenkinsRoleBinding copy on this cell's cluster. Absent for the
+        teamMembership source.
     roleRef:
       type: string
+      description: >-
+        The VarroaRole of the grant. For the federatedBinding source it names
+        the source VarroaRole of the copy.
     subjects:
       type: array
       items:
@@ -6779,6 +6785,12 @@ CellGrant:
     jobs:
       type: array
       minItems: 1
+      items:
+        type: string
+    federatedFrom:
+      type: array
+      minItems: 1
+      description: The core VarroaRoleBindings of a federated copy.
       items:
         type: string
   additionalProperties: false
@@ -6796,7 +6808,9 @@ CellMemberRole:
       type: string
     binding:
       type: string
-      description: The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.
+      description: >-
+        The narrowing VarroaRoleBinding, or the JenkinsRoleBinding copy that
+        names it. Absent for the role on the whole folder subtree.
     permissions:
       type: array
       items:

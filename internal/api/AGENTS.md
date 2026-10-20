@@ -144,11 +144,16 @@ federation, activity persistence, and SSE fanout.
   carries subject names. `404` covers an unknown controller, a controller
   that is not a cell, and a refused controller check; `403` covers a passed
   cell check with no `rolebindings:read`, since that caller already knows the
-  cell exists. It is resolver backed (`Authorizer.TenantGrantSources` over
-  `rbac.TenantGrantSourcesTruncated`), reads no record store, and therefore
-  answers no `503`. `jobs` carries `omitempty` and is never an empty array:
-  an absent list narrows nothing. `memberRoles` comes from
-  `Authorizer.TenantMemberRoles` and is never capped. It is never `null`.
+  cell exists. A local cell is resolver backed (`Authorizer.TenantGrantSources`
+  over `rbac.TenantGrantSourcesTruncated`), reads no record store, and
+  therefore answers no `503`. A member cell asks its operator through
+  `ConfigBrood.CellGrants` (`cells.grants`, `configbrood_cellgrants.go`), and
+  answers `502` when that member does not answer. The wire types are aliases
+  of `bus.CellGrant`, `bus.CellTenantGrants`, and related bus types. Both
+  paths build the reply with `controller.CellTenantGrantsReport`. `jobs` carries
+  `omitempty` and is never an empty array: an absent list narrows nothing.
+  `memberRoles` comes from `Authorizer.TenantMemberRoles` (or the member's
+  operator) and is never capped. It is never `null`.
   The BFF wires the `User` directory (`SetUserDirectory`), so it resolves
   the same principals as the operator.
 - **Retention** (`handlers_pipelines_retention.go`): `GET /pipelines/{team}`
