@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +137,151 @@ func TestManagedItemsPathIsUnderMiteDir(t *testing.T) {
 	agent.miteDir = d
 	if got, want := agent.managedItemsPath(), filepath.Join(d, "managed-items.json"); got != want {
 		t.Fatalf("managedItemsPath = %q, want %q", got, want)
+	}
+}
+
+// runDeleteItem runs one delete_item command against a Jenkins stub that answers
+// the doDelete call with deleteStatus. It seeds managed-items.json with cache
+// and returns the command result.
+func runDeleteItem(t *testing.T, deleteStatus int, cache string) (*mitev1.CommandResult, *Agent) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/crumbIssuer/api/json":
+			w.WriteHeader(http.StatusNotFound)
+		case "/job/old-job/doDelete":
+			w.WriteHeader(deleteStatus)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent.Logger = slog.Default()
+	agent.miteDir = t.TempDir()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+	if cache != "" {
+		if err := os.WriteFile(agent.managedItemsPath(), []byte(cache), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: &mitev1.ImperativeCommand{
+			CommandId: "delete-old-job",
+			Type:      mitev1.CommandTypeDeleteItem,
+			Target:    "old-job",
+		},
+		ctx: context.Background(),
+	})
+	result := captured.Load()
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	return result, agent
+}
+
+// TestDeleteItemCommandForgetsManagedItem checks that a successful approved
+// delete removes the item from the managed-items record.
+func TestDeleteItemCommandForgetsManagedItem(t *testing.T) {
+	result, agent := runDeleteItem(t, http.StatusOK, `{"old-job":"h","keep":"h"}`)
+	if !result.Success {
+		t.Fatalf("Success = false, error %q", result.Error)
+	}
+	assertManagedCache(t, agent, `{"keep":"h"}`)
+}
+
+// TestDeleteItemCommandNotFoundForgetsManagedItem checks that a 404 counts as a
+// completed delete, so the record drops the item.
+func TestDeleteItemCommandNotFoundForgetsManagedItem(t *testing.T) {
+	result, agent := runDeleteItem(t, http.StatusNotFound, `{"old-job":"h","keep":"h"}`)
+	if !result.Success {
+		t.Fatalf("Success = false, error %q", result.Error)
+	}
+	assertManagedCache(t, agent, `{"keep":"h"}`)
+}
+
+// TestDeleteItemCommandServerErrorKeepsManagedItem checks that a failed delete
+// leaves the item, and its record entry, unchanged.
+func TestDeleteItemCommandServerErrorKeepsManagedItem(t *testing.T) {
+	const cache = `{"old-job":"h","keep":"h"}`
+	result, agent := runDeleteItem(t, http.StatusInternalServerError, cache)
+	if result.Success {
+		t.Fatal("Success = true, want false on a 500 delete")
+	}
+	assertManagedCache(t, agent, cache)
+}
+
+// TestDeleteItemCommandReportsRecordFailure checks that a delete which succeeds
+// in Jenkins but cannot update the record reports failure and names the cache.
+func TestDeleteItemCommandReportsRecordFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/job/old-job/doDelete" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	stream, captured := testReplayStream(t)
+	agent := mustNewAgent(t, Config{ControllerName: "test", Namespace: "ns", JenkinsURL: srv.URL})
+	agent.Logger = slog.Default()
+	agent.miteDir = t.TempDir()
+	setTestStream(agent, stream)
+	agent.jenkinsTokenMu.Lock()
+	agent.jenkinsToken = "test-token"
+	agent.jenkinsTokenMu.Unlock()
+	if err := os.MkdirAll(agent.managedItemsPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	agent.runCommand(context.Background(), commandWork{
+		imperativeCmd: &mitev1.ImperativeCommand{
+			CommandId: "delete-old-job",
+			Type:      mitev1.CommandTypeDeleteItem,
+			Target:    "old-job",
+		},
+		ctx: context.Background(),
+	})
+	result := captured.Load()
+	if result == nil {
+		t.Fatal("expected a CommandResult to be sent")
+	}
+	if result.Success {
+		t.Fatal("Success = true, want false when the record cannot be updated")
+	}
+	if !strings.Contains(result.Error, "managed-items.json") {
+		t.Fatalf("Error = %q, want it to name managed-items.json", result.Error)
+	}
+}
+
+// assertManagedCache compares the managed-items record on disk with want as
+// JSON objects.
+func assertManagedCache(t *testing.T, agent *Agent, want string) {
+	t.Helper()
+	data, err := os.ReadFile(agent.managedItemsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, exp map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("cache %q is not JSON: %v", data, err)
+	}
+	if err := json.Unmarshal([]byte(want), &exp); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(exp) {
+		t.Fatalf("cache = %v, want %v", got, exp)
+	}
+	for k, v := range exp {
+		if got[k] != v {
+			t.Fatalf("cache = %v, want %v", got, exp)
+		}
 	}
 }

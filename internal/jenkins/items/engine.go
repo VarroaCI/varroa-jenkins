@@ -270,6 +270,28 @@ func (e *Engine) removeUndeclared(ctx context.Context, next, prev map[string]str
 	return nil
 }
 
+// Forget removes path and every managed item below it from the managed-items
+// cache. The mite calls it after an approved delete, so a later apply does not
+// delete an item that a user creates again at that path. A failed read changes
+// nothing. A path that is not in the cache writes nothing.
+func (e *Engine) Forget(path string) error {
+	m, err := e.loadManaged()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for p := range m {
+		if p == path || strings.HasPrefix(p, path+"/") {
+			delete(m, p)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return e.saveManaged(m)
+}
+
 // loadManaged reads the managed-items cache from disk. A missing file is an
 // empty cache. Any other read failure, and any content that is not a JSON
 // object of path-to-hash strings, is an error. A 0-byte file and a JSON null

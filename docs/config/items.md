@@ -229,6 +229,7 @@ A held tenant's folder stays as it is.
 Unsafe removals appear in `status.pendingItemDeletions` and need the `approve-deletion`
 capability. A running job or unreadable build state defers deletion.
 Deletion also removes build history.
+An approved deletion also removes the item, and every item below it, from the mite's record of managed items. A later apply does not delete an item that you create again at that path.
 
 ## GitHub sources
 

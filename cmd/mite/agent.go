@@ -95,10 +95,14 @@ type Agent struct {
 	client mitev1.MiteClient
 	// sess is the live command-stream session, or nil between sessions.
 	// sendMu guards it. Only the run loop replaces it.
-	sess              *miteSession
-	sendMu            sync.Mutex
-	cert              *tls.Certificate
-	certMu            sync.Mutex // guards cert (renewal loop vs. connect())
+	sess   *miteSession
+	sendMu sync.Mutex
+	cert   *tls.Certificate
+	certMu sync.Mutex // guards cert (renewal loop vs. connect())
+	// managedItemsMu serializes every read-modify-write of managed-items.json.
+	// A reconnect can start a new command worker while the old one still
+	// saves an apply, so the worker mailbox alone does not order these writes.
+	managedItemsMu    sync.Mutex
 	keypair           ed25519.PrivateKey
 	version           string
 	heartbeatInterval time.Duration
@@ -1675,15 +1679,31 @@ func (a *Agent) runCommand(_ context.Context, w commandWork) {
 		switch cmd.Type {
 		case mitev1.CommandTypeDeleteItem:
 			jenkinsClient := a.getJenkinsClient()
-			deleteErr := jenkinsClient.DeleteItem(cctx, cmd.Target)
+			// The lock spans the Jenkins delete and the record update. An apply
+			// that re-creates the path must not save its hash between the two,
+			// or Forget would drop that fresh hash.
+			a.managedItemsMu.Lock()
+			// The wait for the lock is unbounded, so the Jenkins call takes its
+			// own budget after the lock is held.
+			callCtx, cancelCall := context.WithTimeout(w.ctx, deadline)
+			deleteErr := jenkinsClient.DeleteItem(callCtx, cmd.Target)
+			timedOut := callCtx.Err() == context.DeadlineExceeded
+			cancelCall()
 			if deleteErr != nil && !errors.Is(deleteErr, jenkins.ErrItemNotFound) {
 				errStr = deleteErr.Error()
-				if cctx.Err() == context.DeadlineExceeded {
+				if timedOut {
 					errStr = fmt.Sprintf("command deadline exceeded (%s)", deadline)
 				}
 			} else {
 				success = true
+				forgetErr := items.NewEngine(jenkinsClient, a.managedItemsPath()).Forget(cmd.Target)
+				if forgetErr != nil {
+					a.Logger.Error("items managed-items cache failed", "path", a.managedItemsPath(), "item", cmd.Target, "error", forgetErr)
+					success = false
+					errStr = fmt.Sprintf("item %s deleted, but the managed-items record was not updated: %v", cmd.Target, forgetErr)
+				}
 			}
+			a.managedItemsMu.Unlock()
 		case mitev1.CommandTypeReplayWebhook:
 			payload := cmd.ReplayWebhook
 			if payload == nil {
@@ -2526,7 +2546,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		} else {
 			a.Logger.Debug("applying items", "len", len(cmd.ItemsYaml))
 			itemsEngine := items.NewEngine(jenkinsClient, a.managedItemsPath())
+			a.managedItemsMu.Lock()
 			applyResult, err := itemsEngine.Apply(ctx, cmd.ItemsYaml)
+			a.managedItemsMu.Unlock()
 			switch {
 			case err != nil:
 				// An abort saves nothing and reports no per-item failures.
