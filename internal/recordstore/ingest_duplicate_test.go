@@ -493,3 +493,150 @@ func TestApplyRunSourceRaisesNoDuplicateBackstop(t *testing.T) {
 	default:
 	}
 }
+
+// TestDuplicateBackstopSkipsTwoSCMKeysOfOneHeadCommit asserts two runs that
+// both hold an scm: intent key and report one head commit are not
+// duplicates. Neither run is marked and no action is published.
+func TestDuplicateBackstopSkipsTwoSCMKeysOfOneHeadCommit(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+
+	s := startDuplicateTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	received := make(chan []byte, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject(testCluster), func(msg *nats.Msg) {
+		received <- msg.Data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	g := NewIngester(pool, conn, nil)
+
+	revision := "headcommit1"
+	keyA := "scm:acme/app:sha256:aaaa"
+	keyB := "scm:acme/app:sha256:bbbb"
+
+	runA := seedGrantedIntent(t, pool, keyA)
+	buildA := int64(1)
+	startedA := newTestEnvelope(t, runA, keyA, KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildA, SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedA); err != nil {
+		t.Fatalf("apply run.started A: %v", err)
+	}
+
+	runB := seedGrantedIntent(t, pool, keyB)
+	buildB := int64(2)
+	startedB := newTestEnvelope(t, runB, keyB, KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildB, SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedB); err != nil {
+		t.Fatalf("apply run.started B: %v", err)
+	}
+
+	var statusA, statusB string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runA).Scan(&statusA); err != nil {
+		t.Fatalf("read run A: %v", err)
+	}
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runB).Scan(&statusB); err != nil {
+		t.Fatalf("read run B: %v", err)
+	}
+	if statusA != StatusRunning {
+		t.Fatalf("run A status = %q, want RUNNING", statusA)
+	}
+	if statusB != StatusRunning {
+		t.Fatalf("run B status = %q, want RUNNING", statusB)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-received:
+		t.Fatal("two scm: runs of one head commit published a ledger action")
+	default:
+	}
+}
+
+// TestDuplicateBackstopMarksSCMRunAgainstLiveManualRun asserts an arriving
+// scm: run is still marked DUPLICATE when a live manual: run holds the same
+// revision. The scm: skip applies only when both runs hold an scm: key.
+func TestDuplicateBackstopMarksSCMRunAgainstLiveManualRun(t *testing.T) {
+	t.Parallel()
+
+	pool, db := setupLedgerPool(t)
+
+	s := startDuplicateTestServer(t)
+	conn, err := bus.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(conn.Close)
+
+	received := make(chan []byte, 4)
+	sub, err := conn.Subscribe(bus.LedgerActionSubject(testCluster), func(msg *nats.Msg) {
+		received <- msg.Data
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	g := NewIngester(pool, conn, nil)
+
+	revision := "rev-mixed"
+	runA := seedGrantedIntent(t, pool, "manual:dup-scm-live")
+	buildA := int64(1)
+	startedA := newTestEnvelope(t, runA, "manual:dup-scm-live", KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildA, SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedA); err != nil {
+		t.Fatalf("apply run.started A: %v", err)
+	}
+
+	keyB := "scm:acme/app:rev-mixed"
+	runB := seedGrantedIntent(t, pool, keyB)
+	buildB := int64(2)
+	startedB := newTestEnvelope(t, runB, keyB, KindRunStarted, RunStartedPayload{
+		BuildNumber: &buildB, SCMRevision: &revision,
+	})
+	if _, err := g.Apply(context.Background(), startedB); err != nil {
+		t.Fatalf("apply run.started B: %v", err)
+	}
+
+	var statusA, statusB string
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runA).Scan(&statusA); err != nil {
+		t.Fatalf("read run A: %v", err)
+	}
+	if err := db.QueryRow(`SELECT status FROM varroa.runs WHERE run_id = $1`, runB).Scan(&statusB); err != nil {
+		t.Fatalf("read run B: %v", err)
+	}
+	if statusA != StatusRunning {
+		t.Fatalf("run A status = %q, want RUNNING", statusA)
+	}
+	if statusB != StatusDuplicate {
+		t.Fatalf("run B status = %q, want DUPLICATE", statusB)
+	}
+
+	select {
+	case data := <-received:
+		var action LedgerAction
+		if err := json.Unmarshal(data, &action); err != nil {
+			t.Fatalf("unmarshal action: %v", err)
+		}
+		if action.Kind != LedgerActionCancelRun {
+			t.Fatalf("kind = %q, want cancel_run", action.Kind)
+		}
+		if action.RunID != runB.String() {
+			t.Fatalf("run_id = %q, want %q", action.RunID, runB.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no cancel_run action was published")
+	}
+}
