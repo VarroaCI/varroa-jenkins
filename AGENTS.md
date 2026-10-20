@@ -67,7 +67,7 @@ GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` 
 
 Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
 
-Copilot code review reads `.github/copilot-instructions.md`, and also ingests `AGENTS.md` + `CLAUDE.md` as custom instructions. It loads all instruction files from the **base branch**, so edits only take effect once merged to `main`. When repo conventions change here, keep `copilot-instructions.md` aligned so review comments stay low-noise.
+Copilot code review reads `.github/copilot-instructions.md`, and also ingests `AGENTS.md` + `CLAUDE.md` as custom instructions. A same-repo pull request loads these files from its head branch. A fork pull request loads them from the base branch. Copilot review runs as an Actions run under a per-account model rate limit. The review body hides that error. The run log of the `copilot-pull-request-reviewer` job shows the real error. When repo conventions change here, keep `copilot-instructions.md` aligned so review comments stay low-noise.
 
 ## Repository layout
 
