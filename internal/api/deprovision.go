@@ -22,10 +22,11 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	// Compute the set of identifiers that may appear in a binding's
 	// SubjectRef.Name for this user: subject, username, preferred_username, and
 	// email (a binding may reference any of these per --oidc-user-claim, default
-	// preferred_username,sub). Display name is deliberately excluded — it is a
-	// human label, never a binding subject, and would risk over-matching.
-	// Former preferred usernames and emails count too, so a renamed person
-	// loses every binding that names an old identifier.
+	// preferred_username,sub), plus the custom claim values stored at login.
+	// Display name is deliberately excluded — it is a human label, never a
+	// binding subject, and would risk over-matching. Former preferred usernames,
+	// emails, and custom claim values count too, so a renamed person loses every
+	// binding that names an old identifier.
 	identifiers := map[string]bool{}
 	identifiers[user.Name] = true // local username; harmless oidc-hash for OIDC
 	if localAccount && mode != string(auth.AuthModeLocal) {
@@ -41,18 +42,22 @@ func deprovisionUser(ctx context.Context, store crdstore.Backend, user *v1alpha1
 	if user.Spec.Email != "" {
 		identifiers[user.Spec.Email] = true
 	}
-	former := userdirectory.FormerIdentifiers(user)
-	if len(former) > 0 {
-		held, err := liveIdentifierHolders(ctx, store, user)
-		if err != nil {
-			return err
-		}
-		for _, v := range former {
-			if owner, ok := held[v]; ok {
-				slog.Default().Info(fmt.Sprintf("deprovision kept %s: held by %s", v, owner))
-				continue
-			}
-			identifiers[v] = true
+	for _, v := range userdirectory.UserClaims(user) {
+		identifiers[v] = true
+	}
+	for _, v := range userdirectory.FormerIdentifiers(user) {
+		identifiers[v] = true
+	}
+	// An identifier that another live user holds stays in the bindings. The
+	// departing user cannot own a value that a signed-in person now holds.
+	held, err := liveIdentifierHolders(ctx, store, user)
+	if err != nil {
+		return err
+	}
+	for v := range identifiers {
+		if owner, ok := held[v]; ok {
+			slog.Default().Info(fmt.Sprintf("deprovision kept %s: held by %s", v, owner))
+			delete(identifiers, v)
 		}
 	}
 
@@ -150,9 +155,9 @@ func resetObjectMetaForApply(meta *metav1.ObjectMeta) {
 	meta.ManagedFields = nil
 }
 
-// liveIdentifierHolders maps each current preferred username and email of the
-// other idp-managed users in the namespace to the holder's User name. The
-// user being deprovisioned does not count.
+// liveIdentifierHolders maps each current preferred username, email, and
+// subject, custom user claim value of the other idp-managed users in the namespace to
+// the holder's User name. The user being deprovisioned does not count.
 func liveIdentifierHolders(ctx context.Context, store crdstore.Backend, self *v1alpha1.User) (map[string]string, error) {
 	users, err := crdstore.List[v1alpha1.User](ctx, store, self.Namespace, "")
 	if err != nil {
@@ -163,11 +168,17 @@ func liveIdentifierHolders(ctx context.Context, store crdstore.Backend, self *v1
 		if u.Name == self.Name || u.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByIDP {
 			continue
 		}
+		if sub := u.Annotations[v1alpha1.AnnotationOIDCSubject]; sub != "" {
+			held[sub] = u.Name
+		}
 		if pu := u.Annotations[v1alpha1.AnnotationOIDCPreferredUsername]; pu != "" {
 			held[pu] = u.Name
 		}
 		if u.Spec.Email != "" {
 			held[u.Spec.Email] = u.Name
+		}
+		for _, v := range userdirectory.UserClaims(u) {
+			held[v] = u.Name
 		}
 	}
 	return held, nil

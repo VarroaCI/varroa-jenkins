@@ -125,7 +125,9 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   on the cell: the preferred username, then the email, then the subject. The operator reads that
   principal from the person's `User` object. When a later sign-in omits the preferred username, the
   principal changes to the email, then the subject. A person gets the grant after the first sign-in, and
-  the operator applies it on the next reconcile tick. A custom user claim does not reach the cell.
+  the operator applies it on the next reconcile tick. A configured custom user claim also counts.
+  The operator reads that claim value from the person's `User` object, which stores it at sign-in.
+  Only a string claim counts.
   The Cell tab Permissions panel lists the member roles of each tenant.
   A cell on a member cluster also grants this role to the subjects of core tenant-scoped bindings with
   pipelines write. A cluster-wide binding reaches a member cell only through its Global Jenkins role.

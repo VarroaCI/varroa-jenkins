@@ -15,8 +15,10 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // --- normalizeReturn tests ---
@@ -831,5 +833,61 @@ func TestHasGroups(t *testing.T) {
 				t.Errorf("hasGroups() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// mockOIDCClaimsProvider returns an ID token whose configured custom user
+// claims are set in Extra.
+type mockOIDCClaimsProvider struct {
+	mockOIDCProvider
+}
+
+func (m *mockOIDCClaimsProvider) VerifyToken(_ context.Context, _ string) (*auth.Claims, error) {
+	return &auth.Claims{
+		Email:   "test@example.com",
+		Subject: "test-sub",
+		Extra:   map[string]string{"employee_id": "E123"},
+	}, nil
+}
+
+func TestHandleOIDCCallback_RecordsExtraUserClaims(t *testing.T) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	store := crdstore.NewFake()
+	deps := &Dependencies{
+		OIDCStateSecret:   secret,
+		Logger:            testLoggerOIDC(t),
+		Auth:              &mockOIDCClaimsProvider{},
+		Store:             store,
+		OperatorNamespace: "varroa-system",
+		SecureCookies:     true,
+	}
+	s := NewServer(deps)
+
+	nonce, _ := newStateNonce()
+	payload, err := encodeStateCookie(secret, nonce, "/", time.Now().Unix()+300)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/callback?code=valid_code&state="+nonce, nil)
+	r.AddCookie(&http.Cookie{Name: stateCookieName, Value: payload})
+	s.HandleOIDCCallback(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	users, err := crdstore.List[v1alpha1.User](context.Background(), store, "varroa-system", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if got := users[0].Annotations[v1alpha1.AnnotationOIDCUserClaims]; got != `{"employee_id":"E123"}` {
+		t.Errorf("user claims annotation = %q, want employee_id E123", got)
 	}
 }

@@ -30,9 +30,16 @@ const (
 	AnnotationOIDCPreferredUsername = "varroa.dev/oidc-preferred-username"
 
 	// AnnotationOIDCFormerIdentifiers stores a JSON array of the preferred
-	// usernames and emails that a User object held before a later login.
-	// Deprovisioning strips them from bindings. The member role never reads them.
+	// usernames, emails, and replaced custom user claim values that a User
+	// object held before a later login. Deprovisioning strips them from
+	// bindings. The member role never reads them.
 	AnnotationOIDCFormerIdentifiers = "varroa.dev/oidc-former-identifiers"
+
+	// AnnotationOIDCUserClaims stores a JSON object of the configured user
+	// claims outside sub, email, name, and preferred_username. The BFF writes
+	// it at each login, and a login without the claims deletes it. The member
+	// role and deprovisioning read it.
+	AnnotationOIDCUserClaims = "varroa.dev/oidc-user-claims"
 
 	// LabelBuiltin marks a VarroaRole or JenkinsRole as a built-in role
 	// managed by the RoleReconciler.

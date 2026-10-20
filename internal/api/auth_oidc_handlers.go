@@ -349,7 +349,7 @@ func (s *Server) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		userName := "oidc-" + hex.EncodeToString(h[:])[:32]
 		if err := userdirectory.RecordLogin(context.Background(), userStoreAdapter{store: s.deps.Store}, userName,
 			claims.Email, claims.Name, claims.Groups,
-			claims.Subject, claims.PreferredUsername, s.deps.OperatorNamespace); err != nil {
+			claims.Subject, claims.PreferredUsername, claims.Extra, s.deps.OperatorNamespace); err != nil {
 			s.deps.Logger.Error("failed to record user in directory", "error", err, "subject", claims.Subject)
 		}
 	}
