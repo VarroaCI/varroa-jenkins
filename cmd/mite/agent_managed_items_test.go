@@ -11,10 +11,10 @@ import (
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
-// TestItemsApplyReportsManagedCacheSaveFailure makes managed-items.json a
-// directory, so the items walk applies but the cache save fails. The section
-// must report failure and must not record last-items.yaml.
-func TestItemsApplyReportsManagedCacheSaveFailure(t *testing.T) {
+// TestItemsApplyReportsManagedCacheFailure makes managed-items.json a
+// directory, so the cache read fails. The section must report failure and must
+// not record last-items.yaml.
+func TestItemsApplyReportsManagedCacheFailure(t *testing.T) {
 	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
 	home := t.TempDir()
 	srv := rehydrationServer(t, home, []string{"new-job"}, false)
@@ -33,7 +33,7 @@ func TestItemsApplyReportsManagedCacheSaveFailure(t *testing.T) {
 	}
 	res := agent.handleDesiredState(context.Background(), cmd)
 	if res.ItemsSuccess {
-		t.Fatalf("expected items apply to fail on a cache save failure, got %+v", res)
+		t.Fatalf("expected items apply to fail on a cache failure, got %+v", res)
 	}
 	if !strings.Contains(res.ItemsError, "managed-items.json") {
 		t.Fatalf("ItemsError = %q, want it to name managed-items.json", res.ItemsError)
@@ -43,6 +43,49 @@ func TestItemsApplyReportsManagedCacheSaveFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(agent.miteDir, "last-items.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("last-items.yaml must not be written on a save failure, stat err = %v", err)
+	}
+}
+
+// TestItemsApplyReportsCorruptManagedCache seeds a managed-items cache that is
+// not JSON. The section must fail, name the cache file, apply no item, and keep
+// the corrupt file unchanged.
+func TestItemsApplyReportsCorruptManagedCache(t *testing.T) {
+	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
+	home := t.TempDir()
+	srv := rehydrationServer(t, home, []string{"new-job"}, false)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+	cache := filepath.Join(agent.miteDir, "managed-items.json")
+	if err := os.WriteFile(cache, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-1",
+		ItemsYaml:           newJobItems,
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+	}
+	res := agent.handleDesiredState(context.Background(), cmd)
+	if res.ItemsSuccess {
+		t.Fatalf("expected items apply to fail on a corrupt cache, got %+v", res)
+	}
+	if !strings.Contains(res.ItemsError, "managed-items.json") {
+		t.Fatalf("ItemsError = %q, want it to name managed-items.json", res.ItemsError)
+	}
+	if len(res.ItemFailures) != 0 {
+		t.Fatalf("ItemFailures = %v, want none", res.ItemFailures)
+	}
+	data, err := os.ReadFile(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{not json" {
+		t.Fatalf("corrupt cache was rewritten: %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(agent.miteDir, "last-items.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("last-items.yaml must not be written on a cache failure, stat err = %v", err)
 	}
 }
 

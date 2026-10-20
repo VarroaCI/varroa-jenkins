@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,10 +30,11 @@ type ApplyResult struct {
 	// Failed lists each item that Jenkins refused. The walk continues past
 	// a refused item, so one apply can report several failures.
 	Failed []*ItemError
-	// SaveError is the failure to write the managed-items cache after a
-	// completed walk. The written items are live in Jenkins, but the next
-	// apply writes every item again.
-	SaveError error
+	// CacheError is the failure to read or write the managed-items cache. A
+	// failed read applies every declared item, deletes nothing, and does not
+	// save the cache. A failed write keeps the previous cache file. The next
+	// apply writes every item again when the cache is missing.
+	CacheError error
 }
 
 // FailureText joins the refusals of Failed into one message, separated by "; ".
@@ -127,7 +129,8 @@ func (e *ItemError) Refusal() bool {
 func (e *ItemError) Unwrap() error { return e.Err }
 
 // applyIncremental walks each item, creates or updates, then handles remove.
-// A failed cache save after a completed walk sets res.SaveError.
+// A failed cache read or save sets res.CacheError. A failed read deletes
+// nothing and saves nothing, because the record of managed items is unknown.
 // All strategies (NONE, SYNC, REMOVE_SUPPORTED, REMOVE_ALL) use create/update
 // in place for declared items and remove only mite-managed items no longer
 // declared. Declared items are NEVER delete-recreated.
@@ -139,9 +142,13 @@ func (e *ItemError) Unwrap() error { return e.Err }
 // refusal covers them. A failed check of existence and a cancelled context abort the walk with
 // an error, and nothing is saved.
 func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strategy string) (*ApplyResult, error) {
-	prev := e.loadManaged()
-	next := make(map[string]string)
 	res := &ApplyResult{}
+	prev, loadErr := e.loadManaged()
+	if loadErr != nil {
+		prev = map[string]string{}
+		res.CacheError = loadErr
+	}
+	next := make(map[string]string)
 	flattened := manifest.Flatten()
 	var failedCreates []string
 
@@ -197,19 +204,23 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 	// so adding unmanaged-item listing later differentiates them.
 	// A retained path is outside this apply: its managed items stay in the
 	// cache with their previous hash, so the remove step below keeps them.
-	for path, h := range prev {
-		if _, declared := next[path]; !declared && manifest.retains(path) {
-			next[path] = h
+	// The retain and remove steps run only when the cache is known. An unknown
+	// cache never deletes an item.
+	if loadErr == nil {
+		for path, h := range prev {
+			if _, declared := next[path]; !declared && manifest.retains(path) {
+				next[path] = h
+			}
 		}
-	}
 
-	if strategy != string(RemoveNone) {
-		if err := e.removeUndeclared(ctx, next, prev, res); err != nil {
-			return nil, fmt.Errorf("remove undeclared: %w", err)
+		if strategy != string(RemoveNone) {
+			if err := e.removeUndeclared(ctx, next, prev, res); err != nil {
+				return nil, fmt.Errorf("remove undeclared: %w", err)
+			}
 		}
-	}
 
-	res.SaveError = e.saveManaged(next)
+		res.CacheError = e.saveManaged(next)
+	}
 	return res, nil
 }
 
@@ -259,41 +270,62 @@ func (e *Engine) removeUndeclared(ctx context.Context, next, prev map[string]str
 	return nil
 }
 
-// loadManaged reads the managed-items cache from disk.
-// Backward-compatible: tries map[string]string first, then legacy []string,
-// then empty map.
-func (e *Engine) loadManaged() map[string]string {
+// loadManaged reads the managed-items cache from disk. A missing file is an
+// empty cache. Any other read failure, and any content that is not a JSON
+// object of path-to-hash strings, is an error. A 0-byte file and a JSON null
+// are errors.
+func (e *Engine) loadManaged() (map[string]string, error) {
 	data, err := os.ReadFile(e.managedFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]string{}, nil
+	}
 	if err != nil {
-		return map[string]string{}
+		return nil, fmt.Errorf("read managed-items cache %s: %w", e.managedFile, err)
 	}
 	var m map[string]string
-	if err := json.Unmarshal(data, &m); err == nil {
-		return m
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("read managed-items cache %s: %w", e.managedFile, err)
 	}
-	var legacy []string
-	if err := json.Unmarshal(data, &legacy); err == nil {
-		m = make(map[string]string, len(legacy))
-		for _, p := range legacy {
-			m[p] = ""
-		}
-		return m
+	if m == nil {
+		return nil, fmt.Errorf("read managed-items cache %s: content is null, want a JSON object", e.managedFile)
 	}
-	return map[string]string{}
+	return m, nil
 }
 
-// saveManaged writes the managed-items cache to disk. It returns every
+// saveManaged replaces the managed-items cache on disk. It writes a temporary
+// file in the same directory, syncs it, and renames it over the cache, so a
+// failed write leaves the previous cache file in place. It returns every
 // failure, wrapped with the cache path.
 func (e *Engine) saveManaged(m map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(e.managedFile), 0755); err != nil {
+	wrap := func(err error) error {
 		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
+	}
+	dir := filepath.Dir(e.managedFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return wrap(err)
 	}
 	data, err := json.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
+		return wrap(err)
 	}
-	if err := os.WriteFile(e.managedFile, data, 0600); err != nil {
-		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
+	f, err := os.CreateTemp(dir, ".managed-items-*.tmp")
+	if err != nil {
+		return wrap(err)
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, e.managedFile)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return wrap(err)
 	}
 	return nil
 }

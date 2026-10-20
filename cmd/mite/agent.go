@@ -2540,9 +2540,9 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				a.Logger.Error("items apply refused items", "count", len(applyResult.Failed))
 				result.ItemsSuccess = false
 				result.ItemsError = applyResult.FailureText()
-				if applyResult.SaveError != nil {
-					a.Logger.Error("items managed-items cache save failed", "path", a.managedItemsPath(), "error", applyResult.SaveError)
-					result.ItemsError += "; " + applyResult.SaveError.Error()
+				if applyResult.CacheError != nil {
+					a.Logger.Error("items managed-items cache failed", "path", a.managedItemsPath(), "error", applyResult.CacheError)
+					result.ItemsError += "; " + applyResult.CacheError.Error()
 				}
 				result.ItemFailures = make([]*mitev1.ItemFailure, 0, len(applyResult.Failed))
 				for _, f := range applyResult.Failed {
@@ -2555,12 +2555,13 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
 				}
 				a.wakeSchedulePoller()
-			case applyResult.SaveError != nil:
-				// The walk applied every item, but the cache is not durable.
-				// The section stays unconverged, so the operator resends it.
-				a.Logger.Error("items managed-items cache save failed", "path", a.managedItemsPath(), "error", applyResult.SaveError)
+			case applyResult.CacheError != nil:
+				// The walk applied the declared items, but the managed-items cache is
+				// not readable or not durable. The section stays unconverged, so the
+				// operator resends it.
+				a.Logger.Error("items managed-items cache failed", "path", a.managedItemsPath(), "error", applyResult.CacheError)
 				result.ItemsSuccess = false
-				result.ItemsError = applyResult.SaveError.Error()
+				result.ItemsError = applyResult.CacheError.Error()
 				if len(applyResult.DeferredDeletions) > 0 {
 					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
 				}

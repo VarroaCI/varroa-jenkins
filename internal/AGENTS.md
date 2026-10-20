@@ -94,7 +94,7 @@ reading each package's entry point):
   cache, matched on whole path segments. Only the cell merge writes it, for
   a held tenant folder; `ReRoot` drops it. The engine continues past a refused
   item (generate, create, or update). It keeps that item's previous hash, skips the
-  children of a refused create, and aborts only on a failed existence check. A failed managed-cache save after a completed walk sets `ApplyResult.SaveError`; the mite reports it as a failed items section. A `gitea` source or navigator
+  children of a refused create, and aborts only on a failed existence check. A failed managed-cache read or save sets `ApplyResult.CacheError`, and the mite reports a failed items section. A failed read deletes nothing and saves no cache. The save writes a temporary file and renames it over the cache. A `gitea` source or navigator
   always renders its discovery traits (the defaults when none are declared)
   and a `WebhookRegistrationTrait` set to `DISABLE`. A `github` source
   renders its declared traits (`githubSkipNotifications` renders the
