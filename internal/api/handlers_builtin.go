@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -52,7 +54,7 @@ func (s *Server) HandleBuiltinRoles(w http.ResponseWriter, r *http.Request) {
 		ref := builtinRoleRef{
 			Name:               role.Name,
 			JenkinsRoleRef:     role.Spec.JenkinsRoleRef,
-			JenkinsPermissions: role.Spec.JenkinsPermissions,
+			JenkinsPermissions: []string{},
 		}
 		for _, rule := range role.Spec.APIRules {
 			ref.APIRules = append(ref.APIRules, apiRuleRef{
@@ -61,11 +63,14 @@ func (s *Server) HandleBuiltinRoles(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		// Resolve JenkinsRole permissions if a ref is set.
+		// The JenkinsRole holds the permissions. A missing JenkinsRole answers an empty list.
 		if role.Spec.JenkinsRoleRef != "" {
 			jr, err := crdstore.Get[v1alpha1.JenkinsRole](ctx, s.deps.Store, role.Spec.JenkinsRoleRef, "")
 			if err == nil && jr != nil {
-				ref.JenkinsPermissions = jr.Spec.Permissions
+				ref.JenkinsPermissions = append([]string{}, jr.Spec.Permissions...)
+			} else if err != nil && !apierrors.IsNotFound(err) {
+				s.writeK8sError(w, err)
+				return
 			}
 		}
 
