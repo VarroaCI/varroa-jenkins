@@ -109,6 +109,80 @@ func newFakeItemsEngine(t *testing.T, f *fakeItemsJenkins, managed string) (*Eng
 	return &Engine{client: jenkins.NewClient(srv.URL, "test", "token"), managedFile: mf}, mf
 }
 
+// TestApplyReportsManagedCacheMkdirFailure forces the cache directory to be
+// a regular file, so MkdirAll fails with ENOTDIR on every platform.
+func TestApplyReportsManagedCacheMkdirFailure(t *testing.T) {
+	engine, _ := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine.managedFile = filepath.Join(blocker, "sub", "managed.json")
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil: a failed save is reported in the result", err)
+	}
+	if res.Written != 1 {
+		t.Fatalf("Written = %d, want 1", res.Written)
+	}
+	if res.SaveError == nil {
+		t.Fatal("SaveError = nil, want the cache save failure")
+	}
+	if !strings.Contains(res.SaveError.Error(), engine.managedFile) {
+		t.Fatalf("SaveError = %q, want it to name %q", res.SaveError, engine.managedFile)
+	}
+}
+
+// TestApplyReportsManagedCacheWriteFailure makes the cache path a directory,
+// so WriteFile fails with EISDIR on every platform.
+func TestApplyReportsManagedCacheWriteFailure(t *testing.T) {
+	engine, _ := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+	engine.managedFile = filepath.Join(t.TempDir(), "managed.json")
+	if err := os.Mkdir(engine.managedFile, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil: a failed save is reported in the result", err)
+	}
+	if res.Written != 1 {
+		t.Fatalf("Written = %d, want 1", res.Written)
+	}
+	if res.SaveError == nil {
+		t.Fatal("SaveError = nil, want the cache save failure")
+	}
+	if !strings.Contains(res.SaveError.Error(), engine.managedFile) {
+		t.Fatalf("SaveError = %q, want it to name %q", res.SaveError, engine.managedFile)
+	}
+}
+
+// TestApplySavesManagedCacheWithoutError checks the normal path reports no save error.
+func TestApplySavesManagedCacheWithoutError(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if res.SaveError != nil {
+		t.Fatalf("SaveError = %v, want nil", res.SaveError)
+	}
+	if _, err := os.Stat(mf); err != nil {
+		t.Fatalf("managed cache not written: %v", err)
+	}
+}
+
 func TestApplyReportsRefusedItemInResult(t *testing.T) {
 	f := &fakeItemsJenkins{refuse: map[string]bool{"create repos": true}}
 	engine, _ := newFakeItemsEngine(t, f, "")

@@ -29,6 +29,10 @@ type ApplyResult struct {
 	// Failed lists each item that Jenkins refused. The walk continues past
 	// a refused item, so one apply can report several failures.
 	Failed []*ItemError
+	// SaveError is the failure to write the managed-items cache after a
+	// completed walk. The written items are live in Jenkins, but the next
+	// apply writes every item again.
+	SaveError error
 }
 
 // FailureText joins the refusals of Failed into one message, separated by "; ".
@@ -123,6 +127,7 @@ func (e *ItemError) Refusal() bool {
 func (e *ItemError) Unwrap() error { return e.Err }
 
 // applyIncremental walks each item, creates or updates, then handles remove.
+// A failed cache save after a completed walk sets res.SaveError.
 // All strategies (NONE, SYNC, REMOVE_SUPPORTED, REMOVE_ALL) use create/update
 // in place for declared items and remove only mite-managed items no longer
 // declared. Declared items are NEVER delete-recreated.
@@ -204,7 +209,7 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 		}
 	}
 
-	e.saveManaged(next)
+	res.SaveError = e.saveManaged(next)
 	return res, nil
 }
 
@@ -277,33 +282,24 @@ func (e *Engine) loadManaged() map[string]string {
 	return map[string]string{}
 }
 
-// saveManaged writes the managed-items cache to disk.
-func (e *Engine) saveManaged(m map[string]string) {
+// saveManaged writes the managed-items cache to disk. It returns every
+// failure, wrapped with the cache path.
+func (e *Engine) saveManaged(m map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(e.managedFile), 0755); err != nil {
-		return
+		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
 	}
 	data, err := json.Marshal(m)
 	if err != nil {
-		return
+		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
 	}
-	_ = os.WriteFile(e.managedFile, data, 0600)
+	if err := os.WriteFile(e.managedFile, data, 0600); err != nil {
+		return fmt.Errorf("save managed-items cache %s: %w", e.managedFile, err)
+	}
+	return nil
 }
 
 // hashConfig returns the SHA-256 hex digest of configXML.
 func hashConfig(xml string) string {
 	sum := sha256.Sum256([]byte(xml))
 	return hex.EncodeToString(sum[:])
-}
-
-// DropManaged removes a single path from the managed-items cache (no-op if
-// absent). Called after an approved out-of-band delete so the path is not
-// re-evaluated by the next removeUndeclared pass.
-func (e *Engine) DropManaged(path string) error {
-	m := e.loadManaged()
-	if _, ok := m[path]; !ok {
-		return nil
-	}
-	delete(m, path)
-	e.saveManaged(m)
-	return nil
 }

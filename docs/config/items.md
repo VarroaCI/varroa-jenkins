@@ -401,3 +401,4 @@ Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`
 | Kind is unsupported | Keep it unmanaged |
 | Schedule stops after a cell restart | Move the Jenkinsfile trigger to `triggers` |
 | Condition reason is `ItemsRefused` | Read the condition message. Add the missing plugin or credential |
+| Items section fails and names `managed-items.json` | The mite cannot write its record of managed items. Its items section in `status.lastApplyResult` names the file. Fix the state directory. The next apply writes every item again |
