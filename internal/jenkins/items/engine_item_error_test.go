@@ -1,6 +1,7 @@
 package items
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -488,4 +489,101 @@ func TestLoadManagedRejectsNull(t *testing.T) {
 	if _, err := engine.loadManaged(); err == nil || !strings.Contains(err.Error(), mf) {
 		t.Fatalf("loadManaged error = %v, want it to name %q", err, mf)
 	}
+}
+
+// TestForgetDropsPathAndDescendants removes a path and its descendants, and
+// keeps a sibling whose name only shares the prefix.
+func TestForgetDropsPathAndDescendants(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, `{"a":"h1","a/b":"h2","ab":"h3"}`)
+	if err := engine.Forget("a"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+	got, err := engine.loadManaged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["ab"] != "h3" {
+		t.Fatalf("cache after Forget = %v (file %s), want only ab", got, mf)
+	}
+}
+
+// TestForgetAbsentPathWritesNothing checks that Forget creates no file when no
+// cache exists, and leaves the bytes of a cache that lacks the path unchanged.
+func TestForgetAbsentPathWritesNothing(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+	if err := engine.Forget("x"); err != nil {
+		t.Fatalf("Forget on missing cache: %v", err)
+	}
+	if _, err := os.Stat(mf); !os.IsNotExist(err) {
+		t.Fatalf("cache file created by Forget, stat err = %v", err)
+	}
+
+	const body = `{"y":"h"}`
+	engine, mf = newFakeItemsEngine(t, &fakeItemsJenkins{}, body)
+	if err := engine.Forget("x"); err != nil {
+		t.Fatalf("Forget on absent path: %v", err)
+	}
+	data, err := os.ReadFile(mf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, []byte(body)) {
+		t.Fatalf("cache bytes = %q, want %q", data, body)
+	}
+	temps, _ := filepath.Glob(filepath.Join(filepath.Dir(mf), ".managed-items-*.tmp"))
+	if len(temps) != 0 {
+		t.Fatalf("temp files left behind: %v", temps)
+	}
+}
+
+// TestForgetCorruptCacheKeepsFile returns an error that names the cache and
+// leaves a corrupt cache byte-identical.
+func TestForgetCorruptCacheKeepsFile(t *testing.T) {
+	const body = "{not json"
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, body)
+	err := engine.Forget("x")
+	if err == nil || !strings.Contains(err.Error(), mf) {
+		t.Fatalf("Forget error = %v, want one naming the cache file", err)
+	}
+	data, _ := os.ReadFile(mf)
+	if string(data) != body {
+		t.Fatalf("corrupt cache changed to %q", data)
+	}
+}
+
+// TestApplyAfterForgetKeepsRecreatedItem shows that an item forgotten after an
+// approved delete is not deleted by a later apply, which is the hazard the
+// managed-items record guards against. The control case shows the delete does
+// happen when no Forget runs.
+func TestApplyAfterForgetKeepsRecreatedItem(t *testing.T) {
+	const manifest = `removeStrategy:
+  items: "sync"
+root: ""
+items:
+  - kind: folder
+    name: repos
+`
+	t.Run("forgotten", func(t *testing.T) {
+		f := &fakeItemsJenkins{existing: map[string]bool{"old-job": true}}
+		engine, _ := newFakeItemsEngine(t, f, `{"old-job":"h"}`)
+		if err := engine.Forget("old-job"); err != nil {
+			t.Fatalf("Forget: %v", err)
+		}
+		if _, err := engine.Apply(context.Background(), manifest); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if f.has("delete old-job") {
+			t.Fatal("apply deleted an item that was forgotten after an approved delete")
+		}
+	})
+	t.Run("control", func(t *testing.T) {
+		f := &fakeItemsJenkins{existing: map[string]bool{"old-job": true}}
+		engine, _ := newFakeItemsEngine(t, f, `{"old-job":"h"}`)
+		if _, err := engine.Apply(context.Background(), manifest); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if !f.has("delete old-job") {
+			t.Fatal("control: apply did not delete a managed item that is undeclared")
+		}
+	})
 }
