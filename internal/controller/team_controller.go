@@ -1338,38 +1338,6 @@ func tenantAgentServiceAccountName(team string) string { return "varroa-agent-" 
 func tenantAgentTokenSecretName(team string) string    { return "varroa-agent-" + team + "-token" }
 func tenantCloudCredentialID(team string) string       { return "varroa-cloud-" + team }
 
-// retiredPipelinesRoleBindingName names the JenkinsRoleBinding that earlier
-// releases wrote for a pipelines Team. No code path writes this binding now.
-// A cluster can still hold one, so each tick deletes the copy that the Team
-// owns.
-func retiredPipelinesRoleBindingName(team string) string { return "team-" + team + "-pipelines" }
-
-// deleteRetiredPipelinesRoleBinding deletes the retired binding when this
-// Team owns it. A binding that a person wrote by hand keeps its name and its
-// place. A failed read or delete returns its error, so the tick keeps the
-// finalizer and retries. A teardown tick releases the finalizer in the same
-// tick, so a dropped error would leave the binding with no later retry.
-func (r *TeamReconciler) deleteRetiredPipelinesRoleBinding(ctx context.Context, team *v1alpha1.Team) error {
-	name := retiredPipelinesRoleBindingName(team.Name)
-	b, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, r.store, name, "")
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read retired pipelines JenkinsRoleBinding: %w", err)
-	}
-	if !teamOwnsObject(b, team) {
-		return nil
-	}
-	// The delete is conditional on the object read above. A write since
-	// that read answers Conflict, and the next tick reads and decides again.
-	err = crdstore.DeleteIfUnchanged[v1alpha1.JenkinsRoleBinding](ctx, r.store, name, "", string(b.UID), b.ResourceVersion)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete retired pipelines JenkinsRoleBinding: %w", err)
-	}
-	return nil
-}
-
 // tenantAgentServiceName returns the agent Service of one slot of a tenant.
 // A tenant holds one slot for each active member, and a cell holds at most
 // one slot of a tenant. This release writes slot 0 only.
@@ -1394,10 +1362,7 @@ type tenantServiceWriter interface {
 
 // syncPipelinesChildren applies or deletes the objects task 9.2 and task
 // 6.9 name: the slot 0 agent Service while the tenant is placed, and (during
-// teardown) the tenant agent ServiceAccount and its token Secret. It also
-// deletes a retired team-<team>-pipelines JenkinsRoleBinding that the Team
-// owns. Human access comes from the generated member role, not from that
-// binding. Re-run
+// teardown) the tenant agent ServiceAccount and its token Secret. Re-run
 // every tick; every branch is idempotent. It also drains the list of agent
 // Services the tenant still owns, on both branches, and a teardown adds its
 // own cell namespace to that list first. priorCellNamespace is the
@@ -1442,11 +1407,6 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 	if err := r.drainStaleAgentServices(ctx, team.Name, status); err != nil {
 		r.logger.Error("failed to delete an agent Service the tenant still owns",
 			"team", team.Name, "error", err)
-		return err
-	}
-
-	if err := r.deleteRetiredPipelinesRoleBinding(ctx, team); err != nil {
-		r.logger.Error("failed to retire the pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
 		return err
 	}
 
