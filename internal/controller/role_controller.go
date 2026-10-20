@@ -292,11 +292,11 @@ func adminPermissions() []string {
 }
 
 func operatorPermissions() []string {
-	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Delete", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Delete", "hudson.model.Run.Update", "hudson.model.View.Read", "hudson.model.View.Configure"}
+	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Delete", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Delete", "hudson.model.Run.Update", "hudson.model.View.Read", "hudson.model.View.Configure"}
 }
 
 func developerPermissions() []string {
-	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Update", "hudson.model.View.Read"}
+	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Update", "hudson.model.View.Read"}
 }
 
 func viewerPermissions() []string {
