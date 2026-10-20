@@ -148,7 +148,9 @@ challenge-bundle:
 	go run ./internal/jenkins/items/cmd/challengegen
 
 challenge-bundle-check: challenge-bundle
-	git diff --exit-code internal/jenkins/items/testdata/challenge/bundle-challenge
+	git diff --exit-code -- internal/jenkins/items/testdata/challenge/bundle-challenge
+	@untracked="$$(git ls-files --others --exclude-standard -- internal/jenkins/items/testdata/challenge/bundle-challenge)"; \
+	if [ -n "$$untracked" ]; then echo "untracked challenge bundle files; run make challenge-bundle and commit them:" >&2; echo "$$untracked" >&2; exit 1; fi
 
 publish-challenge-bundle: challenge-bundle
 	@test -n "$$VARROA_CONTROLLERS_REPO" || { echo "VARROA_CONTROLLERS_REPO must point at a CasC bundle repo checkout" >&2; exit 1; }
