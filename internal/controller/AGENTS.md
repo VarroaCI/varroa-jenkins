@@ -625,6 +625,7 @@ sections describe.
   items section clears them all. The drain applies this only when the result answers the
   tracked desired-state hash. The same drain also advances `status.cell.appliedTenants` on a
   result with `item_failures`. Each tenant that owns a refused item keeps its previous membership.
+  A pod change drops each tenant with an `ItemsApplyFailed` entry from `appliedTenants`.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
@@ -1174,8 +1175,8 @@ sections describe.
     fault, and a hold would push the cloud with no pod template.
     `appliedTenantsAfterItemsApply` keeps a held tenant's, or a refused tenant's, previous
     `status.cell.appliedTenants` membership, so a held applied folder never
-    reads as drained; `updateCellInstance` calls `dropHeldTenants` on a pod
-    change, because the new pod's empty home holds no held folder. A draining
+    reads as drained; `updateCellInstance` calls `dropKeptTenants` on a pod
+    change, which drops held and refused tenants, because the new pod's empty home holds no folder for them. A draining
     tenant keeps its lifted templates, and a read fault for it logs and
     lifts nothing instead of failing the cell. A non-draining
     tenant's own materialized `PipelineTemplatesYAML`, when non-blank, becomes
