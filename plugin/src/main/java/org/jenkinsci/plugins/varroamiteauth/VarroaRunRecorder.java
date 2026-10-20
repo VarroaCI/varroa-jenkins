@@ -1289,13 +1289,17 @@ public final class VarroaRunRecorder {
             b.durationMillis(duration);
             b.completedAtMillis(startedAt + duration);
 
-            List<BuildChange> changes = extractChanges(run);
+            List<List<BuildChange>> changeSets = extractChangeSets(run);
+            List<BuildChange> changes = flatten(changeSets);
             b.changes(changes);
             b.changeCount(changes.size());
             SCMRevision actionRevision = revisionFromAction(run);
-            boolean changeRequest = actionRevision instanceof ChangeRequestSCMRevision
-                    || resolveChangeRequest(run) != null;
-            String revision = completedRevision(actionRevision, changeRequest, changes);
+            Set<String> otherRevisions = VarroaRunCheckouts.otherCheckoutRevisions(
+                    VarroaRunCheckouts.jobRemote(run),
+                    () -> VarroaRunCheckouts.libraryRemotes(run),
+                    VarroaLibrarySources.buildDataActions(run));
+            String revision = completedRevision(actionRevision, isChangeRequest(run, actionRevision),
+                    ownChanges(changeSets, otherRevisions));
             if (!revision.isEmpty()) {
                 b.scmRevision(truncate(revision, MAX_FIELD_512));
             }
@@ -1345,8 +1349,18 @@ public final class VarroaRunRecorder {
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    /** Answers the changes of every change set of the run, in set order. */
     private static List<BuildChange> extractChanges(Run<?, ?> run) {
+        return flatten(extractChangeSets(run));
+    }
+
+    /**
+     * Answers one list of changes for each change set of the run, in set
+     * order. A shared library checkout adds its own change set, so the
+     * sets keep the boundary that {@link #ownChanges} needs.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static List<List<BuildChange>> extractChangeSets(Run<?, ?> run) {
         if (!(run instanceof RunWithSCM)) {
             return List.of();
         }
@@ -1361,14 +1375,61 @@ public final class VarroaRunRecorder {
         if (sets == null) {
             return List.of();
         }
-        List<BuildChange> changes = new ArrayList<>();
+        List<List<BuildChange>> changeSets = new ArrayList<>();
         for (Object rawSet : sets) {
             ChangeLogSet set = (ChangeLogSet) rawSet;
+            List<BuildChange> changes = new ArrayList<>();
             for (Object rawEntry : set) {
                 changes.add(entryToChange((ChangeLogSet.Entry) rawEntry));
             }
+            changeSets.add(changes);
+        }
+        return changeSets;
+    }
+
+    private static List<BuildChange> flatten(List<List<BuildChange>> changeSets) {
+        List<BuildChange> changes = new ArrayList<>();
+        for (List<BuildChange> set : changeSets) {
+            changes.addAll(set);
         }
         return changes;
+    }
+
+    /**
+     * Answers the changes of the run's own repository. A change set whose
+     * newest commit is the built commit of another checkout is skipped. A
+     * library checkout's change set ends at that checkout's built commit, so
+     * the newest commit of the remaining sets is the run's own.
+     */
+    static List<BuildChange> ownChanges(List<List<BuildChange>> changeSets, Set<String> otherRevisions) {
+        List<BuildChange> changes = new ArrayList<>();
+        for (List<BuildChange> set : changeSets) {
+            if (holdsAny(set, otherRevisions)) {
+                continue;
+            }
+            changes.addAll(set);
+        }
+        return changes;
+    }
+
+    /**
+     * Answers whether a change set ends at another checkout's built commit.
+     * Only the newest entry counts: an older entry can be history the two
+     * checkouts share.
+     */
+    private static boolean holdsAny(List<BuildChange> set, Set<String> revisions) {
+        if (revisions.isEmpty() || set.isEmpty()) {
+            return false;
+        }
+        return revisions.contains(set.get(set.size() - 1).getCommitId());
+    }
+
+    /**
+     * Answers whether the run builds a change request. The revision
+     * action names one, or the run's branch job does.
+     */
+    private static boolean isChangeRequest(Run<?, ?> run, SCMRevision actionRevision) {
+        return actionRevision instanceof ChangeRequestSCMRevision || resolveChangeRequest(run) != null;
     }
 
     private static BuildChange entryToChange(ChangeLogSet.Entry entry) {
@@ -1504,8 +1565,9 @@ public final class VarroaRunRecorder {
      * first adds every allocation the listener did not see.
      */
     static SourceFacts resolveSourceFacts(Run<?, ?> run, RunState state, boolean walk) {
-        SourceFacts scmApi = resolveScmApiFacts(run);
-        SourceFacts git = resolveGitFacts(run);
+        SCMRevision actionRevision = revisionFromAction(run);
+        SourceFacts scmApi = resolveScmApiFacts(actionRevision);
+        SourceFacts git = resolveGitFacts(run, isChangeRequest(run, actionRevision));
         String revision = firstNonEmpty(scmApi.scmRevision, git.scmRevision);
         if (revision.isEmpty()) {
             // The probe short-circuits here: a run with no revision yet
@@ -1539,8 +1601,8 @@ public final class VarroaRunRecorder {
      * metadata carries. The revision stays out of this shape.
      */
     private static SourceFacts resolveBranchFacts(Run<?, ?> run) {
-        SourceFacts scmApi = resolveScmApiFacts(run);
-        SourceFacts git = resolveGitFacts(run);
+        SourceFacts scmApi = resolveScmApiFacts(revisionFromAction(run));
+        SourceFacts git = resolveGitFacts(run, false);
         String branch = branchFrom(run, scmApi, git);
         return new SourceFacts(branch, branch, "", git.scmUrl, git.scmForge, "", List.of(), List.of());
     }
@@ -1602,10 +1664,9 @@ public final class VarroaRunRecorder {
      * Reads the SCM facts from the run's revision action. An absent
      * action leaves every value empty.
      */
-    private static SourceFacts resolveScmApiFacts(Run<?, ?> run) {
+    private static SourceFacts resolveScmApiFacts(SCMRevision scmRevision) {
         String head = "";
         String revision = "";
-        SCMRevision scmRevision = revisionFromAction(run);
         if (scmRevision != null) {
             SCMHead scmHead = scmRevision.getHead();
             head = scmHead != null ? orEmpty(scmHead.getName()) : "";
@@ -1643,11 +1704,23 @@ public final class VarroaRunRecorder {
     }
 
     /**
+     * Answers the git revision of a checkout. A change request answers the
+     * pre-merge commit, never the local merge commit that a merge extension
+     * builds. Any other build answers its last built commit.
+     */
+    static String gitRevision(Object buildData, boolean changeRequest) {
+        if (changeRequest) {
+            return VarroaRunCheckouts.headRevision(buildData);
+        }
+        return stringOf(invokeNoArg(invokeNoArg(buildData, "getLastBuiltRevision"), "getSha1String"));
+    }
+
+    /**
      * Returns the revision the completion event sends. The run's revision
      * action wins, read through revisionHash, so a change request sends its
      * head commit. A change request with no such answer sends no revision,
      * because its changelog can end at the local merge commit. Any other
-     * run sends the newest changelog commit.
+     * run sends the newest commit of its own changesets.
      */
     static String completedRevision(SCMRevision revision, boolean changeRequest, List<BuildChange> changes) {
         String hash = revisionHash(revision);
@@ -1687,9 +1760,10 @@ public final class VarroaRunRecorder {
      * it, so {@link VarroaRunCheckouts} picks the record. The URL is the
      * job's SCM remote when the job has one. Otherwise it is the picked
      * record's first remote. An absent record leaves every value empty.
-     * The URL carries no credentials, query, or fragment.
+     * The URL carries no credentials, query, or fragment. The revision
+     * comes from {@link #gitRevision}.
      */
-    private static SourceFacts resolveGitFacts(Run<?, ?> run) {
+    private static SourceFacts resolveGitFacts(Run<?, ?> run, boolean changeRequest) {
         String branch = "";
         String revision = "";
         String jobRemote = VarroaRunCheckouts.jobRemote(run);
@@ -1698,7 +1772,7 @@ public final class VarroaRunRecorder {
                 VarroaLibrarySources.buildDataActions(run));
         if (buildData != null) {
             Object builtRevision = invokeNoArg(buildData, "getLastBuiltRevision");
-            revision = stringOf(invokeNoArg(builtRevision, "getSha1String"));
+            revision = gitRevision(buildData, changeRequest);
             branch = firstBranchName(invokeNoArg(builtRevision, "getBranches"));
         }
         String url = VarroaLibrarySources.stripCredentials(!jobRemote.isEmpty()

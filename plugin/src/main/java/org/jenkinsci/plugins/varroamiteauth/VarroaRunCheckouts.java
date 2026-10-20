@@ -10,7 +10,9 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -175,5 +177,62 @@ final class VarroaRunCheckouts {
             }
         }
         return false;
+    }
+
+    /**
+     * Answers the pre-merge commit of a checkout: the commit the build
+     * chooser picked, before a merge extension builds the local merge
+     * commit. Answers an empty string when the checkout holds no build.
+     */
+    static String headRevision(Object buildData) {
+        if (buildData == null) {
+            return "";
+        }
+        try {
+            Object build = buildData.getClass().getField("lastBuild").get(buildData);
+            Object marked = VarroaRunRecorder.invokeNoArg(build, "getMarked");
+            Object sha = VarroaRunRecorder.invokeNoArg(marked, "getSha1String");
+            return sha instanceof String ? (String) sha : "";
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            LOGGER.log(Level.FINE, "VarroaRunCheckouts: the pre-merge commit read failed", e);
+            return "";
+        }
+    }
+
+    /**
+     * Answers the built commits of every checkout of the run except the
+     * run's own checkout. The run's own checkout is the one
+     * {@link #select} picks. A shared library checkout is one of them.
+     * Answers an empty set when the run has no checkout, or when no
+     * checkout is the run's own, because nothing can then be told apart.
+     * A commit that the run's own checkout also built is not foreign.
+     */
+    static Set<String> otherCheckoutRevisions(String jobRemote, Supplier<List<String>> libraryRemotes,
+            List<Object> buildDatas) {
+        Set<String> revisions = new LinkedHashSet<>();
+        if (buildDatas == null || buildDatas.isEmpty()) {
+            return revisions;
+        }
+        Object own = select(jobRemote, libraryRemotes, buildDatas);
+        if (own == null) {
+            return revisions;
+        }
+        for (Object buildData : buildDatas) {
+            if (buildData == own) {
+                continue;
+            }
+            String sha = builtSha(buildData);
+            if (!sha.isEmpty()) {
+                revisions.add(sha);
+            }
+        }
+        revisions.remove(builtSha(own));
+        return revisions;
+    }
+
+    private static String builtSha(Object buildData) {
+        Object sha = VarroaRunRecorder.invokeNoArg(
+                VarroaRunRecorder.invokeNoArg(buildData, "getLastBuiltRevision"), "getSha1String");
+        return sha instanceof String ? (String) sha : "";
     }
 }

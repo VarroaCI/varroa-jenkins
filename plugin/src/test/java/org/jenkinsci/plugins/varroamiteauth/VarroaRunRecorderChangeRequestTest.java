@@ -331,4 +331,60 @@ public class VarroaRunRecorderChangeRequestTest {
         }
         return out;
     }
+
+    private static List<String> commitIds(List<BuildChange> changes) {
+        List<String> ids = new java.util.ArrayList<>();
+        for (BuildChange change : changes) {
+            ids.add(change.getCommitId());
+        }
+        return ids;
+    }
+
+    @Test
+    public void gitRevisionOfAChangeRequestAnswersThePreMergeCommit() {
+        String pre = "a".repeat(40);
+        String merged = "b".repeat(40);
+        List<hudson.plugins.git.Branch> branches = List.of(
+                new hudson.plugins.git.Branch("origin/PR-12", org.eclipse.jgit.lib.ObjectId.fromString(pre)));
+        hudson.plugins.git.util.BuildData data = new hudson.plugins.git.util.BuildData();
+        data.saveBuild(new hudson.plugins.git.util.Build(
+                new hudson.plugins.git.Revision(org.eclipse.jgit.lib.ObjectId.fromString(pre), branches),
+                new hudson.plugins.git.Revision(org.eclipse.jgit.lib.ObjectId.fromString(merged), branches),
+                1, null));
+
+        assertEquals(pre, VarroaRunRecorder.gitRevision(data, true));
+        assertEquals(merged, VarroaRunRecorder.gitRevision(data, false));
+    }
+
+    @Test
+    public void ownChangesDropsASetThatHoldsAnotherCheckoutsRevision() {
+        List<List<BuildChange>> sets = List.of(changes("a1", "a2"), changes("l1", "l2"));
+
+        assertEquals(List.of("a1", "a2"),
+                commitIds(VarroaRunRecorder.ownChanges(sets, java.util.Set.of("l2"))));
+    }
+
+    @Test
+    public void ownChangesKeepsEverySetWithNoOtherCheckout() {
+        List<List<BuildChange>> sets = List.of(changes("a1", "a2"), changes("l1", "l2"));
+
+        assertEquals(List.of("a1", "a2", "l1", "l2"),
+                commitIds(VarroaRunRecorder.ownChanges(sets, java.util.Set.of())));
+    }
+
+    @Test
+    public void ownChangesKeepsASetWhoseOlderEntryIsSharedHistory() {
+        List<List<BuildChange>> sets = List.of(changes("shared", "app-head"));
+
+        assertEquals(List.of("shared", "app-head"),
+                commitIds(VarroaRunRecorder.ownChanges(sets, java.util.Set.of("shared"))));
+    }
+
+    @Test
+    public void aLibraryOnlyChangelogCompletesWithNoRevision() {
+        List<BuildChange> own = VarroaRunRecorder.ownChanges(
+                List.of(changes("l1")), java.util.Set.of("l1"));
+
+        assertEquals("", VarroaRunRecorder.completedRevision(null, false, own));
+    }
 }

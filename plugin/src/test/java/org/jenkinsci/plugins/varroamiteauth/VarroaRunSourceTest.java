@@ -584,6 +584,63 @@ public class VarroaRunSourceTest {
         assertNotEquals(secondCommitId, completed.get(0).getScmRevision());
     }
 
+    /**
+     * An opaque change-request revision has no accessor for its head. The
+     * git fallback must still report the pull-request head, the commit the
+     * build chooser picked, and the gate must still fire a second event.
+     */
+    @Test
+    public void anOpaquePullRequestRunReportsItsCheckoutHead() throws Exception {
+        createRepository();
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "opaque-pr-run");
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = new VarroaRunRecorderChangeRequestTest.PullRequestHead(
+                "PR-12", "12", new SCMHead("main"), "fix/cache");
+        SCMRevision revision = new VarroaRunRecorderChangeRequestTest.OpaqueChangeRequestRevision(
+                head, new FakeRevision(new SCMHead("main"), "base111"));
+        job.setDefinition(new SourceFactsFlowDefinition(
+                "node { git url: '" + repoUrl + "', branch: 'master' }", revision));
+
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> sources = byPhase(drainEvents(), BuildEvent.PHASE_RUN_SOURCE);
+        assertTrue("the gate still fires a second source event", sources.size() >= 2);
+        BuildEvent last = sources.get(sources.size() - 1);
+        assertEquals(commitId, last.getScmRevision());
+        assertEquals("PR-12", last.getScmHead());
+    }
+
+    /**
+     * A shared library checkout adds its own change set. The completed
+     * revision must come from the run's own repository, never from the
+     * library commit that the changelog ends at.
+     */
+    @Test
+    public void aLibraryChangeIsNotTheCompletedRevision() throws Exception {
+        String[] library = newRepository("library-repo");
+        String[] app = newRepository("app-repo");
+        Folder folder = j.jenkins.createProject(Folder.class, "library-complete-team");
+        folder.addProperty(new FolderLibraries("shared-lib", library[0]));
+        WorkflowJob job = folder.createProject(WorkflowJob.class, "library-complete-run");
+        job.setDefinition(new SourceFactsFlowDefinition("node {\n"
+                + "  git url: '" + library[0] + "', branch: 'master'\n"
+                + "  git url: '" + app[0] + "', branch: 'master'\n"
+                + "  echo 'built'\n"
+                + "}", false, "shared-lib", false, null));
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+        drainEvents();
+
+        commitAgainIn("library-repo");
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> events = drainEvents();
+        List<BuildEvent> completed = byPhase(events, BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        assertEquals("the library commit is not the run's revision", "", completed.get(0).getScmRevision());
+        assertEquals("the library change still counts in the changes list", 1, completed.get(0).getChangeCount());
+        List<BuildEvent> sources = byPhase(events, BuildEvent.PHASE_RUN_SOURCE);
+        assertEquals(app[1], sources.get(sources.size() - 1).getScmRevision());
+    }
+
     @Test
     public void startedCarriesTheForgeRevisionOverTheClaimRevision() throws Exception {
         createRepository();
@@ -641,6 +698,13 @@ public class VarroaRunSourceTest {
         git(repo, "config", "user.name", "Varroa Test");
         commitFile(repo, "hello\n", "the first commit");
         return new String[] {repo.toURI().toString(), git(repo, "rev-parse", "HEAD").trim()};
+    }
+
+    /** Adds one commit to a repository built by {@link #newRepository} and answers its new head. */
+    private String commitAgainIn(String dirName) throws Exception {
+        File repo = new File(j.jenkins.getRootDir(), dirName);
+        commitFile(repo, "hello again in " + dirName + "\n", "another commit");
+        return git(repo, "rev-parse", "HEAD").trim();
     }
 
     private void commitAgain() throws Exception {
