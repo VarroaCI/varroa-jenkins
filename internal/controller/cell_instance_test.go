@@ -128,6 +128,32 @@ func TestUpdateCellInstance_PodPhase(t *testing.T) {
 	}
 }
 
+// TestUpdateCellInstance_ReplacedPodDropsRefusedApplied asserts that a pod
+// change drops a tenant with an ItemsApplyFailed entry from appliedTenants,
+// and keeps the same pod's entries.
+func TestUpdateCellInstance_ReplacedPodDropsRefusedApplied(t *testing.T) {
+	refused := []v1alpha1.TenantWarning{{Tenant: "refused", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "m"}}
+
+	client := newTestClient()
+	client.controllerPod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-1")}}
+	rec := newTestReconciler(client)
+	cr := &v1alpha1.Controller{}
+	cr.Name = "test"
+	cr.Namespace = "default"
+	cr.Status.Cell = &v1alpha1.CellStatus{Instance: "pod-uid-1", AppliedTenants: []string{"refused", "plain"}, TenantWarnings: refused}
+
+	rec.updateCellInstance(context.Background(), cr)
+	if len(cr.Status.Cell.AppliedTenants) != 2 {
+		t.Fatalf("expected the same pod to keep appliedTenants, got %v", cr.Status.Cell.AppliedTenants)
+	}
+
+	client.controllerPod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("pod-uid-2")}}
+	rec.updateCellInstance(context.Background(), cr)
+	if got := cr.Status.Cell.AppliedTenants; len(got) != 1 || got[0] != "plain" {
+		t.Errorf("expected a new pod to drop the refused tenant, got %v", got)
+	}
+}
+
 // TestUpdateCellInstance_ReplacedPodDropsHeldApplied asserts that a pod
 // change drops a held tenant from appliedTenants, because the new pod has
 // no held folder, and keeps the same pod's entries.

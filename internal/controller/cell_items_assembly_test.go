@@ -1141,14 +1141,74 @@ func TestResolveBundleForController_CellTenantFragmentFaultLeavesCellResolving(t
 	}
 }
 
-func TestDropHeldTenants_RemovesOnlyHeldTenants(t *testing.T) {
-	cell := &v1alpha1.CellStatus{
-		AppliedTenants: []string{"held", "plain"},
-		TenantWarnings: []v1alpha1.TenantWarning{{Tenant: "held", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"}},
+func TestDropKeptTenants_RemovesHeldAndRefusedTenants(t *testing.T) {
+	tests := []struct {
+		name     string
+		applied  []string
+		warnings []v1alpha1.TenantWarning
+		want     string
+	}{
+		{
+			name:     "held tenant is removed",
+			applied:  []string{"held", "plain"},
+			warnings: []v1alpha1.TenantWarning{{Tenant: "held", Reason: v1alpha1.TeamReasonItemsHeld, Message: "m"}},
+			want:     "plain",
+		},
+		{
+			name:     "refused tenant is removed",
+			applied:  []string{"refused", "plain"},
+			warnings: []v1alpha1.TenantWarning{{Tenant: "refused", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "m"}},
+			want:     "plain",
+		},
+		{
+			name:     "bundle keys ignored keeps tenant",
+			applied:  []string{"ignored", "plain"},
+			warnings: []v1alpha1.TenantWarning{{Tenant: "ignored", Reason: v1alpha1.TeamReasonBundleKeysIgnored, Message: "m"}},
+			want:     "ignored,plain",
+		},
+		{
+			name:     "credential skipped keeps tenant",
+			applied:  []string{"skipped", "plain"},
+			warnings: []v1alpha1.TenantWarning{{Tenant: "skipped", Reason: v1alpha1.TeamReasonCredentialSkipped, Message: "m"}},
+			want:     "skipped,plain",
+		},
+		{
+			name:    "plain tenant is kept",
+			applied: []string{"plain", "other"},
+			want:    "plain,other",
+		},
+		{
+			name:    "no warnings leaves the list unchanged",
+			applied: []string{"b", "a"},
+			want:    "b,a",
+		},
 	}
-	dropHeldTenants(cell)
-	if strings.Join(cell.AppliedTenants, ",") != "plain" {
-		t.Errorf("AppliedTenants = %v, want [plain]", cell.AppliedTenants)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cell := &v1alpha1.CellStatus{AppliedTenants: tc.applied, TenantWarnings: tc.warnings}
+			dropKeptTenants(cell)
+			if got := strings.Join(cell.AppliedTenants, ","); got != tc.want {
+				t.Errorf("AppliedTenants = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDropKeptTenants_RefusedTenantReentersAfterCleanWalk(t *testing.T) {
+	cell := &v1alpha1.CellStatus{
+		Tenants:        []string{"ok", "bad"},
+		AppliedTenants: []string{"bad", "ok"},
+		TenantWarnings: []v1alpha1.TenantWarning{{Tenant: "bad", Reason: v1alpha1.TeamReasonItemsApplyFailed, Message: "m"}},
+	}
+	dropKeptTenants(cell)
+	if got := strings.Join(cell.AppliedTenants, ","); got != "ok" {
+		t.Fatalf("after pod change AppliedTenants = %q, want ok", got)
+	}
+	if got := appliedTenantsAfterItemsApply(cell, []string{"bad/job"}); strings.Join(got, ",") != "ok" {
+		t.Errorf("refused walk applied = %v, want [ok]", got)
+	}
+	if got := appliedTenantsAfterItemsApply(cell, nil); strings.Join(got, ",") != "bad,ok" {
+		t.Errorf("clean walk applied = %v, want [bad ok]", got)
 	}
 }
 

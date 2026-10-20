@@ -342,23 +342,27 @@ func recordCellTenantWarnings(cr *v1alpha1.Controller, fresh []v1alpha1.TenantWa
 		v1alpha1.TeamReasonItemsHeld, filterTenantWarnings(fresh, v1alpha1.TeamReasonItemsHeld))
 }
 
-// dropHeldTenants removes every tenant the cell holds from
-// status.cell.appliedTenants. updateCellInstance calls it when the cell's
-// pod changes: the new pod starts with an empty home, so a held folder is
-// gone, and appliedTenantsAfterItemsApply would otherwise keep reporting
-// it applied.
-func dropHeldTenants(cell *v1alpha1.CellStatus) {
-	held := heldTenants(cell)
-	if len(held) == 0 {
+// dropKeptTenants removes each tenant that appliedTenantsAfterItemsApply
+// keeps from status.cell.appliedTenants: the held tenants and the tenants
+// that own a refused item. updateCellInstance calls it when the cell's pod
+// changes. The new pod starts with an empty home and holds no folder for
+// these tenants. A later walk adds a refused tenant back only when all of
+// its items apply.
+func dropKeptTenants(cell *v1alpha1.CellStatus) {
+	kept := heldTenants(cell)
+	for tenant := range refusedTenants(cell) {
+		kept[tenant] = true
+	}
+	if len(kept) == 0 {
 		return
 	}
-	kept := cell.AppliedTenants[:0:0]
+	remaining := cell.AppliedTenants[:0:0]
 	for _, tenant := range cell.AppliedTenants {
-		if !held[tenant] {
-			kept = append(kept, tenant)
+		if !kept[tenant] {
+			remaining = append(remaining, tenant)
 		}
 	}
-	cell.AppliedTenants = sortedTenantCopy(kept)
+	cell.AppliedTenants = sortedTenantCopy(remaining)
 }
 
 // heldTenants answers the tenants that have an ItemsHeld entry.
@@ -370,6 +374,17 @@ func heldTenants(cell *v1alpha1.CellStatus) map[string]bool {
 		}
 	}
 	return held
+}
+
+// refusedTenants answers the tenants that have an ItemsApplyFailed entry.
+func refusedTenants(cell *v1alpha1.CellStatus) map[string]bool {
+	refused := make(map[string]bool)
+	for _, w := range cell.TenantWarnings {
+		if w.Reason == v1alpha1.TeamReasonItemsApplyFailed {
+			refused[w.Tenant] = true
+		}
+	}
+	return refused
 }
 
 // appliedTenantsAfterItemsApply answers status.cell.appliedTenants after an

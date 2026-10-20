@@ -28,8 +28,9 @@ import (
 // time, so the single-tenant announcement can report the replaced pod as
 // a dead instance. A change from empty keeps the earlier record.
 //
-// Any change also drops each held tenant from status.cell.appliedTenants.
-// The new pod has an empty home, so a held folder is gone.
+// Any change also drops each held or refused tenant from
+// status.cell.appliedTenants. The new pod has an empty home, so their folders
+// are gone.
 func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Controller) {
 	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
 	if err != nil {
@@ -58,7 +59,7 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 		cr.Status.Cell.PreviousInstanceLastSeen = &lastSeen
 	}
 	if cr.Status.Cell.Instance != instance {
-		dropHeldTenants(cr.Status.Cell)
+		dropKeptTenants(cr.Status.Cell)
 	}
 	cr.Status.Cell.Instance = instance
 }
