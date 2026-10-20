@@ -118,6 +118,7 @@ stays in the page URL, so a filtered view is shareable and survives a reload.
 
 The commit opens on GitHub, GitLab, Gitea, or Forgejo. Other hosts get a copy button.
 The branch opens the pipeline page filtered to that branch. The **Queue** column shows each build's wait.
+A pull-request build shows the head commit of the pull request, never a local merge commit. A shared library commit never replaces the build's own commit.
 
 The build page shows the parameters that the build ran with. A masked value appears as four dots.
 A replayed build names the build that it copied, with a link. A restarted build names the build
