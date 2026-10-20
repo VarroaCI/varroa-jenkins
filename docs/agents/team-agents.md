@@ -111,6 +111,9 @@ answers `forge_write_denied`. A forge rate limit stops the attempt and answers
 `forge_unreachable`, with the retry time when the forge states one. On GitHub, give the token read access to contents
 and write access to issues.
 
+`open_issue` answers `request_expired` when too little time is left. No issue opened. Call again.
+It answers `operator_timeout` when the operator does not answer in time. The issue can exist. Look in the repository before you call again.
+
 The instructions source must follow the default branch. Set no
 `spec.revision` on the `CatalogSource`. A source that pins `revision: main`
 reports `NotDefaultBranch`. Create a second `CatalogSource` for the agent when

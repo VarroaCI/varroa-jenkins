@@ -149,7 +149,7 @@ always needs approval.
 
 The operator tries each tenant credential that may push. A forge 403 deletes the new branch. When the delete succeeds, the operator moves to the next credential. When the delete fails, the call stops and names the branch for manual removal. When every credential answers 403, the call answers `forge_write_denied` and names each credential. A forge rate limit is not a 403. The call deletes the branch, stops, and answers `forge_unreachable`, with the retry time when the forge states one.
 
-A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. A success logs a
+A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. On `operator_timeout`, call again later. A success logs a
 `pipeline.proposal.opened` event.
 
 ## Account for redaction
@@ -187,6 +187,9 @@ that the tool checks. See [Team agents](team-agents.md).
 | `send_webhook` | action | `team`, `body` | Sends one signed message to the Team's completion webhook. |
 
 An output tool answers `disabled` when the object does not enable its output.
+
+`open_issue` answers `request_expired` when too little time is left. No issue opened. Call again.
+It answers `operator_timeout` when the operator does not answer in time. The issue can exist. Look in the repository before you call again.
 On a member-placed Team, the instructions read and `open_issue` answer
 `no_matching_credential` on the core cluster.
 
