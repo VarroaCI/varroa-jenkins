@@ -104,9 +104,11 @@ The token needs these permissions on Gitea or Forgejo:
 | Instructions and repository reads | `read:repository` | Read |
 | `open_issue` | `read:repository` and `write:issue` | Read |
 
-`open_issue` needs no push access. The forge decides the issue write. A token
-without `write:issue` answers `forge_write_denied`. On GitHub, give the token
-read access to contents and write access to issues.
+`open_issue` needs no push access. The operator tries each credential that
+reads the repository. It tries the credentials that may push first. A forge 403
+moves to the next credential. When every credential answers 403, `open_issue`
+answers `forge_write_denied`. On GitHub, give the token read access to contents
+and write access to issues.
 
 The instructions source must follow the default branch. Set no
 `spec.revision` on the `CatalogSource`. A source that pins `revision: main`

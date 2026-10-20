@@ -3,6 +3,7 @@ package forgeops
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -20,23 +21,77 @@ import (
 // maxIssueTitle bounds the title of an issue, in runes.
 const maxIssueTitle = 256
 
-// pickIssueCredential returns the first credential that may push to the
-// repository, so a pushing credential is never passed over for a read-only
-// one. When no credential may push, it returns the first credential that reads
-// the repository. The forge decides the issue write either way, and its 403
-// is final.
-func (o *Ops) pickIssueCredential(ctx context.Context, host string, repo forge.Repo, creds []Credential) (writer, error) {
-	if w, err := o.pickWriter(ctx, host, repo, creds); err == nil {
-		return w, nil
+// issueCandidates returns every credential that reads the repository, in
+// order: the credentials that may push first, then the read-only ones. Each
+// group keeps the credential id order. The forge decides the issue write.
+func (o *Ops) issueCandidates(ctx context.Context, host string, repo forge.Repo, creds []Credential) ([]writer, error) {
+	kind, err := o.detect(ctx, o.http, host)
+	if errors.Is(err, forge.ErrUnsupported) {
+		return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
 	}
-	return o.pickReader(ctx, host, repo, creds)
+	if err != nil {
+		o.logger.Warn("forge detect failed", "host", host, "error", err)
+		return nil, replyErr(forgeapi.CodeForgeUnreachable, "forge %q is unreachable", host)
+	}
+	var pushers, readers []writer
+	var otherErr error
+	otherID := ""
+	authed := false
+	for _, c := range creds {
+		cl := o.newClient(kind, host, c.Token, o.http)
+		if cl == nil {
+			return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
+		}
+		info, err := cl.Repository(ctx, repo)
+		w := writer{Kind: kind, Client: cl, CredentialID: c.ID, Info: info}
+		switch {
+		case err == nil && info.Push:
+			pushers = append(pushers, w)
+		case err == nil:
+			readers = append(readers, w)
+		case errors.Is(err, forge.ErrAuth):
+			o.logger.Warn("forge credential refused", "credential", c.ID, "host", host)
+		case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
+			authed = true
+		default:
+			o.logger.Warn("forge repository read failed", "credential", c.ID, "host", host, "error", err)
+			if otherErr == nil {
+				otherErr, otherID = err, c.ID
+			}
+		}
+	}
+	if cands := append(pushers, readers...); len(cands) > 0 {
+		return cands, nil
+	}
+	if otherErr != nil {
+		return nil, forgeFailure(otherErr, otherID)
+	}
+	if authed {
+		return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
+	}
+	return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
+}
+
+// issueForbidden is the refusal when every candidate answered 403. One
+// credential keeps the single-credential message. Several name each one.
+func issueForbidden(ids []string) error {
+	if len(ids) == 1 {
+		return forgeFailure(forge.ErrForbidden, ids[0])
+	}
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = strconv.Quote(id)
+	}
+	return replyErr(forgeapi.CodeForgeWriteDenied, "credentials %s are forbidden; check the token scope and the repository access of each credential", strings.Join(quoted, ", "))
 }
 
 // Issue opens an issue for a Team agent. The operator shard that owns the
 // Team answers it. The TeamAgent named by the request must be the accepted,
-// enabled object of the Team, and its outputs must allow issues. A credential
-// that reads the repository serves the issue. The releaseNamespace is the core
-// namespace, which the accept rule needs.
+// enabled object of the Team, and its outputs must allow issues. Issue tries
+// each credential that reads the repository, with the pushing credentials
+// first. A forge 403 moves to the next credential. Any other error stops the
+// attempt. The releaseNamespace is the core namespace, which the accept rule
+// needs.
 func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply {
 	fail := func(err error) forgeapi.IssueReply { return forgeapi.IssueReply{Status: asStatus(err)} }
 	if req.Team == "" {
@@ -92,24 +147,35 @@ func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNames
 	if err != nil {
 		return fail(err)
 	}
-	w, err := o.pickIssueCredential(ctx, repo.Host, forge.Repo{Owner: repo.Owner, Name: repo.Name}, creds)
+	fr := forge.Repo{Owner: repo.Owner, Name: repo.Name}
+	cands, err := o.issueCandidates(ctx, repo.Host, fr, creds)
 	if err != nil {
 		return fail(err)
 	}
-	if string(w.Kind) != out.Forge {
-		return fail(replyErr(forgeapi.CodeForgeUnsupported, "repository forge is %s, not %s", w.Kind, out.Forge))
+	if string(cands[0].Kind) != out.Forge {
+		return fail(replyErr(forgeapi.CodeForgeUnsupported, "repository forge is %s, not %s", cands[0].Kind, out.Forge))
 	}
 
 	body := req.Body + "\n\n---\nOpened by " + req.Actor + " in session " + req.SessionID + "."
-	issue, err := w.Client.CreateIssue(ctx, forge.Repo{Owner: repo.Owner, Name: repo.Name}, req.Title, body, labels)
-	var le *forge.LabelError
-	if errors.As(err, &le) {
-		return fail(replyErr(forgeapi.CodeInvalidRequest, "label %q is not in the repository", le.Name))
+	var forbidden []string
+	for _, w := range cands {
+		issue, err := w.Client.CreateIssue(ctx, fr, req.Title, body, labels)
+		var le *forge.LabelError
+		if errors.As(err, &le) {
+			return fail(replyErr(forgeapi.CodeInvalidRequest, "label %q is not in the repository", le.Name))
+		}
+		if errors.Is(err, forge.ErrForbidden) {
+			o.logger.Info("forge issue write forbidden; trying the next credential", "credential", w.CredentialID, "host", repo.Host)
+			forbidden = append(forbidden, w.CredentialID)
+			continue
+		}
+		if err != nil {
+			return fail(forgeFailure(err, w.CredentialID))
+		}
+		o.logger.Info("forge issue opened", "credential", w.CredentialID, "host", repo.Host, "number", issue.Number, "forbiddenBefore", len(forbidden))
+		return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: issue.Number, URL: issue.URL}
 	}
-	if err != nil {
-		return fail(forgeFailure(err, w.CredentialID))
-	}
-	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: issue.Number, URL: issue.URL}
+	return fail(issueForbidden(forbidden))
 }
 
 // acceptInput lists the TeamAgent and Team objects that accept.Decide needs.

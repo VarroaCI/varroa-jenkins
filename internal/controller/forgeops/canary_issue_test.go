@@ -25,7 +25,13 @@ func TestIssueCanaryTokenNeverLeaves(t *testing.T) {
 	for _, e := range errs {
 		fx := newFixture(t, "agents-payments")
 		seedAgent(t, fx, nil)
-		fx.secrets.addCred("sa", "a", canary)
+		// The first credential answers 403, so the fallback log runs
+		// before the canary credential is tried.
+		first := pushable()
+		first.issueErr = forge.ErrForbidden
+		fx.secrets.addCred("sa", "a", "tok-first")
+		fx.clients[forge.NewToken([]byte("tok-first"))] = first
+		fx.secrets.addCred("sb", "b", canary)
 		c := pushable()
 		c.issueErr = e
 		fx.clients[forge.NewToken([]byte(canary))] = c
