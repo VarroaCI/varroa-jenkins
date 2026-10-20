@@ -32,12 +32,19 @@ import (
 // Any change also drops each held or refused tenant from
 // status.cell.appliedTenants. The new pod has an empty home, so their folders
 // are gone.
+//
+// After a successful read, the parked desired-state result for the controller
+// replays when it came from the instance just read and still matches the
+// tracked hash. The replay runs after the drop, so the result re-adds the
+// tenants that the new pod applied. A failed read keeps the parked result for
+// the next tick.
 func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Controller) {
+	key := cr.Namespace + "/" + cr.Name
 	pod, err := r.client.GetControllerPod(ctx, cr.Namespace, cr.Name)
 	if err != nil {
 		if r.Logger != nil {
 			r.Logger.Warn("get controller pod for cell instance",
-				"controller", cr.Namespace+"/"+cr.Name, "error", err)
+				"controller", key, "error", err)
 		}
 		return
 	}
@@ -47,6 +54,7 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 	}
 	if cr.Status.Cell == nil {
 		if instance == "" {
+			r.takeParkedCellResult(key)
 			return
 		}
 		cr.Status.Cell = &v1alpha1.CellStatus{}
@@ -63,6 +71,49 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 		dropKeptTenants(cr.Status.Cell)
 	}
 	cr.Status.Cell.Instance = instance
+	if parked := r.takeParkedCellResult(key); parked != nil &&
+		isCellController(cr) && parked.CellInstance == instance &&
+		parked.AppliedHash != "" && parked.AppliedHash == cr.Status.DesiredStateHash {
+		applyCellItemsResult(cr, parked)
+	}
+}
+
+// applyCellItemsResult applies the items walk of a desired-state result to
+// status.cell. The caller has checked that the result is for a cell
+// controller, that its hash matches the tracked desired-state hash, and that
+// it came from the current instance. An items apply that walked every item
+// (with or without refusals) advances appliedTenants. Every items apply
+// replaces the ItemsApplyFailed warnings.
+func applyCellItemsResult(cr *v1alpha1.Controller, d *mitev1.DesiredStateResult) {
+	if cr.Status.Cell == nil {
+		cr.Status.Cell = &v1alpha1.CellStatus{}
+	}
+	if d.ItemsSuccess || len(d.ItemFailures) > 0 {
+		cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell, itemFailurePaths(d))
+	}
+	cr.Status.Cell.TenantWarnings = itemsApplyFailedAfter(cr.Status.Cell.TenantWarnings, cr.Status.Cell, d)
+}
+
+// parkCellResult stores a result that the drain could not apply because it
+// came from another instance. One slot exists per controller key; a newer
+// result replaces an older one. The drained result is not shared with the
+// transport after the drain, so the pointer is stored as is.
+func (r *Reconciler) parkCellResult(key string, d *mitev1.DesiredStateResult) {
+	r.cellResultMu.Lock()
+	defer r.cellResultMu.Unlock()
+	if r.parkedCellResults == nil {
+		r.parkedCellResults = make(map[string]*mitev1.DesiredStateResult)
+	}
+	r.parkedCellResults[key] = d
+}
+
+// takeParkedCellResult removes and returns the parked result for a key, or nil.
+func (r *Reconciler) takeParkedCellResult(key string) *mitev1.DesiredStateResult {
+	r.cellResultMu.Lock()
+	defer r.cellResultMu.Unlock()
+	d := r.parkedCellResults[key]
+	delete(r.parkedCellResults, key)
+	return d
 }
 
 // cellResultFromCurrentInstance reports whether a desired-state result came

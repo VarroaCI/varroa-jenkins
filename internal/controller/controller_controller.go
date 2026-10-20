@@ -277,6 +277,14 @@ type Reconciler struct {
 	// approveLockWait limits how long an approve waits for a tick that
 	// holds controllerLocks. The approve request has its own deadline.
 	approveLockWait time.Duration
+	// cellResultMu guards parkedCellResults.
+	cellResultMu sync.Mutex
+	// parkedCellResults holds, per controller key, one desired-state result
+	// that the drain could not apply because it came from another cell
+	// instance. The next successful pod read replays it when its instance
+	// and hash still match. A result lost on an operator restart or a
+	// shard move costs one more push.
+	parkedCellResults map[string]*mitev1.DesiredStateResult
 }
 
 // rehydrationPendingMark is one cell key + tenant's deadline-anchor
@@ -1237,6 +1245,7 @@ func NewReconciler(mp metric.MeterProvider, r *bundle.Resolver, client ResourceC
 		numberSeededJobs:        make(map[string]*numberSeededSet),
 		rehydrationInFlight:     make(map[string]*rehydrationPush),
 		rehydrationPendingSince: make(map[string]rehydrationPendingMark),
+		parkedCellResults:       make(map[string]*mitev1.DesiredStateResult),
 		controllerLocks:         newKeyLock(),
 		approveLockWait:         defaultApproveLockWait,
 	}
@@ -1411,6 +1420,9 @@ func (r *Reconciler) forgetMite(ns, name string) {
 	if r.miteTransport != nil {
 		r.miteTransport.Forget(ns, name)
 	}
+	r.cellResultMu.Lock()
+	delete(r.parkedCellResults, ns+"/"+name)
+	r.cellResultMu.Unlock()
 }
 
 // forgetIfDeleted forgets the mite of ns/name when the Controller is gone or
@@ -4007,25 +4019,18 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// draining tenant never enters the list, because
 				// status.cell.drainingTenants names it. A result from another
 				// cell instance changes neither the list nor the refused
-				// tenant warnings.
-				if isCellController(cr) && (r.DesiredState.ItemsSuccess || len(r.DesiredState.ItemFailures) > 0) &&
-					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash &&
-					cellResultFromCurrentInstance(cr, r.DesiredState) {
-					if cr.Status.Cell == nil {
-						cr.Status.Cell = &v1alpha1.CellStatus{}
-					}
-					cr.Status.Cell.AppliedTenants = appliedTenantsAfterItemsApply(cr.Status.Cell, itemFailurePaths(r.DesiredState))
-				}
-				// Refused tenant items set one ItemsApplyFailed entry per tenant.
-				// A successful items apply clears every such entry. Any other
-				// result keeps the list.
+				// tenant warnings. A result from another instance waits for
+				// the next successful pod read.
 				if isCellController(cr) && r.DesiredState.AppliedHash != "" &&
-					r.DesiredState.AppliedHash == cr.Status.DesiredStateHash &&
-					cellResultFromCurrentInstance(cr, r.DesiredState) {
-					if cr.Status.Cell == nil {
-						cr.Status.Cell = &v1alpha1.CellStatus{}
+					r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
+					if cellResultFromCurrentInstance(cr, r.DesiredState) {
+						applyCellItemsResult(cr, r.DesiredState)
+					} else if r.DesiredState.CellInstance != "" &&
+						(r.DesiredState.ItemsSuccess || len(r.DesiredState.ItemFailures) > 0) {
+						// Only a walk result is worth replaying. A result without a walk
+						// changes nothing, so it must not overwrite a parked walk.
+						recv.parkCellResult(cr.Namespace+"/"+cr.Name, r.DesiredState)
 					}
-					cr.Status.Cell.TenantWarnings = itemsApplyFailedAfter(cr.Status.Cell.TenantWarnings, cr.Status.Cell, r.DesiredState)
 				}
 				// Rehydration result (design D13, task 6.2): update only
 				// the entries whose CommandID matches this result. The
