@@ -3804,8 +3804,10 @@ spec:
                 default: 10
                 description: |-
                   MaxTenantsPerCell is the capacity a pool cell uses when its own
-                  spec.cell.maxTenants is zero.
+                  spec.cell.maxTenants is zero. At most 64, the item limit of
+                  status.cell.tenants.
                 format: int32
+                maximum: 64
                 minimum: 1
                 type: integer
               profileRef:

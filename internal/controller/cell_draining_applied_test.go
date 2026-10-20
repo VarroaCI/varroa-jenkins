@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -163,6 +164,40 @@ func TestAssembleCellContent_ReportsDrainingTenants(t *testing.T) {
 	}
 	if want := []string{"draining"}; !slices.Equal(state.Draining, want) {
 		t.Fatalf("state.Draining = %v, want %v", state.Draining, want)
+	}
+}
+
+// TestDrainingTenantsStayASubsetOfTenants pins that a cell at the 64-item
+// limit with every tenant draining reports a draining set that is a subset of
+// status.cell.tenants and fits the same limit, with no truncation.
+func TestDrainingTenantsStayASubsetOfTenants(t *testing.T) {
+	client := newTestClient()
+	rec := newTestReconciler(client)
+	cr := cellControllerFixture()
+
+	names := make([]string, 0, 64)
+	teams := make([]*v1alpha1.Team, 0, 64)
+	for i := range 64 {
+		name := fmt.Sprintf("tenant-%02d", i)
+		names = append(names, name)
+		team := pipelinesTeam(name)
+		markDraining(team, cr)
+		seedTenantBundle(client, team, name+"-bundle", cleanPipelineItemsYAML)
+		teams = append(teams, team)
+	}
+	cr.Status.Cell = &v1alpha1.CellStatus{Tenants: names}
+
+	state, err := rec.assembleCellContent(context.Background(), cr, teams, nil, "")
+	if err != nil {
+		t.Fatalf("assembleCellContent: %v", err)
+	}
+	if len(state.Draining) != len(names) {
+		t.Fatalf("len(Draining) = %d, want %d: the set must not truncate", len(state.Draining), len(names))
+	}
+	for _, d := range state.Draining {
+		if !slices.Contains(names, d) {
+			t.Fatalf("draining tenant %q is not in Tenants", d)
+		}
 	}
 }
 

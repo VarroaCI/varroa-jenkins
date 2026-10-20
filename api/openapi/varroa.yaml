@@ -6190,6 +6190,7 @@ components:
               type: integer
             maxTenantsPerCell:
               format: int32
+              maximum: 64
               minimum: 1
               type: integer
             unreadyGracePeriod:
@@ -6257,8 +6258,9 @@ components:
           type: integer
         maxTenantsPerCell:
           description: Capacity a pool cell uses when its own spec.cell.maxTenants
-            is zero.
+            is zero. At most 64, the item limit of status.cell.tenants.
           format: int32
+          maximum: 64
           minimum: 1
           type: integer
         profileRef:
@@ -6340,6 +6342,8 @@ components:
           type: boolean
         maxTenants:
           format: int32
+          maximum: 64
+          minimum: 0
           type: integer
       required:
       - enabled
@@ -6351,8 +6355,9 @@ components:
         capability keeps that key inside the operator.'
       properties:
         appliedTenants:
-          description: The tenant set of the last apply that passed. A tenant named
-            in tenants and absent here is still rehydrating.
+          description: The placed tenants that have an applied folder on the cell
+            after its last items walk. A draining tenant never enters it. A tenant
+            named in tenants and absent here has no folder building yet.
           items:
             type: string
           type: array

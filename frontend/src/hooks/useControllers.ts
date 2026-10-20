@@ -87,8 +87,9 @@ export interface CellStatusProjection {
   unreadySince?: string;
   rolledAt?: string;
   /**
-   * The tenant set of the last apply that passed. A tenant named in
-   * tenants and absent here is still rehydrating.
+   * The placed tenants that have an applied folder on the cell after its
+   * last items walk. A draining tenant never enters it. A tenant named in
+   * tenants and absent here has no folder building yet.
    */
   appliedTenants?: string[];
   tenantWarnings?: { tenant: string; reason: string; message: string }[];

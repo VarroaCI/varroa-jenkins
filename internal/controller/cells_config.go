@@ -142,6 +142,12 @@ func ParseCellsConfigFromEnv(logger *slog.Logger) CellsConfig {
 		cfg.WarmPoolPerProfile = 1
 	}
 	cfg.MaxTenantsPerCell = parseCellsIntEnv(logger, "VARROA_CELLS_MAX_TENANTS", cfg.MaxTenantsPerCell)
+	if cfg.MaxTenantsPerCell > cells.MaxCellTenants {
+		// status.cell.tenants holds at most MaxCellTenants items. A larger
+		// capacity would bind a tenant the apiserver then refuses to record.
+		logger.Warn("VARROA_CELLS_MAX_TENANTS above the item limit; using the limit", "value", cfg.MaxTenantsPerCell, "limit", cells.MaxCellTenants)
+		cfg.MaxTenantsPerCell = cells.MaxCellTenants
+	}
 	cfg.UnreadyGracePeriod = parseCellsDurationEnv(logger, "VARROA_CELLS_UNREADY_GRACE", cfg.UnreadyGracePeriod)
 	cfg.CellTemplate = parseCellTemplateEnv(logger, "VARROA_CELLS_CELL_TEMPLATE")
 	cfg.NetworkPolicyEnabled = parseCellsBoolEnv(logger, "VARROA_NETWORKPOLICY_ENABLED", cfg.NetworkPolicyEnabled)

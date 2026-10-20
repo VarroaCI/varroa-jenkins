@@ -11,6 +11,11 @@ import (
 // of its profile that carries no pool label.
 const LabelCellPool = "varroa.dev/cell-pool"
 
+// MaxCellTenants is the capacity ceiling. It matches the CRD item limit on
+// status.cell.tenants: a placed cell cannot hold more tenants than that list
+// accepts.
+const MaxCellTenants = 64
+
 // CellPoolSummary is one pool's read-only view for the placement pass. The
 // caller gathers every summary once per tick, so Place performs no read.
 type CellPoolSummary struct {

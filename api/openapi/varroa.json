@@ -8309,6 +8309,7 @@
               },
               "maxTenantsPerCell": {
                 "format": "int32",
+                "maximum": 64,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -8382,8 +8383,9 @@
             "type": "integer"
           },
           "maxTenantsPerCell": {
-            "description": "Capacity a pool cell uses when its own spec.cell.maxTenants is zero.",
+            "description": "Capacity a pool cell uses when its own spec.cell.maxTenants is zero. At most 64, the item limit of status.cell.tenants.",
             "format": "int32",
+            "maximum": 64,
             "minimum": 1,
             "type": "integer"
           },
@@ -8489,6 +8491,8 @@
           },
           "maxTenants": {
             "format": "int32",
+            "maximum": 64,
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -8502,7 +8506,7 @@
         "description": "The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.",
         "properties": {
           "appliedTenants": {
-            "description": "The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.",
+            "description": "The placed tenants that have an applied folder on the cell after its last items walk. A draining tenant never enters it. A tenant named in tenants and absent here has no folder building yet.",
             "items": {
               "type": "string"
             },

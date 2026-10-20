@@ -14,7 +14,7 @@ Read [Cells and pipelines tenants](cells.md) first.
 | `profileRef` | string, required, immutable | the `JenkinsVersionProfile` the pool's cells run |
 | `warm` | int32, default 0 | target count of free cells the pool keeps ready |
 | `maxCells` | int32, default 0 | cap on the pool's cells, placed cells included. 0 means unlimited |
-| `maxTenantsPerCell` | int32, minimum 1, default 10 | capacity a pool cell uses when its own `spec.cell.maxTenants` is zero |
+| `maxTenantsPerCell` | int32, minimum 1, maximum 64, default 10 | capacity a pool cell uses when its own `spec.cell.maxTenants` is zero |
 | `maxRunsPerTenant` | int32, 0 to 10000, default 0 | builds one tenant runs at once on one cell; zero means no cap. A build over the cap waits. Set it on the object; the scale API does not change it |
 | `unreadyGracePeriod` | duration, optional | how long a pool cell may stay unready before the operator rolls its pod |
 | `cellTemplate` | object, optional | `resources`, `miteResources`, and `podOverrides` for the cells the pool creates |
@@ -71,7 +71,7 @@ cells:
 
 Each value seeds a new pool only. A Helm upgrade never rewrites the spec of an existing pool.
 
-The chart refuses a `cells.maxTenantsPerCell` or `cells.warmPool.perProfile` below 1.
+The chart refuses a `cells.maxTenantsPerCell` below 1 or above 64, and a `cells.warmPool.perProfile` below 1.
 
 To create a second pool, apply one:
 

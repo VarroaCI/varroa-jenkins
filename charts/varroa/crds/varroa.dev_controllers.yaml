@@ -86,8 +86,11 @@ spec:
                   maxTenants:
                     description: |-
                       MaxTenants caps the number of tenants a placement pass may bind to
-                      this cell.
+                      this cell. At most 64, the item limit of status.cell.tenants. Zero
+                      resolves through the pool.
                     format: int32
+                    maximum: 64
+                    minimum: 0
                     type: integer
                 type: object
               className:
@@ -4063,9 +4066,12 @@ spec:
                 properties:
                   appliedTenants:
                     description: |-
-                      AppliedTenants is the tenant set of the desired state whose apply
-                      last succeeded. A tenant absent here has no folder building on this
-                      cell.
+                      AppliedTenants lists the placed tenants that have an applied folder on
+                      this cell after the last items walk of the current desired state from
+                      the current pod. A held tenant or a tenant with a refused item keeps
+                      its previous membership. A draining tenant never enters this list. A
+                      pod change removes each held and each refused tenant. A tenant absent
+                      here has no folder building on this cell. It is a subset of Tenants.
                     items:
                       type: string
                     maxItems: 64
@@ -4075,7 +4081,8 @@ spec:
                       DrainingTenants lists the tenants whose folder the last delivered desired
                       state leaves out, because each tenant moves to another cell. The
                       controller reconciler writes it together with status.desiredStateHash.
-                      An items apply never adds such a tenant to AppliedTenants.
+                      An items apply never adds such a tenant to AppliedTenants. It is a
+                      subset of Tenants, so it holds at most 64 items with no truncation.
                     items:
                       type: string
                     maxItems: 64
