@@ -125,6 +125,10 @@ A tool result is cut at 32768 bytes.
 A session stops when a budget is spent. The stop writes an error event. The
 day budget is checked before every provider call.
 
+On the Administration page, a change of the default provider clears the default model.
+An empty default model uses the first model of the provider.
+The API refuses a default model that the default provider does not list.
+
 An admin sets the kill switch with `PUT /api/v1/assistant/settings`. While it
 is on:
 

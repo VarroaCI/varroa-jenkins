@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -102,13 +103,14 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	if in.DefaultModel != nil && *in.DefaultModel != "" {
-		name := ""
-		if in.DefaultProvider != nil {
-			name = *in.DefaultProvider
+	if in.DefaultProvider != nil || in.DefaultModel != nil {
+		stored, err := rt.Store.GetSettings(r.Context(), agent.ScopeGlobal)
+		if err != nil {
+			s.assistantStoreError(w, err)
+			return
 		}
-		if !rt.modelKnown(name, *in.DefaultModel) {
-			s.writeJSONError(w, http.StatusBadRequest, "unknown default model")
+		if msg := defaultPairRefusal(rt, stored, in); msg != "" {
+			s.writeJSONError(w, http.StatusBadRequest, msg)
 			return
 		}
 	}
@@ -137,6 +139,27 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 		"tenantDataSharing": g.TenantDataSharing, "updatedAt": g.UpdatedAt,
 		"updatedBy": g.UpdatedBy, "limits": rt.limits(),
 	})
+}
+
+// defaultPairRefusal checks the default provider and model that the store
+// holds after the patch. A field missing from the body keeps its stored value.
+func defaultPairRefusal(rt *AssistantRuntime, stored agent.Settings, in assistantSettingsUpdate) string {
+	p, m := stored.DefaultProvider, stored.DefaultModel
+	if in.DefaultProvider != nil {
+		p = *in.DefaultProvider
+	}
+	if in.DefaultModel != nil {
+		m = *in.DefaultModel
+	}
+	switch {
+	case m == "":
+		return ""
+	case p == "":
+		return "a default model needs a default provider"
+	case !rt.modelKnown(p, m):
+		return fmt.Sprintf("the provider %s does not list the model %s", p, m)
+	}
+	return ""
 }
 
 // modelKnown reports whether the model is listed for the provider. An empty

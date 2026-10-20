@@ -342,6 +342,52 @@ func TestAssistantSettings_AdminOnlyWrites(t *testing.T) {
 	}
 }
 
+func TestAssistantSettings_DefaultPairChecked(t *testing.T) {
+	f := newAssistantFixture(t)
+	two := newChooseProviderRuntime(t)
+	f.rt.Config, f.rt.Registry = two.Config, two.Registry
+	if rec := f.do(t, f.admin, http.MethodPut, "/assistant/settings", map[string]any{"defaultProvider": "alpha", "defaultModel": "a1"}); rec.Code != http.StatusOK {
+		t.Fatalf("seed PUT = %d body = %s", rec.Code, rec.Body)
+	}
+	cases := []struct {
+		name     string
+		body     map[string]any
+		wantCode int
+		wantMsg  string
+	}{
+		{"provider and model it does not list", map[string]any{"defaultProvider": "beta", "defaultModel": "a1"}, http.StatusBadRequest, "beta"},
+		{"provider only, stored model not listed", map[string]any{"defaultProvider": "beta"}, http.StatusBadRequest, "a1"},
+		{"model only, stored provider does not list it", map[string]any{"defaultModel": "b1"}, http.StatusBadRequest, "b1"},
+		{"chart default with a model", map[string]any{"defaultProvider": "", "defaultModel": "a1"}, http.StatusBadRequest, "a default model needs a default provider"},
+		{"provider with an empty model", map[string]any{"defaultProvider": "beta", "defaultModel": ""}, http.StatusOK, ""},
+		{"provider with a listed model", map[string]any{"defaultProvider": "beta", "defaultModel": "b2"}, http.StatusOK, ""},
+		{"kill switch leaves the pair unchecked", map[string]any{"paused": true}, http.StatusOK, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := f.do(t, f.admin, http.MethodPut, "/assistant/settings", tc.body)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, tc.wantCode, rec.Body)
+			}
+			if tc.wantMsg != "" && !strings.Contains(rec.Body.String(), tc.wantMsg) {
+				t.Errorf("body = %s, want it to name %q", rec.Body, tc.wantMsg)
+			}
+		})
+	}
+	// The store must keep the last accepted pair after the refusals.
+	rec := f.do(t, f.admin, http.MethodGet, "/assistant/settings", nil)
+	var got struct {
+		DefaultProvider string `json:"defaultProvider"`
+		DefaultModel    string `json:"defaultModel"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET settings: %v", err)
+	}
+	if got.DefaultProvider != "beta" || got.DefaultModel != "b2" {
+		t.Errorf("stored pair = %q/%q, want beta/b2 after the last accepted PUT", got.DefaultProvider, got.DefaultModel)
+	}
+}
+
 func TestAssistantProviders_BaseURLAdminOnly(t *testing.T) {
 	f := newAssistantFixture(t)
 	rec := f.do(t, f.viewer, http.MethodGet, "/assistant/providers", nil)

@@ -123,7 +123,7 @@ export function AssistantAdmin() {
               value={shownProvider}
               onChange={(e) => {
                 setDefaultProvider(e.target.value);
-                if (gone) setDefaultModel("");
+                setDefaultModel("");
               }}
             >
               <option value="">Chart default</option>
@@ -134,7 +134,13 @@ export function AssistantAdmin() {
           </label>{" "}
           <label>
             Model{" "}
-            <input aria-label="Default model" value={shownModel} disabled={gone} onChange={(e) => setDefaultModel(e.target.value)} />
+            <input
+              aria-label="Default model"
+              value={shownModel}
+              placeholder={providerList.find((p) => p.name === shownProvider)?.models[0] ?? ""}
+              disabled={gone}
+              onChange={(e) => setDefaultModel(e.target.value)}
+            />
           </label>{" "}
           <Button size="sm" disabled={gone} onClick={() => update.mutate({ defaultProvider: shownProvider, defaultModel: shownModel })}>
             Save defaults
