@@ -561,6 +561,30 @@ public class VarroaRunSourceTest {
     }
 
     @Test
+    public void aPullRequestMergeRunCompletesWithTheHeadHashNotTheNewestChangelogCommit() throws Exception {
+        createRepository();
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "pr-merge-completed");
+        VarroaRunRecorderChangeRequestTest.PullRequestHead head = new VarroaRunRecorderChangeRequestTest.PullRequestHead(
+                "PR-12", "12", new SCMHead("main"), "fix/cache");
+        SCMRevision revision = new VarroaRunRecorderChangeRequestTest.GitHubStyleRevision(
+                head, new FakeRevision(new SCMHead("main"), "base111"), "head222", "merge333");
+        job.setDefinition(new SourceFactsFlowDefinition(
+                "node { git url: '" + repoUrl + "', branch: 'master' }", revision));
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+        drainEvents();
+
+        // The second commit gives the second build a changelog whose newest
+        // entry is not the head hash. The completion must still send the head.
+        commitAgain();
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, grantedAction()));
+
+        List<BuildEvent> completed = byPhase(drainEvents(), BuildEvent.PHASE_COMPLETED);
+        assertEquals(1, completed.size());
+        assertEquals("head222", completed.get(0).getScmRevision());
+        assertNotEquals(secondCommitId, completed.get(0).getScmRevision());
+    }
+
+    @Test
     public void startedCarriesTheForgeRevisionOverTheClaimRevision() throws Exception {
         createRepository();
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "forge-revision-run");

@@ -1292,14 +1292,12 @@ public final class VarroaRunRecorder {
             List<BuildChange> changes = extractChanges(run);
             b.changes(changes);
             b.changeCount(changes.size());
-            String newestRevision = "";
-            for (BuildChange c : changes) {
-                if (!c.getCommitId().isEmpty()) {
-                    newestRevision = c.getCommitId();
-                }
-            }
-            if (!newestRevision.isEmpty()) {
-                b.scmRevision(truncate(newestRevision, MAX_FIELD_512));
+            SCMRevision actionRevision = revisionFromAction(run);
+            boolean changeRequest = actionRevision instanceof ChangeRequestSCMRevision
+                    || resolveChangeRequest(run) != null;
+            String revision = completedRevision(actionRevision, changeRequest, changes);
+            if (!revision.isEmpty()) {
+                b.scmRevision(truncate(revision, MAX_FIELD_512));
             }
 
             int[] counts = readTestCounters(run.getAllActions());
@@ -1312,7 +1310,7 @@ public final class VarroaRunRecorder {
         // Every SCM fact comes from a reflective read of the run's own
         // actions. A missing plugin, action, or method leaves its value
         // empty. This call site writes no scm_revision: the claim's forge
-        // revision and the changelog fallback keep their own writers.
+        // revision and completedRevision keep their own writers.
         SourceFacts source = resolveBranchFacts(run);
         b.scmHead(source.scmHead);
         b.branch(source.branch);
@@ -1642,6 +1640,30 @@ public final class VarroaRunRecorder {
             }
         }
         return stringOf(invokeNoArg(revision, "getHash"));
+    }
+
+    /**
+     * Returns the revision the completion event sends. The run's revision
+     * action wins, read through revisionHash, so a change request sends its
+     * head commit. A change request with no such answer sends no revision,
+     * because its changelog can end at the local merge commit. Any other
+     * run sends the newest changelog commit.
+     */
+    static String completedRevision(SCMRevision revision, boolean changeRequest, List<BuildChange> changes) {
+        String hash = revisionHash(revision);
+        if (!hash.isEmpty()) {
+            return hash;
+        }
+        if (changeRequest) {
+            return "";
+        }
+        String newest = "";
+        for (BuildChange c : changes) {
+            if (!c.getCommitId().isEmpty()) {
+                newest = c.getCommitId();
+            }
+        }
+        return newest;
     }
 
     /**

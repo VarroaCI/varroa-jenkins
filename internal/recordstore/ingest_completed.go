@@ -98,7 +98,7 @@ func applyRunCompleted(ctx context.Context, tx pgx.Tx, intent *intentRow, env In
 			-- keeps the stored set.
 			inputs = CASE WHEN $13 THEN NULL ELSE runs.inputs END,
 			-- The fill-only revision rule: an absent value takes the
-			-- newest changelog entry's revision, whatever the seq. A set
+			-- completion event's revision, whatever the seq. A set
 			-- value stays, so the rule never rewrites a known commit.
 			scm_revision = COALESCE(NULLIF(runs.scm_revision, ''), EXCLUDED.scm_revision),
 			-- The summary raise reads the stored watermark too, unlike the

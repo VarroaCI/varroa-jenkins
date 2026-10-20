@@ -288,4 +288,47 @@ public class VarroaRunRecorderChangeRequestTest {
     public void aNullRevisionAnswersEmpty() {
         assertEquals("", VarroaRunRecorder.revisionHash(null));
     }
+
+    @Test
+    public void aPullRequestCompletionSendsTheHeadNotTheNewestChangelogCommit() {
+        PullRequestHead head = pullRequest();
+        SCMRevision target = new BranchStyleRevision(head.getTarget(), "base111");
+        GitHubStyleRevision revision = new GitHubStyleRevision(head, target, "head222", "merge333");
+
+        assertEquals("head222", VarroaRunRecorder.completedRevision(revision, true, changes("c1", "merge333")));
+    }
+
+    @Test
+    public void anOpaquePullRequestCompletionSendsNoChangelogCommit() {
+        PullRequestHead head = pullRequest();
+        SCMRevision target = new BranchStyleRevision(head.getTarget(), "base111");
+
+        assertEquals("", VarroaRunRecorder.completedRevision(
+                new OpaqueChangeRequestRevision(head, target), true, changes("merge333")));
+    }
+
+    @Test
+    public void aChangeRequestWithNoRevisionActionSendsNothing() {
+        assertEquals("", VarroaRunRecorder.completedRevision(null, true, changes("merge333")));
+    }
+
+    @Test
+    public void aBranchCompletionPrefersTheRevisionAction() {
+        SCMRevision revision = new BranchStyleRevision(new SCMHead("main"), "branch555");
+
+        assertEquals("branch555", VarroaRunRecorder.completedRevision(revision, false, changes("x")));
+    }
+
+    @Test
+    public void aRunWithNoRevisionFallsBackToTheNewestChangelogCommit() {
+        assertEquals("b", VarroaRunRecorder.completedRevision(null, false, changes("a", "b", "")));
+    }
+
+    private static List<BuildChange> changes(String... commitIds) {
+        List<BuildChange> out = new java.util.ArrayList<>();
+        for (String id : commitIds) {
+            out.add(BuildChange.builder().commitId(id).build());
+        }
+        return out;
+    }
 }
