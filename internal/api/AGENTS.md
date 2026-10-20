@@ -369,7 +369,7 @@ federation, activity persistence, and SSE fanout.
   `status.nodeName` and a freshly-fetched Jenkins agent secret toward the cell.
   `cmd/bff/main.go` feeds `RunnerTokenIndex` from a `runners` informer built the same
   way as the existing RBAC/Team informers.
-- Pipeline proposals (`handlers_pipelines_propose.go`, `open_pull_request.go`): the route runs the refusals in order and starts its session through `createAssistantSession`; the level rule is `sessionLevel`, shared with the assistant start. The tool body calls `OpenPullRequest`, which answers errors that start with a tool code.
+- Pipeline proposals (`handlers_pipelines_propose.go`, `open_pull_request.go`): the route runs the refusals in order and starts its session through `createAssistantSession`; the level rule is `sessionLevel`, shared with the assistant start. The tool body calls `OpenPullRequest`, which answers errors that start with a tool code. A relay timeout answers `operator_timeout`, not `forge_unreachable`; `OpenIssue` uses the same rule.
 - Pipelines and runs (`handlers_pipelines.go`, `handlers_pipelines_write.go`,
   `handlers_pipelines_auth.go`, `handlers_runs.go`, `handlers_runlog.go`,
   `runlog_events.go`, `runlog_manifest.go`, `runlog_live.go`, `runlog_poll.go`,

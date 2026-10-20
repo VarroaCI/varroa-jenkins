@@ -3,12 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -288,6 +291,28 @@ func TestOpenPullRequest_ReplyErrorIsToolError(t *testing.T) {
 	}
 	if len(sink.events) != 0 {
 		t.Fatal("activity on a failed pull request")
+	}
+}
+
+// TestOpenPullRequest_RelayTimeoutAnswersOperatorTimeout checks that a relay
+// timeout answers operator_timeout, and not forge_unreachable.
+func TestOpenPullRequest_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
+	deps, f, _ := proposeDeps(t)
+	f.prErr = fmt.Errorf("forge pullrequest request: %w", nats.ErrTimeout)
+	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	if !failed || !strings.Contains(text, "operator_timeout: ") || strings.Contains(text, "forge_unreachable") {
+		t.Fatalf("failed=%v text=%s", failed, text)
+	}
+}
+
+// TestOpenPullRequest_RelayOtherErrorStaysForgeUnreachable checks that a relay
+// error that is not a timeout keeps forge_unreachable.
+func TestOpenPullRequest_RelayOtherErrorStaysForgeUnreachable(t *testing.T) {
+	deps, f, _ := proposeDeps(t)
+	f.prErr = errors.New("boom")
+	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	if !failed || !strings.Contains(text, "forge_unreachable: ") {
+		t.Fatalf("failed=%v text=%s", failed, text)
 	}
 }
 

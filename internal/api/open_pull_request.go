@@ -2,13 +2,27 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 	"github.com/varroaci/varroa-jenkins/internal/forgeurl"
 )
+
+// codeOperatorTimeout reports that the operator did not answer a forge request
+// before the relay stopped waiting. After a reply timeout, the forge write may
+// have landed.
+const codeOperatorTimeout = "operator_timeout"
+
+// isOperatorTimeout reports whether the relay stopped waiting for the operator.
+// The bus returns nats.ErrTimeout or nats.ErrNoResponders when the reply does not
+// come, and the caller's context returns context.DeadlineExceeded.
+func isOperatorTimeout(err error) bool {
+	return bus.IsNoReply(err) || errors.Is(err, context.DeadlineExceeded)
+}
 
 // OpenPullRequestArgs are the model's arguments of open_pull_request.
 type OpenPullRequestArgs struct {
@@ -91,6 +105,9 @@ func (s *Server) OpenPullRequest(ctx context.Context, claims *auth.Claims, a Ope
 		Team: a.Team, Repo: u.String(), Branch: a.Branch, Title: a.Title, Body: body,
 		Files: a.Files, CommitMessage: msg, BaseRevision: baseRevision,
 	})
+	if err != nil && isOperatorTimeout(err) {
+		return OpenPullRequestResult{}, toolErr(http.StatusGatewayTimeout, codeOperatorTimeout, "the operator did not answer in time. Call again later.")
+	}
 	if err != nil {
 		return OpenPullRequestResult{}, toolErr(http.StatusBadGateway, forgeapi.CodeForgeUnreachable, "%v", err)
 	}

@@ -3,9 +3,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -26,10 +28,12 @@ type teamAgentFakes struct {
 	readReply  forgeapi.ReadReply
 	readReqs   []forgeapi.ReadRequest
 	issueReply forgeapi.IssueReply
+	issueErr   error
 	issueReqs  []forgeapi.IssueRequest
 	checkReply forgeapi.CheckReply
 	checkReqs  []forgeapi.CheckRequest
 	prReply    forgeapi.PullRequestReply
+	prErr      error
 	prReqs     []forgeapi.PullRequestRequest
 	notes      []recordstore.RunNotePostRequest
 	hooks      []recordstore.TeamAgentWebhookRequest
@@ -60,7 +64,7 @@ func (f *teamAgentFakes) Read(_ context.Context, _ string, req forgeapi.ReadRequ
 
 func (f *teamAgentFakes) Issue(_ context.Context, _ string, req forgeapi.IssueRequest) (forgeapi.IssueReply, error) {
 	f.issueReqs = append(f.issueReqs, req)
-	return f.issueReply, nil
+	return f.issueReply, f.issueErr
 }
 
 func (f *teamAgentFakes) Check(_ context.Context, _ string, req forgeapi.CheckRequest) (forgeapi.CheckReply, error) {
@@ -70,7 +74,7 @@ func (f *teamAgentFakes) Check(_ context.Context, _ string, req forgeapi.CheckRe
 
 func (f *teamAgentFakes) PullRequest(_ context.Context, _ string, req forgeapi.PullRequestRequest) (forgeapi.PullRequestReply, error) {
 	f.prReqs = append(f.prReqs, req)
-	return f.prReply, nil
+	return f.prReply, f.prErr
 }
 
 func (f *teamAgentFakes) PostRunNote(_ context.Context, req recordstore.RunNotePostRequest) (recordstore.RunNotePostResponse, error) {
@@ -280,6 +284,42 @@ func TestOpenIssue_AgentOwnTeamPasses(t *testing.T) {
 	}
 	if len(sink.events) != 1 || sink.events[0].Type != "team_agent.issue_opened" {
 		t.Fatalf("activity = %+v", sink.events)
+	}
+}
+
+// TestOpenIssue_RelayTimeoutAnswersOperatorTimeout checks that a relay timeout
+// answers operator_timeout, and never points at gitEgress.
+func TestOpenIssue_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
+	f := newTeamAgentFakes()
+	f.issueErr = fmt.Errorf("forge issue request: %w", nats.ErrTimeout)
+	deps := teamAgentDeps(t, f, &recordingSink{})
+	text, failed := callTeamTool(t, deps, agentClaims(), "open_issue", map[string]any{"team": "obj", "title": "t"})
+	if !failed || !strings.Contains(text, "operator_timeout: ") || strings.Contains(text, "gitEgress") {
+		t.Fatalf("failed=%v text=%s", failed, text)
+	}
+}
+
+// TestOpenIssue_NoResponderAnswersNoIssueOpened checks that a request that no
+// operator received says no issue was opened, and does not say the issue can exist.
+func TestOpenIssue_NoResponderAnswersNoIssueOpened(t *testing.T) {
+	f := newTeamAgentFakes()
+	f.issueErr = fmt.Errorf("forge issue request: %w", nats.ErrNoResponders)
+	deps := teamAgentDeps(t, f, &recordingSink{})
+	text, failed := callTeamTool(t, deps, agentClaims(), "open_issue", map[string]any{"team": "obj", "title": "t"})
+	if !failed || !strings.Contains(text, "No issue was opened") || strings.Contains(text, "operator_timeout") {
+		t.Fatalf("failed=%v text=%s", failed, text)
+	}
+}
+
+// TestOpenIssue_RequestExpiredKeepsCode checks that a refused issue keeps its
+// reply code in the tool error.
+func TestOpenIssue_RequestExpiredKeepsCode(t *testing.T) {
+	f := newTeamAgentFakes()
+	f.issueReply = forgeapi.IssueReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired, Error: "too little time"}}
+	deps := teamAgentDeps(t, f, &recordingSink{})
+	text, failed := callTeamTool(t, deps, agentClaims(), "open_issue", map[string]any{"team": "obj", "title": "t"})
+	if !failed || !strings.Contains(text, "request_expired: ") {
+		t.Fatalf("failed=%v text=%s", failed, text)
 	}
 }
 

@@ -13,9 +13,9 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
 )
 
-// forgeRequestTimeout bounds one forge check or read on the operator. It
-// stays under the requester's forgeapi.RequestTimeout, so the operator
-// returns its own reply first.
+// forgeRequestTimeout bounds one forge check or read on the operator, and it
+// caps the work of one issue. It stays under the requester's
+// forgeapi.RequestTimeout, so the operator returns its own reply first.
 const forgeRequestTimeout = 25 * time.Second
 
 // forgePullRequestTimeout limits the work of one pull-request request whose
@@ -36,6 +36,15 @@ const forgePullRequestReserve = forgeops.CleanupTimeout + forgeReplyMargin
 // forgePullRequestMinBudget is the least work time that a pull request needs.
 // A request with less time left is refused before any forge call.
 const forgePullRequestMinBudget = 15 * time.Second
+
+// forgeIssueReserve is the time that the operator keeps before an issue
+// requester's deadline. No cleanup runs after an issue write. The margin also
+// absorbs a small clock skew.
+const forgeIssueReserve = forgeReplyMargin
+
+// forgeIssueMinBudget is the least work time that an issue needs. A request
+// with less time left is refused before any forge call.
+const forgeIssueMinBudget = 10 * time.Second
 
 // forgeConcurrency limits the forge requests that one replica runs at a
 // time on one verb subject.
@@ -108,7 +117,17 @@ func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 		return nil
 	}
 	defer leave()
-	rctx, cancel := context.WithTimeout(wctx, forgeRequestTimeout)
+	if req.Deadline.IsZero() {
+		return encodeForgeReply(forgeapi.IssueReply{Status: forgeapi.Status{Code: forgeapi.CodeInvalidRequest, Error: "deadline is required"}})
+	}
+	now := time.Now()
+	work, ok := forgeWorkDeadline(now, req.Deadline, forgeIssueReserve, forgeRequestTimeout, forgeIssueMinBudget)
+	if !ok {
+		logger.Info("forge issue has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
+		return encodeForgeReply(forgeapi.IssueReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
+			Error: "too little time was left for the issue, so none was opened. Call again."}})
+	}
+	rctx, cancel := context.WithDeadline(wctx, work)
 	defer cancel()
 	return encodeForgeReply(ops.Issue(rctx, req, releaseNamespace))
 }
@@ -130,11 +149,8 @@ func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeO
 		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeInvalidRequest, Error: "deadline is required"}})
 	}
 	now := time.Now()
-	work := req.Deadline.Add(-forgePullRequestReserve)
-	if limit := now.Add(forgePullRequestTimeout); work.After(limit) {
-		work = limit
-	}
-	if work.Sub(now) < forgePullRequestMinBudget {
+	work, ok := forgeWorkDeadline(now, req.Deadline, forgePullRequestReserve, forgePullRequestTimeout, forgePullRequestMinBudget)
+	if !ok {
 		logger.Info("forge pullrequest has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
 		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
 			Error: "too little time was left for the pull request, so none was opened. Call again."}})
@@ -142,6 +158,18 @@ func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeO
 	rctx, cancel := context.WithDeadline(wctx, work)
 	defer cancel()
 	return encodeForgeReply(ops.PullRequest(rctx, req))
+}
+
+// forgeWorkDeadline returns the end of the work time for a request that the
+// requester stops waiting for at deadline. The work ends reserve before the
+// deadline and at most limit after now. ok is false when less than minBudget
+// of work time is left.
+func forgeWorkDeadline(now, deadline time.Time, reserve, limit, minBudget time.Duration) (work time.Time, ok bool) {
+	work = deadline.Add(-reserve)
+	if ceil := now.Add(limit); work.After(ceil) {
+		work = ceil
+	}
+	return work, work.Sub(now) >= minBudget
 }
 
 // invalidForgeStatus is the reply to a request that does not decode.

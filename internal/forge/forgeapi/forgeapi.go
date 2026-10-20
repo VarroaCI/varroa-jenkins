@@ -42,7 +42,7 @@ const (
 	// CodeProposalBaseMoved refuses a pull request whose base branch no
 	// longer holds the commit that the check read.
 	CodeProposalBaseMoved = "proposal_base_moved"
-	// CodeRequestExpired refuses a pull request whose deadline leaves too little
+	// CodeRequestExpired refuses a pull request or an issue whose deadline leaves too little
 	// work time, for example after a wait in the operator queue. No forge call was made.
 	CodeRequestExpired = "request_expired"
 	CodeInvalidRequest = "invalid_request"
@@ -74,6 +74,10 @@ type IssueRequest struct {
 	Labels    []string     `json:"labels,omitempty"`
 	Actor     string       `json:"actor"`
 	SessionID string       `json:"session_id"`
+	// Deadline is the time when the requester stops waiting for the reply. The
+	// operator refuses a request that has too little time left before it, and
+	// makes no forge call.
+	Deadline time.Time `json:"deadline"`
 }
 
 // IssueReply reports the issue that the forge opened.
