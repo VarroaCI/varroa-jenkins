@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -336,5 +337,123 @@ func TestUserTools_AuthorizerNilReturnsError(t *testing.T) {
 				t.Errorf("%s error text = %q, want %q", tc.name, got, "authorizer not configured")
 			}
 		})
+	}
+}
+
+// deleteUserDeps returns deps over store with an admin Authorizer, the same
+// shape userDeps uses. The admin binding lives in the resolver, not the store.
+func deleteUserDeps(store crdstore.Backend) *api.Dependencies {
+	roles := []*v1alpha1.VarroaRole{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "admin"},
+			Spec: v1alpha1.VarroaRoleSpec{APIRules: []v1alpha1.APIRule{
+				{Resources: []string{"*"}, Verbs: []string{"*"}},
+			}},
+		},
+	}
+	bindings := []*v1alpha1.VarroaRoleBinding{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "admin-binding"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "admin-user"}},
+				RoleRef:  "admin",
+			},
+		},
+	}
+	return &api.Dependencies{
+		Client:     &stubClient{},
+		Store:      store,
+		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+	}
+}
+
+// TestDeleteUser_StripsBindings pins that delete_user runs the same
+// deprovision step as the REST route: bindings naming the user lose that
+// subject, and a binding left empty is deleted.
+func TestDeleteUser_StripsBindings(t *testing.T) {
+	store := crdstore.NewFake()
+	subj := func(kind, name string) v1alpha1.SubjectRef {
+		return v1alpha1.SubjectRef{Kind: kind, Name: name}
+	}
+	crdstore.MustSeed(store,
+		&v1alpha1.User{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "alice",
+				Namespace: "ns",
+				Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+				Annotations: map[string]string{
+					v1alpha1.AnnotationOIDCSubject:           "subj-1",
+					v1alpha1.AnnotationOIDCPreferredUsername: "alice-preferred",
+				},
+			},
+			Spec: v1alpha1.UserSpec{Email: "alice@example.com"},
+		},
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-sub"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "subj-1")}},
+		},
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-shared"},
+			Spec: v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{
+				subj("User", "alice@example.com"), subj("Group", "devs"),
+			}},
+		},
+		&v1alpha1.JenkinsRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "jrb-pu"},
+			Spec:       v1alpha1.JenkinsRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "alice-preferred")}},
+		},
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "vrb-other"},
+			Spec:       v1alpha1.VarroaRoleBindingSpec{Subjects: []v1alpha1.SubjectRef{subj("User", "bob")}},
+		},
+	)
+	ctx := context.Background()
+
+	resp := mcpRequest(t, NewHandler(deleteUserDeps(store)), "tools/call", map[string]interface{}{
+		"name":      "delete_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "alice"},
+	}, mcpAdminClaims)
+	if tr := parseToolResult(t, resp.Result); tr.IsError {
+		t.Fatalf("delete_user returned error: %v", tr.Content)
+	}
+
+	if _, err := crdstore.Get[v1alpha1.User](ctx, store, "alice", "ns"); err == nil {
+		t.Errorf("User alice still exists after delete_user")
+	}
+	if _, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-sub", ""); err == nil {
+		t.Errorf("vrb-sub named only the user and should have been deleted")
+	}
+	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, store, "jrb-pu", ""); err == nil {
+		t.Errorf("jrb-pu named only the preferred username and should have been deleted")
+	}
+	shared, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-shared", "")
+	if err != nil {
+		t.Fatalf("vrb-shared: %v", err)
+	}
+	if len(shared.Spec.Subjects) != 1 || shared.Spec.Subjects[0] != subj("Group", "devs") {
+		t.Errorf("vrb-shared subjects = %+v, want only Group/devs", shared.Spec.Subjects)
+	}
+	other, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, store, "vrb-other", "")
+	if err != nil {
+		t.Fatalf("vrb-other: %v", err)
+	}
+	if len(other.Spec.Subjects) != 1 || other.Spec.Subjects[0] != subj("User", "bob") {
+		t.Errorf("vrb-other subjects = %+v, want only User/bob", other.Spec.Subjects)
+	}
+}
+
+// TestDeleteUser_MissingUserIsError pins the tool error for an absent user,
+// the same outcome the REST route gives as 404.
+func TestDeleteUser_MissingUserIsError(t *testing.T) {
+	resp := mcpRequest(t, NewHandler(deleteUserDeps(crdstore.NewFake())), "tools/call", map[string]interface{}{
+		"name":      "delete_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "ghost"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("delete_user on a missing user must return a tool error, got success: %v", tr.Content)
+	}
+	if got := toolText(tr); !strings.Contains(got, "user not found") {
+		t.Errorf("error text = %q, want it to contain %q", got, "user not found")
 	}
 }

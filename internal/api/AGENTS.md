@@ -586,8 +586,9 @@ federation, activity persistence, and SSE fanout.
   (greenfield break-and-move — see `router.go`'s comments listing the dead routes).
 - Per-resource handlers follow a `handlers_<resource>.go` naming convention (groups,
   teams, users, apikeys, broodops, broodschedules, clusters, hibernation, namespaces,
-  provisioning, banner, builtin, identity, fleetplugins). `deprovision.go` and `preview_util.go`
-  hold controller-deletion and overlay-preview-diff helpers; `observability.go`/
+  provisioning, banner, builtin, identity, fleetplugins). `deprovision.go` holds `DeleteUser`,
+  the one user-delete path that the REST route and the MCP tool share; `preview_util.go`
+  holds overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any

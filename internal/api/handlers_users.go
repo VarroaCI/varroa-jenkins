@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -260,24 +261,12 @@ func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-
-	// Fetch user before deletion for deprovision metadata.
-	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace)
-	if err != nil {
-		s.writeJSONError(w, http.StatusNotFound, "user not found")
-		return
-	}
-
-	// Deprovision: strip from both RBAC planes + group membership.
-	if err := deprovisionUser(ctx, s.deps.Store, user, s.deps.IdentityConfig.Mode); err != nil {
-		s.writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("deprovision failed: %s", err.Error()))
-		return
-	}
-
-	// Delete the User CRD.
-	if err := crdstore.Delete[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace); err != nil {
-		s.writeJSONError(w, http.StatusInternalServerError, "failed to delete user")
+	if err := DeleteUser(r.Context(), s.deps.Store, s.deps.OperatorNamespace, name, s.deps.IdentityConfig.Mode); err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			s.writeJSONError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		s.writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

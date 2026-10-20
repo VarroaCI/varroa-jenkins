@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -227,7 +228,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 
 	deleteU := mcp.NewTool("delete_user",
-		mcp.WithDescription("Delete a Varroa user (admin only)"),
+		mcp.WithDescription("Delete a Varroa user and remove it from every role binding and group (admin only)"),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 	)
@@ -244,7 +245,10 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		ns, _ := getArgs(req)["namespace"].(string)
 		name, _ := getArgs(req)["name"].(string)
-		if err := crdstore.Delete[v1alpha1.User](ctx, deps.Store, name, ns); err != nil {
+		if err := api.DeleteUser(ctx, deps.Store, ns, name, deps.IdentityConfig.Mode); err != nil {
+			if errors.Is(err, api.ErrUserNotFound) {
+				return mcp.NewToolResultError("user not found"), nil
+			}
 			return mcp.NewToolResultError("failed to delete user: " + err.Error()), nil
 		}
 		emitActivity(ctx, deps, claims, activity.Event{

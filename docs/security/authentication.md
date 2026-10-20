@@ -61,7 +61,7 @@ Each setting takes a comma-separated list of claim names.
   on a configured custom claim value reaches the cell too. The operator reads the
   value from the person's `User` object, which stores it at sign-in. Only a string
   claim counts. The `name` claim never names a principal.
-- When you delete a user, Varroa removes the subject, the current and former preferred usernames, the current and former emails, and the current and former custom claim values from every role binding. A value that another signed-in person now holds stays in the bindings.
+- When you delete a user from the dashboard, from `varroactl delete user`, or with the MCP tool `delete_user`, Varroa removes the identifiers from every role binding. It removes the subject, the current and former preferred usernames, the current and former emails, and the current and former custom claim values. A value that another signed-in person now holds stays in the bindings.
 
 For AWS Cognito groups, set the group claim to the Cognito claim name:
 
