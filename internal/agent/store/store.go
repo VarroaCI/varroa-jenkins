@@ -166,6 +166,57 @@ type SettingsPatch struct {
 	Provider    *string
 	Model       *string
 	DataSharing *agent.DataSharing
+
+	// Check, when set, runs on the merged settings under the scope row lock,
+	// before the write. An error from Check writes nothing, and PutSettings
+	// returns that error. Check must not call the store: the memory store runs
+	// Check under its one mutex, so a call back into the store deadlocks.
+	Check func(after agent.Settings) error
+}
+
+// applyPatch applies p to st as the write would store it.
+func applyPatch(st *agent.Settings, scope string, p SettingsPatch, by string, now time.Time) {
+	st.Stored = true
+	st.UpdatedAt = now
+	st.UpdatedBy = by
+	if scope == agent.ScopeGlobal {
+		if p.Paused != nil {
+			st.Paused = *p.Paused
+			st.PausedBy, st.PausedAt = "", nil
+			if st.Paused {
+				st.PausedBy = by
+				st.PausedAt = &now
+			}
+		}
+		if p.DefaultProvider != nil {
+			st.DefaultProvider = *p.DefaultProvider
+		}
+		if p.DefaultModel != nil {
+			st.DefaultModel = *p.DefaultModel
+		}
+		if p.TenantSet != nil {
+			if st.TenantDataSharing == nil {
+				st.TenantDataSharing = map[string]agent.DataSharing{}
+			}
+			st.TenantDataSharing[p.TenantSet.Tenant] = p.TenantSet.Level
+		}
+		if p.TenantRemove != nil {
+			delete(st.TenantDataSharing, *p.TenantRemove)
+		}
+		return
+	}
+	if p.Enabled != nil {
+		st.Enabled = *p.Enabled
+	}
+	if p.Provider != nil {
+		st.Provider = *p.Provider
+	}
+	if p.Model != nil {
+		st.Model = *p.Model
+	}
+	if p.DataSharing != nil {
+		st.DataSharing = *p.DataSharing
+	}
 }
 
 // Store is the agent session store. Each write runs in one transaction,

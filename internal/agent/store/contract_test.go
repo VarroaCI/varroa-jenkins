@@ -48,6 +48,9 @@ func runContract(t *testing.T, f factory) {
 		{"TwoAdminsTwoTenants", testTwoAdminsTwoTenants},
 		{"SetInstructionsSHA", testSetInstructionsSHA},
 		{"PutTeamAgentUnattended", testPutTeamAgentUnattended},
+		{"SettingsCheckSeesMergedState", testSettingsCheckSeesMergedState},
+		{"SettingsCheckRefusalWritesNothing", testSettingsCheckRefusalWritesNothing},
+		{"SettingsCheckSerializesWriters", testSettingsCheckSerializesWriters},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -660,5 +663,130 @@ func testTwoAdminsTwoTenants(t *testing.T, f factory) {
 	}
 	if _, ok := st.TenantDataSharing[billing]; ok {
 		t.Fatal("billing was not removed")
+	}
+}
+
+// errRefused is the sentinel a settings check returns in these tests.
+var errRefused = errors.New("test: refused")
+
+func testSettingsCheckSeesMergedState(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	alpha, a1 := "alpha", "a1"
+	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &alpha, DefaultModel: &a1}, "ops"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	b1 := "b1"
+	var seen agent.Settings
+	_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{
+		DefaultModel: &b1,
+		Check: func(after agent.Settings) error {
+			seen = after
+			return nil
+		},
+	}, "ops")
+	if err != nil {
+		t.Fatalf("put model: %v", err)
+	}
+	if seen.DefaultProvider != "alpha" || seen.DefaultModel != "b1" {
+		t.Fatalf("check saw %s/%s, want alpha/b1", seen.DefaultProvider, seen.DefaultModel)
+	}
+	beta := "beta"
+	_, err = s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{
+		DefaultProvider: &beta,
+		Check:           func(agent.Settings) error { return errRefused },
+	}, "ops")
+	if !errors.Is(err, errRefused) {
+		t.Fatalf("refused put = %v, want errRefused", err)
+	}
+	st, err := s.GetSettings(ctx, agent.ScopeGlobal)
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if st.DefaultProvider != "alpha" || st.DefaultModel != "b1" {
+		t.Fatalf("refused write changed the scope: %s/%s", st.DefaultProvider, st.DefaultModel)
+	}
+}
+
+func testSettingsCheckRefusalWritesNothing(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	x := "x"
+	_, err := s.PutSettings(ctx, agent.UserScope("carol"), SettingsPatch{
+		Provider: &x,
+		Check:    func(agent.Settings) error { return errRefused },
+	}, "carol")
+	if !errors.Is(err, errRefused) {
+		t.Fatalf("refused put = %v, want errRefused", err)
+	}
+	st, err := s.GetSettings(ctx, agent.UserScope("carol"))
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if st.Stored || st.Provider != "" {
+		t.Fatalf("refused first write left a row: %+v", st)
+	}
+}
+
+// testSettingsCheckSerializesWriters reproduces the race where a check reads
+// a snapshot that another writer changes before this writer commits.
+func testSettingsCheckSerializesWriters(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	alpha, a1 := "alpha", "a1"
+	if _, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &alpha, DefaultModel: &a1}, "ops"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	empty := ""
+	doneB := make(chan error, 1)
+	go func() {
+		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultProvider: &empty, DefaultModel: &empty,
+			Check: func(agent.Settings) error {
+				close(entered)
+				<-release
+				return nil
+			}}, "ops")
+		doneB <- err
+	}()
+	<-entered
+
+	onlyModel := "a1"
+	doneA := make(chan error, 1)
+	go func() {
+		_, err := s.PutSettings(ctx, agent.ScopeGlobal, SettingsPatch{DefaultModel: &onlyModel,
+			Check: func(a agent.Settings) error {
+				if a.DefaultModel != "" && a.DefaultProvider == "" {
+					return errRefused
+				}
+				return nil
+			}}, "ops")
+		doneA <- err
+	}()
+	select {
+	case err := <-doneA:
+		t.Fatalf("second writer finished before the first committed: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	unblock()
+	if err := <-doneB; err != nil {
+		t.Fatalf("first writer: %v", err)
+	}
+	if err := <-doneA; !errors.Is(err, errRefused) {
+		t.Fatalf("second writer = %v, want errRefused", err)
+	}
+	st, err := s.GetSettings(ctx, agent.ScopeGlobal)
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if st.DefaultProvider != "" || st.DefaultModel != "" {
+		t.Fatalf("stored pair = %q/%q, want empty", st.DefaultProvider, st.DefaultModel)
 	}
 }

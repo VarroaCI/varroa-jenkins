@@ -100,6 +100,7 @@ Your assistant settings are on the Profile page, in the Assistant tab. Your
 session key is kept for this login only. It is not stored in the browser.
 
 When an admin removes your saved provider, the Assistant tab shows a notice. Pick a provider or Default, then save.
+The API refuses a model that your saved provider does not list. A model needs a provider.
 When the provider list does not load, the Assistant tab shows a notice. The Administration page shows the same notices for the default provider.
 
 Agent rows appear in the activity feed under the Agents filter.

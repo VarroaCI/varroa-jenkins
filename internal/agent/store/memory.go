@@ -749,54 +749,19 @@ func (m *Memory) PutSettings(_ context.Context, scope string, p SettingsPatch, b
 		return agent.Settings{}, err
 	}
 	now := m.now()
-	st, ok := m.settings[scope]
-	if !ok {
-		d := defaultSettings(scope)
-		st = &d
-		m.settings[scope] = st
+	base := defaultSettings(scope)
+	if cur, ok := m.settings[scope]; ok {
+		base = *cur
 	}
-	st.Stored = true
-	st.UpdatedAt = now
-	st.UpdatedBy = by
-	if scope == agent.ScopeGlobal {
-		if p.Paused != nil {
-			st.Paused = *p.Paused
-			st.PausedBy, st.PausedAt = "", nil
-			if st.Paused {
-				st.PausedBy = by
-				st.PausedAt = &now
-			}
-		}
-		if p.DefaultProvider != nil {
-			st.DefaultProvider = *p.DefaultProvider
-		}
-		if p.DefaultModel != nil {
-			st.DefaultModel = *p.DefaultModel
-		}
-		if p.TenantSet != nil {
-			if st.TenantDataSharing == nil {
-				st.TenantDataSharing = map[string]agent.DataSharing{}
-			}
-			st.TenantDataSharing[p.TenantSet.Tenant] = p.TenantSet.Level
-		}
-		if p.TenantRemove != nil {
-			delete(st.TenantDataSharing, *p.TenantRemove)
-		}
-	} else {
-		if p.Enabled != nil {
-			st.Enabled = *p.Enabled
-		}
-		if p.Provider != nil {
-			st.Provider = *p.Provider
-		}
-		if p.Model != nil {
-			st.Model = *p.Model
-		}
-		if p.DataSharing != nil {
-			st.DataSharing = *p.DataSharing
+	next := cloneSettings(base)
+	applyPatch(&next, scope, p, by, now)
+	if p.Check != nil {
+		if err := p.Check(cloneSettings(next)); err != nil {
+			return agent.Settings{}, err
 		}
 	}
-	return cloneSettings(*st), nil
+	m.settings[scope] = &next
+	return cloneSettings(next), nil
 }
 
 // defaultSettings returns the settings of a scope with no row. A user scope
@@ -815,6 +780,13 @@ func cloneSettings(s agent.Settings) agent.Settings {
 	out.TenantDataSharing = map[string]agent.DataSharing{}
 	for k, v := range s.TenantDataSharing {
 		out.TenantDataSharing[k] = v
+	}
+	if s.TeamAgentUnattended != nil {
+		out.TeamAgentUnattended = make(map[string]agent.UnattendedGrant, len(s.TeamAgentUnattended))
+		for k, g := range s.TeamAgentUnattended {
+			g.Tools = append([]string(nil), g.Tools...)
+			out.TeamAgentUnattended[k] = g
+		}
 	}
 	return out
 }

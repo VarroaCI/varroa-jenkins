@@ -490,3 +490,48 @@ func mustSealer(t *testing.T) *sealedkey.Sealer {
 	}
 	return s
 }
+
+func TestMyAssistant_PairChecked(t *testing.T) {
+	f := newAssistantFixture(t)
+	two := newChooseProviderRuntime(t)
+	f.rt.Config, f.rt.Registry = two.Config, two.Registry
+	if rec := f.do(t, f.viewer, http.MethodPut, "/me/assistant", map[string]any{"provider": "beta", "model": "b1"}); rec.Code != http.StatusOK {
+		t.Fatalf("seed PUT = %d body = %s", rec.Code, rec.Body)
+	}
+	cases := []struct {
+		name     string
+		body     map[string]any
+		wantCode int
+		wantMsg  string
+	}{
+		{"model only, stored provider does not list it", map[string]any{"model": "a1"}, http.StatusBadRequest, "a1"},
+		{"provider only, stored model not listed", map[string]any{"provider": "alpha"}, http.StatusBadRequest, "b1"},
+		{"model with an empty provider", map[string]any{"provider": "", "model": "b1"}, http.StatusBadRequest, "a model needs a provider"},
+		{"provider with an empty model", map[string]any{"provider": "alpha", "model": ""}, http.StatusOK, ""},
+		{"provider with a listed model", map[string]any{"provider": "beta", "model": "b2"}, http.StatusOK, ""},
+		{"kill switch leaves the pair unchecked", map[string]any{"enabled": false}, http.StatusOK, ""},
+		{"data sharing leaves the pair unchecked", map[string]any{"dataSharing": "metadata"}, http.StatusOK, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := f.do(t, f.viewer, http.MethodPut, "/me/assistant", tc.body)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d, body = %s", rec.Code, tc.wantCode, rec.Body)
+			}
+			if tc.wantMsg != "" && !strings.Contains(rec.Body.String(), tc.wantMsg) {
+				t.Errorf("body = %s, want it to name %q", rec.Body, tc.wantMsg)
+			}
+		})
+	}
+	rec := f.do(t, f.viewer, http.MethodGet, "/me/assistant", nil)
+	var got struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET me: %v", err)
+	}
+	if got.Provider != "beta" || got.Model != "b2" {
+		t.Errorf("stored pair = %q/%q, want beta/b2 after the last accepted PUT", got.Provider, got.Model)
+	}
+}

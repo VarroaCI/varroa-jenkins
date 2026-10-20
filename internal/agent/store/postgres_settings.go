@@ -33,18 +33,34 @@ func (p *Postgres) GetSettings(ctx context.Context, scope string) (agent.Setting
 	if !scopeValid(scope) {
 		return agent.Settings{}, fmt.Errorf("%w: scope %q", ErrInvalid, scope)
 	}
+	st, found, err := readSettings(ctx, p.pool, scope, false)
+	if err != nil {
+		return agent.Settings{}, err
+	}
+	if !found {
+		return defaultSettings(scope), nil
+	}
+	return st, nil
+}
+
+// readSettings reads one scope row. forUpdate takes the row lock for the
+// rest of the transaction. found is false when the scope has no row.
+func readSettings(ctx context.Context, q rowQuerier, scope string, forUpdate bool) (agent.Settings, bool, error) {
 	var st agent.Settings
 	var pausedBy *string
 	var raw []byte
-	err := p.pool.QueryRow(ctx, `
+	query := `
 		SELECT paused, paused_by, paused_at, settings, updated_at, COALESCE(updated_by, '')
-		FROM varroa.agent_settings WHERE scope = $1`, scope,
-	).Scan(&st.Paused, &pausedBy, &st.PausedAt, &raw, &st.UpdatedAt, &st.UpdatedBy)
+		FROM varroa.agent_settings WHERE scope = $1`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	err := q.QueryRow(ctx, query, scope).Scan(&st.Paused, &pausedBy, &st.PausedAt, &raw, &st.UpdatedAt, &st.UpdatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return defaultSettings(scope), nil
+		return agent.Settings{}, false, nil
 	}
 	if err != nil {
-		return agent.Settings{}, fmt.Errorf("read settings: %w", err)
+		return agent.Settings{}, false, fmt.Errorf("read settings: %w", err)
 	}
 	st.Scope = scope
 	st.Stored = true
@@ -52,9 +68,9 @@ func (p *Postgres) GetSettings(ctx context.Context, scope string) (agent.Setting
 		st.PausedBy = *pausedBy
 	}
 	if err := decodeSettingsJSON(raw, scope, &st); err != nil {
-		return agent.Settings{}, err
+		return agent.Settings{}, false, err
 	}
-	return st, nil
+	return st, true, nil
 }
 
 // settingsJSON is the wire shape of the settings column. A key that is absent
@@ -158,6 +174,19 @@ func (p *Postgres) PutSettings(ctx context.Context, scope string, patch Settings
 				`INSERT INTO varroa.agent_settings (scope) VALUES ($1) ON CONFLICT DO NOTHING`, scope,
 			); err != nil {
 				return fmt.Errorf("ensure settings row: %w", err)
+			}
+		}
+		if patch.Check != nil {
+			cur, found, err := readSettings(ctx, tx, scope, true)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("%w: settings scope %s", ErrNotFound, scope)
+			}
+			applyPatch(&cur, scope, patch, by, now)
+			if err := patch.Check(cur); err != nil {
+				return err
 			}
 		}
 		tag, err := tx.Exec(ctx, settingsPatchSQL,
