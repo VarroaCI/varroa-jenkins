@@ -86,7 +86,7 @@ libpq accepts a comma-separated host list with `target_session_attrs=read-write`
 3. With `networkPolicy.cellIsolation` enabled, add `cellIsolation.extraEgress` entries for the object store and for the update center that the member cells use.
 4. Create the pool's artifact Secret (STS mode: no Secret per pool), then a `CellPool` on the member. The core `/cells` page then shows a block for the member pool, and you can scale it from the core with `varroactl scale cellpool <name> --cluster <member-name>`.
 5. Create the `Team` with `spec.pipelines` on the member. The member operator places it, and the core record store holds its placement.
-6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects. The core copies the tenant grant to the member, so acting-user routes work on the member cell.
+6. Grant access on the core with a `VarroaRoleBinding` scoped to the tenant. The core does not read the member Team's own subjects. The core copies the tenant grant to the member, so acting-user routes work on the member cell. A cluster-wide binding with pipelines write also reaches every member cell.
 
 The core dashboard, including the `/pipelines` list, `varroactl`, and the MCP tools then read and trigger the tenant through the core. Other tenants can call it with [cross-tenant steps](../config/cross-tenant-pipelines.md). The core does not read the member Team's composed bundle, so a job's kind shows as unknown.
 

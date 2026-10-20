@@ -87,6 +87,12 @@ member cell that hosts the tenant reads that copy for its tenant member role
 only. A binding with a `tenants` scope and no pipelines `write` stays on the
 core cluster.
 
+A binding with no `scope` whose role grants pipelines `write` also gets one
+`varroa-fed-tenant-all-*` `JenkinsRoleBinding` on each hive. Its annotation
+`varroa.dev/federated-tenant` is `"*"`. A member cell gives its subjects the
+member role of every tenant that it hosts. A role with pipelines `write` and no
+Jenkins projection federates only this copy.
+
 ### Read the federation status
 
 Each core `VarroaRoleBinding` reports its result on each hive in
@@ -100,12 +106,12 @@ kubectl get varroarolebinding team-admins -o jsonpath='{.status.federation}'
 
 | `state` | `reason` | Meaning |
 |---|---|---|
-| `federated` | `Federated` | The hive holds the `JenkinsRole` and the `JenkinsRoleBinding`. For a tenant grant, the hive holds the tenant copies. |
+| `federated` | `Federated` | The hive holds the `JenkinsRole` and the `JenkinsRoleBinding`. For a tenant grant or a cluster-wide pipelines `write` grant, the hive holds the tenant copies. |
 | `skipped` | `NoSubjects` | The binding has no subjects. |
 | `skipped` | `NoTenantWrite` | The scope names `tenants`, and the role grants no pipelines `write`. The grant stays on the core cluster. |
 | `skipped` | `NoTenantJobs` | The scope names `tenants`, and no tenant entry names a job or a whole folder. |
 | `skipped` | `RoleNotFound` | The `roleRef` names no `VarroaRole`. |
-| `skipped` | `NoJenkinsProjection` | The role sets no `jenkinsRoleRef` and no `jenkinsPermissions`. |
+| `skipped` | `NoJenkinsProjection` | The role sets no `jenkinsRoleRef` and no `jenkinsPermissions`, and the binding gets no tenant copy. |
 | `skipped` | `JenkinsRoleNotFound` | The role's `jenkinsRoleRef` names no core `JenkinsRole`. |
 | `skipped` | `NonGlobalJenkinsRole` | The referenced `JenkinsRole` is not Global. |
 | `skipped` | `ReservedRole` | The role projects onto a reserved `system-*` role. |

@@ -586,3 +586,41 @@ func TestFederationStatusTenantChildFaultReported(t *testing.T) {
 		t.Fatalf("entry = %#v, want failed JenkinsRoleBindingWriteFailed", e)
 	}
 }
+
+// A cluster-wide write binding whose role has a Global projection reports
+// both children on the hive. A write fault on the all-tenants copy is
+// reported as a fault of the binding.
+func TestFederationStatusClusterWideWriteReportsBothChildren(t *testing.T) {
+	r, brood, store := statusFederationReconciler(t, []bus.ClusterInfo{{Name: "dev-cluster"}})
+	legacy := &v1alpha1.VarroaRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "writer-legacy"},
+		Spec: v1alpha1.VarroaRoleSpec{
+			APIRules:           []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"write"}}},
+			JenkinsPermissions: []string{"Overall/Read"},
+		},
+	}
+	r.roles.(*fakeFederationStore).items[legacy.Name] = legacy
+	crdstore.MustSeed(store, legacy.DeepCopy())
+	addSourceBinding(t, r, store, &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bind-writer"},
+		Spec:       v1alpha1.VarroaRoleBindingSpec{RoleRef: "writer-legacy", Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}}},
+	})
+
+	r.Reconcile(context.Background())
+	e := entryFor(t, storedStatus(t, store, "bind-writer"), "dev-cluster")
+	if e.State != v1alpha1.BindingFederated || !strings.Contains(e.Message, "varroa-fed-tenant-all-") {
+		t.Fatalf("entry = %#v, want federated naming the all-tenants copy", e)
+	}
+	if !strings.Contains(e.Message, "varroa-fed-writer-legacy-") {
+		t.Fatalf("entry = %#v, want federated naming the Global child", e)
+	}
+
+	copyName := allTenantsCopyName(t, r)
+	brood.failBindingCreate = map[string]bool{copyName: true}
+	delete(brood.bindings["dev-cluster"], copyName)
+	syncInformer(t, r, store, "bind-writer")
+	r.Reconcile(context.Background())
+	if e := entryFor(t, storedStatus(t, store, "bind-writer"), "dev-cluster"); e.State != v1alpha1.BindingFailed || e.Reason != "JenkinsRoleBindingWriteFailed" {
+		t.Fatalf("entry = %#v, want failed JenkinsRoleBindingWriteFailed", e)
+	}
+}

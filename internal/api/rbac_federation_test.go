@@ -710,3 +710,63 @@ func TestBindingDriftedComparesTenantAnnotations(t *testing.T) {
 		t.Fatalf("an empty jobs annotation matches an absent one (absent is the whole folder)")
 	}
 }
+
+// addClusterWideWriteBinding adds a binding with no scope and the
+// pipelines-writer role to the reconciler's binding snapshot.
+func addClusterWideWriteBinding(r *RBACFederationReconciler) {
+	r.bindings.(*fakeFederationStore).items["bind-writer"] = &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bind-writer"},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  "pipelines-writer",
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+		},
+	}
+}
+
+// allTenantsCopyName returns the name of the desired all-tenants copy.
+func allTenantsCopyName(t *testing.T, r *RBACFederationReconciler) string {
+	t.Helper()
+	for _, b := range r.desiredBindingsForTest() {
+		if b.Labels[rbac.LabelFederatedTenantMember] == "true" {
+			return b.Name
+		}
+	}
+	t.Fatalf("no all-tenants copy in the desired state")
+	return ""
+}
+
+func TestRBACFederationReconcilerWritesAndDeletesAllTenantsCopy(t *testing.T) {
+	reconciler, brood := testFederationReconciler([]bus.ClusterInfo{{Name: "dev-cluster"}})
+	addPipelinesWriteRole(reconciler)
+	addClusterWideWriteBinding(reconciler)
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("first pass warnings = %v", warnings)
+	}
+	copyName := allTenantsCopyName(t, reconciler)
+	written := brood.bindings["dev-cluster"][copyName]
+	if written == nil || written.Annotations[rbac.AnnotationFederatedTenant] != rbac.FederatedAllTenants {
+		t.Fatalf("first pass did not write the all-tenants copy: %v", brood.bindings["dev-cluster"])
+	}
+
+	// A pass with no change writes nothing.
+	opsBefore := len(brood.ops)
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("second pass warnings = %v", warnings)
+	}
+	if len(brood.ops) != opsBefore {
+		t.Fatalf("second pass wrote %v", brood.ops[opsBefore:])
+	}
+
+	// Removing the source binding deletes the copy. The bind-admin child of
+	// the default fixture stays.
+	delete(reconciler.bindings.(*fakeFederationStore).items, "bind-writer")
+	if warnings := reconciler.Reconcile(context.Background()); len(warnings) != 0 {
+		t.Fatalf("third pass warnings = %v", warnings)
+	}
+	if brood.bindings["dev-cluster"][copyName] != nil {
+		t.Fatalf("the all-tenants copy %s was not deleted", copyName)
+	}
+	if len(brood.bindings["dev-cluster"]) != 1 {
+		t.Fatalf("hive bindings = %v, want only the bind-admin child", brood.bindings["dev-cluster"])
+	}
+}
