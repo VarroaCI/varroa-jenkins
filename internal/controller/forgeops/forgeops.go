@@ -315,7 +315,8 @@ func (o *Ops) pickReader(ctx context.Context, host string, repo forge.Repo, cred
 }
 
 // pickCredential returns the first credential that answers the repository
-// read. When needPush is set, the credential must also be allowed to push.
+// read. When needPush is set, the credential must also be allowed to push. A
+// probe error skips its credential, as in candidates.
 func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, creds []Credential, needPush bool) (writer, error) {
 	kind, err := o.detect(ctx, o.http, host)
 	if errors.Is(err, forge.ErrUnsupported) {
@@ -325,7 +326,7 @@ func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, 
 		o.logger.Warn("forge detect failed", "host", host, "error", err)
 		return writer{}, replyErr(forgeapi.CodeForgeUnreachable, "forge %q is unreachable", host)
 	}
-	authed := false
+	var probe probeResult
 	for _, c := range creds {
 		cl := o.newClient(kind, host, c.Token, o.http)
 		if cl == nil {
@@ -336,29 +337,18 @@ func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, 
 		case err == nil && (info.Push || !needPush):
 			return writer{Kind: kind, Client: cl, CredentialID: c.ID, Info: info}, nil
 		case err == nil:
-			authed = true
-		case errors.Is(err, forge.ErrAuth):
-			o.logger.Warn("forge credential refused", "credential", c.ID, "host", host)
-		case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
-			authed = true
+			probe.authed = true
 		default:
-			o.logger.Warn("forge repository read failed", "credential", c.ID, "host", host, "error", err)
-			return writer{}, forgeFailure(err, c.ID)
+			probe.note(o.logger, host, c.ID, err)
 		}
 	}
-	if authed && needPush {
-		return writer{}, replyErr(forgeapi.CodeForgeWriteDenied, "no credential may push to the repository")
-	}
-	if authed {
-		return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
-	}
-	return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
+	return writer{}, probe.refusal(needPush)
 }
 
 // candidates returns the credentials that may serve a write, in order. The
 // credentials that may push come first, in id order. When needPush is false,
-// the read-only credentials follow. A probe error on one credential skips
-// that credential. A rate-limited probe is a probe error, not a refusal.
+// the read-only credentials follow. A probe error skips its credential (see
+// probeResult).
 func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, creds []Credential, needPush bool) ([]writer, error) {
 	kind, err := o.detect(ctx, o.http, host)
 	if errors.Is(err, forge.ErrUnsupported) {
@@ -369,9 +359,7 @@ func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, cred
 		return nil, replyErr(forgeapi.CodeForgeUnreachable, "forge %q is unreachable", host)
 	}
 	var pushers, readers []writer
-	var otherErr error
-	otherID := ""
-	authed := false
+	var probe probeResult
 	for _, c := range creds {
 		cl := o.newClient(kind, host, c.Token, o.http)
 		if cl == nil {
@@ -384,15 +372,9 @@ func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, cred
 			pushers = append(pushers, w)
 		case err == nil:
 			readers = append(readers, w)
-		case errors.Is(err, forge.ErrAuth):
-			o.logger.Warn("forge credential refused", "credential", c.ID, "host", host)
-		case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
-			authed = true
+			probe.authed = true
 		default:
-			o.logger.Warn("forge repository read failed", "credential", c.ID, "host", host, "error", err)
-			if otherErr == nil {
-				otherErr, otherID = err, c.ID
-			}
+			probe.note(o.logger, host, c.ID, err)
 		}
 	}
 	cands := pushers
@@ -402,16 +384,7 @@ func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, cred
 	if len(cands) > 0 {
 		return cands, nil
 	}
-	if otherErr != nil {
-		return nil, forgeFailure(otherErr, otherID)
-	}
-	if needPush && (len(readers) > 0 || authed) {
-		return nil, replyErr(forgeapi.CodeForgeWriteDenied, "no credential may push to the repository")
-	}
-	if authed {
-		return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
-	}
-	return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
+	return nil, probe.refusal(needPush)
 }
 
 // forbiddenRefusal is the refusal when every candidate answered 403. A rate
@@ -426,6 +399,45 @@ func forbiddenRefusal(ids []string) error {
 		quoted[i] = strconv.Quote(id)
 	}
 	return replyErr(forgeapi.CodeForgeWriteDenied, "credentials %s are forbidden; check the token scope and the repository access of each credential", strings.Join(quoted, ", "))
+}
+
+// probeResult holds what a repository probe learns from the credentials that
+// serve no verb. Every probe uses it, so every verb has one skip rule.
+type probeResult struct {
+	authed   bool // a credential authenticated: a 403, a 404, or a read without push
+	firstErr error
+	firstID  string
+}
+
+// note records a failed probe. A failed probe always skips its credential.
+// A rate limit is a probe error, not a refusal.
+func (p *probeResult) note(logger *slog.Logger, host, credID string, err error) {
+	switch {
+	case errors.Is(err, forge.ErrAuth):
+		logger.Warn("forge credential refused", "credential", credID, "host", host)
+	case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
+		p.authed = true
+	default:
+		logger.Warn("forge repository read failed", "credential", credID, "host", host, "error", err)
+		if p.firstErr == nil {
+			p.firstErr, p.firstID = err, credID
+		}
+	}
+}
+
+// refusal is the reply when no credential serves the verb. A probe error wins
+// over a scope refusal, because that credential can serve after a retry.
+func (p *probeResult) refusal(needPush bool) error {
+	if p.firstErr != nil {
+		return forgeFailure(p.firstErr, p.firstID)
+	}
+	if p.authed && needPush {
+		return replyErr(forgeapi.CodeForgeWriteDenied, "no credential may push to the repository")
+	}
+	if p.authed {
+		return replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
+	}
+	return replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
 }
 
 // writer is the credential and client that the verb uses.
