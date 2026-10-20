@@ -120,7 +120,7 @@ different run already claimed it.
 
 For a pull-request build, the key keeps the revision text that the branch source reports. A rebuild
 against a new target commit therefore gets a new key. The build record keeps the head commit of the
-pull request.
+pull request. Two builds of one pull request against different target commits both run. The record store does not mark the newer build as a duplicate.
 
 ## Build numbers in a burst
 

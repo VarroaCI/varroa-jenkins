@@ -4,14 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
+// scmIntentKeyPrefix is the prefix of every intent key an SCM build holds.
+const scmIntentKeyPrefix = string(IntentSchemeSCM) + ":"
+
 // runDuplicateBackstop stops a second live run of one revision. It skips
-// an empty revision, because a freestyle SCM job reports none. It takes
+// an empty revision, because a freestyle SCM job reports none. Two runs
+// that both hold an `scm:` intent key are not duplicates. The ledger gives
+// one claim revision one key, so two such keys name two accepted revisions.
+// A change-request merge build against a new base is one example: it shares
+// the head commit with the older build. It takes
 // pg_advisory_xact_lock on the 64-bit hash Postgres's own
 // hashtextextended computes over the tuple, joined with a unit separator
 // so two different tuples with the same concatenation never collide. The
@@ -20,6 +28,7 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 	if revision == "" {
 		return nil, nil
 	}
+	arrivingSCM := strings.HasPrefix(intent.intentKey, scmIntentKeyPrefix)
 
 	key := intent.cluster + "\x1f" + intent.tenant + "\x1f" + intent.jobPath + "\x1f" + revision
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
@@ -32,9 +41,10 @@ func runDuplicateBackstop(ctx context.Context, tx pgx.Tx, intent *intentRow, rev
 		SELECT run_id, created_at FROM varroa.runs
 		WHERE cluster = $1 AND tenant = $2 AND job_path = $3 AND scm_revision = $4
 		  AND status IN ('QUEUED', 'RUNNING') AND run_id <> $5
+		  AND NOT ($6::boolean AND starts_with(intent_key, $7))
 		ORDER BY created_at
 		LIMIT 1
-	`, intent.cluster, intent.tenant, intent.jobPath, revision, intent.runID).Scan(&otherRunID, &otherCreatedAt)
+	`, intent.cluster, intent.tenant, intent.jobPath, revision, intent.runID, arrivingSCM, scmIntentKeyPrefix).Scan(&otherRunID, &otherCreatedAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return nil, nil

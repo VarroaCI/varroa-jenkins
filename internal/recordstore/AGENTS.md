@@ -877,7 +877,8 @@ of the fleet's audit activity, once a controller becomes disposable.
   column again. `ingest_duplicate.go` holds the duplicate
   backstop `run.started` runs in the same transaction, publishing a
   `cancel_run` ledger action (`ledgeraction.go`) through
-  `PublishLedgerAction` on `bus.LedgerActionSubject`. Every action's
+  `PublishLedgerAction` on `bus.LedgerActionSubject`. The backstop
+  skips a pair of runs that both hold an `scm:` intent key. Every action's
   `Cluster` names the target cell's cluster, because only that cluster's
   operator subscribes; `PublishLedgerAction` refuses an empty `Cluster`.
   `RunIngestConsumer`
