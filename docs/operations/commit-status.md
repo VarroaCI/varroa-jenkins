@@ -134,7 +134,7 @@ never completes. The status then stays `pending`. The operator fixes this in thr
 
 The operator writes the status with the tenant credential. The credential must allow a push to the
 repository. The operator tries each pushing credential in turn. A forge 403 moves to the next
-credential. The new status keeps the context and the link of the old status. Its description reads
+credential. A forge rate limit stops the attempt. The operator logs it, and the status stays pending. The new status keeps the context and the link of the old status. Its description reads
 `Varroa ended the build: <reason>`.
 
 The operator changes only a status that matches the build by its job path and build number. A

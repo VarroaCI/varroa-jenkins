@@ -19,6 +19,7 @@ const CleanupTimeout = 15 * time.Second
 // commit per file, and the pull request. A failure after the branch exists
 // deletes the branch once. It tries each pushing credential in id order. A
 // forge 403 on a write deletes the branch, then moves to the next credential.
+// A forge rate limit is not a 403. It deletes the branch and stops the attempt.
 // A failed delete stops the attempt.
 func (o *Ops) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
 	fail := func(err error) forgeapi.PullRequestReply { return forgeapi.PullRequestReply{Status: asStatus(err)} }

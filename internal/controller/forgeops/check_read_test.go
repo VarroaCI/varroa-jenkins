@@ -320,3 +320,17 @@ func TestReply_JSONShape(t *testing.T) {
 		t.Fatalf("dir keys %v", dir)
 	}
 }
+
+// TestCheck_RateLimitedProbeIsUnreachable checks that a rate-limited probe
+// answers unreachable, not a write refusal or an auth failure.
+func TestCheck_RateLimitedProbeIsUnreachable(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	oneWriter(fx, &fakeClient{repoErr: &forge.RateLimitError{Status: 429}})
+	rep := fx.ops.Check(context.Background(), checkReq())
+	if rep.OK || rep.Code != forgeapi.CodeForgeUnreachable {
+		t.Fatalf("reply %+v, want code %s", rep.Status, forgeapi.CodeForgeUnreachable)
+	}
+	if !strings.Contains(rep.Error, "retry later") {
+		t.Fatalf("error %q lacks the retry hint", rep.Error)
+	}
+}

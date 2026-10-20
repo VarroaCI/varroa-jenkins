@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -94,6 +95,7 @@ func asStatus(err error) forgeapi.Status {
 // message carries a fixed hint about the token scope and access.
 func forgeFailure(err error, credID string) error {
 	var se *forge.StatusError
+	var rl *forge.RateLimitError
 	switch {
 	case errors.Is(err, forge.ErrNotFound):
 		return replyErr(forgeapi.CodeNotFound, "repository not found")
@@ -105,6 +107,11 @@ func forgeFailure(err error, credID string) error {
 		return replyErr(forgeapi.CodeForgeUnreachable, "credential %q: directory listing is truncated", credID)
 	case errors.Is(err, forge.ErrRedirect):
 		return replyErr(forgeapi.CodeForgeUnreachable, "credential %q: redirect refused", credID)
+	case errors.As(err, &rl):
+		if rl.Reset.IsZero() {
+			return replyErr(forgeapi.CodeForgeUnreachable, "credential %q hit the forge rate limit; retry later", credID)
+		}
+		return replyErr(forgeapi.CodeForgeUnreachable, "credential %q hit the forge rate limit; retry after %s", credID, rl.Reset.UTC().Format(time.RFC3339))
 	case errors.As(err, &se):
 		return replyErr(forgeapi.CodeForgeUnreachable, "credential %q: HTTP %d", credID, se.Status)
 	}
@@ -351,7 +358,7 @@ func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, 
 // candidates returns the credentials that may serve a write, in order. The
 // credentials that may push come first, in id order. When needPush is false,
 // the read-only credentials follow. A probe error on one credential skips
-// that credential.
+// that credential. A rate-limited probe is a probe error, not a refusal.
 func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, creds []Credential, needPush bool) ([]writer, error) {
 	kind, err := o.detect(ctx, o.http, host)
 	if errors.Is(err, forge.ErrUnsupported) {
@@ -407,7 +414,8 @@ func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, cred
 	return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
 }
 
-// forbiddenRefusal is the refusal when every candidate answered 403. One
+// forbiddenRefusal is the refusal when every candidate answered 403. A rate
+// limit never reaches here. One
 // credential keeps the single-credential message. Several name each one.
 func forbiddenRefusal(ids []string) error {
 	if len(ids) == 1 {

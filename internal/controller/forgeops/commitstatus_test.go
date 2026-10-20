@@ -283,3 +283,24 @@ func TestEndPendingStatus_ForbiddenWriteNeverRewritesEndedStatus(t *testing.T) {
 		t.Fatalf("b writes %+v, want only the lint status", b.statusWrites)
 	}
 }
+
+// TestEndPendingStatus_RateLimitedWriteStopsFallback checks that a rate limit
+// on a status write stops the attempt before the next pushing credential.
+func TestEndPendingStatus_RateLimitedWriteStopsFallback(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	pending := []forge.CommitStatus{{Context: "ci", State: forge.StatePending, TargetURL: statusBuildURL}}
+	a := pushable()
+	a.statuses = pending
+	a.setStatusErr = rateLimitErr()
+	b := pushable()
+	b.statuses = pending
+	twoCredentials(fx, a, b)
+	_, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	var re *replyError
+	if !errors.As(err, &re) || re.Code != forgeapi.CodeForgeUnreachable {
+		t.Fatalf("err %v, want code %s", err, forgeapi.CodeForgeUnreachable)
+	}
+	if len(b.statusWrites) != 0 {
+		t.Fatalf("b wrote statuses after a rate limit: %v", b.statusWrites)
+	}
+}

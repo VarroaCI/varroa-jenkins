@@ -147,7 +147,7 @@ always needs approval.
 | `body` | At most 8192 bytes. The BFF appends a line that names the actor. |
 | `files` | 1 to 10 files with `path` and `content`. At most 64 KiB each, 256 KiB in total. |
 
-The operator tries each tenant credential that may push. A forge 403 deletes the new branch. When the delete succeeds, the operator moves to the next credential. When the delete fails, the call stops and names the branch for manual removal. When every credential answers 403, the call answers `forge_write_denied` and names each credential.
+The operator tries each tenant credential that may push. A forge 403 deletes the new branch. When the delete succeeds, the operator moves to the next credential. When the delete fails, the call stops and names the branch for manual removal. When every credential answers 403, the call answers `forge_write_denied` and names each credential. A forge rate limit is not a 403. The call deletes the branch, stops, and answers `forge_unreachable` with the retry time.
 
 A session call adds a `Varroa-Session` trailer to the commit. A failed call starts its error text with a code. On `proposal_base_moved`, start over. On `request_expired`, call again. No pull request opened. A success logs a
 `pipeline.proposal.opened` event.

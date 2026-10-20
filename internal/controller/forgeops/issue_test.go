@@ -355,3 +355,24 @@ func TestIssue_ProbeErrorOnlyCandidateRefuses(t *testing.T) {
 		t.Fatalf("reply %+v, want code %s", rep, forgeapi.CodeForgeUnreachable)
 	}
 }
+
+// TestIssue_RateLimitedStopsFallback checks that a rate limit on the issue
+// create stops the attempt and names the reset time.
+func TestIssue_RateLimitedStopsFallback(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	seedAgent(t, fx, nil)
+	a := pushable()
+	a.issueErr = rateLimitErr()
+	b := pushable()
+	twoCredentials(fx, a, b)
+	rep := fx.ops.Issue(context.Background(), issueReq("ops"), "varroa-system")
+	if rep.OK || rep.Code != forgeapi.CodeForgeUnreachable {
+		t.Fatalf("reply %+v, want code %s", rep, forgeapi.CodeForgeUnreachable)
+	}
+	if !strings.Contains(rep.Error, "2026-10-20T12:00:00Z") {
+		t.Fatalf("error %q lacks the reset time", rep.Error)
+	}
+	if len(b.calls) != 0 || len(b.issueLabels) != 0 {
+		t.Fatalf("second credential was tried after a rate limit")
+	}
+}

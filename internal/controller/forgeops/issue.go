@@ -24,8 +24,8 @@ const maxIssueTitle = 256
 // Team answers it. The TeamAgent named by the request must be the accepted,
 // enabled object of the Team, and its outputs must allow issues. Issue tries
 // each credential that reads the repository, with the pushing credentials
-// first. A forge 403 moves to the next credential. Any other error stops the
-// attempt. The releaseNamespace is the core namespace, which the accept rule
+// first. A forge 403 moves to the next credential. A rate limit stops the
+// attempt. Any other error stops the attempt. The releaseNamespace is the core namespace, which the accept rule
 // needs.
 func (o *Ops) Issue(ctx context.Context, req forgeapi.IssueRequest, releaseNamespace string) forgeapi.IssueReply {
 	fail := func(err error) forgeapi.IssueReply { return forgeapi.IssueReply{Status: asStatus(err)} }

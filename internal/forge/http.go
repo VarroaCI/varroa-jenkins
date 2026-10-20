@@ -10,8 +10,14 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
+
+// rateLimitScan is the number of body bytes that rateLimit reads. Only a
+// boolean leaves the scan, so the body never reaches an error.
+const rateLimitScan = 4 << 10
 
 // httpClient holds the request code that both forge kinds share. It never
 // writes a response body or a credential into an error.
@@ -24,8 +30,9 @@ type httpClient struct {
 }
 
 // do sends one request. p is the escaped path under base. It maps every error
-// status to a sentinel or a StatusError. The returned body carries the call's
-// deadline, so the caller closes it.
+// status to a sentinel, a RateLimitError, or a StatusError. A 403 or 429 that a
+// rate limit caused maps to a RateLimitError, never to ErrForbidden. The
+// returned body carries the call's deadline, so the caller closes it.
 func (c *httpClient) do(ctx context.Context, method, p string, q url.Values, body any, hdr http.Header) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	u := c.base + p
@@ -68,8 +75,12 @@ func (c *httpClient) do(ctx context.Context, method, p string, q url.Values, bod
 		return resp, nil
 	}
 	status := resp.StatusCode
+	head, _ := io.ReadAll(io.LimitReader(resp.Body, rateLimitScan))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	_ = resp.Body.Close()
+	if rl := rateLimit(status, resp.Header, head, time.Now()); rl != nil {
+		return nil, rl
+	}
 	switch status {
 	case http.StatusUnauthorized:
 		return nil, ErrAuth
@@ -331,4 +342,39 @@ func isSHA(s string) bool {
 		}
 	}
 	return true
+}
+
+// rateLimit reports whether a 403 or 429 answer came from a rate limit. A 429
+// always does. A 403 does when it carries Retry-After, when its
+// X-RateLimit-Remaining is zero, or when its body names a rate limit. The
+// reset time comes from Retry-After first, then from X-RateLimit-Reset.
+func rateLimit(status int, h http.Header, head []byte, now time.Time) *RateLimitError {
+	if status != http.StatusForbidden && status != http.StatusTooManyRequests {
+		return nil
+	}
+	exhausted := h.Get("X-RateLimit-Remaining") == "0"
+	if status == http.StatusForbidden && !exhausted && h.Get("Retry-After") == "" &&
+		!bytes.Contains(bytes.ToLower(head), []byte("rate limit")) {
+		return nil
+	}
+	return &RateLimitError{Status: status, Reset: rateLimitReset(h, exhausted, now)}
+}
+
+// rateLimitReset returns the time that the headers state for a retry, or the
+// zero time when they state none.
+func rateLimitReset(h http.Header, exhausted bool, now time.Time) time.Time {
+	if ra := h.Get("Retry-After"); ra != "" {
+		if n, err := strconv.ParseInt(ra, 10, 64); err == nil && n >= 0 {
+			return now.Add(time.Duration(n) * time.Second)
+		}
+		if t, err := http.ParseTime(ra); err == nil {
+			return t
+		}
+	}
+	if exhausted {
+		if v, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			return time.Unix(v, 0)
+		}
+	}
+	return time.Time{}
 }
