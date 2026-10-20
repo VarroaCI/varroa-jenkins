@@ -14,7 +14,7 @@ review the file, approve the proposal, and merge the pull request on the forge.
 Create a Secret in the team's agent namespace, `spec.pipelines.agentNamespace`. Set the label
 `varroa.dev/tenant-credential: "true"`. Set the annotations `varroa.dev/credential-id`,
 `varroa.dev/credential-kind` (`usernamePassword` or `secretText`), and
-`varroa.dev/allowed-hosts`, for example `git.example.org`. The token needs write access.
+`varroa.dev/allowed-hosts`, for example `git.example.org`. The token needs write access to contents and pull requests.
 If the cell has a `gitEgress` policy, list the forge address there.
 
 ## Propose and review
@@ -41,7 +41,7 @@ Merge the pull request on the forge. See
 | `no_matching_credential` | 422 | Add a credential for the host. |
 | `forge_unsupported` | 422 | Use a supported forge. |
 | `forge_auth_failed` | 422 | Replace the token. |
-| `forge_write_denied` | 422 | Use a token with write access. |
+| `forge_write_denied` | 422 | Give one token write access to contents and pull requests. |
 | `forge_unreachable` | 502 | Add the forge to `gitEgress`. |
 | `jenkinsfile_exists` | 409 | Add the repository as a job. |
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -344,6 +346,78 @@ func (o *Ops) pickCredential(ctx context.Context, host string, repo forge.Repo, 
 		return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
 	}
 	return writer{}, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
+}
+
+// candidates returns the credentials that may serve a write, in order. The
+// credentials that may push come first, in id order. When needPush is false,
+// the read-only credentials follow. A probe error on one credential skips
+// that credential.
+func (o *Ops) candidates(ctx context.Context, host string, repo forge.Repo, creds []Credential, needPush bool) ([]writer, error) {
+	kind, err := o.detect(ctx, o.http, host)
+	if errors.Is(err, forge.ErrUnsupported) {
+		return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
+	}
+	if err != nil {
+		o.logger.Warn("forge detect failed", "host", host, "error", err)
+		return nil, replyErr(forgeapi.CodeForgeUnreachable, "forge %q is unreachable", host)
+	}
+	var pushers, readers []writer
+	var otherErr error
+	otherID := ""
+	authed := false
+	for _, c := range creds {
+		cl := o.newClient(kind, host, c.Token, o.http)
+		if cl == nil {
+			return nil, replyErr(forgeapi.CodeForgeUnsupported, "host %q is not a supported forge", host)
+		}
+		info, err := cl.Repository(ctx, repo)
+		w := writer{Kind: kind, Client: cl, CredentialID: c.ID, Info: info}
+		switch {
+		case err == nil && info.Push:
+			pushers = append(pushers, w)
+		case err == nil:
+			readers = append(readers, w)
+		case errors.Is(err, forge.ErrAuth):
+			o.logger.Warn("forge credential refused", "credential", c.ID, "host", host)
+		case errors.Is(err, forge.ErrForbidden), errors.Is(err, forge.ErrNotFound):
+			authed = true
+		default:
+			o.logger.Warn("forge repository read failed", "credential", c.ID, "host", host, "error", err)
+			if otherErr == nil {
+				otherErr, otherID = err, c.ID
+			}
+		}
+	}
+	cands := pushers
+	if !needPush {
+		cands = append(cands, readers...)
+	}
+	if len(cands) > 0 {
+		return cands, nil
+	}
+	if otherErr != nil {
+		return nil, forgeFailure(otherErr, otherID)
+	}
+	if needPush && (len(readers) > 0 || authed) {
+		return nil, replyErr(forgeapi.CodeForgeWriteDenied, "no credential may push to the repository")
+	}
+	if authed {
+		return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential may read the repository")
+	}
+	return nil, replyErr(forgeapi.CodeForgeAuthFailed, "no credential authenticated to the forge")
+}
+
+// forbiddenRefusal is the refusal when every candidate answered 403. One
+// credential keeps the single-credential message. Several name each one.
+func forbiddenRefusal(ids []string) error {
+	if len(ids) == 1 {
+		return forgeFailure(forge.ErrForbidden, ids[0])
+	}
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = strconv.Quote(id)
+	}
+	return replyErr(forgeapi.CodeForgeWriteDenied, "credentials %s are forbidden; check the token scope and the repository access of each credential", strings.Join(quoted, ", "))
 }
 
 // writer is the credential and client that the verb uses.

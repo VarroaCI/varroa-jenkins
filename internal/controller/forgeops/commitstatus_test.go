@@ -183,3 +183,103 @@ func TestInterruptedStatusDescription(t *testing.T) {
 		t.Fatalf("long length = %d, want %d", n, maxStatusDescription)
 	}
 }
+
+// TestEndPendingStatus_ForbiddenWriteFallsBackToNextPusher checks that a 403
+// on the status write moves the build to the next pushing credential.
+func TestEndPendingStatus_ForbiddenWriteFallsBackToNextPusher(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	pending := []forge.CommitStatus{{Context: "ci", State: forge.StatePending, TargetURL: statusBuildURL}}
+	a := pushable()
+	a.statuses = pending
+	a.setStatusErr = forge.ErrForbidden
+	b := pushable()
+	b.statuses = pending
+	twoCredentials(fx, a, b)
+	n, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	if err != nil || n != 1 {
+		t.Fatalf("written %d, err %v; want 1, nil", n, err)
+	}
+	if len(a.statusWrites) != 1 || len(b.statusWrites) != 1 {
+		t.Fatalf("writes a=%d b=%d, want 1 and 1", len(a.statusWrites), len(b.statusWrites))
+	}
+}
+
+// TestEndPendingStatus_ForbiddenListFallsBack checks that a 403 on the status
+// list moves the build to the next pushing credential.
+func TestEndPendingStatus_ForbiddenListFallsBack(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.statusErr = forge.ErrForbidden
+	b := pushable()
+	b.statuses = []forge.CommitStatus{{Context: "ci", State: forge.StatePending, TargetURL: statusBuildURL}}
+	twoCredentials(fx, a, b)
+	n, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	if err != nil || n != 1 {
+		t.Fatalf("written %d, err %v; want 1, nil", n, err)
+	}
+}
+
+// TestEndPendingStatus_AllForbiddenNamesEachCredential checks the refusal when
+// every pushing credential answers 403.
+func TestEndPendingStatus_AllForbiddenNamesEachCredential(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.statusErr = forge.ErrForbidden
+	b := pushable()
+	b.statusErr = forge.ErrForbidden
+	twoCredentials(fx, a, b)
+	_, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, want := range []string{forgeapi.CodeForgeWriteDenied, `"a"`, `"b"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %v lacks %q", err, want)
+		}
+	}
+}
+
+// TestEndPendingStatus_ReadOnlyCredentialSkipped checks that a read-only
+// credential is never listed when the pushing credential answers 403.
+func TestEndPendingStatus_ReadOnlyCredentialSkipped(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.statusErr = forge.ErrForbidden
+	b := pushable()
+	b.info.Push = false
+	twoCredentials(fx, a, b)
+	if _, err := fx.ops.EndPendingStatus(context.Background(), endReq()); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(b.statusReads) != 0 {
+		t.Fatalf("read-only credential listed statuses: %v", b.statusReads)
+	}
+}
+
+// TestEndPendingStatus_ForbiddenWriteNeverRewritesEndedStatus checks that a
+// status which the first credential ended is not written again by the next
+// credential. The second credential lists the forge state after the first
+// credential's write.
+func TestEndPendingStatus_ForbiddenWriteNeverRewritesEndedStatus(t *testing.T) {
+	fx := newFixture(t, "agents-payments")
+	a := pushable()
+	a.statuses = []forge.CommitStatus{
+		{Context: "ci", State: forge.StatePending, TargetURL: statusBuildURL},
+		{Context: "lint", State: forge.StatePending, TargetURL: statusBuildURL},
+	}
+	a.setStatusErr = forge.ErrForbidden
+	a.setStatusErrAt = 2
+	b := pushable()
+	b.statuses = []forge.CommitStatus{
+		{Context: "ci", State: forge.StateError, TargetURL: statusBuildURL},
+		{Context: "lint", State: forge.StatePending, TargetURL: statusBuildURL},
+	}
+	twoCredentials(fx, a, b)
+	n, err := fx.ops.EndPendingStatus(context.Background(), endReq())
+	if err != nil || n != 2 {
+		t.Fatalf("written %d, err %v; want 2, nil", n, err)
+	}
+	if len(b.statusWrites) != 1 || b.statusWrites[0].Context != "lint" {
+		t.Fatalf("b writes %+v, want only the lint status", b.statusWrites)
+	}
+}
