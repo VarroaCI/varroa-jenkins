@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -104,14 +105,8 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if in.DefaultProvider != nil || in.DefaultModel != nil {
-		stored, err := rt.Store.GetSettings(r.Context(), agent.ScopeGlobal)
-		if err != nil {
-			s.assistantStoreError(w, err)
-			return
-		}
-		if msg := defaultPairRefusal(rt, stored, in); msg != "" {
-			s.writeJSONError(w, http.StatusBadRequest, msg)
-			return
+		patch.Check = func(after agent.Settings) error {
+			return rt.pairRefusal(after.DefaultProvider, after.DefaultModel, "a default model needs a default provider")
 		}
 	}
 	if in.TenantDataSharing != nil {
@@ -127,7 +122,7 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 	}
 	g, err := rt.Store.PutSettings(r.Context(), agent.ScopeGlobal, patch, ActorFrom(claims))
 	if err != nil {
-		s.assistantStoreError(w, err)
+		s.writeSettingsError(w, err)
 		return
 	}
 	if in.Paused != nil {
@@ -141,32 +136,40 @@ func (s *Server) handlePutAssistantSettings(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// defaultPairRefusal checks the default provider and model that the store
-// holds after the patch. A field missing from the body keeps its stored value.
-func defaultPairRefusal(rt *AssistantRuntime, stored agent.Settings, in assistantSettingsUpdate) string {
-	p, m := stored.DefaultProvider, stored.DefaultModel
-	if in.DefaultProvider != nil {
-		p = *in.DefaultProvider
+// assistantRefusal is a refusal from a settings check. The handler answers 400 with its text.
+type assistantRefusal string
+
+func (e assistantRefusal) Error() string { return string(e) }
+
+// writeSettingsError answers a refusal from a settings check with 400. Any
+// other error goes to the store error mapping.
+func (s *Server) writeSettingsError(w http.ResponseWriter, err error) {
+	var ref assistantRefusal
+	if errors.As(err, &ref) {
+		s.writeJSONError(w, http.StatusBadRequest, string(ref))
+		return
 	}
-	if in.DefaultModel != nil {
-		m = *in.DefaultModel
-	}
-	switch {
-	case m == "":
-		return ""
-	case p == "":
-		return "a default model needs a default provider"
-	case !rt.modelKnown(p, m):
-		return fmt.Sprintf("the provider %s does not list the model %s", p, m)
-	}
-	return ""
+	s.assistantStoreError(w, err)
 }
 
-// modelKnown reports whether the model is listed for the provider. An empty
-// provider name checks every provider.
+// pairRefusal checks a provider and model pair. An empty model passes.
+// noProvider is the text for a model with no provider.
+func (rt *AssistantRuntime) pairRefusal(p, m, noProvider string) error {
+	switch {
+	case m == "":
+		return nil
+	case p == "":
+		return assistantRefusal(noProvider)
+	case !rt.modelKnown(p, m):
+		return assistantRefusal(fmt.Sprintf("the provider %s does not list the model %s", p, m))
+	}
+	return nil
+}
+
+// modelKnown reports whether the model is listed for the provider.
 func (rt *AssistantRuntime) modelKnown(name, model string) bool {
 	for _, e := range rt.Config.Providers {
-		if name != "" && e.Name != name {
+		if e.Name != name {
 			continue
 		}
 		if assistantContains(e.Models, model) {
@@ -306,14 +309,9 @@ func (s *Server) handlePutMyAssistant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if in.Model != nil && *in.Model != "" {
-		name := ""
-		if in.Provider != nil {
-			name = *in.Provider
-		}
-		if !rt.modelKnown(name, *in.Model) {
-			s.writeJSONError(w, http.StatusBadRequest, "unknown model")
-			return
+	if in.Provider != nil || in.Model != nil {
+		patch.Check = func(after agent.Settings) error {
+			return rt.pairRefusal(after.Provider, after.Model, "a model needs a provider")
 		}
 	}
 	if in.DataSharing != nil {
@@ -326,7 +324,7 @@ func (s *Server) handlePutMyAssistant(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := rt.Store.PutSettings(r.Context(), agent.UserScope(claims.Subject), patch, claims.Subject)
 	if err != nil {
-		s.assistantStoreError(w, err)
+		s.writeSettingsError(w, err)
 		return
 	}
 	_ = user
