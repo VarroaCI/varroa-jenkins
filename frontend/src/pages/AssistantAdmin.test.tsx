@@ -150,6 +150,18 @@ describe("removed default provider", () => {
     await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "smoke", defaultModel: "" }));
   });
 
+  it("clears the default model when the default provider changes between listed providers", async () => {
+    vi.mocked(client.getAssistantSettings).mockResolvedValue(createAssistantSettings({ defaultProvider: "smoke", defaultModel: "varroa-smoke" }));
+    vi.mocked(client.listAssistantProviders).mockResolvedValue({ items: [SMOKE, { ...SMOKE, name: "other", models: ["other-model"], default: false }] });
+    renderAdmin();
+    const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("smoke"));
+    fireEvent.change(select, { target: { value: "other" } });
+    expect((screen.getByLabelText("Default model") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+    await waitFor(() => expect(client.putAssistantSettings).toHaveBeenCalledWith({ defaultProvider: "other", defaultModel: "" }));
+  });
+
   it("saves Chart default for a removed default provider", async () => {
     renderAdmin();
     const select = (await screen.findByLabelText("Default provider")) as HTMLSelectElement;
