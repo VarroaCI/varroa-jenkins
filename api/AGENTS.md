@@ -16,6 +16,7 @@ regenerating downstream artifacts in the same change (greenfield/no-legacy).
 
 ### CRD types (`api/v1alpha1/`)
 
+- Capacity fields carry `Maximum=64` (`CellSpec.MaxTenants`, `CellPoolSpec.MaxTenantsPerCell`) because `status.cell.tenants` holds at most 64 items. `CellStatus.AppliedTenants` and `DrainingTenants` are subsets of it, so they need no truncation.
 - `types.go` `CellStatus.PendingSignatures` and `PendingSignaturesTotal` carry the refused script signatures of a cell (`CellPendingSignature`, `CellSignatureRequester`). The operator writes them from the mite snapshot; their DeepCopy is hand-written in `zz_generated.deepcopy.go`.
 - `CellRehydrationEntry.Unseeded` (`[]string`, max 256) lists the jobs that wait for a
   number seed. Its DeepCopy is hand-written in `zz_generated.deepcopy.go`.

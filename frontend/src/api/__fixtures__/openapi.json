@@ -39,6 +39,8 @@
               },
               "maxTenants": {
                 "format": "int32",
+                "maximum": 64,
+                "minimum": 0,
                 "type": "integer"
               }
             },

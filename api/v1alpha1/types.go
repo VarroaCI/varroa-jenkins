@@ -174,7 +174,10 @@ type CellSpec struct {
 	// Enabled marks this Controller as a cell.
 	Enabled bool `json:"enabled,omitempty"`
 	// MaxTenants caps the number of tenants a placement pass may bind to
-	// this cell.
+	// this cell. At most 64, the item limit of status.cell.tenants. Zero
+	// resolves through the pool.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=64
 	MaxTenants int32 `json:"maxTenants,omitempty"`
 }
 
@@ -652,9 +655,12 @@ type CellStatus struct {
 	// +optional
 	RolledAt *metav1.Time `json:"rolledAt,omitempty"`
 
-	// AppliedTenants is the tenant set of the desired state whose apply
-	// last succeeded. A tenant absent here has no folder building on this
-	// cell.
+	// AppliedTenants lists the placed tenants that have an applied folder on
+	// this cell after the last items walk of the current desired state from
+	// the current pod. A held tenant or a tenant with a refused item keeps
+	// its previous membership. A draining tenant never enters this list. A
+	// pod change removes each held and each refused tenant. A tenant absent
+	// here has no folder building on this cell. It is a subset of Tenants.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	AppliedTenants []string `json:"appliedTenants,omitempty"`
@@ -662,7 +668,8 @@ type CellStatus struct {
 	// DrainingTenants lists the tenants whose folder the last delivered desired
 	// state leaves out, because each tenant moves to another cell. The
 	// controller reconciler writes it together with status.desiredStateHash.
-	// An items apply never adds such a tenant to AppliedTenants.
+	// An items apply never adds such a tenant to AppliedTenants. It is a
+	// subset of Tenants, so it holds at most 64 items with no truncation.
 	// +kubebuilder:validation:MaxItems=64
 	// +optional
 	DrainingTenants []string `json:"drainingTenants,omitempty"`
@@ -2081,9 +2088,11 @@ type CellPoolSpec struct {
 	// +optional
 	MaxCells int32 `json:"maxCells,omitempty"`
 	// MaxTenantsPerCell is the capacity a pool cell uses when its own
-	// spec.cell.maxTenants is zero.
+	// spec.cell.maxTenants is zero. At most 64, the item limit of
+	// status.cell.tenants.
 	// +kubebuilder:default=10
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=64
 	// +optional
 	MaxTenantsPerCell int32 `json:"maxTenantsPerCell,omitempty"`
 	// MaxRunsPerTenant caps how many builds one tenant runs at one time on

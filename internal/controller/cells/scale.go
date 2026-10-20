@@ -75,6 +75,9 @@ func ApplyCellPoolDials(spec *v1alpha1.CellPoolSpec, d CellPoolDials) error {
 		if *d.MaxTenantsPerCell < 1 {
 			return invalid("spec.maxTenantsPerCell must be 1 or above")
 		}
+		if *d.MaxTenantsPerCell > MaxCellTenants {
+			return invalid("spec.maxTenantsPerCell must be 64 or below")
+		}
 		spec.MaxTenantsPerCell = *d.MaxTenantsPerCell
 	}
 	if d.UnreadyGracePeriod != nil {

@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/controller/cells"
 )
 
 // clearCellsEnv unsets every env var ParseCellsConfigFromEnv reads, so each
@@ -130,6 +131,14 @@ func TestParseCellsConfigFromEnv_PerProfileFloorIsOne(t *testing.T) {
 	got := ParseCellsConfigFromEnv(slog.Default())
 	if got.WarmPoolPerProfile != 1 {
 		t.Errorf("WarmPoolPerProfile = %d, want 1", got.WarmPoolPerProfile)
+	}
+}
+
+func TestParseCellsConfigFromEnv_MaxTenantsCeilingIsItemLimit(t *testing.T) {
+	t.Setenv("VARROA_CELLS_MAX_TENANTS", "100")
+	got := ParseCellsConfigFromEnv(slog.Default())
+	if got.MaxTenantsPerCell != cells.MaxCellTenants {
+		t.Errorf("MaxTenantsPerCell = %d, want %d", got.MaxTenantsPerCell, cells.MaxCellTenants)
 	}
 }
 

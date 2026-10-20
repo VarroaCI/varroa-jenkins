@@ -1,7 +1,7 @@
 {{- /*
 cells-guard.yaml
 Validates the cells.* values the chart seeds into a new CellPool. The tenant
-floor mirrors the CellPool CRD; the warm floor mirrors the operator seed
+floor and ceiling mirror the CellPool CRD; the warm floor mirrors the operator seed
 (internal/controller/cells_config.go), which keeps one free cell per profile.
 Each value must be a whole number that fits a 32-bit integer: the operator
 writes it to an int32 CellPool field, and the operator and the BFF fall back
@@ -38,13 +38,18 @@ number never reaches the env in exponent form. Renders no objects.
 {{- if lt $n (int64 .floor) -}}
 {{- fail (printf "%s must be at least %d, got %v (%s)" .name (int64 .floor) .value .why) -}}
 {{- end -}}
+{{- if and (hasKey . "ceiling") (gt $n (int64 .ceiling)) -}}
+{{- fail (printf "%s must be at most %d, got %v (%s)" .name (int64 .ceiling) .value .ceilingWhy) -}}
+{{- end -}}
 {{- end -}}
 
 {{- include "varroa.cells.guardInt" (dict
       "name" "cells.maxTenantsPerCell"
       "value" .Values.cells.maxTenantsPerCell
       "floor" 1
-      "why" "the CellPool CRD refuses a lower value") -}}
+      "why" "the CellPool CRD refuses a lower value"
+      "ceiling" 64
+      "ceilingWhy" "status.cell.tenants holds at most 64 items") -}}
 {{- include "varroa.cells.guardInt" (dict
       "name" "cells.warmPool.perProfile"
       "value" .Values.cells.warmPool.perProfile

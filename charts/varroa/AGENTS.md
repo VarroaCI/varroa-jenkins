@@ -111,9 +111,9 @@ the packaged CRDs. Does not own the Go source it packages
   (`internal/controller/cells_config.go`), see
   [internal/controller/AGENTS.md](../../internal/controller/AGENTS.md).
   `templates/cells-guard.yaml` fails the render when `maxTenantsPerCell` is
-  below 1 or `warmPool.perProfile` is below 1, mirroring the CellPool CRD floor
-  and the operator seed floor (issue #628) instead of a silent fallback or a rejected
-  apiserver write. It also refuses a value that is not a whole number or that
+  below 1 or above 64, or `warmPool.perProfile` is below 1, mirroring the CellPool
+  CRD bounds and the operator seed floor (issue #628) instead of a silent fallback or a rejected
+  apiserver write. The 64 ceiling matches the item limit of `status.cell.tenants`. It also refuses a value that is not a whole number or that
   exceeds int32. Both deployments render every cells value they seed through
   the `varroa.cells.int` helper it defines (the BFF renders
   `maxTenantsPerCell` only), so a values-file number never reaches the env

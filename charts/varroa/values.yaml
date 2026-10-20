@@ -70,9 +70,9 @@ cells:
     perProfile: 1
   # -- Seeds CellPool.spec.maxTenantsPerCell: the capacity a pool cell uses
   # when its own spec.cell.maxTenants is zero. It is also the fallback for a
-  # cell that belongs to no pool. Must be a whole number from 1 to
-  # 2147483647: the CellPool CRD refuses a lower value, and cells-guard.yaml
-  # fails the render first.
+  # cell that belongs to no pool. Must be a whole number from 1 to 64: the
+  # CellPool CRD refuses a lower or higher value, and cells-guard.yaml fails
+  # the render first.
   maxTenantsPerCell: 10
   # -- Seeds CellPool.spec.unreadyGracePeriod: how long a pool cell may stay
   # unready before the operator rolls its pod. It is also the fallback for a

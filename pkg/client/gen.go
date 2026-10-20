@@ -1869,7 +1869,7 @@ type ComponentsSchemasCellPoolSpec struct {
 	// MaxRunsPerTenant Cap on the builds one tenant runs at once on one cell of the pool. Zero means no cap. Set it on the CellPool object, not through the scale API.
 	MaxRunsPerTenant *int32 `json:"maxRunsPerTenant,omitempty"`
 
-	// MaxTenantsPerCell Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+	// MaxTenantsPerCell Capacity a pool cell uses when its own spec.cell.maxTenants is zero. At most 64, the item limit of status.cell.tenants.
 	MaxTenantsPerCell *int32 `json:"maxTenantsPerCell,omitempty"`
 
 	// ProfileRef The JenkinsVersionProfile the pool's cells run. Immutable.
@@ -1919,7 +1919,7 @@ type ComponentsSchemasCellSpec struct {
 
 // ComponentsSchemasCellStatusProjection The controller detail's projection of status.cell. It declares twelve properties. It declares no rehydration property: the cell-controllers capability keeps that key inside the operator.
 type ComponentsSchemasCellStatusProjection struct {
-	// AppliedTenants The tenant set of the last apply that passed. A tenant named in tenants and absent here is still rehydrating.
+	// AppliedTenants The placed tenants that have an applied folder on the cell after its last items walk. A draining tenant never enters it. A tenant named in tenants and absent here has no folder building yet.
 	AppliedTenants *[]string `json:"appliedTenants,omitempty"`
 
 	// Evacuate Operator-written state. No API accepts a write to it, so no surface offers an evacuate action.

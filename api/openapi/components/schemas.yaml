@@ -1334,6 +1334,8 @@ CellSpec:
     maxTenants:
       type: integer
       format: int32
+      minimum: 0
+      maximum: 64
   required: [enabled]
   additionalProperties: false
 
@@ -6372,8 +6374,10 @@ CellPoolSpec:
       type: integer
       format: int32
       minimum: 1
+      maximum: 64
       description: >-
         Capacity a pool cell uses when its own spec.cell.maxTenants is zero.
+        At most 64, the item limit of status.cell.tenants.
     maxRunsPerTenant:
       type: integer
       format: int32
@@ -6637,6 +6641,7 @@ CellPoolScaleRequest:
           type: integer
           format: int32
           minimum: 1
+          maximum: 64
         unreadyGracePeriod:
           type: string
       additionalProperties: false
@@ -6669,8 +6674,9 @@ CellStatusProjection:
     appliedTenants:
       type: array
       description: >-
-        The tenant set of the last apply that passed. A tenant named in
-        tenants and absent here is still rehydrating.
+        The placed tenants that have an applied folder on the cell after its
+        last items walk. A draining tenant never enters it. A tenant named in
+        tenants and absent here has no folder building yet.
       items:
         type: string
     tenantWarnings:

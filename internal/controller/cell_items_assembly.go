@@ -438,7 +438,10 @@ func filterTenantWarnings(in []v1alpha1.TenantWarning, reason string) []v1alpha1
 
 // recordCellDrainingTenants writes the draining set of the pushed desired
 // state. Call it only where status.desiredStateHash takes the pushed hash.
-// A controller that is not a cell keeps no draining set.
+// A controller that is not a cell keeps no draining set. The set needs no
+// truncation: it is a subset of status.cell.tenants, which holds at most 64
+// items. A draining tenant dropped from it would enter AppliedTenants on the
+// next items walk.
 func recordCellDrainingTenants(status *v1alpha1.ControllerStatus, cell bool, draining []string) {
 	if !cell {
 		return

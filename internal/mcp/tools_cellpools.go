@@ -121,7 +121,7 @@ func registerCellPoolTools(mcpServer *server.MCPServer, deps *api.Dependencies) 
 		mcp.WithString("cluster", mcp.Description("Cluster that holds the pool. Default: the core cluster.")),
 		mcp.WithNumber("warm", mcp.Description("Target count of free cells the pool keeps ready")),
 		mcp.WithNumber("maxCells", mcp.Description("Cap on the pool's cells, placed cells included. 0 means unlimited")),
-		mcp.WithNumber("maxTenantsPerCell", mcp.Description("Capacity a pool cell uses when its own spec.cell.maxTenants is zero")),
+		mcp.WithNumber("maxTenantsPerCell", mcp.Description("Capacity a pool cell uses when its own spec.cell.maxTenants is zero. At most 64.")),
 		mcp.WithString("unreadyGracePeriod", mcp.Description("How long a pool cell may stay unready before the operator rolls its pod, such as 5m")),
 	)
 	addTool(mcpServer, kindUpdatePartial, updatePool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -212,7 +212,7 @@ var cellPoolListOutputSchema = withClustersProperty(listOutputSchema("Default su
 	{Name: "profileRef", Type: "string", Desc: "The JenkinsVersionProfile the pool's cells run."},
 	{Name: "warm", Type: "integer", Desc: "Target count of free cells the pool keeps ready."},
 	{Name: "maxCells", Type: "integer", Desc: "Cap on the pool's cells, placed cells included. 0 means unlimited."},
-	{Name: "maxTenantsPerCell", Type: "integer", Desc: "Capacity a pool cell uses when its own spec.cell.maxTenants is zero."},
+	{Name: "maxTenantsPerCell", Type: "integer", Desc: "Capacity a pool cell uses when its own spec.cell.maxTenants is zero. At most 64."},
 	{Name: "maxRunsPerTenant", Type: "integer", Desc: "Cap on the builds one tenant runs at once on one cell of the pool. 0 means no cap. Set it on the CellPool object, not through update_cell_pool."},
 	{Name: "unreadyGracePeriod", Type: "string", Desc: "How long a pool cell may stay unready before the operator rolls its pod."},
 	{Name: "warmCells", Type: "integer", Desc: "Owned cells that hold no tenant."},

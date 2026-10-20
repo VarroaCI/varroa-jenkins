@@ -39,6 +39,7 @@ func TestApplyCellPoolDials_Bounds(t *testing.T) {
 		{"negative warm", CellPoolDials{Warm: i32(-1)}, "spec.warm must be 0 or above"},
 		{"negative maxCells", CellPoolDials{MaxCells: i32(-1)}, "spec.maxCells must be 0 or above"},
 		{"zero tenants", CellPoolDials{MaxTenantsPerCell: i32(0)}, "spec.maxTenantsPerCell must be 1 or above"},
+		{"too many tenants", CellPoolDials{MaxTenantsPerCell: i32(65)}, "spec.maxTenantsPerCell must be 64 or below"},
 		{"bad grace", CellPoolDials{UnreadyGracePeriod: str("soon")}, "spec.unreadyGracePeriod must be a duration such as 5m"},
 		{"negative grace", CellPoolDials{UnreadyGracePeriod: str("-5m")}, "spec.unreadyGracePeriod must be a duration such as 5m"},
 		{"maxCells under warm", CellPoolDials{Warm: i32(7)}, "spec.maxCells must be 0 or at least spec.warm"},
@@ -70,6 +71,16 @@ func TestApplyCellPoolDials_AppliesEachDial(t *testing.T) {
 	}
 	if spec.UnreadyGracePeriod == nil || spec.UnreadyGracePeriod.Duration != 5*time.Minute {
 		t.Errorf("unreadyGracePeriod = %v, want 5m", spec.UnreadyGracePeriod)
+	}
+}
+
+func TestApplyCellPoolDials_AcceptsCeiling(t *testing.T) {
+	spec := v1alpha1.CellPoolSpec{Warm: 1, MaxCells: 6, MaxTenantsPerCell: 10}
+	if err := ApplyCellPoolDials(&spec, CellPoolDials{MaxTenantsPerCell: i32(64)}); err != nil {
+		t.Fatalf("apply 64: %v", err)
+	}
+	if spec.MaxTenantsPerCell != 64 {
+		t.Errorf("MaxTenantsPerCell = %d, want 64", spec.MaxTenantsPerCell)
 	}
 }
 
