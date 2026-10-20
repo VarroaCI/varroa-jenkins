@@ -787,7 +787,7 @@ func TestRemovalScopedToManagedItems(t *testing.T) {
 		// Seed the managed cache: "old-folder" was previously managed by the
 		// mite; "user-job" is NOT in the cache (a user-created item).
 		mf := filepath.Join(t.TempDir(), "managed.json")
-		if err := os.WriteFile(mf, []byte(`["old-folder"]`), 0600); err != nil {
+		if err := os.WriteFile(mf, []byte(`{"old-folder":"h"}`), 0600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1270,7 +1270,11 @@ func applyWithManagedCache(t *testing.T, managed map[string]string, yamlContent 
 	if _, err := engine.Apply(context.Background(), yamlContent); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	return deleted, engine.loadManaged()
+	saved, err := engine.loadManaged()
+	if err != nil {
+		t.Fatalf("load managed cache: %v", err)
+	}
+	return deleted, saved
 }
 
 func TestApplyIncremental_RetainKeepsUndeclaredManagedItems(t *testing.T) {

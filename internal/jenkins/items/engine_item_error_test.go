@@ -110,7 +110,7 @@ func newFakeItemsEngine(t *testing.T, f *fakeItemsJenkins, managed string) (*Eng
 }
 
 // TestApplyReportsManagedCacheMkdirFailure forces the cache directory to be
-// a regular file, so MkdirAll fails with ENOTDIR on every platform.
+// a regular file, so the cache read fails with ENOTDIR on every platform.
 func TestApplyReportsManagedCacheMkdirFailure(t *testing.T) {
 	engine, _ := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
 	blocker := filepath.Join(t.TempDir(), "blocker")
@@ -129,16 +129,17 @@ func TestApplyReportsManagedCacheMkdirFailure(t *testing.T) {
 	if res.Written != 1 {
 		t.Fatalf("Written = %d, want 1", res.Written)
 	}
-	if res.SaveError == nil {
-		t.Fatal("SaveError = nil, want the cache save failure")
+	if res.CacheError == nil {
+		t.Fatal("CacheError = nil, want the cache failure")
 	}
-	if !strings.Contains(res.SaveError.Error(), engine.managedFile) {
-		t.Fatalf("SaveError = %q, want it to name %q", res.SaveError, engine.managedFile)
+	if !strings.Contains(res.CacheError.Error(), engine.managedFile) {
+		t.Fatalf("CacheError = %q, want it to name %q", res.CacheError, engine.managedFile)
 	}
 }
 
 // TestApplyReportsManagedCacheWriteFailure makes the cache path a directory,
-// so WriteFile fails with EISDIR on every platform.
+// so the cache read fails with EISDIR on every platform. The write path
+// is not reached.
 func TestApplyReportsManagedCacheWriteFailure(t *testing.T) {
 	engine, _ := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
 	engine.managedFile = filepath.Join(t.TempDir(), "managed.json")
@@ -156,11 +157,11 @@ func TestApplyReportsManagedCacheWriteFailure(t *testing.T) {
 	if res.Written != 1 {
 		t.Fatalf("Written = %d, want 1", res.Written)
 	}
-	if res.SaveError == nil {
-		t.Fatal("SaveError = nil, want the cache save failure")
+	if res.CacheError == nil {
+		t.Fatal("CacheError = nil, want the cache failure")
 	}
-	if !strings.Contains(res.SaveError.Error(), engine.managedFile) {
-		t.Fatalf("SaveError = %q, want it to name %q", res.SaveError, engine.managedFile)
+	if !strings.Contains(res.CacheError.Error(), engine.managedFile) {
+		t.Fatalf("CacheError = %q, want it to name %q", res.CacheError, engine.managedFile)
 	}
 }
 
@@ -175,8 +176,8 @@ func TestApplySavesManagedCacheWithoutError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply error = %v, want nil", err)
 	}
-	if res.SaveError != nil {
-		t.Fatalf("SaveError = %v, want nil", res.SaveError)
+	if res.CacheError != nil {
+		t.Fatalf("CacheError = %v, want nil", res.CacheError)
 	}
 	if _, err := os.Stat(mf); err != nil {
 		t.Fatalf("managed cache not written: %v", err)
@@ -306,5 +307,185 @@ func TestApplyAbortsOnExistenceCheckFailure(t *testing.T) {
 	}
 	if string(saved) != `{"old":"h"}` {
 		t.Fatalf("managed cache = %s, want it unchanged after an abort", saved)
+	}
+}
+
+// TestApplyCorruptManagedCacheFailsAndKeepsFile seeds a cache that is not
+// JSON. The apply writes the declared item, reports the cache failure, and
+// keeps the corrupt file for inspection.
+func TestApplyCorruptManagedCacheFailsAndKeepsFile(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "{not json")
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil: a failed cache read is reported in the result", err)
+	}
+	if res.Written != 1 {
+		t.Fatalf("Written = %d, want 1", res.Written)
+	}
+	if res.CacheError == nil || !strings.Contains(res.CacheError.Error(), mf) {
+		t.Fatalf("CacheError = %v, want it to name %q", res.CacheError, mf)
+	}
+	data, err := os.ReadFile(mf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{not json" {
+		t.Fatalf("corrupt cache was rewritten: %q", data)
+	}
+}
+
+// TestApplyCorruptManagedCacheDeletesNothing proves an unknown cache never
+// removes an item from Jenkins, even under a sync strategy.
+func TestApplyCorruptManagedCacheDeletesNothing(t *testing.T) {
+	f := &fakeItemsJenkins{existing: map[string]bool{"gone": true}}
+	engine, _ := newFakeItemsEngine(t, f, "{not json")
+
+	_, err := engine.Apply(context.Background(), `removeStrategy:
+  items: "sync"
+items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if f.has("delete gone") {
+		t.Fatalf("an item was deleted while the cache is unknown; calls = %v", f.calls)
+	}
+}
+
+// TestApplyFailedSaveKeepsPreviousCache makes the cache directory read-only,
+// so the temporary file cannot be created. The previous cache must stay.
+func TestApplyFailedSaveKeepsPreviousCache(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, `{"old":"h"}`)
+	dir := filepath.Dir(mf)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if res.CacheError == nil || !strings.Contains(res.CacheError.Error(), mf) {
+		t.Fatalf("CacheError = %v, want it to name %q", res.CacheError, mf)
+	}
+	data, err := os.ReadFile(mf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"old":"h"}` {
+		t.Fatalf("previous cache changed: %q", data)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".managed-items-") {
+			t.Fatalf("temporary cache file left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestApplyMissingManagedCacheIsEmpty treats a missing cache as an empty
+// record. The apply reports no cache error and creates the file.
+func TestApplyMissingManagedCacheIsEmpty(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if res.CacheError != nil {
+		t.Fatalf("CacheError = %v, want nil", res.CacheError)
+	}
+	if _, err := os.Stat(mf); err != nil {
+		t.Fatalf("managed cache not created: %v", err)
+	}
+}
+
+// TestSaveManagedLeavesNoTempFile checks that a successful save leaves only
+// the cache file in its directory.
+func TestSaveManagedLeavesNoTempFile(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "")
+
+	if _, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`); err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(mf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(mf) {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("directory entries = %v, want only %s", names, filepath.Base(mf))
+	}
+}
+
+// TestApplyLegacyListCacheIsCorrupt seeds the retired list format. The apply
+// reports the cache as unreadable and deletes nothing.
+func TestApplyLegacyListCacheIsCorrupt(t *testing.T) {
+	f := &fakeItemsJenkins{existing: map[string]bool{"a/b": true}}
+	engine, mf := newFakeItemsEngine(t, f, `["a/b"]`)
+
+	res, err := engine.Apply(context.Background(), `removeStrategy:
+  items: "sync"
+items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if res.CacheError == nil || !strings.Contains(res.CacheError.Error(), mf) {
+		t.Fatalf("CacheError = %v, want it to name %q", res.CacheError, mf)
+	}
+	if f.has("delete a/b") {
+		t.Fatalf("legacy-recorded item was deleted; calls = %v", f.calls)
+	}
+}
+
+// TestSaveManagedReportsMkdirFailure needs no root. A regular file in the
+// path makes MkdirAll fail with ENOTDIR, and the error names the cache path.
+func TestSaveManagedReportsMkdirFailure(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{managedFile: filepath.Join(blocker, "sub", "managed.json")}
+
+	err := engine.saveManaged(map[string]string{"a": "h"})
+	if err == nil || !strings.Contains(err.Error(), engine.managedFile) {
+		t.Fatalf("saveManaged error = %v, want it to name %q", err, engine.managedFile)
+	}
+}
+
+// TestLoadManagedRejectsNull treats a JSON null cache as corrupt, not empty.
+func TestLoadManagedRejectsNull(t *testing.T) {
+	engine, mf := newFakeItemsEngine(t, &fakeItemsJenkins{}, "null")
+
+	if _, err := engine.loadManaged(); err == nil || !strings.Contains(err.Error(), mf) {
+		t.Fatalf("loadManaged error = %v, want it to name %q", err, mf)
 	}
 }
