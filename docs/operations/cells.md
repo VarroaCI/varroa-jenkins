@@ -48,6 +48,9 @@ spec:
     maxTenants: 10
 ```
 
+`maxTenants` is an integer from 0 to 64; the CRD refuses a value outside that range. Zero
+resolves through the cell's pool `maxTenantsPerCell`, then the chart's `cells.maxTenantsPerCell`.
+
 **Verify:**
 
 ```bash
