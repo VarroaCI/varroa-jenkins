@@ -134,7 +134,7 @@ func (r *RoleReconciler) migrateCustomRoles(ctx context.Context) error {
 		return fmt.Errorf("list varroaroles for migration: %w", err)
 	}
 	for _, role := range roles {
-		// Skip built-in roles (already have JenkinsRoleRef set by reconcileVarroaRoles)
+		// Skip built-in roles. They always set JenkinsRoleRef.
 		if role.Labels != nil && role.Labels[v1alpha1.LabelBuiltin] == "true" {
 			continue
 		}
@@ -198,7 +198,6 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 	return []*v1alpha1.VarroaRole{
 		buildRole("admin",
 			[]v1alpha1.APIRule{{Resources: []string{"*"}, Verbs: []string{"*"}}},
-			adminPermissions(),
 			"varroa-admin"),
 		buildRole("operator",
 			[]v1alpha1.APIRule{
@@ -228,7 +227,6 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				{Resources: []string{"teamagents"}, Verbs: []string{"unattended"}},
 				{Resources: []string{"agentsessions"}, Verbs: []string{"read"}},
 			},
-			operatorPermissions(),
 			"varroa-operator"),
 		buildRole("developer",
 			[]v1alpha1.APIRule{
@@ -242,7 +240,6 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				// binding gains no assistant access.
 				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
 			},
-			developerPermissions(),
 			"varroa-developer"),
 		buildRole("viewer",
 			[]v1alpha1.APIRule{
@@ -253,16 +250,15 @@ func builtinRoles() []*v1alpha1.VarroaRole {
 				// binding gains no assistant access.
 				{Resources: []string{"assistant"}, Verbs: []string{"use"}},
 			},
-			viewerPermissions(),
 			"varroa-viewer"),
 	}
 }
 
-func buildRole(name string, apiRules []v1alpha1.APIRule, perms []string, jenkinsRoleRef string) *v1alpha1.VarroaRole {
+func buildRole(name string, apiRules []v1alpha1.APIRule, jenkinsRoleRef string) *v1alpha1.VarroaRole {
 	return &v1alpha1.VarroaRole{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "VarroaRole"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelBuiltin: "true"}},
-		Spec:       v1alpha1.VarroaRoleSpec{APIRules: apiRules, JenkinsPermissions: perms, JenkinsRoleRef: jenkinsRoleRef},
+		Spec:       v1alpha1.VarroaRoleSpec{APIRules: apiRules, JenkinsRoleRef: jenkinsRoleRef},
 	}
 }
 
@@ -273,32 +269,4 @@ func builtinJenkinsRoles() []*v1alpha1.JenkinsRole {
 // BuiltinJenkinsRoles returns deep copies of the canonical JenkinsRole definitions.
 func BuiltinJenkinsRoles() []*v1alpha1.JenkinsRole {
 	return rbac.BuiltinJenkinsRoles()
-}
-
-// Permission sets used by the built-in VarroaRoles.
-func adminPermissions() []string {
-	return []string{
-		"hudson.model.Hudson.Administer", "hudson.model.Hudson.Read", "hudson.model.Item.Read",
-		"hudson.model.Item.Build", "hudson.model.Item.Configure", "hudson.model.Item.Create",
-		"hudson.model.Item.Delete", "hudson.model.Item.Discover", "hudson.model.Item.Workspace",
-		"hudson.model.Run.Delete", "hudson.model.Run.Update", "hudson.model.View.Read",
-		"hudson.model.View.Configure", "hudson.model.View.Create", "hudson.model.View.Delete",
-		"com.cloudbees.plugins.credentials.CredentialsProvider.View",
-		"com.cloudbees.plugins.credentials.CredentialsProvider.ManageDomains",
-		"com.cloudbees.plugins.credentials.CredentialsProvider.Create",
-		"com.cloudbees.plugins.credentials.CredentialsProvider.Update",
-		"com.cloudbees.plugins.credentials.CredentialsProvider.Delete",
-	}
-}
-
-func operatorPermissions() []string {
-	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Delete", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Delete", "hudson.model.Run.Update", "hudson.model.View.Read", "hudson.model.View.Configure"}
-}
-
-func developerPermissions() []string {
-	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build", "hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Update", "hudson.model.View.Read"}
-}
-
-func viewerPermissions() []string {
-	return []string{"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Discover", "hudson.model.View.Read"}
 }

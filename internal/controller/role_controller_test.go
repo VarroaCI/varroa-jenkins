@@ -321,3 +321,32 @@ func TestRoleReconciler_RewritesDriftedFleetLockRule(t *testing.T) {
 		t.Errorf("restored fleetlocks verbs = %v, want [read release]", rule.Verbs)
 	}
 }
+
+// TestRoleReconciler_ClearsBuiltinJenkinsPermissions proves the reconciler
+// clears inline Jenkins permissions that an older release wrote onto a
+// built-in role. The JenkinsRole ref is the only permission source.
+func TestRoleReconciler_ClearsBuiltinJenkinsPermissions(t *testing.T) {
+	ctx := context.Background()
+	st := crdstore.NewFake()
+
+	stale := buildRoleForTest(t, "operator").DeepCopy()
+	stale.Spec.JenkinsPermissions = []string{"hudson.model.Hudson.Read"}
+	crdstore.MustSeed(st, stale)
+
+	r := NewRoleReconciler(nil, st)
+	r.Logger = testLogger()
+	if err := r.reconcileVarroaRoles(ctx); err != nil {
+		t.Fatalf("reconcileVarroaRoles: %v", err)
+	}
+
+	got, err := crdstore.Get[v1alpha1.VarroaRole](ctx, st, "operator", "")
+	if err != nil {
+		t.Fatalf("get operator role: %v", err)
+	}
+	if len(got.Spec.JenkinsPermissions) != 0 {
+		t.Errorf("JenkinsPermissions = %v, want none", got.Spec.JenkinsPermissions)
+	}
+	if got.Spec.JenkinsRoleRef != "varroa-operator" {
+		t.Errorf("JenkinsRoleRef = %q, want varroa-operator", got.Spec.JenkinsRoleRef)
+	}
+}
