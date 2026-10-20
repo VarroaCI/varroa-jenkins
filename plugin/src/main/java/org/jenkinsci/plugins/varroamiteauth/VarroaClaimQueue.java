@@ -415,6 +415,7 @@ public class VarroaClaimQueue {
         action.setOrigin(derived.origin);
         action.setIntentKey(derived.intentKey);
         action.setRevision(derived.revision);
+        action.setForgeRevision(derived.forgeRevision);
 
         // A refused forward proves the cached map disagrees with the
         // recorder. The next attempt claims, so the fence names the home.

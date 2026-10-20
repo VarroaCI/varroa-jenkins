@@ -531,7 +531,7 @@ public class VarroaRunSourceTest {
     // --- The two existing revision writers survive both emissions ---
 
     @Test
-    public void startedKeepsTheClaimsRevisionAndCompletedKeepsTheChangelogFallback() throws Exception {
+    public void startedFallsBackToTheClaimRevisionAndCompletedKeepsTheChangelogFallback() throws Exception {
         createRepository();
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "claim-revision-run");
         job.setDefinition(new CpsFlowDefinition(
@@ -558,6 +558,25 @@ public class VarroaRunSourceTest {
         assertEquals(1, completed.size());
         assertEquals("the changelog fallback survives the source emissions",
                 secondCommitId, completed.get(0).getScmRevision());
+    }
+
+    @Test
+    public void startedCarriesTheForgeRevisionOverTheClaimRevision() throws Exception {
+        createRepository();
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "forge-revision-run");
+        job.setDefinition(new CpsFlowDefinition(
+                "node { git url: '" + repoUrl + "', branch: 'master' }", true));
+        VarroaIntentAction action = grantedAction();
+        action.setRevision("sha256:abc");
+        action.setForgeRevision("head222");
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, action));
+
+        List<BuildEvent> started = byPhase(drainEvents(), BuildEvent.PHASE_STARTED);
+        assertEquals(1, started.size());
+        assertEquals("the forge revision replaces the claim revision",
+                "head222", started.get(0).getScmRevision());
+        assertEquals("the intent key keeps the claim revision", action.getIntentKey(),
+                started.get(0).getIntentKey());
     }
 
     /** The branch job property has a package-private constructor, so the test builds it reflectively. */

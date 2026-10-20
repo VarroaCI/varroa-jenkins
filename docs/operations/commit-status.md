@@ -149,7 +149,8 @@ These builds keep their `pending` status:
   with a GitHub App credential.
 
 For a pull-request build, the recorder keeps the head commit of the pull request. The forge reports
-the status on that commit.
+the status on that commit. The start event carries that head commit too, so a build that stops before
+its checkout still names it.
 
 A failed write leaves the status `pending`. The operator logs the failure and does not retry.
 

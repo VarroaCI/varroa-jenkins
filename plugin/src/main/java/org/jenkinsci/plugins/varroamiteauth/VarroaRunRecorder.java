@@ -1112,6 +1112,14 @@ public final class VarroaRunRecorder {
         }
     }
 
+    /**
+     * Returns the revision the start event sends. The forge commit wins
+     * over the claim revision, so the status end and the backstop read one commit.
+     */
+    private static String startedRevision(VarroaIntentAction action) {
+        return action.getForgeRevision().isEmpty() ? action.getRevision() : action.getForgeRevision();
+    }
+
     /** Builds a {@code STARTED} event from {@code run}'s current state. Does not emit it. */
     private static BuildEvent.Builder startedEventBuilder(Run<?, ?> run, RunState state, VarroaIntentAction action) {
         BuildEvent.Builder b = BuildEvent.builder()
@@ -1123,7 +1131,7 @@ public final class VarroaRunRecorder {
                 .jobPath(state.jobPath)
                 .buildNumber(state.buildNumber)
                 .deliveryId(action.getDeliveryId())
-                .scmRevision(truncate(action.getRevision(), MAX_FIELD_512))
+                .scmRevision(truncate(startedRevision(action), MAX_FIELD_512))
                 .replayOf(replaySourceOf(run))
                 .restartOf(restartSourceOf(run))
                 .restartStage(restartStageOf(run))
@@ -1303,8 +1311,8 @@ public final class VarroaRunRecorder {
 
         // Every SCM fact comes from a reflective read of the run's own
         // actions. A missing plugin, action, or method leaves its value
-        // empty. This call site writes no scm_revision: the claim and the
-        // changelog fallback keep their own writers.
+        // empty. This call site writes no scm_revision: the claim's forge
+        // revision and the changelog fallback keep their own writers.
         SourceFacts source = resolveBranchFacts(run);
         b.scmHead(source.scmHead);
         b.branch(source.branch);

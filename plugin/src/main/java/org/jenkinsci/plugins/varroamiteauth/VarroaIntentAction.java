@@ -44,6 +44,7 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     private volatile String origin = "";
     private volatile String intentKey = "";
     private volatile String revision = "";
+    private volatile String forgeRevision = "";
     private volatile boolean granted;
     private volatile String actor = "";
     private volatile long grantedNumber;
@@ -127,6 +128,20 @@ public class VarroaIntentAction extends InvisibleAction implements Queue.QueueAc
     /** Set by the claimer thread (D5). Package-private: only this package's claimer writes it. */
     void setRevision(String revision) {
         this.revision = revision != null ? revision : "";
+    }
+
+    /**
+     * Returns the commit the forge knows for the claimed revision, or
+     * {@code ""} when the revision object carries none. The start event
+     * sends it as {@code scm_revision}.
+     */
+    public String getForgeRevision() {
+        return forgeRevision != null ? forgeRevision : "";
+    }
+
+    /** Set by the claimer thread (D5). Package-private: only this package's claimer writes it. */
+    void setForgeRevision(String forgeRevision) {
+        this.forgeRevision = forgeRevision != null ? forgeRevision : "";
     }
 
     public boolean isGranted() {
