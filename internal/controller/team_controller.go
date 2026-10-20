@@ -608,7 +608,7 @@ func (r *TeamReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		// first, would never reach the drain again: its spec.pipelines and
 		// its placement are both gone by then.
 		staleBefore := len(status.StaleAgentServiceNamespaces)
-		childErr := r.syncPipelinesChildren(ctx, team, status, subjects, role, agentNamespace, priorCellNamespace, cellsByKey)
+		childErr := r.syncPipelinesChildren(ctx, team, status, agentNamespace, priorCellNamespace, cellsByKey)
 		for _, ev := range outcome.ActivityEvents {
 			r.publishTenantEvent(ev)
 		}
@@ -938,19 +938,21 @@ func (r *TeamReconciler) ensureOwned(ctx context.Context, kind, name string, tea
 		return false // treat as not safe
 	}
 
-	// Check owner reference or label-based ownership.
-	for _, or := range existing.GetOwnerReferences() {
+	return teamOwnsObject(existing, team) // false is a hand-authored collision
+}
+
+// teamOwnsObject reports whether obj carries a Team ownership marker: an
+// owner reference naming the Team UID, or the managed-by and team-name
+// labels that teamChildLabels writes.
+func teamOwnsObject(obj metav1.Object, team *v1alpha1.Team) bool {
+	for _, or := range obj.GetOwnerReferences() {
 		if or.UID == team.UID {
 			return true
 		}
 	}
 
-	lbls := existing.GetLabels()
-	if lbls[v1alpha1.LabelManagedBy] == "team" && lbls[v1alpha1.LabelTeamName] == team.Name {
-		return true
-	}
-
-	return false // hand-authored collision
+	lbls := obj.GetLabels()
+	return lbls[v1alpha1.LabelManagedBy] == "team" && lbls[v1alpha1.LabelTeamName] == team.Name
 }
 
 // reconcileNamespace reconciles a single namespace for a Team using the
@@ -1327,16 +1329,46 @@ func (r *TeamReconciler) applyFinalizerChange(ctx context.Context, team *v1alpha
 	}
 }
 
-// pipelinesRoleBindingName, tenantAgentServiceAccountName,
-// tenantAgentTokenSecretName, and tenantCloudCredentialID are the placement
-// pass's naming contract with the tenant-items batch that creates the
-// ServiceAccount and its token Secret (design D7/D8/D11): task 6.9's
-// teardown deletes exactly these names, and the controller reconciler reads
-// them by the same names.
-func pipelinesRoleBindingName(team string) string      { return "team-" + team + "-pipelines" }
+// tenantAgentServiceAccountName, tenantAgentTokenSecretName, and
+// tenantCloudCredentialID are the placement pass's naming contract with the
+// tenant-items batch that creates the ServiceAccount and its token Secret
+// (design D7/D8/D11): task 6.9's teardown deletes exactly these names, and
+// the controller reconciler reads them by the same names.
 func tenantAgentServiceAccountName(team string) string { return "varroa-agent-" + team }
 func tenantAgentTokenSecretName(team string) string    { return "varroa-agent-" + team + "-token" }
 func tenantCloudCredentialID(team string) string       { return "varroa-cloud-" + team }
+
+// retiredPipelinesRoleBindingName names the JenkinsRoleBinding that earlier
+// releases wrote for a pipelines Team. No code path writes this binding now.
+// A cluster can still hold one, so each tick deletes the copy that the Team
+// owns.
+func retiredPipelinesRoleBindingName(team string) string { return "team-" + team + "-pipelines" }
+
+// deleteRetiredPipelinesRoleBinding deletes the retired binding when this
+// Team owns it. A binding that a person wrote by hand keeps its name and its
+// place. A failed read or delete returns its error, so the tick keeps the
+// finalizer and retries. A teardown tick releases the finalizer in the same
+// tick, so a dropped error would leave the binding with no later retry.
+func (r *TeamReconciler) deleteRetiredPipelinesRoleBinding(ctx context.Context, team *v1alpha1.Team) error {
+	name := retiredPipelinesRoleBindingName(team.Name)
+	b, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](ctx, r.store, name, "")
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read retired pipelines JenkinsRoleBinding: %w", err)
+	}
+	if !teamOwnsObject(b, team) {
+		return nil
+	}
+	// The delete is conditional on the object read above. A write since
+	// that read answers Conflict, and the next tick reads and decides again.
+	err = crdstore.DeleteIfUnchanged[v1alpha1.JenkinsRoleBinding](ctx, r.store, name, "", string(b.UID), b.ResourceVersion)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete retired pipelines JenkinsRoleBinding: %w", err)
+	}
+	return nil
+}
 
 // tenantAgentServiceName returns the agent Service of one slot of a tenant.
 // A tenant holds one slot for each active member, and a cell holds at most
@@ -1361,9 +1393,11 @@ type tenantServiceWriter interface {
 }
 
 // syncPipelinesChildren applies or deletes the objects task 9.2 and task
-// 6.9 name: the team-<team>-pipelines JenkinsRoleBinding and the slot 0
-// agent Service while the tenant is placed, and (during teardown) the
-// tenant agent ServiceAccount and its token Secret. Re-run
+// 6.9 name: the slot 0 agent Service while the tenant is placed, and (during
+// teardown) the tenant agent ServiceAccount and its token Secret. It also
+// deletes a retired team-<team>-pipelines JenkinsRoleBinding that the Team
+// owns. Human access comes from the generated member role, not from that
+// binding. Re-run
 // every tick; every branch is idempotent. It also drains the list of agent
 // Services the tenant still owns, on both branches, and a teardown adds its
 // own cell namespace to that list first. priorCellNamespace is the
@@ -1372,9 +1406,8 @@ type tenantServiceWriter interface {
 // call that needs the value. This function answers an error for a failed
 // drain and for a failed agent Service write, which the caller reports on
 // the Placed condition.
-func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alpha1.Team, status *v1alpha1.TeamStatus, subjects []v1alpha1.SubjectRef, role, agentNamespace, priorCellNamespace string, cellsByKey map[string]*v1alpha1.Controller) error {
+func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alpha1.Team, status *v1alpha1.TeamStatus, agentNamespace, priorCellNamespace string, cellsByKey map[string]*v1alpha1.Controller) error {
 	tearingDown := teamTearingDown(team)
-	bindingName := pipelinesRoleBindingName(team.Name)
 
 	// The steady-state reaper covers every case where no live JVM holds
 	// the slot's cloud, so the plugin's own garbage collection never runs
@@ -1412,38 +1445,16 @@ func (r *TeamReconciler) syncPipelinesChildren(ctx context.Context, team *v1alph
 		return err
 	}
 
+	if err := r.deleteRetiredPipelinesRoleBinding(ctx, team); err != nil {
+		r.logger.Error("failed to retire the pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
+		return err
+	}
+
 	if !tearingDown && status.Placement != nil {
-		want := &v1alpha1.JenkinsRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:            bindingName,
-				Labels:          teamChildLabels(team),
-				OwnerReferences: []metav1.OwnerReference{teamOwnerRef(team)},
-			},
-			Spec: v1alpha1.JenkinsRoleBindingSpec{
-				Subjects: subjects,
-				RoleRef:  role,
-				JenkinsScope: &v1alpha1.JenkinsScope{
-					Type:      "Folder",
-					Folder:    team.Name,
-					Propagate: "Subtree",
-				},
-				ControllerScope: &v1alpha1.VarroaRoleBindingScope{
-					Namespaces:         []string{status.Placement.CellNamespace},
-					ControllerSelector: &metav1.LabelSelector{MatchLabels: map[string]string{v1alpha1.LabelControllerName: status.Placement.Cell}},
-				},
-			},
-		}
-		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, r.store, want); err != nil {
-			r.logger.Error("failed to apply pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
-		}
 		if agentNamespace != "" {
 			r.ensureTenantAgentIdentity(ctx, team.Name, agentNamespace)
 		}
 		serviceErr = r.reconcileTenantAgentServices(ctx, team.Name, team.Status.Placement, status, cellsByKey)
-	} else {
-		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, r.store, bindingName, ""); err != nil {
-			r.logger.Warn("failed to delete pipelines JenkinsRoleBinding", "team", team.Name, "error", err)
-		}
 	}
 
 	if tearingDown && agentNamespace != "" {

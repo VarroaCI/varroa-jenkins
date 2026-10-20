@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -755,7 +756,7 @@ func newPipelinesTeamReconciler(client *testClient, sink *recordingSink) *TeamRe
 	return rec
 }
 
-func TestTeamReconciler_Pipelines_PlacesTenantAndAppliesRoleBinding(t *testing.T) {
+func TestTeamReconciler_Pipelines_PlacesTenantWithoutPipelinesRoleBinding(t *testing.T) {
 	client := newTeamTestClient()
 	client.namespaces["payments-ns"] = true
 	seedJenkinsVersionProfile(client)
@@ -799,22 +800,11 @@ func TestTeamReconciler_Pipelines_PlacesTenantAndAppliesRoleBinding(t *testing.T
 		t.Errorf("unexpected cell status patch: %+v", got)
 	}
 
-	// task 9.2: the team-<team>-pipelines JenkinsRoleBinding exists with the
-	// Team's roleRef and subjects, Folder+Subtree scope, and the owning
-	// cell's ControllerScope.
-	rb, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", "")
-	if err != nil {
-		t.Fatalf("expected the pipelines JenkinsRoleBinding to exist: %v", err)
-	}
-	if rb.Spec.RoleRef != "developer" {
-		t.Errorf("roleRef = %q, want developer", rb.Spec.RoleRef)
-	}
-	if rb.Spec.JenkinsScope == nil || rb.Spec.JenkinsScope.Type != "Folder" || rb.Spec.JenkinsScope.Folder != "payments" || rb.Spec.JenkinsScope.Propagate != "Subtree" {
-		t.Errorf("unexpected JenkinsScope: %+v", rb.Spec.JenkinsScope)
-	}
-	if rb.Spec.ControllerScope == nil || rb.Spec.ControllerScope.ControllerSelector == nil ||
-		rb.Spec.ControllerScope.ControllerSelector.MatchLabels[v1alpha1.LabelControllerName] != "cell-a" {
-		t.Errorf("unexpected ControllerScope: %+v", rb.Spec.ControllerScope)
+	// The placement pass writes no pipelines JenkinsRoleBinding. Human
+	// access comes from the generated member role.
+	_, err = crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", "")
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("expected no pipelines JenkinsRoleBinding, got err %v", err)
 	}
 
 	// task 6.12: tenant.placed is published.
@@ -935,6 +925,73 @@ func TestTeamReconciler_Pipelines_ManuallyCreatedCellResolvesProfileFromVersion(
 	}
 }
 
+// seedRetiredPipelinesRoleBinding seeds the binding an earlier release wrote,
+// with roleRef developer, which no JenkinsRole defines.
+func seedRetiredPipelinesRoleBinding(client *testClient, labels map[string]string, owners []metav1.OwnerReference) {
+	crdstore.MustSeed(client.store, &v1alpha1.JenkinsRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "team-payments-pipelines",
+			Labels:          labels,
+			OwnerReferences: owners,
+		},
+		Spec: v1alpha1.JenkinsRoleBindingSpec{RoleRef: "developer"},
+	})
+}
+
+func TestTeamReconciler_Pipelines_DeletesOwnedRetiredPipelinesRoleBinding(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	seedCellController(client, nil)
+
+	uid := types.UID("10000000-0000-0000-0000-000000000003")
+	teamWith(client, "payments", v1alpha1.TeamSpec{
+		Members:    []string{"alice"},
+		Namespaces: []string{"payments-ns"},
+		Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Profile:        "jenkins-lts",
+			AgentNamespace: "payments-ns",
+		},
+	}, uid)
+	seedRetiredPipelinesRoleBinding(client, nil, []metav1.OwnerReference{{
+		APIVersion: "varroa.dev/v1alpha1", Kind: "Team", Name: "payments", UID: uid,
+	}})
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", ""); !apierrors.IsNotFound(err) {
+		t.Errorf("expected the owned retired binding to be deleted, got err %v", err)
+	}
+}
+
+func TestTeamReconciler_Pipelines_KeepsUnownedPipelinesRoleBinding(t *testing.T) {
+	client := newTeamTestClient()
+	client.namespaces["payments-ns"] = true
+	seedJenkinsVersionProfile(client)
+	seedCellController(client, nil)
+
+	uid := types.UID("10000000-0000-0000-0000-000000000004")
+	teamWith(client, "payments", v1alpha1.TeamSpec{
+		Members:    []string{"alice"},
+		Namespaces: []string{"payments-ns"},
+		Pipelines: &v1alpha1.TeamPipelinesSpec{
+			Profile:        "jenkins-lts",
+			AgentNamespace: "payments-ns",
+		},
+	}, uid)
+	seedRetiredPipelinesRoleBinding(client, nil, nil)
+
+	rec := newPipelinesTeamReconciler(client, nil)
+	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := crdstore.Get[v1alpha1.JenkinsRoleBinding](context.Background(), client.store, "team-payments-pipelines", ""); err != nil {
+		t.Errorf("expected the hand-authored binding to stay, got err %v", err)
+	}
+}
+
 func TestTeamReconciler_Pipelines_TeardownDeletesChildrenAndHoldsFinalizer(t *testing.T) {
 	client := newTeamTestClient()
 	client.namespaces["payments-ns"] = true
@@ -960,7 +1017,10 @@ func TestTeamReconciler_Pipelines_TeardownDeletesChildrenAndHoldsFinalizer(t *te
 	}
 	client.teams["payments"] = team
 	crdstore.MustSeed(client.store, team)
-	crdstore.MustSeed(client.store, &v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "team-payments-pipelines"}})
+	seedRetiredPipelinesRoleBinding(client, map[string]string{
+		v1alpha1.LabelManagedBy: "team",
+		v1alpha1.LabelTeamName:  "payments",
+	}, nil)
 
 	rec := newPipelinesTeamReconciler(client, nil)
 	if _, err := rec.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "payments"}}); err != nil {
