@@ -226,6 +226,77 @@ func TestGatewayIntegration_RegisterRenewalKeepsSameCellInstanceSAN(t *testing.T
 	}
 }
 
+// TestGatewayIntegration_DesiredStateResultCarriesCertCellInstance pins the
+// instance stamp of a desired-state result: the gateway writes the cell
+// instance from the stream certificate, and a value that the mite sent
+// is replaced.
+func TestGatewayIntegration_DesiredStateResultCarriesCertCellInstance(t *testing.T) {
+	natsSrv := startNATS(t)
+	busConn, lis, certAuth := startGatewayWithCA(t, natsSrv.ClientURL())
+
+	name, ns := "resultctl", "resultns"
+	const wantCellInstance = "pod-uid-a"
+
+	results := make(chan []byte, 8)
+	sub, err := busConn.SubscribeData(bus.MiteInSubject(bus.DefaultCluster, ns, name), func(data []byte) {
+		results <- data
+	})
+	if err != nil {
+		t.Fatalf("subscribe mite inbound: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	gconn := dialWithMiteCertCellInstance(t, lis.Addr().String(), certAuth, name, ns, wantCellInstance)
+	stream, err := mitev1.NewMiteClient(gconn).CommandStream(context.Background())
+	if err != nil {
+		t.Fatalf("command stream: %v", err)
+	}
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_Hello{
+			Hello: &mitev1.Hello{ControllerName: name, Namespace: ns, Version: "test-v1"},
+		},
+	}); err != nil {
+		t.Fatalf("send hello: %v", err)
+	}
+	if err := stream.Send(&mitev1.MiteMessage{
+		Message: &mitev1.MiteMessage_CommandResult{
+			CommandResult: &mitev1.CommandResult{
+				CommandId: "cmd-cert-1",
+				Result: &mitev1.CommandResult_DesiredState{
+					DesiredState: &mitev1.DesiredStateResult{
+						AppliedHash:  "hash-cert",
+						ItemsSuccess: true,
+						CellInstance: "spoofed",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("send command result: %v", err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case data := <-results:
+			var mm mitev1.MiteMessage
+			if err := json.Unmarshal(data, &mm); err != nil {
+				t.Fatalf("unmarshal inbound message: %v", err)
+			}
+			ds := mm.GetCommandResult().GetDesiredState()
+			if ds == nil {
+				continue
+			}
+			if got := ds.CellInstance; got != wantCellInstance {
+				t.Fatalf("DesiredStateResult.CellInstance = %q, want %q (from the stream certificate)", got, wantCellInstance)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for the desired-state result on the mite inbound subject")
+		}
+	}
+}
+
 func parseCertPEM(t *testing.T, certPEM string) *x509.Certificate {
 	t.Helper()
 	block, _ := pem.Decode([]byte(certPEM))

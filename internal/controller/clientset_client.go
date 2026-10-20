@@ -3500,8 +3500,8 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 	// omitempty trap — an omitted key is retained, not cleared.
 	statusPatch["pluginInventory"] = status.PluginInventory
 	// cell carries only the controller reconciler's half of status.cell
-	// (task 5.3a, design D4): warm, appliedTenants, evacuate, unreadySince,
-	// rolledAt, and tenantWarnings. It never carries tenants — that field
+	// (task 5.3a, design D4): warm, appliedTenants, drainingTenants,
+	// evacuate, unreadySince, rolledAt, and tenantWarnings. It never carries tenants — that field
 	// is the placement pass's own half, written through the narrower
 	// PatchControllerCellStatus route. This blind end-of-reconcile patch
 	// would otherwise send the stale in-memory tenants list and clobber a
@@ -3510,10 +3510,13 @@ func controllerStatusPatch(status *v1alpha1.ControllerStatus) map[string]interfa
 		statusPatch["cell"] = map[string]interface{}{
 			"warm":           status.Cell.Warm,
 			"appliedTenants": status.Cell.AppliedTenants,
-			"evacuate":       status.Cell.Evacuate,
-			"unreadySince":   status.Cell.UnreadySince,
-			"rolledAt":       status.Cell.RolledAt,
-			"tenantWarnings": status.Cell.TenantWarnings,
+			// drainingTenants is written unconditionally so an empty set
+			// clears the list instead of being retained by the merge patch.
+			"drainingTenants": status.Cell.DrainingTenants,
+			"evacuate":        status.Cell.Evacuate,
+			"unreadySince":    status.Cell.UnreadySince,
+			"rolledAt":        status.Cell.RolledAt,
+			"tenantWarnings":  status.Cell.TenantWarnings,
 			// instance, previousInstance, previousInstanceLastSeen, and
 			// rehydration are the controller reconciler's own half of
 			// status.cell too (design D13, task 6.0/6.1): the running

@@ -301,6 +301,10 @@ message DesiredStateResult {
   // the items apply walked every item. It is empty for a parse error, a
   // deadline, or a failed check of existence.
   repeated ItemFailure item_failures = 19;
+  // cell_instance is the pod UID of the mite stream that carried this result.
+  // The gateway sets it from the client certificate of the stream. A value
+  // that the mite sends is replaced.
+  string cell_instance = 20;
 }
 
 message DeferredDeletion {

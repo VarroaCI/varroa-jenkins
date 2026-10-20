@@ -4070,6 +4070,16 @@ spec:
                       type: string
                     maxItems: 64
                     type: array
+                  drainingTenants:
+                    description: |-
+                      DrainingTenants lists the tenants whose folder the last delivered desired
+                      state leaves out, because each tenant moves to another cell. The
+                      controller reconciler writes it together with status.desiredStateHash.
+                      An items apply never adds such a tenant to AppliedTenants.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
                   evacuate:
                     description: |-
                       Evacuate is true when the roll gate has given up on this cell; every

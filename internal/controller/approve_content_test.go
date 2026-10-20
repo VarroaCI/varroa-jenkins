@@ -19,7 +19,7 @@ import (
 // matches the state the approve builds.
 func pendingRestartFor(t *testing.T, rec *Reconciler, cr *v1alpha1.Controller) *v1alpha1.PendingRestart {
 	t.Helper()
-	desired, err := rec.assembleApproveState(context.Background(), cr)
+	desired, _, err := rec.assembleApproveState(context.Background(), cr)
 	if err != nil {
 		t.Fatalf("assemble the approve state: %v", err)
 	}

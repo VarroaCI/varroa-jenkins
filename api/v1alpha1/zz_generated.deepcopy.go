@@ -418,6 +418,11 @@ func (in *CellStatus) DeepCopyInto(out *CellStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.DrainingTenants != nil {
+		in, out := &in.DrainingTenants, &out.DrainingTenants
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.TenantWarnings != nil {
 		in, out := &in.TenantWarnings, &out.TenantWarnings
 		*out = make([]TenantWarning, len(*in))

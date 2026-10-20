@@ -30,7 +30,9 @@ type assembleCellState struct {
 	CloudCredentials  []tenantCloudCredential
 	TemplateFragments []bundle.CellTemplateFragment
 	FolderCredentials []bundle.CellFolderCredentials
-	Warnings          []v1alpha1.TenantWarning
+	// Draining names the tenants whose folder the items leave out, in name order.
+	Draining []string
+	Warnings []v1alpha1.TenantWarning
 }
 
 // assembleCellContent runs the tenant items pipeline (design D7) plus
@@ -54,13 +56,14 @@ type assembleCellState struct {
 // push the tenant's cloud with no pod template and drop its templates.
 func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Controller, teams []*v1alpha1.Team, coreSet []pluginlock.PluginEntry, templateBase string) (assembleCellState, error) {
 	var (
-		manifests []*items.Manifest
-		clouds    []bundle.TenantCloud
-		creds     []tenantCloudCredential
-		fragments []bundle.CellTemplateFragment
-		folderCrd []bundle.CellFolderCredentials
-		held      []string
-		warnings  []v1alpha1.TenantWarning
+		manifests     []*items.Manifest
+		clouds        []bundle.TenantCloud
+		creds         []tenantCloudCredential
+		fragments     []bundle.CellTemplateFragment
+		folderCrd     []bundle.CellFolderCredentials
+		held          []string
+		drainingNames []string
+		warnings      []v1alpha1.TenantWarning
 	)
 
 	hold := func(team string, fault error) {
@@ -89,6 +92,9 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		}
 		agentNamespace := team.Spec.Pipelines.AgentNamespace
 		draining := tenantIsDrainingFromCell(team, cr)
+		if draining {
+			drainingNames = append(drainingNames, team.Name)
+		}
 
 		// A draining tenant still reads its bundle, because its cloud keeps
 		// the lifted pod templates. A read fault for a draining tenant
@@ -210,6 +216,7 @@ func (r *Reconciler) assembleCellContent(ctx context.Context, cr *v1alpha1.Contr
 		CloudCredentials:  creds,
 		TemplateFragments: fragments,
 		FolderCredentials: folderCrd,
+		Draining:          drainingNames,
 		Warnings:          warnings,
 	}, nil
 }
@@ -398,6 +405,9 @@ func refusedTenants(cell *v1alpha1.CellStatus) map[string]bool {
 // A tenant that owns a refused item keeps its previous state too. Its earlier
 // folder stays on the cell, and a new folder is not complete. A refused path
 // that no tenant owns changes no tenant.
+//
+// A draining tenant is never applied: the pushed desired state has no folder
+// for it, and status.cell.drainingTenants names it.
 func appliedTenantsAfterItemsApply(cell *v1alpha1.CellStatus, refusedPaths []string) []string {
 	kept := heldTenants(cell)
 	for tenant := range partitionJobPathsByTenant(refusedPaths, cell.Tenants) {
@@ -405,6 +415,9 @@ func appliedTenantsAfterItemsApply(cell *v1alpha1.CellStatus, refusedPaths []str
 	}
 	applied := make([]string, 0, len(cell.Tenants))
 	for _, tenant := range cell.Tenants {
+		if slices.Contains(cell.DrainingTenants, tenant) {
+			continue
+		}
 		if !kept[tenant] || slices.Contains(cell.AppliedTenants, tenant) {
 			applied = append(applied, tenant)
 		}
@@ -421,4 +434,20 @@ func filterTenantWarnings(in []v1alpha1.TenantWarning, reason string) []v1alpha1
 		}
 	}
 	return out
+}
+
+// recordCellDrainingTenants writes the draining set of the pushed desired
+// state. Call it only where status.desiredStateHash takes the pushed hash.
+// A controller that is not a cell keeps no draining set.
+func recordCellDrainingTenants(status *v1alpha1.ControllerStatus, cell bool, draining []string) {
+	if !cell {
+		return
+	}
+	if status.Cell == nil {
+		if len(draining) == 0 {
+			return
+		}
+		status.Cell = &v1alpha1.CellStatus{}
+	}
+	status.Cell.DrainingTenants = sortedTenantCopy(draining)
 }

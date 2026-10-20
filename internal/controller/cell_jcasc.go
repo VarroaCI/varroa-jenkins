@@ -293,6 +293,10 @@ func (r *Reconciler) applyCellContent(ctx context.Context, cr *v1alpha1.Controll
 	// unresolved-variable check would fail the whole cell on it.
 	mat.CellFolderCredentials = state.FolderCredentials
 
+	// The draining set describes the pushed folders. The reconciler records
+	// it only when a push delivers, so it is carried, not read from status.
+	mat.CellDrainingTenants = state.Draining
+
 	recordCellTenantWarnings(cr, state.Warnings)
 	return nil
 }

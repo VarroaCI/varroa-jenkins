@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
 // updateCellInstance writes Controller.status.cell.instance from the
@@ -62,4 +63,15 @@ func (r *Reconciler) updateCellInstance(ctx context.Context, cr *v1alpha1.Contro
 		dropKeptTenants(cr.Status.Cell)
 	}
 	cr.Status.Cell.Instance = instance
+}
+
+// cellResultFromCurrentInstance reports whether a desired-state result came
+// from the pod that status.cell.instance names. A result from a replaced pod
+// must not change the applied tenant set or the refused tenant warnings.
+func cellResultFromCurrentInstance(cr *v1alpha1.Controller, d *mitev1.DesiredStateResult) bool {
+	current := ""
+	if cr.Status.Cell != nil {
+		current = cr.Status.Cell.Instance
+	}
+	return d.CellInstance == current
 }

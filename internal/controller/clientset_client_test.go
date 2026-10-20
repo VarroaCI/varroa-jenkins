@@ -1594,7 +1594,7 @@ func TestPatchControllerStatus_CellPatchShape(t *testing.T) {
 		t.Fatalf("patch body carries no status.cell: %v", decoded)
 	}
 	for _, key := range []string{
-		"warm", "appliedTenants", "evacuate", "unreadySince", "rolledAt", "tenantWarnings",
+		"warm", "appliedTenants", "drainingTenants", "evacuate", "unreadySince", "rolledAt", "tenantWarnings",
 		"instance", "previousInstance", "previousInstanceLastSeen", "rehydration",
 	} {
 		if _, present := cell[key]; !present {
@@ -3070,6 +3070,19 @@ func TestControllerStatusPatch_CellPendingSignaturesAlwaysWritten(t *testing.T) 
 		if _, ok := cell[key]; !ok {
 			t.Fatalf("%s absent from the cell patch for an empty status", key)
 		}
+	}
+}
+
+// drainingTenants is written for an empty status, so a cleared draining set
+// clears the list instead of being retained by the merge patch.
+func TestControllerStatusPatch_CellDrainingTenantsAlwaysWritten(t *testing.T) {
+	patch := controllerStatusPatch(&v1alpha1.ControllerStatus{Cell: &v1alpha1.CellStatus{}})
+	cell, ok := patch["cell"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("cell missing from the status patch: %+v", patch)
+	}
+	if _, ok := cell["drainingTenants"]; !ok {
+		t.Fatal("drainingTenants absent from the cell patch for an empty status")
 	}
 }
 

@@ -404,6 +404,7 @@ type DesiredStateResult struct {
 	RehydrationDeferredJobs   []string                    `json:"rehydration_deferred_jobs,omitempty"`
 	RehydrationReloadFailures []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
 	ItemFailures              []*ItemFailure              `json:"item_failures,omitempty"`
+	CellInstance              string                      `json:"cell_instance,omitempty"`
 }
 
 type EventAck struct {
