@@ -1435,7 +1435,7 @@ sections describe.
   any read; they run outside the workqueue, so each carries its own gate. Their
   status writes go through `crdstore.MutateStatus` and change only the approve's
   own fields, never `PatchControllerStatus`. `Reconcile` and both approve methods
-  take `controllerLocks` (`keylock.go`) for the controller's `namespace/name`. The
+  take `controllerLocks` (`internal/keylock`) for the controller's `namespace/name`. The
   tick holds it from its first read to its end status write, so it cannot write
   back stale approve fields. The lock is local to the process: this is correct only
   because the shard owner alone runs the tick and the approve, and because a stalled

@@ -14,6 +14,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
 	"github.com/varroaci/varroa-jenkins/internal/controller/sharding"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
+	"github.com/varroaci/varroa-jenkins/internal/keylock"
 )
 
 // stampOps answers every forge verb with the replica id, so a test can tell
@@ -25,6 +26,9 @@ type stampOps struct {
 	calls *atomic.Int32
 	// block holds PullRequest and Issue until it is closed, when it is not nil.
 	block chan struct{}
+	// blockTeam limits block to the pull requests of one Team. An empty
+	// blockTeam holds every pull request.
+	blockTeam string
 }
 
 func (s stampOps) Check(ctx context.Context, _ forgeapi.CheckRequest) forgeapi.CheckReply {
@@ -58,11 +62,11 @@ func (s stampOps) Issue(ctx context.Context, _ forgeapi.IssueRequest, _ string) 
 	return forgeapi.IssueReply{Status: forgeapi.Status{OK: true}, Number: 1, URL: s.id}
 }
 
-func (s stampOps) PullRequest(ctx context.Context, _ forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
+func (s stampOps) PullRequest(ctx context.Context, req forgeapi.PullRequestRequest) forgeapi.PullRequestReply {
 	if s.calls != nil {
 		s.calls.Add(1)
 	}
-	if s.block != nil {
+	if s.block != nil && (s.blockTeam == "" || req.Team == s.blockTeam) {
 		select {
 		case <-s.block:
 		case <-ctx.Done():
@@ -81,10 +85,17 @@ func prBody(t *testing.T) []byte {
 	return prBodyDeadline(t, time.Now().Add(forgeapi.PullRequestTimeout))
 }
 
-// prBodyDeadline returns a pull-request request that carries the deadline d.
+// prBodyDeadline returns a pull-request request for the payments Team that
+// carries the deadline d.
 func prBodyDeadline(t *testing.T, d time.Time) []byte {
 	t.Helper()
-	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: "payments", Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}, Deadline: d})
+	return prBodyTeam(t, "payments", d)
+}
+
+// prBodyTeam returns a pull-request request for team that carries the deadline d.
+func prBodyTeam(t *testing.T, team string, d time.Time) []byte {
+	t.Helper()
+	b, err := json.Marshal(forgeapi.PullRequestRequest{Team: team, Repo: "https://git.example.org/a/b", Branch: "varroa/propose-pipeline", Title: "t", Body: "b", CommitMessage: "c", Files: []forgeapi.File{{Path: "Jenkinsfile", Content: "x"}}, Deadline: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +106,7 @@ func prBodyDeadline(t *testing.T, d time.Time) []byte {
 // owner of the Team opens the pull request and answers.
 func TestHandleForgePullRequest_NonOwnerSendsNoReply(t *testing.T) {
 	ring := sharding.NewRing(8)
-	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), prBody(t))
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{id: "x"}, ownerEnter(map[int]bool{}, ring), keylock.New(), prBody(t))
 	if got != nil {
 		t.Fatalf("non-owner replied: %s", got)
 	}
@@ -108,7 +119,7 @@ func TestHandleForgePullRequest_DeadlineLeavesReserve(t *testing.T) {
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	var seen time.Time
 	reqDeadline := time.Now().Add(forgeapi.PullRequestTimeout)
-	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBodyDeadline(t, reqDeadline))
+	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), keylock.New(), prBodyDeadline(t, reqDeadline))
 	if seen.IsZero() {
 		t.Fatal("no deadline on the forge call")
 	}
@@ -125,7 +136,7 @@ func TestHandleForgePullRequest_CapsFarDeadline(t *testing.T) {
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	var seen time.Time
 	before := time.Now()
-	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), prBodyDeadline(t, before.Add(time.Hour)))
+	handleForgePullRequest(context.Background(), slog.Default(), stampOps{deadline: &seen}, ownerEnter(held, ring), keylock.New(), prBodyDeadline(t, before.Add(time.Hour)))
 	if seen.IsZero() {
 		t.Fatal("no deadline on the forge call")
 	}
@@ -140,7 +151,7 @@ func TestHandleForgePullRequest_ExpiredRefusesWithoutCall(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	var calls atomic.Int32
-	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring),
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), keylock.New(),
 		prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+5*time.Second)))
 	var rep forgeapi.PullRequestReply
 	if err := json.Unmarshal(got, &rep); err != nil {
@@ -160,7 +171,7 @@ func TestHandleForgePullRequest_MissingDeadlineIsInvalid(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	var calls atomic.Int32
-	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), prBodyDeadline(t, time.Time{}))
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), keylock.New(), prBodyDeadline(t, time.Time{}))
 	var rep forgeapi.PullRequestReply
 	if err := json.Unmarshal(got, &rep); err != nil {
 		t.Fatal(err)
@@ -301,6 +312,7 @@ func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, 
 		return set.Enter(ctx, ring.ShardFor(key))
 	}
 	logger := slog.Default()
+	locks := keylock.New()
 	r := &forgeRunner{
 		busConn: conn,
 		cluster: "core",
@@ -312,15 +324,12 @@ func startForgeReplica(t *testing.T, url, id, verb string, ring *sharding.Ring, 
 			case forgeapi.VerbCheck:
 				return handleForgeCheck(ctx, logger, ops, enter, data)
 			case forgeapi.VerbPullRequest:
-				return handleForgePullRequest(ctx, logger, ops, enter, data)
+				return handleForgePullRequest(ctx, logger, ops, enter, locks, data)
 			case forgeapi.VerbIssue:
 				return handleForgeIssue(ctx, logger, ops, enter, "varroa-system", data)
 			}
 			return handleForgeRead(ctx, logger, ops, enter, data)
 		},
-	}
-	if verb == forgeapi.VerbPullRequest {
-		r.limit = forgePullRequestConcurrency
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -409,8 +418,8 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 }
 
 // TestForgeRunners_QueuedPullRequestExpires checks that a request which waits
-// in the queue behind a slow one is refused once its deadline leaves too
-// little work time, and that the forge makes no call for it.
+// for its Team behind a slow pull request is refused once its deadline leaves
+// too little work time, and that the forge makes no call for it.
 func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
 	s := startLedgerActionNATS(t)
 	url := s.ClientURL()
@@ -428,7 +437,7 @@ func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
 	t.Cleanup(client.Close)
 	subject := bus.OperatorForgeSubject("core", forgeapi.VerbPullRequest)
 
-	// The first request holds the only slot until the test closes block.
+	// The first request holds the Team lock until the test closes block.
 	inboxA := client.NewRespInbox()
 	subA, err := client.SubscribeSync(inboxA)
 	if err != nil {
@@ -448,8 +457,8 @@ func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
 	}
 
 	// The second request has reserve + min budget + 1 s left when it is sent.
-	// The first request holds the slot for 2 s, so less than the minimum
-	// budget is left when the second one runs.
+	// The first request holds the Team lock for 2 s, so the wait for the
+	// Team ends with less than the minimum budget left.
 	inboxB := client.NewRespInbox()
 	subB, err := client.SubscribeSync(inboxB)
 	if err != nil {
@@ -679,4 +688,174 @@ func stampOf(t *testing.T, verb string, data []byte) string {
 		t.Fatal(err)
 	}
 	return rep.Revision
+}
+
+// TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne checks that a slow
+// pull request for one Team does not hold back a pull request for another Team
+// on the same replica.
+func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
+	s := startLedgerActionNATS(t)
+	url := s.ClientURL()
+	ring := sharding.NewRing(8)
+	held := map[int]bool{
+		ring.ShardFor(forgeops.ShardKey("payments")): true,
+		ring.ShardFor(forgeops.ShardKey("billing")):  true,
+	}
+	var calls atomic.Int32
+	block := make(chan struct{})
+	startForgeReplica(t, url, "A", forgeapi.VerbPullRequest, ring, held,
+		stampOps{id: "A", calls: &calls, block: block, blockTeam: "payments"})
+
+	client, err := nats.Connect(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+	subject := bus.OperatorForgeSubject("core", forgeapi.VerbPullRequest)
+
+	inboxA := client.NewRespInbox()
+	subA, err := client.SubscribeSync(inboxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The runner subscribes in its own goroutine, so an early publish is
+	// dropped. Publish again until the forge sees the request.
+	bodyA := prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
+	for i := 0; i < 50 && calls.Load() == 0; i++ {
+		if err := client.PublishRequest(subject, inboxA, bodyA); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("the payments request did not reach the forge")
+	}
+
+	inboxB := client.NewRespInbox()
+	subB, err := client.SubscribeSync(inboxB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyB := prBodyTeam(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))
+	if err := client.PublishRequest(subject, inboxB, bodyB); err != nil {
+		t.Fatal(err)
+	}
+	msgB, err := nextQueuedReply(subB, 3*time.Second)
+	if err != nil {
+		t.Fatalf("the billing request waited behind the payments request: %v", err)
+	}
+	var repB forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgB.Data, &repB); err != nil {
+		t.Fatal(err)
+	}
+	if !repB.OK {
+		t.Fatalf("billing request failed: %+v", repB.Status)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("forge calls %d while payments is held, want 2", n)
+	}
+
+	close(block)
+	msgA, err := nextQueuedReply(subA, 5*time.Second)
+	if err != nil {
+		t.Fatalf("no reply to the payments request: %v", err)
+	}
+	var repA forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgA.Data, &repA); err != nil {
+		t.Fatal(err)
+	}
+	if !repA.OK {
+		t.Fatalf("payments request failed: %+v", repA.Status)
+	}
+}
+
+// TestHandleForgePullRequest_WaitsForTeamThenRuns checks that a pull request
+// waits for the lock of its Team, and runs once the lock is free and enough
+// time is left.
+func TestHandleForgePullRequest_WaitsForTeamThenRuns(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	locks := keylock.New()
+	key := forgeops.ShardKey("payments")
+	if err := locks.Lock(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+3*time.Second))
+	done := make(chan []byte, 1)
+	go func() {
+		done <- handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, body)
+	}()
+	time.Sleep(500 * time.Millisecond)
+	locks.Unlock(key)
+
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(<-done, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK {
+		t.Fatalf("reply %+v, want OK after the Team lock was freed", rep.Status)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("forge calls %d, want 1", n)
+	}
+}
+
+// TestHandleForgePullRequest_TeamWaitExpiresWithoutCall checks that a pull
+// request whose wait for its Team leaves less than the minimum budget answers
+// request_expired and makes no forge call.
+func TestHandleForgePullRequest_TeamWaitExpiresWithoutCall(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	locks := keylock.New()
+	key := forgeops.ShardKey("payments")
+	if err := locks.Lock(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	defer locks.Unlock(key)
+	var calls atomic.Int32
+	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+time.Second))
+	start := time.Now()
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, body)
+	if waited := time.Since(start); waited > 3*time.Second {
+		t.Fatalf("the wait took %v, want about 1s", waited)
+	}
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Code != forgeapi.CodeRequestExpired {
+		t.Fatalf("code %q, want %q", rep.Code, forgeapi.CodeRequestExpired)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("forge calls %d, want 0", n)
+	}
+	if n := locks.Size(); n != 1 {
+		t.Fatalf("lock entries %d, want 1 for the holder", n)
+	}
+}
+
+// TestHandleForgePullRequest_OtherTeamIgnoresHeldLock checks that a lock held
+// for one Team does not delay a pull request for another Team.
+func TestHandleForgePullRequest_OtherTeamIgnoresHeldLock(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	locks := keylock.New()
+	if err := locks.Lock(context.Background(), forgeops.ShardKey("billing")); err != nil {
+		t.Fatal(err)
+	}
+	defer locks.Unlock(forgeops.ShardKey("billing"))
+	var calls atomic.Int32
+	start := time.Now()
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, prBody(t))
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Fatalf("the call took %v behind another Team's lock", waited)
+	}
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK {
+		t.Fatalf("reply %+v, want OK", rep.Status)
+	}
 }

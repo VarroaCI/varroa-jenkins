@@ -11,6 +11,7 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/bus"
 	"github.com/varroaci/varroa-jenkins/internal/controller/forgeops"
 	"github.com/varroaci/varroa-jenkins/internal/forge/forgeapi"
+	"github.com/varroaci/varroa-jenkins/internal/keylock"
 )
 
 // forgeRequestTimeout bounds one forge check or read on the operator, and it
@@ -47,12 +48,9 @@ const forgeIssueReserve = forgeReplyMargin
 const forgeIssueMinBudget = 10 * time.Second
 
 // forgeConcurrency limits the forge requests that one replica runs at a
-// time on one verb subject.
+// time on one verb subject. forge.pullrequest also takes a lock for each
+// Team, so two calls for one Team never race on one branch.
 const forgeConcurrency = 4
-
-// forgePullRequestConcurrency runs one pull request at a time on each
-// replica, so two calls for one Team never race on one branch.
-const forgePullRequestConcurrency = 1
 
 // forgeOps is the slice of *forgeops.Ops that the forge handlers call.
 type forgeOps interface {
@@ -133,8 +131,10 @@ func handleForgeIssue(ctx context.Context, logger *slog.Logger, ops forgeOps, en
 }
 
 // handleForgePullRequest answers one operator.<cluster>.forge.pullrequest
-// request. The ownership rule is the same as handleForgeCheck.
-func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, data []byte) []byte {
+// request. The ownership rule is the same as handleForgeCheck. One request for
+// each Team runs at a time on the replica. The wait for the Team counts against
+// the deadline and leaves at least forgePullRequestMinBudget of work time.
+func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeOps, enter shardEnterer, locks *keylock.KeyLock, data []byte) []byte {
 	var req forgeapi.PullRequestRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		logger.Warn("forge pullrequest decode failed", "error", err)
@@ -152,12 +152,27 @@ func handleForgePullRequest(ctx context.Context, logger *slog.Logger, ops forgeO
 	work, ok := forgeWorkDeadline(now, req.Deadline, forgePullRequestReserve, forgePullRequestTimeout, forgePullRequestMinBudget)
 	if !ok {
 		logger.Info("forge pullrequest has too little time left", "team", req.Team, "left", req.Deadline.Sub(now).Round(time.Second))
-		return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
-			Error: "too little time was left for the pull request, so none was opened. Call again."}})
+		return pullRequestExpired()
 	}
+	key := forgeops.ShardKey(req.Team)
+	lctx, lcancel := context.WithDeadline(wctx, work.Add(-forgePullRequestMinBudget))
+	err := locks.Lock(lctx, key)
+	lcancel()
+	if err != nil {
+		logger.Info("forge pullrequest waited too long for its Team", "team", req.Team, "left", time.Until(req.Deadline).Round(time.Second))
+		return pullRequestExpired()
+	}
+	defer locks.Unlock(key)
 	rctx, cancel := context.WithDeadline(wctx, work)
 	defer cancel()
 	return encodeForgeReply(ops.PullRequest(rctx, req))
+}
+
+// pullRequestExpired is the reply to a pull request that gets too little time.
+// No forge call runs for it.
+func pullRequestExpired() []byte {
+	return encodeForgeReply(forgeapi.PullRequestReply{Status: forgeapi.Status{Code: forgeapi.CodeRequestExpired,
+		Error: "too little time was left for the pull request, so none was opened. Call again."}})
 }
 
 // forgeWorkDeadline returns the end of the work time for a request that the
