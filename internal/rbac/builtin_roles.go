@@ -31,13 +31,13 @@ var builtinJenkinsRoleDefinitions = []v1alpha1.JenkinsRole{
 	}),
 	buildBuiltinJenkinsRole("varroa-operator", []string{
 		"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build",
-		"hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Delete",
+		"hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Delete",
 		"hudson.model.Item.Discover", "hudson.model.Item.Workspace", "hudson.model.Run.Delete",
 		"hudson.model.Run.Update", "hudson.model.View.Read", "hudson.model.View.Configure",
 	}),
 	buildBuiltinJenkinsRole("varroa-developer", []string{
 		"hudson.model.Hudson.Read", "hudson.model.Item.Read", "hudson.model.Item.Build",
-		"hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Discover",
+		"hudson.model.Item.Cancel", "hudson.model.Item.Configure", "hudson.model.Item.Create", "hudson.model.Item.Discover",
 		"hudson.model.Item.Workspace", "hudson.model.Run.Update", "hudson.model.View.Read",
 	}),
 	buildBuiltinJenkinsRole("varroa-viewer", []string{

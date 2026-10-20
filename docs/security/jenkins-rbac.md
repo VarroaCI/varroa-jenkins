@@ -74,6 +74,17 @@ Varroa reconciles the built-in Jenkins roles `varroa-admin`,
 of editing built-ins. See [executeGroovy security](execute-groovy.md) for the
 operator role.
 
+The table lists the permissions of the built-in human roles on a classic controller. It omits the system roles:
+
+| Role | Permissions |
+| --- | --- |
+| `varroa-admin` | All permissions, through `Overall/Administer`. |
+| `varroa-operator` | Read, build, cancel, configure, create, delete, workspace, run delete and update, view read and configure. |
+| `varroa-developer` | Read, build, cancel, configure, create, workspace, run update, view read. |
+| `varroa-viewer` | Read only. |
+
+On a classic controller, `varroa-operator` and `varroa-developer` can stop a build (`Job/Cancel`). `varroa-viewer` cannot.
+
 ## Federate roles to hive clusters
 
 Varroa copies each core `VarroaRoleBinding` that grants a Global Jenkins role
