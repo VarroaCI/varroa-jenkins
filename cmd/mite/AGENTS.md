@@ -46,7 +46,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   - **Mite state dir** — `Agent.miteDir` owns every mite state file, including
     the items engine's `managed-items.json` (`managedItemsPath`). The items
     package takes its cache path from its caller and never hardcodes a Jenkins
-    home path. Tests set `miteDir` to `t.TempDir()`.
+    home path. Tests set `miteDir` to `t.TempDir()`. A failed write of `managed-items.json` fails the items section and names the path in `ItemsError`.
   - **Content answer** — `buildContentResponse` answers a `ContentRequest` from
     `last-jcasc.yaml`, `last-items.yaml`, and `last-plugins.txt`, and passes the
     first two through `internal/secretredact`. The files on disk stay
