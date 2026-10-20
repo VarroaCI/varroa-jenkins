@@ -854,6 +854,7 @@ func main() {
 	broodOps := controller.NewCommandBroodOps(mgr.GetClient(), operatorNamespace, logger)
 	broodSchedules := controller.NewCommandBroodSchedules(mgr.GetClient(), operatorNamespace, logger)
 	configCrud := controller.NewConfigCRUD(clientsetClient, clientsetClient, composer, operatorNamespace, logger.With("component", "config_crud"))
+	configCrud.Grants = rbacResolver
 	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
 	if err := mgr.Add(&operatorCommandRunner{
 		busConn:        busConn,
@@ -2024,6 +2025,7 @@ func (r *operatorCommandRunner) commandResponders(ctx context.Context) []command
 		{"cellpools.list", bus.OperatorCellPoolsSubject(r.cluster, "list"), r.configCrud.HandleCellPoolsList, serialResponder},
 		{"cellpools.get", bus.OperatorCellPoolsSubject(r.cluster, "get"), r.configCrud.HandleCellPoolsGet, serialResponder},
 		{"cellpools.scale", bus.OperatorCellPoolsSubject(r.cluster, "scale"), r.configCrud.HandleCellPoolsScale, serialResponder},
+		{"cells.grants", bus.OperatorCellsSubject(r.cluster, "grants"), r.configCrud.HandleCellGrants, serialResponder},
 		// Namespace discovery (F4 add-cluster-namespace-discovery).
 		{"namespaces.list", bus.OperatorNamespacesSubject(r.cluster), r.crud.HandleNamespacesList, serialResponder},
 	}

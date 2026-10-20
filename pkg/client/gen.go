@@ -288,6 +288,7 @@ const (
 // Defines values for ComponentsSchemasCellGrantSource.
 const (
 	ClusterWideBinding  ComponentsSchemasCellGrantSource = "clusterWideBinding"
+	FederatedBinding    ComponentsSchemasCellGrantSource = "federatedBinding"
 	TeamMembership      ComponentsSchemasCellGrantSource = "teamMembership"
 	TenantScopedBinding ComponentsSchemasCellGrantSource = "tenantScopedBinding"
 )
@@ -1699,9 +1700,14 @@ type ComponentsSchemasCatalogVariableType string
 
 // ComponentsSchemasCellGrant One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.
 type ComponentsSchemasCellGrant struct {
-	// Binding The VarroaRoleBinding name. Absent for the teamMembership source.
-	Binding  *string                             `json:"binding,omitempty"`
-	Jobs     *[]string                           `json:"jobs,omitempty"`
+	// Binding The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the teamMembership source.
+	Binding *string `json:"binding,omitempty"`
+
+	// FederatedFrom The core VarroaRoleBindings of a federated copy.
+	FederatedFrom *[]string `json:"federatedFrom,omitempty"`
+	Jobs          *[]string `json:"jobs,omitempty"`
+
+	// RoleRef The VarroaRole of the grant. For the federatedBinding source it names the source VarroaRole of the copy.
 	RoleRef  string                              `json:"roleRef"`
 	Source   ComponentsSchemasCellGrantSource    `json:"source"`
 	Subjects []ComponentsSchemasCellGrantSubject `json:"subjects"`
@@ -1729,7 +1735,7 @@ type ComponentsSchemasCellGrants struct {
 
 // ComponentsSchemasCellMemberRole One generated Jenkins member role of a tenant. The role holds the person checks of the acting-user routes for its subjects.
 type ComponentsSchemasCellMemberRole struct {
-	// Binding The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.
+	// Binding The narrowing VarroaRoleBinding, or the JenkinsRoleBinding copy that names it. Absent for the role on the whole folder subtree.
 	Binding     *string                             `json:"binding,omitempty"`
 	Name        string                              `json:"name"`
 	Pattern     string                              `json:"pattern"`
@@ -21271,6 +21277,7 @@ type GetCellGrantsResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
+	JSON502      *ComponentsResponsesClusterUnreachable
 }
 
 // Status returns HTTPResponse.Status
@@ -29381,6 +29388,13 @@ func ParseGetCellGrantsResponse(rsp *http.Response) (*GetCellGrantsResponse, err
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest ComponentsResponsesClusterUnreachable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	}
 

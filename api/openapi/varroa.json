@@ -7961,8 +7961,16 @@
         "description": "One grant that reaches a tenant. The jobs field is absent when the grant narrows nothing. An absent jobs and an empty jobs mean different things, so the field is never an empty array.",
         "properties": {
           "binding": {
-            "description": "The VarroaRoleBinding name. Absent for the teamMembership source.",
+            "description": "The VarroaRoleBinding name. For the federatedBinding source it names the JenkinsRoleBinding copy on this cell's cluster. Absent for the teamMembership source.",
             "type": "string"
+          },
+          "federatedFrom": {
+            "description": "The core VarroaRoleBindings of a federated copy.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
           },
           "jobs": {
             "items": {
@@ -7972,12 +7980,14 @@
             "type": "array"
           },
           "roleRef": {
+            "description": "The VarroaRole of the grant. For the federatedBinding source it names the source VarroaRole of the copy.",
             "type": "string"
           },
           "source": {
             "enum": [
               "teamMembership",
               "tenantScopedBinding",
+              "federatedBinding",
               "clusterWideBinding"
             ],
             "type": "string"
@@ -8054,7 +8064,7 @@
         "description": "One generated Jenkins member role of a tenant. The role holds the person checks of the acting-user routes for its subjects.",
         "properties": {
           "binding": {
-            "description": "The narrowing VarroaRoleBinding. Absent for the role on the whole folder subtree.",
+            "description": "The narrowing VarroaRoleBinding, or the JenkinsRoleBinding copy that names it. Absent for the role on the whole folder subtree.",
             "type": "string"
           },
           "name": {
@@ -19206,7 +19216,7 @@
     },
     "/api/v1/cells/{namespace}/{name}/grants": {
       "get": {
-        "description": "Applies two gates. It applies the controller read check on the cell, exactly as the usage reads do. It then applies rolebindings:read on the caller's cluster-wide capability partition. It answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. It answers 403 when the controller check passes and the caller holds no rolebindings:read. The read is resolver backed, so it touches no record store and answers no 503.\n",
+        "description": "Applies two gates. It applies the controller read check on the cell, exactly as the usage reads do. It then applies rolebindings:read on the caller's cluster-wide capability partition. It answers 404 for an unknown controller, a controller that is not a cell, and a caller the controller read check refuses. It answers 403 when the controller check passes and the caller holds no rolebindings:read. A member cell's grants and member roles come from that member's operator, which holds the Team and binding state the member renders. The read touches no record store, so it answers no 503. It answers 502 when the member cluster does not answer.\n",
         "operationId": "getCellGrants",
         "parameters": [
           {
@@ -19250,6 +19260,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/components_responses_ClusterUnreachable"
           }
         },
         "summary": "Returns the grants that reach each tenant of one cell.",

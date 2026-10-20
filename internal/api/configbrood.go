@@ -91,6 +91,11 @@ type ConfigBrood interface {
 	GetCellPool(ctx context.Context, cluster, name string) (*v1alpha1.CellPool, error)
 	ScaleCellPool(ctx context.Context, cluster string, req bus.CellPoolScaleRequest) (*v1alpha1.CellPool, error)
 
+	// --- Cell grants (member clusters only) ---
+	// CellGrants asks a member's operator for the grants of each tenant of
+	// one cell. It refuses the local cluster.
+	CellGrants(ctx context.Context, cluster string, tenants []string) ([]bus.CellTenantGrants, error)
+
 	// --- Member-placed Team bundles (member clusters only) ---
 	// GetTeamBundleContent reads a Team that only a member cluster holds.
 	// It refuses the local cluster, whose Teams the caller reads on its own store.

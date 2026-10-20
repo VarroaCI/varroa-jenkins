@@ -38,6 +38,8 @@ type ConfigCRUD struct {
 	Composer          *bundle.Composer
 	OperatorNamespace string
 	Logger            *slog.Logger
+	// Grants answers cells.grants from this cluster's own RBAC state.
+	Grants TenantGrantReader
 }
 
 // NewConfigCRUD creates a new ConfigCRUD.

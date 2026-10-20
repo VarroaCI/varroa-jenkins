@@ -453,6 +453,7 @@ function PermissionsPanel({
                     <th>Subjects</th>
                     <th>Verbs</th>
                     <th>Jobs</th>
+                    <th>From</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -464,10 +465,16 @@ function PermissionsPanel({
                       <td>{g.subjects.map((s) => `${s.kind}:${s.name}`).join(", ") || DASH}</td>
                       <td>{g.verbs.join(", ") || DASH}</td>
                       <td className={styles.mono}>{g.jobs ? g.jobs.join(", ") : "every job"}</td>
+                      <td className={styles.mono}>{g.federatedFrom?.join(", ") || DASH}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            )}
+            {entry.grants.some((g) => g.source === "federatedBinding") && (
+              <p className={styles.note}>
+                A federatedBinding row is a copy of a core binding on this member cluster.
+              </p>
             )}
             {entry.truncated && (
               <p className={styles.note}>

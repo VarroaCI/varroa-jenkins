@@ -46,11 +46,11 @@ with what this package generates.
     input. `collectFromJenkinsRoleBindings`/`collectFromVarroaRoleBindings`
     dedupe/merge into an `accKey`-keyed map via `upsertAssignment`.
   - `TenantGrantSources` / `TenantGrantSourcesTruncated`
-    (`tenant_grants.go`) walk the same three tenant paths
+    (`tenant_grants.go`) walk the four tenant paths
     `EffectiveTenantCapabilities` walks, with the subject filter removed:
     they answer **which grants reach a tenant**, so they take no claims and
     decide nothing. The order is `teamMembership`, `tenantScopedBinding`,
-    `clusterWideBinding`, then binding name, and the list is capped at
+    `federatedBinding`, `clusterWideBinding`, then binding name, and the list is capped at
     `MaxTenantGrants` (50). The exported `TenantGrantSources` returns the
     capped list; a caller that must tell a full list from a cut list calls
     the `Truncated` sibling, because a list of exactly 50 is not proof of a
@@ -65,7 +65,7 @@ with what this package generates.
     job list gets one role on the whole folder subtree. A tenant-scoped
     grant gets `varroa:tenant-member:<team>:<binding>` with the job globs
     (`TenantMemberNarrowedPattern`). The member walk
-    (`allTenantGrantSources`) is uncapped, because a cut list drops a
+    (`allTenantGrantSources`, which also appends the federated copies) is uncapped, because a cut list drops a
     Jenkins subject silently. `Resolver.TenantMemberRoles` is the single
     source of these roles. `JenkinsRoleAssignments` and the BFF cell grants
     read both call it. No generated name may equal
@@ -84,6 +84,10 @@ with what this package generates.
     and annotated `varroa.dev/federated-tenant`, with an optional `varroa.dev/federated-tenant-jobs`
     JSON list. A copy with an unreadable job list grants nothing. The generic
     `collectFromJenkinsRoleBindings` skips every copy. The narrowed role name uses the copy name.
+    Each copy reports as a `federatedBinding` source: `Binding` is the copy name, `RoleRef` is the
+    source VarroaRole (the `varroa.dev/federated-from` label), and `FederatedFrom` splits the
+    `varroa.dev/federated-bindings` annotation into the core VarroaRoleBindings. The grants panel
+    therefore shows the copies on a member cell. Global-role copies are not reported.
     `DesiredFederatedCRs` (`federation.go`) writes the copies. Its `expandSubjects` argument
     comes from `TenantMemberSubjectExpander`.
   - Scope matching (`scopeMatches`, `controllerScopeMatches`, `lowerScope`,

@@ -495,6 +495,11 @@ sections describe.
   already reported any parse error on the bundle itself. Called from
   `config_crud.go`'s preview/validate NATS replies onto
   `bus.BundleComposePreview.PipelineTemplates`.
+- **Cell grants reply.** `config_crud_cellgrants.go` answers `cells.grants`.
+  It runs `TenantGrantSourcesTruncated` and `TenantMemberRoles` on the
+  cluster's own RBAC resolver (`ConfigCRUD.Grants`) for each requested tenant,
+  in request order. `CellTenantGrantsReport` is the one shaper for the wire
+  type; the BFF's local path calls it too. A reply above `ListPageBudget` fails.
 - **Team bundle content reply.** `config_crud_teambundle.go` answers
   `bundles.teamcontent` for a member-placed Team's pipeline read. It returns the
   bundle, four content keys (never `jenkins.yaml`), and `held`. `held` comes from

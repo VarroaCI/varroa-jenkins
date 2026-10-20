@@ -18,7 +18,8 @@ const MaxTenantGrants = 50
 
 // Grant sources, in the order TenantGrantSources reports them. A narrowing
 // grant matters more than a cluster-wide one, so the narrowing sources come
-// first.
+// first. A federated copy narrows or reaches one tenant, so it ranks with
+// the tenant-scoped sources and before the cluster-wide binding.
 const (
 	GrantSourceTeamMembership      = "teamMembership"
 	GrantSourceTenantScopedBinding = "tenantScopedBinding"
@@ -26,23 +27,29 @@ const (
 	GrantSourceFederatedBinding    = "federatedBinding"
 )
 
-// sourceRank orders the three grant sources.
+// sourceRank orders the four grant sources.
 var sourceRank = map[string]int{
 	GrantSourceTeamMembership:      0,
 	GrantSourceTenantScopedBinding: 1,
-	GrantSourceClusterWideBinding:  2,
+	GrantSourceFederatedBinding:    2,
+	GrantSourceClusterWideBinding:  3,
 }
 
 // TenantGrantSource is one grant that reaches a tenant, with the subjects
 // it names. Jobs is nil when the grant narrows nothing: an empty list and
 // an absent list mean different things to a reader.
+//
+// For a federatedBinding source, Binding names the JenkinsRoleBinding copy,
+// RoleRef names the source VarroaRole, and FederatedFrom names the core
+// VarroaRoleBindings the copy stands for.
 type TenantGrantSource struct {
-	Source   string
-	Binding  string
-	RoleRef  string
-	Subjects []v1alpha1.SubjectRef
-	Verbs    []string
-	Jobs     []string
+	Source        string
+	Binding       string
+	RoleRef       string
+	Subjects      []v1alpha1.SubjectRef
+	Verbs         []string
+	Jobs          []string
+	FederatedFrom []string
 }
 
 // TenantItemRoleName returns the generated Jenkins item role name of a
@@ -141,8 +148,7 @@ func (r *Resolver) tenantMemberRoles(team string, aliases map[string][]string) [
 	var subtree *TenantMemberRole
 	narrowed := map[string]*tenantMemberNarrowing{}
 	var narrowedOrder []string
-	grants := append(r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team}),
-		r.federatedTenantMemberSources(team)...)
+	grants := r.allTenantGrantSources(ParsedTenant{Kind: TenantTeam, Team: team, Folder: team})
 	for _, src := range grants {
 		if !slices.Contains(src.Verbs, "write") {
 			continue
@@ -220,8 +226,10 @@ type tenantMemberNarrowing struct {
 }
 
 // TenantGrantSources lists every grant that reaches one pipelines tenant.
-// It is the reverse of EffectiveTenantCapabilities: it walks the same three
-// paths with the subject filter removed, so it takes no claims.
+// It is the reverse of EffectiveTenantCapabilities: it walks the same four
+// paths (Team membership, tenant-scoped and cluster-wide bindings, and the
+// federated tenant-member copies) with the subject filter removed, so it
+// takes no claims.
 //
 // The method reports. It decides nothing, and every authorization decision
 // keeps calling the tenant checks the authorizer exposes.
@@ -248,7 +256,8 @@ func (r *Resolver) TenantGrantSourcesTruncated(tenant ParsedTenant) ([]TenantGra
 }
 
 // allTenantGrantSources returns every grant that reaches one pipelines
-// tenant, sorted, with no cap. Callers that generate Jenkins grants use it,
+// tenant, sorted, with no cap. It covers the same four sources
+// TenantGrantSources reports. Callers that generate Jenkins grants use it,
 // because a cut list would silently drop a subject from a Jenkins role.
 func (r *Resolver) allTenantGrantSources(tenant ParsedTenant) []TenantGrantSource {
 	if r == nil || tenant.Kind != TenantTeam || tenant.Team == "" {
@@ -260,6 +269,7 @@ func (r *Resolver) allTenantGrantSources(tenant ParsedTenant) []TenantGrantSourc
 		out = append(out, g)
 	}
 	out = append(out, r.bindingGrantSources(tenant.Team)...)
+	out = append(out, r.federatedTenantMemberSources(tenant.Team)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if sourceRank[out[i].Source] != sourceRank[out[j].Source] {
@@ -307,16 +317,26 @@ func (r *Resolver) federatedTenantMemberSources(team string) []TenantGrantSource
 			}
 		}
 		out = append(out, TenantGrantSource{
-			Source:   GrantSourceFederatedBinding,
-			Binding:  b.Name,
-			RoleRef:  b.Spec.RoleRef,
-			Subjects: append([]v1alpha1.SubjectRef(nil), b.Spec.Subjects...),
-			Verbs:    []string{"write"},
-			Jobs:     jobs,
+			Source:        GrantSourceFederatedBinding,
+			Binding:       b.Name,
+			RoleRef:       b.Labels[LabelFederatedFrom],
+			Subjects:      append([]v1alpha1.SubjectRef(nil), b.Spec.Subjects...),
+			Verbs:         []string{"write"},
+			Jobs:          jobs,
+			FederatedFrom: federatedFromNames(b.Annotations[AnnotationFederatedBindings]),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Binding < out[j].Binding })
 	return out
+}
+
+// federatedFromNames splits the source-binding annotation of a copy. It
+// returns nil for an absent annotation, so the JSON omits the field.
+func federatedFromNames(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, ",")
 }
 
 // teamMembershipGrantSource resolves the Team-membership path. It applies
