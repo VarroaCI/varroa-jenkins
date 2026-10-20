@@ -42,7 +42,7 @@ Merge the pull request on the forge. See
 | `forge_unsupported` | 422 | Use a supported forge. |
 | `forge_auth_failed` | 422 | Replace the token. |
 | `forge_write_denied` | 422 | Give one token write access to contents and pull requests. |
-| `forge_unreachable` | 502 | Add the forge to `gitEgress`. On a rate limit, retry after the time in the message. |
+| `forge_unreachable` | 502 | Add the forge to `gitEgress`. On a rate limit, retry after the time in the message, or later when the message gives none. |
 | `jenkinsfile_exists` | 409 | Add the repository as a job. |
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |
 | `request_expired` | 504 | Approve the call again. |
