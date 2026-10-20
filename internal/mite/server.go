@@ -279,9 +279,10 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 	// open this stream on another, which never saw that Register call.
 	// Read it from the cert every time a stream opens, before any build
 	// event on this stream gets mapped to an ingest envelope.
-	if ci := ca.CellInstanceFromCert(leaf); ci != "" {
+	cellInstance := ca.CellInstanceFromCert(leaf)
+	if cellInstance != "" {
 		if rec, ok := handler.(cellInstanceRecorder); ok {
-			rec.RecordCellInstance(controllerName, namespace, ci)
+			rec.RecordCellInstance(controllerName, namespace, cellInstance)
 		}
 	}
 
@@ -353,6 +354,12 @@ func (s *Server) CommandStream(stream mitev1.Mite_CommandStreamServer) error {
 			handler.OnSnapshot(controllerName, namespace, m.StateSnapshot)
 
 		case *mitev1.MiteMessage_CommandResult:
+			// The operator compares this value with status.cell.instance, so
+			// it comes from the certificate of this stream, never from the
+			// payload. A value that the mite sent is replaced.
+			if ds := m.CommandResult.GetDesiredState(); ds != nil {
+				ds.CellInstance = cellInstance
+			}
 			handler.OnCommandResult(controllerName, namespace, m.CommandResult)
 
 		case *mitev1.MiteMessage_TokenRefreshRequest:

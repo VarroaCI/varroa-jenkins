@@ -625,14 +625,18 @@ sections describe.
   items section clears them all. The drain applies this only when the result answers the
   tracked desired-state hash. The same drain also advances `status.cell.appliedTenants` on a
   result with `item_failures`. Each tenant that owns a refused item keeps its previous membership.
-  A pod change drops each tenant with an `ItemsApplyFailed` entry from `appliedTenants`.
+  The drain advances `appliedTenants` and `ItemsApplyFailed` only for a result whose
+  `cell_instance` equals `status.cell.instance`. A result from a replaced pod changes neither.
+  A tenant in `status.cell.drainingTenants` never enters `appliedTenants`. The draining set is
+  written with `desiredStateHash` on a delivered push only. A pod change drops each tenant with an
+  `ItemsApplyFailed` entry from `appliedTenants`.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
   placement pass (`TeamReconciler`, via `cells.Place`) calls it. The blind
   end-of-reconcile `PatchControllerStatus` patch above deliberately omits
   `tenants` from its own `cell` sub-map — it carries only `warm`,
-  `appliedTenants`, `evacuate`, `unreadySince`, `rolledAt`, and
+  `appliedTenants`, `drainingTenants`, `evacuate`, `unreadySince`, `rolledAt`, and
   `tenantWarnings` — or a stale in-memory tenant list would clobber a
   placement change the two writers raced on.
 - **`status.cell.pendingTenants` (the placement claim) is the second narrow

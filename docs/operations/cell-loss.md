@@ -19,6 +19,8 @@ pod; a `Running` or `Pending` pod does not. A failed read clears nothing, so an 
 reports a live cell as gone. The placement announcement names each confirmed instance and the
 time its read proved it.
 
+The operator ignores an items apply result from a replaced pod.
+
 A confirmed loss reaches a mark in about 70 to 130 seconds. Without a confirmation the recorder
 falls back to two fixed windows: five minutes for a run whose owning instance changed, and fifteen
 minutes for a silent run on the current instance.

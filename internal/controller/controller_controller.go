@@ -2200,7 +2200,7 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		return fmt.Errorf("%w for %s", ErrNoPendingRestart, key)
 	}
 
-	desired, err := r.assembleApproveState(ctx, cr)
+	desired, draining, err := r.assembleApproveState(ctx, cr)
 	if err != nil {
 		return err
 	}
@@ -2291,6 +2291,7 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 		}
 		fresh.Status.DesiredStateHash = desiredHash
 		fresh.Status.DesiredContentHash = computeDesiredContentHash(desired)
+		recordCellDrainingTenants(&fresh.Status, isCellController(cr), draining)
 		if action == "restart" {
 			setRestartDrain(&fresh.Status, restartCmdID, restartAt, drainSec)
 		}
@@ -2308,27 +2309,30 @@ func (r *Reconciler) ApproveRestart(ctx context.Context, cluster, namespace, nam
 
 // assembleApproveState builds the desired state that an approval sends
 // from the current inputs.
-func (r *Reconciler) assembleApproveState(ctx context.Context, cr *v1alpha1.Controller) (*mitev1.DesiredStateCommand, error) {
+//
+// It also returns the draining tenants of that desired state, which the
+// approval records with the hash.
+func (r *Reconciler) assembleApproveState(ctx context.Context, cr *v1alpha1.Controller) (*mitev1.DesiredStateCommand, []string, error) {
 	// Re-fetch bundle content from the materialized ConfigMap and resolve vars.
 	resolvedBundle, _, _, _, err := r.resolveBundleForController(ctx, cr)
 	if err != nil {
-		return nil, fmt.Errorf("resolve bundle: %w", err)
+		return nil, nil, fmt.Errorf("resolve bundle: %w", err)
 	}
 
 	contrib, err := r.runnerContribution(ctx, cr)
 	if err != nil {
-		return nil, fmt.Errorf("build runner contribution: %w", err)
+		return nil, nil, fmt.Errorf("build runner contribution: %w", err)
 	}
 
 	desired, err := r.buildDesiredStateCommand(cr, resolvedBundle, contrib)
 	if err != nil {
-		return nil, fmt.Errorf("build desired state: %w", err)
+		return nil, nil, fmt.Errorf("build desired state: %w", err)
 	}
 	// The mite replaces its tenant set from every cell push, so a push
 	// without tenant_homes holds back every tenant's triggers. The entries
 	// are also inside the full hash.
 	r.attachTenantHomes(ctx, cr, r.listPlacedTeams(ctx, cr), desired)
-	return desired, nil
+	return desired, resolvedBundle.CellDrainingTenants, nil
 }
 
 // checkPendingContent refuses an approval when the content that it built
@@ -3995,14 +3999,18 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// apply that walked every item, with or without refusals,
 				// when the hash matches the tracked desired-state hash. The
 				// hash is the only success signal, because ControllerStatus
-				// carries no applied-hash field of its own. A hash match
-				// implies a tenant-set match too. A walk with refusals sets
-				// item_failures. A parse error, a deadline, or a failed
-				// existence check does not set it, so those results do not
-				// advance the list. A tenant that the cell holds, or that
-				// owns a refused item, keeps its previous state.
+				// carries no applied-hash field of its own. A walk with
+				// refusals sets item_failures. A parse error, a deadline, or
+				// a failed existence check does not set it, so those results
+				// do not advance the list. A tenant that the cell holds, or
+				// that owns a refused item, keeps its previous state. A
+				// draining tenant never enters the list, because
+				// status.cell.drainingTenants names it. A result from another
+				// cell instance changes neither the list nor the refused
+				// tenant warnings.
 				if isCellController(cr) && (r.DesiredState.ItemsSuccess || len(r.DesiredState.ItemFailures) > 0) &&
-					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
+					r.DesiredState.AppliedHash != "" && r.DesiredState.AppliedHash == cr.Status.DesiredStateHash &&
+					cellResultFromCurrentInstance(cr, r.DesiredState) {
 					if cr.Status.Cell == nil {
 						cr.Status.Cell = &v1alpha1.CellStatus{}
 					}
@@ -4012,7 +4020,8 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				// A successful items apply clears every such entry. Any other
 				// result keeps the list.
 				if isCellController(cr) && r.DesiredState.AppliedHash != "" &&
-					r.DesiredState.AppliedHash == cr.Status.DesiredStateHash {
+					r.DesiredState.AppliedHash == cr.Status.DesiredStateHash &&
+					cellResultFromCurrentInstance(cr, r.DesiredState) {
 					if cr.Status.Cell == nil {
 						cr.Status.Cell = &v1alpha1.CellStatus{}
 					}
@@ -4350,6 +4359,13 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	// to the read model (invc/ KV key).
 	r.classifyPluginInventory(ctx, cr, coreSet, desiredLines)
 
+	// The draining tenants of this desired state. They are recorded only
+	// when the push below delivers, together with its hash.
+	var drainingTenants []string
+	if resolvedBundle != nil {
+		drainingTenants = resolvedBundle.CellDrainingTenants
+	}
+
 	// Build desired state from the contrib the caller already read this
 	// tick (design D2, D11).
 	desired, desiredHash, err := func() (*mitev1.DesiredStateCommand, string, error) {
@@ -4681,6 +4697,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	default:
 		cr.Status.DesiredStateHash = desiredHash
 		cr.Status.DesiredContentHash = computeDesiredContentHash(desired)
+		recordCellDrainingTenants(&cr.Status, isCellController(cr), drainingTenants)
 		cr.Status.LastDesiredPushAt = &now
 		r.markRehydrationSent(cr, rehydrationPlan, desired, now.Time)
 		if reconnected {

@@ -659,6 +659,14 @@ type CellStatus struct {
 	// +optional
 	AppliedTenants []string `json:"appliedTenants,omitempty"`
 
+	// DrainingTenants lists the tenants whose folder the last delivered desired
+	// state leaves out, because each tenant moves to another cell. The
+	// controller reconciler writes it together with status.desiredStateHash.
+	// An items apply never adds such a tenant to AppliedTenants.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	DrainingTenants []string `json:"drainingTenants,omitempty"`
+
 	// TenantWarnings lists non-blocking findings the controller reconciler
 	// records about a tenant during cell item assembly or the hibernation
 	// gate. Rebuilt each tick.

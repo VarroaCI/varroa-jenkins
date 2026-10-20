@@ -3638,6 +3638,8 @@ type captureTransport struct {
 	imperatives []*mitev1.ImperativeCommand
 	// ensured records each ns/name that EnsureInbound received.
 	ensured []string
+	// sendErr is returned by Send. A nil value delivers every push.
+	sendErr error
 }
 
 func (c *captureTransport) EnsureInbound(ns, name string) {
@@ -3684,7 +3686,7 @@ func (c *captureTransport) Send(_ context.Context, ns, name string, msg *mitev1.
 	if ds, ok := msg.Message.(*mitev1.OperatorMessage_DesiredState); ok {
 		c.lastDesired = ds.DesiredState
 	}
-	return nil
+	return c.sendErr
 }
 
 func (c *captureTransport) Info(ns, name string) (version string, lastHeartbeat, certExpiry time.Time, connected bool) {

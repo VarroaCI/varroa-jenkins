@@ -90,6 +90,11 @@ type MaterializedBundle struct {
 	// field.
 	CellFolderCredentials []CellFolderCredentials
 
+	// CellDrainingTenants names the placed tenants whose folder the cell
+	// content leaves out, because each one moves to another cell. The
+	// ConfigMap write path does not read it.
+	CellDrainingTenants []string
+
 	// CellPoolLibraryCredentials holds the SYSTEM-scope git credentials of a
 	// cell's pool libraries, in the shape the Jenkins credentials domain
 	// expects. A value comes from a pool Secret. The caller that builds the

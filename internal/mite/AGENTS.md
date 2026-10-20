@@ -44,7 +44,9 @@ signing/replay protection, and the Jenkins-facing JWT signer.
   identity comes from the mTLS leaf CN (`controllerName.namespace`, via
   `parseCN`, verified against the CA — never trusts `PeerCertificates[0]`
   directly). Read loop type-switches `MiteMessage` variants out to the active
-  `StreamHandler`; sends go through one `sendMu`-guarded closure. Before each
+  `StreamHandler`. `server.go` sets each desired-state result's `cell_instance` from the stream
+  certificate before the handler sees it, so a value the mite sent is replaced. The operator
+  compares that value with `status.cell.instance`. Sends go through one `sendMu`-guarded closure. Before each
   dispatch it calls `StreamHandler.IsCurrentConnection` with the token
   `OnConnect` returned and ends the stream with `codes.Aborted` once superseded
   — one central gate, rather than a token threaded through every inbound
