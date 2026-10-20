@@ -170,6 +170,22 @@ and never edits a cell that holds a tenant. A `cellTemplate` edit therefore roll
 at once, and reaches a placed cell only after it drains. To grow a placed tenant, move
 it to a pool with a larger template.
 
+## Watch a voluntary move
+
+A voluntary move ends when the old cell drops the tenant. Read these fields on the old cell's
+`Controller` status with `kubectl`. Both lists are subsets of `status.cell.tenants`.
+
+- `status.cell.drainingTenants` lists the tenants that the last delivered desired state leaves out.
+  No component uses it to decide a drain. No dashboard panel shows it.
+- `status.cell.appliedTenants` lists the tenants whose folder the cell holds. A draining tenant never
+  enters it. The Topology panel of the Cell tab shows it.
+
+The operator advances `appliedTenants` only after an items walk of the current desired state, from
+the current pod. A result from a replaced pod changes nothing.
+
+The move proceeds when `appliedTenants` no longer names the tenant and the cell has no pending item
+deletion for it. Check `status.pendingItemDeletions` for a stuck delete.
+
 ## Pool secrets
 
 A cell keeps `$JENKINS_HOME` on an `emptyDir`, so each instance would mint its own `secrets/`
