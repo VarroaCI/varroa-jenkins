@@ -8,17 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/varroaci/varroa-jenkins/internal/jenkins/items"
+	"github.com/varroaci/varroa-jenkins/internal/jenkins/items/challengecorpus"
 )
-
-type caseEntry struct {
-	Name   string `yaml:"name"`
-	Tier   string `yaml:"tier"`
-	Status string `yaml:"status"`
-}
-
-type manifest struct {
-	Cases []caseEntry `yaml:"cases"`
-}
 
 type bundleYAML struct {
 	ID          string   `yaml:"id"`
@@ -43,14 +34,10 @@ func main() {
 	base := "internal/jenkins/items/testdata/challenge"
 	outDir := filepath.Join(base, "bundle-challenge")
 
-	// Read manifest.
-	mfData, err := os.ReadFile(filepath.Join(base, "manifest.yaml"))
+	// Load the manifest and check it against the case directories.
+	mf, err := challengecorpus.Load(base)
 	if err != nil {
-		die("read manifest: %v", err)
-	}
-	var mf manifest
-	if err := yaml.Unmarshal(mfData, &mf); err != nil {
-		die("parse manifest: %v", err)
+		die("challenge corpus: %v", err)
 	}
 
 	// Collect supported cases.
@@ -59,7 +46,7 @@ func main() {
 		if c.Status != "supported" {
 			continue
 		}
-		itemsData, err := os.ReadFile(filepath.Join(base, "cases", c.Tier, c.Name, "items.yaml"))
+		itemsData, err := os.ReadFile(filepath.Join(c.Dir(base), "items.yaml"))
 		if err != nil {
 			die("read items.yaml for %s/%s: %v", c.Tier, c.Name, err)
 		}
