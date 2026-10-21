@@ -3249,6 +3249,106 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 	return &out, unapplied, nil
 }
 
+// ErrControllerSpecClaim reports that CreateControllerSpecSSA created the
+// Controller but did not finish the spec ownership claim. The error arrives
+// with the created object, so the caller can still answer the create.
+var ErrControllerSpecClaim = errors.New("controller created but spec ownership claim failed")
+
+// CreateControllerSpecSSA creates a Controller and claims its spec for
+// fieldManager. The create is the duplicate-name fence: an existing object
+// answers an apierrors AlreadyExists error and nothing is written. The
+// create also records an Update entry for fieldManager, which would make a
+// later SSA edit of the spec conflict. The method therefore applies the same
+// spec as fieldManager, so the Apply entry owns the sent fields, and then
+// drops the Update entry. The drop is a merge patch that pins the
+// resourceVersion, so a concurrent write makes it retry instead of losing
+// the newer entry. The spec apply sends the create's values with force off.
+// A field another manager changed after the create conflicts, so it is not
+// overwritten. The apply carries no resourceVersion precondition, because a
+// status write from the reconciler bumps resourceVersion without a spec
+// change. A failure after the create returns the created object and an error
+// that wraps ErrControllerSpecClaim. Such an object keeps the create's Update
+// entry, and nothing in this package retries the drop later.
+func (c *ClientsetClient) CreateControllerSpecSSA(
+	ctx context.Context, namespace, name string, spec map[string]any, fieldManager string,
+) (*v1alpha1.Controller, error) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "Controller",
+		"metadata": map[string]any{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": runtime.DeepCopyJSON(spec),
+	}}
+	created, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Create(
+		ctx, obj, metav1.CreateOptions{FieldManager: fieldManager},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	claimFailed := func(cause error) (*v1alpha1.Controller, error) {
+		var out v1alpha1.Controller
+		if convErr := runtime.DefaultUnstructuredConverter.FromUnstructured(created.Object, &out); convErr != nil {
+			return nil, fmt.Errorf("%w: %v; convert created controller: %v", ErrControllerSpecClaim, cause, convErr)
+		}
+		return &out, fmt.Errorf("%w: %v", ErrControllerSpecClaim, cause)
+	}
+
+	applied, _, err := c.ApplyControllerSpecSSA(ctx, namespace, name, runtime.DeepCopyJSON(spec), fieldManager, false)
+	if err != nil {
+		return claimFailed(err)
+	}
+	if err := c.dropCreateUpdateEntry(ctx, namespace, name, fieldManager); err != nil {
+		return claimFailed(err)
+	}
+	return applied, nil
+}
+
+// dropCreateUpdateEntry removes every metadata.managedFields entry that
+// fieldManager holds as an Update on the main resource. The merge patch
+// carries the resourceVersion of the read it filtered, so a write between the
+// read and the patch answers a Conflict and the read repeats.
+func (c *ClientsetClient) dropCreateUpdateEntry(ctx context.Context, namespace, name, fieldManager string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cur, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		mf, _, err := unstructured.NestedSlice(cur.Object, "metadata", "managedFields")
+		if err != nil {
+			return err
+		}
+		kept := make([]any, 0, len(mf))
+		dropped := false
+		for _, raw := range mf {
+			m, ok := raw.(map[string]any)
+			if ok && m["manager"] == fieldManager && m["operation"] == "Update" {
+				if sub, _ := m["subresource"].(string); sub == "" {
+					dropped = true
+					continue
+				}
+			}
+			kept = append(kept, raw)
+		}
+		if !dropped {
+			return nil
+		}
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
+			"resourceVersion": cur.GetResourceVersion(),
+			"managedFields":   kept,
+		}})
+		if err != nil {
+			return err
+		}
+		_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+			ctx, name, types.MergePatchType, patch, metav1.PatchOptions{},
+		)
+		return err
+	})
+}
+
 // ApplyControllerSpecSSAIfExists is the existence-guarded sibling of
 // ApplyControllerSpecSSA: it never creates the target object. Unlike the
 // unguarded method, each attempt performs its own GET immediately before

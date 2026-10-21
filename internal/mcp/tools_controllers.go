@@ -167,7 +167,9 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			"version to select an LTS line. Omitting composedBundleRef uses the built-in "+
 			"varroa-starter bundle; create a ComposedBundle first only if the controller needs "+
 			"custom JCasC, plugins, or catalog items. hibernation and spec set the same fields "+
-			"update_controller accepts, so a controller can be created already configured."),
+			"update_controller accepts, so a controller can be created already configured. "+
+			"A create for a name that already exists fails unless the spec is identical; an identical "+
+			"repeat returns the existing controller. Use update_controller to change it."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Controller namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Controller name")),
 		mcp.WithString("cluster", mcp.Description("Cluster (default: local cluster)")),
@@ -180,7 +182,7 @@ func registerControllerTools(mcpServer *server.MCPServer, deps *api.Dependencies
 			"patch, e.g. {\"resources\":{...},\"ingressSpec\":{...},\"probes\":{...}}. The "+
 			"shorthand arguments above win over the same key here.")),
 	)
-	addTool(mcpServer, kindCreate, createC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createC, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := getArgs(req)
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil

@@ -47,6 +47,9 @@ func (s *stubCommandCRUDClient) GetControllerCRD(_ context.Context, _, _ string)
 func (s *stubCommandCRUDClient) ApplyControllerSpecSSA(_ context.Context, _, _ string, _ map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	return nil, nil, errors.New("unimplemented")
 }
+func (s *stubCommandCRUDClient) CreateControllerSpecSSA(_ context.Context, _, _ string, _ map[string]any, _ string) (*v1alpha1.Controller, error) {
+	return nil, errors.New("unimplemented")
+}
 func (s *stubCommandCRUDClient) DeleteControllerPod(_ context.Context, _, _ string) error {
 	return errors.New("unimplemented")
 }

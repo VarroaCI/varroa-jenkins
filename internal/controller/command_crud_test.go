@@ -45,6 +45,9 @@ type fakeCRUDClient struct {
 	hibernatedClears []string
 	// setHibernatedErr, when set, makes SetHibernated return it.
 	setHibernatedErr error
+	// claimErr, when set, makes CreateControllerSpecSSA store the object and
+	// then return an error that wraps ErrControllerSpecClaim.
+	claimErr error
 }
 
 func newFakeCRUDClient() *fakeCRUDClient {
@@ -111,6 +114,34 @@ func (f *fakeCRUDClient) ApplyControllerSpecSSA(_ context.Context, ns, name stri
 	f.controllers[key] = existing
 	f.mirrorController(existing)
 	return existing.DeepCopy(), UnappliedRemovals(existing, removals), nil
+}
+
+// CreateControllerSpecSSA mirrors the operator method: an existing name answers
+// AlreadyExists and changes nothing; otherwise the object is stored with the
+// spec, and claimErr turns the success into a spec-claim failure.
+func (f *fakeCRUDClient) CreateControllerSpecSSA(_ context.Context, ns, name string, specPatch map[string]any, _ string) (*v1alpha1.Controller, error) {
+	if f.ssaApplyErr != nil {
+		return nil, f.ssaApplyErr
+	}
+	if f.applyErr != nil {
+		return nil, f.applyErr
+	}
+	key := f.key(name, ns)
+	if _, ok := f.controllers[key]; ok {
+		return nil, k8serrors.NewAlreadyExists(schema.GroupResource{Group: "varroa.dev", Resource: "controllers"}, name)
+	}
+	cr := &v1alpha1.Controller{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: types.UID("uid-" + name)},
+	}
+	specJSON, _ := json.Marshal(specPatch)
+	json.Unmarshal(specJSON, &cr.Spec)
+	f.controllers[key] = cr
+	f.mirrorController(cr)
+	if f.claimErr != nil {
+		return cr.DeepCopy(), fmt.Errorf("%w: %v", ErrControllerSpecClaim, f.claimErr)
+	}
+	return cr.DeepCopy(), nil
 }
 
 // mirrorController writes cr into the crdstore read surface so Store reads see
@@ -1652,6 +1683,32 @@ func TestCommandCRUD_Create_ScopedWrites(t *testing.T) {
 		t.Fatalf("SSA manifest spec = %#v, want version 2.0", spec)
 	}
 
+	// The create that claims the name carries name/namespace and the spec
+	// only, under varroa-ui. Labels and annotations never ride the create.
+	var createdObj *unstructured.Unstructured
+	creates := 0
+	for _, a := range h.client.dynamic.(*dynamicfake.FakeDynamicClient).Actions() {
+		if ca, ok := a.(clienttesting.CreateActionImpl); ok {
+			creates++
+			if ca.CreateOptions.FieldManager != "varroa-ui" {
+				t.Fatalf("create field manager = %q, want varroa-ui", ca.CreateOptions.FieldManager)
+			}
+			createdObj = ca.GetObject().(*unstructured.Unstructured)
+		}
+	}
+	if creates != 1 {
+		t.Fatalf("expected exactly 1 create, got %d", creates)
+	}
+	createMeta, _ := createdObj.Object["metadata"].(map[string]any)
+	if createMeta["name"] != "my-ctrl" || createMeta["namespace"] != "team-a" {
+		t.Fatalf("create metadata = %#v, want name my-ctrl in team-a", createMeta)
+	}
+	for _, key := range []string{"labels", "annotations"} {
+		if _, ok := createMeta[key]; ok {
+			t.Fatalf("create metadata carries %q", key)
+		}
+	}
+
 	// The labels/annotations ride a separate metadata merge patch.
 	patches := store.MetaPatches(controllerGVR)
 	if len(patches) != 1 {
@@ -1995,5 +2052,95 @@ func TestCommandCRUD_ListWithoutSourceFails(t *testing.T) {
 	}
 	if resp.Code != bus.CodeInternal {
 		t.Fatalf("code = %q, want %q", resp.Code, bus.CodeInternal)
+	}
+}
+
+// --- Create race fence ---
+
+func TestCommandCRUD_CreateRaceExistingNameConflictKeepsSpec(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	// The preflight name check passes (newCommandCRUDTest), which models the
+	// race where a second create misses the name check.
+	ct.seedController(&v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "race", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "1.0"},
+	})
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "race", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
+	}
+	resp := ct.crud.HandleCreate(mustMarshal(t, bus.ControllersCreateRequest{
+		Namespace:  "team-a",
+		Controller: mustMarshal(t, cr),
+	}))
+	var createResp bus.ControllersCreateResponse
+	if err := json.Unmarshal(resp, &createResp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if createResp.Code != bus.CodeConflict {
+		t.Fatalf("expected code=%q, got %q (error=%q)", bus.CodeConflict, createResp.Code, createResp.Error)
+	}
+	if !strings.Contains(createResp.Error, "already exists") {
+		t.Errorf("error = %q, want it to contain %q", createResp.Error, "already exists")
+	}
+	if got := ct.client.controllers["team-a/race"].Spec.Version; got != "1.0" {
+		t.Errorf("client spec version = %q, want %q", got, "1.0")
+	}
+	got, err := crdstore.Get[v1alpha1.Controller](context.Background(), ct.store, "race", "team-a")
+	if err != nil {
+		t.Fatalf("get stored controller: %v", err)
+	}
+	if got.Spec.Version != "1.0" {
+		t.Errorf("stored spec version = %q, want %q", got.Spec.Version, "1.0")
+	}
+}
+
+func TestCommandCRUD_CreateRaceConflictCleansUpOwnInlineBundle(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	ct.seedController(&v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "race-b", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "1.0"},
+	})
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "race-b", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
+	}
+	resp := ct.crud.HandleCreate(mustMarshal(t, bus.ControllersCreateRequest{
+		Namespace:  "team-a",
+		Controller: mustMarshal(t, cr),
+		Bundle:     mustMarshal(t, &v1alpha1.ComposedBundleSpec{}),
+	}))
+	var createResp bus.ControllersCreateResponse
+	if err := json.Unmarshal(resp, &createResp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if createResp.Code != bus.CodeConflict {
+		t.Fatalf("expected code=%q, got %q", bus.CodeConflict, createResp.Code)
+	}
+	if _, err := crdstore.Get[v1alpha1.ComposedBundle](context.Background(), ct.store, "race-b-bundle", "team-a"); err == nil {
+		t.Fatal("expected the inline bundle this call created to be removed")
+	}
+}
+
+func TestCommandCRUD_CreateClaimFailureStillSucceeds(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	ct.client.claimErr = errors.New("apply timed out")
+	cr := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-fail", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
+	}
+	resp := ct.crud.HandleCreate(mustMarshal(t, bus.ControllersCreateRequest{
+		Namespace:  "team-a",
+		Controller: mustMarshal(t, cr),
+	}))
+	var createResp bus.ControllersCreateResponse
+	if err := json.Unmarshal(resp, &createResp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if createResp.Code != "" || createResp.Error != "" {
+		t.Fatalf("expected success after a claim failure, got code=%q error=%q", createResp.Code, createResp.Error)
+	}
+	if createResp.Item == nil {
+		t.Fatal("expected the created item in the reply")
 	}
 }

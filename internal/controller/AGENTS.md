@@ -97,6 +97,15 @@ sections describe.
   into its patch argument in place, so a reused map would carry a prior
   attempt's already-backfilled values into the next attempt and skip
   re-backfilling them from that attempt's own (possibly newer) GET.
+- **`CreateControllerSpecSSA` is the create fence for `controllers.create`.**
+  The Create call refuses an existing name and writes nothing. The method
+  then applies the same spec as `varroa-ui`. The Create also records an
+  Update entry for `varroa-ui`. That entry makes a later SSA spec edit
+  conflict, so the method drops it with a merge patch that pins the
+  resourceVersion. A failure after the Create returns the created object
+  and an error that wraps `ErrControllerSpecClaim`. `HandleCreate` logs that
+  error and still answers success. Never replace it with `crdstore.Create`
+  alone, because the Update entry makes later `varroa-ui` edits conflict.
 - **executeGroovy audit carries a pointer, never a script body.**
   `groovyProvenance` puts `scriptSnapshotRef`/`scriptItemRef` (catalog) or
   `scriptSha256`/`scriptBytes` (inline) on `broodop.target.finished`. The
@@ -551,7 +560,7 @@ sections describe.
 - `ResourceClient` (`controller_controller.go`, ~40 methods) is the operator's deep-op
   K8s surface (StatefulSet/Service/Ingress/Secret/ConfigMap/pod/wake operations, including
   `DeleteControllerPodGrace` for a short-grace, UID-fenced pod delete, plus the
-  named special-semantics methods `PatchControllerStatus`/`ApplyControllerSpecSSA`/
+  named special-semantics methods `PatchControllerStatus`/`ApplyControllerSpecSSA`/`CreateControllerSpecSSA`/
   `SetHibernated`/`SetHibernatedAt`/`ClearUserPassword`); `ClientsetClient` (`clientset_client.go`)
   is the only real implementation (client-go clientset + dynamic client + REST config)
   and also implements `crdstore.Backend` (`crdstore_backend.go`) — all per-kind CRD CRUD
