@@ -35,6 +35,9 @@ type ApplyResult struct {
 	// save the cache. A failed write keeps the previous cache file. The next
 	// apply writes every item again when the cache is missing.
 	CacheError error
+	// RemovalReached is true when the walk reached the remove step with a
+	// readable cache. A failed cache read leaves it false and deletes nothing.
+	RemovalReached bool
 }
 
 // FailureText joins the refusals of Failed into one message, separated by "; ".
@@ -131,6 +134,7 @@ func (e *ItemError) Unwrap() error { return e.Err }
 // applyIncremental walks each item, creates or updates, then handles remove.
 // A failed cache read or save sets res.CacheError. A failed read deletes
 // nothing and saves nothing, because the record of managed items is unknown.
+// A failed read leaves res.RemovalReached false.
 // All strategies (NONE, SYNC, REMOVE_SUPPORTED, REMOVE_ALL) use create/update
 // in place for declared items and remove only mite-managed items no longer
 // declared. Declared items are NEVER delete-recreated.
@@ -207,6 +211,7 @@ func (e *Engine) applyIncremental(ctx context.Context, manifest *Manifest, strat
 	// The retain and remove steps run only when the cache is known. An unknown
 	// cache never deletes an item.
 	if loadErr == nil {
+		res.RemovalReached = true
 		for path, h := range prev {
 			if _, declared := next[path]; !declared && manifest.retains(path) {
 				next[path] = h

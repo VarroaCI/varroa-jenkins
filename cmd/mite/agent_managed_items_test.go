@@ -38,6 +38,9 @@ func TestItemsApplyReportsManagedCacheFailure(t *testing.T) {
 	if res.ItemsSuccess {
 		t.Fatalf("expected items apply to fail on a cache failure, got %+v", res)
 	}
+	if res.ItemsRemovalReached {
+		t.Fatal("ItemsRemovalReached = true, want false when the managed-items cache is unreadable")
+	}
 	if !strings.Contains(res.ItemsError, "managed-items.json") {
 		t.Fatalf("ItemsError = %q, want it to name managed-items.json", res.ItemsError)
 	}
@@ -73,6 +76,9 @@ func TestItemsApplyReportsCorruptManagedCache(t *testing.T) {
 	res := agent.handleDesiredState(context.Background(), cmd)
 	if res.ItemsSuccess {
 		t.Fatalf("expected items apply to fail on a corrupt cache, got %+v", res)
+	}
+	if res.ItemsRemovalReached {
+		t.Fatal("ItemsRemovalReached = true, want false when the managed-items cache is corrupt")
 	}
 	if !strings.Contains(res.ItemsError, "managed-items.json") {
 		t.Fatalf("ItemsError = %q, want it to name managed-items.json", res.ItemsError)
@@ -111,6 +117,9 @@ func TestItemsApplyPersistsManagedHashesUnderMiteDir(t *testing.T) {
 	res := agent.handleDesiredState(context.Background(), cmd)
 	if !res.ItemsSuccess {
 		t.Fatalf("expected items apply to succeed, got %+v", res)
+	}
+	if !res.ItemsRemovalReached {
+		t.Fatal("ItemsRemovalReached = false, want true for a walk with a readable cache")
 	}
 
 	data, err := os.ReadFile(filepath.Join(agent.miteDir, "managed-items.json"))

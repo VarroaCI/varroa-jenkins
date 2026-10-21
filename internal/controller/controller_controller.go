@@ -2592,10 +2592,11 @@ func rebuildPendingDeletions(old []v1alpha1.PendingDeletion, reported []*mitev1.
 }
 
 // itemsWalkReachedRemoval reports whether the items walk in a desired-state
-// result reached the undeclared-item removal step. A walk that stops earlier
-// reports neither success nor a refused item.
+// result reached the undeclared-item removal step. A successful items section
+// reached it, or its walk was skipped after a clean walk. A walk with refusals
+// reached it only when the mite read its managed-items cache.
 func itemsWalkReachedRemoval(d *mitev1.DesiredStateResult) bool {
-	return d.ItemsSuccess || len(d.ItemFailures) > 0
+	return d.ItemsSuccess || d.ItemsRemovalReached
 }
 
 // applyDeferredDeletionsResult sets status.pendingItemDeletions from a

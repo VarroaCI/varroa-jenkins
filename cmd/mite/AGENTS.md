@@ -361,6 +361,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   entry for each refused item path. The other items still apply. The section stays
   unconverged, so the operator resends it. The walk also opens the schedule export gate. The list is empty for a parse error, a
   deadline, or a failed existence check; those abort the apply.
+  It sets `items_removal_reached` from the engine's `RemovalReached`. A walk on an unreadable managed-items cache reports refusals but leaves it false.
   A second pass after the items apply re-seeds the deferred jobs before the
   items gate opens. After a successful items apply, a job that is still absent
   is an orphan, not a deferral, unless its parent is a multibranch project or

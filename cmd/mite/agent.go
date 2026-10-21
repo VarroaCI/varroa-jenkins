@@ -2562,6 +2562,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				a.Logger.Error("items apply refused items", "count", len(applyResult.Failed))
 				result.ItemsSuccess = false
 				result.ItemsError = applyResult.FailureText()
+				result.ItemsRemovalReached = applyResult.RemovalReached
 				if applyResult.CacheError != nil {
 					a.Logger.Error("items managed-items cache failed", "path", a.managedItemsPath(), "error", applyResult.CacheError)
 					result.ItemsError += "; " + applyResult.CacheError.Error()
@@ -2584,12 +2585,14 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				a.Logger.Error("items managed-items cache failed", "path", a.managedItemsPath(), "error", applyResult.CacheError)
 				result.ItemsSuccess = false
 				result.ItemsError = applyResult.CacheError.Error()
+				result.ItemsRemovalReached = applyResult.RemovalReached
 				if len(applyResult.DeferredDeletions) > 0 {
 					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
 				}
 				a.wakeSchedulePoller()
 			default:
 				result.ItemsSuccess = true
+				result.ItemsRemovalReached = applyResult.RemovalReached
 				if len(applyResult.DeferredDeletions) > 0 {
 					result.DeferredItemDeletions = toProtoDeferredDeletions(applyResult.DeferredDeletions)
 				}

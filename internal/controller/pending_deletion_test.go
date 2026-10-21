@@ -281,7 +281,50 @@ func TestApplyDeferredDeletionsResult_CompletedWalkWithNoDeferralsClears(t *test
 func TestApplyDeferredDeletionsResult_RefusedWalkWithNoDeferralsClears(t *testing.T) {
 	cr := pendingDeletionController(metav1Now())
 
-	applyDeferredDeletionsResult(cr, deferredResult(false, []string{"x"}), metav1Now())
+	d := deferredResult(false, []string{"x"})
+	d.ItemsRemovalReached = true
+
+	applyDeferredDeletionsResult(cr, d, metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 0 {
+		t.Fatalf("pending deletions = %+v, want none", cr.Status.PendingItemDeletions)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionFalse {
+		t.Fatalf("DeletionPending = %s, want False", got)
+	}
+}
+
+// TestApplyDeferredDeletionsResult_RefusedWalkOnUnreadableCacheKeepsTheList
+// refuses an item on an unreadable managed-items cache. The remove step did
+// not run, so the pending entry keeps its approval.
+func TestApplyDeferredDeletionsResult_RefusedWalkOnUnreadableCacheKeepsTheList(t *testing.T) {
+	t0 := metav1Now()
+	cr := pendingDeletionController(t0)
+	d := deferredResult(false, []string{"x"})
+	d.ItemsError = "create x: 500; read managed-items cache /mite/managed-items.json: bad"
+
+	applyDeferredDeletionsResult(cr, d, metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 1 {
+		t.Fatalf("pending deletions = %+v, want the entry kept", cr.Status.PendingItemDeletions)
+	}
+	kept := cr.Status.PendingItemDeletions[0]
+	if kept.Path != "team/job" || kept.Approval == nil || kept.Approval.CommandID != "c1" || !kept.DetectedAt.Equal(&t0) {
+		t.Fatalf("entry = %+v, want team/job with its approval and DetectedAt", kept)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionTrue {
+		t.Fatalf("DeletionPending = %s, want True", got)
+	}
+}
+
+// TestApplyDeferredDeletionsResult_FailedSaveWalkWithNoDeferralsClears covers
+// a walk that ran the remove step, then failed to save the cache. The walk
+// reached the remove step, so the pending list clears.
+func TestApplyDeferredDeletionsResult_FailedSaveWalkWithNoDeferralsClears(t *testing.T) {
+	cr := pendingDeletionController(metav1Now())
+	d := &mitev1.DesiredStateResult{ItemsSuccess: false, ItemsRemovalReached: true}
+
+	applyDeferredDeletionsResult(cr, d, metav1Now())
 
 	if len(cr.Status.PendingItemDeletions) != 0 {
 		t.Fatalf("pending deletions = %+v, want none", cr.Status.PendingItemDeletions)

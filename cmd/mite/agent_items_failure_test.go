@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -57,6 +58,59 @@ func TestHandleDesiredStateReportsItemFailures(t *testing.T) {
 	}
 	if !strings.Contains(res.ItemsError, "create repos:") {
 		t.Fatalf("ItemsError = %q, want it to name the create step", res.ItemsError)
+	}
+	if !res.ItemsRemovalReached {
+		t.Fatal("ItemsRemovalReached = false, want true for a walk with a readable cache")
+	}
+}
+
+// TestHandleDesiredStateUnreadableCacheRefusalReportsNoRemoval refuses an
+// item while the managed-items cache is unreadable. The walk reports the
+// refusal but does not reach the remove step.
+func TestHandleDesiredStateUnreadableCacheRefusalReportsNoRemoval(t *testing.T) {
+	t.Setenv("CASC_JENKINS_CONFIG", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/crumbIssuer"):
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"crumb":"c","crumbRequestField":"Jenkins-Crumb"}`)
+		case r.URL.Path == "/configuration-as-code/check":
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(r.URL.Path, "/createItem"):
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "<html><head><title>Jenkins</title></head><body>Logging ID=abcdef12-3456</body></html>")
+		case strings.HasSuffix(r.URL.Path, "/config.xml") && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	if err := os.WriteFile(agent.managedItemsPath(), []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &mitev1.DesiredStateCommand{
+		DesiredStateHash:    "hash-items-unreadable",
+		JcascYaml:           "jenkins: {}",
+		ItemsYaml:           "items:\n  - kind: folder\n    name: repos\n",
+		MiteJenkinsToken:    "eyJtest-token",
+		MiteJenkinsTokenExp: 9999999999,
+	}
+	res := agent.handleDesiredState(context.Background(), cmd)
+
+	if len(res.ItemFailures) != 1 {
+		t.Fatalf("ItemFailures = %+v, want one entry", res.ItemFailures)
+	}
+	if !strings.Contains(res.ItemsError, "create repos:") {
+		t.Fatalf("ItemsError = %q, want it to name the create step", res.ItemsError)
+	}
+	if !strings.Contains(res.ItemsError, "managed-items.json") {
+		t.Fatalf("ItemsError = %q, want it to name the managed-items cache", res.ItemsError)
+	}
+	if res.ItemsRemovalReached {
+		t.Fatal("ItemsRemovalReached = true, want false when the managed-items cache is unreadable")
 	}
 }
 
