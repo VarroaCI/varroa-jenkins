@@ -590,6 +590,7 @@ federation, activity persistence, and SSE fanout.
   the one user-delete path that the REST route and the MCP tool share; `preview_util.go`
   holds overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
+  `user_activity.go` holds `UserActivityEvent`, the one builder of `user.*` activity events. The REST user handlers and the MCP user tools call it.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.

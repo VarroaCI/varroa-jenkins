@@ -457,3 +457,36 @@ func TestDeleteUser_MissingUserIsError(t *testing.T) {
 		t.Errorf("error text = %q, want it to contain %q", got, "user not found")
 	}
 }
+
+// TestDeleteUser_EmitsUserDeleted pins that delete_user publishes the shared
+// user.deleted event built by api.UserActivityEvent.
+func TestDeleteUser_EmitsUserDeleted(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns"},
+		Spec:       v1alpha1.UserSpec{Email: "alice@example.com"},
+	})
+	sink := &recordingSink{}
+	deps := deleteUserDeps(store)
+	deps.ActivityPublisher = sink
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "delete_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "alice"},
+	}, mcpAdminClaims)
+	if tr := parseToolResult(t, resp.Result); tr.IsError {
+		t.Fatalf("delete_user returned error: %v", tr.Content)
+	}
+
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(sink.events), sink.events)
+	}
+	got := sink.events[0]
+	want := api.UserActivityEvent(api.UserDeleted, "ns", "alice")
+	if got.Type != want.Type || got.Message != want.Message || got.Namespace != want.Namespace {
+		t.Errorf("event = %+v, want type/message/namespace of %+v", got, want)
+	}
+	if got.Source != mcpSource {
+		t.Errorf("Source = %q, want %q", got.Source, mcpSource)
+	}
+}
