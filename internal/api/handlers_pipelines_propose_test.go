@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -198,8 +200,20 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 		forgeRow(forgeapi.CodeForgeWriteDenied, http.StatusUnprocessableEntity, 1),
 		forgeRow(forgeapi.CodeJenkinsfileExists, http.StatusConflict, 1),
 		forgeRow(forgeapi.CodeProposalBranchExists, http.StatusConflict, 1),
-		{name: "relay error", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
+		{name: "relay other error", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = errors.New("no reply") }},
+		{name: "relay timeout", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+			setup: func(t *testing.T, f *proposeFixture) {
+				f.relay.checkErr = fmt.Errorf("forge check request: %w", nats.ErrTimeout)
+			}},
+		{name: "relay no responders", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = nats.ErrNoResponders }},
+		{name: "caller deadline", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+			setup: func(t *testing.T, f *proposeFixture) {
+				f.relay.checkErr = fmt.Errorf("forge check request: %w", context.DeadlineExceeded)
+			}},
+		{name: "caller canceled", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
+			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = context.Canceled }},
 		{name: "reply unreachable", team: "payments", repo: proposeRepo, status: http.StatusBadGateway, code: forgeapi.CodeForgeUnreachable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkReply = forgeapi.CheckReply{Status: forgeapi.Status{Code: forgeapi.CodeForgeUnreachable, Error: "down"}}

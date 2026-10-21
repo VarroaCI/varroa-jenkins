@@ -9680,6 +9680,7 @@ components:
           - forge_auth_failed
           - forge_write_denied
           - forge_unreachable
+          - operator_timeout
           - jenkinsfile_exists
           - proposal_branch_exists
           - not_found
@@ -17436,8 +17437,9 @@ paths:
            (409 data_sharing_too_low).
         8. The operator finds a credential that reaches the forge and a
            Jenkinsfile and a proposal branch are absent (422, 409, 502, or 404
-           by the code of the forge reply).
-        9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502).
+           by the code of the forge reply, or 504 operator_timeout when the
+           operator does not answer in time).
+        9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502); operator_timeout (504).
       operationId: proposePipeline
       parameters:
       - $ref: '#/components/parameters/components_parameters_team'
@@ -17493,13 +17495,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_ProposePipelineError'
-          description: The forge or the operator did not answer (forge_unreachable).
+          description: The forge did not answer, or the forge relay failed (forge_unreachable).
         "503":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_ProposePipelineError'
           description: The assistant is disabled or its kill switch is set.
+        "504":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/components_schemas_ProposePipelineError'
+          description: The operator did not answer in time (operator_timeout).
       summary: Starts an assistant session that proposes a first Jenkinsfile for a
         repository.
       tags:

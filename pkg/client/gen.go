@@ -571,6 +571,7 @@ const (
 	ComponentsSchemasProposePipelineErrorCodeKillSwitch           ComponentsSchemasProposePipelineErrorCode = "kill_switch"
 	ComponentsSchemasProposePipelineErrorCodeNoMatchingCredential ComponentsSchemasProposePipelineErrorCode = "no_matching_credential"
 	ComponentsSchemasProposePipelineErrorCodeNotFound             ComponentsSchemasProposePipelineErrorCode = "not_found"
+	ComponentsSchemasProposePipelineErrorCodeOperatorTimeout      ComponentsSchemasProposePipelineErrorCode = "operator_timeout"
 	ComponentsSchemasProposePipelineErrorCodeProposalBranchExists ComponentsSchemasProposePipelineErrorCode = "proposal_branch_exists"
 	ComponentsSchemasProposePipelineErrorCodeRepoUrlInvalid       ComponentsSchemasProposePipelineErrorCode = "repo_url_invalid"
 )
@@ -23922,6 +23923,7 @@ type ProposePipelineResponse struct {
 	JSON429      *ComponentsSchemasProposePipelineError
 	JSON502      *ComponentsSchemasProposePipelineError
 	JSON503      *ComponentsSchemasProposePipelineError
+	JSON504      *ComponentsSchemasProposePipelineError
 }
 
 // Status returns HTTPResponse.Status
@@ -34327,6 +34329,13 @@ func ParseProposePipelineResponse(rsp *http.Response) (*ProposePipelineResponse,
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest ComponentsSchemasProposePipelineError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
 
 	}
 

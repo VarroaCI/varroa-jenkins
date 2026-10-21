@@ -36,6 +36,7 @@ export const PROPOSE_ERROR_LABELS: Record<string, string> = {
   forge_auth_failed: "The team credential was refused by the forge.",
   forge_write_denied: "The team credential may not write to this repository.",
   forge_unreachable: "The forge did not answer. Check the network policy.",
+  operator_timeout: "The operator did not answer in time. Wait, then try again.",
   jenkinsfile_exists: "The repository already holds a Jenkinsfile.",
   proposal_branch_exists: "The branch varroa/propose-pipeline exists. Delete the branch or merge its pull request.",
   not_found: "The repository or the team was not found.",
