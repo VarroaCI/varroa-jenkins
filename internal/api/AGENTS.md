@@ -83,6 +83,11 @@ federation, activity persistence, and SSE fanout.
   reports `authMode: local` for a local session, and logout of a local session
   never sends the token to the IdP end-session endpoint. `GET /me` reports
   `signedInAt` from the session token `iat` when the token has one.
+  `PUT /me/preferences` writes `status.preferences` of the User that `GET /me`
+  reads (`identity.UserResourceName`) through `MutateStatus`. It answers 404
+  when no User exists and never creates one. `PUT /users/{name}` edits a User
+  through `crdstore.Mutate`, so a write from another writer since the read
+  survives.
 - **Cell pools** (`handlers_cellpools.go`, `cellpools_service.go`) serve
   `GET /cellpools`, `GET /cellpools/{name}`, and `PATCH /cellpools/{name}`
   over the cluster-scoped `CellPool` CRD of **every cluster of the brood**.

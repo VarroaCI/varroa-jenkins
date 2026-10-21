@@ -602,3 +602,114 @@ func TestPatchMetaAt_NoChangeKeepsVersion(t *testing.T) {
 		t.Fatalf("resourceVersion = %q, want 4", rv)
 	}
 }
+
+// TestMutate_RetriesOnConflictAndKeepsAConcurrentWrite pins that a write
+// between the read and the update makes Mutate read again, and that the
+// stored object holds both writes.
+func TestMutate_RetriesOnConflictAndKeepsAConcurrentWrite(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns", ResourceVersion: "1"},
+	})
+	gvr, _ := GVRFor[v1alpha1.User]()
+	fired := false
+	f.SetAfterGet(gvr, func(ns, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := f.PatchObjectMetaAt(ctx, gvr, ns, name, "1", map[string]any{
+			"annotations": map[string]any{"x": "concurrent"},
+		}); err != nil {
+			t.Errorf("concurrent patch: %v", err)
+		}
+	})
+
+	calls := 0
+	changed, err := Mutate(ctx, f, "alice", "ns", func(u *v1alpha1.User) (bool, error) {
+		calls++
+		u.Spec.Email = "new@example.com"
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("Mutate: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	if calls != 2 {
+		t.Fatalf("mutate calls = %d, want 2", calls)
+	}
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Annotations["x"] != "concurrent" {
+		t.Errorf("concurrent annotation = %q, want %q", got.Annotations["x"], "concurrent")
+	}
+	if got.Spec.Email != "new@example.com" {
+		t.Errorf("email = %q, want new@example.com", got.Spec.Email)
+	}
+}
+
+// TestMutate_NoChangeWritesNothing pins that a mutate that reports no change
+// makes no update call.
+func TestMutate_NoChangeWritesNothing(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns", ResourceVersion: "1"},
+	})
+	gvr, _ := GVRFor[v1alpha1.User]()
+	f.FailAlways("update", gvr, errors.New("boom"))
+
+	changed, err := Mutate(ctx, f, "alice", "ns", func(*v1alpha1.User) (bool, error) {
+		return false, nil
+	})
+	if err != nil || changed {
+		t.Fatalf("Mutate = %v, %v; want false, nil", changed, err)
+	}
+	got, _ := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if got.ResourceVersion != "1" {
+		t.Fatalf("resourceVersion = %q, want 1", got.ResourceVersion)
+	}
+}
+
+// TestMutate_NotFoundIsUnwrapped pins that a missing object reaches the
+// caller as a NotFound error that apierrors.IsNotFound recognises.
+func TestMutate_NotFoundIsUnwrapped(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+
+	_, err := Mutate(ctx, f, "missing", "ns", func(*v1alpha1.User) (bool, error) {
+		return true, nil
+	})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("Mutate = %v, want NotFound", err)
+	}
+}
+
+// TestMutate_MutateErrorStopsWithoutWrite pins that a mutate error stops the
+// write and reaches the caller, and that the stored object is unchanged.
+func TestMutate_MutateErrorStopsWithoutWrite(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns", ResourceVersion: "1"},
+		Spec:       v1alpha1.UserSpec{Email: "old@example.com"},
+	})
+	refused := errors.New("refused")
+
+	changed, err := Mutate(ctx, f, "alice", "ns", func(u *v1alpha1.User) (bool, error) {
+		u.Spec.Email = "new@example.com"
+		return true, refused
+	})
+	if !errors.Is(err, refused) || changed {
+		t.Fatalf("Mutate = %v, %v; want false, refused", changed, err)
+	}
+	got, _ := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if got.Spec.Email != "old@example.com" || got.ResourceVersion != "1" {
+		t.Fatalf("stored = email %q rv %q, want the original", got.Spec.Email, got.ResourceVersion)
+	}
+}

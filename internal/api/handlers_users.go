@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -15,6 +16,16 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/auth/identity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
+
+// errNotLocalAccount is returned by the HandleUpdateUser mutation when the
+// stored User is not a local account.
+var errNotLocalAccount = errors.New("only a local account can be edited")
+
+// purposeError wraps a purpose validation failure raised inside a mutation,
+// so the handler can answer 400 with the validation message.
+type purposeError struct{ err error }
+
+func (p purposeError) Error() string { return p.err.Error() }
 
 // userListEntry is the JSON shape for each entry in GET /users.
 type userListEntry struct {
@@ -209,33 +220,39 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 	ctx := r.Context()
-	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace)
-	if err != nil || user == nil {
+	_, err := crdstore.Mutate[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace, func(user *v1alpha1.User) (bool, error) {
+		if managedByLabel(user, s.deps.IdentityConfig.Mode) != v1alpha1.ManagedByLocal {
+			return false, errNotLocalAccount
+		}
+
+		// An omitted purpose keeps the stored one, so an edit of other fields
+		// never clears the purpose that the sign-in gate reads.
+		purpose := req.Purpose
+		if purpose == "" {
+			purpose = string(user.Spec.Purpose)
+		}
+		if err := s.validatePurpose(purpose); err != nil {
+			return false, purposeError{err: err}
+		}
+
+		// Update identity fields only; never touch spec.password or status here.
+		user.Spec.Email = req.Email
+		user.Spec.DisplayName = req.DisplayName
+		user.Spec.Purpose = v1alpha1.UserPurpose(purpose)
+		return true, nil
+	})
+	var pe purposeError
+	switch {
+	case apierrors.IsNotFound(err):
 		s.writeJSONError(w, http.StatusNotFound, "user not found")
 		return
-	}
-
-	if managedByLabel(user, s.deps.IdentityConfig.Mode) != v1alpha1.ManagedByLocal {
-		s.writeJSONError(w, http.StatusBadRequest, "only a local account can be edited")
+	case errors.Is(err, errNotLocalAccount):
+		s.writeJSONError(w, http.StatusBadRequest, errNotLocalAccount.Error())
 		return
-	}
-
-	// An omitted purpose keeps the stored one, so an edit of other fields
-	// never clears the purpose that the sign-in gate reads.
-	purpose := req.Purpose
-	if purpose == "" {
-		purpose = string(user.Spec.Purpose)
-	}
-	if err := s.validatePurpose(purpose); err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, err.Error())
+	case errors.As(err, &pe):
+		s.writeJSONError(w, http.StatusBadRequest, pe.Error())
 		return
-	}
-
-	// Update identity fields only; never touch spec.password or status here.
-	user.Spec.Email = req.Email
-	user.Spec.DisplayName = req.DisplayName
-	user.Spec.Purpose = v1alpha1.UserPurpose(purpose)
-	if err := crdstore.Apply[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
+	case err != nil:
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to update user")
 		return
 	}

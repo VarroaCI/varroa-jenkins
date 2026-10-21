@@ -13,7 +13,9 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
+	"github.com/varroaci/varroa-jenkins/internal/auth/identity"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // This file uses recordingActivitySink, defined in
@@ -123,10 +125,74 @@ func TestNotifyActivity_HandleLogout(t *testing.T) {
 
 func TestNotifyActivity_HandleUpdatePreferences(t *testing.T) {
 	srv, sink := publishTestServer(t)
+	seedMeUser(t, srv, "1")
 	body := `{"theme":"dark"}`
 	r := withClaims(httptest.NewRequest(http.MethodPut, "/me/preferences", strings.NewReader(body)))
 	srv.HandleUpdatePreferences(httptest.NewRecorder(), r)
 	assertPublished(t, sink, "preferences.updated")
+}
+
+// seedMeUser stores the User that GET /me and PUT /me/preferences share for
+// publishClaims, at the given resourceVersion.
+func seedMeUser(t *testing.T, srv *Server, rv string) {
+	t.Helper()
+	name := identity.UserResourceName(publishClaims, auth.AuthMode(srv.deps.IdentityConfig.Mode))
+	crdstore.MustSeed(srv.deps.Store.(*crdstore.Fake), &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "varroa-system", ResourceVersion: rv},
+	})
+}
+
+// TestHandleUpdatePreferences_WritesStatusOfMeUser pins that a preferences
+// write lands in status.preferences of the User that GET /me reads, and that
+// a concurrent write to that User survives it.
+func TestHandleUpdatePreferences_WritesStatusOfMeUser(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	ctx := context.Background()
+	st := srv.deps.Store.(*crdstore.Fake)
+	seedMeUser(t, srv, "1")
+	name := identity.UserResourceName(publishClaims, auth.AuthMode(srv.deps.IdentityConfig.Mode))
+	gvr, _ := crdstore.GVRFor[v1alpha1.User]()
+	fired := false
+	st.SetAfterGet(gvr, func(ns, n string) {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := st.PatchObjectMetaAt(ctx, gvr, ns, n, "1", map[string]any{
+			"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
+		}); err != nil {
+			t.Errorf("concurrent patch: %v", err)
+		}
+	})
+
+	w := httptest.NewRecorder()
+	r := withClaims(httptest.NewRequest(http.MethodPut, "/me/preferences", strings.NewReader(`{"theme":"dark"}`)))
+	srv.HandleUpdatePreferences(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s; want 200", w.Code, w.Body.String())
+	}
+	got, err := crdstore.Get[v1alpha1.User](ctx, st, name, "varroa-system")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status.Preferences == nil || got.Status.Preferences.Theme != "dark" {
+		t.Fatalf("status.preferences = %+v, want theme dark", got.Status.Preferences)
+	}
+	if got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] != `["bob"]` {
+		t.Errorf("former identifiers annotation = %q, want the concurrent value", got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers])
+	}
+}
+
+// TestHandleUpdatePreferences_NoUserIs404 pins that the handler does not
+// create a User when none exists for the caller.
+func TestHandleUpdatePreferences_NoUserIs404(t *testing.T) {
+	srv, _ := publishTestServer(t)
+	w := httptest.NewRecorder()
+	r := withClaims(httptest.NewRequest(http.MethodPut, "/me/preferences", strings.NewReader(`{"theme":"dark"}`)))
+	srv.HandleUpdatePreferences(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
 }
 
 func TestNotifyActivity_HandleReconcile(t *testing.T) {

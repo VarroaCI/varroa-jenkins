@@ -490,3 +490,62 @@ func TestDeleteUser_EmitsUserDeleted(t *testing.T) {
 		t.Errorf("Source = %q, want %q", got.Source, mcpSource)
 	}
 }
+
+// TestUpdateUser_ConcurrentWriteKeepsFormerIdentifiers pins that a write
+// between the read and the update of update_user survives it.
+func TestUpdateUser_ConcurrentWriteKeepsFormerIdentifiers(t *testing.T) {
+	ctx := context.Background()
+	deps := userDeps(t)
+	st := deps.Store.(*crdstore.Fake)
+	crdstore.MustSeed(st, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "u1", Namespace: "ns", ResourceVersion: "1"},
+	})
+	gvr, _ := crdstore.GVRFor[v1alpha1.User]()
+	fired := false
+	st.SetAfterGet(gvr, func(ns, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := st.PatchObjectMetaAt(ctx, gvr, ns, name, "1", map[string]any{
+			"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
+		}); err != nil {
+			t.Errorf("concurrent patch: %v", err)
+		}
+	})
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "u1", "email": "new@example.com"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if tr.IsError {
+		t.Fatalf("update_user returned a tool error: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.User](ctx, st, "u1", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] != `["bob"]` {
+		t.Errorf("former identifiers annotation = %q, want the concurrent value", got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers])
+	}
+	if got.Spec.Email != "new@example.com" {
+		t.Errorf("email = %q, want new@example.com", got.Spec.Email)
+	}
+}
+
+// TestUpdateUser_NotFound pins that update_user on a missing user answers a
+// tool error that starts with "user not found".
+func TestUpdateUser_NotFound(t *testing.T) {
+	resp := mcpRequest(t, NewHandler(deleteUserDeps(crdstore.NewFake())), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "ghost", "email": "x@example.com"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("update_user on a missing user must return a tool error, got success: %v", tr.Content)
+	}
+	if got := toolText(tr); !strings.HasPrefix(got, "user not found") {
+		t.Errorf("error text = %q, want prefix %q", got, "user not found")
+	}
+}

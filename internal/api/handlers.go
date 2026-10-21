@@ -1624,7 +1624,12 @@ func (s *Server) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 	}
 
 	claims := auth.ClaimsFromContext(r.Context())
-	if claims == nil || claims.Email == "" {
+	if claims == nil {
+		s.writeJSONError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	userName := identity.UserResourceName(claims, auth.AuthMode(s.deps.IdentityConfig.Mode))
+	if userName == "" {
 		s.writeJSONError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
@@ -1642,27 +1647,22 @@ func (s *Server) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Fetch existing or create new User CRD.
-	user, err := crdstore.Get[v1alpha1.User](ctx, s.deps.Store, claims.Email, ns)
+	// The User must exist. HandleMe reads these preferences from the same
+	// name, so this handler never creates a User.
+	_, err := crdstore.MutateStatus[v1alpha1.User](ctx, s.deps.Store, userName, ns, func(user *v1alpha1.User) (bool, error) {
+		user.Status.Preferences = &v1alpha1.UserPreferences{
+			Theme:          prefs.Theme,
+			Accent:         prefs.Accent,
+			DefaultLanding: prefs.DefaultLanding,
+		}
+		return true, nil
+	})
+	if k8serrors.IsNotFound(err) {
+		s.writeJSONError(w, http.StatusNotFound, "user not found")
+		return
+	}
 	if err != nil {
-		// Create a new User CRD.
-		user = &v1alpha1.User{}
-		user.APIVersion = "varroa.dev/v1alpha1"
-		user.Kind = "User"
-		user.Name = claims.Email
-		user.Namespace = ns
-		user.Spec.Email = claims.Email
-		user.Spec.DisplayName = claims.Name
-	}
-
-	user.Status.Preferences = &v1alpha1.UserPreferences{
-		Theme:          prefs.Theme,
-		Accent:         prefs.Accent,
-		DefaultLanding: prefs.DefaultLanding,
-	}
-
-	if err := crdstore.Apply[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
-		s.deps.Logger.Error("apply user CRD failed", "error", err)
+		s.deps.Logger.Error("update user preferences failed", "error", err)
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to save preferences")
 		return
 	}

@@ -179,6 +179,8 @@
               $ref: '../components/schemas.yaml#/Preferences'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
 
 /api/v1/me/password:
   put:

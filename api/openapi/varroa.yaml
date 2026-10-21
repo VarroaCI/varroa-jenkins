@@ -16892,6 +16892,8 @@ paths:
           description: Echo of the saved preferences.
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
       summary: Updates the current user's UI preferences.
       tags:
       - auth

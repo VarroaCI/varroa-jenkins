@@ -23477,6 +23477,7 @@ type UpdateMyPreferencesResponse struct {
 	HTTPResponse *http.Response
 	JSON200      *ComponentsSchemasPreferences
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON404      *ComponentsResponsesNotFound
 }
 
 // Status returns HTTPResponse.Status
@@ -33402,6 +33403,13 @@ func ParseUpdateMyPreferencesResponse(rsp *http.Response) (*UpdateMyPreferencesR
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 

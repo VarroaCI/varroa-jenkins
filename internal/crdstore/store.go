@@ -220,6 +220,53 @@ func MutateStatus[T any](ctx context.Context, b Backend, name, namespace string,
 	return changed, nil
 }
 
+// Mutate is a compare-and-swap on the main resource. It reads the live
+// object, calls mutate on it, and writes it back with the read
+// resourceVersion. A write since the read makes the write conflict. Mutate
+// then reads again and calls mutate again, up to retry.DefaultRetry
+// attempts. So mutate must derive every change from the object it receives
+// and must have no side effects. When mutate reports no change, Mutate
+// writes nothing and returns false.
+//
+// The write keeps every field that mutate does not touch. The apiserver
+// ignores status on this write; use MutateStatus for status.
+//
+// Mutate calls Backend.UpdateObject with the read version. It does not call
+// Update, whose live-version fallback would skip the precondition.
+func Mutate[T any](ctx context.Context, b Backend, name, namespace string, mutate func(obj *T) (bool, error)) (bool, error) {
+	var changed bool
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		changed = false
+		obj, err := Get[T](ctx, b, name, namespace)
+		if err != nil {
+			return err
+		}
+		c, err := mutate(obj)
+		if err != nil || !c {
+			return err
+		}
+		info, err := gvrInfo[T]()
+		if err != nil {
+			return err
+		}
+		u, err := toUnstructured(obj, info)
+		if err != nil {
+			return err
+		}
+		updated, err := b.UpdateObject(ctx, info.gvr, namespaceFromObj(u, info), u)
+		if err != nil {
+			return fmt.Errorf("update %s: %w", info.gvr.Resource, err)
+		}
+		mergeCreateResult(obj, updated)
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 // ErrNotOwned is returned by ApplyOwned when the live object exists and the
 // caller's ownership predicate rejects it.
 var ErrNotOwned = errors.New("crdstore: object is owned by another writer")

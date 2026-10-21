@@ -26,6 +26,7 @@ func init() {
 		contractCase{Name: "logout", Method: "POST", Path: "/api/v1/logout", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "getMe", Method: "GET", Path: "/api/v1/me", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "updateMyPreferences", Method: "PUT", Path: "/api/v1/me/preferences", Claims: adminClaims, Body: map[string]string{}, WantStatus: http.StatusOK},
+		contractCase{Name: "updateMyPreferences-404", Method: "PUT", Path: "/api/v1/me/preferences", Claims: operatorClaims, Body: map[string]string{}, WantStatus: http.StatusNotFound},
 		contractCase{Name: "changeMyPassword-501", Method: "PUT", Path: "/api/v1/me/password", Claims: adminClaims, Body: map[string]string{"oldPassword": "x", "newPassword": "short"}, WantStatus: http.StatusNotImplemented},
 		contractCase{Name: "getMyPermissions", Method: "GET", Path: "/api/v1/me/permissions", Claims: adminClaims, WantStatus: http.StatusOK},
 	)

@@ -191,6 +191,7 @@ func TestRequestHandlersPassRequestContext(t *testing.T) {
 		{
 			name: "preferences", method: http.MethodPut, path: "/me/preferences",
 			body: `{"theme":"dark"}`,
+			seed: []any{&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: "admin-user", Namespace: "test-ns"}}},
 			call: func(s *Server, w http.ResponseWriter, r *http.Request) { s.HandleUpdatePreferences(w, r) },
 		},
 		{
