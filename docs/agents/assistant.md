@@ -123,7 +123,7 @@ A tool result is cut at 32768 bytes.
 
 ## System prompt
 
-The system prompt carries the [operator guide](guide.md). The guide costs prompt tokens on every step, and the session budget counts them. The `anthropic` adapter marks the tool list and the system prompt for the provider prompt cache. The session budget counts cached tokens at their full count.
+The system prompt carries the [operator guide](guide.md). The guide costs prompt tokens on every step, and the session budget counts them. The `anthropic` adapter marks the tool list, the system prompt, and the latest message for the provider prompt cache. The session budget counts cached tokens at their full count.
 
 ## Budgets and the kill switch
 

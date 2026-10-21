@@ -47,9 +47,11 @@ contract with its adapters, and the sandbox contract.
 - **System text.** The loop starts the system text with `RunConfig.SystemBase`.
   An empty value uses `loop.AssistantBase`. The Team agent runner sets
   `sessions.SystemBase(ta)`.
-- **Prompt cache.** The Messages adapter marks the last tool and the system
-  text block for the cache. Usage counts cache creation and cache read as
-  prompt tokens.
+- **Prompt cache.** The Messages adapter marks the last tool, the system
+  text block, and the last content block of the last message. Three
+  breakpoints at most. Usage counts cache creation and cache read as prompt
+  tokens and also reports them apart (`CacheCreationTokens`,
+  `CacheReadTokens`).
 
 - The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
 - `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
