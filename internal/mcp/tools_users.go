@@ -199,7 +199,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 
 	updateU := mcp.NewTool("update_user",
-		mcp.WithDescription("Update an existing Varroa user (admin only)"),
+		mcp.WithDescription("Update an existing Varroa user (admin only, local accounts only)"),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 		mcp.WithString("email", mcp.Description("Email address")),
@@ -217,6 +217,9 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		if !deps.Authorizer.IsAdmin(claims) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
+		}
+		if !deps.IdentityConfig.LocalAccountsOn() {
+			return mcp.NewToolResultError("user editing is only available with local accounts"), nil
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")

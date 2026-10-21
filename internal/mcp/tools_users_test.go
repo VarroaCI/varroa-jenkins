@@ -497,6 +497,7 @@ func TestDeleteUser_EmitsUserDeleted(t *testing.T) {
 func TestUpdateUser_ConcurrentWriteKeepsFormerIdentifiers(t *testing.T) {
 	ctx := context.Background()
 	deps := userDeps(t)
+	deps.IdentityConfig.Mode = "local"
 	st := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(st, &v1alpha1.User{
 		ObjectMeta: metav1.ObjectMeta{Name: "u1", Namespace: "ns", ResourceVersion: "1"},
@@ -538,7 +539,9 @@ func TestUpdateUser_ConcurrentWriteKeepsFormerIdentifiers(t *testing.T) {
 // TestUpdateUser_NotFound pins that update_user on a missing user answers a
 // tool error that starts with "user not found".
 func TestUpdateUser_NotFound(t *testing.T) {
-	resp := mcpRequest(t, NewHandler(deleteUserDeps(crdstore.NewFake())), "tools/call", map[string]interface{}{
+	deps := deleteUserDeps(crdstore.NewFake())
+	deps.IdentityConfig.Mode = "local"
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 		"name":      "update_user",
 		"arguments": map[string]interface{}{"namespace": "ns", "name": "ghost", "email": "x@example.com"},
 	}, mcpAdminClaims)
