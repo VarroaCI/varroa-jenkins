@@ -9,6 +9,8 @@ import (
 )
 
 // latestCoreResolveTimeout bounds one upstream latest lookup made for a metadata request.
+// A metadata fetch that takes longer keeps running after this budget ends. It fills the
+// resolver cache, so a later request uses its result.
 const latestCoreResolveTimeout = 10 * time.Second
 
 // preferCompatible returns the candidates whose requiredCore runs on core. When no

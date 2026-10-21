@@ -195,3 +195,187 @@ func TestResolve_SourcesListChangePickedUp(t *testing.T) {
 		t.Fatalf("after remove: got %v, want ErrVersionUnavailable", err)
 	}
 }
+
+// gatedServer serves plugins like metaServer. While block reports true, it holds each
+// request until release is closed. Callers register the release cleanup after the
+// server cleanup, so the handler unblocks before the server waits for it.
+func gatedServer(t *testing.T, plugins map[string]ucPlugin, block func() bool, release <-chan struct{}) (*httptest.Server, *int32) {
+	t.Helper()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if block() {
+			<-release
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body := `{"plugins":{`
+		first := true
+		for name, p := range plugins {
+			if !first {
+				body += ","
+			}
+			first = false
+			body += fmt.Sprintf(`%q:{"version":%q,"sha256":%q}`, name, p.Version, p.SHA256)
+		}
+		body += `}}`
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+func TestEnsureFresh_CallerDeadlineDoesNotDegradeSource(t *testing.T) {
+	release := make(chan struct{})
+	srv, hits := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		func() bool { return true }, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("short-deadline call outcome = %v, want degraded", res.Outcome)
+	}
+
+	unblock()
+	if sha, err := r.ResolveSHA256(context.Background(), "p", "1"); err != nil || sha != "s1" {
+		t.Fatalf("later call got (%q,%v), want (s1,nil): the caller deadline degraded the source", sha, err)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("fetches = %d, want 1", got)
+	}
+}
+
+func TestEnsureFresh_CanceledCallerStartsFetchThatFillsCache(t *testing.T) {
+	release := make(chan struct{})
+	srv, hits := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		func() bool { return true }, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if res := r.ResolveExact(canceled, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("canceled call outcome = %v, want degraded", res.Outcome)
+	}
+
+	unblock()
+	if sha, err := r.ResolveSHA256(context.Background(), "p", "1"); err != nil || sha != "s1" {
+		t.Fatalf("background call got (%q,%v), want (s1,nil)", sha, err)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("fetches = %d, want 1", got)
+	}
+}
+
+func TestEnsureFresh_StaleEntryServedWhileRefetchIsSlow(t *testing.T) {
+	var slow atomic.Bool
+	release := make(chan struct{})
+	srv, _ := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		slow.Load, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	r.now = func() time.Time { return base }
+
+	if sha, err := r.ResolveSHA256(context.Background(), "p", "1"); err != nil || sha != "s1" {
+		t.Fatalf("warm-up got (%q,%v), want (s1,nil)", sha, err)
+	}
+
+	slow.Store(true)
+	r.now = func() time.Time { return base.Add(2 * time.Hour) }
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != Resolved || res.Meta.SHA256 != "s1" {
+		t.Fatalf("stale-while-refetch outcome = %v (sha %q), want resolved s1", res.Outcome, res.Meta.SHA256)
+	}
+}
+
+func TestEnsureFresh_StaleMissIsNotProvableNegative(t *testing.T) {
+	var slow atomic.Bool
+	release := make(chan struct{})
+	srv, _ := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		slow.Load, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	r.now = func() time.Time { return base }
+
+	if _, err := r.ResolveSHA256(context.Background(), "p", "1"); err != nil {
+		t.Fatalf("warm-up: %v", err)
+	}
+
+	// The refresh may list "x", but the stale entry does not. The miss must not be NotListed.
+	slow.Store(true)
+	r.now = func() time.Time { return base.Add(2 * time.Hour) }
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if res := r.ResolveExact(ctx, "x", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("stale miss outcome = %v, want degraded", res.Outcome)
+	}
+}
+
+func TestEnsureFresh_FetchOwnTimeoutCachesDegraded(t *testing.T) {
+	release := make(chan struct{})
+	srv, hits := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		func() bool { return true }, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	r.fetchTimeout = 20 * time.Millisecond
+
+	ctx := context.Background()
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("timed-out fetch outcome = %v, want degraded", res.Outcome)
+	}
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("second call outcome = %v, want degraded", res.Outcome)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("fetches = %d, want 1: a failed source must stay cached for the ttl", got)
+	}
+}
+
+func TestEnsureFresh_ConcurrentDeadlinedCallersShareOneFetch(t *testing.T) {
+	release := make(chan struct{})
+	srv, hits := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
+		func() bool { return true }, release)
+	unblock := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(unblock)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			_ = r.ResolveExact(ctx, "p", "1")
+		}()
+	}
+	wg.Wait()
+
+	unblock()
+	if sha, err := r.ResolveSHA256(context.Background(), "p", "1"); err != nil || sha != "s1" {
+		t.Fatalf("final call got (%q,%v), want (s1,nil)", sha, err)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("fetches = %d, want 1", got)
+	}
+}
