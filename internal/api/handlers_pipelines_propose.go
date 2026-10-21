@@ -154,8 +154,12 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 		cluster = s.deps.CoreCluster
 	}
 	check, err := s.deps.ForgeRelay.Check(ctx, cluster, forgeapi.CheckRequest{Team: team, Repo: u.String()})
+	if err != nil && isOperatorTimeout(err) {
+		writeAssistantError(s, w, http.StatusGatewayTimeout, codeOperatorTimeout, "the operator did not answer in time")
+		return
+	}
 	if err != nil {
-		writeAssistantError(s, w, http.StatusBadGateway, forgeapi.CodeForgeUnreachable, "the operator did not answer")
+		writeAssistantError(s, w, http.StatusBadGateway, forgeapi.CodeForgeUnreachable, "the forge relay failed")
 		return
 	}
 	if !check.OK {

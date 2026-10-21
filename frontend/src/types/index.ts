@@ -2889,6 +2889,7 @@ export type ProposePipelineErrorCode =
   | "forge_auth_failed"
   | "forge_write_denied"
   | "forge_unreachable"
+  | "operator_timeout"
   | "jenkinsfile_exists"
   | "proposal_branch_exists"
   | "not_found"

@@ -110,6 +110,14 @@ describe("ProposePipelineCard", () => {
     expect(await screen.findByText("The repository already holds a Jenkinsfile.")).toBeInTheDocument();
   });
 
+  it("names an operator timeout", async () => {
+    mockPropose.mockRejectedValue(new ApiError(504, "timeout", { error: "late", code: "operator_timeout" }));
+    renderCard();
+    fireEvent.change((await screen.findByLabelText("Repository URL")), { target: { value: "https://git.example.org/acme/payments" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose" }));
+    expect(await screen.findByText("The operator did not answer in time. Wait, then try again.")).toBeInTheDocument();
+  });
+
   it("shows the reading state of a running session", async () => {
     mockList.mockResolvedValue({ items: [{ id: "s-1" }], nextCursor: null });
     mockGet.mockResolvedValue(detail("running"));
