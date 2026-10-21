@@ -1,6 +1,7 @@
 // Package keylock provides a set of mutexes, one for each key, whose waits
-// end with a context. An entry exists only while a caller holds or waits for
-// its key, so the set does not grow with every key it ever saw.
+// end with a context, and a non-blocking try for each key. An entry exists
+// only while a caller holds or waits for its key, so the set does not grow
+// with every key it ever saw.
 package keylock
 
 import (
@@ -53,6 +54,29 @@ func (l *KeyLock) Lock(ctx context.Context, key string) error {
 	case <-ctx.Done():
 		l.release(key, e)
 		return ctx.Err()
+	}
+}
+
+// TryLock takes the lock of key without waiting. It returns true when the
+// caller gets the lock, and the caller must then call Unlock with the same
+// key. It returns false when another caller holds the lock. The caller then
+// holds nothing, and an entry that no one else uses is removed.
+func (l *KeyLock) TryLock(key string) bool {
+	l.mu.Lock()
+	e := l.entries[key]
+	if e == nil {
+		e = &entry{sem: make(chan struct{}, 1)}
+		l.entries[key] = e
+	}
+	e.refs++
+	l.mu.Unlock()
+
+	select {
+	case e.sem <- struct{}{}:
+		return true
+	default:
+		l.release(key, e)
+		return false
 	}
 }
 

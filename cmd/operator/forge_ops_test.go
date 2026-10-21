@@ -417,10 +417,10 @@ func TestForgeRunners_OnlyOwnerReplies(t *testing.T) {
 	}
 }
 
-// TestForgeRunners_QueuedPullRequestExpires checks that a request which waits
-// for its Team behind a slow pull request is refused once its deadline leaves
-// too little work time, and that the forge makes no call for it.
-func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
+// TestForgeRunners_SecondPullRequestForTeamIsBusy checks that a second pull
+// request for a Team that runs answers pull_request_busy without a forge call,
+// and that the first request still completes.
+func TestForgeRunners_SecondPullRequestForTeamIsBusy(t *testing.T) {
 	s := startLedgerActionNATS(t)
 	url := s.ClientURL()
 	ring := sharding.NewRing(8)
@@ -456,21 +456,31 @@ func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
 		t.Fatal("the first request did not reach the forge")
 	}
 
-	// The second request has reserve + min budget + 1 s left when it is sent.
-	// The first request holds the Team lock for 2 s, so the wait for the
-	// Team ends with less than the minimum budget left.
 	inboxB := client.NewRespInbox()
 	subB, err := client.SubscribeSync(inboxB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.PublishRequest(subject, inboxB, prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+time.Second))); err != nil {
+	if err := client.PublishRequest(subject, inboxB, prBodyDeadline(t, time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Second)
-	close(block)
+	msgB, err := nextQueuedReply(subB, 3*time.Second)
+	if err != nil {
+		t.Fatalf("no reply to the second request within 3s: %v", err)
+	}
+	var repB forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgB.Data, &repB); err != nil {
+		t.Fatal(err)
+	}
+	if repB.Code != forgeapi.CodePullRequestBusy {
+		t.Fatalf("second request code %q, want %q", repB.Code, forgeapi.CodePullRequestBusy)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("forge calls %d, want 1", n)
+	}
 
-	msgA, err := nextQueuedReply(subA, 5*time.Second)
+	close(block)
+	msgA, err := nextReplyNotBusy(subA, 5*time.Second)
 	if err != nil {
 		t.Fatalf("no reply to the first request: %v", err)
 	}
@@ -481,25 +491,128 @@ func TestForgeRunners_QueuedPullRequestExpires(t *testing.T) {
 	if !repA.OK {
 		t.Fatalf("first request failed: %+v", repA.Status)
 	}
-	msgB, err := nextQueuedReply(subB, 5*time.Second)
+}
+
+// TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam checks that repeated pull
+// requests for a busy Team do not hold the bus slots, so a pull request for
+// another Team still runs.
+func TestForgeRunners_BusyTeamDoesNotStarveAnotherTeam(t *testing.T) {
+	s := startLedgerActionNATS(t)
+	url := s.ClientURL()
+	ring := sharding.NewRing(8)
+	held := map[int]bool{
+		ring.ShardFor(forgeops.ShardKey("payments")): true,
+		ring.ShardFor(forgeops.ShardKey("billing")):  true,
+	}
+	var calls atomic.Int32
+	block := make(chan struct{})
+	startForgeReplica(t, url, "A", forgeapi.VerbPullRequest, ring, held,
+		stampOps{id: "A", calls: &calls, block: block, blockTeam: "payments"})
+
+	client, err := nats.Connect(url)
 	if err != nil {
-		t.Fatalf("no reply to the queued request: %v", err)
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+	subject := bus.OperatorForgeSubject("core", forgeapi.VerbPullRequest)
+
+	inboxA := client.NewRespInbox()
+	subA, err := client.SubscribeSync(inboxA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyA := prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))
+	for i := 0; i < 50 && calls.Load() == 0; i++ {
+		if err := client.PublishRequest(subject, inboxA, bodyA); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("the payments request did not reach the forge")
+	}
+
+	// Four more payments requests would have filled every bus slot before
+	// this change. Each one is refused at once.
+	for i := 0; i < 4; i++ {
+		inbox := client.NewRespInbox()
+		sub, err := client.SubscribeSync(inbox)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := client.PublishRequest(subject, inbox, prBodyTeam(t, "payments", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
+			t.Fatal(err)
+		}
+		msg, err := nextQueuedReply(sub, 3*time.Second)
+		if err != nil {
+			t.Fatalf("no reply to payments request %d within 3s: %v", i, err)
+		}
+		var rep forgeapi.PullRequestReply
+		if err := json.Unmarshal(msg.Data, &rep); err != nil {
+			t.Fatal(err)
+		}
+		if rep.Code != forgeapi.CodePullRequestBusy {
+			t.Fatalf("payments request %d code %q, want %q", i, rep.Code, forgeapi.CodePullRequestBusy)
+		}
+	}
+
+	inboxB := client.NewRespInbox()
+	subB, err := client.SubscribeSync(inboxB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PublishRequest(subject, inboxB, prBodyTeam(t, "billing", time.Now().Add(forgeapi.PullRequestTimeout))); err != nil {
+		t.Fatal(err)
+	}
+	msgB, err := nextQueuedReply(subB, 3*time.Second)
+	if err != nil {
+		t.Fatalf("the billing request waited behind the busy payments Team: %v", err)
 	}
 	var repB forgeapi.PullRequestReply
 	if err := json.Unmarshal(msgB.Data, &repB); err != nil {
 		t.Fatal(err)
 	}
-	if repB.Code != forgeapi.CodeRequestExpired {
-		t.Fatalf("queued request code %q, want %q", repB.Code, forgeapi.CodeRequestExpired)
+	if !repB.OK {
+		t.Fatalf("billing request failed: %+v", repB.Status)
 	}
-	if n := calls.Load(); n != 1 {
-		t.Fatalf("forge calls %d, want 1", n)
+
+	close(block)
+	msgA, err := nextReplyNotBusy(subA, 5*time.Second)
+	if err != nil {
+		t.Fatalf("no reply to the payments request: %v", err)
+	}
+	var repA forgeapi.PullRequestReply
+	if err := json.Unmarshal(msgA.Data, &repA); err != nil {
+		t.Fatal(err)
+	}
+	if !repA.OK {
+		t.Fatalf("payments request failed: %+v", repA.Status)
 	}
 }
 
 // nextQueuedReply returns the next reply on sub. It skips the no-responders
 // status that the server sends for a publish that arrived before the runner
 // subscribed.
+// nextReplyNotBusy returns the next reply on sub that is not pull_request_busy.
+// A test republishes a request while the first one may not have reached the
+// forge yet, so a busy refusal for a duplicate can arrive first on the same inbox.
+func nextReplyNotBusy(sub *nats.Subscription, wait time.Duration) (*nats.Msg, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		msg, err := nextQueuedReply(sub, time.Until(deadline))
+		if err != nil {
+			return nil, err
+		}
+		var rep forgeapi.PullRequestReply
+		if err := json.Unmarshal(msg.Data, &rep); err != nil {
+			return nil, err
+		}
+		if rep.Code != forgeapi.CodePullRequestBusy {
+			return msg, nil
+		}
+	}
+}
+
 func nextQueuedReply(sub *nats.Subscription, wait time.Duration) (*nats.Msg, error) {
 	deadline := time.Now().Add(wait)
 	for {
@@ -769,42 +882,10 @@ func TestForgeRunners_OtherTeamPullRequestRunsBesideASlowOne(t *testing.T) {
 	}
 }
 
-// TestHandleForgePullRequest_WaitsForTeamThenRuns checks that a pull request
-// waits for the lock of its Team, and runs once the lock is free and enough
-// time is left.
-func TestHandleForgePullRequest_WaitsForTeamThenRuns(t *testing.T) {
-	ring := sharding.NewRing(8)
-	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
-	locks := keylock.New()
-	key := forgeops.ShardKey("payments")
-	if err := locks.Lock(context.Background(), key); err != nil {
-		t.Fatal(err)
-	}
-	var calls atomic.Int32
-	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+3*time.Second))
-	done := make(chan []byte, 1)
-	go func() {
-		done <- handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, body)
-	}()
-	time.Sleep(500 * time.Millisecond)
-	locks.Unlock(key)
-
-	var rep forgeapi.PullRequestReply
-	if err := json.Unmarshal(<-done, &rep); err != nil {
-		t.Fatal(err)
-	}
-	if !rep.OK {
-		t.Fatalf("reply %+v, want OK after the Team lock was freed", rep.Status)
-	}
-	if n := calls.Load(); n != 1 {
-		t.Fatalf("forge calls %d, want 1", n)
-	}
-}
-
-// TestHandleForgePullRequest_TeamWaitExpiresWithoutCall checks that a pull
-// request whose wait for its Team leaves less than the minimum budget answers
-// request_expired and makes no forge call.
-func TestHandleForgePullRequest_TeamWaitExpiresWithoutCall(t *testing.T) {
+// TestHandleForgePullRequest_HeldTeamAnswersBusy checks that a pull request for a
+// Team whose lock is held is refused at once with pull_request_busy, and makes
+// no forge call.
+func TestHandleForgePullRequest_HeldTeamAnswersBusy(t *testing.T) {
 	ring := sharding.NewRing(8)
 	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
 	locks := keylock.New()
@@ -814,24 +895,61 @@ func TestHandleForgePullRequest_TeamWaitExpiresWithoutCall(t *testing.T) {
 	}
 	defer locks.Unlock(key)
 	var calls atomic.Int32
-	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+time.Second))
+	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+3*time.Second))
 	start := time.Now()
 	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, ownerEnter(held, ring), locks, body)
-	if waited := time.Since(start); waited > 3*time.Second {
-		t.Fatalf("the wait took %v, want about 1s", waited)
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("the refusal took %v, want at once", waited)
 	}
 	var rep forgeapi.PullRequestReply
 	if err := json.Unmarshal(got, &rep); err != nil {
 		t.Fatal(err)
 	}
-	if rep.Code != forgeapi.CodeRequestExpired {
-		t.Fatalf("code %q, want %q", rep.Code, forgeapi.CodeRequestExpired)
+	if rep.Code != forgeapi.CodePullRequestBusy {
+		t.Fatalf("code %q, want %q", rep.Code, forgeapi.CodePullRequestBusy)
 	}
 	if n := calls.Load(); n != 0 {
 		t.Fatalf("forge calls %d, want 0", n)
 	}
 	if n := locks.Size(); n != 1 {
 		t.Fatalf("lock entries %d, want 1 for the holder", n)
+	}
+}
+
+// TestHandleForgePullRequest_FreedTeamRunsAgain checks that after a busy refusal
+// and an unlock, a new pull request for the Team runs.
+func TestHandleForgePullRequest_FreedTeamRunsAgain(t *testing.T) {
+	ring := sharding.NewRing(8)
+	held := map[int]bool{ring.ShardFor(forgeops.ShardKey("payments")): true}
+	locks := keylock.New()
+	key := forgeops.ShardKey("payments")
+	if err := locks.Lock(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	enter := ownerEnter(held, ring)
+	body := prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+3*time.Second))
+	got := handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, enter, locks, body)
+	var busy forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &busy); err != nil {
+		t.Fatal(err)
+	}
+	if busy.Code != forgeapi.CodePullRequestBusy {
+		t.Fatalf("code %q, want %q", busy.Code, forgeapi.CodePullRequestBusy)
+	}
+	locks.Unlock(key)
+
+	body = prBodyDeadline(t, time.Now().Add(forgePullRequestReserve+forgePullRequestMinBudget+3*time.Second))
+	got = handleForgePullRequest(context.Background(), slog.Default(), stampOps{calls: &calls}, enter, locks, body)
+	var rep forgeapi.PullRequestReply
+	if err := json.Unmarshal(got, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK {
+		t.Fatalf("reply %+v, want OK after the Team lock was freed", rep.Status)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("forge calls %d, want 1", n)
 	}
 }
 

@@ -47,6 +47,7 @@ Merge the pull request on the forge. See
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |
 | `request_expired` | 504 | Approve the call again. |
 | `operator_timeout` | 504 | The operator did not answer in time. Wait, then try again. |
+| `pull_request_busy` | 429 | Another pull request for the team runs. Wait, then approve the call again. |
 | `assistant_busy` | 429 | Wait for a session to end. |
 | `kill_switch` | 503 | Wait for the assistant to resume. |
 | `invalid_request` | 400 | Send a body with a `repo` field only. |
