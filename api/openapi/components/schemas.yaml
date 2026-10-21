@@ -7186,7 +7186,7 @@ ProposePipelineError:
       type: string
     code:
       type: string
-      enum: [assistant_disabled, assistant_off, assistant_busy, kill_switch, repo_url_invalid, data_sharing_too_low, no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied, forge_unreachable, operator_timeout, jenkinsfile_exists, proposal_branch_exists, not_found, invalid_request, internal]
+      enum: [assistant_disabled, assistant_off, assistant_busy, kill_switch, repo_url_invalid, data_sharing_too_low, no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied, forge_unreachable, operator_timeout, operator_unavailable, jenkinsfile_exists, proposal_branch_exists, not_found, invalid_request, internal]
   additionalProperties: false
 
 AssistantSessionContext:

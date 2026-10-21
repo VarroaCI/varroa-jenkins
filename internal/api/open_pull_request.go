@@ -17,12 +17,21 @@ import (
 // have landed.
 const codeOperatorTimeout = "operator_timeout"
 
+// codeOperatorUnavailable reports that no operator received a forge request.
+// The operator wrote nothing, so the caller can call again.
+const codeOperatorUnavailable = "operator_unavailable"
+
 // isOperatorTimeout reports whether the relay stopped waiting for the operator.
-// The bus returns nats.ErrTimeout or nats.ErrNoResponders when the reply does not
-// come, and the caller's context returns context.DeadlineExceeded.
+// The bus returns nats.ErrTimeout when the reply does not come, and the caller's
+// context returns context.DeadlineExceeded. A no-responder error is not a
+// timeout: no operator received the request, so isOperatorUnavailable owns it.
 func isOperatorTimeout(err error) bool {
-	return bus.IsNoReply(err) || errors.Is(err, context.DeadlineExceeded)
+	return (bus.IsNoReply(err) && !bus.IsNoResponder(err)) || errors.Is(err, context.DeadlineExceeded)
 }
+
+// isOperatorUnavailable reports whether no operator received the request.
+// The operator wrote nothing, so the caller can call again.
+func isOperatorUnavailable(err error) bool { return bus.IsNoResponder(err) }
 
 // OpenPullRequestArgs are the model's arguments of open_pull_request.
 type OpenPullRequestArgs struct {
@@ -105,8 +114,11 @@ func (s *Server) OpenPullRequest(ctx context.Context, claims *auth.Claims, a Ope
 		Team: a.Team, Repo: u.String(), Branch: a.Branch, Title: a.Title, Body: body,
 		Files: a.Files, CommitMessage: msg, BaseRevision: baseRevision,
 	})
+	if err != nil && isOperatorUnavailable(err) {
+		return OpenPullRequestResult{}, toolErr(http.StatusServiceUnavailable, codeOperatorUnavailable, "no operator received the request. No branch or pull request was created. Call again later.")
+	}
 	if err != nil && isOperatorTimeout(err) {
-		return OpenPullRequestResult{}, toolErr(http.StatusGatewayTimeout, codeOperatorTimeout, "the operator did not answer in time. Call again later.")
+		return OpenPullRequestResult{}, toolErr(http.StatusGatewayTimeout, codeOperatorTimeout, "the operator did not answer in time. The branch or the pull request can exist. Look in the repository, then call again later.")
 	}
 	if err != nil {
 		return OpenPullRequestResult{}, toolErr(http.StatusBadGateway, forgeapi.CodeForgeUnreachable, "%v", err)

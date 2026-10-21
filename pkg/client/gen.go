@@ -572,6 +572,7 @@ const (
 	ComponentsSchemasProposePipelineErrorCodeNoMatchingCredential ComponentsSchemasProposePipelineErrorCode = "no_matching_credential"
 	ComponentsSchemasProposePipelineErrorCodeNotFound             ComponentsSchemasProposePipelineErrorCode = "not_found"
 	ComponentsSchemasProposePipelineErrorCodeOperatorTimeout      ComponentsSchemasProposePipelineErrorCode = "operator_timeout"
+	ComponentsSchemasProposePipelineErrorCodeOperatorUnavailable  ComponentsSchemasProposePipelineErrorCode = "operator_unavailable"
 	ComponentsSchemasProposePipelineErrorCodeProposalBranchExists ComponentsSchemasProposePipelineErrorCode = "proposal_branch_exists"
 	ComponentsSchemasProposePipelineErrorCodeRepoUrlInvalid       ComponentsSchemasProposePipelineErrorCode = "repo_url_invalid"
 )

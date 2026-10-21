@@ -118,6 +118,14 @@ describe("ProposePipelineCard", () => {
     expect(await screen.findByText("The operator did not answer in time. Wait, then try again.")).toBeInTheDocument();
   });
 
+  it("names an unavailable operator", async () => {
+    mockPropose.mockRejectedValue(new ApiError(503, "unavailable", { error: "none", code: "operator_unavailable" }));
+    renderCard();
+    fireEvent.change((await screen.findByLabelText("Repository URL")), { target: { value: "https://git.example.org/acme/payments" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose" }));
+    expect(await screen.findByText("No operator received the check. Wait, then try again.")).toBeInTheDocument();
+  });
+
   it("shows the reading state of a running session", async () => {
     mockList.mockResolvedValue({ items: [{ id: "s-1" }], nextCursor: null });
     mockGet.mockResolvedValue(detail("running"));

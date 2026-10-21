@@ -9681,6 +9681,7 @@ components:
           - forge_write_denied
           - forge_unreachable
           - operator_timeout
+          - operator_unavailable
           - jenkinsfile_exists
           - proposal_branch_exists
           - not_found
@@ -17439,9 +17440,10 @@ paths:
            (409 data_sharing_too_low).
         8. The operator finds a credential that reaches the forge and a
            Jenkinsfile and a proposal branch are absent (422, 409, 502, or 404
-           by the code of the forge reply, or 504 operator_timeout when the
-           operator does not answer in time).
-        9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502); operator_timeout (504).
+           by the code of the forge reply, 504 operator_timeout when the
+           operator does not answer in time, or 503 operator_unavailable when
+           no operator receives the check).
+        9. The assistant is not busy (429 assistant_busy). Codes from the forge check: no_matching_credential, forge_unsupported, forge_auth_failed, forge_write_denied (422); jenkinsfile_exists and proposal_branch_exists (409); not_found (404); forge_unreachable (502); operator_timeout (504); operator_unavailable (503).
       operationId: proposePipeline
       parameters:
       - $ref: '#/components/parameters/components_parameters_team'
@@ -17503,7 +17505,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_ProposePipelineError'
-          description: The assistant is disabled or its kill switch is set.
+          description: The assistant is disabled, its kill switch is set, or no operator
+            received the forge check (operator_unavailable).
         "504":
           content:
             application/json:
