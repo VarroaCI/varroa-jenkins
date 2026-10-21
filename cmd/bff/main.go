@@ -1328,8 +1328,8 @@ type bffUserStore struct {
 func (s bffUserStore) GetUserCRD(ctx context.Context, name, ns string) (*v1alpha1.User, error) {
 	return crdstore.Get[v1alpha1.User](ctx, s.store, name, ns)
 }
-func (s bffUserStore) ApplyUserCRD(ctx context.Context, u *v1alpha1.User) error {
-	return crdstore.Apply[v1alpha1.User](ctx, s.store, u)
+func (s bffUserStore) MutateUserCRD(ctx context.Context, name, ns string, mutate func(*v1alpha1.User) (bool, error)) (bool, error) {
+	return crdstore.Mutate[v1alpha1.User](ctx, s.store, name, ns, mutate)
 }
 func (s bffUserStore) PatchUserStatus(ctx context.Context, name, ns string, st *v1alpha1.UserStatus) error {
 	return crdstore.PatchStatus[v1alpha1.User](ctx, s.store, name, ns, st)

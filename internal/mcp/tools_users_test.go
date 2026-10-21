@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -547,5 +548,45 @@ func TestUpdateUser_NotFound(t *testing.T) {
 	}
 	if got := toolText(tr); !strings.HasPrefix(got, "user not found") {
 		t.Errorf("error text = %q, want prefix %q", got, "user not found")
+	}
+}
+
+// TestCreateUser_ExistingNameIsToolError pins that create_user refuses a
+// name that already exists with a tool error. The stored User keeps its
+// managed-by label and email.
+func TestCreateUser_ExistingNameIsToolError(t *testing.T) {
+	ctx := context.Background()
+	deps := deleteUserDeps(crdstore.NewFake())
+	st := deps.Store.(*crdstore.Fake)
+	crdstore.MustSeed(st, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "alice",
+			Namespace: "ns",
+			Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal},
+		},
+		Spec: v1alpha1.UserSpec{Email: "a@x"},
+	})
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "create_user",
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "alice", "email": "b@x"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("create_user over an existing name returned no tool error: %v", tr.Content)
+	}
+	if !strings.Contains(fmt.Sprint(tr.Content), "already exists") {
+		t.Errorf("tool error = %v, want the already-exists message", tr.Content)
+	}
+
+	got, err := crdstore.Get[v1alpha1.User](ctx, st, "alice", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
+		t.Errorf("managed-by = %q, want local", got.Labels[v1alpha1.LabelManagedBy])
+	}
+	if got.Spec.Email != "a@x" {
+		t.Errorf("email = %q, want a@x", got.Spec.Email)
 	}
 }

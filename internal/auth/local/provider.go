@@ -34,7 +34,7 @@ type userStore interface {
 	GetUserCRD(ctx context.Context, name, ns string) (*v1alpha1.User, error)
 	ListGroupCRDs(ctx context.Context) ([]*v1alpha1.Group, error)
 	PatchUserStatus(ctx context.Context, name, ns string, st *v1alpha1.UserStatus) error
-	ApplyUserCRD(ctx context.Context, u *v1alpha1.User) error
+	MutateUserCRD(ctx context.Context, name, ns string, mutate func(*v1alpha1.User) (bool, error)) (bool, error)
 }
 
 // Provider is the local authentication provider.
@@ -233,11 +233,17 @@ func (p *Provider) ensureLocalLabel(ctx context.Context, u *v1alpha1.User) {
 	if u.Labels != nil && u.Labels[v1alpha1.LabelManagedBy] == v1alpha1.ManagedByLocal {
 		return
 	}
-	if u.Labels == nil {
-		u.Labels = map[string]string{}
-	}
-	u.Labels[v1alpha1.LabelManagedBy] = v1alpha1.ManagedByLocal
-	_ = p.store.ApplyUserCRD(ctx, u)
+	// The write uses the fresh read, so a write since the login read survives.
+	_, _ = p.store.MutateUserCRD(ctx, u.Name, p.ns, func(live *v1alpha1.User) (bool, error) {
+		if live.Labels[v1alpha1.LabelManagedBy] == v1alpha1.ManagedByLocal {
+			return false, nil
+		}
+		if live.Labels == nil {
+			live.Labels = map[string]string{}
+		}
+		live.Labels[v1alpha1.LabelManagedBy] = v1alpha1.ManagedByLocal
+		return true, nil
+	})
 }
 
 // --- Token verification ---

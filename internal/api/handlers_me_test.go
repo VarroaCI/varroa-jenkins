@@ -125,11 +125,6 @@ func (f *fakeResourceClient) GetUserCRD(_ context.Context, name, namespace strin
 	return u, nil
 }
 
-func (f *fakeResourceClient) ApplyUserCRD(_ context.Context, cr *v1alpha1.User) error {
-	f.users[cr.Name] = cr.DeepCopy()
-	return nil
-}
-
 func (f *fakeResourceClient) ListUserCRDs(_ context.Context, namespace string) ([]*v1alpha1.User, error) {
 	out := make([]*v1alpha1.User, 0, len(f.users))
 	for _, u := range f.users {

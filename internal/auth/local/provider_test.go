@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 	"github.com/varroaci/varroa-jenkins/internal/signing"
 )
 
@@ -24,6 +25,8 @@ type mockStore struct {
 	// notFoundErr models the real client, which returns a k8s NotFound
 	// error (rather than nil, nil) for a missing user.
 	notFoundErr bool
+	// mutateCalls counts MutateUserCRD calls.
+	mutateCalls int
 }
 
 func newMockStore() *mockStore {
@@ -56,9 +59,19 @@ func (m *mockStore) PatchUserStatus(_ context.Context, _, _ string, _ *v1alpha1.
 	return nil
 }
 
-func (m *mockStore) ApplyUserCRD(_ context.Context, u *v1alpha1.User) error {
-	m.users[u.Name] = u
-	return nil
+func (m *mockStore) MutateUserCRD(_ context.Context, name, _ string, mutate func(*v1alpha1.User) (bool, error)) (bool, error) {
+	m.mutateCalls++
+	u, ok := m.users[name]
+	if !ok {
+		return false, apierrors.NewNotFound(schema.GroupResource{Group: "varroa.dev", Resource: "users"}, name)
+	}
+	live := u.DeepCopy()
+	changed, err := mutate(live)
+	if err != nil || !changed {
+		return false, err
+	}
+	m.users[name] = live
+	return true, nil
 }
 
 func (m *mockStore) addUser(name, password, email, displayName string) {
@@ -440,5 +453,85 @@ func TestLogin_LocalOnly_Unchanged(t *testing.T) {
 	}
 	if claims.Subject != "alice" {
 		t.Errorf("sub = %q, want alice", claims.Subject)
+	}
+}
+
+// crdUserStore is a userStore over the in-memory crdstore.Fake. It runs the
+// real crdstore compare-and-swap, so a stale read conflicts as it does live.
+type crdUserStore struct {
+	f *crdstore.Fake
+}
+
+func (s crdUserStore) GetUserCRD(ctx context.Context, name, ns string) (*v1alpha1.User, error) {
+	return crdstore.Get[v1alpha1.User](ctx, s.f, name, ns)
+}
+
+func (s crdUserStore) ListGroupCRDs(ctx context.Context) ([]*v1alpha1.Group, error) {
+	return crdstore.List[v1alpha1.Group](ctx, s.f, "", "")
+}
+
+func (s crdUserStore) PatchUserStatus(ctx context.Context, name, ns string, st *v1alpha1.UserStatus) error {
+	return crdstore.PatchStatus[v1alpha1.User](ctx, s.f, name, ns, st)
+}
+
+func (s crdUserStore) MutateUserCRD(ctx context.Context, name, ns string, mutate func(*v1alpha1.User) (bool, error)) (bool, error) {
+	return crdstore.Mutate[v1alpha1.User](ctx, s.f, name, ns, mutate)
+}
+
+// TestLogin_LabelHealKeepsConcurrentWrite pins that the managed-by:local
+// heal writes from a fresh read. A write made after Login's own read must
+// survive the heal.
+func TestLogin_LabelHealKeepsConcurrentWrite(t *testing.T) {
+	ctx := context.Background()
+	p, _ := newTestProvider(t)
+	f := crdstore.NewFake()
+	p.store = crdUserStore{f: f}
+	hash, _ := bcrypt.GenerateFromPassword([]byte("correct"), bcrypt.MinCost)
+	crdstore.MustSeed(f, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "default", ResourceVersion: "1"},
+		Spec:       v1alpha1.UserSpec{Email: "alice@example.com"},
+		Status:     v1alpha1.UserStatus{Credentials: &v1alpha1.UserCredentials{PasswordHash: string(hash)}},
+	})
+	gvr, _ := crdstore.GVRFor[v1alpha1.User]()
+	fired := false
+	f.SetAfterGet(gvr, func(ns, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := f.PatchObjectMetaAt(ctx, gvr, ns, name, "1", map[string]any{
+			"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
+		}); err != nil {
+			t.Errorf("concurrent patch: %v", err)
+		}
+	})
+
+	if _, err := p.Login(ctx, "alice", "correct"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	got, err := crdstore.Get[v1alpha1.User](ctx, f, "alice", "default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
+		t.Errorf("managed-by = %q, want local", got.Labels[v1alpha1.LabelManagedBy])
+	}
+	if got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] != `["bob"]` {
+		t.Errorf("former identifiers annotation = %q, want the concurrent value", got.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers])
+	}
+}
+
+// TestLogin_LabeledUserSkipsMutate pins that a User that already carries
+// managed-by:local causes no write on login.
+func TestLogin_LabeledUserSkipsMutate(t *testing.T) {
+	p, _ := newTestProvider(t)
+	m := p.store.(*mockStore)
+	m.addUser("alice", "correct", "", "")
+	m.users["alice"].Labels = map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal}
+	if _, err := p.Login(context.Background(), "alice", "correct"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if m.mutateCalls != 0 {
+		t.Errorf("MutateUserCRD calls = %d, want 0", m.mutateCalls)
 	}
 }

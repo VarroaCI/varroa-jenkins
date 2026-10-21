@@ -41,7 +41,9 @@ func (s *localUserStore) ListGroupCRDs(_ context.Context) ([]*v1alpha1.Group, er
 func (s *localUserStore) PatchUserStatus(_ context.Context, _, _ string, _ *v1alpha1.UserStatus) error {
 	return nil
 }
-func (s *localUserStore) ApplyUserCRD(_ context.Context, _ *v1alpha1.User) error { return nil }
+func (s *localUserStore) MutateUserCRD(_ context.Context, _, _ string, _ func(*v1alpha1.User) (bool, error)) (bool, error) {
+	return false, nil
+}
 
 func (s *localUserStore) add(name, password string, purpose v1alpha1.UserPurpose) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)

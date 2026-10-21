@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -254,5 +256,57 @@ func TestUserReconciler_SkipsEmptyPassword(t *testing.T) {
 	}
 	if len(client.passwordClears) != 0 {
 		t.Errorf("expected 0 password clears, got %d", len(client.passwordClears))
+	}
+}
+
+// TestBootstrapLocalAdmin_KeepsExistingUser pins that the bootstrap run keeps
+// an admin User that already exists. Its labels, annotations, email, and
+// purpose survive, and the bootstrap password hash is written to status.
+func TestBootstrapLocalAdmin_KeepsExistingUser(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+	crdstore.MustSeed(client.store, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        bootstrapAdminUser,
+			Namespace:   "default",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal, "team": "ops"},
+			Annotations: map[string]string{"a": "b"},
+		},
+		Spec: v1alpha1.UserSpec{
+			Email:       "ops@example.com",
+			DisplayName: "Ops",
+			Purpose:     v1alpha1.UserPurposeBreakGlass,
+		},
+	})
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", slog.Default()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	got, err := crdstore.Get[v1alpha1.User](ctx, client.store, bootstrapAdminUser, "default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels["team"] != "ops" || got.Labels[v1alpha1.LabelManagedBy] != v1alpha1.ManagedByLocal {
+		t.Errorf("labels = %v, want the existing labels", got.Labels)
+	}
+	if got.Annotations["a"] != "b" {
+		t.Errorf("annotations = %v, want a=b", got.Annotations)
+	}
+	if got.Spec.Email != "ops@example.com" {
+		t.Errorf("email = %q, want ops@example.com", got.Spec.Email)
+	}
+	if got.Spec.Purpose != v1alpha1.UserPurposeBreakGlass {
+		t.Errorf("purpose = %q, want break-glass", got.Spec.Purpose)
+	}
+	if got.Status.Credentials == nil || got.Status.Credentials.PasswordHash == "" {
+		t.Fatalf("status.credentials.passwordHash is empty; want the bootstrap hash")
+	}
+	sec := client.createdSecrets[bootstrapSecretName]
+	if string(sec[bootstrapAnnotation]) != "true" {
+		t.Errorf("bootstrap Secret not consumed: %q", sec[bootstrapAnnotation])
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(got.Status.Credentials.PasswordHash), sec["password"]); err != nil {
+		t.Errorf("status hash does not match the Secret password: %v", err)
 	}
 }

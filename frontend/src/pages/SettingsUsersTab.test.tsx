@@ -20,6 +20,7 @@ vi.mock("../context/AuthContext", () => ({ useAuth: vi.fn() }));
 
 import * as client from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { ApiError } from "../hooks/useApi";
 import SettingsUsersTab from "./SettingsUsersTab";
 
 const m = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -147,6 +148,23 @@ describe("SettingsUsersTab", () => {
     expect(await screen.findByText("No API keys.")).toBeInTheDocument();
     expect(screen.queryByText("Edit — oidc-abc")).not.toBeInTheDocument();
     expect(screen.queryByText("Reset")).not.toBeInTheDocument();
+  });
+
+  it("local mode: a create over an existing name shows the conflict message", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    m(client.listUsers).mockResolvedValue([
+      { name: "alice", email: "alice@example.com", displayName: "Alice", groups: [], managedBy: "local" },
+    ]);
+    m(client.createUser).mockRejectedValue(new ApiError(409, "x", { error: "user already exists" }));
+    renderTab();
+
+    await screen.findByText("alice");
+    await userEvent.click(screen.getByText("+ New User"));
+    await userEvent.type(screen.getByPlaceholderText("alice"), "alice");
+    await userEvent.type(screen.getByPlaceholderText("Min 8 characters"), "password1");
+    await userEvent.click(screen.getByText("Create"));
+
+    expect(await screen.findByText("A user with this name already exists.")).toBeInTheDocument();
   });
 
   it("beside OIDC: a local account needs a purpose, and an IdP user is read-only", async () => {

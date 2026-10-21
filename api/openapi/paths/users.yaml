@@ -50,6 +50,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
       "501":
         $ref: '../components/responses.yaml#/MethodNotAllowed'
 

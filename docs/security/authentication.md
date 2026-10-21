@@ -189,6 +189,7 @@ dex:
 
 The chart requires `auth.bffUrl` in this mode.
 Create users through the dashboard or users API.
+The API refuses a name that already exists with 409. Use an update to change an existing user.
 
 ## Add local accounts beside OIDC
 

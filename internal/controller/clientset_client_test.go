@@ -25,7 +25,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/bus"
-	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
 // TestPatchComposedBundleStatus_ClearsStaleErrors guards the regression where a
@@ -1324,103 +1323,6 @@ func TestParseResourcesFromContainerMap_EmptyOrMissingReturnsNil(t *testing.T) {
 		},
 	}); rr != nil {
 		t.Errorf("expected nil for empty requests+limits, got %+v", rr)
-	}
-}
-
-// TestApplyUserCRD_StripsResourceVersionOnCreate asserts that ApplyUserCRD
-// clears Create-forbidden metadata fields before Create: passing a
-// ResourceVersion-bearing object to Create() gets a
-// "resourceVersion should not be set on objects to be created" Invalid error
-// from Kubernetes.
-func TestApplyUserCRD_StripsResourceVersionOnCreate(t *testing.T) {
-	scheme := runtime.NewScheme()
-	gvk := schema.GroupVersionKind{Group: "varroa.dev", Version: "v1alpha1", Kind: "User"}
-	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
-	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("UserList"), &unstructured.UnstructuredList{})
-
-	// --- Create path: input carries a resourceVersion ---
-	user := &v1alpha1.User{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "oidc-alice",
-			Namespace:       "varroa-system",
-			ResourceVersion: "12345",
-		},
-	}
-
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{userGVR: "UserList"},
-	)
-	// Simulate the real apiserver: reject Create() when resourceVersion is
-	// non-empty with a StatusReasonInvalid error.  This is the error the buggy
-	// code saw (not IsAlreadyExists), which the old code failed to handle.
-	dyn.PrependReactor("create", "users", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		obj := action.(clienttesting.CreateAction).GetObject()
-		u, ok := obj.(*unstructured.Unstructured)
-		if ok && u.GetResourceVersion() != "" {
-			return true, nil, apierrors.NewInvalid(
-				schema.GroupKind{Group: "varroa.dev", Kind: "User"},
-				u.GetName(),
-				nil,
-			)
-		}
-		return false, nil, nil
-	})
-	c := &ClientsetClient{dynamic: dyn}
-
-	err := crdstore.Apply[v1alpha1.User](context.Background(), c, user)
-	if err != nil {
-		t.Fatalf("Create path with resourceVersion set: %v", err)
-	}
-
-	got, err := dyn.Resource(userGVR).Namespace("varroa-system").Get(context.Background(), "oidc-alice", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get created user: %v", err)
-	}
-	if got.GetName() != "oidc-alice" {
-		t.Errorf("expected name oidc-alice, got %s", got.GetName())
-	}
-
-	// --- Update path: object exists, update takes effect ---
-	existing := &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": "varroa.dev/v1alpha1",
-		"kind":       "User",
-		"metadata": map[string]interface{}{
-			"name":      "oidc-bob",
-			"namespace": "varroa-system",
-		},
-		"spec": map[string]interface{}{
-			"displayName": "Bob Original",
-		},
-	}}
-
-	dyn2 := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{userGVR: "UserList"},
-		existing,
-	)
-	c2 := &ClientsetClient{dynamic: dyn2}
-
-	updatedUser := &v1alpha1.User{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "oidc-bob",
-			Namespace: "varroa-system",
-		},
-		Spec: v1alpha1.UserSpec{
-			DisplayName: "Bob Updated",
-		},
-	}
-
-	err = crdstore.Apply[v1alpha1.User](context.Background(), c2, updatedUser)
-	if err != nil {
-		t.Fatalf("Update path: %v", err)
-	}
-
-	got2, err := dyn2.Resource(userGVR).Namespace("varroa-system").Get(context.Background(), "oidc-bob", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get updated user: %v", err)
-	}
-	displayName, _, _ := unstructured.NestedString(got2.Object, "spec", "displayName")
-	if displayName != "Bob Updated" {
-		t.Errorf("expected displayName Bob Updated, got %q", displayName)
 	}
 }
 

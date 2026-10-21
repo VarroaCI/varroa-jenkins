@@ -165,7 +165,10 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 				Purpose:     purpose,
 			},
 		}
-		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, user); err != nil {
+		if err := crdstore.Create[v1alpha1.User](ctx, deps.Store, user); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("user %s/%s already exists; use update_user to change it", user.Namespace, user.Name)), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create user: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserCreated, strArg(args, "namespace"), strArg(args, "name")))

@@ -8,6 +8,7 @@ import {
   type UserEntry, type GroupEntry, type AccountPurpose,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { ApiError } from "../hooks/useApi";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -234,7 +235,7 @@ function CreateUserForm({ groups, requirePurpose, onClose, onCreated }: { groups
       if (failed.length > 0) throw new Error(`User created, but failed to add to groups: ${failed.join(", ")}`);
     },
     onSuccess: onCreated,
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(e instanceof ApiError && e.status === 409 ? "A user with this name already exists." : e.message),
   });
 
   const toggle = (name: string) => setSelected((prev) => {

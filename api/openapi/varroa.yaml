@@ -18946,6 +18946,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
         "501":
           $ref: '#/components/responses/components_responses_MethodNotAllowed'
       summary: Creates a new user (admin, local auth only).

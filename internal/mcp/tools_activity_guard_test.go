@@ -394,7 +394,7 @@ func guardArgsFor(name string) map[string]interface{} {
 		"update_jenkins_version_profile": {"name": obj},
 		"delete_jenkins_version_profile": {"name": obj},
 		// Users (namespaced, admin-only)
-		"create_user": {"namespace": ns, "name": obj},
+		"create_user": {"namespace": ns, "name": "obj-new"},
 		"update_user": {"namespace": ns, "name": obj},
 		"delete_user": {"namespace": ns, "name": obj},
 		// Groups (cluster-scoped, admin-only)
