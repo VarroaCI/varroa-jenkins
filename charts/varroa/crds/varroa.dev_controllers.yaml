@@ -4490,7 +4490,7 @@ spec:
                   Last-one-wins; sufficient because commands to one controller serialize
                   through the mite.
                 properties:
-                  commandID:
+                  commandId:
                     description: CommandID is the imperative command identifier for
                       correlation.
                     type: string
@@ -4636,7 +4636,7 @@ spec:
                         approvedAt:
                           format: date-time
                           type: string
-                        commandID:
+                        commandId:
                           type: string
                         error:
                           description: Error is the mite's error text for a failed
@@ -4647,7 +4647,7 @@ spec:
                           type: string
                       required:
                       - approvedAt
-                      - commandID
+                      - commandId
                       type: object
                     detectedAt:
                       format: date-time
@@ -4882,7 +4882,7 @@ spec:
                     description: AttemptCount is the number of drain attempts made
                       so far.
                     type: integer
-                  commandID:
+                  commandId:
                     description: CommandID is the outstanding SAFE_RESTART command_id
                       for correlation.
                     type: string

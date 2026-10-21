@@ -32,6 +32,8 @@ Merge the pull request on the forge. See
 
 ## Troubleshoot
 
+The proposal route answers these codes.
+
 | Code | Status | Fix |
 |---|---|---|
 | `assistant_disabled` | 503 | Turn on the assistant. |
@@ -45,13 +47,21 @@ Merge the pull request on the forge. See
 | `forge_unreachable` | 502 | Add the forge to `gitEgress`. The operator skips a rate-limited token when another pushing token covers the host. When every token is rate-limited, retry after the time in the message, or later when the message gives none. |
 | `jenkinsfile_exists` | 409 | Add the repository as a job. |
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |
-| `request_expired` | 504 | Approve the call again. |
 | `operator_timeout` | 504 | The operator did not answer in time. Wait, then try again. |
-| `pull_request_busy` | 429 | Another pull request for the team runs. Wait, then approve the call again. |
 | `assistant_busy` | 429 | Wait for a session to end. |
 | `kill_switch` | 503 | Wait for the assistant to resume. |
 | `invalid_request` | 400 | Send a body with a `repo` field only. |
 | `internal` | 500 | Retry. Report the code if it repeats. |
 | `not_found` | 404 | Check the repository URL and the team. |
 | (no code) | 403 or 404 | Check the team name and your write grant. |
+
+### Errors at approval
+
+A failed approval shows the code at the start of the error text.
+
+| Code | What to do |
+|---|---|
+| `proposal_base_moved` | The base branch moved after the check. Start a new proposal. |
+| `request_expired` | Approve the call again. |
+| `pull_request_busy` | Another pull request for the team runs. Wait, then approve the call again. |
 

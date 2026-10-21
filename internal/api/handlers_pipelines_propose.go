@@ -44,7 +44,8 @@ func teamPipelinesTenant(refs []TenantRef, team string) (TenantRef, bool) {
 	return TenantRef{}, false
 }
 
-// forgeCodeStatus maps a forge reply code onto the route status.
+// forgeCodeStatus maps a forge reply code onto an HTTP status. The propose route,
+// open_pull_request, and open_issue share it.
 func forgeCodeStatus(code string) int {
 	switch code {
 	case forgeapi.CodeRepoURLInvalid, forgeapi.CodeInvalidRequest:
