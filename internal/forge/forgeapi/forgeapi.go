@@ -45,9 +45,13 @@ const (
 	// CodeRequestExpired refuses a pull request or an issue whose deadline leaves too little
 	// work time, for example after a wait in the operator queue. No forge call was made.
 	CodeRequestExpired = "request_expired"
-	CodeInvalidRequest = "invalid_request"
-	CodeNotFound       = "not_found"
-	CodeInternal       = "internal"
+	// CodePullRequestBusy refuses a pull request while another pull request for
+	// the same Team runs on the shard owner. No forge call was made. The caller
+	// can call again.
+	CodePullRequestBusy = "pull_request_busy"
+	CodeInvalidRequest  = "invalid_request"
+	CodeNotFound        = "not_found"
+	CodeInternal        = "internal"
 )
 
 // Status is the envelope of every forge reply.

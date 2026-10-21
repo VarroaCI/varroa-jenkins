@@ -60,6 +60,8 @@ func forgeCodeStatus(code string) int {
 		return http.StatusBadGateway
 	case forgeapi.CodeRequestExpired:
 		return http.StatusGatewayTimeout
+	case forgeapi.CodePullRequestBusy:
+		return http.StatusTooManyRequests
 	}
 	return http.StatusInternalServerError
 }

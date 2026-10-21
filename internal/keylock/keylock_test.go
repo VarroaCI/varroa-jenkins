@@ -85,3 +85,46 @@ func TestKeyLock_UnlockRemovesTheEntry(t *testing.T) {
 		t.Fatalf("entries = %d, want 0", n)
 	}
 }
+
+// TestKeyLock_TryLockFreeKey pins that TryLock takes a free key and that
+// Unlock removes its entry.
+func TestKeyLock_TryLockFreeKey(t *testing.T) {
+	l := New()
+	if !l.TryLock("ns/a") {
+		t.Fatal("TryLock on a free key = false, want true")
+	}
+	if n := l.Size(); n != 1 {
+		t.Fatalf("entries = %d, want 1", n)
+	}
+	l.Unlock("ns/a")
+	if n := l.Size(); n != 0 {
+		t.Fatalf("entries after unlock = %d, want 0", n)
+	}
+}
+
+// TestKeyLock_TryLockHeldKeyFails pins that TryLock returns false at once
+// for a held key, keeps the holder's entry, and succeeds after Unlock.
+func TestKeyLock_TryLockHeldKeyFails(t *testing.T) {
+	l := New()
+	if err := l.Lock(context.Background(), "ns/a"); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	start := time.Now()
+	if l.TryLock("ns/a") {
+		t.Fatal("TryLock on a held key = true, want false")
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Fatalf("TryLock took %v, want at once", d)
+	}
+	if n := l.Size(); n != 1 {
+		t.Fatalf("entries = %d, want 1", n)
+	}
+	l.Unlock("ns/a")
+	if n := l.Size(); n != 0 {
+		t.Fatalf("entries after unlock = %d, want 0", n)
+	}
+	if !l.TryLock("ns/a") {
+		t.Fatal("TryLock after unlock = false, want true")
+	}
+	l.Unlock("ns/a")
+}

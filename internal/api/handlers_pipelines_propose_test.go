@@ -403,3 +403,11 @@ func TestForgeCodeStatus_RequestExpired(t *testing.T) {
 		t.Fatalf("status %d, want %d", got, http.StatusGatewayTimeout)
 	}
 }
+
+// TestForgeCodeStatus_PullRequestBusy checks that a busy Team maps to too many
+// requests.
+func TestForgeCodeStatus_PullRequestBusy(t *testing.T) {
+	if got := forgeCodeStatus(forgeapi.CodePullRequestBusy); got != http.StatusTooManyRequests {
+		t.Fatalf("status %d, want %d", got, http.StatusTooManyRequests)
+	}
+}

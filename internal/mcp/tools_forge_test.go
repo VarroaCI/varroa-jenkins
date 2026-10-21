@@ -174,6 +174,7 @@ func TestOpenPullRequest_ToolErrors(t *testing.T) {
 		{name: "write denied", code: "forge_write_denied", relay: true},
 		{name: "unreachable", code: "forge_unreachable", relay: true},
 		{name: "branch exists", code: "proposal_branch_exists", relay: true},
+		{name: "busy", code: "pull_request_busy", relay: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
