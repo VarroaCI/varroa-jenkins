@@ -301,7 +301,7 @@ func TestOpenPullRequest_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
 	deps, f, _ := proposeDeps(t)
 	f.prErr = fmt.Errorf("forge pullrequest request: %w", nats.ErrTimeout)
 	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
-	if !failed || !strings.Contains(text, "operator_timeout: ") || strings.Contains(text, "forge_unreachable") {
+	if !failed || !strings.Contains(text, "operator_timeout: ") || !strings.Contains(text, "can exist") || strings.Contains(text, "forge_unreachable") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
 }
@@ -313,6 +313,17 @@ func TestOpenPullRequest_RelayOtherErrorStaysForgeUnreachable(t *testing.T) {
 	f.prErr = errors.New("boom")
 	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
 	if !failed || !strings.Contains(text, "forge_unreachable: ") {
+		t.Fatalf("failed=%v text=%s", failed, text)
+	}
+}
+
+// TestOpenPullRequest_NoResponderAnswersOperatorUnavailable checks that a request
+// that no operator received answers operator_unavailable and creates no branch.
+func TestOpenPullRequest_NoResponderAnswersOperatorUnavailable(t *testing.T) {
+	deps, f, _ := proposeDeps(t)
+	f.prErr = fmt.Errorf("forge pullrequest request: %w", nats.ErrNoResponders)
+	text, failed := callTeamTool(t, deps, guardClaims, "open_pull_request", prArgs())
+	if !failed || !strings.Contains(text, "operator_unavailable: ") || !strings.Contains(text, "No branch or pull request was created") || strings.Contains(text, "operator_timeout") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
 }

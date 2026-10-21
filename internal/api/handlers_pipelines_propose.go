@@ -157,6 +157,10 @@ func (s *Server) handleProposePipeline(w http.ResponseWriter, r *http.Request) {
 		cluster = s.deps.CoreCluster
 	}
 	check, err := s.deps.ForgeRelay.Check(ctx, cluster, forgeapi.CheckRequest{Team: team, Repo: u.String()})
+	if err != nil && isOperatorUnavailable(err) {
+		writeAssistantError(s, w, http.StatusServiceUnavailable, codeOperatorUnavailable, "no operator received the forge check")
+		return
+	}
 	if err != nil && isOperatorTimeout(err) {
 		writeAssistantError(s, w, http.StatusGatewayTimeout, codeOperatorTimeout, "the operator did not answer in time")
 		return

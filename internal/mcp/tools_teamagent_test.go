@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -299,14 +300,26 @@ func TestOpenIssue_RelayTimeoutAnswersOperatorTimeout(t *testing.T) {
 	}
 }
 
-// TestOpenIssue_NoResponderAnswersNoIssueOpened checks that a request that no
-// operator received says no issue was opened, and does not say the issue can exist.
-func TestOpenIssue_NoResponderAnswersNoIssueOpened(t *testing.T) {
+// TestOpenIssue_NoResponderAnswersOperatorUnavailable checks that a request that no
+// operator received answers operator_unavailable and says no issue was opened.
+func TestOpenIssue_NoResponderAnswersOperatorUnavailable(t *testing.T) {
 	f := newTeamAgentFakes()
 	f.issueErr = fmt.Errorf("forge issue request: %w", nats.ErrNoResponders)
 	deps := teamAgentDeps(t, f, &recordingSink{})
 	text, failed := callTeamTool(t, deps, agentClaims(), "open_issue", map[string]any{"team": "obj", "title": "t"})
-	if !failed || !strings.Contains(text, "No issue was opened") || strings.Contains(text, "operator_timeout") {
+	if !failed || !strings.Contains(text, "operator_unavailable: ") || !strings.Contains(text, "No issue was opened") || strings.Contains(text, "operator_timeout") {
+		t.Fatalf("failed=%v text=%s", failed, text)
+	}
+}
+
+// TestOpenIssue_OtherRelayErrorAnswersForgeUnreachable checks that a relay error
+// that is not a timeout and not a missing responder answers forge_unreachable.
+func TestOpenIssue_OtherRelayErrorAnswersForgeUnreachable(t *testing.T) {
+	f := newTeamAgentFakes()
+	f.issueErr = errors.New("boom")
+	deps := teamAgentDeps(t, f, &recordingSink{})
+	text, failed := callTeamTool(t, deps, agentClaims(), "open_issue", map[string]any{"team": "obj", "title": "t"})
+	if !failed || !strings.Contains(text, "forge_unreachable: ") {
 		t.Fatalf("failed=%v text=%s", failed, text)
 	}
 }

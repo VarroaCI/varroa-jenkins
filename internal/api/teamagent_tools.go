@@ -414,14 +414,14 @@ func (s *Server) OpenIssue(ctx context.Context, claims *auth.Claims, a OpenIssue
 		Actor:     ActorFrom(claims),
 		SessionID: teamAgentSessionID(ctx).String(),
 	})
-	if err != nil && bus.IsNoResponder(err) {
-		return forgeapi.IssueReply{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "forge relay: no operator received the issue request. No issue was opened. Call again."}
+	if err != nil && isOperatorUnavailable(err) {
+		return forgeapi.IssueReply{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: codeOperatorUnavailable + ": no operator received the issue request. No issue was opened. Call again."}
 	}
 	if err != nil && isOperatorTimeout(err) {
 		return forgeapi.IssueReply{}, &ServiceError{Status: http.StatusGatewayTimeout, Message: codeOperatorTimeout + ": the operator did not answer in time. The issue can exist. Look in the repository, then call again later."}
 	}
 	if err != nil {
-		return forgeapi.IssueReply{}, &ServiceError{Status: http.StatusServiceUnavailable, Message: "forge relay: " + err.Error()}
+		return forgeapi.IssueReply{}, &ServiceError{Status: http.StatusBadGateway, Message: forgeapi.CodeForgeUnreachable + ": " + err.Error()}
 	}
 	if !reply.OK {
 		return forgeapi.IssueReply{}, &ServiceError{Status: forgeCodeStatus(reply.Code), Message: reply.Code + ": " + reply.Error}

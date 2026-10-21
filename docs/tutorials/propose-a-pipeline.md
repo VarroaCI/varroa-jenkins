@@ -48,6 +48,7 @@ The proposal route answers these codes.
 | `jenkinsfile_exists` | 409 | Add the repository as a job. |
 | `proposal_branch_exists` | 409 | Delete the branch or merge its pull request. |
 | `operator_timeout` | 504 | The operator did not answer in time. Wait, then try again. |
+| `operator_unavailable` | 503 | No operator received the check. Check the operator pods, then try again. |
 | `assistant_busy` | 429 | Wait for a session to end. |
 | `kill_switch` | 503 | Wait for the assistant to resume. |
 | `invalid_request` | 400 | Send a body with a `repo` field only. |

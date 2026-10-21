@@ -206,8 +206,12 @@ func TestProposePipeline_RefusalsInOrder(t *testing.T) {
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkErr = fmt.Errorf("forge check request: %w", nats.ErrTimeout)
 			}},
-		{name: "relay no responders", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
+		{name: "relay no responders", team: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) { f.relay.checkErr = nats.ErrNoResponders }},
+		{name: "relay wrapped no responders", team: "payments", repo: proposeRepo, status: http.StatusServiceUnavailable, code: codeOperatorUnavailable, checks: 1,
+			setup: func(t *testing.T, f *proposeFixture) {
+				f.relay.checkErr = fmt.Errorf("forge check request: %w", nats.ErrNoResponders)
+			}},
 		{name: "caller deadline", team: "payments", repo: proposeRepo, status: http.StatusGatewayTimeout, code: codeOperatorTimeout, checks: 1,
 			setup: func(t *testing.T, f *proposeFixture) {
 				f.relay.checkErr = fmt.Errorf("forge check request: %w", context.DeadlineExceeded)
