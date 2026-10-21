@@ -505,6 +505,73 @@ func TestEnsureFresh_BackoffDoublesBetweenFailures(t *testing.T) {
 	}
 }
 
+func TestEnsureFresh_RetryLimitZeroWaitsTTL(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	r.SetFailureRetryLimit(0)
+	base := time.Unix(1_700_000_000, 0)
+	ctx := context.Background()
+
+	r.now = func() time.Time { return base }
+	_ = r.ResolveExact(ctx, "p", "1")
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("first failure: fetches = %d, want 1", got)
+	}
+
+	for _, at := range []time.Duration{31 * time.Second, 2 * time.Minute, 59 * time.Minute} {
+		r.now = func() time.Time { return base.Add(at) }
+		if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+			t.Fatalf("at +%v: outcome = %v, want SourcesDegraded", at, res.Outcome)
+		}
+		if got := atomic.LoadInt32(hits); got != 1 {
+			t.Fatalf("at +%v: fetches = %d, want 1 (no retry inside the ttl)", at, got)
+		}
+	}
+
+	fail.Store(false)
+	r.now = func() time.Time { return base.Add(61 * time.Minute) }
+	res := r.ResolveExact(ctx, "p", "1")
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("after ttl: fetches = %d, want 2", got)
+	}
+	if res.Outcome != Resolved || res.Meta.SHA256 != "s1" {
+		t.Fatalf("after ttl: outcome %v sha %q, want Resolved s1", res.Outcome, res.Meta.SHA256)
+	}
+}
+
+func TestEnsureFresh_RetryLimitOneRetriesOnce(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	r.SetFailureRetryLimit(1)
+	base := time.Unix(1_700_000_000, 0)
+	ctx := context.Background()
+
+	steps := []struct {
+		at       time.Duration
+		wantHits int32
+	}{
+		{0, 1},
+		{31 * time.Second, 2},                // the one allowed retry, then the ttl wait
+		{31*time.Second + 61*time.Second, 2}, // inside the ttl wait
+		{31*time.Second + 61*time.Minute, 3}, // ttl over: one more fetch
+	}
+	for _, st := range steps {
+		r.now = func() time.Time { return base.Add(st.at) }
+		_ = r.ResolveExact(ctx, "p", "1")
+		if got := atomic.LoadInt32(hits); got != st.wantHits {
+			t.Fatalf("at +%v: fetches = %d, want %d", st.at, got, st.wantHits)
+		}
+	}
+}
+
 func TestEnsureFresh_FailedRefreshKeepsLastGoodIndex(t *testing.T) {
 	var fail atomic.Bool
 	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
