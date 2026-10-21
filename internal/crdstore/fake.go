@@ -9,10 +9,12 @@ import (
 	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 // StatusPatch records a call to PatchObjectStatus.
@@ -23,8 +25,16 @@ type StatusPatch struct {
 }
 
 // Fake is an in-memory Backend for unit tests. Safe for concurrent use.
+//
+// The Fake models optimistic concurrency like the apiserver. Every write that
+// changes an object takes the next resourceVersion. A write that carries a
+// stale, non-empty resourceVersion answers Conflict.
 type Fake struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// rv is the one resourceVersion counter for the whole Fake. A deleted and
+	// re-created object never reuses an earlier value, because the counter
+	// never goes back.
+	rv            uint64
 	objects       map[schema.GroupVersionResource]map[string]*unstructured.Unstructured // gvr → "ns/name" → obj
 	statusPatches map[schema.GroupVersionResource][]StatusPatch
 	metaPatches   map[schema.GroupVersionResource][]MetaPatch
@@ -53,6 +63,9 @@ func NewFake() *Fake {
 // --- Seed ----------------------------------------------------------------
 
 // Seed converts each typed object via the registry and stores it in the fake.
+// An object without a resourceVersion gets the next one, and Seed writes it
+// back into obj, so a caller that reads obj later holds the stored value. An
+// explicit numeric resourceVersion is kept as given.
 // Returns an error when a type is not registered or conversion fails.
 func (f *Fake) Seed(objs ...any) error {
 	for _, obj := range objs {
@@ -70,6 +83,14 @@ func (f *Fake) Seed(objs ...any) error {
 		unst.SetKind(info.kind)
 
 		f.mu.Lock()
+		if unst.GetResourceVersion() == "" {
+			f.bump(unst)
+			if m, err := apimeta.Accessor(obj); err == nil {
+				m.SetResourceVersion(unst.GetResourceVersion())
+			}
+		} else if n, err := strconv.ParseUint(unst.GetResourceVersion(), 10, 64); err == nil && n > f.rv {
+			f.rv = n
+		}
 		if f.objects[info.gvr] == nil {
 			f.objects[info.gvr] = make(map[string]*unstructured.Unstructured)
 		}
@@ -212,8 +233,9 @@ func (f *Fake) CreateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		return nil, apierrors.NewAlreadyExists(gr, obj.GetName())
 	}
 	clone := obj.DeepCopy()
+	f.bump(clone)
 	f.objects[gvr][key] = clone
-	return clone, nil
+	return clone.DeepCopy(), nil
 }
 
 // UpdateObject updates the stored object. Returns NotFound when absent.
@@ -231,14 +253,38 @@ func (f *Fake) UpdateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
 		return nil, apierrors.NewNotFound(gr, obj.GetName())
 	}
+	// The Backend contract requires a resourceVersion on an update. The
+	// apiserver rejects an unconditional custom resource update the same way.
+	if obj.GetResourceVersion() == "" {
+		return nil, invalidUpdateVersion(gvr, obj)
+	}
 	// Optimistic concurrency: reject if resourceVersion doesn't match.
-	if obj.GetResourceVersion() != "" && obj.GetResourceVersion() != stored.GetResourceVersion() {
+	if obj.GetResourceVersion() != stored.GetResourceVersion() {
 		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
 		return nil, apierrors.NewConflict(gr, obj.GetName(), fmt.Errorf("stale resourceVersion"))
 	}
 	clone := obj.DeepCopy()
+	if reflect.DeepEqual(stored.Object, clone.Object) {
+		// An update that changes nothing keeps the value, as the apiserver does.
+		return stored.DeepCopy(), nil
+	}
+	f.bump(clone)
 	f.objects[gvr][key] = clone
-	return clone, nil
+	return clone.DeepCopy(), nil
+}
+
+// invalidUpdateVersion is the Invalid error the apiserver returns for an
+// update that names no resourceVersion.
+func invalidUpdateVersion(gvr schema.GroupVersionResource, obj *unstructured.Unstructured) error {
+	return apierrors.NewInvalid(
+		schema.GroupKind{Group: gvr.Group, Kind: obj.GetKind()},
+		obj.GetName(),
+		field.ErrorList{field.Invalid(
+			field.NewPath("metadata", "resourceVersion"),
+			obj.GetResourceVersion(),
+			"must be specified for an update",
+		)},
+	)
 }
 
 // UpdateObjectStatus replaces only the stored object's "status" field,
@@ -260,16 +306,23 @@ func (f *Fake) UpdateObjectStatus(_ context.Context, gvr schema.GroupVersionReso
 		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
 		return nil, apierrors.NewNotFound(gr, obj.GetName())
 	}
-	if obj.GetResourceVersion() != "" && obj.GetResourceVersion() != stored.GetResourceVersion() {
+	if obj.GetResourceVersion() == "" {
+		return nil, invalidUpdateVersion(gvr, obj)
+	}
+	if obj.GetResourceVersion() != stored.GetResourceVersion() {
 		gr := schema.GroupResource{Group: gvr.Group, Resource: gvr.Resource}
 		return nil, apierrors.NewConflict(gr, obj.GetName(), fmt.Errorf("stale resourceVersion"))
 	}
 	clone := stored.DeepCopy()
 	clone.Object["status"] = obj.Object["status"]
-	// The apiserver moves the resourceVersion on every status write. A Fake
+	if reflect.DeepEqual(stored.Object, clone.Object) {
+		// A status write that changes nothing keeps the value, as the apiserver does.
+		return stored.DeepCopy(), nil
+	}
+	// A status write that changes the object moves the resourceVersion. A Fake
 	// that froze it would let a second writer with the same read pass the
 	// precondition.
-	bumpResourceVersion(clone)
+	f.bump(clone)
 	f.objects[gvr][key] = clone
 	return clone.DeepCopy(), nil
 }
@@ -339,7 +392,14 @@ func (f *Fake) PatchObjectStatus(_ context.Context, gvr schema.GroupVersionResou
 	if obj == nil {
 		return nil // best-effort; the real API would also succeed if obj doesn't exist? No, it would fail. But for test ergonomics, be lenient.
 	}
-	return applyStatusPatch(obj, status)
+	before := obj.DeepCopy()
+	if err := applyStatusPatch(obj, status); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(before.Object, obj.Object) {
+		f.bump(obj)
+	}
+	return nil
 }
 
 // PatchObjectStatusAt applies a status merge patch only while the stored
@@ -369,8 +429,15 @@ func (f *Fake) PatchObjectStatusAt(_ context.Context, gvr schema.GroupVersionRes
 			fmt.Errorf("resourceVersion %q does not match %q", resourceVersion, obj.GetResourceVersion()))
 	}
 	f.statusPatches[gvr] = append(f.statusPatches[gvr], StatusPatch{Namespace: namespace, Name: name, Status: status})
+	before := obj.DeepCopy()
 	if err := applyStatusPatch(obj, status); err != nil {
 		return "", err
+	}
+	// A patch that changes the object moves its resourceVersion, and a patch
+	// that changes nothing leaves it, as the apiserver does. A Fake that froze
+	// it would let a conditional delete pass over a write that really happened.
+	if !reflect.DeepEqual(before.Object, obj.Object) {
+		f.bump(obj)
 	}
 	return obj.GetResourceVersion(), nil
 }
@@ -398,21 +465,18 @@ func applyStatusPatch(obj *unstructured.Unstructured, status any) error {
 	}
 	mergePatchMap(existing, statusMap)
 	obj.Object["status"] = existing
-	// A merge patch changes the object, so the apiserver moves its
-	// resourceVersion. A Fake that froze it would let a conditional delete
-	// pass over a write that really happened.
-	bumpResourceVersion(obj)
 	return nil
 }
 
-// bumpResourceVersion advances the stored resourceVersion by one, so a
-// caller holding the earlier value loses a precondition.
-func bumpResourceVersion(obj *unstructured.Unstructured) {
-	n, err := strconv.Atoi(obj.GetResourceVersion())
-	if err != nil {
-		n = 0
+// bump gives obj the next resourceVersion from the Fake-wide counter. A
+// numeric value above the counter raises the counter first, so the next value
+// is always greater. The caller holds f.mu.
+func (f *Fake) bump(obj *unstructured.Unstructured) {
+	if n, err := strconv.ParseUint(obj.GetResourceVersion(), 10, 64); err == nil && n > f.rv {
+		f.rv = n
 	}
-	obj.SetResourceVersion(strconv.Itoa(n + 1))
+	f.rv++
+	obj.SetResourceVersion(strconv.FormatUint(f.rv, 10))
 }
 
 // mergePatchMap applies patch onto dst per RFC 7386: a null value deletes its
@@ -464,7 +528,11 @@ func (f *Fake) PatchObjectMeta(_ context.Context, gvr schema.GroupVersionResourc
 	if obj == nil {
 		return nil // best-effort for test ergonomics
 	}
+	before := obj.DeepCopy()
 	applyMetaPatch(obj, meta)
+	if !reflect.DeepEqual(before.Object, obj.Object) {
+		f.bump(obj)
+	}
 	return nil
 }
 
@@ -494,7 +562,7 @@ func (f *Fake) PatchObjectMetaAt(_ context.Context, gvr schema.GroupVersionResou
 	before := obj.DeepCopy()
 	applyMetaPatch(obj, meta)
 	if !reflect.DeepEqual(before.Object, obj.Object) {
-		bumpResourceVersion(obj)
+		f.bump(obj)
 	}
 	return obj.GetResourceVersion(), nil
 }

@@ -15,25 +15,34 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
+// withFormerBob seeds the former identifier "bob" on the User.
+func withFormerBob(u *v1alpha1.User) {
+	u.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = `["bob"]`
+}
+
 // seedRecordLoginUser seeds an idp-managed User that RecordLogin refreshes.
-// It returns the fake, the User GVR, and the User's namespace and name.
-func seedRecordLoginUser(t *testing.T) (*crdstore.Fake, schema.GroupVersionResource) {
+// It returns the fake and the User GVR. Each option edits the User before it
+// is seeded.
+func seedRecordLoginUser(t *testing.T, opts ...func(*v1alpha1.User)) (*crdstore.Fake, schema.GroupVersionResource) {
 	t.Helper()
 	f := crdstore.NewFake()
 	gvr, err := crdstore.GVRFor[v1alpha1.User]()
 	if err != nil {
 		t.Fatalf("GVRFor: %v", err)
 	}
-	crdstore.MustSeed(f, &v1alpha1.User{
+	u := &v1alpha1.User{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            "oidc-test",
-			Namespace:       "ns",
-			ResourceVersion: "1",
-			Labels:          map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
-			Annotations:     map[string]string{v1alpha1.AnnotationOIDCPreferredUsername: "alice"},
+			Name:        "oidc-test",
+			Namespace:   "ns",
+			Labels:      map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+			Annotations: map[string]string{v1alpha1.AnnotationOIDCPreferredUsername: "alice"},
 		},
 		Spec: v1alpha1.UserSpec{Email: "old@example.com"},
-	})
+	}
+	for _, opt := range opts {
+		opt(u)
+	}
+	crdstore.MustSeed(f, u)
 	return f, gvr
 }
 
@@ -57,10 +66,14 @@ func TestRecordLogin_ConcurrentWriteKeepsFormerIdentifiers(t *testing.T) {
 			return
 		}
 		fired = true
-		if _, err := f.PatchObjectMetaAt(ctx, gvr, ns, name, "1", map[string]any{
-			"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
-		}); err != nil {
-			t.Errorf("concurrent patch: %v", err)
+		other, err := crdstore.Get[v1alpha1.User](ctx, f, name, ns)
+		if err != nil {
+			t.Errorf("concurrent read: %v", err)
+			return
+		}
+		other.Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = `["bob"]`
+		if err := crdstore.Update(ctx, f, other); err != nil {
+			t.Errorf("concurrent update: %v", err)
 		}
 	})
 
@@ -102,12 +115,7 @@ func TestRecordLogin_ConflictBudgetSpentFailsWithoutStatusPatch(t *testing.T) {
 
 func TestRecordLogin_ReadErrorKeepsRecord(t *testing.T) {
 	ctx := context.Background()
-	f, gvr := seedRecordLoginUser(t)
-	if _, err := f.PatchObjectMetaAt(ctx, gvr, "ns", "oidc-test", "1", map[string]any{
-		"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
-	}); err != nil {
-		t.Fatalf("seed former identifiers: %v", err)
-	}
+	f, gvr := seedRecordLoginUser(t, withFormerBob)
 	f.FailNext("get", gvr, apierrors.NewInternalError(errors.New("boom")))
 
 	if err := userdirectory.RecordLogin(ctx, userStoreAdapter{store: f}, "oidc-test",
@@ -125,12 +133,7 @@ func TestRecordLogin_ReadErrorKeepsRecord(t *testing.T) {
 
 func TestRecordLogin_FirstLoginRaceMergesIntoCreatedUser(t *testing.T) {
 	ctx := context.Background()
-	f, gvr := seedRecordLoginUser(t)
-	if _, err := f.PatchObjectMetaAt(ctx, gvr, "ns", "oidc-test", "1", map[string]any{
-		"annotations": map[string]any{v1alpha1.AnnotationOIDCFormerIdentifiers: `["bob"]`},
-	}); err != nil {
-		t.Fatalf("seed former identifiers: %v", err)
-	}
+	f, gvr := seedRecordLoginUser(t, withFormerBob)
 	// The first read misses. The create then answers AlreadyExists, and the retry reads the User.
 	f.FailNext("get", gvr, apierrors.NewNotFound(testUserGR, "oidc-test"))
 
