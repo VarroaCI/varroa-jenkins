@@ -186,3 +186,9 @@ type IdentityConfig struct {
 	// primary OIDC provider.
 	LocalAccounts bool
 }
+
+// LocalAccountsOn reports whether local accounts exist on this release:
+// local mode, or local accounts beside OIDC.
+func (c IdentityConfig) LocalAccountsOn() bool {
+	return c.Mode == string(auth.AuthModeLocal) || c.LocalAccounts
+}

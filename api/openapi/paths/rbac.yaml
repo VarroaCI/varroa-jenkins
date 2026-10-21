@@ -44,6 +44,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/roles/{name}:
   get:
@@ -152,6 +154,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/rolebindings/{name}:
   get:
@@ -265,6 +269,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/jenkinsroles/{name}:
   get:
@@ -381,6 +387,8 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/jenkinsrolebindings/{name}:
   get:

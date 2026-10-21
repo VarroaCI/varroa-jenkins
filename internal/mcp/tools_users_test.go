@@ -321,7 +321,7 @@ func TestUserTools_AuthorizerNilReturnsError(t *testing.T) {
 		args map[string]interface{}
 	}{
 		{"list_users", map[string]interface{}{}},
-		{"create_user", map[string]interface{}{"namespace": "ns", "name": "u1"}},
+		{"create_user", map[string]interface{}{"namespace": "ns", "name": "u1", "password": "pw-12345678"}},
 		{"update_user", map[string]interface{}{"namespace": "ns", "name": "u1"}},
 		{"delete_user", map[string]interface{}{"namespace": "ns", "name": "u1"}},
 	} {
@@ -557,6 +557,8 @@ func TestUpdateUser_NotFound(t *testing.T) {
 func TestCreateUser_ExistingNameIsToolError(t *testing.T) {
 	ctx := context.Background()
 	deps := deleteUserDeps(crdstore.NewFake())
+	deps.IdentityConfig.Mode = "local"
+	deps.OperatorNamespace = "ns"
 	st := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(st, &v1alpha1.User{
 		ObjectMeta: metav1.ObjectMeta{
@@ -569,7 +571,7 @@ func TestCreateUser_ExistingNameIsToolError(t *testing.T) {
 
 	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 		"name":      "create_user",
-		"arguments": map[string]interface{}{"namespace": "ns", "name": "alice", "email": "b@x"},
+		"arguments": map[string]interface{}{"namespace": "ns", "name": "alice", "email": "b@x", "password": "pw-12345678"},
 	}, mcpAdminClaims)
 	tr := parseToolResult(t, resp.Result)
 	if !tr.IsError {

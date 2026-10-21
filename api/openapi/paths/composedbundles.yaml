@@ -52,6 +52,8 @@
         $ref: '../components/responses.yaml#/BadRequest'
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/clusters/{cluster}/composedbundles/validate:
   post:

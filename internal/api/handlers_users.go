@@ -105,12 +105,11 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 // createUserRequest is the JSON body for POST /users.
 type createUserRequest struct {
-	Username    string   `json:"username"`
-	Email       string   `json:"email,omitempty"`
-	DisplayName string   `json:"displayName,omitempty"`
-	Password    string   `json:"password"`
-	Groups      []string `json:"groups,omitempty"`
-	Purpose     string   `json:"purpose,omitempty"`
+	Username    string `json:"username"`
+	Email       string `json:"email,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	Password    string `json:"password"`
+	Purpose     string `json:"purpose,omitempty"`
 }
 
 // validatePurpose checks a local account purpose. Beside OIDC a purpose is

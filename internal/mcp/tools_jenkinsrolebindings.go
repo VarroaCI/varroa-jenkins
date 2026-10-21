@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -65,7 +66,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		mcp.WithString("roleRef", mcp.Required(), mcp.Description("JenkinsRole name to bind")),
 		mcp.WithArray("subjects", mcp.Required(), mcp.Description("Subject references, e.g. [{\"kind\":\"User\",\"name\":\"alice\"}]")),
 	)
-	addTool(mcpServer, kindCreate, createJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createJRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -84,7 +85,10 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 				Subjects: buildSubjectRefs(args["subjects"]),
 			},
 		}
-		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
+		if err := crdstore.Create[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("Jenkins role binding %s already exists; use update_jenkins_role_binding to change it", strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role binding: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessCreated, strArg(args, "name")))

@@ -737,7 +737,6 @@ export interface CreateUserBody {
   email?: string;
   displayName?: string;
   password: string;
-  groups?: string[];
   /** Required when local accounts run beside OIDC. */
   purpose?: AccountPurpose;
 }
@@ -797,6 +796,13 @@ export interface CreateGroupBody {
 export function createGroup(body: CreateGroupBody): Promise<{ name: string }> {
   return bffFetch("/groups", {
     method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateGroup(name: string, body: { displayName?: string; members: string[] }): Promise<{ name: string }> {
+  return bffFetch(`/groups/${encodeURIComponent(name)}`, {
+    method: "PUT",
     body: JSON.stringify(body),
   });
 }

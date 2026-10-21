@@ -2,6 +2,8 @@
 package mcp
 
 import (
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -104,7 +106,7 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 		mcp.WithString("jcascMergeStrategy", mcp.Description("JCasC merge strategy: errorOnConflict (default), override")),
 		mcp.WithObject("variables", mcp.Description("Template variables for the bundle")),
 	)
-	addTool(mcpServer, kindCreate, createCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createCB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -141,7 +143,10 @@ func registerComposedBundleTools(mcpServer *server.MCPServer, deps *api.Dependen
 				return mcp.NewToolResultError(fmt.Sprintf("invalid variables: %v", err)), nil
 			}
 		}
-		if err := crdstore.Apply[v1alpha1.ComposedBundle](ctx, deps.Store, bundle); err != nil {
+		if err := crdstore.Create[v1alpha1.ComposedBundle](ctx, deps.Store, bundle); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("composed bundle %s/%s already exists; use update_composed_bundle to change it", ns, strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create composed bundle: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, activity.Event{

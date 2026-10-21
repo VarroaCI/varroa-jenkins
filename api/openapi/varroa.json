@@ -284,6 +284,16 @@
         },
         "description": "Resource not found."
       },
+      "components_responses_NotImplemented": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/components_schemas_Error"
+            }
+          }
+        },
+        "description": "Not implemented."
+      },
       "components_responses_ServiceUnavailable": {
         "content": {
           "application/json": {
@@ -2640,12 +2650,6 @@
           },
           "email": {
             "type": "string"
-          },
-          "groups": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
           },
           "password": {
             "type": "string"
@@ -10152,12 +10156,6 @@
           },
           "email": {
             "type": "string"
-          },
-          "groups": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
           },
           "password": {
             "type": "string"
@@ -18322,7 +18320,7 @@
             "description": "Redirect to OIDC provider authorization URL."
           },
           "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+            "$ref": "#/components/responses/components_responses_NotImplemented"
           }
         },
         "security": [],
@@ -19041,7 +19039,7 @@
             "description": "Token exchange or validation failed."
           },
           "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+            "$ref": "#/components/responses/components_responses_NotImplemented"
           }
         },
         "security": [],
@@ -19909,6 +19907,9 @@
           },
           "401": {
             "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a composed bundle.",
@@ -21739,6 +21740,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a JenkinsRoleBinding on a cluster.",
@@ -21939,6 +21943,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a JenkinsRole on a cluster.",
@@ -22785,8 +22792,11 @@
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
           },
-          "501": {
+          "405": {
             "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a new group (admin, local auth only).",
@@ -22818,9 +22828,82 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
           }
         },
         "summary": "Deletes a group (admin, local auth only).",
+        "tags": [
+          "groups"
+        ]
+      },
+      "put": {
+        "operationId": "updateGroup",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/components_parameters_name"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "members": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "members"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Group updated."
+          },
+          "400": {
+            "$ref": "#/components/responses/components_responses_BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/components_responses_Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/components_responses_NotFound"
+          }
+        },
+        "summary": "Edits the display name and members of an existing group (admin, local auth only).",
         "tags": [
           "groups"
         ]
@@ -22982,7 +23065,7 @@
             "description": "Rate-limited — too many login attempts."
           },
           "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+            "$ref": "#/components/responses/components_responses_NotImplemented"
           }
         },
         "security": [],
@@ -23492,7 +23575,7 @@
             "$ref": "#/components/responses/components_responses_Unauthorized"
           },
           "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+            "$ref": "#/components/responses/components_responses_NotImplemented"
           }
         },
         "summary": "Changes the current user's password (local auth only).",
@@ -24623,6 +24706,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a VarroaRoleBinding.",
@@ -24804,6 +24890,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a VarroaRole.",
@@ -24999,6 +25088,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Registers a runner for a pipelines tenant. Requires the runners:create verb and a write grant on spec.team; refuses a spec.team that names no Team with 400.",
@@ -26346,6 +26438,9 @@
           },
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a new team (admin).",
@@ -26769,11 +26864,11 @@
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
           },
+          "405": {
+            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+          },
           "409": {
             "$ref": "#/components/responses/components_responses_Conflict"
-          },
-          "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
           }
         },
         "summary": "Creates a new user (admin, local auth only).",
@@ -27003,7 +27098,7 @@
             "$ref": "#/components/responses/components_responses_Forbidden"
           },
           "501": {
-            "$ref": "#/components/responses/components_responses_MethodNotAllowed"
+            "$ref": "#/components/responses/components_responses_NotImplemented"
           }
         },
         "summary": "Sets a user's password (admin, local auth only).",

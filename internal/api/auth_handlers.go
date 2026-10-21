@@ -68,7 +68,7 @@ func (s *Server) HandleAuthConfig(w http.ResponseWriter, r *http.Request) {
 // localAccountsOn reports whether local accounts exist on this release:
 // local mode, or local accounts beside OIDC.
 func (s *Server) localAccountsOn() bool {
-	return s.deps.IdentityConfig.Mode == string(auth.AuthModeLocal) || s.deps.IdentityConfig.LocalAccounts
+	return s.deps.IdentityConfig.LocalAccountsOn()
 }
 
 // auditLocalLogin publishes the audit event for a local sign-in beside

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useParams, useNavigate } from "react-router-dom";
 import { getRoleBinding, createRoleBinding, updateRoleBinding, listRoles } from "../api/client";
 import type { VarroaRoleBinding, VarroaRole, SubjectRef, VarroaRoleBindingScope, VarroaRoleBindingStatus } from "../types";
@@ -131,7 +132,7 @@ export default function RoleBindingForm() {
       }
       navigate("/access/role-bindings");
     } catch (err: any) {
-      setError(err.message);
+      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A role binding with this name already exists." : err.message);
     } finally {
       setLoading(false);
     }

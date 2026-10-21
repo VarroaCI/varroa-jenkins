@@ -51,6 +51,13 @@ MethodNotAllowed:
       schema:
         $ref: './schemas.yaml#/Error'
 
+NotImplemented:
+  description: Not implemented.
+  content:
+    application/json:
+      schema:
+        $ref: './schemas.yaml#/Error'
+
 Internal:
   description: Internal server error.
   content:

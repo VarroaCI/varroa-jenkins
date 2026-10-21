@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   getJenkinsRoleBinding,
@@ -142,7 +143,7 @@ export default function JenkinsRoleBindingForm() {
       }
       navigate(`/access/jenkins-role-bindings${clusterQuery(cluster)}`);
     } catch (err: any) {
-      setError(err.message);
+      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A Jenkins role binding with this name already exists." : err.message);
     } finally {
       setLoading(false);
     }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RoleBindingForm from "./RoleBindingForm";
+import { ApiError } from "../hooks/useApi";
 import { renderWithProviders } from "../test/render-utils";
 import { createRole, createRoleBinding } from "../test/factories";
 
@@ -130,6 +131,27 @@ describe("RoleBindingForm — create mode", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Validation error")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the conflict message on a create over an existing name", async () => {
+    mockCreateRoleBinding.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+    const user = userEvent.setup();
+    renderWithProviders(<RoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Create Role Binding")).toBeInTheDocument();
+    });
+
+    await user.type(getNameInput(), "fail-binding");
+    // Fill required fields so form submits
+    const subjectInputs = screen.getAllByPlaceholderText("Subject name");
+    await user.type(subjectInputs[0], "test-user");
+    await user.selectOptions(screen.getAllByRole("combobox")[1], "varroa:admin");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("A role binding with this name already exists.")).toBeInTheDocument();
     });
   });
 

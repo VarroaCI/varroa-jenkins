@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/render-utils";
+import { ApiError } from "../hooks/useApi";
 import CatalogSources from "./CatalogSources";
 
 // Mock react-router-dom's Link since CatalogSources uses it implicitly
@@ -44,11 +45,12 @@ const GLOBAL_ALL_PERMS = {
 };
 
 // Mock useToast to avoid side effects, keep ToastProvider for renderWithProviders
+const { mockToast } = vi.hoisted(() => ({ mockToast: vi.fn() }));
 vi.mock("../components/Toast", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../components/Toast")>();
   return {
     ...actual,
-    useToast: () => ({ toast: vi.fn() }),
+    useToast: () => ({ toast: mockToast }),
   };
 });
 
@@ -243,6 +245,29 @@ describe("CatalogSources", () => {
       });
       const body = mockCreateCatalogSource.mock.calls[0][2];
       expect(body.spec).not.toHaveProperty("ociRef");
+    });
+
+    it("shows the conflict message on a create over an existing name", async () => {
+      mockCreateCatalogSource.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+      const user = userEvent.setup();
+      mockUseCatalogSources.mockReturnValue({
+        data: { items: [] },
+        isLoading: false,
+        error: null,
+      });
+      renderPage();
+
+      await user.click(screen.getByText("+ New Source"));
+      await user.type(screen.getByPlaceholderText("my-catalog"), "my-repo");
+      await user.type(
+        screen.getByPlaceholderText("https://github.com/org/repo"),
+        "https://github.com/my-org/my-repo",
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockToast).toHaveBeenCalledWith("A catalog source with this name already exists.");
+      });
     });
 
     it("disables Save until the active kind's location and a valid name are set", async () => {

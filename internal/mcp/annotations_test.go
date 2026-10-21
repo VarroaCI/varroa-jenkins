@@ -36,35 +36,35 @@ var expectedToolKinds = map[string]toolKind{
 	// VarroaRoles
 	"list_varroa_roles":  kindRead,
 	"get_varroa_role":    kindRead,
-	"create_varroa_role": kindCreate,
+	"create_varroa_role": kindCreateStrict,
 	"update_varroa_role": kindUpdate,
 	"delete_varroa_role": kindDelete,
 
 	// VarroaRoleBindings
 	"list_varroa_role_bindings":  kindRead,
 	"get_varroa_role_binding":    kindRead,
-	"create_varroa_role_binding": kindCreate,
+	"create_varroa_role_binding": kindCreateStrict,
 	"update_varroa_role_binding": kindUpdate,
 	"delete_varroa_role_binding": kindDelete,
 
 	// JenkinsRoles
 	"list_jenkins_roles":  kindRead,
 	"get_jenkins_role":    kindRead,
-	"create_jenkins_role": kindCreate,
+	"create_jenkins_role": kindCreateStrict,
 	"update_jenkins_role": kindUpdate,
 	"delete_jenkins_role": kindDelete,
 
 	// JenkinsRoleBindings
 	"list_jenkins_role_bindings":  kindRead,
 	"get_jenkins_role_binding":    kindRead,
-	"create_jenkins_role_binding": kindCreate,
+	"create_jenkins_role_binding": kindCreateStrict,
 	"update_jenkins_role_binding": kindUpdate,
 	"delete_jenkins_role_binding": kindDelete,
 
 	// CatalogSources
 	"list_catalog_sources":  kindRead,
 	"get_catalog_source":    kindRead,
-	"create_catalog_source": kindCreate,
+	"create_catalog_source": kindCreateStrict,
 	"update_catalog_source": kindUpdate,
 	"delete_catalog_source": kindDelete,
 	"sync_catalog_source":   kindAction,
@@ -76,7 +76,7 @@ var expectedToolKinds = map[string]toolKind{
 	// ComposedBundles
 	"list_composed_bundles":    kindRead,
 	"get_composed_bundle":      kindRead,
-	"create_composed_bundle":   kindCreate,
+	"create_composed_bundle":   kindCreateStrict,
 	"update_composed_bundle":   kindUpdate,
 	"delete_composed_bundle":   kindDelete,
 	"validate_composed_bundle": kindRead,
@@ -97,13 +97,14 @@ var expectedToolKinds = map[string]toolKind{
 	// Users
 	"list_users":  kindRead,
 	"get_user":    kindRead,
-	"create_user": kindCreate,
+	"create_user": kindCreateStrict,
 	"update_user": kindUpdate,
 	"delete_user": kindDelete,
 
 	// Groups
 	"list_groups":  kindRead,
-	"create_group": kindCreate,
+	"create_group": kindCreateStrict,
+	"update_group": kindUpdate,
 	"delete_group": kindDelete,
 
 	// Activity, search, identity
@@ -241,9 +242,10 @@ func TestToolAnnotationsMatchKind(t *testing.T) {
 // self-consistency: TestToolAnnotationsMatchKind compares live annotations
 // against annotationsFor, so both sides move together and a wrong policy passes.
 //
-// Almost every create and update in this package is backed by crdstore.Apply, a
-// full-object replace with upsert semantics — a create silently overwrites an
-// existing object, and an update drops fields absent from the request. Claiming
+// Most updates, and the creates that upsert in some topology, are backed by
+// crdstore.Apply, a full-object replace with upsert semantics. An update drops
+// fields absent from the request, and such a create overwrites an existing
+// object. Claiming
 // destructiveHint=false there tells a client it is safe to run these without
 // asking, which is the opposite of true.
 func TestWriteToolsAreAdvertisedDestructive(t *testing.T) {
@@ -283,11 +285,11 @@ func TestStrictCreatesAreAdditiveButStillIdempotent(t *testing.T) {
 			t.Errorf("%s changes nothing when retried, so it must advertise idempotentHint=true", tool.Name)
 		}
 	}
-	// Only create_jenkins_version_profile reaches the operator's crdstore.Create
-	// with no Apply fallback. If this count grows, verify the new tool really
-	// cannot upsert before accepting it.
-	if found != 1 {
-		t.Errorf("expected exactly 1 strict-create tool, found %d — verify each cannot upsert", found)
+	// Each strict create calls crdstore.Create and refuses an existing name.
+	// If this count grows, verify the new tool really cannot upsert before
+	// accepting it.
+	if found != 9 {
+		t.Errorf("expected exactly 9 strict-create tools, found %d — verify each cannot upsert", found)
 	}
 }
 

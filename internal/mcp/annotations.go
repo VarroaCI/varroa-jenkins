@@ -22,17 +22,14 @@ const (
 	// validate_*.
 	kindRead toolKind = iota
 	// kindCreate brings an object into existence. Destructive and idempotent,
-	// because every create here goes through crdstore.Apply, which is a
-	// full-object replace with upsert semantics: creating over an existing
-	// object silently overwrites it rather than failing, and repeating the call
-	// converges. Annotating it non-destructive would be a false safety signal —
-	// create_group on an existing group replaces its member list.
+	// because in at least one topology the create upserts: it applies a full
+	// object over an existing one, so the call can overwrite it. Repeating the
+	// call converges. Annotating it non-destructive would be a false safety
+	// signal. Used by creates that preflight a name and then apply.
 	kindCreate
-	// kindCreateStrict is a create that genuinely fails on conflict, so it is
-	// additive-only: it cannot overwrite an existing object. It is the exception
-	// here, applying only where the write reaches the operator's crdstore.Create
-	// with no local Apply fallback. A tool with both paths gets kindCreate,
-	// because in at least one topology it upserts.
+	// kindCreateStrict is a create that calls crdstore.Create and refuses an
+	// existing name, so it is additive-only: it cannot overwrite an existing
+	// object. The caller gets a conflict error and uses the update tool.
 	//
 	// It is still idempotent. MCP defines idempotentHint as "no additional
 	// effect on its environment" when repeated, not "returns the same response":

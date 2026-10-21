@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useParams, useNavigate } from "react-router-dom";
 import { getRole, createRole, updateRole } from "../api/client";
 import type { VarroaRole, APIRule } from "../types";
@@ -56,7 +57,7 @@ export default function RoleForm() {
       }
       navigate("/access/roles");
     } catch (err: any) {
-      setError(err.message);
+      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A role with this name already exists." : err.message);
     } finally {
       setLoading(false);
     }

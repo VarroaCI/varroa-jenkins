@@ -230,7 +230,8 @@ reading each package's entry point):
   must be set explicitly even when false. `kindUpdate` is Apply-backed and so
   genuinely destructive (an absent field is removed); `kindUpdatePartial`
   writes a named subset and removes nothing, so it is non-destructive and
-  idempotent. Both mutate, so both emit an activity event — a new kind must
+  idempotent. A create through `crdstore.Create` that refuses an existing name
+  is `kindCreateStrict`; a create that can upsert is `kindCreate`. Both mutate, so both emit an activity event — a new kind must
   join **both** the `annotationsFor` and the `mutates` switch, and a mutating
   tool also needs an entry in `guardArgsFor` (and often a seeded object in
   `seedGuardObjects`) or `TestEveryMutatingToolEmitsActivity` panics.

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -472,7 +473,11 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := crdstore.Apply[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
+	if err := crdstore.Create[v1alpha1.Team](ctx, s.deps.Store, team); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			s.writeJSONError(w, http.StatusConflict, "team already exists")
+			return
+		}
 		if k8sErrorToHTTP(err) == http.StatusBadRequest {
 			s.writeJSONError(w, http.StatusBadRequest, err.Error())
 			return

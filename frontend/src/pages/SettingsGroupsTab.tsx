@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listGroups, createGroup, deleteGroup, listUsers, type UserEntry, type GroupEntry } from "../api/client";
+import { listGroups, createGroup, updateGroup, deleteGroup, listUsers, type UserEntry, type GroupEntry } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
@@ -131,13 +132,17 @@ function GroupForm({ title, existing, onClose, onSaved }: { title: string; exist
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => createGroup({
-      name,
-      displayName,
-      members: members.split(",").map((s) => s.trim()).filter(Boolean),
-    }),
+    mutationFn: () => {
+      const memberList = members.split(",").map((s) => s.trim()).filter(Boolean);
+      // An IdP-only group has no Group object yet. Its first local edit creates one.
+      return existing && existing.source !== "idp"
+        ? updateGroup(existing.name, { displayName, members: memberList })
+        : createGroup({ name, displayName, members: memberList });
+    },
     onSuccess: onSaved,
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(
+      e instanceof ApiError && e.status === 409 ? "A group with this name already exists." : e.message,
+    ),
   });
 
   const body = (

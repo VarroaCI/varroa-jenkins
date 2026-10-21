@@ -12,9 +12,10 @@ the authoritative reference for available names and arguments.
 | `idempotentHint` | Repeating the same call does not add another effect |
 | `openWorldHint` | The effect depends on a system outside Varroa's resource model |
 
-Varroa create and update tools are declarative. Many create tools apply a full
-desired object, so an existing object may be replaced. Updates for most
-resources also replace omitted fields. Two tools are sparse instead.
+Varroa create and update tools are declarative. The create tools for groups, roles,
+role bindings, Jenkins roles, Jenkins role bindings, catalog sources, composed bundles, and users refuse a name that
+already exists. Use the update tool to change an existing object. Updates for most
+resources replace omitted fields. Two tools are sparse instead.
 `update_controller` is a sparse patch with separate ownership rules. Read
 [Writing through MCP](writing.md) before using it. `update_cell_pool` writes
 only the dials the call names, which is why it alone among the write tools

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useNavigate, useParams } from "react-router-dom";
 import { getTeam, createTeam, updateTeam, listRoles, listComposedBundles } from "../api/client";
 import type { TeamEntry } from "../api/client";
@@ -444,7 +445,11 @@ export default function TeamForm() {
       }
       navigate("/access/teams");
     } catch (err: unknown) {
-      setErrors([err instanceof Error ? err.message : "Save failed"]);
+      if (!isEdit && err instanceof ApiError && err.status === 409) {
+        setErrors(["A team with this name already exists."]);
+      } else {
+        setErrors([err instanceof Error ? err.message : "Save failed"]);
+      }
     } finally {
       setSaving(false);
     }

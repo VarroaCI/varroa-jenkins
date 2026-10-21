@@ -51,7 +51,7 @@
             schema:
               $ref: '../components/schemas.yaml#/Error'
       "501":
-        $ref: '../components/responses.yaml#/MethodNotAllowed'
+        $ref: '../components/responses.yaml#/NotImplemented'
 
 /api/v1/auth/login:
   get:
@@ -73,7 +73,7 @@
       "302":
         description: Redirect to OIDC provider authorization URL.
       "501":
-        $ref: '../components/responses.yaml#/MethodNotAllowed'
+        $ref: '../components/responses.yaml#/NotImplemented'
 
 /api/v1/callback:
   get:
@@ -113,7 +113,7 @@
       "500":
         description: Token exchange or validation failed.
       "501":
-        $ref: '../components/responses.yaml#/MethodNotAllowed'
+        $ref: '../components/responses.yaml#/NotImplemented'
 
 /api/v1/logout:
   post:
@@ -217,7 +217,7 @@
       "401":
         $ref: '../components/responses.yaml#/Unauthorized'
       "501":
-        $ref: '../components/responses.yaml#/MethodNotAllowed'
+        $ref: '../components/responses.yaml#/NotImplemented'
 
 /api/v1/me/permissions:
   get:

@@ -3,21 +3,24 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { ApiError } from "../hooks/useApi";
 
 vi.mock("../api/client", () => ({
   listGroups: vi.fn(),
   createGroup: vi.fn(),
+  updateGroup: vi.fn(),
   deleteGroup: vi.fn(),
   listUsers: vi.fn(),
 }));
 vi.mock("../context/AuthContext", () => ({ useAuth: vi.fn() }));
 
-import { listGroups, createGroup, deleteGroup, listUsers } from "../api/client";
+import { listGroups, createGroup, updateGroup, deleteGroup, listUsers } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import SettingsGroupsTab from "./SettingsGroupsTab";
 
 const mockListGroups = listGroups as ReturnType<typeof vi.fn>;
 const mockCreateGroup = createGroup as ReturnType<typeof vi.fn>;
+const mockUpdateGroup = updateGroup as ReturnType<typeof vi.fn>;
 const mockDeleteGroup = deleteGroup as ReturnType<typeof vi.fn>;
 const mockListUsers = listUsers as ReturnType<typeof vi.fn>;
 const mockUseAuth = useAuth as ReturnType<typeof vi.fn>;
@@ -61,6 +64,33 @@ describe("SettingsGroupsTab", () => {
     expect(mockCreateGroup.mock.calls[0][0]).toMatchObject({ name: "qa", members: ["carol", "dave"] });
   });
 
+  it("local mode: a create over an existing name shows the conflict message", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    mockListGroups.mockResolvedValue([{ name: "devs", displayName: "Developers", members: ["alice"] }]);
+    mockCreateGroup.mockRejectedValueOnce(new ApiError(409, "x", { error: "group already exists" }));
+    renderTab();
+
+    await screen.findByText("Developers");
+    await userEvent.click(screen.getByText("+ New Group"));
+    await userEvent.type(screen.getByPlaceholderText("developers"), "devs");
+    await userEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText("A group with this name already exists.")).toBeInTheDocument();
+  });
+
+  it("local mode: editing an IdP-only group creates its local Group object", async () => {
+    mockUseAuth.mockReturnValue({ authMode: "local" });
+    mockListGroups.mockResolvedValue([{ name: "eng", displayName: "Engineering", members: ["alice"], source: "idp" }]);
+    renderTab();
+
+    await screen.findByText("Engineering");
+    await userEvent.click(screen.getByText("Edit members"));
+    await userEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => expect(mockCreateGroup).toHaveBeenCalled());
+    expect(mockUpdateGroup).not.toHaveBeenCalled();
+  });
+
   it("local mode: edits members and deletes a group", async () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     mockUseAuth.mockReturnValue({ authMode: "local" });
@@ -69,14 +99,15 @@ describe("SettingsGroupsTab", () => {
 
     await screen.findByText("Developers");
 
-    // Edit members (upsert preserves name, edits member list).
+    // Edit members: the existing group is updated, not created.
     await userEvent.click(screen.getByText("Edit members"));
     const membersInput = screen.getByDisplayValue("alice");
     await userEvent.clear(membersInput);
     await userEvent.type(membersInput, "alice, bob");
     await userEvent.click(screen.getByText("Save"));
-    await waitFor(() => expect(mockCreateGroup).toHaveBeenCalled());
-    expect(mockCreateGroup.mock.calls[0][0]).toMatchObject({ name: "devs", members: ["alice", "bob"] });
+    await waitFor(() => expect(mockUpdateGroup).toHaveBeenCalled());
+    expect(mockUpdateGroup.mock.calls[0]).toEqual(["devs", { displayName: "Developers", members: ["alice", "bob"] }]);
+    expect(mockCreateGroup).not.toHaveBeenCalled();
 
     // Delete.
     await userEvent.click(screen.getByText("Delete"));

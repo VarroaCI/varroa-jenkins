@@ -175,7 +175,7 @@ export default function ComposerTray({ open, onClose, editTarget }: ComposerTray
       handleClear();
       onClose();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "Failed to create");
+      toast(e instanceof ApiError && e.status === 409 ? "A composed bundle with this name already exists." : e instanceof Error ? e.message : "Failed to create");
     } finally {
       setCreating(false);
     }
@@ -269,7 +269,7 @@ export default function ComposerTray({ open, onClose, editTarget }: ComposerTray
       navigate(`/catalog/bundles/${editTarget.namespace}/${newName}${clusterQuery(cluster)}`);
       onClose();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "Failed to save as new bundle");
+      toast(e instanceof ApiError && e.status === 409 ? "A composed bundle with this name already exists." : e instanceof Error ? e.message : "Failed to save as new bundle");
     } finally {
       setCreating(false);
     }

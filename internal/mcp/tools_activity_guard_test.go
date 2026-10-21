@@ -190,12 +190,13 @@ func guardEmitDeps(t *testing.T, sink activity.EventSink) *api.Dependencies {
 	stub := newGuardStub()
 	seedGuardObjects(t, stub)
 	return &api.Dependencies{
-		Client:      stub,
-		Store:       stub,
-		Authorizer:  guardAuthorizer(),
-		Brood:       &recordingBrood{},
-		ConfigBrood: &guardConfigBrood{},
-		Reconciler:  &guardReconciler{},
+		Client:         stub,
+		Store:          stub,
+		Authorizer:     guardAuthorizer(),
+		IdentityConfig: api.IdentityConfig{Mode: "local"},
+		Brood:          &recordingBrood{},
+		ConfigBrood:    &guardConfigBrood{},
+		Reconciler:     &guardReconciler{},
 		VersionProfileReconciler: controller.NewJenkinsVersionProfileReconciler(
 			stub, stub, "varroa-system", slog.New(slog.DiscardHandler)),
 		ActivityPublisher: sink,
@@ -305,6 +306,7 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 		},
 		&v1alpha1.ComposedBundle{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
 		&v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
+		&v1alpha1.Group{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
@@ -364,28 +366,28 @@ func guardArgsFor(name string) map[string]interface{} {
 		"hibernate_controller": {"namespace": ns, "name": obj},
 		"wake_controller":      {"namespace": ns, "name": obj},
 		// VarroaRoles (cluster-scoped)
-		"create_varroa_role": {"name": obj},
+		"create_varroa_role": {"name": "obj-new"},
 		"update_varroa_role": {"name": obj},
 		"delete_varroa_role": {"name": obj},
 		// VarroaRoleBindings (cluster-scoped)
-		"create_varroa_role_binding": {"name": obj, "roleRef": "some-role", "subjects": subject},
+		"create_varroa_role_binding": {"name": "obj-new", "roleRef": "some-role", "subjects": subject},
 		"update_varroa_role_binding": {"name": obj},
 		"delete_varroa_role_binding": {"name": obj},
 		// JenkinsRoles (cluster-scoped)
-		"create_jenkins_role": {"name": obj, "permissions": []interface{}{"Overall/Read"}},
+		"create_jenkins_role": {"name": "obj-new", "permissions": []interface{}{"Overall/Read"}},
 		"update_jenkins_role": {"name": obj},
 		"delete_jenkins_role": {"name": obj},
 		// JenkinsRoleBindings (cluster-scoped)
-		"create_jenkins_role_binding": {"name": obj, "roleRef": "some-role", "subjects": subject},
+		"create_jenkins_role_binding": {"name": "obj-new", "roleRef": "some-role", "subjects": subject},
 		"update_jenkins_role_binding": {"name": obj},
 		"delete_jenkins_role_binding": {"name": obj},
 		// CatalogSources (namespaced)
-		"create_catalog_source": {"namespace": ns, "name": obj, "repoURL": "https://example.com/repo.git"},
+		"create_catalog_source": {"namespace": ns, "name": "obj-new", "repoURL": "https://example.com/repo.git"},
 		"update_catalog_source": {"namespace": ns, "name": obj},
 		"delete_catalog_source": {"namespace": ns, "name": obj},
 		"sync_catalog_source":   {"namespace": ns, "name": obj},
 		// ComposedBundles (namespaced)
-		"create_composed_bundle": {"namespace": ns, "name": obj, "inputs": []interface{}{map[string]interface{}{"itemRef": map[string]interface{}{"name": "cat-item"}}}},
+		"create_composed_bundle": {"namespace": ns, "name": "obj-new", "inputs": []interface{}{map[string]interface{}{"itemRef": map[string]interface{}{"name": "cat-item"}}}},
 		"update_composed_bundle": {"namespace": ns, "name": obj},
 		"delete_composed_bundle": {"namespace": ns, "name": obj},
 		// ProvisioningDefaults + JenkinsVersionProfiles (cluster-scoped, config brood)
@@ -394,11 +396,12 @@ func guardArgsFor(name string) map[string]interface{} {
 		"update_jenkins_version_profile": {"name": obj},
 		"delete_jenkins_version_profile": {"name": obj},
 		// Users (namespaced, admin-only)
-		"create_user": {"namespace": ns, "name": "obj-new"},
+		"create_user": {"namespace": "varroa-system", "name": "obj-new", "password": "pw-12345678"},
 		"update_user": {"namespace": ns, "name": obj},
 		"delete_user": {"namespace": ns, "name": obj},
 		// Groups (cluster-scoped, admin-only)
-		"create_group": {"name": obj},
+		"create_group": {"name": "obj-new"},
+		"update_group": {"name": obj},
 		"delete_group": {"name": obj},
 		// ProfileCandidates (cluster-scoped, direct store)
 		"promote_version_candidate": {"name": obj},

@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -66,7 +67,7 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 		mcp.WithString("roleType", mcp.Description("Role type: Global, Item, Agent; default Global")),
 		mcp.WithArray("permissions", mcp.Required(), mcp.Description("Permission IDs")),
 	)
-	addTool(mcpServer, kindCreate, createJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createJR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -86,7 +87,10 @@ func registerJenkinsRoleTools(mcpServer *server.MCPServer, deps *api.Dependencie
 				Description: strArg(args, "description"),
 			},
 		}
-		if err := crdstore.Apply[v1alpha1.JenkinsRole](ctx, deps.Store, role); err != nil {
+		if err := crdstore.Create[v1alpha1.JenkinsRole](ctx, deps.Store, role); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("Jenkins role %s already exists; use update_jenkins_role to change it", strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRole, api.AccessCreated, strArg(args, "name")))

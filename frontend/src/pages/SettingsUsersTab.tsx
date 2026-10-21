@@ -4,7 +4,7 @@ import {
   listUsers, createUser, deleteUser, updateUser, adminResetPassword,
   adminListUserApiKeys, adminRevokeApiKey,
   listRoleBindings, listJenkinsRoleBindings,
-  listGroups, createGroup,
+  listGroups, createGroup, updateGroup,
   type UserEntry, type GroupEntry, type AccountPurpose,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -15,7 +15,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import type { KeyMeta } from "../types";
 import styles from "./settings.module.css";
 
-// applyMembership upserts the groups whose membership for `username` changed to
+// applyMembership writes the groups whose membership for `username` changed to
 // match `desired`. Returns the names of groups that failed to update. Group
 // membership is canonical in the Group CRD, so we read-modify-write each.
 async function applyMembership(groups: GroupEntry[], username: string, desired: Set<string>): Promise<string[]> {
@@ -28,7 +28,10 @@ async function applyMembership(groups: GroupEntry[], username: string, desired: 
       ? [...g.members, username]
       : g.members.filter((m) => m !== username);
     try {
-      await createGroup({ name: g.name, displayName: g.displayName, members });
+      // An IdP-only group has no Group object yet, so its first local write creates one.
+      await (g.source === "idp"
+        ? createGroup({ name: g.name, displayName: g.displayName, members })
+        : updateGroup(g.name, { displayName: g.displayName, members }));
     } catch {
       failed.push(g.name);
     }
