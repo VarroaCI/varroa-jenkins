@@ -2627,8 +2627,15 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 				pollFailed bool
 			)
 			if result.ItemsSuccess {
+				var gone map[string]bool
+				if len(cmd.RehydrationGoneFolders) > 0 {
+					gone = make(map[string]bool, len(cmd.RehydrationGoneFolders))
+					for _, folder := range cmd.RehydrationGoneFolders {
+						gone[folder] = true
+					}
+				}
 				var orphans []string
-				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs, func() *mitev1.JobBranchSet {
+				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs, gone, func() *mitev1.JobBranchSet {
 					set, err := a.pollJobBranches(ctx)
 					if err != nil {
 						a.Logger.Warn("rehydration branch inventory poll failed, keeping multibranch deferrals", "error", err)
@@ -2645,6 +2652,19 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 					}
 					a.Logger.Info("rehydration dropped records of jobs the items apply did not create",
 						"orphans", len(orphans), "sample", sample)
+				}
+				if len(gone) > 0 {
+					// The gone rule needs the inventory. Without it no job
+					// can be released by a forge verdict.
+					if branches != nil {
+						// The scan-only rule runs again without the gone set. The
+						// difference is the orphans the forge verdict caused.
+						_, base := orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs, nil, func() *mitev1.JobBranchSet { return branches })
+						if released := len(orphans) - len(base); released > 0 {
+							a.Logger.Info("rehydration released jobs of folders the forge reports gone",
+								"released", released, "gone_folders", len(gone))
+						}
+					}
 				}
 			}
 			a.Logger.Info("rehydration seeded deferred jobs after the items apply",

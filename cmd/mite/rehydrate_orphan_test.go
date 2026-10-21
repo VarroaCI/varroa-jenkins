@@ -58,7 +58,7 @@ func TestOrphanDeferredJobs(t *testing.T) {
 		"org/repos/projgen/main", // organization folder grandparent, parent absent
 		"tenant/nest/one/job",    // plain folder grandparent, parent absent
 	}
-	keep, orphans := orphanDeferredJobs(home, deferred, nil)
+	keep, orphans := orphanDeferredJobs(home, deferred, nil, nil)
 
 	wantKeep := []string{"tenant/mb/feature", "org/repo", "bare/child", "org/repos/projgen/main"}
 	wantOrphans := []string{"tenant-x", "tenant/gone", "missing/child", "tenant/nest/one/job"}
@@ -221,7 +221,7 @@ func TestOrphanDeferredJobsOrganizationFolderLayout(t *testing.T) {
 	keep, orphans := orphanDeferredJobs(home, []string{
 		"sbsoftware/repos/projgen/main",
 		"sbsoftware/projgen/main",
-	}, nil)
+	}, nil, nil)
 
 	if want := []string{"sbsoftware/repos/projgen/main"}; !reflect.DeepEqual(keep, want) {
 		t.Errorf("keep = %v, want %v", keep, want)
@@ -370,7 +370,7 @@ func TestOrphanDeferredJobsBranchInventory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
 			tt.setup(t, home)
-			keep, orphans := orphanDeferredJobs(home, []string{tt.job}, func() *mitev1.JobBranchSet { return tt.set })
+			keep, orphans := orphanDeferredJobs(home, []string{tt.job}, nil, func() *mitev1.JobBranchSet { return tt.set })
 			if tt.wantOrphan {
 				if want := []string{tt.job}; !reflect.DeepEqual(orphans, want) || len(keep) != 0 {
 					t.Errorf("keep = %v, orphans = %v; want orphan %v", keep, orphans, want)
@@ -403,7 +403,7 @@ func TestOrphanDeferredJobsLoadsInventoryOnce(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
-			orphanDeferredJobs(home, tt.deferred, func() *mitev1.JobBranchSet {
+			orphanDeferredJobs(home, tt.deferred, nil, func() *mitev1.JobBranchSet {
 				calls++
 				return branchSet()
 			})

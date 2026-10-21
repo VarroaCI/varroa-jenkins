@@ -497,7 +497,30 @@ public class ActivityEndpoint implements RootAction {
         row.put("heads", heads);
         row.put("headsTruncated", headsTruncated);
         row.put("lastScan", VarroaBranchScans.lastScanJson(project.getFullName()));
+        row.put("sourceUrl", sourceUrlOf(project));
         return row;
+    }
+
+    /**
+     * Returns the single SCM source URL of a multibranch project. An organization
+     * folder, a project with several sources, and an unreadable source answer "".
+     */
+    static String sourceUrlOf(ComputedFolder<?> project) {
+        if (project instanceof OrganizationFolder || !(project instanceof MultiBranchProject)) {
+            return "";
+        }
+        try {
+            List<?> sources = ((MultiBranchProject) project).getSCMSources();
+            if (sources == null || sources.size() != 1) {
+                return "";
+            }
+            Object remote = VarroaRunRecorder.invokeNoArg(sources.get(0), "getRemote");
+            String url = remote instanceof String ? (String) remote : "";
+            // A truncated URL names another repository, so an over-long URL is dropped.
+            return url.length() > 512 ? "" : url;
+        } catch (RuntimeException | LinkageError e) {
+            return "";
+        }
     }
 
     /**

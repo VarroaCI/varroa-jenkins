@@ -251,6 +251,9 @@ type Reconciler struct {
 	// operator restart or a shard move) costs one more send of the
 	// bundle on the next tick.
 	rehydrationInFlight map[string]*rehydrationPush
+	// repoProbe caches the forge verdicts that release deferred branch
+	// jobs of a repository the forge confirms gone. It is in memory only.
+	repoProbe repoProbeState
 	// numberCacheMu guards numberSeededJobs, rehydrationInFlight, and
 	// rehydrationPendingSince: up to maxConcurrentReconciles cells
 	// reconcile at once and each touches only its own key, but the
@@ -4184,6 +4187,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					cr.Status.Cell.TenantWarnings = branchScanFailedAfter(
 						cr.Status.Cell.TenantWarnings, cr.Status.Cell, r.DesiredState, matchedTenants)
 					pruneBranchScanFailedWarnings(cr.Status.Cell)
+					recv.noteRepoScans(cr.Namespace+"/"+cr.Name, r.DesiredState, matchedTenants, tenants, time.Now())
 				}
 				// Number-only progress (design D4, task 5.7): a block
 				// counts as seeded only once this matching, successful
@@ -4780,6 +4784,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 	if rehydrationPlan != nil && rehydrationPlan.Held && desired.Rehydration == nil {
 		desired.Rehydration = rehydrationPlan.Bundle
 	}
+	r.attachRepoGoneFolders(desired, cr.Namespace+"/"+cr.Name)
 
 	// The hash and the push time are stamped only after a delivered push.
 	// NATS keeps no copy of the command, so a stamp after a failed push

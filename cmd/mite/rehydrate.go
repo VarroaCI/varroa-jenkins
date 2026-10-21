@@ -360,7 +360,13 @@ type jobCreator struct {
 // set, keeps the job. A job whose parent directory exists without a
 // config.xml also stays deferred. Any other job the items apply did not
 // create no longer exists, so its records have nothing to seed.
-func orphanDeferredJobs(jenkinsHome string, deferred []string, loadBranches func() *mitev1.JobBranchSet) (keep, orphans []string) {
+//
+// A kept job also orphans when its own fresh inventory shows its folder's
+// last completed scan did not succeed, and the operator's forge probe
+// confirmed that folder's repository gone. The gone set comes from the
+// operator and may be nil. The inventory must still show the failing scan,
+// so a scan that succeeds again keeps the job.
+func orphanDeferredJobs(jenkinsHome string, deferred []string, gone map[string]bool, loadBranches func() *mitev1.JobBranchSet) (keep, orphans []string) {
 	var (
 		branches *mitev1.JobBranchSet
 		loaded   bool
@@ -380,6 +386,8 @@ func orphanDeferredJobs(jenkinsHome string, deferred []string, loadBranches func
 				}
 			}
 			if scanOmitsJob(branches, c.folder, jobPath) {
+				orphans = append(orphans, jobPath)
+			} else if failed, _ := branchScanFailure(branches, c.folder, jobPath); failed != "" && gone[failed] {
 				orphans = append(orphans, jobPath)
 			} else {
 				keep = append(keep, jobPath)
@@ -470,7 +478,7 @@ func failedBranchScans(jenkinsHome string, keep []string, set *mitev1.JobBranchS
 		}
 		scan := byFolder[folder]
 		if scan == nil {
-			scan = &mitev1.RehydrationFailedScan{Folder: folder, IndexResult: result}
+			scan = &mitev1.RehydrationFailedScan{Folder: folder, IndexResult: result, RepoUrl: branchProjectRow(set, folder).SourceUrl}
 			byFolder[folder] = scan
 		}
 		scan.DeferredJobs++

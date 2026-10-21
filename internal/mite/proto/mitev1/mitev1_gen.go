@@ -386,6 +386,7 @@ type DesiredStateCommand struct {
 	Rehydration                *RehydrationBundle `json:"rehydration,omitempty"`
 	TenantHomes                []*TenantHomes     `json:"tenant_homes,omitempty"`
 	Cell                       bool               `json:"cell,omitempty"`
+	RehydrationGoneFolders     []string           `json:"rehydration_gone_folders,omitempty"`
 }
 
 type DesiredStateResult struct {
@@ -498,6 +499,7 @@ type JobBranchProject struct {
 	Heads          []*JobBranchHead  `json:"heads,omitempty"`
 	HeadsTruncated bool              `json:"heads_truncated,omitempty"`
 	LastScan       *BranchScanResult `json:"last_scan,omitempty"`
+	SourceUrl      string            `json:"source_url,omitempty"`
 }
 
 // JobBranchSet wraps the branch inventory with presence: an unset field
@@ -1242,6 +1244,7 @@ type RehydrationFailedScan struct {
 	Folder       string `json:"folder,omitempty"`
 	IndexResult  string `json:"index_result,omitempty"`
 	DeferredJobs int    `json:"deferred_jobs,omitempty"`
+	RepoUrl      string `json:"repo_url,omitempty"`
 }
 
 // RehydrationFile is one file the mite writes under JENKINS_HOME to seed a
