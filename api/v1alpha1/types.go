@@ -926,7 +926,7 @@ type PendingDeletion struct {
 
 // DeletionApproval records one approved delete of a pending item.
 type DeletionApproval struct {
-	CommandID  string      `json:"commandID"`
+	CommandID  string      `json:"commandId"`
 	ApprovedAt metav1.Time `json:"approvedAt"`
 	// Error is the mite's error text for a failed delete. Empty while the delete is in flight.
 	// +optional
@@ -940,7 +940,7 @@ type RestartDrainStatus struct {
 	// DesiredStateHash is the hash that triggered the restart attempt.
 	DesiredStateHash string `json:"desiredStateHash,omitempty"`
 	// CommandID is the outstanding SAFE_RESTART command_id for correlation.
-	CommandID string `json:"commandID,omitempty"`
+	CommandID string `json:"commandId,omitempty"`
 	// AttemptCount is the number of drain attempts made so far.
 	AttemptCount int `json:"attemptCount,omitempty"`
 	// NextRetryAt is the time after which the operator may re-issue the restart.
@@ -953,7 +953,7 @@ type RestartDrainStatus struct {
 // Shape-aligned with RestartDrainStatus.CommandID for correlation.
 type ImperativeResult struct {
 	// CommandID is the imperative command identifier for correlation.
-	CommandID string `json:"commandID,omitempty"`
+	CommandID string `json:"commandId,omitempty"`
 	// Success indicates whether the command completed successfully.
 	Success bool `json:"success"`
 	// Error is the error message when Success is false.

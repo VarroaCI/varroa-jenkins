@@ -404,6 +404,13 @@ func TestForgeCodeStatus_RequestExpired(t *testing.T) {
 	}
 }
 
+// TestForgeCodeStatus_ProposalBaseMoved checks that a moved base branch maps to conflict.
+func TestForgeCodeStatus_ProposalBaseMoved(t *testing.T) {
+	if got := forgeCodeStatus(forgeapi.CodeProposalBaseMoved); got != http.StatusConflict {
+		t.Fatalf("status %d, want %d", got, http.StatusConflict)
+	}
+}
+
 // TestForgeCodeStatus_PullRequestBusy checks that a busy Team maps to too many
 // requests.
 func TestForgeCodeStatus_PullRequestBusy(t *testing.T) {
