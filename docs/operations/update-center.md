@@ -84,7 +84,7 @@ The metadata document `update-center.actual.json` lists the dependencies of each
 
 The Jenkins plugin installer reads these entries for the `latest` version of a plugin.
 
-The service also serves `plugin-versions.json`. It lists every stored version of each plugin, with its sha256, `requiredCore`, and dependencies. The installer reads this document for an explicit version. A version whose dependency list is unknown is left out. The installer then reads that plugin's manifest.
+The service also serves `plugin-versions.json`. It lists every stored version of each plugin, with its sha256, `requiredCore`, and dependencies. With pull-through on, the document also lists each declared exact pin that the store does not hold yet. It takes that entry from upstream metadata. A pin that only the artifact archive lists stays out. The installer then reads that plugin's manifest. To store such pins before the first boot, use `prefetch`. The installer reads this document for an explicit version. A version whose dependency list is unknown is left out. The installer then reads that plugin's manifest.
 
 A plugin whose manifest cannot be read is left out of the metadata document. The service logs a warning. The plugin stays downloadable at its explicit version. The operator reports these plugins in `status.unknownDependencies`. See [Check readiness](#check-readiness). A slow blob store can delay a manifest read. The inventory waits at most 15 seconds for these reads, reports a plugin whose read is not complete as unknown, and lists it on the next pass.
 
