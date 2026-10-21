@@ -177,6 +177,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyUserActivity(claims, UserCreated, req.Username)
 	s.writeJSON(w, http.StatusCreated, map[string]string{"name": req.Username})
 }
 
@@ -239,6 +240,7 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 
+	s.notifyUserActivity(claims, UserUpdated, name)
 	s.writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }
 
@@ -270,6 +272,7 @@ func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyUserActivity(claims, UserDeleted, name)
 	w.WriteHeader(http.StatusNoContent)
 }
 
