@@ -4628,6 +4628,27 @@ spec:
                     PendingDeletion records a managed item whose deletion was deferred because a
                     build is running.
                   properties:
+                    approval:
+                      description: |-
+                        Approval records the last approved delete sent to the mite. The
+                        entry stays until the mite reports that delete as successful.
+                      properties:
+                        approvedAt:
+                          format: date-time
+                          type: string
+                        commandID:
+                          type: string
+                        error:
+                          description: Error is the mite's error text for a failed
+                            delete. Empty while the delete is in flight.
+                          type: string
+                        failedAt:
+                          format: date-time
+                          type: string
+                      required:
+                      - approvedAt
+                      - commandID
+                      type: object
                     detectedAt:
                       format: date-time
                       type: string

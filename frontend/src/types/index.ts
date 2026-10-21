@@ -110,6 +110,12 @@ export interface PendingDeletion {
   path: string;
   reason: string;
   detectedAt: string;
+  approval?: {
+    commandId: string;
+    approvedAt: string;
+    error?: string;
+    failedAt?: string;
+  };
 }
 
 export interface LiveDrift {

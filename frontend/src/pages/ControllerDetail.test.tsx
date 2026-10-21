@@ -1260,6 +1260,45 @@ describe("ControllerDetail — Permission matrix", () => {
     expect(screen.queryByText(/Approve deletion/)).not.toBeInTheDocument();
   });
 
+  it("shows the waiting state while an approved deletion is unconfirmed", () => {
+    setControllerData({
+      pendingItemDeletions: [
+        {
+          path: "job/test",
+          reason: "build running",
+          detectedAt: new Date().toISOString(),
+          approval: { commandId: "c1", approvedAt: new Date().toISOString() },
+        },
+      ],
+    } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.getByText(/Waiting for the mite to confirm the delete/)).toBeInTheDocument();
+    expect(screen.queryByText(/Delete failed/)).not.toBeInTheDocument();
+  });
+
+  it("shows the delete error with Approve again", () => {
+    setControllerData({
+      pendingItemDeletions: [
+        {
+          path: "job/test",
+          reason: "build running",
+          detectedAt: new Date().toISOString(),
+          approval: {
+            commandId: "c1",
+            approvedAt: new Date().toISOString(),
+            error: "delete item job/test: HTTP 500",
+            failedAt: new Date().toISOString(),
+          },
+        },
+      ],
+    } as any);
+    renderWithProviders(<ControllerDetail />);
+
+    expect(screen.getByText(/Delete failed: delete item job\/test: HTTP 500/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve again" })).toBeEnabled();
+  });
+
   it("hides header lifecycle buttons when manage is denied", () => {
     mockCanDo.mockImplementation(
       (_perms?: unknown, _ns?: string, resource?: string, verb?: string) =>

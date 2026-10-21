@@ -1436,7 +1436,7 @@ sections describe.
   This is safe: the hook reads the held set when it runs, and a shard that a pass
   claims again enqueues its controllers again through `onAcquired`. The operator wires it to
   `Reconciler.ForgetUnowned`, which calls `Transport.ForgetMatching` for every
-  controller that the replica does not own. `ApproveRestart` and `ApproveDeletion`
+  controller that the replica does not own. `ApproveDeletion` stamps `approval` on the pending entry and keeps the entry. A `DELETE_ITEM` result clears the entry on success, or records `approval.error` on failure (`applyDeleteItemResult`). `ApproveRestart` and `ApproveDeletion`
   return `ErrNotShardOwner` on a replica that does not own the controller, before
   any read; they run outside the workqueue, so each carries its own gate. Their
   status writes go through `crdstore.MutateStatus` and change only the approve's

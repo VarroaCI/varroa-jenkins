@@ -304,9 +304,10 @@ func TestApproveDeletion_RefusesANonOwner(t *testing.T) {
 	}
 }
 
-// TestApproveDeletion_OwnerSendsAndClears pins that the replica that holds
-// the controller's shard sends the delete and clears the pending entry.
-func TestApproveDeletion_OwnerSendsAndClears(t *testing.T) {
+// TestApproveDeletion_OwnerSendsAndMarksTheApproval pins that the replica
+// that holds the controller's shard sends the delete and records the
+// approval. The entry stays until the mite confirms the delete.
+func TestApproveDeletion_OwnerSendsAndMarksTheApproval(t *testing.T) {
 	client := newTestClient()
 	rec := newTestReconciler(client)
 	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
@@ -333,20 +334,23 @@ func TestApproveDeletion_OwnerSendsAndClears(t *testing.T) {
 		t.Fatalf("get controller: %v", err)
 	}
 	st := &got.Status
-	if len(st.PendingItemDeletions) != 0 {
-		t.Fatalf("pending deletions = %v, want none", st.PendingItemDeletions)
+	if len(st.PendingItemDeletions) != 1 {
+		t.Fatalf("pending deletions = %v, want the entry kept", st.PendingItemDeletions)
 	}
-	var found bool
+	approval := st.PendingItemDeletions[0].Approval
+	if approval == nil {
+		t.Fatal("entry has no approval record")
+	}
+	if approval.CommandID != tr.imperatives[0].CommandId {
+		t.Fatalf("approval command id = %q, want the sent %q", approval.CommandID, tr.imperatives[0].CommandId)
+	}
+	if approval.ApprovedAt.IsZero() {
+		t.Fatal("approval time is zero")
+	}
 	for _, c := range st.Conditions {
-		if c.Type == v1alpha1.ConditionDeletionPending {
-			found = true
-			if c.Status != metav1.ConditionFalse {
-				t.Fatalf("DeletionPending = %s, want False", c.Status)
-			}
+		if c.Type == v1alpha1.ConditionDeletionPending && c.Status == metav1.ConditionFalse {
+			t.Fatal("DeletionPending set to False while the delete is unconfirmed")
 		}
-	}
-	if !found {
-		t.Fatal("DeletionPending condition missing")
 	}
 }
 
@@ -459,8 +463,9 @@ func TestApproveDeletion_KeepsAnOwnerWriteThatLandsBeforeTheStatusWrite(t *testi
 	if got.Status.ConfigHash != "owner" {
 		t.Fatalf("configHash = %q, want the owner's value", got.Status.ConfigHash)
 	}
-	if len(got.Status.PendingItemDeletions) != 1 || got.Status.PendingItemDeletions[0].Path != "team/other" {
-		t.Fatalf("pending deletions = %v, want [team/other]", got.Status.PendingItemDeletions)
+	pending := got.Status.PendingItemDeletions
+	if len(pending) != 2 || pending[0].Path != "team/job" || pending[0].Approval == nil || pending[1].Path != "team/other" {
+		t.Fatalf("pending deletions = %v, want [team/job (approval set), team/other]", pending)
 	}
 }
 

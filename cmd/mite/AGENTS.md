@@ -46,7 +46,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   - **Mite state dir** — `Agent.miteDir` owns every mite state file, including
     the items engine's `managed-items.json` (`managedItemsPath`). The items
     package takes its cache path from its caller and never hardcodes a Jenkins
-    home path. Tests set `miteDir` to `t.TempDir()`. A failed read or write of `managed-items.json` fails the items section and names the path in `ItemsError`. A `delete_item` command that succeeds or gets 404 calls `Engine.Forget` on its target; a failed `Forget` reports the command as failed. `managedItemsMu` serializes every `managed-items.json` read-modify-write (the items apply and `Forget`), because a reconnect can overlap two command workers.
+    home path. Tests set `miteDir` to `t.TempDir()`. A failed read or write of `managed-items.json` fails the items section and names the path in `ItemsError`. A `delete_item` command that succeeds or gets 404 calls `Engine.Forget` on its target; a failed `Forget` reports the command as failed. The result carries `job_path` and `command_type` so the operator can settle the pending entry. `managedItemsMu` serializes every `managed-items.json` read-modify-write (the items apply and `Forget`), because a reconnect can overlap two command workers.
   - **Content answer** — `buildContentResponse` answers a `ContentRequest` from
     `last-jcasc.yaml`, `last-items.yaml`, and `last-plugins.txt`, and passes the
     first two through `internal/secretredact`. The files on disk stay
@@ -380,6 +380,9 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   A failed items apply keeps every deferral. The marker never records the `rehydration` section while
   a job stays deferred. The composite fast path skips a command only when the
   marker also holds the bundle's `rehydration` hash.
+  While a deferred deletion remains, the marker never records the `items` section, and the
+  composite fast path also needs the `items` hash (`itemsConverged`). Each push walks the items
+  again, because the operator rebuilds the pending list from every result.
   `writeRehydrationFileAt` is the one writer that takes an overwrite flag:
   only the resume path sets it, and `applyRehydrationBundle` keeps its own
   rules.

@@ -3263,9 +3263,19 @@ type ComponentsSchemasObjectMeta struct {
 
 // ComponentsSchemasPendingDeletion Pending item deletion.
 type ComponentsSchemasPendingDeletion struct {
-	DetectedAt *string `json:"detectedAt,omitempty"`
-	Path       string  `json:"path"`
-	Reason     *string `json:"reason,omitempty"`
+	// Approval An approved delete of a pending item. The entry stays until the mite confirms the delete. Error is set when the mite reports a failed delete.
+	Approval   *ComponentsSchemasPendingDeletionApproval `json:"approval,omitempty"`
+	DetectedAt *string                                   `json:"detectedAt,omitempty"`
+	Path       string                                    `json:"path"`
+	Reason     *string                                   `json:"reason,omitempty"`
+}
+
+// ComponentsSchemasPendingDeletionApproval An approved delete of a pending item. The entry stays until the mite confirms the delete. Error is set when the mite reports a failed delete.
+type ComponentsSchemasPendingDeletionApproval struct {
+	ApprovedAt string  `json:"approvedAt"`
+	CommandId  string  `json:"commandId"`
+	Error      *string `json:"error,omitempty"`
+	FailedAt   *string `json:"failedAt,omitempty"`
 }
 
 // ComponentsSchemasPendingPluginRoll Pending plugin roll information.

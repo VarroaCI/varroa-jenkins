@@ -115,8 +115,11 @@ func TestReconcile_DeletionApproveDuringTheTickSurvivesTheEndWrite(t *testing.T)
 		t.Fatalf("approve deletion: %v", err)
 	}
 	got := getMine(t, client.store)
-	if len(got.Status.PendingItemDeletions) != 0 {
-		t.Fatalf("pendingItemDeletions = %v, want none", got.Status.PendingItemDeletions)
+	if len(got.Status.PendingItemDeletions) != 1 {
+		t.Fatalf("pendingItemDeletions = %v, want the entry kept", got.Status.PendingItemDeletions)
+	}
+	if got.Status.PendingItemDeletions[0].Approval == nil {
+		t.Fatalf("entry %v has no approval record after the end-of-tick write", got.Status.PendingItemDeletions[0])
 	}
 }
 

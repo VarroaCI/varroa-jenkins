@@ -2415,7 +2415,7 @@ function PendingDeletionBanner({
     setApproving(path);
     try {
       await approveDeletion(cluster, namespace, name, path);
-      toast(`Item deletion of ${path} approved`);
+      toast(`Deletion of ${path} sent to the mite`);
       queryClient.invalidateQueries({ queryKey: ["controller", cluster, namespace, name] });
       queryClient.invalidateQueries({ queryKey: ["controllers"] });
     } catch (e) {
@@ -2437,6 +2437,14 @@ function PendingDeletionBanner({
           <div key={d.path} className={styles.deferredItem}>
             <span className={styles.muted}>{d.path}</span>
             <span className={styles.muted}> — {d.reason}</span>
+            {d.approval && !d.approval.error && (
+              <div className={styles.muted}>
+                Approval sent at {new Date(d.approval.approvedAt).toLocaleString()}. Waiting for the mite to confirm the delete.
+              </div>
+            )}
+            {d.approval?.error && (
+              <div role="alert">Delete failed: {d.approval.error}</div>
+            )}
             {canDoInNamespace(permissions, namespace, "controllers", "approve-deletion") && (
               <Button
                 size="sm"
@@ -2445,7 +2453,11 @@ function PendingDeletionBanner({
                 onClick={() => handleApprove(d.path)}
                 className={styles.deferredApprove}
               >
-                {approving === d.path ? "⟳ Approving..." : "Approve deletion"}
+                {approving === d.path
+                  ? "⟳ Approving..."
+                  : d.approval?.error
+                    ? "Approve again"
+                    : "Approve deletion"}
               </Button>
             )}
           </div>
