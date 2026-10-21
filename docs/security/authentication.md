@@ -216,6 +216,8 @@ spec:
 An account needs `purpose` and signs in as `local:<name>`. The profile page shows such a session as `via local account`.
 Each sign-in writes an `auth.local.login` event. A failed attempt on a declared
 account writes `auth.local.login_failed`. An unknown name writes no event.
+A password set on a local account writes a `user.password_set` event. An admin set and a self-service change both write it. The event does not carry the password.
+A REST or MCP create or delete of a group writes a `group.created` or `group.deleted` event.
 
 ## Configure controller SSO safely
 

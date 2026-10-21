@@ -165,6 +165,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyAccessActivity(claims, "", AccessGroup, AccessCreated, req.Name)
 	s.writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
@@ -204,5 +205,6 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name 
 		return
 	}
 
+	s.notifyAccessActivity(claims, "", AccessGroup, AccessDeleted, name)
 	w.WriteHeader(http.StatusNoContent)
 }

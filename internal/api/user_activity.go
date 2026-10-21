@@ -26,6 +26,17 @@ func UserActivityEvent(change UserChange, namespace, name string) activity.Event
 	}
 }
 
+// UserPasswordSetEvent returns the activity event for a password set on a
+// local account. The event never carries the password. The caller sets
+// Actor, Source, and Severity.
+func UserPasswordSetEvent(namespace, name string) activity.Event {
+	return activity.Event{
+		Type:      "user.password_set",
+		Message:   "User " + name + " password set in " + namespace,
+		Namespace: namespace,
+	}
+}
+
 // notifyUserActivity publishes the activity event for a User write made
 // through the REST API.
 func (s *Server) notifyUserActivity(claims *auth.Claims, change UserChange, name string) {

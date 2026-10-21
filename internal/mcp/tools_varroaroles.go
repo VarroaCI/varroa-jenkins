@@ -11,7 +11,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -101,10 +100,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, role); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarole.created",
-			Message: "VarroaRole " + strArg(args, "name") + " created",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRole, api.AccessCreated, strArg(args, "name")))
 		return resultJSON(role)
 	})
 
@@ -153,10 +149,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update role: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarole.updated",
-			Message: "VarroaRole " + name + " updated",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRole, api.AccessUpdated, name))
 		return resultJSON(existing)
 	})
 
@@ -179,10 +172,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		if err := crdstore.Delete[v1alpha1.VarroaRole](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete role: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarole.deleted",
-			Message: "VarroaRole " + name + " deleted",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRole, api.AccessDeleted, name))
 		return mcp.NewToolResultText("role " + name + " deleted"), nil
 	})
 }

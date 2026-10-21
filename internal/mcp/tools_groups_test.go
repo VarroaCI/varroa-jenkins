@@ -15,6 +15,34 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/rbac"
 )
 
+// TestDeleteGroup_EmitsSharedEvent pins that delete_group publishes the group
+// event built by api.AccessActivityEvent.
+func TestDeleteGroup_EmitsSharedEvent(t *testing.T) {
+	sink := &recordingSink{}
+	deps := groupDeps(t)
+	deps.ActivityPublisher = sink
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "delete_group",
+		"arguments": map[string]interface{}{"name": "team-a"},
+	}, mcpAdminClaims)
+	if tr := parseToolResult(t, resp.Result); tr.IsError {
+		t.Fatalf("delete_group returned error: %v", tr.Content)
+	}
+
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(sink.events), sink.events)
+	}
+	got := sink.events[0]
+	want := api.AccessActivityEvent(api.AccessGroup, api.AccessDeleted, "team-a")
+	if got.Type != want.Type || got.Message != want.Message {
+		t.Errorf("event = %+v, want type/message of %+v", got, want)
+	}
+	if got.Source != mcpSource {
+		t.Errorf("Source = %q, want %q", got.Source, mcpSource)
+	}
+}
+
 // groupStore seeds two cluster-scoped groups: one populated (three members)
 // and one empty.
 func groupStore(t *testing.T) *crdstore.Fake {

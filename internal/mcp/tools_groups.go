@@ -11,7 +11,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -78,10 +77,7 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if err := crdstore.Apply[v1alpha1.Group](ctx, deps.Store, group); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create group: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "group.created",
-			Message: "Group " + strArg(args, "name") + " created",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessGroup, api.AccessCreated, strArg(args, "name")))
 		return resultJSON(group)
 	})
 
@@ -104,10 +100,7 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if err := crdstore.Delete[v1alpha1.Group](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError("failed to delete group: " + err.Error()), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "group.deleted",
-			Message: "Group " + name + " deleted",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessGroup, api.AccessDeleted, name))
 		return mcp.NewToolResultText("group " + name + " deleted"), nil
 	})
 }

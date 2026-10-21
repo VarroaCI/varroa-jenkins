@@ -3414,14 +3414,7 @@ func (s *Server) handleVarroaRoles(w http.ResponseWriter, r *http.Request) {
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarole.created",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRole %s created by %s", role.Name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRole, AccessCreated, role.Name)
 		s.writeJSON(w, http.StatusCreated, role)
 
 	default:
@@ -3474,14 +3467,7 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarole.updated",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRole %s updated by %s", role.Name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRole, AccessUpdated, role.Name)
 		s.writeJSON(w, http.StatusOK, role)
 
 	case http.MethodDelete:
@@ -3493,14 +3479,7 @@ func (s *Server) handleVarroaRoleDispatch(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarole.deleted",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRole %s deleted by %s", name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRole, AccessDeleted, name)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -3545,14 +3524,7 @@ func (s *Server) handleVarroaRoleBindings(w http.ResponseWriter, r *http.Request
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarolebinding.created",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRoleBinding %s created by %s", binding.Name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRoleBinding, AccessCreated, binding.Name)
 		s.writeJSON(w, http.StatusCreated, binding)
 
 	default:
@@ -3605,14 +3577,7 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarolebinding.updated",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRoleBinding %s updated by %s", binding.Name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRoleBinding, AccessUpdated, binding.Name)
 		s.writeJSON(w, http.StatusOK, binding)
 
 	case http.MethodDelete:
@@ -3624,14 +3589,7 @@ func (s *Server) handleVarroaRoleBindingDispatch(w http.ResponseWriter, r *http.
 			s.writeK8sError(w, err)
 			return
 		}
-		if claims != nil {
-			s.notifyActivity(activity.Event{
-				Type:    "varroarolebinding.deleted",
-				Source:  "user",
-				Actor:   ActorFrom(claims),
-				Message: fmt.Sprintf("VarroaRoleBinding %s deleted by %s", name, ActorFrom(claims)),
-			})
-		}
+		s.notifyAccessActivity(claims, "", AccessVarroaRoleBinding, AccessDeleted, name)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

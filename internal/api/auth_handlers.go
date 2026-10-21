@@ -213,6 +213,7 @@ func (s *Server) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.notifyPasswordSet(claims, username)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -296,6 +297,18 @@ func (s *Server) HandleAdminSetPassword(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	s.notifyPasswordSet(claims, username)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// notifyPasswordSet publishes the user.password_set event for a password
+// set on a local account. The handler does not read the account's purpose,
+// so the event keeps the info severity.
+func (s *Server) notifyPasswordSet(claims *auth.Claims, username string) {
+	e := UserPasswordSetEvent(s.deps.OperatorNamespace, username)
+	e.Source = "user"
+	e.Actor = ActorFrom(claims)
+	e.Severity = "info"
+	s.notifyActivity(e)
 }

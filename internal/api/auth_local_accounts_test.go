@@ -330,13 +330,70 @@ func TestAdminKeyOwner_BesideOIDC(t *testing.T) {
 }
 
 func TestAdminSetPassword_BesideOIDC_RefusesIdPUser(t *testing.T) {
-	s, _, _ := besideOIDCServer(t)
+	s, _, sink := besideOIDCServer(t)
 	s.deps.Authorizer = adminAuthorizer()
 	r := withClaims(httptest.NewRequest(http.MethodPut, "/users/oidc-0123/password", strings.NewReader(`{"newPassword":"long-enough-1"}`)))
 	w := httptest.NewRecorder()
 	s.HandleAdminSetPassword(w, r, "oidc-0123")
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status %d, want 400", w.Code)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("events = %+v, want none on a refused set", sink.events)
+	}
+}
+
+// TestAdminSetPassword_PublishesPasswordSet pins that an admin password set
+// publishes one user.password_set event and never carries the password.
+func TestAdminSetPassword_PublishesPasswordSet(t *testing.T) {
+	s, store, sink := besideOIDCServer(t)
+	s.deps.Authorizer = adminAuthorizer()
+	s.deps.OperatorNamespace = "varroa-system"
+	store.add("rescue", "old-pass-123", v1alpha1.UserPurposeBreakGlass)
+
+	r := withClaims(httptest.NewRequest(http.MethodPut, "/users/rescue/password", strings.NewReader(`{"newPassword":"long-enough-1"}`)))
+	w := httptest.NewRecorder()
+	s.HandleAdminSetPassword(w, r, "rescue")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(sink.events), sink.events)
+	}
+	e := sink.events[0]
+	if e.Type != "user.password_set" || e.Source != "user" {
+		t.Errorf("event = %+v, want user.password_set from user", e)
+	}
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "long-enough-1") {
+		t.Errorf("event carries the password: %s", raw)
+	}
+}
+
+// TestChangePassword_PublishesPasswordSet pins that a self-service password
+// change publishes one user.password_set event naming the caller.
+func TestChangePassword_PublishesPasswordSet(t *testing.T) {
+	s, store, sink := besideOIDCServer(t)
+	s.deps.OperatorNamespace = "varroa-system"
+	store.add("rescue", "old-pass-123", v1alpha1.UserPurposeBreakGlass)
+
+	claims := &auth.Claims{Subject: "local:rescue"}
+	r := httptest.NewRequest(http.MethodPut, "/me/password", strings.NewReader(`{"oldPassword":"old-pass-123","newPassword":"long-enough-1"}`))
+	r = r.WithContext(contextWithClaims(r.Context(), claims))
+	w := httptest.NewRecorder()
+	s.HandleChangePassword(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(sink.events), sink.events)
+	}
+	e := sink.events[0]
+	if e.Type != "user.password_set" || e.Source != "user" || e.Actor != ActorFrom(claims) {
+		t.Errorf("event = %+v, want user.password_set from user by %q", e, ActorFrom(claims))
 	}
 }
 

@@ -296,6 +296,7 @@ export const ACTIVITY_TYPE_MAP: Record<string, { icon: string; style: string }> 
   "user.created": { icon: "➕", style: "softOk" },
   "user.updated": { icon: "✏", style: "softInfo" },
   "user.deleted": { icon: "✗", style: "softBad" },
+  "user.password_set": { icon: "⚿", style: "softWarn" },
   "versionprofile.created": { icon: "➕", style: "softOk" },
   "versionprofile.updated": { icon: "✏", style: "softInfo" },
   "versionprofile.deleted": { icon: "✗", style: "softBad" },
