@@ -466,7 +466,10 @@ func newExportResolver(downloadURLBase string, entries []resolvedEntry) *ucmeta.
 	// The TTL is only ever compared against this run's own fetches, so it just
 	// has to outlast the run: a large export downloads blobs serially and can
 	// take a while.
-	return ucmeta.NewResolver(func() []ucmeta.Source { return srcs }, 24*time.Hour, client, logger)
+	resolver := ucmeta.NewResolver(func() []ucmeta.Source { return srcs }, 24*time.Hour, client, logger)
+	// An export is one run. A failed source is not fetched again in the run, so a dead source costs one fetch.
+	resolver.SetFailureRetryLimit(0)
+	return resolver
 }
 
 // sha256FromBase64 converts upstream's base64 digest to the "sha256:<hex>" form

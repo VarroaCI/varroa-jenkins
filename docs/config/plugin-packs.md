@@ -24,6 +24,7 @@ Destinations without an explicit OCI tag receive a floating profile tag and a
 content-addressed tag containing the lock hash. An explicit tag writes only that tag.
 Export fails when a plugin checksum cannot be resolved or verified.
 A plugin at `latest`, or with no version in `--plugins-file`, resolves to a concrete version before download. For a profile, the newest version that the profile's core runs is used. In offline mode, the newest listed version is used. Export fails when no metadata source lists a usable version.
+A metadata source that fails is not fetched again during the same export.
 
 ## Export one addon
 

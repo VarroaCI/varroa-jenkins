@@ -73,6 +73,10 @@ type Resolver struct {
 	// failureRetryBase is the first retry wait after a failed fetch. Tests lower it directly.
 	failureRetryBase time.Duration
 
+	// failureRetryLimit caps the retries after the first failure of a source. A
+	// negative value removes the cap. After the cap, a failed source waits the ttl.
+	failureRetryLimit int
+
 	mu    sync.Mutex
 	cache map[string]*sourceEntry // keyed by Source.URL
 	// inflight holds one channel per source whose fetch is running. The channel
@@ -205,11 +209,17 @@ func NewResolver(sources func() []Source, ttl time.Duration, client *http.Client
 		archive: newArchiveResolver(DefaultArchiveBaseURL, client),
 		cache:   make(map[string]*sourceEntry),
 
-		fetchTimeout:     metadataFetchTimeout,
-		failureRetryBase: failureRetryBase,
-		inflight:         make(map[string]chan struct{}),
+		fetchTimeout:      metadataFetchTimeout,
+		failureRetryBase:  failureRetryBase,
+		failureRetryLimit: -1,
+		inflight:          make(map[string]chan struct{}),
 	}
 }
+
+// SetFailureRetryLimit caps the retries of a failed source at n. After n
+// retries fail, the source waits the ttl. A negative n removes the cap.
+// Call it before the first resolve.
+func (r *Resolver) SetFailureRetryLimit(n int) { r.failureRetryLimit = n }
 
 // SetArchiveBaseURL points the archive fallback at a different Maven repository, or
 // disables it entirely when baseURL is empty. Intended for tests and for air-gapped
@@ -436,6 +446,9 @@ func (r *Resolver) refresh(parent context.Context, url string, fetchedAt time.Ti
 			failures = prev.failures + 1
 		}
 		wait = failureBackoff(failures, r.failureRetryBase, r.ttl)
+		if r.failureRetryLimit >= 0 && failures > r.failureRetryLimit {
+			wait = r.ttl
+		}
 		entry = &sourceEntry{fetchedAt: fetchedAt, expiresAt: r.now().Add(wait), failures: failures}
 		if prev != nil && prev.index != nil {
 			entry.healthy, entry.stale = true, true
