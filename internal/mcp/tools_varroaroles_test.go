@@ -13,6 +13,36 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
+// TestCreateVarroaRole_EmitsSharedEvent pins that create_varroa_role publishes
+// the varroarole event built by api.AccessActivityEvent.
+func TestCreateVarroaRole_EmitsSharedEvent(t *testing.T) {
+	sink := &recordingSink{}
+	deps := varroaRoleDeps(t)
+	deps.Authorizer = groupDeps(t).Authorizer
+	deps.ActivityPublisher = sink
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name": "create_varroa_role",
+		"arguments": map[string]interface{}{
+			"name":               "reviewer",
+			"jenkinsRoleRef":     "reviewer-jenkins-role",
+			"jenkinsPermissions": []string{"hudson.model.Item.Read"},
+		},
+	}, mcpAdminClaims)
+	if tr := parseToolResult(t, resp.Result); tr.IsError {
+		t.Fatalf("create_varroa_role returned error: %v", tr.Content)
+	}
+
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(sink.events), sink.events)
+	}
+	got := sink.events[0]
+	want := api.AccessActivityEvent(api.AccessVarroaRole, api.AccessCreated, "reviewer")
+	if got.Type != want.Type || got.Message != want.Message {
+		t.Errorf("event = %+v, want type/message of %+v", got, want)
+	}
+}
+
 // varroaRoleDeps seeds one VarroaRole carrying the fields whose cost Task 3
 // exists to cut: spec.jenkinsPermissions[] and spec.apiRules[].resources/verbs.
 // VarroaRole is cluster-scoped (types.go: +kubebuilder:resource:scope=Cluster),

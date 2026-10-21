@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+// TestUserPasswordSetEvent_Shape pins the password-set event. It names the
+// account and never the password.
+func TestUserPasswordSetEvent_Shape(t *testing.T) {
+	e := UserPasswordSetEvent("varroa-system", "rescue")
+	if e.Type != "user.password_set" {
+		t.Errorf("Type = %q, want user.password_set", e.Type)
+	}
+	if want := "User rescue password set in varroa-system"; e.Message != want {
+		t.Errorf("Message = %q, want %q", e.Message, want)
+	}
+	if e.Namespace != "varroa-system" {
+		t.Errorf("Namespace = %q, want varroa-system", e.Namespace)
+	}
+	if e.Actor != "" || e.Source != "" {
+		t.Errorf("builder set Actor/Source: %+v", e)
+	}
+}
+
 func TestUserActivityEvent_Shape(t *testing.T) {
 	cases := []struct {
 		change UserChange

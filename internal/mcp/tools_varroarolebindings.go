@@ -12,7 +12,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -99,10 +98,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, binding); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarolebinding.created",
-			Message: "VarroaRoleBinding " + strArg(args, "name") + " created",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRoleBinding, api.AccessCreated, strArg(args, "name")))
 		return resultJSON(binding)
 	})
 
@@ -146,10 +142,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarolebinding.updated",
-			Message: "VarroaRoleBinding " + name + " updated",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRoleBinding, api.AccessUpdated, name))
 		return resultJSON(existing)
 	})
 
@@ -172,10 +165,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 		if err := crdstore.Delete[v1alpha1.VarroaRoleBinding](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "varroarolebinding.deleted",
-			Message: "VarroaRoleBinding " + name + " deleted",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRoleBinding, api.AccessDeleted, name))
 		return mcp.NewToolResultText("role binding " + name + " deleted"), nil
 	})
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
-	"github.com/varroaci/varroa-jenkins/internal/api/activity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -88,10 +87,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, binding); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "jenkinsrolebinding.created",
-			Message: "JenkinsRoleBinding " + strArg(args, "name") + " created",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessCreated, strArg(args, "name")))
 		return resultJSON(binding)
 	})
 
@@ -127,10 +123,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Apply[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, existing); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "jenkinsrolebinding.updated",
-			Message: "JenkinsRoleBinding " + name + " updated",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessUpdated, name))
 		return resultJSON(existing)
 	})
 
@@ -153,10 +146,7 @@ func registerJenkinsRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depe
 		if err := crdstore.Delete[v1alpha1.JenkinsRoleBinding](ctx, deps.Store, name, ""); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to delete Jenkins role binding: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, activity.Event{
-			Type:    "jenkinsrolebinding.deleted",
-			Message: "JenkinsRoleBinding " + name + " deleted",
-		})
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessJenkinsRoleBinding, api.AccessDeleted, name))
 		return mcp.NewToolResultText("Jenkins role binding " + name + " deleted"), nil
 	})
 }

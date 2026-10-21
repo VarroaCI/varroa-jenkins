@@ -419,7 +419,7 @@ const BACKEND_EMITTED_TYPES = [
   "jenkinsrolebinding.created", "jenkinsrolebinding.updated", "jenkinsrolebinding.deleted",
   "varroarole.created", "varroarole.updated", "varroarole.deleted",
   "varroarolebinding.created", "varroarolebinding.updated", "varroarolebinding.deleted",
-  "user.created", "user.updated", "user.deleted",
+  "user.created", "user.updated", "user.deleted", "user.password_set",
   "group.created", "group.deleted",
   "versionprofile.created", "versionprofile.updated", "versionprofile.deleted",
   "provisioningdefaults.updated",

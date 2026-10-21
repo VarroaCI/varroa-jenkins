@@ -595,12 +595,13 @@ federation, activity persistence, and SSE fanout.
   the one user-delete path that the REST route and the MCP tool share; `preview_util.go`
   holds overlay-preview-diff helpers; `observability.go`/
   `observability_backends.go` normalize a pluggable observability-links integration.
-  `user_activity.go` holds `UserActivityEvent`, the one builder of `user.*` activity events. The REST user handlers and the MCP user tools call it.
+  `user_activity.go` holds `UserActivityEvent`, the one builder of `user.*` activity events, and `UserPasswordSetEvent`, the builder of `user.password_set`. The REST user handlers and the MCP user tools call it.
   `handlers_teams.go` maps `spec.pipelines` and `status.placement` by hand, in both
   directions; it never maps `status.pipelines.webhookToken` or `.webhookSecret` on any
   read path, because both are the tenant webhook door's credentials.
   `validateTeamPipelines` refuses a pipelines block without `profile`, `agentNamespace`, or
   export `callers` with `400` before the write. An apiserver validation refusal also answers `400`.
+- `access_activity.go` holds `AccessActivityEvent`, the one builder of `group.*`, `varroarole.*`, `varroarolebinding.*`, `jenkinsrole.*`, and `jenkinsrolebinding.*` events. The REST handlers and the MCP tools call it. The message holds no actor.
 - **Controller diff read** — `handleControllerDiff` passes the `jcasc` and `items`
   text of both sides through `internal/secretredact`. No caller gets an unredacted
   credential value, whatever its grants. The mite redacts its own answer too; the

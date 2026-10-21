@@ -1138,12 +1138,7 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 			}
 			var created v1alpha1.JenkinsRole
 			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:    "jenkinsrole.created",
-				Actor:   ActorFrom(claims),
-				Cluster: cluster,
-				Message: "JenkinsRole " + role.Name + " created",
-			})
+			s.notifyAccessActivity(claims, cluster, AccessJenkinsRole, AccessCreated, role.Name)
 			s.writeJSON(w, http.StatusCreated, created)
 		default:
 			s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1193,12 +1188,7 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 		}
 		var updated v1alpha1.JenkinsRole
 		_ = json.Unmarshal(item, &updated)
-		s.notifyActivity(activity.Event{
-			Type:    "jenkinsrole.updated",
-			Actor:   ActorFrom(claims),
-			Cluster: cluster,
-			Message: "JenkinsRole " + name + " updated",
-		})
+		s.notifyAccessActivity(claims, cluster, AccessJenkinsRole, AccessUpdated, name)
 		s.writeJSON(w, http.StatusOK, updated)
 	case http.MethodDelete:
 		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanDeleteJenkinsRole(claims) {
@@ -1209,12 +1199,7 @@ func (s *Server) dispatchJenkinsRoles(w http.ResponseWriter, r *http.Request, cl
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
-		s.notifyActivity(activity.Event{
-			Type:    "jenkinsrole.deleted",
-			Actor:   ActorFrom(claims),
-			Cluster: cluster,
-			Message: "JenkinsRole " + name + " deleted",
-		})
+		s.notifyAccessActivity(claims, cluster, AccessJenkinsRole, AccessDeleted, name)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1264,12 +1249,7 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 			}
 			var created v1alpha1.JenkinsRoleBinding
 			_ = json.Unmarshal(item, &created)
-			s.notifyActivity(activity.Event{
-				Type:    "jenkinsrolebinding.created",
-				Actor:   ActorFrom(claims),
-				Cluster: cluster,
-				Message: "JenkinsRoleBinding " + binding.Name + " created",
-			})
+			s.notifyAccessActivity(claims, cluster, AccessJenkinsRoleBinding, AccessCreated, binding.Name)
 			s.writeJSON(w, http.StatusCreated, created)
 		default:
 			s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1319,12 +1299,7 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 		}
 		var updated v1alpha1.JenkinsRoleBinding
 		_ = json.Unmarshal(item, &updated)
-		s.notifyActivity(activity.Event{
-			Type:    "jenkinsrolebinding.updated",
-			Actor:   ActorFrom(claims),
-			Cluster: cluster,
-			Message: "JenkinsRoleBinding " + name + " updated",
-		})
+		s.notifyAccessActivity(claims, cluster, AccessJenkinsRoleBinding, AccessUpdated, name)
 		s.writeJSON(w, http.StatusOK, updated)
 	case http.MethodDelete:
 		if s.deps.Authorizer == nil || !s.deps.Authorizer.CanDeleteJenkinsRoleBinding(claims) {
@@ -1335,12 +1310,7 @@ func (s *Server) dispatchJenkinsRoleBindings(w http.ResponseWriter, r *http.Requ
 			writeConfigBroodError(w, err, cluster)
 			return
 		}
-		s.notifyActivity(activity.Event{
-			Type:    "jenkinsrolebinding.deleted",
-			Actor:   ActorFrom(claims),
-			Cluster: cluster,
-			Message: "JenkinsRoleBinding " + name + " deleted",
-		})
+		s.notifyAccessActivity(claims, cluster, AccessJenkinsRoleBinding, AccessDeleted, name)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
