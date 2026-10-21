@@ -183,6 +183,9 @@ func TestApplySavesManagedCacheWithoutError(t *testing.T) {
 	if _, err := os.Stat(mf); err != nil {
 		t.Fatalf("managed cache not written: %v", err)
 	}
+	if !res.RemovalReached {
+		t.Fatal("RemovalReached = false, want true for a walk with a readable cache")
+	}
 }
 
 func TestApplyReportsRefusedItemInResult(t *testing.T) {
@@ -204,6 +207,60 @@ func TestApplyReportsRefusedItemInResult(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.FailureText(), "create repos: ") {
 		t.Fatalf("FailureText = %q, want prefix %q", res.FailureText(), "create repos: ")
+	}
+}
+
+// TestApplyRefusedItemReachesRemoval refuses an item on a readable cache. The
+// walk still reaches the remove step, so RemovalReached is true.
+func TestApplyRefusedItemReachesRemoval(t *testing.T) {
+	f := &fakeItemsJenkins{refuse: map[string]bool{"create repos": true}}
+	engine, _ := newFakeItemsEngine(t, f, "")
+
+	res, err := engine.Apply(context.Background(), `items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("Failed = %d entries, want 1", len(res.Failed))
+	}
+	if !res.RemovalReached {
+		t.Fatal("RemovalReached = false, want true for a refused item on a readable cache")
+	}
+}
+
+// TestApplyCorruptManagedCacheWithRefusalSkipsRemoval refuses an item on an
+// unreadable cache. The remove step does not run, so RemovalReached is false
+// and the undeclared item is kept.
+func TestApplyCorruptManagedCacheWithRefusalSkipsRemoval(t *testing.T) {
+	f := &fakeItemsJenkins{
+		existing: map[string]bool{"gone": true},
+		refuse:   map[string]bool{"create repos": true},
+	}
+	engine, _ := newFakeItemsEngine(t, f, "{not json")
+
+	res, err := engine.Apply(context.Background(), `removeStrategy:
+  items: "sync"
+items:
+  - kind: folder
+    name: repos
+`)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("Failed = %d entries, want 1", len(res.Failed))
+	}
+	if res.CacheError == nil {
+		t.Fatal("CacheError = nil, want the unreadable cache error")
+	}
+	if res.RemovalReached {
+		t.Fatal("RemovalReached = true, want false when the cache is unreadable")
+	}
+	if f.has("delete gone") {
+		t.Fatalf("an item was deleted while the cache is unknown; calls = %v", f.calls)
 	}
 }
 
@@ -345,7 +402,7 @@ func TestApplyCorruptManagedCacheDeletesNothing(t *testing.T) {
 	f := &fakeItemsJenkins{existing: map[string]bool{"gone": true}}
 	engine, _ := newFakeItemsEngine(t, f, "{not json")
 
-	_, err := engine.Apply(context.Background(), `removeStrategy:
+	res, err := engine.Apply(context.Background(), `removeStrategy:
   items: "sync"
 items:
   - kind: folder
@@ -353,6 +410,9 @@ items:
 `)
 	if err != nil {
 		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if res.RemovalReached {
+		t.Fatal("RemovalReached = true, want false when the cache is unreadable")
 	}
 	if f.has("delete gone") {
 		t.Fatalf("an item was deleted while the cache is unknown; calls = %v", f.calls)
@@ -381,6 +441,9 @@ func TestApplyFailedSaveKeepsPreviousCache(t *testing.T) {
 	}
 	if res.CacheError == nil || !strings.Contains(res.CacheError.Error(), mf) {
 		t.Fatalf("CacheError = %v, want it to name %q", res.CacheError, mf)
+	}
+	if !res.RemovalReached {
+		t.Fatal("RemovalReached = false, want true: the walk read the cache and reached the remove step")
 	}
 	data, err := os.ReadFile(mf)
 	if err != nil {

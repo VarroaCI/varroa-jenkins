@@ -408,6 +408,7 @@ type DesiredStateResult struct {
 	CellInstance                  string                      `json:"cell_instance,omitempty"`
 	RehydrationFailedScans        []*RehydrationFailedScan    `json:"rehydration_failed_scans,omitempty"`
 	RehydrationBranchScansUnknown bool                        `json:"rehydration_branch_scans_unknown,omitempty"`
+	ItemsRemovalReached           bool                        `json:"items_removal_reached,omitempty"`
 }
 
 type EventAck struct {

@@ -319,6 +319,10 @@ message DesiredStateResult {
   // rehydration_branch_scans_unknown is true when the mite could not read the
   // branch inventory, so rehydration_failed_scans is not complete.
   bool rehydration_branch_scans_unknown = 22;
+  // items_removal_reached is true when the items walk reached the remove step
+  // with a readable managed-items cache. It is false for an aborted walk and
+  // for a walk that could not read the cache, which deletes nothing.
+  bool items_removal_reached = 23;
 }
 
 // RehydrationFailedScan is one multibranch project or organization folder
