@@ -107,6 +107,14 @@ type Client interface {
 	SetCommitStatus(ctx context.Context, r Repo, sha string, s CommitStatus) error
 }
 
+// OwnerScope is implemented by a client whose forge can say whether the
+// credential sees every repository of an owner. The operator asks for it
+// before it treats a 404 as a gone repository. A client that does not
+// implement it never confirms a gone repository.
+type OwnerScope interface {
+	SeesAllOwnerRepos(ctx context.Context, owner string) (bool, error)
+}
+
 // statusPageSize is the page size of a commit-status listing. maxStatusPages
 // bounds how many pages one listing reads. A listing past the bound answers
 // ErrListingTruncated, so no matching status is skipped silently.

@@ -167,6 +167,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	teams := r.listPlacedTeams(ctx, cr)
 	if len(teams) == 0 {
 		r.dropRehydrationInFlight(cellKey)
+		r.dropRepoScans(cellKey)
 		pruneBranchScanFailedWarnings(cr.Status.Cell)
 		return nil
 	}

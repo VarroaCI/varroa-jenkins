@@ -631,7 +631,7 @@ the root AGENTS.md greenfield rule.
   every 3 seconds whether the folder computation ended, `diff` names new, changed, and orphaned
   heads as `{name, jobPath}` refs (each list capped at 200), and a scan past 30 minutes becomes
   `timeout`. The snapshot keys heads by job full name, so two heads with one name stay separate.
-  `lastScanJson` fills the `lastScan` key of each `/varroa-activity/branches` row with the three
+  `sourceUrl` on each project row is the single SCM source URL (empty for an organization folder or several sources; `ActivityEndpoint.sourceUrlOf`). `lastScanJson` fills the `lastScan` key of each `/varroa-activity/branches` row with the three
   `newHeadRefs`, `changedHeadRefs`, and `orphanedHeadRefs` arrays. The route list pin is nine.
   `POST /varroa-run/restart` (`VarroaRunTriggerAction.doRestart`) reruns a completed declarative
   build from one stage as the acting user. It keeps the source build's parameter values. It refuses

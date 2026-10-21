@@ -857,6 +857,7 @@ func main() {
 	configCrud := controller.NewConfigCRUD(clientsetClient, clientsetClient, composer, operatorNamespace, logger.With("component", "config_crud"))
 	configCrud.Grants = rbacResolver
 	forgeAnswerer := forgeops.New(clientsetClient, clientsetClient, forge.NewHTTPClient(), logger.With("component", "forgeops"))
+	reconciler.SetRepoGoneProber(forgeAnswerer)
 	if err := mgr.Add(&operatorCommandRunner{
 		busConn:        busConn,
 		cluster:        cluster,

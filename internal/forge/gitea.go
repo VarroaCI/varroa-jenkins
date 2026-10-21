@@ -61,6 +61,34 @@ func (g *giteaClient) Repository(ctx context.Context, r Repo) (Info, error) {
 	return Info{DefaultBranch: out.DefaultBranch, Push: out.Permissions.Push}, nil
 }
 
+// SeesAllOwnerRepos reports whether the credential sees every repository
+// that owner holds. It answers true for a site administrator, for the owner
+// account itself, and for an organization owner. A lookup error answers
+// false with the error.
+func (g *giteaClient) SeesAllOwnerRepos(ctx context.Context, owner string) (bool, error) {
+	var me struct {
+		Login   string `json:"login"`
+		IsAdmin bool   `json:"is_admin"`
+	}
+	if err := g.getJSON(ctx, "/user", nil, &me); err != nil {
+		return false, err
+	}
+	if me.IsAdmin || (me.Login != "" && strings.EqualFold(me.Login, owner)) {
+		return true, nil
+	}
+	if me.Login == "" {
+		return false, errors.New("forge: the credential reports no login")
+	}
+	var perm struct {
+		IsOwner bool `json:"is_owner"`
+	}
+	p := "/users/" + url.PathEscape(me.Login) + "/orgs/" + url.PathEscape(owner) + "/permissions"
+	if err := g.getJSON(ctx, p, nil, &perm); err != nil {
+		return false, err
+	}
+	return perm.IsOwner, nil
+}
+
 // BranchHead returns the head commit of a branch.
 func (g *giteaClient) BranchHead(ctx context.Context, r Repo, branch string) (string, bool, error) {
 	var out struct {

@@ -179,6 +179,10 @@ message JobBranchProject {
   repeated JobBranchHead heads = 4;
   bool heads_truncated = 5;
   BranchScanResult last_scan = 6;
+  // source_url is the single SCM source URL of a multibranch project. It is
+  // empty for an organization folder, for a project with several sources,
+  // and when the source is unknown.
+  string source_url = 7;
 }
 
 // JobBranchSet wraps the branch inventory with presence: an unset field
@@ -227,6 +231,10 @@ message DesiredStateCommand {
   // of the composite desired-state hash: the role of a controller does
   // not change the content the mite applies.
   bool cell = 19;
+  // rehydration_gone_folders lists the failed-scan folders that a forge probe
+  // confirmed gone. It stays out of the composite desired-state hash. The
+  // operator sets it only with the rehydration bundle.
+  repeated string rehydration_gone_folders = 20;
 }
 
 // TenantHomes names one hosted tenant's slot on this cell and that
@@ -319,6 +327,8 @@ message RehydrationFailedScan {
   string folder = 1;
   string index_result = 2;
   int32 deferred_jobs = 3;
+  // repo_url is the single SCM source URL of the folder, or empty.
+  string repo_url = 4;
 }
 
 message DeferredDeletion {

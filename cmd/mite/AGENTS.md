@@ -374,7 +374,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   a computed folder decides a deferred job, and the cached set is not used.
   The mite also reports each deciding folder whose last completed scan did not
   succeed and that keeps a deferred job (`branchScanFailure`, `failedBranchScans`) in
-  `DesiredStateResult.rehydration_failed_scans`. It sets
+  `DesiredStateResult.rehydration_failed_scans`. Each failed scan carries the folder's `repo_url`. A deferred job of a folder that the operator confirmed gone (`rehydration_gone_folders`, field 20, outside the state hash) also orphans, when the fresh inventory still shows the failing scan (`orphanDeferredJobs`). It sets
   `rehydration_branch_scans_unknown` when the inventory poll failed, when the items
   apply did not succeed, or when the retry failed, so the operator keeps its last warning.
   A failed items apply keeps every deferral. The marker never records the `rehydration` section while

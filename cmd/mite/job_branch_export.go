@@ -82,6 +82,7 @@ type jobBranchProjectRow struct {
 	Heads          []jobBranchHeadRow `json:"heads"`
 	HeadsTruncated bool               `json:"headsTruncated"`
 	LastScan       *jobBranchScanRow  `json:"lastScan"`
+	SourceURL      string             `json:"sourceUrl"`
 }
 
 // wakeSchedulePoller wakes the schedule poller at once. A wake that finds
@@ -203,6 +204,7 @@ func (a *Agent) pollJobBranches(ctx context.Context) (*mitev1.JobBranchSet, erro
 			Heads:          heads,
 			HeadsTruncated: p.HeadsTruncated,
 			LastScan:       lastScanProto(p.LastScan),
+			SourceUrl:      p.SourceURL,
 		})
 	}
 
