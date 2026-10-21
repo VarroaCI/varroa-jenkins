@@ -11,7 +11,7 @@ contract with its adapters, and the sandbox contract.
 
 - Owns the Go types and enumerations of the agent runtime (`agent.go`,
   `payloads.go`, `sessionctx.go`, `create.go`).
-- Owns the sub-packages `policy/`, `datashare/`, `budget/`, `prompts/`,
+- Owns the sub-packages `policy/`, `datashare/`, `budget/`, `prompts/`, `guide/`,
   `store/`, `provider/` (with `anthropic/`, `openaicompat/`, `providertest/`,
   `factories/`), and `sandbox/v1/` (with `none/` and `conformance/`).
 - Does not own the MCP tool host, the HTTP handlers, or the agent loop. Those
@@ -41,6 +41,9 @@ contract with its adapters, and the sandbox contract.
 - **Shipping.** `cmd/fakeprovider` ships in no image.
 - **Sandbox.** `sandbox/v1` never changes its exported shape. A later version
   lives beside it.
+- **Operator guide.** `docs/agents/guide.md` is the one source. `guide/guide.txt`
+  is its byte copy, and a test fails on drift. The guide stays under `MaxBytes`
+  (8192) and holds no link and no blocked term.
 
 - The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
 - `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.

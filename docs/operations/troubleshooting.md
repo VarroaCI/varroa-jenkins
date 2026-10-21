@@ -2,6 +2,8 @@
 
 Start with the controller status, recent activity, and operator logs.
 
+An agent reads the same symptoms as tool recipes in the [operator guide](../agents/guide.md).
+
 ```bash
 varroactl describe controller <namespace>/<name>
 varroactl activity --controller <name>

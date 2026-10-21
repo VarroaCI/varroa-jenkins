@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/varroaci/varroa-jenkins/internal/agent"
+	"github.com/varroaci/varroa-jenkins/internal/agent/guide"
 	"github.com/varroaci/varroa-jenkins/internal/agent/provider"
 	"github.com/varroaci/varroa-jenkins/internal/agent/store"
 )
@@ -361,6 +362,22 @@ func TestSystemText_NamesRepo(t *testing.T) {
 	}
 	if !strings.Contains(text, "Data level: metadata") {
 		t.Errorf("data level missing: %q", text)
+	}
+}
+
+func TestSystemText_CarriesGuideBeforeContext(t *testing.T) {
+	text := SystemText(map[string]any{agent.CtxRun: "r1"}, agent.DataLogs)
+	if !strings.HasPrefix(text, systemBase) {
+		t.Fatalf("system text does not start with the base text: %.40q", text)
+	}
+	gi := strings.Index(text, guide.Text)
+	if gi < 0 {
+		t.Fatal("system text does not carry the operator guide")
+	}
+	for _, after := range []string{"Context run: r1", "Data level:"} {
+		if ci := strings.Index(text, after); ci < 0 || ci < gi {
+			t.Errorf("%q must follow the guide (guide at %d, %q at %d)", after, gi, after, ci)
+		}
 	}
 }
 

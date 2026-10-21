@@ -208,7 +208,8 @@ reading each package's entry point):
   git materialization lives in `bundle/resolver.go`.
 - **`mcp/`** — MCP (Model Context Protocol) Streamable-HTTP server exposing
   Varroa's CRUD surface as MCP tools; built on `internal/api.Dependencies` so it
-  stays in lockstep with the REST API surface. `handler.go` wires the server,
+  stays in lockstep with the REST API surface. `handler.go` wires the server
+  instructions and the `varroa://guide` resource from `internal/agent/guide`,
   `proxy.go` forwards to per-controller Jenkins MCP servers, and tool
   registration is split one file per domain (`tools_controllers.go`,
   `tools_users.go`, …) with `tools.go` holding `registerAllTools`, `resultJSON`,
