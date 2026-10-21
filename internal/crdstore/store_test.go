@@ -713,3 +713,52 @@ func TestMutate_MutateErrorStopsWithoutWrite(t *testing.T) {
 		t.Fatalf("stored = email %q rv %q, want the original", got.Spec.Email, got.ResourceVersion)
 	}
 }
+
+// TestCreate_WritesBackMetadataOnly asserts Create copies the stored metadata
+// back and leaves the caller's status as the caller set it.
+func TestCreate_WritesBackMetadataOnly(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogItem{
+		ObjectMeta: metav1.ObjectMeta{Name: "i", Namespace: "ns"},
+		Status:     v1alpha1.CatalogItemStatus{ContentHash: "h1", Valid: true},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if src.ResourceVersion == "" {
+		t.Error("resourceVersion was not written back")
+	}
+	if src.Generation != 1 {
+		t.Errorf("generation = %d, want 1", src.Generation)
+	}
+	if src.Status.ContentHash != "h1" || !src.Status.Valid {
+		t.Errorf("status changed by Create: %+v", src.Status)
+	}
+}
+
+// TestUpdate_WritesBackMetadataOnly asserts Update on a status-subresource kind
+// moves the caller's resourceVersion and keeps the caller's status value.
+func TestUpdate_WritesBackMetadataOnly(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before := src.ResourceVersion
+	src.Spec.RepoURL = "https://example.test/b"
+	src.Status.Message = "caller value"
+	if err := Update(ctx, f, src); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if src.ResourceVersion == before {
+		t.Error("resourceVersion did not move")
+	}
+	if src.Status.Message != "caller value" {
+		t.Errorf("status = %q, want the caller value", src.Status.Message)
+	}
+}

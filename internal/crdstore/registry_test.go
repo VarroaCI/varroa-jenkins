@@ -73,19 +73,9 @@ func TestClearStatusFields_RunnerClearsCellFields(t *testing.T) {
 		t.Fatalf("status after set = %+v, want cell=cell-a cellNamespace=varroa-system", got.Status)
 	}
 
-	// Patch a status that omits both fields, force-nulling the clearable
-	// keys the way ClientsetClient.PatchObjectStatus does.
-	empty := &v1alpha1.RunnerStatus{}
-	statusJSON, err := json.Marshal(empty)
-	if err != nil {
-		t.Fatalf("marshal empty status: %v", err)
-	}
-	statusMap := map[string]any{}
-	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
-		t.Fatalf("unmarshal empty status: %v", err)
-	}
-	ApplyStatusClears(gvr, statusMap)
-	if err := f.PatchObjectStatus(ctx, gvr, "", "payments-win-1", statusMap); err != nil {
+	// Patch a status that omits both fields. The Fake applies the clearable-key
+	// rule, so the stored cell fields clear.
+	if err := f.PatchObjectStatus(ctx, gvr, "", "payments-win-1", &v1alpha1.RunnerStatus{}); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
 
@@ -118,9 +108,7 @@ func TestClearStatusFields_TeamClearsPipelines(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PatchStatus (set): %v", err)
 	}
-	statusMap := map[string]any{}
-	ApplyStatusClears(gvr, statusMap)
-	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", statusMap); err != nil {
+	if err := f.PatchObjectStatus(ctx, gvr, "", "payments", &v1alpha1.TeamStatus{}); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
 	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
@@ -232,17 +220,7 @@ func TestClearStatusFields_CellPoolClearsTenants(t *testing.T) {
 		t.Fatalf("PatchStatus (set): %v", err)
 	}
 
-	empty := &v1alpha1.CellPoolStatus{}
-	statusJSON, err := json.Marshal(empty)
-	if err != nil {
-		t.Fatalf("marshal empty status: %v", err)
-	}
-	statusMap := map[string]any{}
-	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
-		t.Fatalf("unmarshal empty status: %v", err)
-	}
-	ApplyStatusClears(gvr, statusMap)
-	if err := f.PatchObjectStatus(ctx, gvr, "", "lts-2-555", statusMap); err != nil {
+	if err := f.PatchObjectStatus(ctx, gvr, "", "lts-2-555", &v1alpha1.CellPoolStatus{}); err != nil {
 		t.Fatalf("PatchObjectStatus (clear): %v", err)
 	}
 

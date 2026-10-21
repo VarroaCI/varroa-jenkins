@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -517,18 +519,30 @@ func fromUnstructured[T any](u *unstructured.Unstructured) (*T, error) {
 	return &obj, nil
 }
 
-// mergeCreateResult copies server-assigned metadata (uid, resourceVersion,
-// generation, creationTimestamp) back into the typed object via JSON
-// round-trip, so callers get the persisted version.
+// mergeCreateResult replaces the ObjectMeta of obj with the metadata of the
+// stored object. It does not change spec or status. A fresh ObjectMeta value
+// replaces the old one, so obj shares no memory with the stored object.
 func mergeCreateResult(obj any, created *unstructured.Unstructured) {
 	if created == nil {
 		return
 	}
-	data, err := json.Marshal(created.Object)
+	raw, ok := created.Object["metadata"]
+	if !ok {
+		return
+	}
+	data, err := json.Marshal(raw)
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, obj)
+	var meta metav1.ObjectMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return
+	}
+	om := reflect.ValueOf(obj).Elem().FieldByName("ObjectMeta")
+	if !om.IsValid() || !om.CanSet() {
+		return
+	}
+	om.Set(reflect.ValueOf(meta))
 }
 
 // namespaceFromObj extracts the namespace from an unstructured object.

@@ -124,14 +124,8 @@ func TestTick_CellWrites_MovedPlacement(t *testing.T) {
 	}
 }
 
-// TestTick_CellWrites_PlacedToUnplaced proves the reconciler computes an
-// empty cell/cellNamespace once a Team's placement clears. The in-package
-// Fake does not itself apply crdstore.ApplyStatusClears (only the real
-// ClientsetClient.PatchObjectStatus force-nulls an absent clearable key), so
-// this asserts against the recorded StatusPatch's Status value — what the
-// reconciler actually computed and sent — rather than a re-Get, mirroring
-// the pattern crdstore's own TestClearStatusFields_RunnerClearsCellFields
-// uses for the same reason.
+// TestTick_CellWrites_PlacedToUnplaced proves the reconciler clears the
+// cell and cellNamespace of a Runner once a Team's placement clears.
 func TestTick_CellWrites_PlacedToUnplaced(t *testing.T) {
 	f := crdstore.NewFake()
 	crdstore.MustSeed(f, placedTeam("payments", "cell-a", "varroa-system"))
@@ -150,17 +144,9 @@ func TestTick_CellWrites_PlacedToUnplaced(t *testing.T) {
 	}
 	rec.Tick(context.Background())
 
-	gvr, err := crdstore.GVRFor[v1alpha1.Runner]()
-	if err != nil {
-		t.Fatalf("GVRFor: %v", err)
-	}
-	patches := f.StatusPatches(gvr)
-	if len(patches) == 0 {
-		t.Fatal("expected at least one status patch")
-	}
-	last := patches[len(patches)-1].Status.(*v1alpha1.RunnerStatus)
-	if last.Cell != "" || last.CellNamespace != "" {
-		t.Fatalf("computed status = %+v, want cell and cellNamespace cleared", last)
+	got := getRunner(t, f, "win-1")
+	if got.Status.Cell != "" || got.Status.CellNamespace != "" {
+		t.Fatalf("stored status = %+v, want cell and cellNamespace cleared", got.Status)
 	}
 }
 

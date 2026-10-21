@@ -175,3 +175,41 @@ func TestApplyOwned_NilPredicateAllowsUpdate(t *testing.T) {
 		t.Fatalf("ApplyOwned: %v", err)
 	}
 }
+
+// TestApplyOwned_UpdateKeepsTheCallerStatus asserts that ApplyOwned writes only
+// the stored metadata back. A shallow copy of the caller's status taken before
+// the call must still match it afterwards.
+func TestApplyOwned_UpdateKeepsTheCallerStatus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	seeded := item("i", "alpha", "v1")
+	seeded.Status = v1alpha1.CatalogItemStatus{
+		Closure:    []v1alpha1.CatalogItemClosureEntry{{ArtifactID: "stored", Version: "1"}},
+		Conditions: []v1alpha1.TemplateCatalogCondition{{Type: "stored", Status: metav1.ConditionTrue}},
+	}
+	MustSeed(f, seeded)
+
+	want := v1alpha1.CatalogItemStatus{
+		Closure:    []v1alpha1.CatalogItemClosureEntry{{ArtifactID: "computed", Version: "2"}},
+		Conditions: []v1alpha1.TemplateCatalogCondition{{Type: "computed", Status: metav1.ConditionFalse}},
+	}
+	obj := item("i", "alpha", "v2")
+	obj.Status = want
+	prev := obj.Status
+
+	if err := ApplyOwned(ctx, f, obj, ownedByLabel("alpha")); err != nil {
+		t.Fatalf("ApplyOwned: %v", err)
+	}
+	if len(obj.Status.Closure) != 1 || obj.Status.Closure[0] != want.Closure[0] {
+		t.Errorf("closure = %+v, want the caller value %+v", obj.Status.Closure, want.Closure)
+	}
+	if len(obj.Status.Conditions) != 1 || obj.Status.Conditions[0] != want.Conditions[0] {
+		t.Errorf("conditions = %+v, want the caller value %+v", obj.Status.Conditions, want.Conditions)
+	}
+	if len(prev.Closure) != 1 || prev.Closure[0] != want.Closure[0] {
+		t.Errorf("the earlier copy changed: %+v", prev.Closure)
+	}
+	if obj.ResourceVersion == "" {
+		t.Error("resourceVersion was not written back")
+	}
+}
