@@ -1515,6 +1515,25 @@ PendingDeletion:
       type: string
     detectedAt:
       type: string
+    approval:
+      $ref: '#/PendingDeletionApproval'
+  additionalProperties: false
+
+PendingDeletionApproval:
+  type: object
+  description: >-
+    An approved delete of a pending item. The entry stays until the mite
+    confirms the delete. Error is set when the mite reports a failed delete.
+  required: [commandId, approvedAt]
+  properties:
+    commandId:
+      type: string
+    approvedAt:
+      type: string
+    error:
+      type: string
+    failedAt:
+      type: string
   additionalProperties: false
 
 ApplySectionResult:

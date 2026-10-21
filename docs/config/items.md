@@ -229,6 +229,9 @@ A held tenant's folder stays as it is.
 Unsafe removals appear in `status.pendingItemDeletions` and need the `approve-deletion`
 capability. A running job or unreadable build state defers deletion.
 Deletion also removes build history.
+An approval keeps the entry until the mite confirms the delete.
+A failed delete keeps the entry and shows the error in `approval.error`. Approve again to retry.
+While a deletion is deferred, each push checks the items again. A deferred item that has no running build is then deleted.
 An approved deletion also removes the item, and every item below it, from the mite's record of managed items. A later apply does not delete an item that you create again at that path.
 
 ## GitHub sources
@@ -398,7 +401,7 @@ Job DSL seed jobs are not supported on a cell. Declare every job in `items.yaml`
 | Unknown kind | Use one of the five supported values |
 | Old item stays after a rename | A non-cell controller keeps undeclared items. Delete it from the Jenkins UI |
 | Setting is absent | Field spelling and indentation |
-| Deletion is pending | Pending path, build state, and approval |
+| Deletion is pending | Pending path, build state, approval, and approval error |
 | Kind is unsupported | Keep it unmanaged |
 | Schedule stops after a cell restart | Move the Jenkinsfile trigger to `triggers` |
 | Condition reason is `ItemsRefused` | Read the condition message. Add the missing plugin or credential |

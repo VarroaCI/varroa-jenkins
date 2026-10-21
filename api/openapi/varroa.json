@@ -3219,6 +3219,9 @@
         "additionalProperties": false,
         "description": "Pending item deletion.",
         "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/components_schemas_PendingDeletionApproval"
+          },
           "detectedAt": {
             "type": "string"
           },
@@ -11618,6 +11621,9 @@
         "additionalProperties": false,
         "description": "Pending item deletion.",
         "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/components_schemas_PendingDeletionApproval"
+          },
           "detectedAt": {
             "type": "string"
           },
@@ -11630,6 +11636,29 @@
         },
         "required": [
           "path"
+        ],
+        "type": "object"
+      },
+      "components_schemas_PendingDeletionApproval": {
+        "additionalProperties": false,
+        "description": "An approved delete of a pending item. The entry stays until the mite confirms the delete. Error is set when the mite reports a failed delete.",
+        "properties": {
+          "approvedAt": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "failedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commandId",
+          "approvedAt"
         ],
         "type": "object"
       },

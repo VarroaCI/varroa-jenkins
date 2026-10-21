@@ -918,6 +918,21 @@ type PendingDeletion struct {
 	Path       string      `json:"path"`
 	Reason     string      `json:"reason,omitempty"`
 	DetectedAt metav1.Time `json:"detectedAt,omitempty"`
+	// Approval records the last approved delete sent to the mite. The
+	// entry stays until the mite reports that delete as successful.
+	// +optional
+	Approval *DeletionApproval `json:"approval,omitempty"`
+}
+
+// DeletionApproval records one approved delete of a pending item.
+type DeletionApproval struct {
+	CommandID  string      `json:"commandID"`
+	ApprovedAt metav1.Time `json:"approvedAt"`
+	// Error is the mite's error text for a failed delete. Empty while the delete is in flight.
+	// +optional
+	Error string `json:"error,omitempty"`
+	// +optional
+	FailedAt *metav1.Time `json:"failedAt,omitempty"`
 }
 
 // RestartDrainStatus tracks the backoff state for a drain-timeout restart deferral.

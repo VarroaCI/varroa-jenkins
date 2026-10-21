@@ -794,9 +794,19 @@ type ApplyResultJSON struct {
 
 // PendingDeletionJSON is the JSON shape for a pending item deletion.
 type PendingDeletionJSON struct {
-	Path       string `json:"path"`
-	Reason     string `json:"reason,omitempty"`
-	DetectedAt string `json:"detectedAt,omitempty"`
+	Path       string                       `json:"path"`
+	Reason     string                       `json:"reason,omitempty"`
+	DetectedAt string                       `json:"detectedAt,omitempty"`
+	Approval   *PendingDeletionApprovalJSON `json:"approval,omitempty"`
+}
+
+// PendingDeletionApprovalJSON is the JSON shape for an approved delete of a
+// pending item. Error is set when the mite reported the delete as failed.
+type PendingDeletionApprovalJSON struct {
+	CommandID  string `json:"commandId"`
+	ApprovedAt string `json:"approvedAt"`
+	Error      string `json:"error,omitempty"`
+	FailedAt   string `json:"failedAt,omitempty"`
 }
 
 // LiveDriftJSON is the JSON shape for live-drift status.
@@ -1107,11 +1117,22 @@ func (s *Server) handleControllerDetail(w http.ResponseWriter, r *http.Request, 
 		if !d.DetectedAt.IsZero() {
 			detectedAt = d.DetectedAt.Format(time.RFC3339)
 		}
-		resp.PendingItemDeletions = append(resp.PendingItemDeletions, PendingDeletionJSON{
+		entry := PendingDeletionJSON{
 			Path:       d.Path,
 			Reason:     d.Reason,
 			DetectedAt: detectedAt,
-		})
+		}
+		if a := d.Approval; a != nil {
+			entry.Approval = &PendingDeletionApprovalJSON{
+				CommandID:  a.CommandID,
+				ApprovedAt: a.ApprovedAt.Format(time.RFC3339),
+				Error:      a.Error,
+			}
+			if a.FailedAt != nil {
+				entry.Approval.FailedAt = a.FailedAt.Format(time.RFC3339)
+			}
+		}
+		resp.PendingItemDeletions = append(resp.PendingItemDeletions, entry)
 	}
 	if cr.Status.FirstConnectedAt != nil {
 		resp.FirstConnectedAt = cr.Status.FirstConnectedAt.Format(time.RFC3339)

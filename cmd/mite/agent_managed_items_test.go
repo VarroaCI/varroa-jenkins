@@ -193,6 +193,12 @@ func TestDeleteItemCommandForgetsManagedItem(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Success = false, error %q", result.Error)
 	}
+	if result.CommandType != mitev1.CommandTypeDeleteItem {
+		t.Fatalf("CommandType = %v, want DELETE_ITEM", result.CommandType)
+	}
+	if result.JobPath != "old-job" {
+		t.Fatalf("JobPath = %q, want old-job", result.JobPath)
+	}
 	assertManagedCache(t, agent, `{"keep":"h"}`)
 }
 

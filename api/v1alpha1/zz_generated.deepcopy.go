@@ -1853,6 +1853,30 @@ func (in *PendingRestart) DeepCopyInto(out *PendingRestart) {
 func (in *PendingDeletion) DeepCopyInto(out *PendingDeletion) {
 	*out = *in
 	in.DetectedAt.DeepCopyInto(&out.DetectedAt)
+	if in.Approval != nil {
+		in, out := &in.Approval, &out.Approval
+		*out = (*in).DeepCopy()
+	}
+}
+
+// DeepCopyInto for DeletionApproval.
+func (in *DeletionApproval) DeepCopyInto(out *DeletionApproval) {
+	*out = *in
+	in.ApprovedAt.DeepCopyInto(&out.ApprovedAt)
+	if in.FailedAt != nil {
+		in, out := &in.FailedAt, &out.FailedAt
+		*out = (*in).DeepCopy()
+	}
+}
+
+// DeepCopy creates a deep copy of DeletionApproval.
+func (in *DeletionApproval) DeepCopy() *DeletionApproval {
+	if in == nil {
+		return nil
+	}
+	out := new(DeletionApproval)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // DeepCopyInto for RestartDrainStatus.

@@ -2416,7 +2416,7 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 	// fails (Jenkins down, likely restarting) — fall through and re-apply.
 	if cmd.DesiredStateHash != "" && !cmd.Reload {
 		marker := a.readMarker()
-		if marker.composite == cmd.DesiredStateHash && rehydrationConverged(marker, cmd) {
+		if marker.composite == cmd.DesiredStateHash && rehydrationConverged(marker, cmd) && itemsConverged(marker, cmd) {
 			live, err := a.getJenkinsClient().SessionID(ctx)
 			switch {
 			case err == nil && marker.session != "" && live == marker.session:
@@ -2709,6 +2709,12 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 		// or a resend would skip the job's seed or its reload.
 		if len(result.RehydrationDeferredJobs) > 0 || len(result.RehydrationReloadFailures) > 0 {
 			delete(newSections, "rehydration")
+		}
+		// A deferred deletion must be walked again on each push. The
+		// operator rebuilds the pending list from each result, so a
+		// fast-path push with no walk would answer an empty list.
+		if len(result.DeferredItemDeletions) > 0 {
+			delete(newSections, "items")
 		}
 		a.writeMarker(appliedMarker{
 			composite: cmd.DesiredStateHash,
@@ -3349,6 +3355,14 @@ func (a *Agent) desiredSectionHashes(cmd *mitev1.DesiredStateCommand) map[string
 // rehydration bundle of cmd. A command with no bundle is converged.
 func rehydrationConverged(m appliedMarker, cmd *mitev1.DesiredStateCommand) bool {
 	return cmd.Rehydration == nil || (m.sections != nil && m.sections["rehydration"] == cmd.Rehydration.ContentHash)
+}
+
+// itemsConverged reports whether the marker already records the items
+// section of cmd. A command with no items is converged. A marker that
+// records deferred deletions has no items section, so the push walks the
+// items again.
+func itemsConverged(m appliedMarker, cmd *mitev1.DesiredStateCommand) bool {
+	return cmd.ItemsYaml == "" || (m.sections != nil && m.sections["items"] == sha256hex([]byte(cmd.ItemsYaml)))
 }
 
 func (a *Agent) allComponentsSucceeded(result *mitev1.DesiredStateResult, cmd *mitev1.DesiredStateCommand) bool {

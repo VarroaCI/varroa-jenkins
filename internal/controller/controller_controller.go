@@ -2501,16 +2501,91 @@ func (r *Reconciler) ApproveDeletion(ctx context.Context, cluster, namespace, na
 	}
 
 	// The shard can still move, and the owner's reconcile can write status,
-	// after the check above. The compare-and-swap removes only this entry
+	// after the check above. The compare-and-swap stamps only this entry
 	// from a fresh read, so it never writes back a stale field.
 	if _, err := crdstore.MutateStatus(ctx, r.store, name, namespace, func(fresh *v1alpha1.Controller) (bool, error) {
-		return removePendingDeletion(&fresh.Status, path), nil
+		return markDeletionApproved(&fresh.Status, path, cmdID, metav1Now()), nil
 	}); err != nil {
-		logger.Warn("failed to clear pending deletion", "error", err)
+		logger.Warn("failed to record deletion approval", "error", err)
 	}
 	r.emitOperatorEvent("deletion.approved", cr, "item deletion approved by user", path)
 	r.wakeController(key)
 	return nil
+}
+
+// markDeletionApproved records an approved delete on the pending entry for
+// path. It clears any error from an earlier attempt. It reports false when
+// the entry is gone.
+func markDeletionApproved(status *v1alpha1.ControllerStatus, path, cmdID string, now metav1.Time) bool {
+	for i := range status.PendingItemDeletions {
+		if status.PendingItemDeletions[i].Path != path {
+			continue
+		}
+		status.PendingItemDeletions[i].Approval = &v1alpha1.DeletionApproval{
+			CommandID:  cmdID,
+			ApprovedAt: now,
+		}
+		return true
+	}
+	return false
+}
+
+// applyDeleteItemResult applies a mite delete_item result to the pending
+// deletion list. A success removes the entry. A failure records the error
+// on the entry, unless the error belongs to an older approval. It reports
+// whether status changed.
+func applyDeleteItemResult(status *v1alpha1.ControllerStatus, res *mitev1.CommandResult, now metav1.Time) bool {
+	if res.CommandType != mitev1.CommandTypeDeleteItem || res.JobPath == "" {
+		return false
+	}
+	idx := -1
+	for i := range status.PendingItemDeletions {
+		if status.PendingItemDeletions[i].Path == res.JobPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	if res.Success {
+		return removePendingDeletion(status, res.JobPath)
+	}
+	entry := &status.PendingItemDeletions[idx]
+	if entry.Approval != nil && entry.Approval.CommandID != "" && entry.Approval.CommandID != res.CommandId {
+		return false
+	}
+	if entry.Approval == nil {
+		// A shard move during the send skips the approval write. The
+		// result then stands for the approval, so it sets the time too.
+		entry.Approval = &v1alpha1.DeletionApproval{CommandID: res.CommandId, ApprovedAt: now}
+	}
+	failedAt := now
+	entry.Approval.Error = truncate(res.Error, 1024)
+	entry.Approval.FailedAt = &failedAt
+	return true
+}
+
+// rebuildPendingDeletions builds the pending list from a desired-state
+// result. An entry keeps its DetectedAt and approval record when the mite
+// reports the same path again.
+func rebuildPendingDeletions(old []v1alpha1.PendingDeletion, reported []*mitev1.DeferredDeletion, now metav1.Time) []v1alpha1.PendingDeletion {
+	byPath := make(map[string]v1alpha1.PendingDeletion, len(old))
+	for _, d := range old {
+		byPath[d.Path] = d
+	}
+	pending := make([]v1alpha1.PendingDeletion, 0, len(reported))
+	for _, d := range reported {
+		entry := v1alpha1.PendingDeletion{Path: d.Path, Reason: d.Reason, DetectedAt: now}
+		if prev, ok := byPath[d.Path]; ok {
+			if !prev.DetectedAt.IsZero() {
+				entry.DetectedAt = prev.DetectedAt
+			}
+			entry.Approval = prev.Approval
+		}
+		pending = append(pending, entry)
+	}
+	return pending
 }
 
 // removePendingDeletion removes the pending deletion entry for path from
@@ -4090,11 +4165,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 				}
 				// DeletionPending: surface deferred item deletions from the mite.
 				if len(r.DesiredState.DeferredItemDeletions) > 0 {
-					pending := make([]v1alpha1.PendingDeletion, 0, len(r.DesiredState.DeferredItemDeletions))
-					now := metav1Now()
-					for _, d := range r.DesiredState.DeferredItemDeletions {
-						pending = append(pending, v1alpha1.PendingDeletion{Path: d.Path, Reason: d.Reason, DetectedAt: now})
-					}
+					pending := rebuildPendingDeletions(cr.Status.PendingItemDeletions, r.DesiredState.DeferredItemDeletions, metav1Now())
 					cr.Status.PendingItemDeletions = pending
 					cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
 						Type:    v1alpha1.ConditionDeletionPending,
@@ -4149,6 +4220,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 			// ack (SAFE_RESTART, DELETE_ITEM, etc.). Always record it last-one-wins
 			// on LastImperativeResult for brood operation completion predicates.
 			recv.recordImperativeOutcome(ctx, cr, res)
+			applyDeleteItemResult(&cr.Status, res, metav1Now())
 			cr.Status.LastImperativeResult = &v1alpha1.ImperativeResult{
 				CommandID:  res.CommandId,
 				Success:    res.Success,
