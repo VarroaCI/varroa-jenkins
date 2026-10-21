@@ -389,18 +389,20 @@ func TestUpdate_StaleResourceVersionConflictsAndKeepsTheConcurrentWrite(t *testi
 	ctx := context.Background()
 	f := NewFake()
 	MustSeed(f, &v1alpha1.User{
-		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns", ResourceVersion: "1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns"},
 	})
-	gvr, _ := GVRFor[v1alpha1.User]()
 
 	stale, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if _, err := f.PatchObjectMetaAt(ctx, gvr, "ns", "alice", "1", map[string]any{
-		"annotations": map[string]any{"x": "concurrent"},
-	}); err != nil {
-		t.Fatalf("concurrent patch: %v", err)
+	other, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("Get second writer: %v", err)
+	}
+	other.Annotations = map[string]string{"x": "concurrent"}
+	if err := Update(ctx, f, other); err != nil {
+		t.Fatalf("concurrent Update: %v", err)
 	}
 
 	stale.Spec.Email = "stale@example.com"

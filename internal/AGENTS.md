@@ -53,8 +53,7 @@ reading each package's entry point):
   the live object, calls a side-effect-free mutate function, and writes the
   status subresource with the read resourceVersion, reading again on each
   conflict. A writer that owns only some status fields uses it in place of a
-  blind `PatchStatus`. `Fake.UpdateObjectStatus` advances the resourceVersion,
-  so a test seeds a non-empty resourceVersion to exercise the precondition.
+  blind `PatchStatus`. The `Fake` keeps one `resourceVersion` counter. `Seed`, `CreateObject`, and each write that changes an object set the next value, and `Seed` writes it back to an object that has none. `UpdateObject` and `UpdateObjectStatus` answer Invalid for an empty `resourceVersion`, and the `*At` patches and both updates answer Conflict for a stale one.
 - **`auth/`** — OIDC/Dex, local, and LDAP auth providers (`AuthMode` =
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,

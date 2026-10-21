@@ -300,16 +300,14 @@ func TestSyncRBACBindings_LabelStampClaimsNoSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantSpec := v1alpha1.ControllerSpec{Version: "2.479", ClassName: "standard"}
-	crdstore.MustSeed(store, &v1alpha1.Controller{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
-		Spec:       wantSpec,
-	})
-
-	r := &Reconciler{store: store, Logger: slog.Default()}
+	// Seed writes the stored resourceVersion back into cr.
 	cr := &v1alpha1.Controller{
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"},
 		Spec:       wantSpec,
 	}
+	crdstore.MustSeed(store, cr)
+
+	r := &Reconciler{store: store, Logger: slog.Default()}
 	if err := r.syncRBACBindings(context.Background(), cr); err != nil {
 		t.Fatalf("syncRBACBindings: %v", err)
 	}

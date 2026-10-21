@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -384,6 +385,12 @@ func TestApproveDeletion_SkipsTheStatusWriteWhenTheShardMovesDuringTheSend(t *te
 	tr := &shardMovingImperativeTransport{captureTransport: &captureTransport{}, onSend: func() { held.Remove(shard) }}
 	rec.miteTransport = tr
 
+	// Read the status through the store before the call, so both sides of
+	// the comparison take the same round trip.
+	before, err := crdstore.Get[v1alpha1.Controller](context.Background(), client.store, "moving", "ns")
+	if err != nil {
+		t.Fatalf("get controller before approve: %v", err)
+	}
 	if err := rec.ApproveDeletion(context.Background(), "", "ns", "moving", "team/job"); err != nil {
 		t.Fatalf("approve deletion: %v", err)
 	}
@@ -394,9 +401,9 @@ func TestApproveDeletion_SkipsTheStatusWriteWhenTheShardMovesDuringTheSend(t *te
 	if err != nil {
 		t.Fatalf("get controller: %v", err)
 	}
-	if len(got.Status.PendingItemDeletions) != 1 || got.ResourceVersion != "1" {
-		t.Fatalf("a replica that lost the shard wrote the status: pending %v, resourceVersion %q",
-			got.Status.PendingItemDeletions, got.ResourceVersion)
+	if !reflect.DeepEqual(got.Status, before.Status) {
+		t.Fatalf("a replica that lost the shard wrote the status: before %+v, after %+v",
+			before.Status, got.Status)
 	}
 }
 
