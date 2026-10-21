@@ -485,7 +485,7 @@ reading each package's entry point):
 - **`hibernation/`** — shared controller-hibernation contracts: webhook replay
   constants, the BFF/operator wake interstitial renderer, and the operator's
   informer-backed `wakeserver` HTTP handler.
-- **`forge/`** — operator-only client for a repository forge (GitHub REST and Gitea API). Stdlib only. `NewHTTPClient` refuses non-global addresses and redirects. `Token` never renders its value. A 403 with `Retry-After`, `X-RateLimit-Remaining: 0`, or a body that names a rate limit, and every 429, map to `RateLimitError`, never `ErrForbidden`. `forge/forgeapi/` holds the stdlib wire types of the operator forge verbs.
+- **`forge/`** — operator-only client for a repository forge (GitHub REST and Gitea API). Stdlib only. `NewHTTPClient` refuses non-global addresses and redirects. `Token` never renders its value. A 403 with `Retry-After`, `X-RateLimit-Remaining: 0`, or a body that names a rate limit, and every 429, map to `RateLimitError`, never `ErrForbidden`. `forge/forgeapi/` holds the stdlib wire types of the operator forge verbs. `SeesAllOwnerRepos` answers true only after `/repos/search` lists one private repository of the owner, so a public-only token never confirms a gone repository.
 - **`forgeurl/`** — leaf rules for the forge path: repository URL normalization, branch names, revisions, file paths, file sets, titles, bodies, relayed bodies, and commit messages. Stdlib only.
 - **`secretredact/`** — replaces secret values in JCasC (`JCasC`) and items
   (`Items`) YAML with `<redacted>`. A key that contains `password`, `secret`,

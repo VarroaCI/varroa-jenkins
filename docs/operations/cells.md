@@ -118,7 +118,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   folder until fixed. A folder held on any member cell shows no job.
 - **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells. When Jenkins refuses a tenant item, the Team reports `TenantWarnings=True` with the reason `ItemsApplyFailed`. Other tenants still apply. The cell reports those other tenants as applied. The message names each refused item and its error. A successful items apply clears it.
   A new cell pod drops a refused tenant from the applied list. The tenant returns when all its items apply.
-- **Branch scan warnings.** A failed or aborted branch scan keeps the branch jobs deferred until a scan succeeds or `rehydrateDeadline` passes. The Team reports `TenantWarnings=True`, reason `BranchScanFailed`. Gitea or Forgejo: owner-scoped 404 releases them. GitHub keeps them.
+- **Branch scan warnings.** A failed or aborted branch scan keeps the branch jobs deferred until a scan succeeds or `rehydrateDeadline` passes. The Team reports `TenantWarnings=True`, reason `BranchScanFailed`. Gitea/Forgejo: owner 404 with private-repo proof releases them. GitHub keeps.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.
 - **Member role.** The operator grants read, discover, build, cancel, and replay on the folder's

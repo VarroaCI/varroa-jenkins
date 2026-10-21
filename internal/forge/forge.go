@@ -108,8 +108,8 @@ type Client interface {
 }
 
 // OwnerScope is implemented by a client whose forge can say whether the
-// credential sees every repository of an owner. The operator asks for it
-// before it treats a 404 as a gone repository. A client that does not
+// credential sees every repository of an owner, private ones included. The
+// operator asks for it before it treats a 404 as a gone repository. A client that does not
 // implement it never confirms a gone repository.
 type OwnerScope interface {
 	SeesAllOwnerRepos(ctx context.Context, owner string) (bool, error)

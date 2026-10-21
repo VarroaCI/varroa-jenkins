@@ -10,7 +10,8 @@ import (
 
 // RepositoryGone reports whether the forge confirms that repoURL no longer
 // exists. Only one answer is a confirmation: a 404 from a Gitea or Forgejo
-// credential that sees every repository of the owner. Every other answer
+// credential that sees every repository of the owner, and that proves it
+// reads private repositories of the owner. Every other answer
 // keeps the repository present or unknown, and the result is false. A GitHub
 // host always answers false, because its 404 also answers for a private
 // repository the credential cannot see. No credential, an unsupported forge,

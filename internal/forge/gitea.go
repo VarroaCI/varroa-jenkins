@@ -63,30 +63,81 @@ func (g *giteaClient) Repository(ctx context.Context, r Repo) (Info, error) {
 
 // SeesAllOwnerRepos reports whether the credential sees every repository
 // that owner holds. It answers true for a site administrator, for the owner
-// account itself, and for an organization owner. A lookup error answers
-// false with the error.
+// account itself, and for an organization owner, and only when the
+// credential also lists one private repository of the owner. A public-only
+// token answers false. An owner with no visible private repository answers
+// false. A lookup error answers false with the error.
 func (g *giteaClient) SeesAllOwnerRepos(ctx context.Context, owner string) (bool, error) {
 	var me struct {
+		ID      int64  `json:"id"`
 		Login   string `json:"login"`
 		IsAdmin bool   `json:"is_admin"`
 	}
 	if err := g.getJSON(ctx, "/user", nil, &me); err != nil {
 		return false, err
 	}
-	if me.IsAdmin || (me.Login != "" && strings.EqualFold(me.Login, owner)) {
-		return true, nil
-	}
 	if me.Login == "" {
 		return false, errors.New("forge: the credential reports no login")
 	}
-	var perm struct {
-		IsOwner bool `json:"is_owner"`
+	var ownerID int64
+	switch {
+	case strings.EqualFold(me.Login, owner):
+		ownerID = me.ID
+	case me.IsAdmin:
+		// The owner ID is looked up below.
+	default:
+		var perm struct {
+			IsOwner bool `json:"is_owner"`
+		}
+		p := "/users/" + url.PathEscape(me.Login) + "/orgs/" + url.PathEscape(owner) + "/permissions"
+		if err := g.getJSON(ctx, p, nil, &perm); err != nil {
+			return false, err
+		}
+		if !perm.IsOwner {
+			return false, nil
+		}
 	}
-	p := "/users/" + url.PathEscape(me.Login) + "/orgs/" + url.PathEscape(owner) + "/permissions"
-	if err := g.getJSON(ctx, p, nil, &perm); err != nil {
+	return g.readsPrivateOwnerRepo(ctx, owner, ownerID)
+}
+
+// readsPrivateOwnerRepo reports whether the credential lists at least one
+// private repository of owner. A public-only token lists none, so it never
+// proves private read access. An owner with no visible private repository
+// answers false. ownerID is zero when the caller does not know it.
+func (g *giteaClient) readsPrivateOwnerRepo(ctx context.Context, owner string, ownerID int64) (bool, error) {
+	if ownerID == 0 {
+		var u struct {
+			ID int64 `json:"id"`
+		}
+		if err := g.getJSON(ctx, "/users/"+url.PathEscape(owner), nil, &u); err != nil {
+			return false, err
+		}
+		if u.ID == 0 {
+			return false, errors.New("forge: the owner reports no id")
+		}
+		ownerID = u.ID
+	}
+	q := url.Values{
+		"uid":        {strconv.FormatInt(ownerID, 10)},
+		"exclusive":  {"true"},
+		"is_private": {"true"},
+		"limit":      {"1"},
+	}
+	var out struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Private bool `json:"private"`
+		} `json:"data"`
+	}
+	if err := g.getJSON(ctx, "/repos/search", q, &out); err != nil {
 		return false, err
 	}
-	return perm.IsOwner, nil
+	for _, r := range out.Data {
+		if r.Private {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // BranchHead returns the head commit of a branch.
