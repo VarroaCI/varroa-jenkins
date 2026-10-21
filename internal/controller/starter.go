@@ -147,7 +147,9 @@ func (r *StarterReconciler) applyItem(ctx context.Context, item *v1alpha1.Catalo
 		}
 	}
 
-	status := item.Status
+	// ApplyOwned writes the stored status back into item, and that write shares
+	// item's slices and pointers. A deep copy keeps the status that this pass computed.
+	status := *item.Status.DeepCopy()
 	if err := crdstore.ApplyOwned(ctx, r.store, item, func(l *unstructured.Unstructured) bool {
 		return starterOwned(l.GetLabels())
 	}); err != nil {

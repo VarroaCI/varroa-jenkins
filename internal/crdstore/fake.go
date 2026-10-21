@@ -29,6 +29,11 @@ type StatusPatch struct {
 // The Fake models optimistic concurrency like the apiserver. Every write that
 // changes an object takes the next resourceVersion. A write that carries a
 // stale, non-empty resourceVersion answers Conflict.
+//
+// For a kind whose CRD sets the status subresource, the Fake treats .status
+// as the apiserver does. CreateObject drops .status. UpdateObject keeps the
+// stored .status. Only UpdateObjectStatus and the status patches change it.
+// Seed and SeedObject store .status as given.
 type Fake struct {
 	mu sync.Mutex
 	// rv is the one resourceVersion counter for the whole Fake. A deleted and
@@ -105,6 +110,30 @@ func MustSeed(f *Fake, objs ...any) {
 	if err := f.Seed(objs...); err != nil {
 		panic(err)
 	}
+}
+
+// SeedObject stores obj under gvr as given, status included. It is the
+// unstructured sibling of Seed, for a test that builds a raw object. An
+// object without a resourceVersion gets the next one. An explicit numeric
+// resourceVersion is kept as given.
+func (f *Fake) SeedObject(gvr schema.GroupVersionResource, obj *unstructured.Unstructured) error {
+	if obj.GetName() == "" {
+		return fmt.Errorf("crdstore: SeedObject %s: name is empty", gvr.Resource)
+	}
+	clone := obj.DeepCopy()
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if clone.GetResourceVersion() == "" {
+		f.bump(clone)
+	} else if n, err := strconv.ParseUint(clone.GetResourceVersion(), 10, 64); err == nil && n > f.rv {
+		f.rv = n
+	}
+	if f.objects[gvr] == nil {
+		f.objects[gvr] = make(map[string]*unstructured.Unstructured)
+	}
+	f.objects[gvr][nsName(clone.GetNamespace(), clone.GetName())] = clone
+	return nil
 }
 
 // --- Error injection ------------------------------------------------------
@@ -233,6 +262,10 @@ func (f *Fake) CreateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		return nil, apierrors.NewAlreadyExists(gr, obj.GetName())
 	}
 	clone := obj.DeepCopy()
+	if hasStatusSubresource(gvr) {
+		// The apiserver drops status on a create when the kind has a status subresource.
+		delete(clone.Object, "status")
+	}
 	f.bump(clone)
 	f.objects[gvr][key] = clone
 	return clone.DeepCopy(), nil
@@ -264,6 +297,14 @@ func (f *Fake) UpdateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		return nil, apierrors.NewConflict(gr, obj.GetName(), fmt.Errorf("stale resourceVersion"))
 	}
 	clone := obj.DeepCopy()
+	if hasStatusSubresource(gvr) {
+		// A main-resource update leaves .status as stored, as the apiserver does.
+		if st, ok := stored.Object["status"]; ok {
+			clone.Object["status"] = runtime.DeepCopyJSONValue(st)
+		} else {
+			delete(clone.Object, "status")
+		}
+	}
 	if reflect.DeepEqual(stored.Object, clone.Object) {
 		// An update that changes nothing keeps the value, as the apiserver does.
 		return stored.DeepCopy(), nil
@@ -314,7 +355,11 @@ func (f *Fake) UpdateObjectStatus(_ context.Context, gvr schema.GroupVersionReso
 		return nil, apierrors.NewConflict(gr, obj.GetName(), fmt.Errorf("stale resourceVersion"))
 	}
 	clone := stored.DeepCopy()
-	clone.Object["status"] = obj.Object["status"]
+	if st, ok := obj.Object["status"]; ok {
+		clone.Object["status"] = st
+	} else {
+		delete(clone.Object, "status")
+	}
 	if reflect.DeepEqual(stored.Object, clone.Object) {
 		// A status write that changes nothing keeps the value, as the apiserver does.
 		return stored.DeepCopy(), nil

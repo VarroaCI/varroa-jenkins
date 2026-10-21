@@ -113,7 +113,7 @@ func TestTick_CellWrites_MovedPlacement(t *testing.T) {
 	// Move the team to a new cell.
 	moved := placedTeam("payments", "cell-b", "varroa-system-2")
 	moved.ResourceVersion = ""
-	if err := crdstore.Update[v1alpha1.Team](context.Background(), f, moved); err != nil {
+	if err := f.Seed(moved); err != nil {
 		t.Fatalf("move team: %v", err)
 	}
 	rec.Tick(context.Background())
@@ -145,7 +145,7 @@ func TestTick_CellWrites_PlacedToUnplaced(t *testing.T) {
 		ObjectMeta: metaObj("payments"),
 		Spec:       v1alpha1.TeamSpec{Pipelines: &v1alpha1.TeamPipelinesSpec{AgentNamespace: "agents"}},
 	}
-	if err := crdstore.Update[v1alpha1.Team](context.Background(), f, unplaced); err != nil {
+	if err := f.Seed(unplaced); err != nil {
 		t.Fatalf("unplace team: %v", err)
 	}
 	rec.Tick(context.Background())

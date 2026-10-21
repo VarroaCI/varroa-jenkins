@@ -130,7 +130,7 @@ func placedTeamHoldFixtureWithContent(t *testing.T, cellStatus *v1alpha1.CellSta
 		t.Fatalf("get team: %v", err)
 	}
 	team.Status.Placement = &v1alpha1.TeamPlacementStatus{Cell: "cell-1", CellNamespace: "test-ns"}
-	if err := crdstore.Update(context.Background(), st, team); err != nil {
+	if err := crdstore.UpdateStatus(context.Background(), st, team); err != nil {
 		t.Fatalf("place team: %v", err)
 	}
 	if cellStatus != nil {
@@ -236,7 +236,7 @@ func placedTeamMembersHoldFixture(t *testing.T, members []v1alpha1.TeamMemberSta
 		t.Fatalf("get team: %v", err)
 	}
 	team.Status.Placement = &v1alpha1.TeamPlacementStatus{Cell: "cell-1", CellNamespace: "test-ns", Members: members}
-	if err := crdstore.Update(context.Background(), st, team); err != nil {
+	if err := crdstore.UpdateStatus(context.Background(), st, team); err != nil {
 		t.Fatalf("place team: %v", err)
 	}
 	for name, cs := range cells {

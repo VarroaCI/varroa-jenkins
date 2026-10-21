@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -34,7 +33,7 @@ func seedWarningTeam(t *testing.T, store *crdstore.Fake, team string) {
 	if err != nil {
 		t.Fatalf("GVRFor[Team]: %v", err)
 	}
-	if _, err := store.CreateObject(context.Background(), gvr, "", obj); err != nil {
+	if err := store.SeedObject(gvr, obj); err != nil {
 		t.Fatalf("seed team: %v", err)
 	}
 }

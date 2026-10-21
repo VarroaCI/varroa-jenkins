@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
@@ -286,5 +287,191 @@ func TestFake_PatchObjectStatusBumpsOnlyOnChange(t *testing.T) {
 	}
 	if afterNoop.ResourceVersion != afterSet.ResourceVersion {
 		t.Errorf("a no-op status patch moved resourceVersion from %q to %q", afterSet.ResourceVersion, afterNoop.ResourceVersion)
+	}
+}
+
+// userWithCredentials returns a User named alice with the stored password hash h1.
+func userWithCredentials() *v1alpha1.User {
+	u := fakeUser("alice", "a@example.test")
+	u.Status.Credentials = &v1alpha1.UserCredentials{PasswordHash: "h1"}
+	return u
+}
+
+// TestFake_UpdateObjectKeepsStoredStatus proves a main-resource update does
+// not change .status on a kind with a status subresource, as the apiserver
+// behaves.
+func TestFake_UpdateObjectKeepsStoredStatus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, userWithCredentials())
+
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	got.Spec.Email = "b@example.test"
+	got.Status.Credentials = &v1alpha1.UserCredentials{PasswordHash: "h2"}
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if after.Spec.Email != "b@example.test" {
+		t.Errorf("email = %q, want the updated value", after.Spec.Email)
+	}
+	if after.Status.Credentials == nil || after.Status.Credentials.PasswordHash != "h1" {
+		t.Errorf("credentials = %+v, want the stored hash h1", after.Status.Credentials)
+	}
+}
+
+// TestFake_UpdateObjectStatusOnlyChangeIsANoop proves a main-resource write
+// that changes only .status changes nothing, so the resourceVersion holds.
+func TestFake_UpdateObjectStatusOnlyChangeIsANoop(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, userWithCredentials())
+
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	before := got.ResourceVersion
+	got.Status.Credentials = &v1alpha1.UserCredentials{PasswordHash: "h2"}
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if after.ResourceVersion != before {
+		t.Errorf("resourceVersion = %q, want unchanged %q", after.ResourceVersion, before)
+	}
+	if after.Status.Credentials == nil || after.Status.Credentials.PasswordHash != "h1" {
+		t.Errorf("credentials = %+v, want the stored hash h1", after.Status.Credentials)
+	}
+}
+
+// TestFake_CreateObjectDropsStatus proves a create ignores .status on a kind
+// with a status subresource, as the apiserver does.
+func TestFake_CreateObjectDropsStatus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	if err := Create(ctx, f, userWithCredentials()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Credentials != nil {
+		t.Errorf("credentials = %+v, want none after a create", got.Status.Credentials)
+	}
+}
+
+// TestFake_StatusWritesChangeOnlyStatus proves a status write leaves spec
+// alone, and that an unstructured status write without a status key removes
+// the stored status.
+func TestFake_StatusWritesChangeOnlyStatus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, userWithCredentials())
+
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	got.Spec.Email = "b@example.test"
+	got.Status.Credentials = &v1alpha1.UserCredentials{PasswordHash: "h2"}
+	if err := UpdateStatus(ctx, f, got); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+
+	after, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("get after status write: %v", err)
+	}
+	if after.Spec.Email != "a@example.test" {
+		t.Errorf("email = %q, want the spec unchanged", after.Spec.Email)
+	}
+	if after.Status.Credentials == nil || after.Status.Credentials.PasswordHash != "h2" {
+		t.Errorf("credentials = %+v, want the written hash h2", after.Status.Credentials)
+	}
+
+	raw, err := f.GetObject(ctx, userGVR, "ns", "alice")
+	if err != nil {
+		t.Fatalf("raw get: %v", err)
+	}
+	delete(raw.Object, "status")
+	if _, err := f.UpdateObjectStatus(ctx, userGVR, "ns", raw); err != nil {
+		t.Fatalf("status write without a status key: %v", err)
+	}
+	cleared, err := f.GetObject(ctx, userGVR, "ns", "alice")
+	if err != nil {
+		t.Fatalf("raw get after clear: %v", err)
+	}
+	if _, ok := cleared.Object["status"]; ok {
+		t.Errorf("status = %v, want the key removed", cleared.Object["status"])
+	}
+}
+
+// TestFake_KindWithoutStatusSubresourceKeepsWholeObject proves a kind whose
+// CRD has no status subresource keeps .status on a create, as the apiserver
+// does for such a kind.
+func TestFake_KindWithoutStatusSubresourceKeepsWholeObject(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "varroa.dev/v1alpha1",
+		"kind":       "JenkinsRole",
+		"metadata":   map[string]any{"name": "r1"},
+		"status":     map[string]any{"x": "y"},
+	}}
+	if _, err := f.CreateObject(ctx, jenkinsRoleGVR, "", obj); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := f.GetObject(ctx, jenkinsRoleGVR, "", "r1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Object["status"] == nil {
+		t.Error("status was dropped on a kind without a status subresource")
+	}
+}
+
+// TestFake_SeedObjectKeepsStatus proves SeedObject stores status as given and
+// assigns a resourceVersion.
+func TestFake_SeedObjectKeepsStatus(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	team := &v1alpha1.Team{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Status: v1alpha1.TeamStatus{
+			Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-1"},
+		},
+	}
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(team)
+	if err != nil {
+		t.Fatalf("to unstructured: %v", err)
+	}
+	if err := f.SeedObject(teamGVR, &unstructured.Unstructured{Object: u}); err != nil {
+		t.Fatalf("seed object: %v", err)
+	}
+
+	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status.Placement == nil || got.Status.Placement.Cell != "cell-1" {
+		t.Errorf("placement = %+v, want cell-1 kept", got.Status.Placement)
+	}
+	if got.ResourceVersion == "" {
+		t.Error("resourceVersion is empty, want one assigned by SeedObject")
 	}
 }

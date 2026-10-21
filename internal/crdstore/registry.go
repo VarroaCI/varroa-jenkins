@@ -13,6 +13,9 @@ type kindInfo struct {
 	gvr        schema.GroupVersionResource
 	kind       string
 	namespaced bool
+	// statusSubresource is true when the CRD sets subresources.status. The
+	// apiserver then ignores .status on a main-resource create or update.
+	statusSubresource bool
 }
 
 // registry maps Go CRD types to their GVR, kind, and scope. It is the only
@@ -22,29 +25,29 @@ type kindInfo struct {
 // does not.
 var registry = map[reflect.Type]kindInfo{
 	// Namespaced kinds.
-	reflect.TypeOf(v1alpha1.Controller{}):     {controllerGVR, "Controller", true},
-	reflect.TypeOf(v1alpha1.PodTemplate{}):    {podTemplateGVR, "PodTemplate", true},
-	reflect.TypeOf(v1alpha1.CatalogSource{}):  {catalogSourceGVR, "CatalogSource", true},
-	reflect.TypeOf(v1alpha1.CatalogItem{}):    {catalogItemGVR, "CatalogItem", true},
-	reflect.TypeOf(v1alpha1.ComposedBundle{}): {composedBundleGVR, "ComposedBundle", true},
-	reflect.TypeOf(v1alpha1.BroodOperation{}): {broodOperationGVR, "BroodOperation", true},
-	reflect.TypeOf(v1alpha1.TeamAgent{}):      {teamAgentGVR, "TeamAgent", true},
-	reflect.TypeOf(v1alpha1.User{}):           {userGVR, "User", true},
+	reflect.TypeOf(v1alpha1.Controller{}):     {controllerGVR, "Controller", true, true},
+	reflect.TypeOf(v1alpha1.PodTemplate{}):    {podTemplateGVR, "PodTemplate", true, true},
+	reflect.TypeOf(v1alpha1.CatalogSource{}):  {catalogSourceGVR, "CatalogSource", true, true},
+	reflect.TypeOf(v1alpha1.CatalogItem{}):    {catalogItemGVR, "CatalogItem", true, true},
+	reflect.TypeOf(v1alpha1.ComposedBundle{}): {composedBundleGVR, "ComposedBundle", true, true},
+	reflect.TypeOf(v1alpha1.BroodOperation{}): {broodOperationGVR, "BroodOperation", true, true},
+	reflect.TypeOf(v1alpha1.TeamAgent{}):      {teamAgentGVR, "TeamAgent", true, true},
+	reflect.TypeOf(v1alpha1.User{}):           {userGVR, "User", true, true},
 
 	// Cluster-scoped kinds.
-	reflect.TypeOf(v1alpha1.VarroaRole{}):            {varroaRoleGVR, "VarroaRole", false},
-	reflect.TypeOf(v1alpha1.VarroaRoleBinding{}):     {varroaRoleBindingGVR, "VarroaRoleBinding", false},
-	reflect.TypeOf(v1alpha1.JenkinsRole{}):           {jenkinsRoleGVR, "JenkinsRole", false},
-	reflect.TypeOf(v1alpha1.JenkinsRoleBinding{}):    {jenkinsRoleBindingGVR, "JenkinsRoleBinding", false},
-	reflect.TypeOf(v1alpha1.ProvisioningDefaults{}):  {provisioningDefaultsGVR, "ProvisioningDefaults", false},
-	reflect.TypeOf(v1alpha1.ControllerClass{}):       {controllerClassGVR, "ControllerClass", false},
-	reflect.TypeOf(v1alpha1.JenkinsVersionProfile{}): {jenkinsVersionProfileGVR, "JenkinsVersionProfile", false},
-	reflect.TypeOf(v1alpha1.Group{}):                 {groupGVR, "Group", false},
-	reflect.TypeOf(v1alpha1.Team{}):                  {teamGVR, "Team", false},
-	reflect.TypeOf(v1alpha1.Runner{}):                {runnerGVR, "Runner", false},
-	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false},
-	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false},
-	reflect.TypeOf(v1alpha1.CellPool{}):              {cellPoolGVR, "CellPool", false},
+	reflect.TypeOf(v1alpha1.VarroaRole{}):            {varroaRoleGVR, "VarroaRole", false, true},
+	reflect.TypeOf(v1alpha1.VarroaRoleBinding{}):     {varroaRoleBindingGVR, "VarroaRoleBinding", false, true},
+	reflect.TypeOf(v1alpha1.JenkinsRole{}):           {jenkinsRoleGVR, "JenkinsRole", false, false},
+	reflect.TypeOf(v1alpha1.JenkinsRoleBinding{}):    {jenkinsRoleBindingGVR, "JenkinsRoleBinding", false, false},
+	reflect.TypeOf(v1alpha1.ProvisioningDefaults{}):  {provisioningDefaultsGVR, "ProvisioningDefaults", false, true},
+	reflect.TypeOf(v1alpha1.ControllerClass{}):       {controllerClassGVR, "ControllerClass", false, true},
+	reflect.TypeOf(v1alpha1.JenkinsVersionProfile{}): {jenkinsVersionProfileGVR, "JenkinsVersionProfile", false, true},
+	reflect.TypeOf(v1alpha1.Group{}):                 {groupGVR, "Group", false, true},
+	reflect.TypeOf(v1alpha1.Team{}):                  {teamGVR, "Team", false, true},
+	reflect.TypeOf(v1alpha1.Runner{}):                {runnerGVR, "Runner", false, true},
+	reflect.TypeOf(v1alpha1.UpdateCenter{}):          {updateCentersGVR, "UpdateCenter", false, true},
+	reflect.TypeOf(v1alpha1.ProfileCandidate{}):      {profileCandidateGVR, "ProfileCandidate", false, true},
+	reflect.TypeOf(v1alpha1.CellPool{}):              {cellPoolGVR, "CellPool", false, true},
 }
 
 // clearStatusFields lists, per resource, the status keys a merge patch must
@@ -194,6 +197,17 @@ func gvrInfo[T any]() (kindInfo, error) {
 		return kindInfo{}, fmt.Errorf("crdstore: type %T not registered", zero)
 	}
 	return info, nil
+}
+
+// hasStatusSubresource reports whether gvr names a kind whose CRD sets the
+// status subresource. A gvr outside the registry reports false.
+func hasStatusSubresource(gvr schema.GroupVersionResource) bool {
+	for _, info := range registry {
+		if info.gvr == gvr {
+			return info.statusSubresource
+		}
+	}
+	return false
 }
 
 // GVR variables. A name that also appears in
