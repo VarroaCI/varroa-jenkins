@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
+
+	"github.com/varroaci/varroa-jenkins/internal/updatecenter/ucmeta"
 )
 
 // pluginVersionsJSON is the shape of the plugin-versions document that
@@ -28,16 +31,20 @@ func (s *Server) handlePluginVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildPluginVersionsPayload lists every stored plugin version, not one winner
-// per plugin. The installer reads the entry for an exact pin, so each stored
-// version needs its own entry. A version whose dependency list is unknown is
-// left out, and the installer then reads the plugin's own manifest. The first
-// stored pack that holds a name and version wins, as findPluginDigest does, so
-// the advertised digest matches the bytes a download serves.
+// per plugin, and then fills each declared exact pin that no pack stores. The
+// installer reads the entry for an exact pin, so each version needs its own
+// entry. A version whose dependency list is unknown is left out, and the
+// installer then reads the plugin's own manifest. The first stored pack that
+// holds a name and version wins, as findPluginDigest does, so the advertised
+// digest matches the bytes a download serves. The upstream fill runs after the
+// store entries and never replaces one.
 func (s *Server) buildPluginVersionsPayload(ctx context.Context) *pluginVersionsJSON {
 	doc := &pluginVersionsJSON{Plugins: make(map[string]map[string]updateCenterPlugin)}
 
-	// Skipped packs are dropped, as buildMetadataPayload drops them.
-	packs, _, err := s.listPackInfos(ctx)
+	// Skipped packs are dropped, as buildMetadataPayload drops them. A skipped
+	// pack can hold a stored version that the scan never saw, so the upstream
+	// fill stays off while any pack is skipped.
+	packs, skipped, err := s.listPackInfos(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list pack infos for plugin versions", "error", err)
 		return doc
@@ -83,5 +90,60 @@ func (s *Server) buildPluginVersionsPayload(ctx context.Context) *pluginVersions
 			}
 		}
 	}
+	if len(skipped) == 0 {
+		s.fillUnstoredPins(ctx, doc, claimed)
+	}
 	return doc
+}
+
+// fillUnstoredPins adds an upstream entry for each declared pinned version that
+// no pack offers. It runs only with pull-through on. Only a metadata source can
+// supply the dependency list, so a version that only the archive resolves stays out.
+func (s *Server) fillUnstoredPins(ctx context.Context, doc *pluginVersionsJSON, claimed map[string]bool) {
+	if !s.pullThroughEnabled || s.resolver == nil {
+		return
+	}
+	declared, ok := ReadDeclaredPlugins(s.declaredPluginsFile)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, latestCoreResolveTimeout)
+	defer cancel()
+
+	names := make([]string, 0, len(declared))
+	for name := range declared {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		for _, v := range declared[name] {
+			if ucmeta.IsLatest(v) || claimed[name+"@"+v] {
+				continue
+			}
+			res := s.resolver.ResolveExact(ctx, name, v)
+			if res.Outcome != ucmeta.Resolved {
+				if ctx.Err() != nil {
+					s.logger.Warn("upstream fill for plugin versions stopped at its deadline", "name", name, "version", v)
+					return
+				}
+				continue
+			}
+			deps := make([]updateCenterDependency, 0, len(res.Meta.Dependencies))
+			for _, d := range res.Meta.Dependencies {
+				deps = append(deps, updateCenterDependency{Name: d.Name, Optional: d.Optional, Version: d.Version})
+			}
+			if doc.Plugins[name] == nil {
+				doc.Plugins[name] = make(map[string]updateCenterPlugin)
+			}
+			doc.Plugins[name][v] = updateCenterPlugin{
+				Name:         name,
+				Version:      v,
+				URL:          name + "/" + v + "/" + name + ".hpi",
+				SHA256:       res.Meta.SHA256,
+				RequiredCore: res.Meta.RequiredCore,
+				Dependencies: deps,
+			}
+			claimed[name+"@"+v] = true
+		}
+	}
 }

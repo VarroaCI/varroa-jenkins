@@ -5,7 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -182,5 +185,185 @@ func TestPluginVersions_SkippedFirstPackBlocksLaterDigest(t *testing.T) {
 	doc, _ := pluginVersionsDoc(t, ts)
 	if _, ok := doc.Plugins["dup2"]["1.0"]; ok {
 		t.Error("dup2 1.0 advertised from a later pack, but the download serves the skipped first pack")
+	}
+}
+
+// depUpstream serves one plugin at the weekly metadata root, with the given
+// dependency JSON array, and its HPI bytes under /plugins/.
+func depUpstream(t *testing.T, name, version string, hpiBytes []byte, deps string) *httptest.Server {
+	t.Helper()
+	doc := fmt.Sprintf(`{"updateCenterVersion":"1","plugins":{%q:{"name":%q,"version":%q,"sha256":%q,"requiredCore":"2.555.3","dependencies":%s}}}`,
+		name, name, version, sha256Base64(hpiBytes), deps)
+	hpiPath := "/plugins/" + name + "/" + version + "/" + name + ".hpi"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/update-center.actual.json":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, doc)
+		case hpiPath:
+			_, _ = w.Write(hpiBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestPluginVersions_UnstoredDeclaredPinFilledFromUpstream(t *testing.T) {
+	hpiBytes := newCorePluginBytes(t, "1.9", "2.555.3")
+	up := depUpstream(t, "foo", "1.9", hpiBytes, `[{"name":"bar","version":"1.2","optional":true}]`)
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "foo@1.9")))...)
+
+	doc, _ := pluginVersionsDoc(t, ts)
+	entry, ok := doc.Plugins["foo"]["1.9"]
+	if !ok {
+		t.Fatalf("foo 1.9 missing from plugin-versions: %+v", doc)
+	}
+	if entry.SHA256 != sha256Base64(hpiBytes) {
+		t.Errorf("sha256 = %q, want upstream base64 digest", entry.SHA256)
+	}
+	if entry.URL != "foo/1.9/foo.hpi" {
+		t.Errorf("url = %q, want foo/1.9/foo.hpi", entry.URL)
+	}
+	if entry.RequiredCore != "2.555.3" {
+		t.Errorf("requiredCore = %q, want 2.555.3", entry.RequiredCore)
+	}
+	wantDeps := []updateCenterDependency{{Name: "bar", Optional: true, Version: "1.2"}}
+	if !reflect.DeepEqual(entry.Dependencies, wantDeps) {
+		t.Errorf("dependencies = %+v, want %+v", entry.Dependencies, wantDeps)
+	}
+}
+
+func TestPluginVersions_FilledDigestMatchesPulledBytes(t *testing.T) {
+	hpiBytes := newCorePluginBytes(t, "1.9", "2.555.3")
+	up := depUpstream(t, "foo", "1.9", hpiBytes, "[]")
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "foo@1.9")))...)
+
+	doc, _ := pluginVersionsDoc(t, ts)
+	advertised := doc.Plugins["foo"]["1.9"].SHA256
+	if advertised == "" {
+		t.Fatal("foo 1.9 missing from plugin-versions")
+	}
+
+	resp := ts.get("/download/plugins/foo/1.9/foo.hpi")
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("download status = %d, want 200", resp.StatusCode)
+	}
+	if got := sha256Base64(body); got != advertised {
+		t.Errorf("pulled bytes digest = %q, advertised = %q", got, advertised)
+	}
+
+	again, _ := pluginVersionsDoc(t, ts)
+	if got := again.Plugins["foo"]["1.9"].SHA256; got != advertised {
+		t.Errorf("after pull-through, sha256 = %q, want %q", got, advertised)
+	}
+}
+
+func TestPluginVersions_StoredVersionNotReplacedByUpstream(t *testing.T) {
+	store := newTestStore(t)
+	seedCorePack(t, store, "pack:foo-2.0", "2.0", "2.555.3")
+	upBytes := append(newCorePluginBytes(t, "2.0", "2.555.3"), []byte("upstream")...)
+	up := depUpstream(t, "foo", "2.0", upBytes, "[]")
+
+	ts := newTestServer(t, store,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "foo@2.0")))...)
+	digest := ts.server.findPluginDigest(t.Context(), "foo", "2.0")
+	if digest == "" {
+		t.Fatal("findPluginDigest returned no digest for the stored foo 2.0")
+	}
+	raw, err := hex.DecodeString(stripDigestPrefix(digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, _ := pluginVersionsDoc(t, ts)
+	entry, ok := doc.Plugins["foo"]["2.0"]
+	if !ok {
+		t.Fatal("foo 2.0 missing from plugin-versions")
+	}
+	if entry.SHA256 != base64.StdEncoding.EncodeToString(raw) {
+		t.Errorf("sha256 = %q, want the stored digest", entry.SHA256)
+	}
+	if entry.SHA256 == sha256Base64(upBytes) {
+		t.Error("stored version was replaced by the upstream digest")
+	}
+}
+
+func TestPluginVersions_WithheldStoredVersionNotFilled(t *testing.T) {
+	store := newTestStore(t)
+	seedPluginPack(t, store, "pack:opaque-pv", []testPlugin{
+		{name: "opaque-pv", version: "1.0", hpiBytes: []byte("not-a-zip")},
+	})
+	up := depUpstream(t, "opaque-pv", "1.0", []byte("upstream-bytes"), "[]")
+
+	ts := newTestServer(t, store,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "opaque-pv@1.0")))...)
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["opaque-pv"]["1.0"]; ok {
+		t.Error("withheld stored version was filled from upstream")
+	}
+}
+
+func TestPluginVersions_PullThroughOffNoFill(t *testing.T) {
+	ts := newTestServer(t, nil, WithDeclaredPluginsFile(declaredFile(t, "foo@1.9")))
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["foo"]; ok {
+		t.Error("declared pin filled with pull-through off")
+	}
+}
+
+func TestPluginVersions_UndeclaredUnstoredNotFilled(t *testing.T) {
+	up := depUpstream(t, "foo", "1.9", []byte("upstream-bytes"), "[]")
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t)))...)
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["foo"]; ok {
+		t.Error("undeclared plugin filled from upstream")
+	}
+}
+
+func TestPluginVersions_DeclaredLatestNotFilled(t *testing.T) {
+	up := depUpstream(t, "foo", "1.9", []byte("upstream-bytes"), "[]")
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), fooDeclaredLatest(t))...)
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["foo"]; ok {
+		t.Error("declared latest filled as an exact pin")
+	}
+}
+
+func TestPluginVersions_UnlistedPinOmitted(t *testing.T) {
+	up := depUpstream(t, "foo", "2.0", []byte("upstream-bytes"), "[]")
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "foo@1.0")))...)
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["foo"]["1.0"]; ok {
+		t.Error("pin that upstream does not list was filled")
+	}
+}
+
+func TestPluginVersions_UpstreamDownOmitsPin(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closedURL := closed.URL
+	closed.Close()
+
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(closedURL), WithDeclaredPluginsFile(declaredFile(t, "foo@1.9")))...)
+	resp := ts.get("/plugin-versions.json")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plugin-versions status = %d, want 200", resp.StatusCode)
+	}
+	doc, _ := pluginVersionsDoc(t, ts)
+	if _, ok := doc.Plugins["foo"]; ok {
+		t.Error("pin filled while upstream is down")
 	}
 }
