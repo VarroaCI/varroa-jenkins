@@ -4,24 +4,36 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
 
 // stubRecordLoginClient mimics the real ResourceClient's status-subresource
-// semantics: ApplyUserCRD (a write to the main resource) NEVER persists the
-// status stanza, and PatchUserStatus is the only path that writes status. This
-// is essential — a stub that let ApplyUserCRD persist status would mask the
-// real bug where status fields silently vanish.
+// semantics: CreateUserCRD and UpdateUserCRD (writes to the main resource) NEVER
+// persist the status stanza, and PatchUserStatus is the only path that writes
+// status. This is essential — a stub that let the main-resource writes persist
+// status would mask the real bug where status fields silently vanish.
+//
+// conflictsLeft makes the next UpdateUserCRD calls answer Conflict. onConflict
+// runs at each conflict, so a test can model a concurrent write.
 type stubRecordLoginClient struct {
 	users         map[string]*v1alpha1.User
 	statusPatches int
+	conflictsLeft int
+	onConflict    func()
+	// beforeUpdate runs once at the start of the next UpdateUserCRD call.
+	beforeUpdate func()
 }
+
+var stubUserGR = schema.GroupResource{Group: "varroa.dev", Resource: "users"}
 
 func newStubRecordLoginClient() *stubRecordLoginClient {
 	return &stubRecordLoginClient{users: make(map[string]*v1alpha1.User)}
@@ -30,20 +42,41 @@ func newStubRecordLoginClient() *stubRecordLoginClient {
 func (c *stubRecordLoginClient) GetUserCRD(_ context.Context, name, _ string) (*v1alpha1.User, error) {
 	u, ok := c.users[name]
 	if !ok {
-		return nil, nil
+		return nil, apierrors.NewNotFound(stubUserGR, name)
 	}
 	return u.DeepCopy(), nil
 }
 
-func (c *stubRecordLoginClient) ApplyUserCRD(_ context.Context, user *v1alpha1.User) error {
+func (c *stubRecordLoginClient) CreateUserCRD(_ context.Context, user *v1alpha1.User) error {
+	if _, ok := c.users[user.Name]; ok {
+		return apierrors.NewAlreadyExists(stubUserGR, user.Name)
+	}
+	cp := user.DeepCopy()
+	cp.Status = v1alpha1.UserStatus{}
+	c.users[user.Name] = cp
+	return nil
+}
+
+func (c *stubRecordLoginClient) UpdateUserCRD(_ context.Context, user *v1alpha1.User) error {
+	if hook := c.beforeUpdate; hook != nil {
+		c.beforeUpdate = nil
+		hook()
+	}
+	if c.conflictsLeft > 0 {
+		c.conflictsLeft--
+		if c.onConflict != nil {
+			c.onConflict()
+		}
+		return apierrors.NewConflict(stubUserGR, user.Name, errors.New("concurrent write"))
+	}
+	existing, ok := c.users[user.Name]
+	if !ok {
+		return apierrors.NewNotFound(stubUserGR, user.Name)
+	}
 	cp := user.DeepCopy()
 	// Main-resource writes do not touch status (status subresource). Preserve
 	// any previously persisted status; discard status carried in the request.
-	if existing, ok := c.users[user.Name]; ok {
-		cp.Status = existing.Status
-	} else {
-		cp.Status = v1alpha1.UserStatus{}
-	}
+	cp.Status = existing.Status
 	c.users[user.Name] = cp
 	return nil
 }
@@ -66,6 +99,72 @@ func (c *stubRecordLoginClient) PatchUserStatus(_ context.Context, name, _ strin
 func oidcUserName(subject string) string {
 	h := sha256.Sum256([]byte(subject))
 	return "oidc-" + hex.EncodeToString(h[:])[:32]
+}
+
+// TestRecordLogin_RetriesOnConflict pins that a write made between the read
+// and the update is kept: the retry reads the User again and merges into it.
+func TestRecordLogin_RetriesOnConflict(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "fixed-subject-for-conflict"
+	userName := oidcUserName(subject)
+
+	if err := RecordLogin(context.Background(), client, userName,
+		"old@example.com", "Old Name",
+		nil, subject, "alice", nil, "test-ns"); err != nil {
+		t.Fatalf("unexpected error on first login: %v", err)
+	}
+
+	client.conflictsLeft = 1
+	client.onConflict = func() {
+		client.users[userName].Annotations[v1alpha1.AnnotationOIDCFormerIdentifiers] = `["bob"]`
+	}
+	if err := RecordLogin(context.Background(), client, userName,
+		"new@example.com", "New Name",
+		nil, subject, "alice", nil, "test-ns"); err != nil {
+		t.Fatalf("unexpected error on second login: %v", err)
+	}
+
+	u := client.users[userName]
+	if u.Spec.Email != "new@example.com" {
+		t.Errorf("expected email refresh, got %q", u.Spec.Email)
+	}
+	if got := FormerIdentifiers(u); !slices.Contains(got, "bob") {
+		t.Errorf("expected former identifiers to keep the concurrent write, got %v", got)
+	}
+	if client.statusPatches != 2 {
+		t.Errorf("expected one status patch per login, got %d", client.statusPatches)
+	}
+}
+
+// TestRecordLogin_UserDeletedBeforeWriteIsCreatedAgain pins that a User
+// deleted between the read and the write is created again by the retry.
+func TestRecordLogin_UserDeletedBeforeWriteIsCreatedAgain(t *testing.T) {
+	client := newStubRecordLoginClient()
+	subject := "fixed-subject-for-deletion"
+	userName := oidcUserName(subject)
+
+	if err := RecordLogin(context.Background(), client, userName,
+		"old@example.com", "Old Name",
+		nil, subject, "alice", nil, "test-ns"); err != nil {
+		t.Fatalf("unexpected error on first login: %v", err)
+	}
+
+	// The User disappears after the read, so the update answers NotFound.
+	client.beforeUpdate = func() {
+		delete(client.users, userName)
+	}
+	if err := RecordLogin(context.Background(), client, userName,
+		"new@example.com", "New Name",
+		nil, subject, "alice", nil, "test-ns"); err != nil {
+		t.Fatalf("unexpected error on second login: %v", err)
+	}
+	u := client.users[userName]
+	if u == nil {
+		t.Fatal("expected the User to be created again")
+	}
+	if u.Spec.Email != "new@example.com" {
+		t.Errorf("expected email refresh, got %q", u.Spec.Email)
+	}
 }
 
 func TestRecordLogin_FirstLogin(t *testing.T) {

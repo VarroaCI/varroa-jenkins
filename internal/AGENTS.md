@@ -59,7 +59,7 @@ reading each package's entry point):
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,
   `auth/userdirectory`, `auth/schedule` hold provider-specific logic.
-  `auth/userdirectory.RecordLogin` stores the configured custom claims (`Claims.Extra`) in `varroa.dev/oidc-user-claims` and moves a replaced or dropped preferred username, email, or custom claim value to `varroa.dev/oidc-former-identifiers`, which only `deprovisionUser` reads (through `api.DeleteUser`).
+  `auth/userdirectory.RecordLogin` stores the configured custom claims (`Claims.Extra`) in `varroa.dev/oidc-user-claims` and moves a replaced or dropped preferred username, email, or custom claim value to `varroa.dev/oidc-former-identifiers`, which only `deprovisionUser` reads (through `api.DeleteUser`). `RecordLogin` writes with the read `resourceVersion` and reads again on a conflict, up to `retry.DefaultRetry` attempts.
   `multi.go`'s `MultiProvider` serves local accounts beside OIDC
   (`--local-accounts`). It selects the verifier by the unverified `iss`. It
   refuses an IdP token whose `sub`, `preferred_username`, `email`, `name`, or any
