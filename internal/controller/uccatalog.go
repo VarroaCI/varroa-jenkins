@@ -639,7 +639,9 @@ func itemOwnedBy(labels map[string]string, refs []metav1.OwnerReference, src *v1
 func (r *CatalogReconciler) writeCatalogItem(ctx context.Context, src *v1alpha1.CatalogSource, item *v1alpha1.CatalogItem, desired map[string]bool) ([]string, bool) {
 	desired[item.Name] = true
 
-	status := item.Status
+	// ApplyOwned writes the stored status back into item, and that write shares
+	// item's slices and pointers. A deep copy keeps the status that this pass computed.
+	status := *item.Status.DeepCopy()
 	err := crdstore.ApplyOwned(ctx, r.store, item, func(live *unstructured.Unstructured) bool {
 		return itemOwnedBy(live.GetLabels(), live.GetOwnerReferences(), src)
 	})

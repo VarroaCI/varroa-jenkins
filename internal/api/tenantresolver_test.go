@@ -106,16 +106,16 @@ func unplacedTeamObject(name string, namespaces ...string) *unstructured.Unstruc
 	}}
 }
 
-// seedTeam creates a Team object directly through the unstructured
-// Backend, bypassing the typed Seed helper, because spec.pipelines and
-// status.placement are not yet fields of v1alpha1.Team.
+// seedTeam stores a Team object as given, status included, through the
+// unstructured seam. The typed Seed helper is not used, because it cannot
+// carry the raw spec.pipelines and status.placement fixtures these tests need.
 func seedTeam(t *testing.T, store *crdstore.Fake, obj *unstructured.Unstructured) {
 	t.Helper()
 	gvr, err := crdstore.GVRFor[v1alpha1.Team]()
 	if err != nil {
 		t.Fatalf("GVRFor[Team]: %v", err)
 	}
-	if _, err := store.CreateObject(context.Background(), gvr, "", obj); err != nil {
+	if err := store.SeedObject(gvr, obj); err != nil {
 		t.Fatalf("seed team %q: %v", obj.GetName(), err)
 	}
 }

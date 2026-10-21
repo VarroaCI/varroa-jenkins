@@ -3,9 +3,13 @@ package crdstore
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 )
@@ -388,5 +392,62 @@ func TestRegistryTeamAgent(t *testing.T) {
 	}
 	if v, ok := cleared["instructionsSHA"]; !ok || v != "" {
 		t.Errorf("instructionsSHA clear value = %v, want empty string", v)
+	}
+}
+
+// TestRegistry_StatusSubresourceMatchesCRD pins each registry entry to its
+// CRD in charts/varroa/crds. The Fake reads statusSubresource to decide
+// whether .status is kept, so a drift here changes what the tests see.
+func TestRegistry_StatusSubresourceMatchesCRD(t *testing.T) {
+	paths, err := filepath.Glob("../../charts/varroa/crds/*.yaml")
+	if err != nil {
+		t.Fatalf("glob CRDs: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no CRD files found under charts/varroa/crds")
+	}
+	crds := make(map[string]apiextensionsv1.CustomResourceDefinition)
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		var crd apiextensionsv1.CustomResourceDefinition
+		if err := yaml.Unmarshal(data, &crd); err != nil {
+			t.Fatalf("parse %s: %v", p, err)
+		}
+		if crd.Spec.Group != "varroa.dev" {
+			continue
+		}
+		crds[crd.Spec.Names.Plural] = crd
+	}
+
+	for _, info := range registry {
+		crd, ok := crds[info.gvr.Resource]
+		if !ok {
+			t.Errorf("%s: no CRD for resource %q", info.kind, info.gvr.Resource)
+			continue
+		}
+		if crd.Spec.Names.Kind != info.kind {
+			t.Errorf("%s: CRD kind = %q", info.kind, crd.Spec.Names.Kind)
+		}
+		if namespaced := crd.Spec.Scope == apiextensionsv1.NamespaceScoped; namespaced != info.namespaced {
+			t.Errorf("%s: CRD namespaced = %v, registry says %v", info.kind, namespaced, info.namespaced)
+		}
+		var version *apiextensionsv1.CustomResourceDefinitionVersion
+		for i := range crd.Spec.Versions {
+			if crd.Spec.Versions[i].Name == info.gvr.Version {
+				version = &crd.Spec.Versions[i]
+			}
+		}
+		if version == nil {
+			t.Errorf("%s: CRD has no version %q", info.kind, info.gvr.Version)
+			continue
+		}
+		hasStatus := version.Subresources != nil && version.Subresources.Status != nil
+		if hasStatus != info.statusSubresource {
+			t.Errorf("%s: CRD status subresource = %v, registry statusSubresource = %v",
+				info.kind, hasStatus, info.statusSubresource)
+		}
 	}
 }

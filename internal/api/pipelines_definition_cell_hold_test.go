@@ -331,7 +331,7 @@ func newPlacedTeamMembersFixture(t *testing.T) *fakeResourceClient {
 		{Cell: "cell-2", CellNamespace: "test-ns", Slot: &slot1},
 		{Cell: "cell-3", CellNamespace: "test-ns"},
 	}
-	if err := crdstore.Update(context.Background(), client.crdStore, team); err != nil {
+	if err := crdstore.UpdateStatus(context.Background(), client.crdStore, team); err != nil {
 		t.Fatalf("place team members: %v", err)
 	}
 	return client

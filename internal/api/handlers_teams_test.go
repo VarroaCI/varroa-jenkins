@@ -406,7 +406,7 @@ func TestTeamHandlers_PipelinesLedgerSettingsRoundTrip(t *testing.T) {
 		Attempts:     4,
 		LastAttempt:  &metav1.Time{Time: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)},
 	}
-	if err := crdstore.Apply[v1alpha1.Team](context.Background(), store, stored); err != nil {
+	if err := crdstore.UpdateStatus(context.Background(), store, stored); err != nil {
 		t.Fatalf("seed status.rehydration: %v", err)
 	}
 
