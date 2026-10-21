@@ -17,9 +17,14 @@ func (a userStoreAdapter) GetUserCRD(ctx context.Context, name, namespace string
 	return crdstore.Get[v1alpha1.User](ctx, a.store, name, namespace)
 }
 
-// ApplyUserCRD implements userdirectory.UserStore.
-func (a userStoreAdapter) ApplyUserCRD(ctx context.Context, user *v1alpha1.User) error {
-	return crdstore.Apply[v1alpha1.User](ctx, a.store, user)
+// CreateUserCRD implements userdirectory.UserStore.
+func (a userStoreAdapter) CreateUserCRD(ctx context.Context, user *v1alpha1.User) error {
+	return crdstore.Create[v1alpha1.User](ctx, a.store, user)
+}
+
+// UpdateUserCRD implements userdirectory.UserStore.
+func (a userStoreAdapter) UpdateUserCRD(ctx context.Context, user *v1alpha1.User) error {
+	return crdstore.Update[v1alpha1.User](ctx, a.store, user)
 }
 
 // PatchUserStatus implements userdirectory.UserStore.

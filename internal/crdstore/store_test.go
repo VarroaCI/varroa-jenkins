@@ -382,6 +382,44 @@ func seedCASController(t *testing.T, f *Fake) {
 	})
 }
 
+// TestUpdate_StaleResourceVersionConflictsAndKeepsTheConcurrentWrite pins that
+// Update sends the read resourceVersion, so a write since the read is not
+// overwritten.
+func TestUpdate_StaleResourceVersionConflictsAndKeepsTheConcurrentWrite(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "alice", Namespace: "ns", ResourceVersion: "1"},
+	})
+	gvr, _ := GVRFor[v1alpha1.User]()
+
+	stale, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if _, err := f.PatchObjectMetaAt(ctx, gvr, "ns", "alice", "1", map[string]any{
+		"annotations": map[string]any{"x": "concurrent"},
+	}); err != nil {
+		t.Fatalf("concurrent patch: %v", err)
+	}
+
+	stale.Spec.Email = "stale@example.com"
+	err = Update(ctx, f, stale)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("Update with a stale resourceVersion = %v, want Conflict", err)
+	}
+	got, err := Get[v1alpha1.User](ctx, f, "alice", "ns")
+	if err != nil {
+		t.Fatalf("Get after conflict: %v", err)
+	}
+	if got.Annotations["x"] != "concurrent" {
+		t.Errorf("concurrent annotation = %q, want %q", got.Annotations["x"], "concurrent")
+	}
+	if got.Spec.Email == "stale@example.com" {
+		t.Errorf("stale write reached the store")
+	}
+}
+
 // TestMutateStatus_RetriesOnConflictAndKeepsAConcurrentWrite pins that a
 // write between the read and the status update makes MutateStatus read
 // again, and that the final status holds both writes.
