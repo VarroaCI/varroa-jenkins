@@ -25,11 +25,14 @@ reading each package's entry point):
   10-method unstructured-level `Backend` seam (implemented by
   `controller.ClientsetClient` and the in-memory `Fake`), package-level
   generic helpers (`Get[T]`/`List[T]`/`Apply[T]`/`ApplyOwned[T]`/`Create`/
-  `Update`/`UpdateStatus`/`Mutate`/`MutateStatus`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`/`PatchMetaAt`), and a static
+  `Update`/`UpdateStatus`/`Mutate`/`CreateOrMutate`/`MutateStatus`/`Delete`/`PatchStatus`/`PatchAnnotations`/`PatchFinalizers`/`PatchMetaAt`), and a static
   type→GVR registry covering all 18 kinds. `Mutate` is the main-resource
   compare-and-swap: it reads, calls a side-effect-free mutate function, and
   updates with the read resourceVersion, reading again on each conflict. A
-  read-modify-write of spec or metadata uses it in place of `Apply`. `PatchMetaAt` sends a
+  read-modify-write of spec or metadata uses it in place of `Apply`. `CreateOrMutate`
+  creates, or mutates the live object when the name exists. `Apply` and
+  `CreateOrMutate` create again, once, when a delete removes the object between
+  the AlreadyExists and the write. `PatchMetaAt` sends a
   `resourceVersion` precondition in the metadata patch and returns the next
   version; a write chained from one read uses it. Every CRD read/write in the
   operator, BFF, and MCP goes through it; new kinds register here instead

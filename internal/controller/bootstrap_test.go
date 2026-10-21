@@ -10,7 +10,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -174,6 +176,91 @@ func TestBootstrapLocalAdmin_DoesNotLogPassword(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), bootstrapSecretName) {
 		t.Error("expected the log to reference the secret name")
+	}
+}
+
+// deleteOnceAfterGetInController deletes the object of gvr once, right after
+// the first Get that finds it.
+func deleteOnceAfterGetInController(store *crdstore.Fake, gvr schema.GroupVersionResource, ns, name string) {
+	fired := false
+	store.SetAfterGet(gvr, func(gotNS, gotName string) {
+		if fired || gotNS != ns || gotName != name {
+			return
+		}
+		fired = true
+		_ = store.DeleteObject(context.Background(), gvr, ns, name)
+	})
+}
+
+func TestBootstrapLocalAdmin_RecreatesGroupDeletedMidUpdate(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+	crdstore.MustSeed(client.store, &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: bootstrapGroupName},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"alice"}},
+	})
+	gvr, _ := crdstore.GVRFor[v1alpha1.Group]()
+	deleteOnceAfterGetInController(client.store, gvr, "", bootstrapGroupName)
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", slog.Default()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	group, err := crdstore.Get[v1alpha1.Group](ctx, client.store, bootstrapGroupName, "")
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	if want := []string{bootstrapAdminUser}; !slices.Equal(group.Spec.Members, want) {
+		t.Errorf("members = %v, want %v", group.Spec.Members, want)
+	}
+}
+
+func TestBootstrapLocalAdmin_RecreatesBindingDeletedMidUpdate(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+	crdstore.MustSeed(client.store, &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: bootstrapRoleBindingName},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			RoleRef:  bootstrapAdminRole,
+			Subjects: []v1alpha1.SubjectRef{{Kind: "User", Name: "alice"}},
+		},
+	})
+	gvr, _ := crdstore.GVRFor[v1alpha1.VarroaRoleBinding]()
+	deleteOnceAfterGetInController(client.store, gvr, "", bootstrapRoleBindingName)
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", slog.Default()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	binding, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, client.store, bootstrapRoleBindingName, "")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if binding.Spec.RoleRef != bootstrapAdminRole {
+		t.Errorf("RoleRef = %s, want %s", binding.Spec.RoleRef, bootstrapAdminRole)
+	}
+	want := []v1alpha1.SubjectRef{
+		{Kind: "User", Name: bootstrapAdminUser},
+		{Kind: "Group", Name: bootstrapGroupName},
+	}
+	if !slices.Equal(binding.Spec.Subjects, want) {
+		t.Errorf("subjects = %v, want %v", binding.Spec.Subjects, want)
+	}
+}
+
+func TestBootstrapLocalAdmin_RecreatesUserWhenStatusPatchAnswersNotFound(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+	userGVR, _ := crdstore.GVRFor[v1alpha1.User]()
+	client.store.FailNext("patchstatus", userGVR, apierrors.NewNotFound(userGVR.GroupResource(), bootstrapAdminUser))
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", slog.Default()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	user, err := crdstore.Get[v1alpha1.User](ctx, client.store, bootstrapAdminUser, "default")
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if user.Status.Credentials == nil || user.Status.Credentials.PasswordHash == "" {
+		t.Errorf("user status has no password hash: %+v", user.Status)
 	}
 }
 

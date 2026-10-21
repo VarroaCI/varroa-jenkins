@@ -66,31 +66,40 @@ func BootstrapLocalAdmin(ctx context.Context, client ResourceClient, store crdst
 		return fmt.Errorf("hash bootstrap password: %w", err)
 	}
 
-	user := &v1alpha1.User{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      username,
-			Namespace: ns,
-			Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal},
-		},
-		Spec: v1alpha1.UserSpec{
-			Email:       username + "@local",
-			DisplayName: "Administrator",
-		},
-	}
-	if err := crdstore.Create[v1alpha1.User](ctx, store, user); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create bootstrap user: %w", err)
-		}
-		logger.Info("bootstrap user exists; keeping it", "user", username)
-	}
-
 	now := metav1.Now()
-	if err := crdstore.PatchStatus[v1alpha1.User](ctx, store, username, ns, &v1alpha1.UserStatus{
-		Credentials: &v1alpha1.UserCredentials{
-			PasswordHash: string(hash),
-			LastChanged:  &now,
-		},
-	}); err != nil {
+	// A delete between the create and the status patch makes the patch answer
+	// NotFound; create the User again once.
+	for attempt := 0; attempt < 2; attempt++ {
+		user := &v1alpha1.User{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      username,
+				Namespace: ns,
+				Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal},
+			},
+			Spec: v1alpha1.UserSpec{
+				Email:       username + "@local",
+				DisplayName: "Administrator",
+			},
+		}
+		if err := crdstore.Create[v1alpha1.User](ctx, store, user); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return fmt.Errorf("create bootstrap user: %w", err)
+			}
+			logger.Info("bootstrap user exists; keeping it", "user", username)
+		}
+
+		err := crdstore.PatchStatus[v1alpha1.User](ctx, store, username, ns, &v1alpha1.UserStatus{
+			Credentials: &v1alpha1.UserCredentials{
+				PasswordHash: string(hash),
+				LastChanged:  &now,
+			},
+		})
+		if err == nil {
+			break
+		}
+		if apierrors.IsNotFound(err) && attempt == 0 {
+			continue
+		}
 		return fmt.Errorf("patch bootstrap user status: %w", err)
 	}
 
@@ -129,14 +138,7 @@ func ensureBootstrapGroup(ctx context.Context, store crdstore.Backend, username 
 			Members:     []string{username},
 		},
 	}
-	err := crdstore.Create[v1alpha1.Group](ctx, store, group)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create bootstrap group: %w", err)
-	}
-	_, err = crdstore.Mutate[v1alpha1.Group](ctx, store, bootstrapGroupName, "", func(g *v1alpha1.Group) (bool, error) {
+	err := crdstore.CreateOrMutate[v1alpha1.Group](ctx, store, group, func(g *v1alpha1.Group) (bool, error) {
 		if slices.Contains(g.Spec.Members, username) {
 			return false, nil
 		}
@@ -144,7 +146,7 @@ func ensureBootstrapGroup(ctx context.Context, store crdstore.Backend, username 
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("add bootstrap user to group: %w", err)
+		return fmt.Errorf("ensure bootstrap group: %w", err)
 	}
 	return nil
 }
@@ -168,14 +170,7 @@ func ensureBootstrapRoleBinding(ctx context.Context, store crdstore.Backend, use
 			RoleRef:  bootstrapAdminRole,
 		},
 	}
-	err := crdstore.Create[v1alpha1.VarroaRoleBinding](ctx, store, binding)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create bootstrap role binding: %w", err)
-	}
-	_, err = crdstore.Mutate[v1alpha1.VarroaRoleBinding](ctx, store, bootstrapRoleBindingName, "", func(b *v1alpha1.VarroaRoleBinding) (bool, error) {
+	err := crdstore.CreateOrMutate[v1alpha1.VarroaRoleBinding](ctx, store, binding, func(b *v1alpha1.VarroaRoleBinding) (bool, error) {
 		changed := false
 		for _, want := range wanted {
 			if slices.ContainsFunc(b.Spec.Subjects, func(sub v1alpha1.SubjectRef) bool {
@@ -189,7 +184,7 @@ func ensureBootstrapRoleBinding(ctx context.Context, store crdstore.Backend, use
 		return changed, nil
 	})
 	if err != nil {
-		return fmt.Errorf("add bootstrap subjects to role binding: %w", err)
+		return fmt.Errorf("ensure bootstrap role binding: %w", err)
 	}
 	return nil
 }

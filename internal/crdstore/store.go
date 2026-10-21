@@ -269,6 +269,46 @@ func Mutate[T any](ctx context.Context, b Backend, name, namespace string, mutat
 	return changed, nil
 }
 
+// CreateOrMutate creates obj, or calls Mutate with mutate on the live object
+// when the name exists. A delete between the create and the update makes
+// Mutate answer NotFound; CreateOrMutate then creates obj again. It makes at
+// most two rounds and returns the last error wrapped with %w.
+func CreateOrMutate[T any](ctx context.Context, b Backend, obj *T, mutate func(live *T) (bool, error)) error {
+	info, err := gvrInfo[T]()
+	if err != nil {
+		return err
+	}
+	u, err := toUnstructured(obj, info)
+	if err != nil {
+		return err
+	}
+	ns := namespaceFromObj(u, info)
+	name := u.GetName()
+
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		c := u.DeepCopy()
+		c.SetResourceVersion("")
+		created, err := b.CreateObject(ctx, info.gvr, ns, c)
+		if err == nil {
+			mergeCreateResult(obj, created)
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create %s: %w", info.gvr.Resource, err)
+		}
+		_, err = Mutate[T](ctx, b, name, ns, mutate)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("mutate %s %q: %w", info.gvr.Resource, name, err)
+		}
+		lastErr = err
+	}
+	return fmt.Errorf("create or mutate %s %q: %w", info.gvr.Resource, name, lastErr)
+}
+
 // ErrNotOwned is returned by ApplyOwned when the live object exists and the
 // caller's ownership predicate rejects it.
 var ErrNotOwned = errors.New("crdstore: object is owned by another writer")
@@ -341,7 +381,9 @@ func ApplyOwned[T any](ctx context.Context, b Backend, obj *T, owned func(live *
 // Apply creates or updates a typed CRD. On create, resourceVersion is cleared
 // before the call. On IsAlreadyExists, the live object is fetched for its
 // resourceVersion, that version is stamped on the object, and Update is
-// attempted.
+// attempted. A NotFound from that Get or from that Update means a delete ran
+// in between; Apply then creates again. It makes at most two rounds. A
+// Conflict is returned and not retried.
 func Apply[T any](ctx context.Context, b Backend, obj *T) error {
 	info, err := gvrInfo[T]()
 	if err != nil {
@@ -352,26 +394,40 @@ func Apply[T any](ctx context.Context, b Backend, obj *T) error {
 		return err
 	}
 	ns := namespaceFromObj(u, info)
+	name := u.GetName()
 
-	u.SetResourceVersion("")
-	_, err = b.CreateObject(ctx, info.gvr, ns, u)
-	if apierrors.IsAlreadyExists(err) {
-		existing, getErr := b.GetObject(ctx, info.gvr, ns, u.GetName())
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		u.SetResourceVersion("")
+		created, err := b.CreateObject(ctx, info.gvr, ns, u)
+		if err == nil {
+			mergeCreateResult(obj, created)
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create %s: %w", info.gvr.Resource, err)
+		}
+		existing, getErr := b.GetObject(ctx, info.gvr, ns, name)
+		if apierrors.IsNotFound(getErr) {
+			lastErr = getErr
+			continue
+		}
 		if getErr != nil {
 			return fmt.Errorf("get existing %s for update: %w", info.gvr.Resource, getErr)
 		}
 		u.SetResourceVersion(existing.GetResourceVersion())
 		created, updErr := b.UpdateObject(ctx, info.gvr, ns, u)
-		if updErr != nil {
-			return fmt.Errorf("update %s: %w", info.gvr.Resource, updErr)
+		if updErr == nil {
+			mergeCreateResult(obj, created)
+			return nil
 		}
-		mergeCreateResult(obj, created)
-		return nil
+		if apierrors.IsNotFound(updErr) {
+			lastErr = updErr
+			continue
+		}
+		return fmt.Errorf("update %s: %w", info.gvr.Resource, updErr)
 	}
-	if err != nil {
-		return fmt.Errorf("create %s: %w", info.gvr.Resource, err)
-	}
-	return nil
+	return fmt.Errorf("apply %s %q: %w", info.gvr.Resource, name, lastErr)
 }
 
 // Delete deletes a typed CRD by name and namespace. namespace "" for
