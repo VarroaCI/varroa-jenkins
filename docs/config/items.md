@@ -231,6 +231,7 @@ capability. A running job or unreadable build state defers deletion.
 Deletion also removes build history.
 An approval keeps the entry until the mite confirms the delete.
 A failed delete keeps the entry and shows the error in `approval.error`. Approve again to retry.
+An items apply that stops before the remove step keeps every pending entry.
 While a deletion is deferred, each push checks the items again. A deferred item that has no running build is then deleted.
 An approved deletion also removes the item, and every item below it, from the mite's record of managed items. A later apply does not delete an item that you create again at that path.
 

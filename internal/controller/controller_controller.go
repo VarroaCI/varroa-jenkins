@@ -2588,6 +2588,43 @@ func rebuildPendingDeletions(old []v1alpha1.PendingDeletion, reported []*mitev1.
 	return pending
 }
 
+// itemsWalkReachedRemoval reports whether the items walk in a desired-state
+// result reached the undeclared-item removal step. A walk that stops earlier
+// reports neither success nor a refused item.
+func itemsWalkReachedRemoval(d *mitev1.DesiredStateResult) bool {
+	return d.ItemsSuccess || len(d.ItemFailures) > 0
+}
+
+// applyDeferredDeletionsResult sets status.pendingItemDeletions from a
+// desired-state result. A result that stops before the remove step keeps the
+// pending list and its condition. A result from another cell instance changes
+// nothing.
+func applyDeferredDeletionsResult(cr *v1alpha1.Controller, d *mitev1.DesiredStateResult, now metav1.Time) {
+	if isCellController(cr) && !cellResultFromCurrentInstance(cr, d) {
+		return
+	}
+	if len(d.DeferredItemDeletions) > 0 {
+		pending := rebuildPendingDeletions(cr.Status.PendingItemDeletions, d.DeferredItemDeletions, now)
+		cr.Status.PendingItemDeletions = pending
+		cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+			Type:    v1alpha1.ConditionDeletionPending,
+			Status:  metav1.ConditionTrue,
+			Reason:  v1alpha1.ReasonItemDeletionPending,
+			Message: fmt.Sprintf("%d item deletion(s) deferred: a build is in progress", len(pending)),
+		})
+		return
+	}
+	if !itemsWalkReachedRemoval(d) {
+		return
+	}
+	cr.Status.PendingItemDeletions = nil
+	cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
+		Type:   v1alpha1.ConditionDeletionPending,
+		Status: metav1.ConditionFalse,
+		Reason: v1alpha1.ReasonNoDeletionPending,
+	})
+}
+
 // removePendingDeletion removes the pending deletion entry for path from
 // status and reports whether it found one. It sets DeletionPending to False
 // when the list becomes empty.
@@ -4164,23 +4201,7 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError, unconfirmed)
 				}
 				// DeletionPending: surface deferred item deletions from the mite.
-				if len(r.DesiredState.DeferredItemDeletions) > 0 {
-					pending := rebuildPendingDeletions(cr.Status.PendingItemDeletions, r.DesiredState.DeferredItemDeletions, metav1Now())
-					cr.Status.PendingItemDeletions = pending
-					cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-						Type:    v1alpha1.ConditionDeletionPending,
-						Status:  metav1.ConditionTrue,
-						Reason:  v1alpha1.ReasonItemDeletionPending,
-						Message: fmt.Sprintf("%d item deletion(s) deferred: a build is in progress", len(pending)),
-					})
-				} else {
-					cr.Status.PendingItemDeletions = nil
-					cr.Status.Conditions = setCondition(cr.Status.Conditions, v1alpha1.ControllerCondition{
-						Type:   v1alpha1.ConditionDeletionPending,
-						Status: metav1.ConditionFalse,
-						Reason: v1alpha1.ReasonNoDeletionPending,
-					})
-				}
+				applyDeferredDeletionsResult(cr, r.DesiredState, metav1Now())
 				// Build ApplyResult from the mite's per-section outcomes — records
 				// per-section errors structurally on status (config, rbac, plugins, items).
 				d := r.DesiredState

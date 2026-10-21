@@ -207,3 +207,162 @@ func TestReconcile_FailedDeleteItemResultKeepsTheEntry(t *testing.T) {
 		t.Fatalf("approval = %+v, want the mite error recorded", approval)
 	}
 }
+
+// deferredResult builds a desired-state result for the deferred-deletion
+// tests. Each deferred path is reported with the same reason text.
+func deferredResult(itemsOK bool, failures []string, deferred ...string) *mitev1.DesiredStateResult {
+	d := &mitev1.DesiredStateResult{ItemsSuccess: itemsOK}
+	for _, path := range failures {
+		d.ItemFailures = append(d.ItemFailures, &mitev1.ItemFailure{Path: path})
+	}
+	for _, path := range deferred {
+		d.DeferredItemDeletions = append(d.DeferredItemDeletions, &mitev1.DeferredDeletion{Path: path, Reason: "in use"})
+	}
+	return d
+}
+
+// pendingDeletionController returns a controller with one approved pending
+// deletion and DeletionPending set to True.
+func pendingDeletionController(t0 metav1.Time) *v1alpha1.Controller {
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{
+		{Path: "team/job", DetectedAt: t0, Approval: &v1alpha1.DeletionApproval{CommandID: "c1", Error: "boom"}},
+	}
+	cr.Status.Conditions = []v1alpha1.ControllerCondition{{Type: v1alpha1.ConditionDeletionPending, Status: metav1.ConditionTrue}}
+	return cr
+}
+
+func TestApplyDeferredDeletionsResult_AbortedWalkKeepsTheList(t *testing.T) {
+	t0 := metav1Now()
+	cr := pendingDeletionController(t0)
+	d := deferredResult(false, nil)
+	d.ItemsError = "parse items: bad"
+
+	applyDeferredDeletionsResult(cr, d, metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 1 {
+		t.Fatalf("pending deletions = %+v, want the entry kept", cr.Status.PendingItemDeletions)
+	}
+	entry := cr.Status.PendingItemDeletions[0]
+	if entry.Approval == nil || entry.Approval.Error != "boom" || !entry.DetectedAt.Equal(&t0) {
+		t.Fatalf("entry = %+v, want the approval and DetectedAt kept", entry)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionTrue {
+		t.Fatalf("DeletionPending = %s, want True", got)
+	}
+}
+
+func TestApplyDeferredDeletionsResult_ResultWithNoItemsStepKeepsTheList(t *testing.T) {
+	cr := pendingDeletionController(metav1Now())
+
+	applyDeferredDeletionsResult(cr, &mitev1.DesiredStateResult{}, metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 1 {
+		t.Fatalf("pending deletions = %+v, want the entry kept", cr.Status.PendingItemDeletions)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionTrue {
+		t.Fatalf("DeletionPending = %s, want True", got)
+	}
+}
+
+func TestApplyDeferredDeletionsResult_CompletedWalkWithNoDeferralsClears(t *testing.T) {
+	cr := pendingDeletionController(metav1Now())
+
+	applyDeferredDeletionsResult(cr, deferredResult(true, nil), metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 0 {
+		t.Fatalf("pending deletions = %+v, want none", cr.Status.PendingItemDeletions)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionFalse {
+		t.Fatalf("DeletionPending = %s, want False", got)
+	}
+}
+
+func TestApplyDeferredDeletionsResult_RefusedWalkWithNoDeferralsClears(t *testing.T) {
+	cr := pendingDeletionController(metav1Now())
+
+	applyDeferredDeletionsResult(cr, deferredResult(false, []string{"x"}), metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 0 {
+		t.Fatalf("pending deletions = %+v, want none", cr.Status.PendingItemDeletions)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionFalse {
+		t.Fatalf("DeletionPending = %s, want False", got)
+	}
+}
+
+func TestApplyDeferredDeletionsResult_FailedWalkWithDeferralsRebuilds(t *testing.T) {
+	t0 := metav1Now()
+	cr := pendingDeletionController(t0)
+
+	applyDeferredDeletionsResult(cr, deferredResult(false, nil, "team/job", "team/other"), metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 2 {
+		t.Fatalf("pending deletions = %+v, want two entries", cr.Status.PendingItemDeletions)
+	}
+	kept := cr.Status.PendingItemDeletions[0]
+	if kept.Path != "team/job" || kept.Approval == nil || kept.Approval.CommandID != "c1" || !kept.DetectedAt.Equal(&t0) {
+		t.Fatalf("entry = %+v, want team/job with its approval and DetectedAt", kept)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionTrue {
+		t.Fatalf("DeletionPending = %s, want True", got)
+	}
+}
+
+func TestApplyDeferredDeletionsResult_SupersededCellInstanceChangesNothing(t *testing.T) {
+	results := map[string]*mitev1.DesiredStateResult{
+		"walk without deferrals": deferredResult(true, nil),
+		"deferrals":              deferredResult(false, nil, "team/other"),
+	}
+	for name, d := range results {
+		t.Run(name, func(t *testing.T) {
+			cr := pendingDeletionController(metav1Now())
+			cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+			cr.Status.Cell = &v1alpha1.CellStatus{Instance: "new"}
+			d.CellInstance = "old"
+
+			applyDeferredDeletionsResult(cr, d, metav1Now())
+
+			if len(cr.Status.PendingItemDeletions) != 1 || cr.Status.PendingItemDeletions[0].Path != "team/job" {
+				t.Fatalf("pending deletions = %+v, want the list unchanged", cr.Status.PendingItemDeletions)
+			}
+			if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionTrue {
+				t.Fatalf("DeletionPending = %s, want True", got)
+			}
+		})
+	}
+}
+
+func TestApplyDeferredDeletionsResult_CurrentCellInstanceApplies(t *testing.T) {
+	cr := pendingDeletionController(metav1Now())
+	cr.Spec.Cell = &v1alpha1.CellSpec{Enabled: true}
+	cr.Status.Cell = &v1alpha1.CellStatus{Instance: "new"}
+	d := deferredResult(true, nil)
+	d.CellInstance = "new"
+
+	applyDeferredDeletionsResult(cr, d, metav1Now())
+
+	if len(cr.Status.PendingItemDeletions) != 0 {
+		t.Fatalf("pending deletions = %+v, want none", cr.Status.PendingItemDeletions)
+	}
+	if got := deletionPendingStatus(t, &cr.Status); got != metav1.ConditionFalse {
+		t.Fatalf("DeletionPending = %s, want False", got)
+	}
+}
+
+func TestReconcile_AbortedItemsWalkKeepsThePendingDeletions(t *testing.T) {
+	rec := newTestReconcilerWithTokenSigner(newTestClientWithBundle())
+	transport := &captureTransport{}
+	rec.miteTransport = transport
+	cr := testController("mine", "ns", v1alpha1.ControllerPhaseConnected)
+	cr.Status.PendingItemDeletions = []v1alpha1.PendingDeletion{
+		{Path: "team/job", Approval: &v1alpha1.DeletionApproval{CommandID: "c1"}},
+	}
+	transport.drainResults = []*mitev1.CommandResult{mkDSR(true, true, true, false, "", "", "", "parse items: bad yaml", "hash-1")}
+
+	_ = rec.reconcileController(context.Background(), cr)
+
+	if len(cr.Status.PendingItemDeletions) != 1 || cr.Status.PendingItemDeletions[0].Approval == nil {
+		t.Fatalf("pending deletions = %+v, want the entry and its approval kept", cr.Status.PendingItemDeletions)
+	}
+}
