@@ -2619,16 +2619,23 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			a.Logger.Error("rehydration retry after items apply failed", "error", err)
 			result.RehydrationSuccess = false
 			result.RehydrationError = err.Error()
+			result.RehydrationBranchScansUnknown = true
 		} else {
 			keep := retry.deferredJobs
+			var (
+				branches   *mitev1.JobBranchSet
+				pollFailed bool
+			)
 			if result.ItemsSuccess {
 				var orphans []string
 				keep, orphans = orphanDeferredJobs(a.jenkinsHomeDir, retry.deferredJobs, func() *mitev1.JobBranchSet {
 					set, err := a.pollJobBranches(ctx)
 					if err != nil {
 						a.Logger.Warn("rehydration branch inventory poll failed, keeping multibranch deferrals", "error", err)
+						pollFailed = true
 						return nil
 					}
+					branches = set
 					return set
 				})
 				if len(orphans) > 0 {
@@ -2643,6 +2650,14 @@ func (a *Agent) handleDesiredState(ctx context.Context, cmd *mitev1.DesiredState
 			a.Logger.Info("rehydration seeded deferred jobs after the items apply",
 				"deferred_before", deferredBefore, "deferred_after", len(keep))
 			result.RehydrationDeferredJobs = keep
+			if len(keep) > 0 {
+				// Without a successful items apply the branch inventory was
+				// not read, so the failed scans are unknown.
+				result.RehydrationBranchScansUnknown = !result.ItemsSuccess || pollFailed
+				if !result.RehydrationBranchScansUnknown {
+					result.RehydrationFailedScans = failedBranchScans(a.jenkinsHomeDir, keep, branches)
+				}
+			}
 		}
 	}
 

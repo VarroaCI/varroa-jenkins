@@ -2421,3 +2421,22 @@ func TestSetTenantWarningsCondition_SkipsMissingMemberCell(t *testing.T) {
 		t.Errorf("message = %q, want %q", cond.Message, "ItemsHeld: items held")
 	}
 }
+
+func TestSetTenantWarningsCondition_HibernationIgnoredOutranksBranchScanFailed(t *testing.T) {
+	cond := foldTenantWarnings(t, []v1alpha1.TenantWarning{
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "the last branch scan of mb ended with FAILURE"},
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonHibernationIgnored, Message: "hibernation is ignored on a cell"},
+	})
+	if cond.Reason != v1alpha1.TeamReasonHibernationIgnored {
+		t.Errorf("expected reason HibernationIgnored, got %q", cond.Reason)
+	}
+}
+
+func TestSetTenantWarningsCondition_BranchScanFailedAlone(t *testing.T) {
+	cond := foldTenantWarnings(t, []v1alpha1.TenantWarning{
+		{Tenant: "payments", Reason: v1alpha1.TeamReasonBranchScanFailed, Message: "the last branch scan of mb ended with FAILURE"},
+	})
+	if cond.Reason != v1alpha1.TeamReasonBranchScanFailed {
+		t.Errorf("expected reason BranchScanFailed, got %q", cond.Reason)
+	}
+}

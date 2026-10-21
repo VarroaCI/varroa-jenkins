@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -418,6 +419,71 @@ func scanOmitsJob(set *mitev1.JobBranchSet, folder, jobPath string) bool {
 		}
 		folder = child
 	}
+}
+
+// branchScanFailure walks the same path as scanOmitsJob. It reports the
+// folder on that path whose last completed scan did not succeed, with the
+// index result of that scan. A missing row, a running scan, truncated heads,
+// a job path outside folder, or a head that the scan did not list answer
+// "", "".
+func branchScanFailure(set *mitev1.JobBranchSet, folder, jobPath string) (failedFolder, result string) {
+	if set == nil {
+		return "", ""
+	}
+	for {
+		row := branchProjectRow(set, folder)
+		if row == nil || row.IndexResult == "" || row.HeadsTruncated {
+			return "", ""
+		}
+		if row.IndexResult != branchIndexSucceeded {
+			return folder, row.IndexResult
+		}
+		prefix := folder + "/"
+		if !strings.HasPrefix(jobPath, prefix) {
+			return "", ""
+		}
+		rest := strings.TrimPrefix(jobPath, prefix)
+		child := folder + "/" + rest
+		if next := strings.Index(rest, "/"); next >= 0 {
+			child = folder + "/" + rest[:next]
+		}
+		if !hasBranchHead(row, child) || child == jobPath {
+			return "", ""
+		}
+		folder = child
+	}
+}
+
+// failedBranchScans groups the kept deferred jobs by the folder whose last
+// completed branch scan did not succeed. The result is sorted by folder.
+// A nil set answers nil.
+func failedBranchScans(jenkinsHome string, keep []string, set *mitev1.JobBranchSet) []*mitev1.RehydrationFailedScan {
+	byFolder := map[string]*mitev1.RehydrationFailedScan{}
+	for _, jobPath := range keep {
+		c := jobCreatorFor(jenkinsHome, jobPath)
+		if c.folder == "" {
+			continue
+		}
+		folder, result := branchScanFailure(set, c.folder, jobPath)
+		if folder == "" {
+			continue
+		}
+		scan := byFolder[folder]
+		if scan == nil {
+			scan = &mitev1.RehydrationFailedScan{Folder: folder, IndexResult: result}
+			byFolder[folder] = scan
+		}
+		scan.DeferredJobs++
+	}
+	if len(byFolder) == 0 {
+		return nil
+	}
+	out := make([]*mitev1.RehydrationFailedScan, 0, len(byFolder))
+	for _, scan := range byFolder {
+		out = append(out, scan)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Folder < out[j].Folder })
+	return out
 }
 
 // branchProjectRow returns the inventory row of the project at jobPath, or

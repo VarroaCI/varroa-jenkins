@@ -372,6 +372,11 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   no child on the job's path. A running scan, a failed scan, a missing row,
   truncated heads, or a failed poll keeps the deferral. The poll runs only when
   a computed folder decides a deferred job, and the cached set is not used.
+  The mite also reports each deciding folder whose last completed scan did not
+  succeed and that keeps a deferred job (`branchScanFailure`, `failedBranchScans`) in
+  `DesiredStateResult.rehydration_failed_scans`. It sets
+  `rehydration_branch_scans_unknown` when the inventory poll failed, when the items
+  apply did not succeed, or when the retry failed, so the operator keeps its last warning.
   A failed items apply keeps every deferral. The marker never records the `rehydration` section while
   a job stays deferred. The composite fast path skips a command only when the
   marker also holds the bundle's `rehydration` hash.

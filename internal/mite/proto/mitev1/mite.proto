@@ -305,6 +305,20 @@ message DesiredStateResult {
   // The gateway sets it from the client certificate of the stream. A value
   // that the mite sends is replaced.
   string cell_instance = 20;
+  // rehydration_failed_scans lists each computed folder whose last completed
+  // branch scan did not succeed and that keeps at least one deferred job.
+  repeated RehydrationFailedScan rehydration_failed_scans = 21;
+  // rehydration_branch_scans_unknown is true when the mite could not read the
+  // branch inventory, so rehydration_failed_scans is not complete.
+  bool rehydration_branch_scans_unknown = 22;
+}
+
+// RehydrationFailedScan is one multibranch project or organization folder
+// whose last completed branch scan did not succeed.
+message RehydrationFailedScan {
+  string folder = 1;
+  string index_result = 2;
+  int32 deferred_jobs = 3;
 }
 
 message DeferredDeletion {

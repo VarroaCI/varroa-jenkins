@@ -4923,7 +4923,7 @@ type ComponentsSchemasTeamCellWarning struct {
 	// Message The warning message, which names the fault.
 	Message string `json:"message"`
 
-	// Reason The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or HibernationIgnored.
+	// Reason The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, HibernationIgnored, or BranchScanFailed.
 	Reason string `json:"reason"`
 }
 

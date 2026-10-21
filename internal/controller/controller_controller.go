@@ -4058,11 +4058,20 @@ func (r *Reconciler) handleConnected(ctx context.Context, cr *v1alpha1.Controlle
 					deferredByTenant := partitionJobPathsByTenant(r.DesiredState.RehydrationDeferredJobs, tenants)
 					coveredByTenant := partitionJobPathsByTenant(resultMatch.CoveredJobPaths, tenants)
 					reloadFailedByTenant := partitionReloadFailuresByTenant(r.DesiredState.RehydrationReloadFailures, tenants)
+					matchedTenants := make(map[string]bool)
+					for _, e := range cr.Status.Cell.Rehydration {
+						if e.CommandID == rehydrationID {
+							matchedTenants[e.Tenant] = true
+						}
+					}
 					cr.Status.Cell.Rehydration = applyRehydrationResult(
 						cr.Status.Cell.Rehydration, rehydrationID,
 						r.DesiredState.RehydrationSuccess, r.DesiredState.RehydrationError,
 						deferredByTenant, coveredByTenant, reloadFailedByTenant, time.Now(),
 					)
+					cr.Status.Cell.TenantWarnings = branchScanFailedAfter(
+						cr.Status.Cell.TenantWarnings, cr.Status.Cell, r.DesiredState, matchedTenants)
+					pruneBranchScanFailedWarnings(cr.Status.Cell)
 				}
 				// Number-only progress (design D4, task 5.7): a block
 				// counts as seeded only once this matching, successful

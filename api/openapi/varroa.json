@@ -15589,7 +15589,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or HibernationIgnored.",
+            "description": "The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, HibernationIgnored, or BranchScanFailed.",
             "type": "string"
           }
         },

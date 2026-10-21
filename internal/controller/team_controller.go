@@ -1161,6 +1161,7 @@ var tenantWarningPriority = map[string]int{
 	v1alpha1.TeamReasonPodTemplateSkipped: 3,
 	v1alpha1.TeamReasonCredentialSkipped:  4,
 	v1alpha1.TeamReasonHibernationIgnored: 5,
+	v1alpha1.TeamReasonBranchScanFailed:   6,
 }
 
 // foldedWarning is one distinct tenant warning and the namespace/name keys

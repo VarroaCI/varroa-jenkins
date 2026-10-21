@@ -445,3 +445,156 @@ func TestRehydrationDropsBranchDeletedAfterScan(t *testing.T) {
 		t.Errorf("expected no directory for the deleted branch, stat err = %v", err)
 	}
 }
+
+func TestBranchScanFailure(t *testing.T) {
+	const failure = "FAILURE"
+	tests := []struct {
+		name       string
+		set        *mitev1.JobBranchSet
+		folder     string
+		job        string
+		wantFolder string
+		wantResult string
+	}{
+		{
+			name:       "multibranch failed scan",
+			set:        branchSet(branchRow("mb", failure)),
+			folder:     "mb",
+			job:        "mb/main",
+			wantFolder: "mb",
+			wantResult: failure,
+		},
+		{
+			name:       "multibranch aborted scan",
+			set:        branchSet(branchRow("mb", "ABORTED")),
+			folder:     "mb",
+			job:        "mb/main",
+			wantFolder: "mb",
+			wantResult: "ABORTED",
+		},
+		{
+			name:   "multibranch successful scan",
+			set:    branchSet(branchRow("mb", branchIndexSucceeded)),
+			folder: "mb",
+			job:    "mb/main",
+		},
+		{
+			name:   "multibranch scan still running",
+			set:    branchSet(branchRow("mb", "")),
+			folder: "mb",
+			job:    "mb/main",
+		},
+		{
+			name:   "no row",
+			set:    branchSet(),
+			folder: "mb",
+			job:    "mb/main",
+		},
+		{
+			name:   "nil set",
+			set:    nil,
+			folder: "mb",
+			job:    "mb/main",
+		},
+		{
+			name: "organization folder lists the repository, repository failed",
+			set: branchSet(
+				branchRow("sbsoftware/repos", branchIndexSucceeded, "sbsoftware/repos/smoke-push"),
+				branchRow("sbsoftware/repos/smoke-push", failure),
+			),
+			folder:     "sbsoftware/repos",
+			job:        "sbsoftware/repos/smoke-push/main",
+			wantFolder: "sbsoftware/repos/smoke-push",
+			wantResult: failure,
+		},
+		{
+			name:       "organization folder itself failed",
+			set:        branchSet(branchRow("sbsoftware/repos", failure)),
+			folder:     "sbsoftware/repos",
+			job:        "sbsoftware/repos/smoke-push/main",
+			wantFolder: "sbsoftware/repos",
+			wantResult: failure,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFolder, gotResult := branchScanFailure(tt.set, tt.folder, tt.job)
+			if gotFolder != tt.wantFolder || gotResult != tt.wantResult {
+				t.Errorf("branchScanFailure = (%q, %q), want (%q, %q)",
+					gotFolder, gotResult, tt.wantFolder, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestFailedBranchScansGroupsByFolder(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	writeJobConfig(t, home, "plain", folderConfig)
+	if err := os.MkdirAll(filepath.Join(home, "jobs", "bare"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	set := branchSet(branchRow("mb", "FAILURE"))
+	keep := []string{"mb/main", "mb/feature", "plain/child", "bare/main"}
+
+	got := failedBranchScans(home, keep, set)
+	want := []*mitev1.RehydrationFailedScan{{Folder: "mb", IndexResult: "FAILURE", DeferredJobs: 2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("failedBranchScans = %v, want %v", got, want)
+	}
+}
+
+func TestRehydrationReportsFailedBranchScan(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	const branches = `{"projects":[{"jobPath":"mb","indexResult":"FAILURE","heads":[]}],"total":1}`
+	srv := rehydrationServerWithBranches(t, home, []string{"new-job"}, false, branches)
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+	cmd := orphanCommand("hash-failed-scan", &mitev1.RehydrationBundle{
+		ContentHash: "content-failed-scan",
+		Files: []*mitev1.RehydrationFile{
+			rehydrationFile(t, "jobs/mb/jobs/main/nextBuildNumber", []byte("2")),
+		},
+	})
+
+	res := agent.handleDesiredState(context.Background(), cmd)
+	if !res.ItemsSuccess || !res.RehydrationSuccess {
+		t.Fatalf("expected items and rehydration to succeed, got %+v", res)
+	}
+	if want := []string{"mb/main"}; !reflect.DeepEqual(res.RehydrationDeferredJobs, want) {
+		t.Errorf("RehydrationDeferredJobs = %v, want %v", res.RehydrationDeferredJobs, want)
+	}
+	want := []*mitev1.RehydrationFailedScan{{Folder: "mb", IndexResult: "FAILURE", DeferredJobs: 1}}
+	if !reflect.DeepEqual(res.RehydrationFailedScans, want) {
+		t.Errorf("RehydrationFailedScans = %v, want %v", res.RehydrationFailedScans, want)
+	}
+	if res.RehydrationBranchScansUnknown {
+		t.Error("RehydrationBranchScansUnknown = true, want false")
+	}
+}
+
+func TestRehydrationBranchScansUnknownOnPollFailure(t *testing.T) {
+	home := t.TempDir()
+	writeJobConfig(t, home, "mb", multibranchConfig)
+	// An empty branch response fails to decode, so the poll reports an error.
+	srv := rehydrationServerWithBranches(t, home, []string{"new-job"}, false, "")
+
+	agent := newTestAgentWithJenkins(t, srv.URL)
+	agent.jenkinsHomeDir = home
+	cmd := orphanCommand("hash-poll-failure", &mitev1.RehydrationBundle{
+		ContentHash: "content-poll-failure",
+		Files: []*mitev1.RehydrationFile{
+			rehydrationFile(t, "jobs/mb/jobs/main/nextBuildNumber", []byte("2")),
+		},
+	})
+
+	res := agent.handleDesiredState(context.Background(), cmd)
+	if !res.RehydrationBranchScansUnknown {
+		t.Error("RehydrationBranchScansUnknown = false, want true")
+	}
+	if len(res.RehydrationFailedScans) != 0 {
+		t.Errorf("RehydrationFailedScans = %v, want none", res.RehydrationFailedScans)
+	}
+}

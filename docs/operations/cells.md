@@ -118,6 +118,7 @@ Expect `"status":"True","reason":"TenantPlaced"`.
   folder until fixed. A folder held on any member cell shows no job.
 - **Tenant warnings.** `TenantWarnings` folds all member cells; several-cell lines name cells. When Jenkins refuses a tenant item, the Team reports `TenantWarnings=True` with the reason `ItemsApplyFailed`. Other tenants still apply. The cell reports those other tenants as applied. The message names each refused item and its error. A successful items apply clears it.
   A new cell pod drops a refused tenant from the applied list. The tenant returns when all its items apply.
+- **Branch scan warnings.** A failed or aborted branch scan keeps the branch jobs deferred until a scan succeeds or `rehydrateDeadline` passes. The Team reports `TenantWarnings=True`, reason `BranchScanFailed`. If the repository is gone, remove the project.
 - **Item role.** The operator grants the service identity build, read, and replay permissions
   on the folder's subtree.
 - **Member role.** The operator grants read, discover, build, cancel, and replay on the folder's
@@ -317,7 +318,7 @@ child seeds only after branch indexing creates it; the operator retries until th
 | `TenantRehydrated` | True | Every selected seed reached the cell. | None. |
 | `RehydrationPending` | False | A bundle is outstanding, or a job is deferred. Only deferred jobs and jobs with no number seed wait. Above 256 such jobs for a tenant, or past a cell-wide size limit, the largest tenants wait whole. | Wait; the operator resends after a result or a timeout. |
 | `RehydrationTruncated` | False | Seeds exceed one bundle. Only jobs with no build number wait. Above 256 such jobs, the whole tenant waits. | Wait; number-only bundles cover every job before full records resume. |
-| `RehydrationFailed` | False | The mite rejected the bundle, could not reload a job, or `rehydrateDeadline` passed. Past the deadline, the deferred jobs build with no seeded history. | Read the message. A bundle that never applied needs a fresh generation: move the tenant or roll the cell. |
+| `RehydrationFailed` | False | The mite rejected the bundle, could not reload a job, or `rehydrateDeadline` passed. Past the deadline, the deferred jobs build with no seeded history. | Read the message. A bundle that never applied needs a fresh generation: move the tenant or roll the cell. See `BranchScanFailed`. |
 
 A build can still wait on the claim reason `NOT_READY` while `Rehydrated` is `True`; the
 claimer retries. The operator applies a rehydration result and announces the seed within
