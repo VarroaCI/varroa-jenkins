@@ -411,7 +411,7 @@ reading each package's entry point):
   with an empty profile. `ucmeta` additionally exposes outcome-typed
   `ResolveExact`/`ResolveSatisfying`: a provable negative (`NotListed`, 422) and
   an unprovable one (`SourcesDegraded`, retryable 503) must not be conflated,
-  and a healthy source's answer always beats another source's degradation.
+  and a healthy source's answer always beats another source's degradation. A failed metadata fetch keeps the source's last good index (stale) and retries with a backoff from 30 s that doubles up to the ttl; a success resets it.
   `ResolveAvailable` is the single serving entry point: pull-through
   (`ResolveSHA256` delegates to it), the `POST /api/v1/servability` endpoint,
   and the upload planner's declared-pin check all call it. Do not add a second

@@ -38,6 +38,10 @@ import (
 // deadline. The HTTP client's own timeout can end the fetch earlier.
 const metadataFetchTimeout = 2 * time.Minute
 
+// failureRetryBase is the first wait before a failed source is fetched again.
+// Each further failure doubles the wait, up to the resolver ttl.
+const failureRetryBase = 30 * time.Second
+
 // Source is one upstream update-center metadata endpoint, e.g.
 //
 //	https://updates.jenkins.io/update-center.actual.json                        (weekly)
@@ -66,6 +70,9 @@ type Resolver struct {
 	// fetchTimeout bounds one background metadata fetch. Tests lower it directly.
 	fetchTimeout time.Duration
 
+	// failureRetryBase is the first retry wait after a failed fetch. Tests lower it directly.
+	failureRetryBase time.Duration
+
 	mu    sync.Mutex
 	cache map[string]*sourceEntry // keyed by Source.URL
 	// inflight holds one channel per source whose fetch is running. The channel
@@ -73,16 +80,21 @@ type Resolver struct {
 	inflight map[string]chan struct{}
 }
 
-// sourceEntry is a cached, parsed metadata source. index is nil when the last fetch
-// failed; fetchedAt is stamped either way so a failing source is skipped (not retried)
-// until the next TTL window. healthy records whether that last fetch succeeded, which
-// is what lets a caller tell a provable negative ("every source answered and none
+// sourceEntry is a cached, parsed metadata source. healthy is true when the entry has
+// a usable index. A failed fetch keeps the last good index, marks it stale, and sets a
+// backoff expiry. A source with no good index stays unhealthy until a fetch succeeds.
+// healthy lets a caller tell a provable negative ("every source answered and none
 // listed it") from an unprovable one ("a source is down").
 type sourceEntry struct {
 	fetchedAt time.Time
-	healthy   bool
-	// stale marks an entry past its ttl that a caller used while a refresh runs. A
-	// miss in a stale entry is not proof, because the refresh may list the name.
+	// expiresAt is the time after which ensureFresh starts a refresh.
+	expiresAt time.Time
+	// failures counts failed fetches in a row. A success resets it to zero.
+	failures int
+	healthy  bool
+	// stale marks an entry whose last good index a caller uses while the source is
+	// past its ttl or in a failure backoff. A miss in a stale entry is not proof,
+	// because the source may list the name once it answers.
 	stale  bool
 	index  map[verKey]string     // (name,version) -> base64 sha256
 	byName map[string]PluginMeta // name -> the one version this source lists
@@ -193,8 +205,9 @@ func NewResolver(sources func() []Source, ttl time.Duration, client *http.Client
 		archive: newArchiveResolver(DefaultArchiveBaseURL, client),
 		cache:   make(map[string]*sourceEntry),
 
-		fetchTimeout: metadataFetchTimeout,
-		inflight:     make(map[string]chan struct{}),
+		fetchTimeout:     metadataFetchTimeout,
+		failureRetryBase: failureRetryBase,
+		inflight:         make(map[string]chan struct{}),
 	}
 }
 
@@ -363,18 +376,18 @@ func (r *Resolver) SourceURLs() []string {
 	return out
 }
 
-// ensureFresh returns the cached entry for url, refetching when it is missing or older
-// than ttl. The fetch does not use the caller's deadline: it runs in the background
+// ensureFresh returns the cached entry for url, refetching when it is missing or past
+// its expiry. The fetch does not use the caller's deadline: it runs in the background
 // under fetchTimeout and fills the cache, so a later request uses its result. A caller
 // whose deadline expires first gets the stale entry when one exists. Otherwise it gets
 // an unhealthy entry that is not stored, so the degraded answer is not cached for the
-// ttl. At most one fetch runs per source at a time. A failed fetch stamps fetchedAt
-// with an unhealthy entry, so the source is skipped and not retried until the next
-// ttl window.
+// ttl. At most one fetch runs per source at a time. A failed fetch sets a short retry
+// wait that doubles on each failure, up to the ttl. A last good index keeps answering
+// while the wait runs.
 func (r *Resolver) ensureFresh(ctx context.Context, url string) *sourceEntry {
 	r.mu.Lock()
 	cached, ok := r.cache[url]
-	if ok && r.now().Sub(cached.fetchedAt) < r.ttl {
+	if ok && r.now().Before(cached.expiresAt) {
 		r.mu.Unlock()
 		return cached
 	}
@@ -408,21 +421,58 @@ func (r *Resolver) refresh(parent context.Context, url string, fetchedAt time.Ti
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), r.fetchTimeout)
 	defer cancel()
 
-	entry := &sourceEntry{fetchedAt: fetchedAt}
 	index, byName, err := r.fetch(ctx, url)
-	if err != nil {
-		r.logger.Warn("ucmeta: metadata source unavailable, skipping", "url", url, "error", err)
-	} else {
-		entry.healthy = true
-		entry.index = index
-		entry.byName = byName
-	}
 
 	r.mu.Lock()
+	prev := r.cache[url]
+	var entry *sourceEntry
+	var wait time.Duration
+	if err == nil {
+		entry = &sourceEntry{fetchedAt: fetchedAt, expiresAt: fetchedAt.Add(r.ttl),
+			healthy: true, index: index, byName: byName}
+	} else {
+		failures := 1
+		if prev != nil {
+			failures = prev.failures + 1
+		}
+		wait = failureBackoff(failures, r.failureRetryBase, r.ttl)
+		entry = &sourceEntry{fetchedAt: fetchedAt, expiresAt: r.now().Add(wait), failures: failures}
+		if prev != nil && prev.index != nil {
+			entry.healthy, entry.stale = true, true
+			entry.index, entry.byName = prev.index, prev.byName
+			entry.fetchedAt = prev.fetchedAt // the age of the data, not of the failed attempt
+		}
+	}
 	r.cache[url] = entry
 	delete(r.inflight, url)
 	r.mu.Unlock()
+
+	if err != nil {
+		r.logger.Warn("ucmeta: metadata source unavailable, will retry", "url", url, "error", err,
+			"failures", entry.failures, "retry_in", wait, "serving_stale", entry.stale)
+	} else if prev != nil && prev.failures > 0 {
+		r.logger.Info("ucmeta: metadata source recovered", "url", url, "failures", prev.failures)
+	}
 	close(done)
+}
+
+// failureBackoff returns the wait before the next fetch of a source that failed
+// failures times in a row. The wait doubles from base and never exceeds ceiling.
+func failureBackoff(failures int, base, ceiling time.Duration) time.Duration {
+	if failures < 1 {
+		failures = 1
+	}
+	d := base
+	for i := 1; i < failures; i++ {
+		d *= 2
+		if d >= ceiling {
+			return ceiling
+		}
+	}
+	if d > ceiling {
+		return ceiling
+	}
+	return d
 }
 
 func (r *Resolver) fetch(ctx context.Context, url string) (map[verKey]string, map[string]PluginMeta, error) {

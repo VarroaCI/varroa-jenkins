@@ -105,7 +105,7 @@ func TestResolve_FailedSourceSkipped_OthersResolve(t *testing.T) {
 	}
 }
 
-func TestResolve_FailedSourceNotRetriedWithinTTL(t *testing.T) {
+func TestResolve_FailedSourceNotRetriedBeforeBackoff(t *testing.T) {
 	var hits int32
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -121,7 +121,19 @@ func TestResolve_FailedSourceNotRetriedWithinTTL(t *testing.T) {
 	_, _ = r.ResolveSHA256(ctx, "p", "1")
 	_, _ = r.ResolveSHA256(ctx, "p", "1")
 	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Fatalf("failed source retried within TTL: %d fetches, want 1", got)
+		t.Fatalf("failed source retried at once: %d fetches, want 1", got)
+	}
+
+	r.now = func() time.Time { return base.Add(failureRetryBase - time.Second) }
+	_, _ = r.ResolveSHA256(ctx, "p", "1")
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("failed source retried before its backoff: %d fetches, want 1", got)
+	}
+
+	r.now = func() time.Time { return base.Add(failureRetryBase + time.Second) }
+	_, _ = r.ResolveSHA256(ctx, "p", "1")
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Fatalf("failed source not retried after its backoff: %d fetches, want 2", got)
 	}
 }
 
@@ -326,7 +338,7 @@ func TestEnsureFresh_StaleMissIsNotProvableNegative(t *testing.T) {
 	}
 }
 
-func TestEnsureFresh_FetchOwnTimeoutCachesDegraded(t *testing.T) {
+func TestEnsureFresh_FetchOwnTimeoutBacksOff(t *testing.T) {
 	release := make(chan struct{})
 	srv, hits := gatedServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}},
 		func() bool { return true }, release)
@@ -336,6 +348,8 @@ func TestEnsureFresh_FetchOwnTimeoutCachesDegraded(t *testing.T) {
 	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
 	r.SetArchiveBaseURL("")
 	r.fetchTimeout = 20 * time.Millisecond
+	base := time.Unix(1_700_000_000, 0)
+	r.now = func() time.Time { return base }
 
 	ctx := context.Background()
 	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
@@ -345,7 +359,7 @@ func TestEnsureFresh_FetchOwnTimeoutCachesDegraded(t *testing.T) {
 		t.Fatalf("second call outcome = %v, want degraded", res.Outcome)
 	}
 	if got := atomic.LoadInt32(hits); got != 1 {
-		t.Fatalf("fetches = %d, want 1: a failed source must stay cached for the ttl", got)
+		t.Fatalf("fetches = %d, want 1: a failed source must wait for its backoff", got)
 	}
 }
 
@@ -377,5 +391,189 @@ func TestEnsureFresh_ConcurrentDeadlinedCallersShareOneFetch(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(hits); got != 1 {
 		t.Fatalf("fetches = %d, want 1", got)
+	}
+}
+
+// toggleServer serves the metaServer body while fail is false and HTTP 500 while it is
+// true. It counts every request.
+func toggleServer(t *testing.T, plugins map[string]ucPlugin, fail *atomic.Bool) (*httptest.Server, *int32) {
+	t.Helper()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body := `{"plugins":{`
+		first := true
+		for name, p := range plugins {
+			if !first {
+				body += ","
+			}
+			first = false
+			body += fmt.Sprintf(`%q:{"version":%q,"sha256":%q}`, name, p.Version, p.SHA256)
+		}
+		body += `}}`
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+func TestFailureBackoff_DoublesAndCaps(t *testing.T) {
+	const base, ceiling = 30 * time.Second, time.Hour
+	cases := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{0, 30 * time.Second},
+		{1, 30 * time.Second},
+		{2, time.Minute},
+		{3, 2 * time.Minute},
+		{7, 32 * time.Minute},
+		{8, time.Hour},
+		{1000, time.Hour},
+	}
+	for _, c := range cases {
+		if got := failureBackoff(c.failures, base, ceiling); got != c.want {
+			t.Errorf("failureBackoff(%d) = %v, want %v", c.failures, got, c.want)
+		}
+	}
+}
+
+func TestEnsureFresh_FailedSourceRetriedAfterBackoff(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	r.now = func() time.Time { return base }
+
+	ctx := context.Background()
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("failing fetch outcome = %v, want degraded", res.Outcome)
+	}
+
+	fail.Store(false)
+	r.now = func() time.Time { return base.Add(failureRetryBase - time.Second) }
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("before backoff outcome = %v, want degraded", res.Outcome)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Fatalf("fetches before backoff = %d, want 1", got)
+	}
+
+	r.now = func() time.Time { return base.Add(failureRetryBase + time.Second) }
+	res := r.ResolveExact(ctx, "p", "1")
+	if res.Outcome != Resolved || res.Meta.SHA256 != "s1" {
+		t.Fatalf("after backoff got outcome %v sha %q, want Resolved s1", res.Outcome, res.Meta.SHA256)
+	}
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("fetches after backoff = %d, want 2", got)
+	}
+}
+
+func TestEnsureFresh_BackoffDoublesBetweenFailures(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	ctx := context.Background()
+
+	steps := []struct {
+		at       time.Duration
+		wantHits int32
+	}{
+		{0, 1},
+		{31 * time.Second, 2},                // second failure: wait 1 m
+		{31*time.Second + 59*time.Second, 2}, // still inside the 1 m wait
+		{31*time.Second + 61*time.Second, 3}, // wait over: third failure, wait 2 m
+	}
+	for _, st := range steps {
+		r.now = func() time.Time { return base.Add(st.at) }
+		_ = r.ResolveExact(ctx, "p", "1")
+		if got := atomic.LoadInt32(hits); got != st.wantHits {
+			t.Fatalf("at +%v: fetches = %d, want %d", st.at, got, st.wantHits)
+		}
+	}
+}
+
+func TestEnsureFresh_FailedRefreshKeepsLastGoodIndex(t *testing.T) {
+	var fail atomic.Bool
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	r.now = func() time.Time { return base }
+	ctx := context.Background()
+
+	if sha, err := r.ResolveSHA256(ctx, "p", "1"); err != nil || sha != "s1" {
+		t.Fatalf("warm-up got (%q,%v), want (s1,nil)", sha, err)
+	}
+
+	fail.Store(true)
+	r.now = func() time.Time { return base.Add(2 * time.Hour) }
+	res := r.ResolveExact(ctx, "p", "1")
+	if res.Outcome != Resolved || res.Meta.SHA256 != "s1" {
+		t.Fatalf("failed refresh outcome %v sha %q, want Resolved s1 from the last good index", res.Outcome, res.Meta.SHA256)
+	}
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("fetches = %d, want 2", got)
+	}
+	if res := r.ResolveExact(ctx, "x", "1"); res.Outcome != SourcesDegraded {
+		t.Fatalf("miss against a stale index outcome = %v, want degraded, not NotListed", res.Outcome)
+	}
+	if av := r.ResolveAvailable(ctx, "p", "1"); av.Outcome != Resolved {
+		t.Fatalf("ResolveAvailable outcome = %v, want Resolved", av.Outcome)
+	}
+}
+
+func TestEnsureFresh_SuccessResetsBackoff(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	srv, hits := toggleServer(t, map[string]ucPlugin{"p": {Version: "1", SHA256: "s1"}}, &fail)
+
+	r := NewResolver(staticSources(srv.URL), time.Hour, nil, nil)
+	r.SetArchiveBaseURL("")
+	base := time.Unix(1_700_000_000, 0)
+	ctx := context.Background()
+	at := func(d time.Duration) { r.now = func() time.Time { return base.Add(d) } }
+
+	at(0)
+	_ = r.ResolveExact(ctx, "p", "1") // failure 1: wait 30 s
+	at(31 * time.Second)
+	_ = r.ResolveExact(ctx, "p", "1") // failure 2: wait 1 m
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("fetches while failing = %d, want 2", got)
+	}
+
+	fail.Store(false)
+	at(92 * time.Second)
+	if res := r.ResolveExact(ctx, "p", "1"); res.Outcome != Resolved {
+		t.Fatalf("recovered fetch outcome = %v, want Resolved", res.Outcome)
+	}
+	if got := atomic.LoadInt32(hits); got != 3 {
+		t.Fatalf("fetches after recovery = %d, want 3", got)
+	}
+
+	// The healthy entry lasts one ttl. Its next failure starts the backoff at 30 s again.
+	fail.Store(true)
+	at(92*time.Second + time.Hour + time.Second)
+	_ = r.ResolveExact(ctx, "p", "1") // failure 1 after a success: wait 30 s
+	if got := atomic.LoadInt32(hits); got != 4 {
+		t.Fatalf("fetches at ttl expiry = %d, want 4", got)
+	}
+	at(92*time.Second + time.Hour + time.Second + 31*time.Second)
+	_ = r.ResolveExact(ctx, "p", "1")
+	if got := atomic.LoadInt32(hits); got != 5 {
+		t.Fatalf("fetches 31 s after a post-recovery failure = %d, want 5: the success must reset the backoff", got)
 	}
 }
