@@ -34,6 +34,10 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/pluginver"
 )
 
+// metadataFetchTimeout bounds one metadata fetch. The fetch does not use the caller's
+// deadline. The HTTP client's own timeout can end the fetch earlier.
+const metadataFetchTimeout = 2 * time.Minute
+
 // Source is one upstream update-center metadata endpoint, e.g.
 //
 //	https://updates.jenkins.io/update-center.actual.json                        (weekly)
@@ -59,8 +63,14 @@ type Resolver struct {
 	// Nil disables the fallback.
 	archive *archiveResolver
 
+	// fetchTimeout bounds one background metadata fetch. Tests lower it directly.
+	fetchTimeout time.Duration
+
 	mu    sync.Mutex
 	cache map[string]*sourceEntry // keyed by Source.URL
+	// inflight holds one channel per source whose fetch is running. The channel
+	// closes when the fetch has filled the cache. Guarded by mu.
+	inflight map[string]chan struct{}
 }
 
 // sourceEntry is a cached, parsed metadata source. index is nil when the last fetch
@@ -71,8 +81,11 @@ type Resolver struct {
 type sourceEntry struct {
 	fetchedAt time.Time
 	healthy   bool
-	index     map[verKey]string     // (name,version) -> base64 sha256
-	byName    map[string]PluginMeta // name -> the one version this source lists
+	// stale marks an entry past its ttl that a caller used while a refresh runs. A
+	// miss in a stale entry is not proof, because the refresh may list the name.
+	stale  bool
+	index  map[verKey]string     // (name,version) -> base64 sha256
+	byName map[string]PluginMeta // name -> the one version this source lists
 }
 
 type verKey struct{ name, version string }
@@ -179,6 +192,9 @@ func NewResolver(sources func() []Source, ttl time.Duration, client *http.Client
 		logger:  logger,
 		archive: newArchiveResolver(DefaultArchiveBaseURL, client),
 		cache:   make(map[string]*sourceEntry),
+
+		fetchTimeout: metadataFetchTimeout,
+		inflight:     make(map[string]chan struct{}),
 	}
 }
 
@@ -254,6 +270,9 @@ func (r *Resolver) ResolveAvailable(ctx context.Context, name, version string) A
 		if sha, ok := entry.index[key]; ok {
 			pm := entry.byName[name]
 			return Availability{Outcome: Resolved, SHA256: sha, Via: ViaMetadata, Meta: &pm, Version: version}
+		}
+		if entry.stale {
+			anyDegraded = true // a refresh in flight may list the version
 		}
 		// Wrong version, but the listing still supplies a groupId, which is stable
 		// across a plugin's versions and is all the archive fallback needs.
@@ -345,19 +364,51 @@ func (r *Resolver) SourceURLs() []string {
 }
 
 // ensureFresh returns the cached entry for url, refetching when it is missing or older
-// than ttl. The lock is held across the fetch: fetches are infrequent, and a burst of
-// concurrent requests during warmup shares a single fetch per source rather than
-// stampeding the upstream. A failed fetch stamps fetchedAt with a nil index so the
-// source is skipped and not retried until the next ttl window.
+// than ttl. The fetch does not use the caller's deadline: it runs in the background
+// under fetchTimeout and fills the cache, so a later request uses its result. A caller
+// whose deadline expires first gets the stale entry when one exists. Otherwise it gets
+// an unhealthy entry that is not stored, so the degraded answer is not cached for the
+// ttl. At most one fetch runs per source at a time. A failed fetch stamps fetchedAt
+// with an unhealthy entry, so the source is skipped and not retried until the next
+// ttl window.
 func (r *Resolver) ensureFresh(ctx context.Context, url string) *sourceEntry {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if entry, ok := r.cache[url]; ok && r.now().Sub(entry.fetchedAt) < r.ttl {
-		return entry
+	cached, ok := r.cache[url]
+	if ok && r.now().Sub(cached.fetchedAt) < r.ttl {
+		r.mu.Unlock()
+		return cached
 	}
+	done, running := r.inflight[url]
+	if !running {
+		done = make(chan struct{})
+		r.inflight[url] = done
+		go r.refresh(ctx, url, r.now(), done) // stamp now under the lock
+	}
+	r.mu.Unlock()
 
-	entry := &sourceEntry{fetchedAt: r.now()}
+	select {
+	case <-done:
+		r.mu.Lock()
+		e := r.cache[url]
+		r.mu.Unlock()
+		return e
+	case <-ctx.Done():
+		if ok {
+			stale := *cached // stale entry; better than a degraded answer
+			stale.stale = true
+			return &stale
+		}
+		return &sourceEntry{} // unhealthy for this call only, never stored in r.cache
+	}
+}
+
+// refresh runs one metadata fetch detached from the caller's context, stores the
+// result, and closes done. The fetch itself is bounded by fetchTimeout.
+func (r *Resolver) refresh(parent context.Context, url string, fetchedAt time.Time, done chan struct{}) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), r.fetchTimeout)
+	defer cancel()
+
+	entry := &sourceEntry{fetchedAt: fetchedAt}
 	index, byName, err := r.fetch(ctx, url)
 	if err != nil {
 		r.logger.Warn("ucmeta: metadata source unavailable, skipping", "url", url, "error", err)
@@ -366,8 +417,12 @@ func (r *Resolver) ensureFresh(ctx context.Context, url string) *sourceEntry {
 		entry.index = index
 		entry.byName = byName
 	}
+
+	r.mu.Lock()
 	r.cache[url] = entry
-	return entry
+	delete(r.inflight, url)
+	r.mu.Unlock()
+	close(done)
 }
 
 func (r *Resolver) fetch(ctx context.Context, url string) (map[verKey]string, map[string]PluginMeta, error) {
@@ -454,6 +509,7 @@ func (r *Resolver) resolve(ctx context.Context, name string, accept func(PluginM
 		}
 		m, ok := entry.byName[name]
 		if !ok {
+			anyDegraded = anyDegraded || entry.stale
 			continue
 		}
 		if res.Best == nil || pluginver.Compare(m.Version, res.Best.Version) > 0 {
@@ -461,6 +517,7 @@ func (r *Resolver) resolve(ctx context.Context, name string, accept func(PluginM
 			res.Best = &best
 		}
 		if !accept(m) {
+			anyDegraded = anyDegraded || entry.stale
 			continue
 		}
 		if !found || pluginver.Compare(m.Version, res.Meta.Version) > 0 {

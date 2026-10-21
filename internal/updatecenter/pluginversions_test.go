@@ -2,6 +2,7 @@ package updatecenter
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -365,5 +366,25 @@ func TestPluginVersions_UpstreamDownOmitsPin(t *testing.T) {
 	doc, _ := pluginVersionsDoc(t, ts)
 	if _, ok := doc.Plugins["foo"]; ok {
 		t.Error("pin filled while upstream is down")
+	}
+}
+
+func TestPluginVersions_CanceledFillDoesNotDegradeLaterFill(t *testing.T) {
+	hpiBytes := newCorePluginBytes(t, "1.9", "2.555.3")
+	up := depUpstream(t, "foo", "1.9", hpiBytes, "[]")
+	ts := newTestServer(t, nil,
+		append(pullThroughWithResolver(up.URL), WithDeclaredPluginsFile(declaredFile(t, "foo@1.9")))...)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	doc := &pluginVersionsJSON{Plugins: map[string]map[string]updateCenterPlugin{}}
+	ts.server.fillUnstoredPins(canceled, doc, map[string]bool{})
+	if _, ok := doc.Plugins["foo"]["1.9"]; ok {
+		t.Fatal("foo 1.9 filled under a canceled context")
+	}
+
+	later, _ := pluginVersionsDoc(t, ts)
+	if _, ok := later.Plugins["foo"]["1.9"]; !ok {
+		t.Fatalf("foo 1.9 missing after a later fill: a canceled fill degraded the source: %+v", later)
 	}
 }
