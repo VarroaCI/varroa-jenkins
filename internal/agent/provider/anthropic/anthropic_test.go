@@ -137,6 +137,9 @@ func TestCachedTokensCountAsPrompt(t *testing.T) {
 	if resp.Usage.PromptTokens != 15 {
 		t.Fatalf("prompt tokens = %d, want 15 (input, cache creation, cache read)", resp.Usage.PromptTokens)
 	}
+	if resp.Usage.CacheReadTokens != 7 || resp.Usage.CacheCreationTokens != 5 {
+		t.Fatalf("cache usage = read %d, creation %d; want 7 and 5", resp.Usage.CacheReadTokens, resp.Usage.CacheCreationTokens)
+	}
 }
 
 func TestDefaultBaseURL(t *testing.T) {
@@ -235,5 +238,138 @@ func TestToolResultsMergeIntoUserMessage(t *testing.T) {
 	last := body.Messages[2]
 	if last.Role != "user" || len(last.Content) != 2 || last.Content[1]["is_error"] != true {
 		t.Fatalf("merged message = %+v", last)
+	}
+}
+
+// decodeBody decodes the request body of one recorded call.
+func decodeBody(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return doc
+}
+
+// hasMarker reports whether a block carries a cache breakpoint.
+func hasMarker(block any) bool {
+	m, ok := block.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = m["cache_control"]
+	return ok
+}
+
+// messageBlocks returns the content blocks of message i of a decoded body.
+func messageBlocks(t *testing.T, doc map[string]any, i int) []any {
+	t.Helper()
+	msgs, _ := doc["messages"].([]any)
+	if i >= len(msgs) {
+		t.Fatalf("messages = %d, want more than %d", len(msgs), i)
+	}
+	content, _ := msgs[i].(map[string]any)["content"].([]any)
+	return content
+}
+
+func TestCacheMarkerOnLastMessageBlockOnly(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "done"})
+	tools := []agent.ToolDef{
+		{Name: "a", Description: "first", Schema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "b", Description: "second", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Text: "go"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+			{ID: "c1", Name: "a", Arguments: json.RawMessage(`{}`)},
+			{ID: "c2", Name: "b"},
+		}},
+		{Role: provider.RoleTool, ToolCallID: "c1", ToolName: "a", Text: "one"},
+		{Role: provider.RoleTool, ToolCallID: "c2", ToolName: "b", Text: "two"},
+	}
+	req := provider.Request{Model: "m", System: "sys", Tools: tools, Messages: msgs}
+	if _, err := collect(t, New(ts.URL, nil), provider.Key{}, req); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	doc := decodeBody(t, fake.Requests()[0].Body)
+	if got := messageBlocks(t, doc, 2)[1]; !hasMarker(got) {
+		t.Fatalf("last block of the last message has no marker: %+v", got)
+	}
+	marked := 0
+	for i := range 3 {
+		for j, b := range messageBlocks(t, doc, i) {
+			if hasMarker(b) {
+				marked++
+				if i != 2 || j != 1 {
+					t.Fatalf("message %d block %d carries a marker", i, j)
+				}
+			}
+		}
+	}
+	system, _ := doc["system"].([]any)
+	if len(system) != 1 || !hasMarker(system[0]) {
+		t.Fatalf("system block marker missing: %+v", system)
+	}
+	if len(doc["tools"].([]any)) != 2 || !hasMarker(doc["tools"].([]any)[1]) {
+		t.Fatal("last tool marker missing")
+	}
+	if total := marked + 1 + 1; total != 3 {
+		t.Fatalf("breakpoints = %d, want 3", total)
+	}
+}
+
+func TestCacheMarkerOnLastUserText(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "ok"})
+	req := provider.Request{Model: "m", Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}}}
+	if _, err := collect(t, New(ts.URL, nil), provider.Key{}, req); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	doc := decodeBody(t, fake.Requests()[0].Body)
+	if !hasMarker(messageBlocks(t, doc, 0)[0]) {
+		t.Fatal("the only user text block has no marker")
+	}
+}
+
+func TestCacheMarkerMovesBetweenCalls(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "x"}, providertest.Turn{Text: "y"})
+	a := New(ts.URL, nil)
+	first := []provider.Message{{Role: provider.RoleUser, Text: "start"}}
+	if _, err := collect(t, a, provider.Key{}, provider.Request{Model: "m", Messages: first}); err != nil {
+		t.Fatalf("Collect 1: %v", err)
+	}
+	second := []provider.Message{
+		{Role: provider.RoleUser, Text: "start"},
+		{Role: provider.RoleAssistant, Text: "x"},
+		{Role: provider.RoleUser, Text: "next"},
+	}
+	if _, err := collect(t, a, provider.Key{}, provider.Request{Model: "m", Messages: second}); err != nil {
+		t.Fatalf("Collect 2: %v", err)
+	}
+	doc := decodeBody(t, fake.Requests()[1].Body)
+	if hasMarker(messageBlocks(t, doc, 0)[0]) {
+		t.Fatal("the earlier user message keeps a marker")
+	}
+	if !hasMarker(messageBlocks(t, doc, 2)[0]) {
+		t.Fatal("the new last message has no marker")
+	}
+}
+
+func TestNoCacheMarkerOnEmptyText(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "ok"})
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Text: "hi"},
+		{Role: provider.RoleAssistant, Text: "hello"},
+		{Role: provider.RoleUser, Text: ""},
+	}
+	if _, err := collect(t, New(ts.URL, nil), provider.Key{}, provider.Request{Model: "m", Messages: msgs}); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	doc := decodeBody(t, fake.Requests()[0].Body)
+	if hasMarker(messageBlocks(t, doc, 2)[0]) {
+		t.Fatal("an empty text block carries a marker")
 	}
 }

@@ -362,6 +362,12 @@ func (r *run) consume(ctx context.Context, ch <-chan provider.Delta, turn int) (
 				if d.Usage.CompletionTokens > 0 {
 					out.usage.CompletionTokens = d.Usage.CompletionTokens
 				}
+				if d.Usage.CacheCreationTokens > 0 {
+					out.usage.CacheCreationTokens = d.Usage.CacheCreationTokens
+				}
+				if d.Usage.CacheReadTokens > 0 {
+					out.usage.CacheReadTokens = d.Usage.CacheReadTokens
+				}
 			}
 			if d.Stop != "" {
 				out.stop = d.Stop
@@ -402,7 +408,9 @@ func (r *run) recordUsage(ctx context.Context, out streamed, msgs []provider.Mes
 	if _, err := r.st.RecordStep(ctx, r.id, r.owner, prompt, completion); err != nil {
 		return estimated, mapErr(ctx, err)
 	}
-	r.log.Info("assistant step", "prompt_tokens", prompt, "completion_tokens", completion, "estimated", estimated)
+	r.log.Info("assistant step", "prompt_tokens", prompt, "completion_tokens", completion,
+		"cache_read_tokens", out.usage.CacheReadTokens, "cache_creation_tokens", out.usage.CacheCreationTokens,
+		"estimated", estimated)
 	return estimated, nil
 }
 

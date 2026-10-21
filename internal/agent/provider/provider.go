@@ -83,7 +83,11 @@ type ToolCallDelta struct {
 type Usage struct {
 	PromptTokens     int64
 	CompletionTokens int64
-	Estimated        bool
+	// CacheCreationTokens and CacheReadTokens are a part of PromptTokens;
+	// zero when the provider does not report them.
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+	Estimated           bool
 }
 
 // StopReason says why a call ended.

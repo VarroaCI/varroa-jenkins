@@ -141,11 +141,12 @@ func (a *Adapter) Stream(ctx context.Context, key provider.Key, req provider.Req
 
 // streamState holds what one stream reads across its events.
 type streamState struct {
-	prompt, completion int64
-	toolIndex          int
-	blockTools         map[int]int
-	stop               provider.StopReason
-	finished           bool
+	prompt, completion       int64
+	cacheCreation, cacheRead int64
+	toolIndex                int
+	blockTools               map[int]int
+	stop                     provider.StopReason
+	finished                 bool
 }
 
 // handle reads one event. It sends the deltas of the event and reports the
@@ -173,6 +174,7 @@ func (st *streamState) handle(ctx context.Context, event, data string, ch chan<-
 		u := m.Message.Usage
 		st.prompt = u.Input + u.CacheCreation + u.CacheRead
 		st.completion = u.Output
+		st.cacheCreation, st.cacheRead = u.CacheCreation, u.CacheRead
 	case "content_block_start":
 		var b struct {
 			Index        int `json:"index"`
@@ -239,6 +241,7 @@ func (st *streamState) handle(ctx context.Context, event, data string, ch chan<-
 		}
 		if p := m.Usage.Input + m.Usage.CacheCreation + m.Usage.CacheRead; p != 0 {
 			st.prompt = p
+			st.cacheCreation, st.cacheRead = m.Usage.CacheCreation, m.Usage.CacheRead
 		}
 		if m.Usage.Output != 0 {
 			st.completion = m.Usage.Output
@@ -251,8 +254,13 @@ func (st *streamState) handle(ctx context.Context, event, data string, ch chan<-
 			stop = provider.StopEndTurn
 		}
 		if err := emit(provider.Delta{
-			Usage: &provider.Usage{PromptTokens: st.prompt, CompletionTokens: st.completion},
-			Stop:  stop,
+			Usage: &provider.Usage{
+				PromptTokens:        st.prompt,
+				CompletionTokens:    st.completion,
+				CacheCreationTokens: st.cacheCreation,
+				CacheReadTokens:     st.cacheRead,
+			},
+			Stop: stop,
 		}); err != nil {
 			return err
 		}
@@ -295,7 +303,6 @@ func buildBody(req provider.Request) ([]byte, error) {
 		"model":      req.Model,
 		"max_tokens": maxTokens,
 		"stream":     true,
-		"messages":   convertMessages(req.Messages),
 	}
 	if req.System != "" {
 		doc["system"] = []map[string]any{{
@@ -304,6 +311,9 @@ func buildBody(req provider.Request) ([]byte, error) {
 			"cache_control": map[string]any{"type": "ephemeral"},
 		}}
 	}
+	msgs := convertMessages(req.Messages)
+	markLastBlock(msgs)
+	doc["messages"] = msgs
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(req.Tools))
 		for i, t := range req.Tools {
@@ -320,6 +330,25 @@ func buildBody(req provider.Request) ([]byte, error) {
 		doc["tools"] = tools
 	}
 	return json.Marshal(doc)
+}
+
+// markLastBlock sets a cache breakpoint on the last content block of the last
+// message. Only that block is marked, so the request keeps within the provider
+// limit of four breakpoints. An empty text block is skipped because the API
+// refuses a cache breakpoint on it.
+func markLastBlock(msgs []map[string]any) {
+	if len(msgs) == 0 {
+		return
+	}
+	content, ok := msgs[len(msgs)-1]["content"].([]map[string]any)
+	if !ok || len(content) == 0 {
+		return
+	}
+	last := content[len(content)-1]
+	if last["type"] == "text" && last["text"] == "" {
+		return
+	}
+	last["cache_control"] = map[string]any{"type": "ephemeral"}
 }
 
 // convertMessages maps the contract messages to Messages API messages. Consecutive
