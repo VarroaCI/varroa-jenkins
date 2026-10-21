@@ -382,7 +382,7 @@ not own the gRPC server, NATS bridging, or JWT signing — those are
   marker also holds the bundle's `rehydration` hash.
   While a deferred deletion remains, the marker never records the `items` section, and the
   composite fast path also needs the `items` hash (`itemsConverged`). Each push walks the items
-  again, because the operator rebuilds the pending list from every result.
+  again, because the operator rebuilds the pending list from each walk that reaches the remove step.
   `writeRehydrationFileAt` is the one writer that takes an overwrite flag:
   only the resume path sets it, and `applyRehydrationBundle` keeps its own
   rules.
