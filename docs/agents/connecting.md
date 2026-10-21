@@ -146,6 +146,10 @@ with a copy button and a link to the API keys page. It shows the three blocks
 above, with your dashboard address in place of `<dashboard-host>`. The card
 never shows or holds a key.
 
+## Operator guide
+
+The server sends the [operator guide](guide.md) in its `initialize` instructions. It also serves the guide as the resource `varroa://guide`.
+
 ## Related pages
 
 - [API keys](../security/api-keys.md)

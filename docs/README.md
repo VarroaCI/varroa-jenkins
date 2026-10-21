@@ -73,6 +73,7 @@ Commands use `kubectl` and `helm`. Replace values in `<angle-brackets>` before r
 - [Jenkins controller tools](agents/jenkins-tools.md)
 - [Tool reference](agents/tools.md)
 - [Write through MCP](agents/writing.md)
+- [Operator guide for agents](agents/guide.md)
 
 ## Operations
 

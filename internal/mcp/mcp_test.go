@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
+	"github.com/varroaci/varroa-jenkins/internal/agent/guide"
 	"github.com/varroaci/varroa-jenkins/internal/api"
 	"github.com/varroaci/varroa-jenkins/internal/auth"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
@@ -409,4 +411,102 @@ func (c *stubClient) CreateJenkinsRoleBindingCRD(_ context.Context, _ *v1alpha1.
 }
 func (c *stubClient) UpdateJenkinsRoleBindingCRD(_ context.Context, _ *v1alpha1.JenkinsRoleBinding) error {
 	return nil
+}
+
+func TestInitializeCarriesGuide(t *testing.T) {
+	handler := NewHandler(newTestDeps())
+	resp := mcpRequest(t, handler, "initialize", map[string]interface{}{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]interface{}{"name": "t", "version": "0"},
+	}, nil)
+	if resp.Error != nil {
+		t.Fatalf("initialize returned error: %s", resp.Error)
+	}
+	var result struct {
+		Instructions string                     `json:"instructions"`
+		Capabilities map[string]json.RawMessage `json:"capabilities"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Instructions != guide.Text {
+		t.Errorf("instructions do not equal the operator guide")
+	}
+	if _, ok := result.Capabilities["resources"]; !ok {
+		t.Errorf("capabilities lack resources: %s", resp.Result)
+	}
+}
+
+func TestGuideResourceListsAndReads(t *testing.T) {
+	handler := NewHandler(newTestDeps())
+
+	list := mcpRequest(t, handler, "resources/list", nil, nil)
+	if list.Error != nil {
+		t.Fatalf("resources/list returned error: %s", list.Error)
+	}
+	var listed struct {
+		Resources []struct {
+			URI      string `json:"uri"`
+			MIMEType string `json:"mimeType"`
+		} `json:"resources"`
+	}
+	json.Unmarshal(list.Result, &listed)
+	found := false
+	for _, r := range listed.Resources {
+		if r.URI == guide.URI {
+			found = r.MIMEType == "text/markdown"
+		}
+	}
+	if !found {
+		t.Fatalf("resources/list lacks %s with text/markdown: %s", guide.URI, list.Result)
+	}
+
+	read := mcpRequest(t, handler, "resources/read", map[string]interface{}{"uri": guide.URI}, nil)
+	if read.Error != nil {
+		t.Fatalf("resources/read returned error: %s", read.Error)
+	}
+	var got struct {
+		Contents []struct {
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	json.Unmarshal(read.Result, &got)
+	if len(got.Contents) != 1 || got.Contents[0].Text != guide.Text {
+		t.Errorf("resources/read did not return the operator guide")
+	}
+}
+
+func TestGuideNamesRegisteredTools(t *testing.T) {
+	handler := NewHandler(newTestDeps())
+	resp := mcpRequest(t, handler, "tools/list", nil, nil)
+	var listed struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	json.Unmarshal(resp.Result, &listed)
+	names := map[string]bool{}
+	for _, tool := range listed.Tools {
+		names[tool.Name] = true
+	}
+
+	// Single-word tool names have no underscore, so the guide's one such name is checked on its own.
+	re := regexp.MustCompile("`([a-z]+(?:_[a-z]+)+)`")
+	matches := re.FindAllStringSubmatch(guide.Text, -1)
+	namesToCheck := make([]string, 0, len(matches)+1)
+	namesToCheck = append(namesToCheck, "search")
+	for _, m := range matches {
+		namesToCheck = append(namesToCheck, m[1])
+	}
+	checked := 0
+	for _, name := range namesToCheck {
+		checked++
+		if !names[name] {
+			t.Errorf("guide names %q, which is not a registered tool", name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("guide names no tools; the check would pass for nothing")
+	}
 }

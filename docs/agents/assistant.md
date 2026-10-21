@@ -121,6 +121,10 @@ run and job metadata. At `logs`, the model also sees the log tail.
 
 A tool result is cut at 32768 bytes.
 
+## System prompt
+
+The system prompt carries the [operator guide](guide.md). The guide costs prompt tokens on every step, and the session budget counts them.
+
 ## Budgets and the kill switch
 
 A session stops when a budget is spent. The stop writes an error event. The

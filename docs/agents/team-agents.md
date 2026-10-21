@@ -63,6 +63,8 @@ spec:
   dataSharing: logs
 ```
 
+A Team agent reads the [operator guide](guide.md) in its system prompt and the Team instructions file in its first turn.
+
 ## The instructions file
 
 The instructions file is a text file in the repository of the `CatalogSource`.
