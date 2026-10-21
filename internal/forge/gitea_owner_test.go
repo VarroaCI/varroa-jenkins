@@ -6,6 +6,20 @@ import (
 	"testing"
 )
 
+// searchReply answers a repository search only when the query asks for the
+// owner's private repositories, one at a time, and it fails the test otherwise.
+func searchReply(t *testing.T, wantUID, body string) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("uid") != wantUID || q.Get("is_private") != "true" ||
+			q.Get("exclusive") != "true" || q.Get("limit") != "1" {
+			t.Errorf("repository search query = %q, want uid=%s private exclusive limit=1", r.URL.RawQuery, wantUID)
+		}
+		jsonReply(body)(w, r)
+	}
+}
+
 func TestGiteaSeesAllOwnerRepos(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -14,31 +28,71 @@ func TestGiteaSeesAllOwnerRepos(t *testing.T) {
 		err    bool
 	}{
 		{
-			name: "site administrator sees every repository",
+			name: "site administrator with a private repository of the owner",
 			routes: map[string]http.HandlerFunc{
-				"GET /user": jsonReply(`{"login":"bot","is_admin":true}`),
+				"GET /user":         jsonReply(`{"id":1,"login":"bot","is_admin":true}`),
+				"GET /users/o":      jsonReply(`{"id":7}`),
+				"GET /repos/search": searchReply(t, "7", `{"ok":true,"data":[{"private":true}]}`),
 			},
 			want: true,
 		},
 		{
-			name: "owner account sees its own repositories",
+			name: "site administrator with a public-only token lists no private repository",
 			routes: map[string]http.HandlerFunc{
-				"GET /user": jsonReply(`{"login":"o","is_admin":false}`),
+				"GET /user":         jsonReply(`{"id":1,"login":"bot","is_admin":true}`),
+				"GET /users/o":      jsonReply(`{"id":7}`),
+				"GET /repos/search": searchReply(t, "7", `{"ok":true,"data":[]}`),
+			},
+			want: false,
+		},
+		{
+			name: "owner account with a private repository",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":         jsonReply(`{"id":5,"login":"o","is_admin":false}`),
+				"GET /repos/search": searchReply(t, "5", `{"ok":true,"data":[{"private":true}]}`),
 			},
 			want: true,
 		},
 		{
-			name: "organization owner sees the organization repositories",
+			name: "owner account without a visible private repository is not a scope",
 			routes: map[string]http.HandlerFunc{
-				"GET /user":                         jsonReply(`{"login":"bot","is_admin":false}`),
+				"GET /user":         jsonReply(`{"id":5,"login":"o","is_admin":false}`),
+				"GET /repos/search": searchReply(t, "5", `{"ok":true,"data":[]}`),
+			},
+			want: false,
+		},
+		{
+			name: "search entry that is not private is not a scope",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":         jsonReply(`{"id":5,"login":"o","is_admin":false}`),
+				"GET /repos/search": searchReply(t, "5", `{"ok":true,"data":[{"private":false}]}`),
+			},
+			want: false,
+		},
+		{
+			name: "organization owner with a private repository",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":                         jsonReply(`{"id":3,"login":"bot","is_admin":false}`),
 				"GET /users/bot/orgs/o/permissions": jsonReply(`{"is_owner":true}`),
+				"GET /users/o":                      jsonReply(`{"id":9}`),
+				"GET /repos/search":                 searchReply(t, "9", `{"ok":true,"data":[{"private":true}]}`),
 			},
 			want: true,
 		},
 		{
-			name: "organization member is not an owner",
+			name: "organization owner whose token lists no private repository",
 			routes: map[string]http.HandlerFunc{
-				"GET /user":                         jsonReply(`{"login":"bot","is_admin":false}`),
+				"GET /user":                         jsonReply(`{"id":3,"login":"bot","is_admin":false}`),
+				"GET /users/bot/orgs/o/permissions": jsonReply(`{"is_owner":true}`),
+				"GET /users/o":                      jsonReply(`{"id":9}`),
+				"GET /repos/search":                 searchReply(t, "9", `{"ok":true,"data":[]}`),
+			},
+			want: false,
+		},
+		{
+			name: "organization member is not an owner and never searches",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":                         jsonReply(`{"id":3,"login":"bot","is_admin":false}`),
 				"GET /users/bot/orgs/o/permissions": jsonReply(`{"is_owner":false}`),
 			},
 			want: false,
@@ -46,8 +100,24 @@ func TestGiteaSeesAllOwnerRepos(t *testing.T) {
 		{
 			name: "forbidden permissions lookup is not a scope",
 			routes: map[string]http.HandlerFunc{
-				"GET /user":                         jsonReply(`{"login":"bot","is_admin":false}`),
+				"GET /user":                         jsonReply(`{"id":3,"login":"bot","is_admin":false}`),
 				"GET /users/bot/orgs/o/permissions": textReply(http.StatusForbidden, "x"),
+			},
+			err: true,
+		},
+		{
+			name: "owner lookup that fails is an error",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":    jsonReply(`{"id":1,"login":"bot","is_admin":true}`),
+				"GET /users/o": textReply(http.StatusNotFound, "x"),
+			},
+			err: true,
+		},
+		{
+			name: "forbidden repository search is an error",
+			routes: map[string]http.HandlerFunc{
+				"GET /user":         jsonReply(`{"id":5,"login":"o","is_admin":false}`),
+				"GET /repos/search": textReply(http.StatusForbidden, "x"),
 			},
 			err: true,
 		},

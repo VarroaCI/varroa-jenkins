@@ -635,7 +635,7 @@ sections describe.
   A tenant in `status.cell.drainingTenants` never enters `appliedTenants`. The draining set is
   written with `desiredStateHash` on a delivered push only. A pod change drops each tenant with an
   `ItemsApplyFailed` entry from `appliedTenants`.
-- **Gone-repository probe** (`cell_repo_probe.go`): `noteRepoScans` runs in the result drain. It starts at most four probes per cell result, at most one per tenant and repository in ten minutes, each on its own 45 second context. Only `forgeops.RepositoryGone` decides a gone verdict. `repoGoneFolders` feeds `rehydration_gone_folders`. `dropRepoScans` runs when a cell has no placed tenant.
+- **Gone-repository probe** (`cell_repo_probe.go`): `noteRepoScans` runs in the result drain. It starts at most four probes per cell result, at most one per tenant and repository in ten minutes, each on its own 45 second context. Only `forgeops.RepositoryGone` decides a gone verdict (a Gitea 404 counts only with private-repository proof). `repoGoneFolders` feeds `rehydration_gone_folders`. `dropRepoScans` runs when a cell has no placed tenant.
 - **`BranchScanFailed` tenant warnings** are result-driven. `branchScanFailedWarnings`
   (`cell_branch_scan_warning.go`) maps each `rehydration_failed_scans` entry to its tenant. The
   drain replaces only the `BranchScanFailed` entries of tenants whose rehydration entry carries the
