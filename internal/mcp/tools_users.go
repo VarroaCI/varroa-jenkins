@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
@@ -194,24 +195,32 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		args := getArgs(req)
 		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		existing, err := crdstore.Get[v1alpha1.User](ctx, deps.Store, name, ns)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("user not found: %v", err)), nil
-		}
-		if v := strArg(args, "email"); v != "" {
-			existing.Spec.Email = v
-		}
-		if v := strArg(args, "displayName"); v != "" {
-			existing.Spec.DisplayName = v
-		}
+		var purpose v1alpha1.UserPurpose
 		if strArg(args, "purpose") != "" {
-			purpose, perr := userPurposeArg(deps, args, false)
+			p, perr := userPurposeArg(deps, args, false)
 			if perr != "" {
 				return mcp.NewToolResultError(perr), nil
 			}
-			existing.Spec.Purpose = purpose
+			purpose = p
 		}
-		if err := crdstore.Apply[v1alpha1.User](ctx, deps.Store, existing); err != nil {
+		var existing *v1alpha1.User
+		_, err = crdstore.Mutate[v1alpha1.User](ctx, deps.Store, name, ns, func(u *v1alpha1.User) (bool, error) {
+			if v := strArg(args, "email"); v != "" {
+				u.Spec.Email = v
+			}
+			if v := strArg(args, "displayName"); v != "" {
+				u.Spec.DisplayName = v
+			}
+			if strArg(args, "purpose") != "" {
+				u.Spec.Purpose = purpose
+			}
+			existing = u
+			return true, nil
+		})
+		if apierrors.IsNotFound(err) {
+			return mcp.NewToolResultError(fmt.Sprintf("user not found: %v", err)), nil
+		}
+		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserUpdated, ns, name))

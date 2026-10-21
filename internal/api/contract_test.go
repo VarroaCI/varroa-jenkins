@@ -410,6 +410,11 @@ func newContractServer(t *testing.T) (*httptest.Server, *openapi3.T) {
 		Spec:       v1alpha1.RunnerSpec{Team: "test-team", Launcher: "inbound", RemoteFS: "/var/j"},
 		Status:     v1alpha1.RunnerStatus{Token: "deadbeefdeadbeefdeadbeefdeadbeef"},
 	})
+	// The signed-in admin's User, so PUT /me/preferences has a row to update.
+	crdstore.MustSeed(client.crdStore, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "admin-user", Namespace: "test-ns"},
+		Spec:       v1alpha1.UserSpec{Email: "admin@test.com"},
+	})
 	// A placed pipelines Team, so the landing-page list answers one row
 	// for the response schema to check.
 	crdstore.MustSeed(client.crdStore, &v1alpha1.Team{
