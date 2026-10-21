@@ -1412,7 +1412,9 @@ sections describe.
   the tick its seed applies and the fence would hold every build of that
   tenant until the next announcement.
 - `bootstrap.go` — `BootstrapLocalAdmin` seeds the local-mode admin user/password on
-  first boot.
+  first boot. It labels the new User `managed-by: local`. A re-run keeps the existing
+  `varroa-admins` Group and `varroa-admin-bootstrap` binding and adds only the admin's
+  subjects; other members and subjects stay.
 - `webhook_replay.go` — drains a NATS queue of webhook deliveries received while a
   controller was hibernated, replaying them once the mite reconnects. It routes two
   envelope shapes on one filter, chosen from the envelope's own fields, never the

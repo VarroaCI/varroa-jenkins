@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,9 +28,12 @@ func TestBootstrapLocalAdmin_Idempotent(t *testing.T) {
 	}
 
 	// Verify the admin user was created in the store.
-	_, err = crdstore.Get[v1alpha1.User](ctx, client.store, bootstrapAdminUser, "default")
+	adminUser, err := crdstore.Get[v1alpha1.User](ctx, client.store, bootstrapAdminUser, "default")
 	if err != nil {
 		t.Fatalf("expected admin user in store: %v", err)
+	}
+	if got := adminUser.Labels[v1alpha1.LabelManagedBy]; got != v1alpha1.ManagedByLocal {
+		t.Errorf("expected admin user label %s=%s, got %q", v1alpha1.LabelManagedBy, v1alpha1.ManagedByLocal, got)
 	}
 
 	// Verify the group was created.
@@ -308,5 +312,104 @@ func TestBootstrapLocalAdmin_KeepsExistingUser(t *testing.T) {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(got.Status.Credentials.PasswordHash), sec["password"]); err != nil {
 		t.Errorf("status hash does not match the Secret password: %v", err)
+	}
+}
+
+func TestBootstrapLocalAdmin_KeepsGroupMembersAndBindingSubjects(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+
+	crdstore.MustSeed(client.store,
+		&v1alpha1.Group{
+			ObjectMeta: metav1.ObjectMeta{Name: bootstrapGroupName, Labels: map[string]string{"ops": "true"}},
+			Spec: v1alpha1.GroupSpec{
+				DisplayName: "Ops admins",
+				Members:     []string{"alice"},
+			},
+		},
+		&v1alpha1.VarroaRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: bootstrapRoleBindingName},
+			Spec: v1alpha1.VarroaRoleBindingSpec{
+				RoleRef: bootstrapAdminRole,
+				Subjects: []v1alpha1.SubjectRef{
+					{Kind: "User", Name: "alice"},
+					{Kind: "Group", Name: "ops"},
+				},
+			},
+		},
+	)
+	client.existingSecrets[bootstrapSecretName] = map[string][]byte{
+		"username": []byte("myadmin"),
+		"password": []byte("supersecretpassword!!"),
+	}
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", slog.Default()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	group, err := crdstore.Get[v1alpha1.Group](ctx, client.store, bootstrapGroupName, "")
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	if want := []string{"alice", "myadmin"}; !slices.Equal(group.Spec.Members, want) {
+		t.Errorf("expected group members %v, got %v", want, group.Spec.Members)
+	}
+	if group.Spec.DisplayName != "Ops admins" {
+		t.Errorf("expected display name kept, got %q", group.Spec.DisplayName)
+	}
+	if group.Labels["ops"] != "true" {
+		t.Errorf("expected group label kept, got %v", group.Labels)
+	}
+
+	binding, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, client.store, bootstrapRoleBindingName, "")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if binding.Spec.RoleRef != bootstrapAdminRole {
+		t.Errorf("expected RoleRef %s kept, got %s", bootstrapAdminRole, binding.Spec.RoleRef)
+	}
+	want := []v1alpha1.SubjectRef{
+		{Kind: "User", Name: "alice"},
+		{Kind: "Group", Name: "ops"},
+		{Kind: "User", Name: "myadmin"},
+		{Kind: "Group", Name: bootstrapGroupName},
+	}
+	if !slices.Equal(binding.Spec.Subjects, want) {
+		t.Errorf("expected subjects %v, got %v", want, binding.Spec.Subjects)
+	}
+}
+
+func TestBootstrapLocalAdmin_RerunAddsNoDuplicates(t *testing.T) {
+	client := newTestClient()
+	ctx := context.Background()
+	logger := slog.Default()
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", logger); err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+
+	// Clear the consumed marker so the second run executes the write path.
+	sec := client.createdSecrets[bootstrapSecretName]
+	delete(sec, bootstrapAnnotation)
+	client.existingSecrets[bootstrapSecretName] = sec
+
+	if err := BootstrapLocalAdmin(ctx, client, client.store, "default", logger); err != nil {
+		t.Fatalf("second bootstrap: %v", err)
+	}
+
+	group, err := crdstore.Get[v1alpha1.Group](ctx, client.store, bootstrapGroupName, "")
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	if len(group.Spec.Members) != 1 {
+		t.Errorf("expected 1 group member, got %v", group.Spec.Members)
+	}
+
+	binding, err := crdstore.Get[v1alpha1.VarroaRoleBinding](ctx, client.store, bootstrapRoleBindingName, "")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if len(binding.Spec.Subjects) != 2 {
+		t.Errorf("expected 2 binding subjects, got %v", binding.Spec.Subjects)
 	}
 }
