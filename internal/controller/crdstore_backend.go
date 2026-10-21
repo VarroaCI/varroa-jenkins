@@ -119,26 +119,14 @@ func (c *ClientsetClient) DeleteObjectIfUnchanged(ctx context.Context, gvr schem
 	return err
 }
 
-// PatchObjectStatus merge-patches the /status subresource.
-// Fields tagged with `json:"...,omitempty"` that are zero-valued in the Go
-// struct are dropped during json.Marshal, which means a JSON merge patch
-// would leave a stale prior value in etcd. To avoid that, this method
-// round-trips through a map and explicitly sets every omitted field to its
-// Go zero value (nil for pointers/slices/maps, "" for strings, 0 for
-// numbers, false for bools), so the merge patch clears them.
+// PatchObjectStatus merge-patches the /status subresource. The body comes
+// from crdstore.StatusPatchMap, which sets each clearable key that the typed
+// status omits to its zero value, so a stale server-side value clears.
 func (c *ClientsetClient) PatchObjectStatus(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string, status any) error {
-	// Marshal the typed status (honoring omitempty — partial patch), then
-	// force-null the per-kind clearable keys so stale server-side values
-	// clear (RFC 7386: null deletes the key).
-	statusJSON, err := json.Marshal(status)
+	statusMap, err := crdstore.StatusPatchMap(gvr, status)
 	if err != nil {
-		return fmt.Errorf("marshal status: %w", err)
+		return fmt.Errorf("build status patch: %w", err)
 	}
-	var statusMap map[string]any
-	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
-		return fmt.Errorf("unmarshal status: %w", err)
-	}
-	crdstore.ApplyStatusClears(gvr, statusMap)
 	data, err := json.Marshal(map[string]any{"status": statusMap})
 	if err != nil {
 		return fmt.Errorf("marshal status patch: %w", err)

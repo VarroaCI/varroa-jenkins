@@ -723,9 +723,11 @@ func TestCellPool_LastTenantLeavingClearsTheList(t *testing.T) {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	// tenants is omitempty, so the pass sends a status that omits it and the
-	// crdstore clear entry force-nulls the key. The Fake applies no clear
-	// entry, so the assertion reads the status the pass actually sent.
+	// tenants is omitempty, so the pass sends a status that omits it. The
+	// Fake applies the crdstore clear entry, so the stored list is empty.
+	if got := getPool(t, store, testProfileName).Status.Tenants; len(got) != 0 {
+		t.Fatalf("stored tenants = %v, want empty", got)
+	}
 	gvr, err := crdstore.GVRFor[v1alpha1.CellPool]()
 	if err != nil {
 		t.Fatalf("GVRFor[CellPool]: %v", err)

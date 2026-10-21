@@ -34,6 +34,11 @@ type StatusPatch struct {
 // as the apiserver does. CreateObject drops .status. UpdateObject keeps the
 // stored .status. Only UpdateObjectStatus and the status patches change it.
 // Seed and SeedObject store .status as given.
+//
+// The Fake models metadata.generation as the apiserver does. CreateObject sets
+// it to 1. UpdateObject keeps the stored value and adds one when anything
+// outside metadata changes. The status writes never change it. A status patch
+// applies the clearable-key rule of ApplyStatusClears, as ClientsetClient does.
 type Fake struct {
 	mu sync.Mutex
 	// rv is the one resourceVersion counter for the whole Fake. A deleted and
@@ -266,6 +271,7 @@ func (f *Fake) CreateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		// The apiserver drops status on a create when the kind has a status subresource.
 		delete(clone.Object, "status")
 	}
+	clone.SetGeneration(1)
 	f.bump(clone)
 	f.objects[gvr][key] = clone
 	return clone.DeepCopy(), nil
@@ -304,6 +310,13 @@ func (f *Fake) UpdateObject(_ context.Context, gvr schema.GroupVersionResource, 
 		} else {
 			delete(clone.Object, "status")
 		}
+	}
+	// A client cannot set generation. The apiserver keeps the stored value and
+	// adds one when anything outside metadata changes. For a status-subresource
+	// kind, .status is already the stored status at this point.
+	setGeneration(clone, stored.GetGeneration())
+	if !reflect.DeepEqual(withoutMetadata(stored.Object), withoutMetadata(clone.Object)) {
+		setGeneration(clone, stored.GetGeneration()+1)
 	}
 	if reflect.DeepEqual(stored.Object, clone.Object) {
 		// An update that changes nothing keeps the value, as the apiserver does.
@@ -438,7 +451,7 @@ func (f *Fake) PatchObjectStatus(_ context.Context, gvr schema.GroupVersionResou
 		return nil // best-effort; the real API would also succeed if obj doesn't exist? No, it would fail. But for test ergonomics, be lenient.
 	}
 	before := obj.DeepCopy()
-	if err := applyStatusPatch(obj, status); err != nil {
+	if err := applyStatusPatch(gvr, obj, status); err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(before.Object, obj.Object) {
@@ -475,7 +488,7 @@ func (f *Fake) PatchObjectStatusAt(_ context.Context, gvr schema.GroupVersionRes
 	}
 	f.statusPatches[gvr] = append(f.statusPatches[gvr], StatusPatch{Namespace: namespace, Name: name, Status: status})
 	before := obj.DeepCopy()
-	if err := applyStatusPatch(obj, status); err != nil {
+	if err := applyStatusPatch(gvr, obj, status); err != nil {
 		return "", err
 	}
 	// A patch that changes the object moves its resourceVersion, and a patch
@@ -488,22 +501,19 @@ func (f *Fake) PatchObjectStatusAt(_ context.Context, gvr schema.GroupVersionRes
 }
 
 // applyStatusPatch applies status to obj as a JSON merge patch (RFC 7386),
-// matching ClientsetClient's real merge-patch semantics: marshal the status
-// value, unmarshal to map[string]any, and merge it onto the existing status
-// rather than replacing the whole status, so omitempty fields the caller
-// didn't set survive the patch. The merge recurses into nested objects and a
-// null value deletes its key, as RFC 7386 requires; a non-object value
-// replaces whatever it lands on, so a list is replaced wholesale rather than
-// merged.
-func applyStatusPatch(obj *unstructured.Unstructured, status any) error {
-	statusJSON, err := json.Marshal(status)
+// matching ClientsetClient's real merge-patch semantics. The body comes from
+// StatusPatchMap, so each clearable key that status omits takes its zero value,
+// as it does on the apiserver path. The body is then converted to JSON-native
+// types, so an int zero does not reach the stored object. The merge recurses
+// into nested objects and a null value deletes its key, as RFC 7386 requires;
+// a non-object value replaces whatever it lands on, so a list is replaced
+// wholesale rather than merged.
+func applyStatusPatch(gvr schema.GroupVersionResource, obj *unstructured.Unstructured, status any) error {
+	statusMap, err := StatusPatchMap(gvr, status)
 	if err != nil {
-		return fmt.Errorf("marshal status: %w", err)
+		return err
 	}
-	var statusMap map[string]any
-	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
-		return fmt.Errorf("unmarshal status: %w", err)
-	}
+	statusMap, _ = jsonNative(statusMap).(map[string]any)
 	existing, _ := obj.Object["status"].(map[string]any)
 	if existing == nil {
 		existing = map[string]any{}
@@ -700,6 +710,27 @@ func (f *Fake) StatusPatches(gvr schema.GroupVersionResource) []StatusPatch {
 }
 
 // --- Helpers --------------------------------------------------------------
+
+// setGeneration sets metadata.generation to gen. A zero gen removes the field,
+// so a no-op update does not add generation 0 and move the resourceVersion.
+func setGeneration(obj *unstructured.Unstructured, gen int64) {
+	if gen == 0 {
+		unstructured.RemoveNestedField(obj.Object, "metadata", "generation")
+		return
+	}
+	obj.SetGeneration(gen)
+}
+
+// withoutMetadata returns a shallow copy of m that omits the metadata key.
+func withoutMetadata(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if k != "metadata" {
+			out[k] = v
+		}
+	}
+	return out
+}
 
 func nsName(namespace, name string) string {
 	if namespace == "" {

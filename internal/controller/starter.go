@@ -147,9 +147,6 @@ func (r *StarterReconciler) applyItem(ctx context.Context, item *v1alpha1.Catalo
 		}
 	}
 
-	// ApplyOwned writes the stored status back into item, and that write shares
-	// item's slices and pointers. A deep copy keeps the status that this pass computed.
-	status := *item.Status.DeepCopy()
 	if err := crdstore.ApplyOwned(ctx, r.store, item, func(l *unstructured.Unstructured) bool {
 		return starterOwned(l.GetLabels())
 	}); err != nil {
@@ -160,7 +157,7 @@ func (r *StarterReconciler) applyItem(ctx context.Context, item *v1alpha1.Catalo
 		}
 		return err
 	}
-	return crdstore.PatchStatus[v1alpha1.CatalogItem](ctx, r.store, item.Name, item.Namespace, &status)
+	return crdstore.PatchStatus[v1alpha1.CatalogItem](ctx, r.store, item.Name, item.Namespace, &item.Status)
 }
 
 // applyBundle writes the ComposedBundle referencing both starter items.

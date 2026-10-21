@@ -475,3 +475,306 @@ func TestFake_SeedObjectKeepsStatus(t *testing.T) {
 		t.Error("resourceVersion is empty, want one assigned by SeedObject")
 	}
 }
+
+// --- metadata.generation --------------------------------------------------
+
+func TestFakeCreateObject_SetsGenerationOne(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if src.Generation != 1 {
+		t.Errorf("generation = %d, want 1", src.Generation)
+	}
+}
+
+func TestFakeUpdateObject_SpecChangeBumpsGeneration(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	})
+	got, err := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Generation != 0 {
+		t.Fatalf("seeded generation = %d, want 0 (Seed stores the object as given)", got.Generation)
+	}
+	got.Spec.RepoURL = "https://example.test/b"
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	after, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if after.Generation != 1 {
+		t.Errorf("generation after spec change = %d, want 1", after.Generation)
+	}
+	if got.Generation != 1 {
+		t.Errorf("caller generation after Update = %d, want 1", got.Generation)
+	}
+}
+
+func TestFakeUpdateObject_MetadataChangeKeepsGeneration(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before := src.ResourceVersion
+	got, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	got.Labels = map[string]string{"edited": "true"}
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	after, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if after.Generation != 1 {
+		t.Errorf("generation after label edit = %d, want 1", after.Generation)
+	}
+	if after.ResourceVersion == before {
+		t.Errorf("resourceVersion did not move on a label edit")
+	}
+}
+
+func TestFakeUpdateObject_StatusOnlyChangeKeepsGenerationWithStatusSubresource(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	got.Status.Message = "changed through the main resource"
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	after, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if after.Generation != 1 {
+		t.Errorf("generation = %d, want 1: a status-subresource kind ignores status on Update", after.Generation)
+	}
+	if after.Status.Message != "" {
+		t.Errorf("status = %q, want the stored status (empty)", after.Status.Message)
+	}
+}
+
+func TestFakeUpdateObject_StatusChangeBumpsGenerationWithoutStatusSubresource(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	gvr, err := GVRFor[v1alpha1.JenkinsRole]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	MustSeed(f, &v1alpha1.JenkinsRole{ObjectMeta: metav1.ObjectMeta{Name: "role"}})
+	stored, err := f.GetObject(ctx, gvr, "", "role")
+	if err != nil {
+		t.Fatalf("GetObject: %v", err)
+	}
+	obj := stored.DeepCopy()
+	obj.Object["status"] = map[string]any{"observed": "yes"}
+	updated, err := f.UpdateObject(ctx, gvr, "", obj)
+	if err != nil {
+		t.Fatalf("UpdateObject: %v", err)
+	}
+	if updated.GetGeneration() != 1 {
+		t.Errorf("generation = %d, want 1: a kind without a status subresource bumps on any change", updated.GetGeneration())
+	}
+}
+
+func TestFakeUpdateObject_IgnoresClientGeneration(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	got.Generation = 99
+	got.Spec.RepoURL = "https://example.test/b"
+	if err := Update(ctx, f, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	after, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if after.Generation != 2 {
+		t.Errorf("generation = %d, want 2: the client value 99 must not reach the stored object", after.Generation)
+	}
+}
+
+func TestFakeStatusWrites_KeepGeneration(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	gvr, err := GVRFor[v1alpha1.CatalogSource]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	got.Status.Message = "via UpdateStatus"
+	if err := UpdateStatus(ctx, f, got); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	if g := mustGen(t, f); g != 1 {
+		t.Errorf("generation after UpdateStatus = %d, want 1", g)
+	}
+
+	if err := PatchStatus[v1alpha1.CatalogSource](ctx, f, "cat", "ns", &v1alpha1.CatalogSourceStatus{Message: "via patch"}); err != nil {
+		t.Fatalf("PatchStatus: %v", err)
+	}
+	if g := mustGen(t, f); g != 1 {
+		t.Errorf("generation after PatchStatus = %d, want 1", g)
+	}
+
+	cur, _ := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if _, err := f.PatchObjectStatusAt(ctx, gvr, "ns", "cat", cur.ResourceVersion, &v1alpha1.CatalogSourceStatus{Message: "via patch at"}); err != nil {
+		t.Fatalf("PatchObjectStatusAt: %v", err)
+	}
+	if g := mustGen(t, f); g != 1 {
+		t.Errorf("generation after PatchObjectStatusAt = %d, want 1", g)
+	}
+}
+
+func TestMutate_SpecChangeBumpsGeneration(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	src := &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Spec:       v1alpha1.CatalogSourceSpec{RepoURL: "https://example.test/a"},
+	}
+	if err := Create(ctx, f, src); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	changed, err := Mutate[v1alpha1.CatalogSource](ctx, f, "cat", "ns", func(obj *v1alpha1.CatalogSource) (bool, error) {
+		obj.Spec.RepoURL = "https://example.test/b"
+		return true, nil
+	})
+	if err != nil || !changed {
+		t.Fatalf("Mutate: changed=%v err=%v", changed, err)
+	}
+	if g := mustGen(t, f); g != 2 {
+		t.Errorf("generation = %d, want 2", g)
+	}
+}
+
+// mustGen returns the stored metadata.generation of the CatalogSource "cat".
+func mustGen(t *testing.T, f *Fake) int64 {
+	t.Helper()
+	got, err := Get[v1alpha1.CatalogSource](context.Background(), f, "cat", "ns")
+	if err != nil {
+		t.Fatalf("Get cat: %v", err)
+	}
+	return got.Generation
+}
+
+// --- status merge patch clears --------------------------------------------
+
+func TestFakePatchObjectStatus_TeamOmittingPlacementClearsIt(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Team{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
+		Placement: &v1alpha1.TeamPlacementStatus{Cell: "cell-a", CellNamespace: "varroa-system"},
+	}); err != nil {
+		t.Fatalf("PatchStatus (set): %v", err)
+	}
+
+	// The second patch omits placement and sets another field.
+	if err := PatchStatus[v1alpha1.Team](ctx, f, "payments", "", &v1alpha1.TeamStatus{
+		ObservedGeneration: 3,
+	}); err != nil {
+		t.Fatalf("PatchStatus (omit placement): %v", err)
+	}
+	got, err := Get[v1alpha1.Team](ctx, f, "payments", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status.Placement != nil {
+		t.Errorf("placement = %+v, want nil: the apiserver clears an omitted clearable key", got.Status.Placement)
+	}
+	if got.Status.ObservedGeneration != 3 {
+		t.Errorf("observedGeneration = %d, want 3", got.Status.ObservedGeneration)
+	}
+
+	// The recorded patch keeps the typed value the caller sent.
+	gvr, err := GVRFor[v1alpha1.Team]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	patches := f.StatusPatches(gvr)
+	last, ok := patches[len(patches)-1].Status.(*v1alpha1.TeamStatus)
+	if !ok {
+		t.Fatalf("recorded status = %T, want *TeamStatus", patches[len(patches)-1].Status)
+	}
+	if last.Placement != nil {
+		t.Errorf("recorded placement = %+v, want nil", last.Placement)
+	}
+}
+
+func TestFakePatchObjectStatus_IntZeroClearDoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.CatalogSource{
+		ObjectMeta: metav1.ObjectMeta{Name: "cat", Namespace: "ns"},
+		Status:     v1alpha1.CatalogSourceStatus{ItemCount: 5},
+	})
+	if err := PatchStatus[v1alpha1.CatalogSource](ctx, f, "cat", "ns", &v1alpha1.CatalogSourceStatus{Message: "ok"}); err != nil {
+		t.Fatalf("PatchStatus: %v", err)
+	}
+	got, err := Get[v1alpha1.CatalogSource](ctx, f, "cat", "ns")
+	if err != nil {
+		t.Fatalf("Get (after clear): %v", err)
+	}
+	if got.Status.ItemCount != 0 {
+		t.Errorf("itemCount = %d, want 0", got.Status.ItemCount)
+	}
+	if got.Status.Message != "ok" {
+		t.Errorf("message = %q, want ok", got.Status.Message)
+	}
+}
+
+func TestFakePatchObjectStatusAt_AppliesClears(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	gvr, err := GVRFor[v1alpha1.Runner]()
+	if err != nil {
+		t.Fatalf("GVRFor: %v", err)
+	}
+	MustSeed(f, &v1alpha1.Runner{ObjectMeta: metav1.ObjectMeta{Name: "win-1", Namespace: "ns"}})
+	if err := PatchStatus[v1alpha1.Runner](ctx, f, "win-1", "ns", &v1alpha1.RunnerStatus{Cell: "cell-a", CellNamespace: "varroa-system"}); err != nil {
+		t.Fatalf("PatchStatus (set): %v", err)
+	}
+	cur, err := Get[v1alpha1.Runner](ctx, f, "win-1", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if _, err := f.PatchObjectStatusAt(ctx, gvr, "ns", "win-1", cur.ResourceVersion, &v1alpha1.RunnerStatus{}); err != nil {
+		t.Fatalf("PatchObjectStatusAt: %v", err)
+	}
+	got, err := Get[v1alpha1.Runner](ctx, f, "win-1", "ns")
+	if err != nil {
+		t.Fatalf("Get (after clear): %v", err)
+	}
+	if got.Status.Cell != "" || got.Status.CellNamespace != "" {
+		t.Errorf("status = %+v, want cell fields cleared", got.Status)
+	}
+}

@@ -42,8 +42,7 @@ reading each package's entry point):
   stale server value, so `registry.go` names, per kind, the keys a patch must
   carry as an explicit zero. A `NestedClear` value names such keys **inside**
   one status object, for a writer that sends the object and clears a field of
-  it. Only `ClientsetClient.PatchObjectStatus` applies it: the `Fake` does not,
-  so a test asserts on the recorded patch or applies the helper itself. Tests
+  it. `StatusPatchMap` applies it for `ClientsetClient` and the `Fake` alike. Tests
   seed `crdstore.Fake` (upsert
   semantics; re-seed after mutating a seeded object) and assert on its
   `StatusPatches`/`MetaPatches` recorders. `ApplyOwned` is the guarded sibling
@@ -56,7 +55,7 @@ reading each package's entry point):
   the live object, calls a side-effect-free mutate function, and writes the
   status subresource with the read resourceVersion, reading again on each
   conflict. A writer that owns only some status fields uses it in place of a
-  blind `PatchStatus`. The `Fake` keeps one `resourceVersion` counter. `Seed`, `CreateObject`, and each write that changes an object set the next value, and `Seed` writes it back to an object that has none. `UpdateObject` and `UpdateObjectStatus` answer Invalid for an empty `resourceVersion`, and the `*At` patches and both updates answer Conflict for a stale one. The `Fake` treats `.status` like the apiserver for each kind that has a status subresource. `CreateObject` drops `.status`. `UpdateObject` keeps the stored `.status`. Only `UpdateObjectStatus` and the status patches change it. The registry `statusSubresource` bit selects these kinds, and a test pins the bit to the CRD YAML. `Seed` and `SeedObject` store `.status` as given.
+  blind `PatchStatus`. The `Fake` keeps one `resourceVersion` counter. `Seed`, `CreateObject`, and each write that changes an object set the next value, and `Seed` writes it back to an object that has none. `UpdateObject` and `UpdateObjectStatus` answer Invalid for an empty `resourceVersion`, and the `*At` patches and both updates answer Conflict for a stale one. The `Fake` treats `.status` like the apiserver for each kind that has a status subresource. `CreateObject` drops `.status`. `UpdateObject` keeps the stored `.status`. Only `UpdateObjectStatus` and the status patches change it. The registry `statusSubresource` bit selects these kinds, and a test pins the bit to the CRD YAML. `Seed` and `SeedObject` store `.status` as given. `CreateObject` sets `generation` 1. `UpdateObject` keeps the stored `generation` and adds one when anything outside `metadata` changes. The status writes never change it. A status patch applies `ApplyStatusClears`, as `ClientsetClient` does. Each typed write helper copies only the stored `ObjectMeta` back into the caller's object.
 - **`auth/`** — OIDC/Dex, local, and LDAP auth providers (`AuthMode` =
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,

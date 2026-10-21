@@ -1,6 +1,7 @@
 package crdstore
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -154,8 +155,8 @@ type NestedClear map[string]any
 // its explicit zero value, so a status merge patch clears the server's
 // stale value (RFC 7386: null deletes the key; ""/0 set to zero, matching
 // the pre-crdstore per-kind patch bytes exactly). It is the one
-// implementation of that rule: ClientsetClient.PatchObjectStatus calls it
-// on every status patch it sends.
+// implementation of that rule. StatusPatchMap calls it for both the
+// ClientsetClient and the Fake, so every status patch follows it.
 func ApplyStatusClears(gvr schema.GroupVersionResource, statusMap map[string]any) {
 	for key, zero := range clearStatusFields[gvr] {
 		nested, isNested := zero.(NestedClear)
@@ -176,6 +177,25 @@ func ApplyStatusClears(gvr schema.GroupVersionResource, statusMap map[string]any
 			}
 		}
 	}
+}
+
+// StatusPatchMap returns the body of a status merge patch for gvr: status as
+// a JSON map, with every clearable key it omits set to its zero value. A nil
+// status yields an empty map.
+func StatusPatchMap(gvr schema.GroupVersionResource, status any) (map[string]any, error) {
+	statusJSON, err := json.Marshal(status)
+	if err != nil {
+		return nil, fmt.Errorf("marshal status: %w", err)
+	}
+	var statusMap map[string]any
+	if err := json.Unmarshal(statusJSON, &statusMap); err != nil {
+		return nil, fmt.Errorf("unmarshal status: %w", err)
+	}
+	if statusMap == nil {
+		statusMap = map[string]any{}
+	}
+	ApplyStatusClears(gvr, statusMap)
+	return statusMap, nil
 }
 
 // GVRFor returns the schema.GroupVersionResource for the given type T.

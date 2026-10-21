@@ -639,9 +639,6 @@ func itemOwnedBy(labels map[string]string, refs []metav1.OwnerReference, src *v1
 func (r *CatalogReconciler) writeCatalogItem(ctx context.Context, src *v1alpha1.CatalogSource, item *v1alpha1.CatalogItem, desired map[string]bool) ([]string, bool) {
 	desired[item.Name] = true
 
-	// ApplyOwned writes the stored status back into item, and that write shares
-	// item's slices and pointers. A deep copy keeps the status that this pass computed.
-	status := *item.Status.DeepCopy()
 	err := crdstore.ApplyOwned(ctx, r.store, item, func(live *unstructured.Unstructured) bool {
 		return itemOwnedBy(live.GetLabels(), live.GetOwnerReferences(), src)
 	})
@@ -661,7 +658,7 @@ func (r *CatalogReconciler) writeCatalogItem(ctx context.Context, src *v1alpha1.
 	// successful ApplyOwned, so ownership was just established against the live
 	// object, and it is a status-subresource merge patch rather than a
 	// full-object replace, so it cannot resurrect or reshape a foreign spec.
-	if err := crdstore.PatchStatus[v1alpha1.CatalogItem](ctx, r.store, item.Name, item.Namespace, &status); err != nil {
+	if err := crdstore.PatchStatus[v1alpha1.CatalogItem](ctx, r.store, item.Name, item.Namespace, &item.Status); err != nil {
 		r.logger.Warn("failed to patch catalog item status",
 			"source", src.Name, "item", item.Name, "error", err)
 		return []string{fmt.Sprintf("item %s status patch failed: %v", item.Name, err)}, true
