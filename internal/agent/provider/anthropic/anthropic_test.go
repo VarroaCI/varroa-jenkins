@@ -82,6 +82,48 @@ func TestCacheMarkerOnLastToolOnly(t *testing.T) {
 	}
 }
 
+func TestCacheMarkerOnSystemText(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "ok"})
+	if _, err := collect(t, New(ts.URL, nil), provider.Key{}, provider.Request{Model: "m", System: "You are X.",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}}}); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var body struct {
+		System []map[string]any `json:"system"`
+	}
+	if err := json.Unmarshal(fake.Requests()[0].Body, &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body.System) != 1 {
+		t.Fatalf("system blocks = %d, want 1", len(body.System))
+	}
+	b := body.System[0]
+	if b["type"] != "text" || b["text"] != "You are X." {
+		t.Errorf("system block = %v", b)
+	}
+	cc, _ := b["cache_control"].(map[string]any)
+	if cc["type"] != "ephemeral" {
+		t.Errorf("system cache_control = %v, want ephemeral", b["cache_control"])
+	}
+}
+
+func TestNoSystemWhenEmpty(t *testing.T) {
+	t.Parallel()
+	ts, fake := fakeServer(t, providertest.Turn{Text: "ok"})
+	if _, err := collect(t, New(ts.URL, nil), provider.Key{}, provider.Request{Model: "m",
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}}}); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(fake.Requests()[0].Body, &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if _, ok := body["system"]; ok {
+		t.Error("an empty system text sends a system key")
+	}
+}
+
 func TestCachedTokensCountAsPrompt(t *testing.T) {
 	t.Parallel()
 	ts, _ := fakeServer(t, providertest.Turn{

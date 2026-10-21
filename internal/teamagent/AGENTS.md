@@ -13,7 +13,7 @@ Team agent core. A Team agent is a `TeamAgent` object that works for one pipelin
 - `config/`: decodes the runner environment and answers `ProviderReady` for one TeamAgent.
 - `store/`: the record-store queries of the runner: run and placement lookups, the spend rollup, the resume candidates, and the newest session of a principal.
 - `triggers/`: the audit-feed path. `consumer.go` holds the durable `agent-triggers` consumer on `varroa_activity`. `matcher.go` decides which TeamAgent a row concerns. `create.go` writes the session row under an advisory lock keyed by agent, trigger, and item. `handoff.go` acks, naks with a 60-second delay, or starts a worker.
-- `sessions/`: the session runtime. `host.go` is the HTTP MCP host. `decision.go` is the write decision. `pool.go` bounds the sessions of one replica at 8. `resume.go` takes over a session only when every tool call has its result. `killswitch.go` refreshes the settings cache on each control message.
+- `sessions/`: the session runtime. `host.go` is the HTTP MCP host. `system.go` is the Team agent's base sentence. `decision.go` is the write decision. `pool.go` bounds the sessions of one replica at 8. `resume.go` takes over a session only when every tool call has its result. `killswitch.go` refreshes the settings cache on each control message.
 
 ## Local Contracts
 

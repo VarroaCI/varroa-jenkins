@@ -68,16 +68,19 @@ func (t Trigger) String() string {
 // RunConfig is everything one Run needs. The caller takes the lease before
 // it calls Run, so Run assumes it holds the lease of the session.
 type RunConfig struct {
-	Host           ToolHost
-	DecideWrite    func(agent.ToolDef, json.RawMessage) WriteDecision
-	DaySpend       func(ctx context.Context) (total, limit int64, err error)
-	Provider       provider.Provider
-	Key            provider.Key
-	Model          string
-	Store          store.Store
-	SessionID      uuid.UUID
-	Owner          string
-	SessionBudget  int64
+	Host          ToolHost
+	DecideWrite   func(agent.ToolDef, json.RawMessage) WriteDecision
+	DaySpend      func(ctx context.Context) (total, limit int64, err error)
+	Provider      provider.Provider
+	Key           provider.Key
+	Model         string
+	Store         store.Store
+	SessionID     uuid.UUID
+	Owner         string
+	SessionBudget int64
+	// SystemBase is the first sentence of the system text. An empty value uses
+	// AssistantBase.
+	SystemBase     string
 	StepBudget     int
 	ApprovalExpiry time.Duration
 	Tenants        datashare.TenantResolver

@@ -44,6 +44,12 @@ contract with its adapters, and the sandbox contract.
 - **Operator guide.** `docs/agents/guide.md` is the one source. `guide/guide.txt`
   is its byte copy, and a test fails on drift. The guide stays under `MaxBytes`
   (8192) and holds no link and no blocked term.
+- **System text.** The loop starts the system text with `RunConfig.SystemBase`.
+  An empty value uses `loop.AssistantBase`. The Team agent runner sets
+  `sessions.SystemBase(ta)`.
+- **Prompt cache.** The Messages adapter marks the last tool and the system
+  text block for the cache. Usage counts cache creation and cache read as
+  prompt tokens.
 
 - The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
 - `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
