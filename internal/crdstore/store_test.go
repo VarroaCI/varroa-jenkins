@@ -3,6 +3,7 @@ package crdstore
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -760,5 +761,197 @@ func TestUpdate_WritesBackMetadataOnly(t *testing.T) {
 	}
 	if src.Status.Message != "caller value" {
 		t.Errorf("status = %q, want the caller value", src.Status.Message)
+	}
+}
+
+// deleteOnceAfterGet deletes the object once, right after the first Get of
+// gvr that finds it. The delete opens the window between a read and the
+// write that follows it.
+func deleteOnceAfterGet(f *Fake, gvr schema.GroupVersionResource) {
+	fired := false
+	f.SetAfterGet(gvr, func(ns, name string) {
+		if fired {
+			return
+		}
+		fired = true
+		_ = f.DeleteObject(context.Background(), gvr, ns, name)
+	})
+}
+
+func TestCreateOrMutate_CreatesWhenAbsent(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+
+	obj := &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "admins"},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"a"}},
+	}
+	calls := 0
+	err := CreateOrMutate(ctx, f, obj, func(*v1alpha1.Group) (bool, error) {
+		calls++
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("CreateOrMutate: %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("mutate calls = %d, want 0", calls)
+	}
+	got, err := Get[v1alpha1.Group](ctx, f, "admins", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !slices.Equal(got.Spec.Members, []string{"a"}) {
+		t.Errorf("members = %v, want [a]", got.Spec.Members)
+	}
+}
+
+func TestCreateOrMutate_MutatesWhenExists(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "admins", Labels: map[string]string{"ops": "true"}},
+		Spec:       v1alpha1.GroupSpec{DisplayName: "Ops", Members: []string{"a"}},
+	})
+
+	obj := &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "admins"},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"b"}},
+	}
+	err := CreateOrMutate(ctx, f, obj, func(g *v1alpha1.Group) (bool, error) {
+		g.Spec.Members = append(g.Spec.Members, "b")
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("CreateOrMutate: %v", err)
+	}
+	got, err := Get[v1alpha1.Group](ctx, f, "admins", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !slices.Equal(got.Spec.Members, []string{"a", "b"}) {
+		t.Errorf("members = %v, want [a b]", got.Spec.Members)
+	}
+	if got.Spec.DisplayName != "Ops" || got.Labels["ops"] != "true" {
+		t.Errorf("other fields not kept: display=%q labels=%v", got.Spec.DisplayName, got.Labels)
+	}
+}
+
+func TestCreateOrMutate_RecreatesAfterConcurrentDelete(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "admins"},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"old"}},
+	})
+	gvr, _ := GVRFor[v1alpha1.Group]()
+	deleteOnceAfterGet(f, gvr)
+
+	obj := &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "admins"},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"new"}},
+	}
+	calls := 0
+	err := CreateOrMutate(ctx, f, obj, func(g *v1alpha1.Group) (bool, error) {
+		calls++
+		g.Spec.Members = append(g.Spec.Members, "x")
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("CreateOrMutate: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("mutate calls = %d, want 1", calls)
+	}
+	got, err := Get[v1alpha1.Group](ctx, f, "admins", "")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !slices.Equal(got.Spec.Members, []string{"new"}) {
+		t.Errorf("members = %v, want the created shape [new]", got.Spec.Members)
+	}
+}
+
+func TestCreateOrMutate_ReturnsNotFoundAfterTwoRounds(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Group{ObjectMeta: metav1.ObjectMeta{Name: "admins"}})
+	gvr, _ := GVRFor[v1alpha1.Group]()
+	f.FailAlways("get", gvr, apierrors.NewNotFound(gvr.GroupResource(), "admins"))
+
+	obj := &v1alpha1.Group{ObjectMeta: metav1.ObjectMeta{Name: "admins"}}
+	err := CreateOrMutate(ctx, f, obj, func(*v1alpha1.Group) (bool, error) { return true, nil })
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("err = %v, want NotFound", err)
+	}
+}
+
+func TestApply_RecreatesWhenDeletedBeforeUpdate(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Version: "1.0"},
+	})
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	deleteOnceAfterGet(f, gvr)
+
+	obj := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
+	}
+	if err := Apply(ctx, f, obj); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.Version != "2.0" {
+		t.Errorf("version = %q, want 2.0", got.Spec.Version)
+	}
+}
+
+func TestApply_RetriesWhenGetAnswersNotFound(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Version: "1.0"},
+	})
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	f.FailNext("get", gvr, apierrors.NewNotFound(gvr.GroupResource(), "ctrl"))
+
+	obj := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.0"},
+	}
+	if err := Apply(ctx, f, obj); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := Get[v1alpha1.Controller](ctx, f, "ctrl", "ns")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.Version != "2.0" {
+		t.Errorf("version = %q, want 2.0", got.Spec.Version)
+	}
+}
+
+func TestApply_ReturnsNotFoundAfterTwoRounds(t *testing.T) {
+	ctx := context.Background()
+	f := NewFake()
+	MustSeed(f, &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+	})
+	gvr, _ := GVRFor[v1alpha1.Controller]()
+	f.FailAlways("get", gvr, apierrors.NewNotFound(gvr.GroupResource(), "ctrl"))
+
+	obj := &v1alpha1.Controller{
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl", Namespace: "ns"},
+	}
+	err := Apply(ctx, f, obj)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("err = %v, want NotFound", err)
 	}
 }
