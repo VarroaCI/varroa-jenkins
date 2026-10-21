@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"golang.org/x/crypto/bcrypt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,6 +30,10 @@ const (
 // BootstrapLocalAdmin ensures a local-admin User exists, bound to the
 // admin VarroaRole. It is idempotent: once the bootstrap Secret is
 // annotated bootstrap.consumed=true, it returns immediately.
+//
+// A re-run keeps the existing User, Group, and binding. It adds only the
+// bootstrap subject to the Group and the binding, and keeps every other
+// member and subject.
 //
 // If the Secret already has username+password keys, those are used;
 // otherwise a random 24-char password is generated and persisted.
@@ -65,6 +70,7 @@ func BootstrapLocalAdmin(ctx context.Context, client ResourceClient, store crdst
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      username,
 			Namespace: ns,
+			Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal},
 		},
 		Spec: v1alpha1.UserSpec{
 			Email:       username + "@local",
@@ -88,39 +94,11 @@ func BootstrapLocalAdmin(ctx context.Context, client ResourceClient, store crdst
 		return fmt.Errorf("patch bootstrap user status: %w", err)
 	}
 
-	// Create the admin group.
-	group := &v1alpha1.Group{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: bootstrapGroupName,
-		},
-		Spec: v1alpha1.GroupSpec{
-			DisplayName: "Varroa Administrators",
-			Members:     []string{username},
-		},
+	if err := ensureBootstrapGroup(ctx, store, username); err != nil {
+		return err
 	}
-	if err := crdstore.Apply[v1alpha1.Group](ctx, store, group); err != nil {
-		return fmt.Errorf("apply bootstrap group: %w", err)
-	}
-
-	// Bind both the admin user and the varroa-admins group to the admin
-	// role. The group subject is what makes membership in varroa-admins
-	// actually grant admin: user-deprovisioning strips User subjects from
-	// bindings, so a deleted-and-recreated admin regains access by being
-	// re-added to the group rather than silently losing it forever.
-	binding := &v1alpha1.VarroaRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: bootstrapRoleBindingName,
-		},
-		Spec: v1alpha1.VarroaRoleBindingSpec{
-			Subjects: []v1alpha1.SubjectRef{
-				{Kind: "User", Name: username},
-				{Kind: "Group", Name: bootstrapGroupName},
-			},
-			RoleRef: bootstrapAdminRole,
-		},
-	}
-	if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, store, binding); err != nil {
-		return fmt.Errorf("apply bootstrap role binding: %w", err)
+	if err := ensureBootstrapRoleBinding(ctx, store, username); err != nil {
+		return err
 	}
 
 	// Persist or update the Secret with the consumed annotation.
@@ -138,6 +116,81 @@ func BootstrapLocalAdmin(ctx context.Context, client ResourceClient, store crdst
 		logger.Info("Created bootstrap admin", "secret", bootstrapSecretName, "namespace", ns)
 	}
 
+	return nil
+}
+
+// ensureBootstrapGroup creates the admin Group, or adds username to the
+// existing Group. It keeps every other member and field.
+func ensureBootstrapGroup(ctx context.Context, store crdstore.Backend, username string) error {
+	group := &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: bootstrapGroupName},
+		Spec: v1alpha1.GroupSpec{
+			DisplayName: "Varroa Administrators",
+			Members:     []string{username},
+		},
+	}
+	err := crdstore.Create[v1alpha1.Group](ctx, store, group)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create bootstrap group: %w", err)
+	}
+	_, err = crdstore.Mutate[v1alpha1.Group](ctx, store, bootstrapGroupName, "", func(g *v1alpha1.Group) (bool, error) {
+		if slices.Contains(g.Spec.Members, username) {
+			return false, nil
+		}
+		g.Spec.Members = append(g.Spec.Members, username)
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("add bootstrap user to group: %w", err)
+	}
+	return nil
+}
+
+// ensureBootstrapRoleBinding creates the admin role binding, or adds the
+// bootstrap User and Group subjects to the existing binding. It keeps
+// every other subject, and it never changes RoleRef or Scope.
+//
+// The binding has a Group subject as well as the User. User-deprovisioning
+// strips User subjects from bindings. A deleted-and-recreated admin regains
+// access by being re-added to the group.
+func ensureBootstrapRoleBinding(ctx context.Context, store crdstore.Backend, username string) error {
+	wanted := []v1alpha1.SubjectRef{
+		{Kind: "User", Name: username},
+		{Kind: "Group", Name: bootstrapGroupName},
+	}
+	binding := &v1alpha1.VarroaRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: bootstrapRoleBindingName},
+		Spec: v1alpha1.VarroaRoleBindingSpec{
+			Subjects: wanted,
+			RoleRef:  bootstrapAdminRole,
+		},
+	}
+	err := crdstore.Create[v1alpha1.VarroaRoleBinding](ctx, store, binding)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create bootstrap role binding: %w", err)
+	}
+	_, err = crdstore.Mutate[v1alpha1.VarroaRoleBinding](ctx, store, bootstrapRoleBindingName, "", func(b *v1alpha1.VarroaRoleBinding) (bool, error) {
+		changed := false
+		for _, want := range wanted {
+			if slices.ContainsFunc(b.Spec.Subjects, func(sub v1alpha1.SubjectRef) bool {
+				return sub.Kind == want.Kind && sub.Name == want.Name
+			}) {
+				continue
+			}
+			b.Spec.Subjects = append(b.Spec.Subjects, want)
+			changed = true
+		}
+		return changed, nil
+	})
+	if err != nil {
+		return fmt.Errorf("add bootstrap subjects to role binding: %w", err)
+	}
 	return nil
 }
 

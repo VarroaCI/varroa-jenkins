@@ -191,6 +191,10 @@ The chart requires `auth.bffUrl` in this mode.
 Create users through the dashboard or users API.
 The API refuses a name that already exists with 409. Use an update to change an existing user.
 
+The operator creates the first admin from the Secret `varroa-admin-credentials`.
+A new Secret adds its user to the `varroa-admins` group and to the `varroa-admin-bootstrap` role binding.
+Other members and subjects of both objects stay.
+
 ## Add local accounts beside OIDC
 
 Keep `auth.mode: oidc` and declare the accounts:

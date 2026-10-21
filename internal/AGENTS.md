@@ -60,7 +60,7 @@ reading each package's entry point):
 - **`auth/`** — OIDC/Dex, local, and LDAP auth providers (`AuthMode` =
   `oidc|local|ldap`) plus HTTP middleware (`middleware.go`) that resolves
   request claims; subpackages `auth/local`, `auth/ldap`, `auth/identity`,
-  `auth/userdirectory`, `auth/schedule` hold provider-specific logic. `auth/local` writes the `managed-by: local` label heal through `crdstore.Mutate`. `controller.BootstrapLocalAdmin` creates the admin User and keeps an existing one.
+  `auth/userdirectory`, `auth/schedule` hold provider-specific logic. `auth/local` writes the `managed-by: local` label heal through `crdstore.Mutate`. `controller.BootstrapLocalAdmin` creates the admin User with the `managed-by: local` label and keeps an existing one. It adds the admin to an existing `varroa-admins` Group and `varroa-admin-bootstrap` binding without removing other entries.
   `auth/userdirectory.RecordLogin` stores the configured custom claims (`Claims.Extra`) in `varroa.dev/oidc-user-claims` and moves a replaced or dropped preferred username, email, or custom claim value to `varroa.dev/oidc-former-identifiers`, which only `deprovisionUser` reads (through `api.DeleteUser`). `RecordLogin` writes with the read `resourceVersion` and reads again on a conflict, up to `retry.DefaultRetry` attempts.
   `multi.go`'s `MultiProvider` serves local accounts beside OIDC
   (`--local-accounts`). It selects the verifier by the unverified `iss`. It
