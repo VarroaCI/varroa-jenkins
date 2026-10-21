@@ -171,6 +171,31 @@ public class VarroaRunRecorderChangeRequestTest {
 
     }
 
+    /** A Bitbucket-style revision: the head commit sits on a pull revision. */
+    static final class BitbucketStyleRevision extends ChangeRequestSCMRevision<PullRequestHead> {
+        private static final long serialVersionUID = 1L;
+        private final SCMRevision pull;
+
+        BitbucketStyleRevision(PullRequestHead head, SCMRevision target, SCMRevision pull) {
+            super(head, target);
+            this.pull = pull;
+        }
+
+        public SCMRevision getPull() {
+            return pull;
+        }
+
+        @Override
+        public boolean equivalent(ChangeRequestSCMRevision<?> other) {
+            return equals(other);
+        }
+
+        @Override
+        protected int _hashCode() {
+            return pull.hashCode();
+        }
+    }
+
     /** A branch revision: a plain SCM revision with its own hash. */
     static final class BranchStyleRevision extends SCMRevision {
         private static final long serialVersionUID = 1L;
@@ -269,6 +294,25 @@ public class VarroaRunRecorderChangeRequestTest {
         GiteaStyleRevision revision = new GiteaStyleRevision(head, target, new OriginHash("head444"));
 
         assertEquals("head444", VarroaRunRecorder.revisionHash(revision));
+    }
+
+    @Test
+    public void aBitbucketPullRequestRevisionAnswersThePullRevisionHash() {
+        PullRequestHead head = pullRequest();
+        SCMRevision target = new BranchStyleRevision(head.getTarget(), "base111");
+        SCMRevision pull = new BranchStyleRevision(head, "head666");
+
+        assertEquals("head666", VarroaRunRecorder.revisionHash(new BitbucketStyleRevision(head, target, pull)));
+    }
+
+    @Test
+    public void aBitbucketPullRequestCompletionSendsThePullRevisionHash() {
+        PullRequestHead head = pullRequest();
+        SCMRevision target = new BranchStyleRevision(head.getTarget(), "base111");
+        SCMRevision pull = new BranchStyleRevision(head, "head666");
+        BitbucketStyleRevision revision = new BitbucketStyleRevision(head, target, pull);
+
+        assertEquals("head666", VarroaRunRecorder.completedRevision(revision, true, changes("c1", "merge333")));
     }
 
     @Test

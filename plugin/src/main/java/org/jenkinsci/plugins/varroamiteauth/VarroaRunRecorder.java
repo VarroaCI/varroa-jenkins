@@ -1681,7 +1681,8 @@ public final class VarroaRunRecorder {
      * so a change-request revision answers its head commit and never the
      * local merge commit of the checkout. GitHub exposes the head as
      * {@code getPullHash}. Gitea exposes it as the origin revision's
-     * {@code getHash}. A change-request revision with no other accessor
+     * {@code getHash}. Bitbucket exposes it as the pull revision's {@code getHash}.
+     * A change-request revision with no other accessor
      * answers its own {@code getHash}, as before. Any other revision
      * answers its own hash.
      */
@@ -1698,6 +1699,11 @@ public final class VarroaRunRecorder {
             String originHash = origin == null ? "" : stringOf(invokeNoArg(origin, "getHash"));
             if (!originHash.isEmpty()) {
                 return originHash;
+            }
+            Object pull = invokeNoArg(revision, "getPull");
+            String pullRevisionHash = pull == null ? "" : stringOf(invokeNoArg(pull, "getHash"));
+            if (!pullRevisionHash.isEmpty()) {
+                return pullRevisionHash;
             }
         }
         return stringOf(invokeNoArg(revision, "getHash"));

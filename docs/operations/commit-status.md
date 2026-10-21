@@ -166,10 +166,9 @@ writes its own end state, which replaces the `error`.
 
 A pull-request build records one revision. The rule has two parts:
 
-- The revision action hash, when the branch source provides one. The GitHub, Gitea, and Forgejo
-  branch sources provide it. It is the head commit of the pull request.
-- The pre-merge commit of the checkout, when the branch source provides no hash. A Bitbucket
-  pull-request build uses this fallback until a Bitbucket accessor exists.
+- The revision action hash, when the branch source provides one. The GitHub, Gitea, Forgejo,
+  and Bitbucket branch sources provide it. It is the head commit of the pull request.
+- The pre-merge commit of the checkout, when the branch source provides no hash.
 
 The recorder never records the local merge commit of the checkout, on any forge.
 
