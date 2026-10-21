@@ -116,6 +116,7 @@ var routeManifest = []route{
 	{Method: "GET", Path: "/api/v1/users/{name}/apikeys"},
 	{Method: "DELETE", Path: "/api/v1/users/{name}/apikeys/{prefix}"},
 	// Groups sub-routes
+	{Method: "PUT", Path: "/api/v1/groups/{name}"},
 	{Method: "DELETE", Path: "/api/v1/groups/{name}"},
 	// Teams sub-routes
 	{Method: "GET", Path: "/api/v1/teams/{name}"},

@@ -211,6 +211,12 @@ components:
           schema:
             $ref: '#/components/schemas/components_schemas_Error'
       description: Resource not found.
+    components_responses_NotImplemented:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/components_schemas_Error'
+      description: Not implemented.
     components_responses_ServiceUnavailable:
       content:
         application/json:
@@ -1939,10 +1945,6 @@ components:
           type: string
         email:
           type: string
-        groups:
-          items:
-            type: string
-          type: array
         password:
           type: string
         purpose:
@@ -7600,10 +7602,6 @@ components:
           type: string
         email:
           type: string
-        groups:
-          items:
-            type: string
-          type: array
         password:
           type: string
         purpose:
@@ -13665,7 +13663,7 @@ paths:
         "302":
           description: Redirect to OIDC provider authorization URL.
         "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
+          $ref: '#/components/responses/components_responses_NotImplemented'
       security: []
       summary: Initiate OIDC authorization flow. Sets signed state cookie and redirects
         to provider.
@@ -14111,7 +14109,7 @@ paths:
         "500":
           description: Token exchange or validation failed.
         "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
+          $ref: '#/components/responses/components_responses_NotImplemented'
       security: []
       summary: OIDC provider callback endpoint.
       tags:
@@ -14625,6 +14623,8 @@ paths:
           $ref: '#/components/responses/components_responses_BadRequest'
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a composed bundle.
       tags:
       - composedbundles
@@ -15764,6 +15764,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a JenkinsRoleBinding on a cluster.
       tags:
       - rbac
@@ -15883,6 +15885,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a JenkinsRole on a cluster.
       tags:
       - rbac
@@ -16396,8 +16400,10 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
-        "501":
+        "405":
           $ref: '#/components/responses/components_responses_MethodNotAllowed'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a new group (admin, local auth only).
       tags:
       - groups
@@ -16417,7 +16423,54 @@ paths:
           $ref: '#/components/responses/components_responses_Forbidden'
         "404":
           $ref: '#/components/responses/components_responses_NotFound'
+        "405":
+          $ref: '#/components/responses/components_responses_MethodNotAllowed'
       summary: Deletes a group (admin, local auth only).
+      tags:
+      - groups
+    put:
+      operationId: updateGroup
+      parameters:
+      - $ref: '#/components/parameters/components_parameters_name'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: false
+              properties:
+                displayName:
+                  type: string
+                members:
+                  items:
+                    type: string
+                  type: array
+              required:
+              - members
+              type: object
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+          description: Group updated.
+        "400":
+          $ref: '#/components/responses/components_responses_BadRequest'
+        "401":
+          $ref: '#/components/responses/components_responses_Unauthorized'
+        "403":
+          $ref: '#/components/responses/components_responses_Forbidden'
+        "404":
+          $ref: '#/components/responses/components_responses_NotFound'
+      summary: Edits the display name and members of an existing group (admin, local
+        auth only).
       tags:
       - groups
   /api/v1/identity-settings:
@@ -16525,7 +16578,7 @@ paths:
                 $ref: '#/components/schemas/components_schemas_Error'
           description: Rate-limited — too many login attempts.
         "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
+          $ref: '#/components/responses/components_responses_NotImplemented'
       security: []
       summary: Authenticate with username/password. Returns a JWT and sets a secure
         cookie.
@@ -16855,7 +16908,7 @@ paths:
         "401":
           $ref: '#/components/responses/components_responses_Unauthorized'
         "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
+          $ref: '#/components/responses/components_responses_NotImplemented'
       summary: Changes the current user's password (local auth only).
       tags:
       - auth
@@ -17586,6 +17639,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a VarroaRoleBinding.
       tags:
       - rbac
@@ -17698,6 +17753,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a VarroaRole.
       tags:
       - rbac
@@ -17819,6 +17876,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Registers a runner for a pipelines tenant. Requires the runners:create
         verb and a write grant on spec.team; refuses a spec.team that names no Team
         with 400.
@@ -18681,6 +18740,8 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "409":
+          $ref: '#/components/responses/components_responses_Conflict'
       summary: Creates a new team (admin).
       tags:
       - teams
@@ -18949,10 +19010,10 @@ paths:
           $ref: '#/components/responses/components_responses_Unauthorized'
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
+        "405":
+          $ref: '#/components/responses/components_responses_MethodNotAllowed'
         "409":
           $ref: '#/components/responses/components_responses_Conflict'
-        "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
       summary: Creates a new user (admin, local auth only).
       tags:
       - users
@@ -19093,7 +19154,7 @@ paths:
         "403":
           $ref: '#/components/responses/components_responses_Forbidden'
         "501":
-          $ref: '#/components/responses/components_responses_MethodNotAllowed'
+          $ref: '#/components/responses/components_responses_NotImplemented'
       summary: Sets a user's password (admin, local auth only).
       tags:
       - users

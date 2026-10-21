@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RoleForm from "./RoleForm";
+import { ApiError } from "../hooks/useApi";
 import { renderWithProviders } from "../test/render-utils";
 import { createRole } from "../test/factories";
 
@@ -57,6 +58,17 @@ describe("RoleForm — create mode", () => {
     const nameInput = getNameInput();
     expect(nameInput).not.toBeDisabled();
     expect(nameInput).toHaveAttribute("required");
+  });
+
+  it("shows the conflict message on a create over an existing name", async () => {
+    mockCreateRole.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+    const user = userEvent.setup();
+    renderWithProviders(<RoleForm />);
+
+    await user.type(getNameInput(), "my-role");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("A role with this name already exists.")).toBeInTheDocument();
   });
 
   it("submits and navigates to /roles on successful create", async () => {

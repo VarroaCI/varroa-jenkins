@@ -6,6 +6,7 @@ import JenkinsRoleForm from "./JenkinsRoleForm";
 vi.mock("../hooks/useConfigurationCluster", () => ({
   useConfigurationCluster: () => ({ cluster: "core", entry: null, ready: true }),
 }));
+import { ApiError } from "../hooks/useApi";
 import { renderWithProviders } from "../test/render-utils";
 import { createJenkinsRole } from "../test/factories";
 
@@ -110,6 +111,19 @@ describe("JenkinsRoleForm — create mode", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Invalid role data")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the conflict message on a create over an existing name", async () => {
+    mockCreateJenkinsRole.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleForm />);
+
+    await user.type(getNameInput(), "broken");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("A Jenkins role with this name already exists.")).toBeInTheDocument();
     });
   });
 

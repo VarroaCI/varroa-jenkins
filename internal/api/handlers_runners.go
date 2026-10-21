@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -283,6 +284,10 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 		Spec:       runnerSpecFromEntry(req.Spec),
 	}
 	if err := crdstore.Create[v1alpha1.Runner](ctx, s.deps.Store, runner); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			s.writeJSONError(w, http.StatusConflict, "runner already exists")
+			return
+		}
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create runner")
 		return
 	}

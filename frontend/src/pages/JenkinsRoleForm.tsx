@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getJenkinsRole, createJenkinsRole, updateJenkinsRole } from "../api/client";
 import type { JenkinsRole, JenkinsRoleType } from "../types";
@@ -69,7 +70,7 @@ export default function JenkinsRoleForm() {
       }
       navigate(`/access/jenkins-roles${clusterQuery(cluster)}`);
     } catch (err: any) {
-      setError(err.message);
+      setError(!isEdit && err instanceof ApiError && err.status === 409 ? "A Jenkins role with this name already exists." : err.message);
     } finally {
       setLoading(false);
     }

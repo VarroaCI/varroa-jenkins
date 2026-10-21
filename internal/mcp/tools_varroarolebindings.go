@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -71,7 +72,7 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 			"(e.g. [{\"name\":\"team-a\",\"jobs\":[\"release/*\"]}]). A scope names one dimension: tenants "+
 			"never combines with namespaces or controllerSelector.")),
 	)
-	addTool(mcpServer, kindCreate, createRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createRB, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -95,7 +96,10 @@ func registerVarroaRoleBindingTools(mcpServer *server.MCPServer, deps *api.Depen
 				Scope:    scope,
 			},
 		}
-		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](ctx, deps.Store, binding); err != nil {
+		if err := crdstore.Create[v1alpha1.VarroaRoleBinding](ctx, deps.Store, binding); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("role binding %s already exists; use update_varroa_role_binding to change it", strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role binding: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRoleBinding, api.AccessCreated, strArg(args, "name")))

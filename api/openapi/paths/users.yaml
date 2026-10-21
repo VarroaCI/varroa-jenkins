@@ -52,7 +52,7 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "409":
         $ref: '../components/responses.yaml#/Conflict'
-      "501":
+      "405":
         $ref: '../components/responses.yaml#/MethodNotAllowed'
 
 /api/v1/users/{name}:
@@ -145,7 +145,7 @@
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
       "501":
-        $ref: '../components/responses.yaml#/MethodNotAllowed'
+        $ref: '../components/responses.yaml#/NotImplemented'
 
 /api/v1/identity-settings:
   get:

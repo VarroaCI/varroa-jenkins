@@ -397,6 +397,22 @@ describe("ComposerTray", () => {
       });
     });
 
+    it("keeps the tray open when a create answers 409 for an existing name", async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.post("*/composedbundles/:namespace", () => new HttpResponse(null, { status: 409 })),
+      );
+      renderWithProviders(<ComposerTray open={true} onClose={onClose} />);
+
+      await user.type(screen.getByPlaceholderText("My composed bundle"), "My Bundle");
+      await user.click(screen.getByText("Create bundle"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Create bundle")).toBeInTheDocument();
+      });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
     it("shows Create + Attach when a controller is selected and creates both", async () => {
       const user = userEvent.setup();
       renderWithProviders(<ComposerTray open={true} onClose={onClose} />);

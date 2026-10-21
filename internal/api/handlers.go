@@ -3410,7 +3410,7 @@ func (s *Server) handleVarroaRoles(w http.ResponseWriter, r *http.Request) {
 		}
 		role.APIVersion = "varroa.dev/v1alpha1"
 		role.Kind = "VarroaRole"
-		if err := crdstore.Apply[v1alpha1.VarroaRole](r.Context(), s.deps.Store, &role); err != nil {
+		if err := crdstore.Create[v1alpha1.VarroaRole](r.Context(), s.deps.Store, &role); err != nil {
 			s.writeK8sError(w, err)
 			return
 		}
@@ -3520,7 +3520,7 @@ func (s *Server) handleVarroaRoleBindings(w http.ResponseWriter, r *http.Request
 		}
 		binding.APIVersion = "varroa.dev/v1alpha1"
 		binding.Kind = "VarroaRoleBinding"
-		if err := crdstore.Apply[v1alpha1.VarroaRoleBinding](r.Context(), s.deps.Store, &binding); err != nil {
+		if err := crdstore.Create[v1alpha1.VarroaRoleBinding](r.Context(), s.deps.Store, &binding); err != nil {
 			s.writeK8sError(w, err)
 			return
 		}

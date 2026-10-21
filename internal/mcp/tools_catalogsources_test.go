@@ -76,7 +76,7 @@ func TestMCPCreateCatalogSource_ScopedDeveloper(t *testing.T) {
 		"name": "create_catalog_source",
 		"arguments": map[string]interface{}{
 			"namespace": "team-a",
-			"name":      "src",
+			"name":      "src-new",
 			"repoURL":   "https://example.com/repo.git",
 		},
 	}, mcpScopedDevClaims)

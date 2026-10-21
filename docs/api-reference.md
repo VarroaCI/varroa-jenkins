@@ -27,4 +27,6 @@ The API returns standard HTTP status codes. `401` means the credential is missin
 
 The API base path is `/api/v1`. The interactive reference is at `/api/v1/docs`; the machine-readable document is at `/api/v1/openapi.json`. Most controller and configuration resources are addressed within a cluster. Select the intended cluster explicitly when operating across clusters. Collection responses, pagination, streaming endpoints, action routes, and error bodies are specified in OpenAPI.
 
+A create request for a name that already exists answers `409`. Use the update route to change the object.
+
 For exhaustive schemas, examples, and media types, defer to the OpenAPI document rather than duplicating it here.

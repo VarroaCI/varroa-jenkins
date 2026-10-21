@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -15,7 +16,7 @@ import (
 )
 
 // =============================================================================
-// Group tools (3) — admin-only
+// Group tools (4) — admin-only
 // =============================================================================
 
 func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
@@ -58,7 +59,7 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("Group name (DNS-1123)")),
 		mcp.WithArray("members", mcp.Description("Group members")),
 	)
-	addTool(mcpServer, kindCreate, createG, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createG, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -74,11 +75,53 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			ObjectMeta: metav1.ObjectMeta{Name: strArg(args, "name")},
 			Spec:       v1alpha1.GroupSpec{Members: firstSlice(strSliceArg(args, "members"))},
 		}
-		if err := crdstore.Apply[v1alpha1.Group](ctx, deps.Store, group); err != nil {
+		if err := crdstore.Create[v1alpha1.Group](ctx, deps.Store, group); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("group %s already exists", strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create group: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessGroup, api.AccessCreated, strArg(args, "name")))
 		return resultJSON(group)
+	})
+
+	updateG := mcp.NewTool("update_group",
+		mcp.WithDescription("Replace the display name and members of an existing Varroa group (admin only, local auth only)"),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Group name")),
+		mcp.WithString("displayName", mcp.Description("Display name")),
+		mcp.WithArray("members", mcp.Description("Group members. Replaces the whole member list.")),
+	)
+	addTool(mcpServer, kindUpdate, updateG, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if deps.Authorizer == nil {
+			return mcp.NewToolResultError("authorizer not configured"), nil
+		}
+		claims, err := requireClaims(ctx)
+		if err != nil {
+			return mcp.NewToolResultError("authentication required"), nil
+		}
+		if !deps.Authorizer.IsAdmin(claims) {
+			return mcp.NewToolResultError("access denied: admin only"), nil
+		}
+		if !deps.IdentityConfig.LocalAccountsOn() {
+			return mcp.NewToolResultError("group management is only available with local accounts"), nil
+		}
+		args := getArgs(req)
+		name := strArg(args, "name")
+		members := firstSlice(strSliceArg(args, "members"))
+		displayName := strArg(args, "displayName")
+		_, err = crdstore.Mutate[v1alpha1.Group](ctx, deps.Store, name, "", func(g *v1alpha1.Group) (bool, error) {
+			g.Spec.DisplayName = displayName
+			g.Spec.Members = members
+			return true, nil
+		})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("group %s not found", name)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to update group: %v", err)), nil
+		}
+		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessGroup, api.AccessUpdated, name))
+		return resultJSON(map[string]string{"name": name})
 	})
 
 	deleteG := mcp.NewTool("delete_group",

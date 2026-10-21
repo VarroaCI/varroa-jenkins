@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -160,7 +161,11 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := crdstore.Apply[v1alpha1.Group](ctx, s.deps.Store, group); err != nil {
+	if err := crdstore.Create[v1alpha1.Group](ctx, s.deps.Store, group); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			s.writeJSONError(w, http.StatusConflict, "group already exists")
+			return
+		}
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create group")
 		return
 	}
@@ -171,6 +176,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 // HandleGroupDispatch dispatches /groups/{name} requests:
 //
+//	PUT    /groups/{name} — edit display name and members (admin, local only)
 //	DELETE /groups/{name} — delete group (admin, local only)
 func (s *Server) HandleGroupDispatch(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/groups/")
@@ -180,11 +186,59 @@ func (s *Server) HandleGroupDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case http.MethodPut:
+		s.handleUpdateGroup(w, r, name)
 	case http.MethodDelete:
 		s.handleDeleteGroup(w, r, name)
 	default:
 		s.writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// updateGroupRequest is the JSON body for PUT /groups/{name}.
+type updateGroupRequest struct {
+	DisplayName string   `json:"displayName,omitempty"`
+	Members     []string `json:"members"`
+}
+
+// handleUpdateGroup replaces the display name and member list of an existing
+// group through crdstore.Mutate. A missing group answers 404; the name is never
+// created here.
+func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request, name string) {
+	if !s.localAccountsOn() {
+		s.writeJSONError(w, http.StatusMethodNotAllowed, "group management is only available with local accounts")
+		return
+	}
+
+	claims := auth.ClaimsFromContext(r.Context())
+	if s.deps.Authorizer == nil || !s.deps.Authorizer.IsAdmin(claims) {
+		s.writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	var req updateGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	ctx := r.Context()
+	_, err := crdstore.Mutate[v1alpha1.Group](ctx, s.deps.Store, name, "", func(g *v1alpha1.Group) (bool, error) {
+		g.Spec.DisplayName = req.DisplayName
+		g.Spec.Members = req.Members
+		return true, nil
+	})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			s.writeJSONError(w, http.StatusNotFound, "group not found")
+			return
+		}
+		s.writeJSONError(w, http.StatusInternalServerError, "failed to update group")
+		return
+	}
+
+	s.notifyAccessActivity(claims, "", AccessGroup, AccessUpdated, name)
+	s.writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }
 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request, name string) {

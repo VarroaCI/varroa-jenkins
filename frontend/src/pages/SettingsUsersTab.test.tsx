@@ -15,6 +15,7 @@ vi.mock("../api/client", () => ({
   listJenkinsRoleBindings: vi.fn(),
   listGroups: vi.fn(),
   createGroup: vi.fn(),
+  updateGroup: vi.fn(),
 }));
 vi.mock("../context/AuthContext", () => ({ useAuth: vi.fn() }));
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   m(client.deleteUser).mockResolvedValue(undefined);
   m(client.adminResetPassword).mockResolvedValue(undefined);
   m(client.createGroup).mockResolvedValue({ name: "devs" });
+  m(client.updateGroup).mockResolvedValue({ name: "devs" });
   m(client.listRoleBindings).mockResolvedValue({ items: [] });
   m(client.listJenkinsRoleBindings).mockResolvedValue({ items: [] });
 });
@@ -66,7 +68,7 @@ describe("SettingsUsersTab", () => {
     await waitFor(() => expect(client.createUser).toHaveBeenCalled());
     expect(m(client.createUser).mock.calls[0][0]).toMatchObject({ username: "carol" });
     // Initial membership applied via create-then-patch.
-    await waitFor(() => expect(client.createGroup).toHaveBeenCalled());
+    await waitFor(() => expect(client.updateGroup).toHaveBeenCalled());
   });
 
   it("local mode: edits a user and resets password from the detail panel", async () => {
@@ -88,7 +90,7 @@ describe("SettingsUsersTab", () => {
     await userEvent.click(screen.getByText("Save changes"));
     await waitFor(() => expect(client.updateUser).toHaveBeenCalledWith("alice", expect.objectContaining({ displayName: "Alice B" })));
     // Membership change is applied via group upsert.
-    await waitFor(() => expect(client.createGroup).toHaveBeenCalled());
+    await waitFor(() => expect(client.updateGroup).toHaveBeenCalled());
 
     // Reset password.
     await userEvent.type(screen.getByPlaceholderText("New password (min 8 chars)"), "newpass12");

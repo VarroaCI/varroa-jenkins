@@ -53,6 +53,7 @@ func init() {
 		contractCase{Name: "listGroups", Method: "GET", Path: "/api/v1/groups", Claims: adminClaims, WantStatus: http.StatusOK},
 		contractCase{Name: "listGroups-403-nonadmin", Method: "GET", Path: "/api/v1/groups", Claims: operatorClaims, WantStatus: http.StatusForbidden},
 		contractCase{Name: "createGroup", Method: "POST", Path: "/api/v1/groups", Claims: adminClaims, Body: map[string]string{"name": "test-group"}, WantStatus: http.StatusCreated},
+		contractCase{Name: "updateGroup-404-missing", Method: "PUT", Path: "/api/v1/groups/any-group", Claims: adminClaims, Body: map[string]any{"members": []string{}}, WantStatus: http.StatusNotFound},
 		contractCase{Name: "zz-deleteGroup", Method: "DELETE", Path: "/api/v1/groups/any-group", Claims: adminClaims, WantStatus: http.StatusNoContent},
 	)
 

@@ -9,9 +9,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/api"
+	"github.com/varroaci/varroa-jenkins/internal/auth/identity"
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
@@ -131,17 +133,16 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 
 	createU := mcp.NewTool("create_user",
-		mcp.WithDescription("Create a new Varroa user (admin only, local auth only)"),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace")),
+		mcp.WithDescription("Create a new Varroa local user (admin only, local accounts only). This tool does not set group membership."),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace. Local users live in the operator namespace; any other value is refused.")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 		mcp.WithString("email", mcp.Description("Email address")),
 		mcp.WithString("displayName", mcp.Description("Display name")),
-		mcp.WithString("password", mcp.Description("Initial password")),
-		mcp.WithArray("groups", mcp.Description("Group memberships")),
+		mcp.WithString("password", mcp.Required(), mcp.Description("Initial password")),
 		mcp.WithString("purpose", mcp.Enum(string(v1alpha1.UserPurposeService), string(v1alpha1.UserPurposeBreakGlass)),
 			mcp.Description("Purpose of a local account beside OIDC: service or break-glass. Required when local accounts run beside OIDC.")),
 	)
-	addTool(mcpServer, kindCreate, createU, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createU, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -152,16 +153,38 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if !deps.Authorizer.IsAdmin(claims) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
 		}
+		if !deps.IdentityConfig.LocalAccountsOn() {
+			return mcp.NewToolResultError("user creation is only available with local accounts"), nil
+		}
 		args := getArgs(req)
+		ns := strArg(args, "namespace")
+		if ns != "" && ns != deps.OperatorNamespace {
+			return mcp.NewToolResultError("local users live in the operator namespace " + deps.OperatorNamespace), nil
+		}
 		purpose, perr := userPurposeArg(deps, args, true)
 		if perr != "" {
 			return mcp.NewToolResultError(perr), nil
 		}
+		password := strArg(args, "password")
+		if password == "" {
+			return mcp.NewToolResultError("password is required"), nil
+		}
+		name := strArg(args, "name")
+		if err := identity.ValidateLocalUsername(name); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		user := &v1alpha1.User{
-			ObjectMeta: objMeta(args),
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: deps.OperatorNamespace,
+				Labels: map[string]string{
+					v1alpha1.LabelManagedBy: v1alpha1.ManagedByLocal,
+				},
+			},
 			Spec: v1alpha1.UserSpec{
 				Email:       strArg(args, "email"),
 				DisplayName: strArg(args, "displayName"),
+				Password:    password,
 				Purpose:     purpose,
 			},
 		}
@@ -171,7 +194,7 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create user: %v", err)), nil
 		}
-		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserCreated, strArg(args, "namespace"), strArg(args, "name")))
+		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserCreated, user.Namespace, user.Name))
 		return resultJSON(user)
 	})
 
@@ -181,7 +204,6 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 		mcp.WithString("email", mcp.Description("Email address")),
 		mcp.WithString("displayName", mcp.Description("Display name")),
-		mcp.WithArray("groups", mcp.Description("Group memberships")),
 		mcp.WithString("purpose", mcp.Enum(string(v1alpha1.UserPurposeService), string(v1alpha1.UserPurposeBreakGlass)),
 			mcp.Description("Purpose of a local account beside OIDC: service or break-glass.")),
 	)

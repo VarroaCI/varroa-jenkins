@@ -2,6 +2,8 @@
 package mcp
 
 import (
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"context"
 	"errors"
 	"fmt"
@@ -105,7 +107,7 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 		mcp.WithBoolean("trusted", mcp.Description("Mark the source trusted")),
 		mcp.WithNumber("syncIntervalSeconds", mcp.Description("Sync interval in seconds: 0 (use the default, 300) or 30 to 31536000")),
 	)
-	addTool(mcpServer, kindCreate, createCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createCS, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -152,7 +154,10 @@ func registerCatalogSourceTools(mcpServer *server.MCPServer, deps *api.Dependenc
 			Spec:       spec,
 		}
 		source.Namespace = ns
-		if err := crdstore.Apply[v1alpha1.CatalogSource](ctx, deps.Store, source); err != nil {
+		if err := crdstore.Create[v1alpha1.CatalogSource](ctx, deps.Store, source); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("catalog source %s/%s already exists; use update_catalog_source to change it", ns, strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create catalog source: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, activity.Event{

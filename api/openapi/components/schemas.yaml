@@ -209,10 +209,6 @@ CreateUserRequest:
       type: string
     password:
       type: string
-    groups:
-      type: array
-      items:
-        type: string
     purpose:
       type: string
       enum: [service, break-glass]

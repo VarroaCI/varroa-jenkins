@@ -87,7 +87,7 @@ federation, activity persistence, and SSE fanout.
   reads (`identity.UserResourceName`) through `MutateStatus`. It answers 404
   when no User exists and never creates one. `PUT /users/{name}` edits a User
   through `crdstore.Mutate`, so a write from another writer since the read
-  survives. `POST /users` and MCP `create_user` write through `crdstore.Create` and refuse an existing name: 409 on REST and a tool error on MCP. They never replace a User.
+  survives. Every REST create route and every MCP create tool writes through `crdstore.Create` and refuses an existing name: 409 on REST and a tool error on MCP. A create never replaces an object. MCP `create_user` requires a password and writes only to the operator namespace.
 - **Cell pools** (`handlers_cellpools.go`, `cellpools_service.go`) serve
   `GET /cellpools`, `GET /cellpools/{name}`, and `PATCH /cellpools/{name}`
   over the cluster-scoped `CellPool` CRD of **every cluster of the brood**.

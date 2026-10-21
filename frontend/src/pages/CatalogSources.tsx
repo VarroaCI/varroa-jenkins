@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ApiError } from "../hooks/useApi";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCatalogSources } from "../hooks/useCatalog";
@@ -299,7 +300,11 @@ export default function CatalogSources() {
       queryClient.invalidateQueries({ queryKey: ["catalog-sources"] });
       setDialog(null);
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "Failed to save");
+      if (dialog.open === "create" && e instanceof ApiError && e.status === 409) {
+        toast("A catalog source with this name already exists.");
+      } else {
+        toast(e instanceof Error ? e.message : "Failed to save");
+      }
     } finally {
       setSaving(false);
     }

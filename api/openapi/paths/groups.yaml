@@ -50,10 +50,53 @@
         $ref: '../components/responses.yaml#/Unauthorized'
       "403":
         $ref: '../components/responses.yaml#/Forbidden'
-      "501":
+      "405":
         $ref: '../components/responses.yaml#/MethodNotAllowed'
+      "409":
+        $ref: '../components/responses.yaml#/Conflict'
 
 /api/v1/groups/{name}:
+  put:
+    operationId: updateGroup
+    tags: [groups]
+    summary: Edits the display name and members of an existing group (admin, local auth only).
+    parameters:
+      - $ref: '../components/parameters.yaml#/name'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [members]
+            properties:
+              displayName:
+                type: string
+              members:
+                type: array
+                items:
+                  type: string
+            additionalProperties: false
+    responses:
+      "200":
+        description: Group updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      "400":
+        $ref: '../components/responses.yaml#/BadRequest'
+      "401":
+        $ref: '../components/responses.yaml#/Unauthorized'
+      "403":
+        $ref: '../components/responses.yaml#/Forbidden'
+      "404":
+        $ref: '../components/responses.yaml#/NotFound'
   delete:
     operationId: deleteGroup
     tags: [groups]
@@ -71,3 +114,5 @@
         $ref: '../components/responses.yaml#/Forbidden'
       "404":
         $ref: '../components/responses.yaml#/NotFound'
+      "405":
+        $ref: '../components/responses.yaml#/MethodNotAllowed'

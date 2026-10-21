@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -67,7 +68,7 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 		mcp.WithArray("apiRules", mcp.Description("API permission rules")),
 		mcp.WithArray("jenkinsPermissions", mcp.Description("Jenkins permissions (legacy inline)")),
 	)
-	addTool(mcpServer, kindCreate, createR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	addTool(mcpServer, kindCreateStrict, createR, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if deps.Authorizer == nil {
 			return mcp.NewToolResultError("authorizer not configured"), nil
 		}
@@ -97,7 +98,10 @@ func registerVarroaRoleTools(mcpServer *server.MCPServer, deps *api.Dependencies
 				}
 			}
 		}
-		if err := crdstore.Apply[v1alpha1.VarroaRole](ctx, deps.Store, role); err != nil {
+		if err := crdstore.Create[v1alpha1.VarroaRole](ctx, deps.Store, role); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("role %s already exists; use update_varroa_role to change it", strArg(args, "name"))), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create role: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.AccessActivityEvent(api.AccessVarroaRole, api.AccessCreated, strArg(args, "name")))

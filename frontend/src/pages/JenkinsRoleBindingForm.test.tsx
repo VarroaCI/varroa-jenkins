@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import JenkinsRoleBindingForm from "./JenkinsRoleBindingForm";
+import { ApiError } from "../hooks/useApi";
 import { renderWithProviders } from "../test/render-utils";
 import { createJenkinsRole, createJenkinsRoleBinding } from "../test/factories";
 
@@ -126,6 +127,28 @@ describe("JenkinsRoleBindingForm — create mode", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Bind failed")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the conflict message on a create over an existing name", async () => {
+    mockCreateJenkinsRoleBinding.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+    const user = userEvent.setup();
+    renderWithProviders(<JenkinsRoleBindingForm />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Create Jenkins Role Binding")).toBeInTheDocument();
+    });
+
+    await user.type(getNameInput(), "fail");
+    // Fill required fields so form submits
+    const subjectInputs = screen.getAllByPlaceholderText("Subject name");
+    await user.type(subjectInputs[0], "test-user");
+    const combos = screen.getAllByRole("combobox");
+    await user.selectOptions(combos[1], "jenkins-viewer");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("A Jenkins role binding with this name already exists.")).toBeInTheDocument();
     });
   });
 

@@ -2654,10 +2654,9 @@ type ComponentsSchemasCreateRunRequest struct {
 
 // ComponentsSchemasCreateUserRequest Request body for creating a local account (admin only).
 type ComponentsSchemasCreateUserRequest struct {
-	DisplayName *string   `json:"displayName,omitempty"`
-	Email       *string   `json:"email,omitempty"`
-	Groups      *[]string `json:"groups,omitempty"`
-	Password    string    `json:"password"`
+	DisplayName *string `json:"displayName,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	Password    string  `json:"password"`
 
 	// Purpose Required when local accounts run beside OIDC.
 	Purpose  *ComponentsSchemasCreateUserRequestPurpose `json:"purpose,omitempty"`
@@ -5662,6 +5661,9 @@ type ComponentsResponsesMethodNotAllowed = ComponentsSchemasError
 // ComponentsResponsesNotFound defines model for components_responses_NotFound.
 type ComponentsResponsesNotFound = ComponentsSchemasError
 
+// ComponentsResponsesNotImplemented defines model for components_responses_NotImplemented.
+type ComponentsResponsesNotImplemented = ComponentsSchemasError
+
 // ComponentsResponsesServiceUnavailable defines model for components_responses_ServiceUnavailable.
 type ComponentsResponsesServiceUnavailable = ComponentsSchemasError
 
@@ -5925,6 +5927,12 @@ type GetFleetPluginParams struct {
 	Affected *string `form:"affected,omitempty" json:"affected,omitempty"`
 }
 
+// UpdateGroupJSONBody defines parameters for UpdateGroup.
+type UpdateGroupJSONBody struct {
+	DisplayName *string  `json:"displayName,omitempty"`
+	Members     []string `json:"members"`
+}
+
 // ChangeMyPasswordJSONBody defines parameters for ChangeMyPassword.
 type ChangeMyPasswordJSONBody struct {
 	NewPassword string `json:"newPassword"`
@@ -6139,6 +6147,9 @@ type UpdateVersionProfileJSONRequestBody = ComponentsSchemasJenkinsVersionProfil
 
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = ComponentsSchemasCreateGroupRequest
+
+// UpdateGroupJSONRequestBody defines body for UpdateGroup for application/json ContentType.
+type UpdateGroupJSONRequestBody UpdateGroupJSONBody
 
 // ReleaseFleetLockJSONRequestBody defines body for ReleaseFleetLock for application/json ContentType.
 type ReleaseFleetLockJSONRequestBody = ComponentsSchemasFleetLockReleaseRequest
@@ -7112,6 +7123,11 @@ type ClientInterface interface {
 
 	// DeleteGroup request
 	DeleteGroup(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateGroupWithBody request with any body
+	UpdateGroupWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateGroup(ctx context.Context, name ComponentsParametersName, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetIdentitySettings request
 	GetIdentitySettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9085,6 +9101,30 @@ func (c *Client) CreateGroup(ctx context.Context, body CreateGroupJSONRequestBod
 
 func (c *Client) DeleteGroup(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteGroupRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateGroupWithBody(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateGroupRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateGroup(ctx context.Context, name ComponentsParametersName, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateGroupRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -15995,6 +16035,53 @@ func NewDeleteGroupRequest(server string, name ComponentsParametersName) (*http.
 	return req, nil
 }
 
+// NewUpdateGroupRequest calls the generic UpdateGroup builder with application/json body
+func NewUpdateGroupRequest(server string, name ComponentsParametersName, body UpdateGroupJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateGroupRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewUpdateGroupRequestWithBody generates requests for UpdateGroup with any type of body
+func NewUpdateGroupRequestWithBody(server string, name ComponentsParametersName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "name", runtime.ParamLocationPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/groups/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PUT", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetIdentitySettingsRequest generates requests for GetIdentitySettings
 func NewGetIdentitySettingsRequest(server string) (*http.Request, error) {
 	var err error
@@ -20038,6 +20125,11 @@ type ClientWithResponsesInterface interface {
 	// DeleteGroupWithResponse request
 	DeleteGroupWithResponse(ctx context.Context, name ComponentsParametersName, reqEditors ...RequestEditorFn) (*DeleteGroupResponse, error)
 
+	// UpdateGroupWithBodyWithResponse request with any body
+	UpdateGroupWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error)
+
+	UpdateGroupWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error)
+
 	// GetIdentitySettingsWithResponse request
 	GetIdentitySettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetIdentitySettingsResponse, error)
 
@@ -20791,7 +20883,7 @@ func (r GetAuthConfigResponse) StatusCode() int {
 type AuthLoginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON501      *ComponentsResponsesMethodNotAllowed
+	JSON501      *ComponentsResponsesNotImplemented
 }
 
 // Status returns HTTPResponse.Status
@@ -21155,7 +21247,7 @@ func (r ListBuiltinRolesResponse) StatusCode() int {
 type AuthCallbackResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON501      *ComponentsResponsesMethodNotAllowed
+	JSON501      *ComponentsResponsesNotImplemented
 }
 
 // Status returns HTTPResponse.Status
@@ -21618,6 +21710,7 @@ type CreateComposedBundleResponse struct {
 	JSON201      *ComponentsSchemasComposedBundle
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -22479,6 +22572,7 @@ type CreateJenkinsRoleBindingResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -22604,6 +22698,7 @@ type CreateJenkinsRoleResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -23031,7 +23126,8 @@ type CreateGroupResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
-	JSON501 *ComponentsResponsesMethodNotAllowed
+	JSON405 *ComponentsResponsesMethodNotAllowed
+	JSON409 *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -23057,6 +23153,7 @@ type DeleteGroupResponse struct {
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
 	JSON404      *ComponentsResponsesNotFound
+	JSON405      *ComponentsResponsesMethodNotAllowed
 }
 
 // Status returns HTTPResponse.Status
@@ -23069,6 +23166,34 @@ func (r DeleteGroupResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r DeleteGroupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateGroupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Name string `json:"name"`
+	}
+	JSON400 *ComponentsResponsesBadRequest
+	JSON401 *ComponentsResponsesUnauthorized
+	JSON403 *ComponentsResponsesForbidden
+	JSON404 *ComponentsResponsesNotFound
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateGroupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateGroupResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -23159,7 +23284,7 @@ type LoginResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON429      *ComponentsSchemasError
-	JSON501      *ComponentsResponsesMethodNotAllowed
+	JSON501      *ComponentsResponsesNotImplemented
 }
 
 // Status returns HTTPResponse.Status
@@ -23431,7 +23556,7 @@ type ChangeMyPasswordResponse struct {
 	}
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
-	JSON501 *ComponentsResponsesMethodNotAllowed
+	JSON501 *ComponentsResponsesNotImplemented
 }
 
 // Status returns HTTPResponse.Status
@@ -24000,6 +24125,7 @@ type CreateVarroaRoleBindingResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -24125,6 +24251,7 @@ type CreateVarroaRoleResponse struct {
 	JSON400      *ComponentsResponsesBadRequest
 	JSON401      *ComponentsResponsesUnauthorized
 	JSON403      *ComponentsResponsesForbidden
+	JSON409      *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -24252,6 +24379,7 @@ type CreateRunnerResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
+	JSON409 *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -24877,6 +25005,7 @@ type CreateTeamResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
+	JSON409 *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -25089,8 +25218,8 @@ type CreateUserResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
+	JSON405 *ComponentsResponsesMethodNotAllowed
 	JSON409 *ComponentsResponsesConflict
-	JSON501 *ComponentsResponsesMethodNotAllowed
 }
 
 // Status returns HTTPResponse.Status
@@ -25222,7 +25351,7 @@ type SetUserPasswordResponse struct {
 	JSON400 *ComponentsResponsesBadRequest
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
-	JSON501 *ComponentsResponsesMethodNotAllowed
+	JSON501 *ComponentsResponsesNotImplemented
 }
 
 // Status returns HTTPResponse.Status
@@ -26575,6 +26704,23 @@ func (c *ClientWithResponses) DeleteGroupWithResponse(ctx context.Context, name 
 		return nil, err
 	}
 	return ParseDeleteGroupResponse(rsp)
+}
+
+// UpdateGroupWithBodyWithResponse request with arbitrary body returning *UpdateGroupResponse
+func (c *ClientWithResponses) UpdateGroupWithBodyWithResponse(ctx context.Context, name ComponentsParametersName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error) {
+	rsp, err := c.UpdateGroupWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateGroupResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateGroupWithResponse(ctx context.Context, name ComponentsParametersName, body UpdateGroupJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateGroupResponse, error) {
+	rsp, err := c.UpdateGroup(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateGroupResponse(rsp)
 }
 
 // GetIdentitySettingsWithResponse request returning *GetIdentitySettingsResponse
@@ -28477,7 +28623,7 @@ func ParseAuthLoginResponse(rsp *http.Response) (*AuthLoginResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
+		var dest ComponentsResponsesNotImplemented
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -29137,7 +29283,7 @@ func ParseAuthCallbackResponse(rsp *http.Response) (*AuthCallbackResponse, error
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
+		var dest ComponentsResponsesNotImplemented
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -29976,6 +30122,13 @@ func ParseCreateComposedBundleResponse(rsp *http.Response) (*CreateComposedBundl
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -31635,6 +31788,13 @@ func ParseCreateJenkinsRoleBindingResponse(rsp *http.Response) (*CreateJenkinsRo
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -31857,6 +32017,13 @@ func ParseCreateJenkinsRoleResponse(rsp *http.Response) (*CreateJenkinsRoleRespo
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -32617,12 +32784,19 @@ func ParseCreateGroupResponse(rsp *http.Response) (*CreateGroupResponse, error) 
 		}
 		response.JSON403 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
 		var dest ComponentsResponsesMethodNotAllowed
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.JSON501 = &dest
+		response.JSON405 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -32643,6 +32817,69 @@ func ParseDeleteGroupResponse(rsp *http.Response) (*DeleteGroupResponse, error) 
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ComponentsResponsesBadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ComponentsResponsesUnauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ComponentsResponsesForbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ComponentsResponsesNotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateGroupResponse parses an HTTP response from a UpdateGroupWithResponse call
+func ParseUpdateGroupResponse(rsp *http.Response) (*UpdateGroupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateGroupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest ComponentsResponsesBadRequest
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -32874,7 +33111,7 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 		response.JSON429 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
+		var dest ComponentsResponsesNotImplemented
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -33334,7 +33571,7 @@ func ParseChangeMyPasswordResponse(rsp *http.Response) (*ChangeMyPasswordRespons
 		response.JSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
+		var dest ComponentsResponsesNotImplemented
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -34469,6 +34706,13 @@ func ParseCreateVarroaRoleBindingResponse(rsp *http.Response) (*CreateVarroaRole
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -34691,6 +34935,13 @@ func ParseCreateVarroaRoleResponse(rsp *http.Response) (*CreateVarroaRoleRespons
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -34916,6 +35167,13 @@ func ParseCreateRunnerResponse(rsp *http.Response) (*CreateRunnerResponse, error
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -36166,6 +36424,13 @@ func ParseCreateTeamResponse(rsp *http.Response) (*CreateTeamResponse, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -36590,19 +36855,19 @@ func ParseCreateUserResponse(rsp *http.Response) (*CreateUserResponse, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 405:
+		var dest ComponentsResponsesMethodNotAllowed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON405 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest ComponentsResponsesConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON409 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON501 = &dest
 
 	}
 
@@ -36846,7 +37111,7 @@ func ParseSetUserPasswordResponse(rsp *http.Response) (*SetUserPasswordResponse,
 		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 501:
-		var dest ComponentsResponsesMethodNotAllowed
+		var dest ComponentsResponsesNotImplemented
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

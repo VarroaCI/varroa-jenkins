@@ -394,7 +394,13 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 			}
 			cb.APIVersion = "varroa.dev/v1alpha1"
 			cb.Kind = "ComposedBundle"
-			if err := crdstore.Apply[v1alpha1.ComposedBundle](context.Background(), c.Store, cb); err != nil {
+			if err := crdstore.Create[v1alpha1.ComposedBundle](context.Background(), c.Store, cb); err != nil {
+				if k8serrors.IsAlreadyExists(err) {
+					return c.crudReply(bus.ControllersCreateResponse{
+						Error: "bundle " + bundleName + " exists",
+						Code:  bus.CodeConflict,
+					})
+				}
 				c.Logger.Error("create inline bundle failed", "bundle", bundleName, "error", err)
 				return c.crudReply(bus.ControllersCreateResponse{Error: "failed to create bundle", Code: bus.CodeInternal})
 			}

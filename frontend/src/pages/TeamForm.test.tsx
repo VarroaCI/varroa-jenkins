@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ApiError } from "../hooks/useApi";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TeamForm from "./TeamForm";
@@ -53,6 +54,20 @@ describe("TeamForm", () => {
     mockListComposedBundles.mockResolvedValue(bundleList);
     mockCreateTeam.mockResolvedValue({ name: "alpha-team" });
     mockUpdateTeam.mockResolvedValue({ name: "alpha-team" });
+  });
+
+  it("shows the conflict message on a create over an existing name", async () => {
+    mockCreateTeam.mockRejectedValueOnce(new ApiError(409, "x", { error: "already exists" }));
+    const user = userEvent.setup();
+    render(<TeamForm />);
+
+    const nameInput = screen.getByText("Name").nextElementSibling as HTMLInputElement;
+    await user.type(nameInput, "alpha-team");
+    await user.type(screen.getAllByPlaceholderText("Username")[0], "alice");
+    await user.type(screen.getAllByPlaceholderText("Namespace")[0], "team-alpha");
+    await user.click(screen.getByText("Create"));
+
+    expect(await screen.findByText("A team with this name already exists.")).toBeInTheDocument();
   });
 
   it("emits pipelines with the selected bundle's namespace explicitly", async () => {
