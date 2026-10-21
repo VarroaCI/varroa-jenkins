@@ -7075,8 +7075,8 @@ TeamCellWarning:
       type: string
       description: >-
         The warning reason. One of ItemsHeld, ItemsApplyFailed,
-        BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped, or
-        HibernationIgnored.
+        BundleKeysIgnored, PodTemplateSkipped, CredentialSkipped,
+        HibernationIgnored, or BranchScanFailed.
     message:
       type: string
       description: The warning message, which names the fault.

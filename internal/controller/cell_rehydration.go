@@ -167,6 +167,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 	teams := r.listPlacedTeams(ctx, cr)
 	if len(teams) == 0 {
 		r.dropRehydrationInFlight(cellKey)
+		pruneBranchScanFailedWarnings(cr.Status.Cell)
 		return nil
 	}
 
@@ -265,6 +266,7 @@ func (r *Reconciler) attachCellRehydration(ctx context.Context, cr *v1alpha1.Con
 				}
 			}
 			cr.Status.Cell.Rehydration = entries
+			pruneBranchScanFailedWarnings(cr.Status.Cell)
 			return held
 		}
 		keep = inFlight
@@ -574,5 +576,6 @@ func publishRehydrationEntries(cr *v1alpha1.Controller, entries []v1alpha1.CellR
 		entries[i] = *existing
 	}
 	cr.Status.Cell.Rehydration = entries
+	pruneBranchScanFailedWarnings(cr.Status.Cell)
 	return deferred
 }

@@ -389,22 +389,24 @@ type DesiredStateCommand struct {
 }
 
 type DesiredStateResult struct {
-	ConfigSuccess             bool                        `json:"config_success"`
-	RbacSuccess               bool                        `json:"rbac_success"`
-	PluginsSuccess            bool                        `json:"plugins_success"`
-	ItemsSuccess              bool                        `json:"items_success"`
-	ConfigError               string                      `json:"config_error,omitempty"`
-	RbacError                 string                      `json:"rbac_error,omitempty"`
-	PluginsError              string                      `json:"plugins_error,omitempty"`
-	ItemsError                string                      `json:"items_error,omitempty"`
-	AppliedHash               string                      `json:"applied_hash,omitempty"`
-	DeferredItemDeletions     []*DeferredDeletion         `json:"deferred_item_deletions,omitempty"`
-	RehydrationSuccess        bool                        `json:"rehydration_success,omitempty"`
-	RehydrationError          string                      `json:"rehydration_error,omitempty"`
-	RehydrationDeferredJobs   []string                    `json:"rehydration_deferred_jobs,omitempty"`
-	RehydrationReloadFailures []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
-	ItemFailures              []*ItemFailure              `json:"item_failures,omitempty"`
-	CellInstance              string                      `json:"cell_instance,omitempty"`
+	ConfigSuccess                 bool                        `json:"config_success"`
+	RbacSuccess                   bool                        `json:"rbac_success"`
+	PluginsSuccess                bool                        `json:"plugins_success"`
+	ItemsSuccess                  bool                        `json:"items_success"`
+	ConfigError                   string                      `json:"config_error,omitempty"`
+	RbacError                     string                      `json:"rbac_error,omitempty"`
+	PluginsError                  string                      `json:"plugins_error,omitempty"`
+	ItemsError                    string                      `json:"items_error,omitempty"`
+	AppliedHash                   string                      `json:"applied_hash,omitempty"`
+	DeferredItemDeletions         []*DeferredDeletion         `json:"deferred_item_deletions,omitempty"`
+	RehydrationSuccess            bool                        `json:"rehydration_success,omitempty"`
+	RehydrationError              string                      `json:"rehydration_error,omitempty"`
+	RehydrationDeferredJobs       []string                    `json:"rehydration_deferred_jobs,omitempty"`
+	RehydrationReloadFailures     []*RehydrationReloadFailure `json:"rehydration_reload_failures,omitempty"`
+	ItemFailures                  []*ItemFailure              `json:"item_failures,omitempty"`
+	CellInstance                  string                      `json:"cell_instance,omitempty"`
+	RehydrationFailedScans        []*RehydrationFailedScan    `json:"rehydration_failed_scans,omitempty"`
+	RehydrationBranchScansUnknown bool                        `json:"rehydration_branch_scans_unknown,omitempty"`
 }
 
 type EventAck struct {
@@ -1233,6 +1235,13 @@ type RehydrationBundle struct {
 	Truncated   bool               `json:"truncated,omitempty"`
 	RecordCount int                `json:"record_count,omitempty"`
 	JobCount    int                `json:"job_count,omitempty"`
+}
+
+// RehydrationFailedScan is one multibranch project or organization folder
+type RehydrationFailedScan struct {
+	Folder       string `json:"folder,omitempty"`
+	IndexResult  string `json:"index_result,omitempty"`
+	DeferredJobs int    `json:"deferred_jobs,omitempty"`
 }
 
 // RehydrationFile is one file the mite writes under JENKINS_HOME to seed a

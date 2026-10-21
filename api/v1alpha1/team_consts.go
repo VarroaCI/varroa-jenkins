@@ -99,6 +99,10 @@ const (
 	TeamReasonPodTemplateSkipped = "PodTemplateSkipped"
 	TeamReasonCredentialSkipped  = "CredentialSkipped"
 	TeamReasonHibernationIgnored = "HibernationIgnored"
+	// TeamReasonBranchScanFailed reports a tenant whose multibranch project
+	// or organization folder has a last completed branch scan that did not
+	// succeed, while branch jobs of the tenant stay deferred.
+	TeamReasonBranchScanFailed = "BranchScanFailed"
 )
 
 // Team condition type for build-record rehydration.

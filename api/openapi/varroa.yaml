@@ -11721,7 +11721,7 @@ components:
           type: string
         reason:
           description: The warning reason. One of ItemsHeld, ItemsApplyFailed, BundleKeysIgnored,
-            PodTemplateSkipped, CredentialSkipped, or HibernationIgnored.
+            PodTemplateSkipped, CredentialSkipped, HibernationIgnored, or BranchScanFailed.
           type: string
       required:
       - reason

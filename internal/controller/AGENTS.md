@@ -635,6 +635,12 @@ sections describe.
   A tenant in `status.cell.drainingTenants` never enters `appliedTenants`. The draining set is
   written with `desiredStateHash` on a delivered push only. A pod change drops each tenant with an
   `ItemsApplyFailed` entry from `appliedTenants`.
+- **`BranchScanFailed` tenant warnings** are result-driven. `branchScanFailedWarnings`
+  (`cell_branch_scan_warning.go`) maps each `rehydration_failed_scans` entry to its tenant. The
+  drain replaces only the `BranchScanFailed` entries of tenants whose rehydration entry carries the
+  result's command ID (`branchScanFailedAfter`). It keeps the list on a failed rehydration or an
+  unknown inventory. `pruneBranchScanFailedWarnings` drops an entry whose tenant has no deferring
+  rehydration entry. Its rank is lowest in `tenantWarningPriority`.
 - **`status.cell.tenants` has exactly one writer: `PatchControllerCellStatus`**
   (`clientset_client.go`). It sends a narrow merge patch carrying only
   `status.cell.tenants`, never the whole `status.cell` object, and only the
