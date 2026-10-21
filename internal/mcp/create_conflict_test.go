@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -25,7 +26,9 @@ func assertCreateRefused[T any](t *testing.T, store *crdstore.Fake, seed *T, ns,
 		t.Fatalf("Get before: %v", err)
 	}
 
-	resp := mcpRequest(t, NewHandler(deleteUserDeps(store)), "tools/call", map[string]interface{}{
+	deps := deleteUserDeps(store)
+	deps.IdentityConfig.Mode = "local"
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 		"name":      tool,
 		"arguments": args,
 	}, mcpAdminClaims)
@@ -52,6 +55,26 @@ func TestCreateGroup_ExistingNameIsToolError(t *testing.T) {
 		"", "team-a", "create_group",
 		map[string]interface{}{"name": "team-a", "members": []interface{}{"bob"}},
 		"group team-a already exists")
+}
+
+// TestCreateGroup_RefusedWhenLocalAccountsOff pins that create_group refuses
+// the call and writes no Group when local accounts are off.
+func TestCreateGroup_RefusedWhenLocalAccountsOff(t *testing.T) {
+	store := crdstore.NewFake()
+	deps := deleteUserDeps(store)
+	deps.IdentityConfig = api.IdentityConfig{Mode: "oidc"}
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "create_group",
+		"arguments": map[string]interface{}{"name": "g-new", "members": []interface{}{"bob"}},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || toolText(tr) != "group management is only available with local accounts" {
+		t.Errorf("create_group with local accounts off = %q, want the local-accounts tool error", toolText(tr))
+	}
+	_, err := crdstore.Get[v1alpha1.Group](context.Background(), store, "g-new", "")
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Get g-new after a refused create_group: err = %v, want not found", err)
+	}
 }
 
 // TestUpdateGroup_EditsMembers pins that update_group replaces the member list
@@ -218,6 +241,33 @@ func TestCreateUser_RefusedWhenLocalAccountsOff(t *testing.T) {
 	tr := parseToolResult(t, resp.Result)
 	if !tr.IsError || toolText(tr) != "user creation is only available with local accounts" {
 		t.Errorf("create_user with local accounts off = %q, want the local-accounts tool error", toolText(tr))
+	}
+}
+
+// TestUpdateUser_RefusedWhenLocalAccountsOff pins that update_user refuses
+// the call and keeps the stored email when local accounts are off.
+func TestUpdateUser_RefusedWhenLocalAccountsOff(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "bob", Namespace: "varroa-system"},
+		Spec:       v1alpha1.UserSpec{Email: "old@example.com"},
+	})
+	deps := localUserDeps(store)
+	deps.IdentityConfig.Mode = "oidc"
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "varroa-system", "name": "bob", "email": "new@example.com"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || toolText(tr) != "user editing is only available with local accounts" {
+		t.Errorf("update_user with local accounts off = %q, want the local-accounts tool error", toolText(tr))
+	}
+	got, err := crdstore.Get[v1alpha1.User](context.Background(), store, "bob", "varroa-system")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.Email != "old@example.com" {
+		t.Errorf("email = %q, want the stored old@example.com", got.Spec.Email)
 	}
 }
 

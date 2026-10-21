@@ -70,6 +70,9 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if !deps.Authorizer.IsAdmin(claims) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
 		}
+		if !deps.IdentityConfig.LocalAccountsOn() {
+			return mcp.NewToolResultError("group management is only available with local accounts"), nil
+		}
 		args := getArgs(req)
 		group := &v1alpha1.Group{
 			ObjectMeta: metav1.ObjectMeta{Name: strArg(args, "name")},
@@ -125,7 +128,7 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 
 	deleteG := mcp.NewTool("delete_group",
-		mcp.WithDescription("Delete a Varroa group (admin only)"),
+		mcp.WithDescription("Delete a Varroa group (admin only, local auth only)"),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Group name")),
 	)
 	addTool(mcpServer, kindDelete, deleteG, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -138,6 +141,9 @@ func registerGroupTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		}
 		if !deps.Authorizer.IsAdmin(claims) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
+		}
+		if !deps.IdentityConfig.LocalAccountsOn() {
+			return mcp.NewToolResultError("group management is only available with local accounts"), nil
 		}
 		name, _ := getArgs(req)["name"].(string)
 		if err := crdstore.Delete[v1alpha1.Group](ctx, deps.Store, name, ""); err != nil {

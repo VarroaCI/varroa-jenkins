@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ func TestDeleteGroup_EmitsSharedEvent(t *testing.T) {
 	sink := &recordingSink{}
 	deps := groupDeps(t)
 	deps.ActivityPublisher = sink
+	deps.IdentityConfig.Mode = "local"
 
 	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
 		"name":      "delete_group",
@@ -40,6 +42,30 @@ func TestDeleteGroup_EmitsSharedEvent(t *testing.T) {
 	}
 	if got.Source != mcpSource {
 		t.Errorf("Source = %q, want %q", got.Source, mcpSource)
+	}
+}
+
+// TestDeleteGroup_RefusedWhenLocalAccountsOff pins that delete_group refuses
+// the call, keeps the Group, and publishes no event when local accounts are off.
+func TestDeleteGroup_RefusedWhenLocalAccountsOff(t *testing.T) {
+	sink := &recordingSink{}
+	deps := groupDeps(t)
+	deps.ActivityPublisher = sink
+	deps.IdentityConfig = api.IdentityConfig{Mode: "oidc"}
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "delete_group",
+		"arguments": map[string]interface{}{"name": "team-a"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError || toolText(tr) != "group management is only available with local accounts" {
+		t.Errorf("delete_group with local accounts off = %q, want the local-accounts tool error", toolText(tr))
+	}
+	if _, err := crdstore.Get[v1alpha1.Group](context.Background(), deps.Store, "team-a", ""); err != nil {
+		t.Errorf("Get team-a after a refused delete_group: %v", err)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("events = %d, want 0 after a refused delete_group", len(sink.events))
 	}
 }
 
