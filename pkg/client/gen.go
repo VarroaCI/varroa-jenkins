@@ -21938,6 +21938,7 @@ type CreateControllerResponse struct {
 	JSON401 *ComponentsResponsesUnauthorized
 	JSON403 *ComponentsResponsesForbidden
 	JSON404 *ComponentsResponsesNotFound
+	JSON409 *ComponentsResponsesConflict
 }
 
 // Status returns HTTPResponse.Status
@@ -30512,6 +30513,13 @@ func ParseCreateControllerResponse(rsp *http.Response) (*CreateControllerRespons
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ComponentsResponsesConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 

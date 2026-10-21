@@ -30,6 +30,10 @@ type CommandCRUDClient interface {
 	// requested removal (explicit null) that did not take effect, tested
 	// against the applied object's unstructured spec.
 	ApplyControllerSpecSSA(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
+	// CreateControllerSpecSSA creates the Controller, which fences the name,
+	// and claims its spec for fieldManager. See ClientsetClient.
+	// CreateControllerSpecSSA.
+	CreateControllerSpecSSA(ctx context.Context, namespace, name string, spec map[string]any, fieldManager string) (*v1alpha1.Controller, error)
 	DeleteControllerPod(ctx context.Context, namespace, name string) error
 	// SetHibernated writes status.hibernated and status.hibernatedAt from a
 	// fresh read. HandleUpdate calls it to clear the flag when the
@@ -412,13 +416,13 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 		cr.Spec.ComposedBundleRef = &v1alpha1.ComposedBundleRef{Name: bundleName}
 	}
 
-	// Apply the controller spec via server-side apply as the user-facing field
+	// Create the Controller and claim its spec as the user-facing field
 	// manager. Create hardcodes "varroa-ui": bus.ControllersCreateRequest
 	// carries no FieldManager field (the req.FieldManager default in
-	// HandleUpdate belongs to update, not create), and the preflight checkName
-	// above is the duplicate-name guard — a same-manager SSA apply overwrites
-	// its own fields silently, so the apply must not be relied on to surface a
-	// name conflict.
+	// HandleUpdate belongs to update, not create). The create is the
+	// duplicate-name fence: a create over an existing object answers
+	// AlreadyExists and writes nothing. The preflight name check above is an
+	// early answer only, because two creates can both pass it.
 	specJSON, err := json.Marshal(cr.Spec)
 	if err != nil {
 		return c.crudReply(bus.ControllersCreateResponse{Error: "marshal controller spec", Code: bus.CodeInternal})
@@ -427,9 +431,20 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 	if err := json.Unmarshal(specJSON, &specMap); err != nil {
 		return c.crudReply(bus.ControllersCreateResponse{Error: "unmarshal controller spec", Code: bus.CodeInternal})
 	}
-	applied, _, err := c.Client.ApplyControllerSpecSSA(context.Background(), req.Namespace, cr.Name, specMap, "varroa-ui", false)
+	applied, err := c.Client.CreateControllerSpecSSA(context.Background(), req.Namespace, cr.Name, specMap, "varroa-ui")
+	if err != nil && errors.Is(err, ErrControllerSpecClaim) {
+		// The object exists and this create made it, so the inline bundle
+		// stays: the created Controller references it. The spec claim is
+		// incomplete and the object keeps the create's Update entry. Answer
+		// success with the created object, as the label stamp below does.
+		c.Logger.Error("create succeeded but spec ownership claim failed",
+			"namespace", req.Namespace, "name", cr.Name, "error", err)
+		if applied == nil {
+			return c.crudReply(bus.ControllersCreateResponse{Error: fmt.Sprintf("controller %s was created but could not be read back", cr.Name), Code: bus.CodeInternal})
+		}
+		err = nil
+	}
 	if err != nil {
-		c.Logger.Error("create controller failed", "namespace", req.Namespace, "name", cr.Name, "error", err)
 		// Best-effort cleanup of the inline bundle — only when this invocation
 		// created it; a reused bundle is never deleted.
 		if bundleCreated {
@@ -438,6 +453,15 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 				c.Logger.Warn("failed to clean up orphaned bundle", "bundle", bundleName, "error", delErr)
 			}
 		}
+		if k8serrors.IsAlreadyExists(err) {
+			c.Logger.Info("controller create refused an existing name",
+				"namespace", req.Namespace, "name", cr.Name)
+			return c.crudReply(bus.ControllersCreateResponse{
+				Error: fmt.Sprintf("controller %s already exists in namespace %s", cr.Name, req.Namespace),
+				Code:  bus.CodeConflict,
+			})
+		}
+		c.Logger.Error("create controller failed", "namespace", req.Namespace, "name", cr.Name, "error", err)
 		return c.crudReply(bus.ControllersCreateResponse{
 			Error: fmt.Sprintf("failed to create controller: %s", err.Error()),
 			Code:  k8sErrToCode(err),

@@ -20315,6 +20315,9 @@
           },
           "404": {
             "$ref": "#/components/responses/components_responses_NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
           }
         },
         "summary": "Creates a new controller in the given namespace on the specified cluster.",

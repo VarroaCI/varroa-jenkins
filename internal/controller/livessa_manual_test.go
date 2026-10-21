@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -119,4 +121,63 @@ func TestLiveSSA(t *testing.T) {
 		t.Fatalf("10.5b FAIL: blocked removal NOT reported. managedFields=%s", mf)
 	}
 	t.Logf("10.5b PASS: blocked removal retained and reported: %v", unapplied)
+}
+
+// TestLiveSSACreateClaim checks CreateControllerSpecSSA against a real
+// apiserver. The create fences the name, the claim drops the varroa-ui Update
+// entry that carries f:spec, a later apply with force off does not conflict,
+// and a repeat create answers AlreadyExists without changing the spec.
+// Run: go test -tags livessa -count=1 -v ./internal/controller/ -run TestLiveSSACreateClaim
+func TestLiveSSACreateClaim(t *testing.T) {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = os.Getenv("HOME") + "/.kube/config"
+	}
+	c, err := NewClientsetClientWithKubeconfig(kubeconfig)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	ctx := context.Background()
+	const ns, fm = "default", "varroa-ui"
+	name := fmt.Sprintf("ssa-create-probe-%d", time.Now().UnixNano())
+	defer func() {
+		_ = c.dynamic.Resource(controllerGVR).Namespace(ns).Delete(ctx, name, metav1.DeleteOptions{})
+		t.Log("cleanup: deleted test controller")
+	}()
+
+	created, err := c.CreateControllerSpecSSA(ctx, ns, name, map[string]any{"version": "2.479.3"}, fm)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Logf("create PASS: %s/%s spec.version=%s", ns, name, created.Spec.Version)
+
+	u, err := c.dynamic.Resource(controllerGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	for _, e := range u.GetManagedFields() {
+		if e.Manager == fm && e.Operation == metav1.ManagedFieldsOperationUpdate && e.Subresource == "" &&
+			e.FieldsV1 != nil && strings.Contains(string(e.FieldsV1.Raw), "f:spec") {
+			t.Fatalf("claim FAIL: varroa-ui Update entry with f:spec remains: %s", e.FieldsV1.Raw)
+		}
+	}
+	t.Log("claim PASS: no varroa-ui Update entry with f:spec remains")
+
+	if _, _, err := c.ApplyControllerSpecSSA(ctx, ns, name, map[string]any{"version": "2.504"}, fm, false); err != nil {
+		t.Fatalf("apply with a changed value after the claim: %v", err)
+	}
+	t.Log("apply PASS: changed value applied with force=false and no conflict")
+
+	if _, err := c.CreateControllerSpecSSA(ctx, ns, name, map[string]any{"version": "2.479.3"}, fm); !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("repeat create: err = %v, want AlreadyExists", err)
+	}
+	u, err = c.dynamic.Resource(controllerGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get after repeat create: %v", err)
+	}
+	version, _, _ := unstructured.NestedString(u.Object, "spec", "version")
+	if version != "2.504" {
+		t.Fatalf("repeat create changed spec.version to %q, want 2.504", version)
+	}
+	t.Logf("repeat create PASS: AlreadyExists, spec.version still %s", version)
 }

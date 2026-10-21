@@ -25,11 +25,13 @@ const (
 	// because in at least one topology the create upserts: it applies a full
 	// object over an existing one, so the call can overwrite it. Repeating the
 	// call converges. Annotating it non-destructive would be a false safety
-	// signal. Used by creates that preflight a name and then apply.
+	// signal.
 	kindCreate
-	// kindCreateStrict is a create that calls crdstore.Create and refuses an
-	// existing name, so it is additive-only: it cannot overwrite an existing
-	// object. The caller gets a conflict error and uses the update tool.
+	// kindCreateStrict is a create whose write fails on an existing name
+	// (`crdstore.Create`, or the operator's `controllers.create` for
+	// `create_controller`), so it is additive-only: it cannot overwrite an
+	// existing object. The caller gets a conflict error and uses the update
+	// tool.
 	//
 	// It is still idempotent. MCP defines idempotentHint as "no additional
 	// effect on its environment" when repeated, not "returns the same response":

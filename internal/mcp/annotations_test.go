@@ -25,7 +25,7 @@ var expectedToolKinds = map[string]toolKind{
 	"open_pull_request":    kindCreate,
 	"send_webhook":         kindAction,
 	"get_controller_logs":  kindRead,
-	"create_controller":    kindCreate,
+	"create_controller":    kindCreateStrict,
 	"update_controller":    kindUpdate,
 	"delete_controller":    kindDelete,
 	"reconcile_controller": kindAction,
@@ -288,8 +288,8 @@ func TestStrictCreatesAreAdditiveButStillIdempotent(t *testing.T) {
 	// Each strict create calls crdstore.Create and refuses an existing name.
 	// If this count grows, verify the new tool really cannot upsert before
 	// accepting it.
-	if found != 9 {
-		t.Errorf("expected exactly 9 strict-create tools, found %d — verify each cannot upsert", found)
+	if found != 10 {
+		t.Errorf("expected exactly 10 strict-create tools, found %d — verify each cannot upsert", found)
 	}
 }
 
