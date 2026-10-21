@@ -446,6 +446,7 @@ func (d *runnerDeps) runSession(ctx context.Context, writer agentstore.Store, se
 		SessionID:      sess.ID,
 		Owner:          sess.LeaseOwner,
 		SessionBudget:  sessionBudget,
+		SystemBase:     sessions.SystemBase(ta),
 		StepBudget:     d.cfg.Assistant.Budgets.Steps,
 		ApprovalExpiry: d.cfg.Assistant.ApprovalExpiry,
 		Tenants:        tenantLookup{d.tenants},

@@ -63,7 +63,7 @@ spec:
   dataSharing: logs
 ```
 
-A Team agent reads the [operator guide](guide.md) in its system prompt and the Team instructions file in its first turn.
+A Team agent reads the [operator guide](guide.md) in its system prompt and the Team instructions file in its first turn. The system prompt names the Team agent and its Team.
 
 ## The instructions file
 

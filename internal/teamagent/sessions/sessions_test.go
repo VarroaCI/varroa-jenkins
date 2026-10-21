@@ -12,11 +12,27 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
 	"github.com/varroaci/varroa-jenkins/internal/agent"
 	"github.com/varroaci/varroa-jenkins/internal/agent/loop"
 )
+
+func TestSystemBase_NamesTeamAgent(t *testing.T) {
+	ta := &v1alpha1.TeamAgent{
+		ObjectMeta: metav1.ObjectMeta{Name: "triage", Namespace: "payments"},
+		Spec:       v1alpha1.TeamAgentSpec{TeamRef: v1alpha1.TeamAgentTeamRef{Name: "platform"}},
+	}
+	text := SystemBase(ta)
+	if !strings.Contains(text, "triage") || !strings.Contains(text, "payments/platform") {
+		t.Errorf("system base does not name the agent and its Team: %q", text)
+	}
+	if strings.Contains(text, "Varroa assistant") {
+		t.Errorf("system base names the assistant: %q", text)
+	}
+}
 
 var testKey = []byte(strings.Repeat("k", 32))
 

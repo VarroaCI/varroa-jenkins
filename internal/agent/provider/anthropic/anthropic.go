@@ -298,7 +298,11 @@ func buildBody(req provider.Request) ([]byte, error) {
 		"messages":   convertMessages(req.Messages),
 	}
 	if req.System != "" {
-		doc["system"] = req.System
+		doc["system"] = []map[string]any{{
+			"type":          "text",
+			"text":          req.System,
+			"cache_control": map[string]any{"type": "ephemeral"},
+		}}
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(req.Tools))

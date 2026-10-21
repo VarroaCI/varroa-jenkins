@@ -356,7 +356,7 @@ func TestCutResult(t *testing.T) {
 }
 
 func TestSystemText_NamesRepo(t *testing.T) {
-	text := SystemText(map[string]any{agent.CtxRepo: "https://git.example/r", agent.CtxRun: "r1"}, agent.DataMetadata)
+	text := SystemText("", map[string]any{agent.CtxRepo: "https://git.example/r", agent.CtxRun: "r1"}, agent.DataMetadata)
 	if !strings.Contains(text, "Context repo: https://git.example/r") {
 		t.Errorf("repo missing: %q", text)
 	}
@@ -366,8 +366,8 @@ func TestSystemText_NamesRepo(t *testing.T) {
 }
 
 func TestSystemText_CarriesGuideBeforeContext(t *testing.T) {
-	text := SystemText(map[string]any{agent.CtxRun: "r1"}, agent.DataLogs)
-	if !strings.HasPrefix(text, systemBase) {
+	text := SystemText("", map[string]any{agent.CtxRun: "r1"}, agent.DataLogs)
+	if !strings.HasPrefix(text, AssistantBase) {
 		t.Fatalf("system text does not start with the base text: %.40q", text)
 	}
 	gi := strings.Index(text, guide.Text)
@@ -378,6 +378,50 @@ func TestSystemText_CarriesGuideBeforeContext(t *testing.T) {
 		if ci := strings.Index(text, after); ci < 0 || ci < gi {
 			t.Errorf("%q must follow the guide (guide at %d, %q at %d)", after, gi, after, ci)
 		}
+	}
+}
+
+func TestSystemText_EmptyBaseIsAssistant(t *testing.T) {
+	text := SystemText("", map[string]any{}, agent.DataNone)
+	if !strings.HasPrefix(text, AssistantBase+"\n") {
+		t.Fatalf("empty base does not use the assistant base: %.60q", text)
+	}
+}
+
+func TestSystemText_CustomBase(t *testing.T) {
+	text := SystemText("X.", map[string]any{}, agent.DataNone)
+	if !strings.HasPrefix(text, "X.\n") {
+		t.Fatalf("custom base does not start the text: %.40q", text)
+	}
+	if strings.Contains(text, AssistantBase) {
+		t.Error("custom base still carries the assistant base")
+	}
+	if !strings.Contains(text, guide.Text) {
+		t.Error("custom base drops the operator guide")
+	}
+}
+
+// keepProvider keeps the request of its last call.
+type keepProvider struct {
+	scriptProvider
+	last provider.Request
+}
+
+func (p *keepProvider) Stream(ctx context.Context, k provider.Key, req provider.Request) (<-chan provider.Delta, error) {
+	p.last = req
+	return p.scriptProvider.Stream(ctx, k, req)
+}
+
+func TestRun_SystemBaseReachesProvider(t *testing.T) {
+	f := newFixture(t, textTurn("done"))
+	kp := &keepProvider{scriptProvider: scriptProvider{turns: [][]provider.Delta{textTurn("done")}}}
+	f.cfg.Provider = kp
+	f.cfg.SystemBase = "X."
+	if err := Run(context.Background(), f.cfg, TriggerStart); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(kp.last.System, "X.\n") {
+		t.Errorf("provider system = %.40q, want the set base first", kp.last.System)
 	}
 }
 

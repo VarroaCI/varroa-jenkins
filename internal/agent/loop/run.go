@@ -185,7 +185,7 @@ func (r *run) loop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	system := SystemText(sess.Context, sess.DataSharing)
+	system := SystemText(r.cfg.SystemBase, sess.Context, sess.DataSharing)
 
 	for {
 		cur, err := r.st.GetSession(ctx, r.id)
