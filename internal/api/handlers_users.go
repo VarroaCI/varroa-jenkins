@@ -162,7 +162,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Validate username as DNS-1123 before creating the CRD.
 	if err := identity.ValidateLocalUsername(req.Username); err != nil {
-		s.writeJSONError(w, http.StatusBadRequest, "`+err.Error()+`")
+		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -183,7 +183,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if err := crdstore.Apply[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
+	if err := crdstore.Create[v1alpha1.User](ctx, s.deps.Store, user); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			s.writeJSONError(w, http.StatusConflict, "user already exists")
+			return
+		}
 		s.writeJSONError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}

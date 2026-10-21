@@ -26768,6 +26768,9 @@
           "403": {
             "$ref": "#/components/responses/components_responses_Forbidden"
           },
+          "409": {
+            "$ref": "#/components/responses/components_responses_Conflict"
+          },
           "501": {
             "$ref": "#/components/responses/components_responses_MethodNotAllowed"
           }

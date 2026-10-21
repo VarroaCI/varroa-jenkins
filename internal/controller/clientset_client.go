@@ -5014,34 +5014,6 @@ func (c *ClientsetClient) GetUserCRD(ctx context.Context, name, namespace string
 	return user, nil
 }
 
-// ApplyUserCRD creates or updates a User CRD.
-func (c *ClientsetClient) ApplyUserCRD(ctx context.Context, cr *v1alpha1.User) error {
-	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(cr)
-	if err != nil {
-		return fmt.Errorf("convert user to unstructured: %w", err)
-	}
-	u := &unstructured.Unstructured{Object: obj}
-	u.SetAPIVersion("varroa.dev/v1alpha1")
-	u.SetKind("User")
-	// Clear fields that are forbidden on Create (the caller may have
-	// fetched a live object, which carries resourceVersion etc.).
-	u.SetResourceVersion("")
-	u.SetUID("")
-	u.SetCreationTimestamp(metav1.Time{})
-	u.SetGeneration(0)
-	u.SetManagedFields(nil)
-	_, err = c.dynamic.Resource(userGVR).Namespace(cr.Namespace).Create(ctx, u, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		existing, getErr := c.dynamic.Resource(userGVR).Namespace(cr.Namespace).Get(ctx, cr.Name, metav1.GetOptions{})
-		if getErr != nil {
-			return fmt.Errorf("get existing user for update: %w", getErr)
-		}
-		u.SetResourceVersion(existing.GetResourceVersion())
-		_, err = c.dynamic.Resource(userGVR).Namespace(cr.Namespace).Update(ctx, u, metav1.UpdateOptions{})
-	}
-	return err
-}
-
 // PatchUserStatus patches the status subresource of a User CRD.
 func (c *ClientsetClient) PatchUserStatus(ctx context.Context, name, namespace string, status *v1alpha1.UserStatus) error {
 	if status == nil {

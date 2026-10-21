@@ -71,8 +71,11 @@ func BootstrapLocalAdmin(ctx context.Context, client ResourceClient, store crdst
 			DisplayName: "Administrator",
 		},
 	}
-	if err := crdstore.Apply[v1alpha1.User](ctx, store, user); err != nil {
-		return fmt.Errorf("apply bootstrap user: %w", err)
+	if err := crdstore.Create[v1alpha1.User](ctx, store, user); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create bootstrap user: %w", err)
+		}
+		logger.Info("bootstrap user exists; keeping it", "user", username)
 	}
 
 	now := metav1.Now()

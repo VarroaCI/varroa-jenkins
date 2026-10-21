@@ -204,7 +204,6 @@ func (f *fakeBroodClient) PatchJenkinsVersionProfileStatus(_ context.Context, _ 
 func (f *fakeBroodClient) GetUserCRD(_ context.Context, _, _ string) (*v1alpha1.User, error) {
 	return nil, nil
 }
-func (f *fakeBroodClient) ApplyUserCRD(_ context.Context, _ *v1alpha1.User) error { return nil }
 func (f *fakeBroodClient) ListUserCRDs(_ context.Context, _ string) ([]*v1alpha1.User, error) {
 	return nil, nil
 }
