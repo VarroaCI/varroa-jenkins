@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -205,15 +206,9 @@ func requireRedelivered(t *testing.T, conn *bus.Conn, cluster, stream, consumer 
 		t.Fatalf("pull subscribe: %v", err)
 	}
 	defer sub.Unsubscribe()
-	msgs, err := conn.DrainConsumer(sub, 1)
-	if err != nil {
-		t.Fatalf("fetch redelivery: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("fetched %d messages, want 1", len(msgs))
-	}
+	msg := bustest.FetchOne(t, sub, bustest.PresenceWait)
 	var op mitev1.OperatorMessage
-	if err := json.Unmarshal(msgs[0].Data, &op); err != nil {
+	if err := json.Unmarshal(msg.Data, &op); err != nil {
 		t.Fatalf("unmarshal redelivery: %v", err)
 	}
 	if imp := op.GetImperative(); imp == nil || imp.CommandId != "cmd-1" {

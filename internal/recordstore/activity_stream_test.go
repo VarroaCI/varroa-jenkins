@@ -7,6 +7,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
 
 // TestEnsureActivityStreamCreatesWhenAbsent asserts D2's step 1: an
@@ -101,14 +102,8 @@ func TestEnsureActivityStreamPreservesLongerRetentionUntilDrained(t *testing.T) 
 	if err != nil {
 		t.Fatalf("pull subscribe: %v", err)
 	}
-	msgs, err := conn.DrainConsumer(sub, 10)
-	if err != nil {
-		t.Fatalf("drain consumer: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("want 1 pending message, got %d", len(msgs))
-	}
-	if err := msgs[0].Ack(); err != nil {
+	msg := bustest.FetchOne(t, sub, bustest.PresenceWait)
+	if err := msg.Ack(); err != nil {
 		t.Fatalf("ack: %v", err)
 	}
 	_ = sub.Unsubscribe()

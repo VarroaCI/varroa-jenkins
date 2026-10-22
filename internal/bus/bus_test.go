@@ -6,6 +6,8 @@ import (
 
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 )
 
 // startTestServer starts an embedded NATS server with JetStream enabled.
@@ -244,17 +246,11 @@ func TestJetStreamPublishAndConsume(t *testing.T) {
 		t.Fatalf("pull subscribe: %v", err)
 	}
 
-	msgs, err := c.DrainConsumer(sub, 10)
-	if err != nil {
-		t.Fatalf("drain consumer: %v", err)
+	msg := bustest.FetchOne(t, sub, bustest.PresenceWait)
+	if string(msg.Data) != "hello-js" {
+		t.Fatalf("expected 'hello-js', got %q", string(msg.Data))
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	if string(msgs[0].Data) != "hello-js" {
-		t.Fatalf("expected 'hello-js', got %q", string(msgs[0].Data))
-	}
-	msgs[0].Ack()
+	msg.Ack()
 }
 
 func TestJetStreamAsyncPublish(t *testing.T) {

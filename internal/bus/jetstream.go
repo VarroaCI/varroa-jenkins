@@ -112,8 +112,9 @@ func (c *Conn) PublishJetStreamAsync(subject string, data []byte) (nats.PubAckFu
 	return c.js.PublishAsync(subject, data)
 }
 
-// DrainConsumer drains messages from a pull consumer, invoking handler for
-// each message. It stops when the batch is empty or ctx is done.
+// DrainConsumer fetches up to batchSize messages from a pull consumer. It
+// waits at most 100 ms for them and returns the messages that arrive in that
+// time. When no message arrives, it returns an error that wraps nats.ErrTimeout.
 func (c *Conn) DrainConsumer(sub *nats.Subscription, batchSize int) ([]*nats.Msg, error) {
 	msgs, err := sub.Fetch(batchSize, nats.MaxWait(100*time.Millisecond))
 	if err != nil {

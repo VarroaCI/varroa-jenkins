@@ -12,8 +12,7 @@ control plane's async transport — no other package talks to NATS directly.
 
 - Owns: connection/TLS setup (`conn.go`), subscription-denial watchers
   (`denied.go`), the self-healing request responder (`responder.go`) and
-  plain listener (`listener.go`), the deny-and-reload NATS test server
-  (`bustest/`),
+  plain listener (`listener.go`), the NATS test helpers (`bustest/`),
   subject naming (`subjects.go`),
   JetStream stream configs (`jetstream.go`), KV helpers (`kv.go`), the
   cluster directory (`clusters.go`, `cluster.go`), gateway↔operator
@@ -191,6 +190,10 @@ control plane's async transport — no other package talks to NATS directly.
   embedded NATS server whose restricted user may not subscribe to the deny
   list; `SetDeny` reloads it in place. It does not import `bus`, so the
   tests of `bus` use it too.
+  `FetchOne(t, sub, wait)` pulls one message with batch 1 and fails the test
+  when none arrives. Use it with `PresenceWait` (10 s) for a presence check.
+  `FetchOne` cannot prove absence. For an absence check, use a short window
+  with `DrainConsumer` or a direct `Fetch`.
 - **Logging** — a `Conn`'s logger is supplied only through `Config.Logger` and
   is installed by `Connect` before any handler closure exists. There is no
   exported logger field: the NATS callbacks read it from library goroutines and
