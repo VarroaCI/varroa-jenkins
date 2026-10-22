@@ -434,7 +434,8 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 	if err != nil && errors.Is(err, ErrControllerSpecClaim) {
 		// The object exists and this create made it, so the inline bundle
 		// stays: the created Controller references it. The spec claim is
-		// incomplete and the object keeps the create's Update entry. Answer
+		// incomplete and the object keeps the create's Update entry until the
+		// next varroa-ui spec write repairs it. Answer
 		// success with the created object, as the label stamp below does.
 		c.Logger.Error("create succeeded but spec ownership claim failed",
 			"namespace", req.Namespace, "name", cr.Name, "error", err)
@@ -445,8 +446,9 @@ func (c *CommandCRUD) HandleCreate(data []byte) []byte {
 	}
 	if err != nil {
 		// Best-effort cleanup of the inline bundle — only when this invocation
-		// created it; a reused bundle is never deleted.
-		if bundleCreated {
+		// created it; a reused bundle is never deleted. A replaced Controller
+		// may reference the bundle, so a replaced create keeps it.
+		if bundleCreated && !errors.Is(err, errControllerReplaced) {
 			bundleName := cr.Name + "-bundle"
 			if delErr := crdstore.Delete[v1alpha1.ComposedBundle](context.Background(), c.Store, bundleName, req.Namespace); delErr != nil {
 				c.Logger.Warn("failed to clean up orphaned bundle", "bundle", bundleName, "error", delErr)

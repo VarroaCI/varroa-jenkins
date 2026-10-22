@@ -456,14 +456,12 @@ func TestClientsetClient_ApplyControllerSpecSSA_NoApplyEntry(t *testing.T) {
 	assertSpecJSONEqual(t, spec, map[string]any{"version": "2.5"})
 }
 
-// TestClientsetClient_ApplyControllerSpecSSA_UpdateEntryIgnored (5.5): an
-// Update entry under the same manager name is a distinct ownership record; its
-// leaves are NOT backfilled into the Apply patch. The entry owns f:className —
-// a leaf the patch does NOT set — so if the Update record were (wrongly)
-// treated as Apply ownership, className would appear in the payload at its
-// current value and this assertion would fail. (Seeding the patch's own field
-// would be vacuous: backfill has nothing to contribute either way.)
-func TestClientsetClient_ApplyControllerSpecSSA_UpdateEntryIgnored(t *testing.T) {
+// TestClientsetClient_ApplyControllerSpecSSA_UpdateEntryClaimedBeforeBackfill
+// (5.5): an Update entry under the same manager name is merged into the Apply
+// entry before the completion read. The write path claims the entry first, so
+// f:className, a leaf the patch does NOT set, becomes owned by the Apply entry
+// and is backfilled. Without the backfill, the apply would release it.
+func TestClientsetClient_ApplyControllerSpecSSA_UpdateEntryClaimedBeforeBackfill(t *testing.T) {
 	current := completionCurrent(map[string]any{
 		"version":   "2.479",
 		"className": "standard",
@@ -481,7 +479,7 @@ func TestClientsetClient_ApplyControllerSpecSSA_UpdateEntryIgnored(t *testing.T)
 	}
 
 	spec := h.mustCapturedSpec(t)
-	assertSpecJSONEqual(t, spec, map[string]any{"version": "2.5"})
+	assertSpecJSONEqual(t, spec, map[string]any{"version": "2.5", "className": "standard"})
 }
 
 // TestClientsetClient_ApplyControllerSpecSSA_WrongAPIVersionIgnored (5.6): an

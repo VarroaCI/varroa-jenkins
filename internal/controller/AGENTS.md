@@ -103,14 +103,29 @@ sections describe.
   re-backfilling them from that attempt's own (possibly newer) GET.
 - **`ClientsetClient.CreateOrUpdateSecret` creates the Secret again, once, when the Get or the Update after AlreadyExists answers NotFound.** A Conflict is returned and not retried.
 - **`CreateControllerSpecSSA` is the create fence for `controllers.create`.**
-  The Create call refuses an existing name and writes nothing. The method
-  then applies the same spec as `varroa-ui`. The Create also records an
-  Update entry for `varroa-ui`. That entry makes a later SSA spec edit
-  conflict, so the method drops it with a merge patch that pins the
-  resourceVersion. A failure after the Create returns the created object
-  and an error that wraps `ErrControllerSpecClaim`. `HandleCreate` logs that
-  error and still answers success. Never replace it with `crdstore.Create`
-  alone, because the Update entry makes later `varroa-ui` edits conflict.
+  The Create call refuses an existing name and writes nothing. The method then
+  applies the same spec as `varroa-ui`. The apply carries the created UID, so
+  a replaced object answers `errControllerReplaced` and creates nothing. The
+  Create leaves an Update entry for `varroa-ui` that owns `f:spec`. That entry
+  makes a later SSA spec edit conflict. A failure after the Create returns
+  the created object and an error that wraps `ErrControllerSpecClaim`.
+  `HandleCreate` logs that error and still answers success. Never replace it
+  with `crdstore.Create` alone, because the Update entry makes later
+  `varroa-ui` edits conflict.
+- **The spec-claim repair runs on every `varroa-ui` spec write.**
+  `needsSpecClaim` gates the repair. It runs when a `varroa-ui`
+  main-resource Update entry owns `f:spec`, and no other top-level field.
+  `claimSpecUpdateEntry` merges that entry into the Apply entry with
+  `csaupgrade.UpgradeManagedFieldsPatch`. The JSON patch pins
+  `resourceVersion`, so a stale read answers Conflict and the read repeats.
+  `ApplyControllerSpecSSA` runs the repair before it reads the owned leaves.
+  `ApplyControllerSpecSSAIfExists` runs it once before its retry loop. A
+  failed claim heals on the next `varroa-ui` spec write. An entry that owns
+  labels is not repaired, because the next apply would delete them. Any
+  `varroa-ui` main-resource entry of another apiVersion also blocks the
+  repair, because csaupgrade would drop that version's leaves. The create
+  apply's UID is checked against the GET before the repair runs, so a
+  replaced object is never patched.
 - **executeGroovy audit carries a pointer, never a script body.**
   `groovyProvenance` puts `scriptSnapshotRef`/`scriptItemRef` (catalog) or
   `scriptSha256`/`scriptBytes` (inline) on `broodop.target.finished`. The
