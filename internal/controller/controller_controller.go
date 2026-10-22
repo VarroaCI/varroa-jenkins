@@ -1135,12 +1135,12 @@ type ResourceClient interface {
 	// ApplyControllerSpecSSAIfExists is the existence-guarded sibling of
 	// ApplyControllerSpecSSA: it performs its own GET, fails with a
 	// recognizable apierrors NotFound rather than creating the object when
-	// absent, and stamps that GET's resourceVersion into the apply so a
-	// concurrent change between the GET and the apply surfaces as a
-	// recognizable apierrors Conflict, and a concurrent delete fails the
-	// apply rather than resurrecting the object (the stamped resourceVersion
-	// is invalid on the create path the server takes for a missing object).
-	// Existing ApplyControllerSpecSSA call sites are unaffected.
+	// absent, and stamps that GET's UID and resourceVersion into the apply.
+	// The UID stops a concurrent delete from recreating the object, because
+	// the apiserver answers Conflict for a UID-stamped apply to an absent
+	// object. The resourceVersion is a freshness check: a concurrent change
+	// surfaces as a recognizable apierrors Conflict. Existing
+	// ApplyControllerSpecSSA call sites are unaffected.
 	ApplyControllerSpecSSAIfExists(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
 	// SetHibernated writes status.hibernated and status.hibernatedAt for
 	// every caller outside the reconcile tick. It reads the live object, returns (false, nil)

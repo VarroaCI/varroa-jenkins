@@ -347,6 +347,100 @@ func TestApplyControllerSpecSSAIfExists_FieldManagerConflictNotRetried(t *testin
 	}
 }
 
+// TestApplyControllerSpecSSAIfExists_StampsUID pins that each attempt stamps
+// the UID of its own GET into the apply body, next to the resourceVersion.
+func TestApplyControllerSpecSSAIfExists_StampsUID(t *testing.T) {
+	cur := ifExistsController()
+	cur.SetUID("uid-1")
+	c, dyn := newIfExistsTestClient(t, cur)
+
+	var body map[string]any
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa, ok := action.(clienttesting.PatchActionImpl)
+		if !ok || pa.GetPatchType() != types.ApplyPatchType {
+			return false, nil, nil
+		}
+		if err := json.Unmarshal(pa.GetPatch(), &body); err != nil {
+			return true, nil, err
+		}
+		return true, &unstructured.Unstructured{Object: body}, nil
+	})
+
+	if _, _, err := c.ApplyControllerSpecSSAIfExists(context.Background(), "ns1", "ctrl1",
+		map[string]any{"powerState": "Stopped"}, "varroa-ui", false); err != nil {
+		t.Fatalf("ApplyControllerSpecSSAIfExists: %v", err)
+	}
+	meta, _ := body["metadata"].(map[string]any)
+	if got := meta["uid"]; got != "uid-1" {
+		t.Fatalf("applied metadata.uid = %v, want uid-1", got)
+	}
+	if got := meta["resourceVersion"]; got != "5" {
+		t.Fatalf("applied metadata.resourceVersion = %v, want 5", got)
+	}
+}
+
+// TestApplyControllerSpecSSAIfExists_DeleteAfterGetAnswersNotFound pins the
+// delete window. The first GET sees the object, then the object is deleted
+// before the apply. The fake apiserver answers a UID-stamped apply to an
+// absent object with Conflict and creates nothing. The retry re-GETs, finds
+// nothing, and must answer NotFound.
+func TestApplyControllerSpecSSAIfExists_DeleteAfterGetAnswersNotFound(t *testing.T) {
+	cur := ifExistsController()
+	cur.SetUID("uid-1")
+	c, dyn := newIfExistsTestClient(t, cur)
+
+	gets := 0
+	dyn.PrependReactor("get", "controllers", func(clienttesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets > 1 {
+			return false, nil, nil
+		}
+		obj, err := dyn.Tracker().Get(controllerGVR, "ns1", "ctrl1")
+		if err != nil {
+			return true, nil, err
+		}
+		// The delete lands after the first GET, before the apply.
+		if err := dyn.Tracker().Delete(controllerGVR, "ns1", "ctrl1"); err != nil {
+			return true, nil, err
+		}
+		return true, obj.(*unstructured.Unstructured).DeepCopy(), nil
+	})
+
+	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		pa, ok := action.(clienttesting.PatchActionImpl)
+		if !ok || pa.GetPatchType() != types.ApplyPatchType {
+			return false, nil, nil
+		}
+		var body map[string]any
+		if err := json.Unmarshal(pa.GetPatch(), &body); err != nil {
+			return true, nil, err
+		}
+		meta, _ := body["metadata"].(map[string]any)
+		uid, _ := meta["uid"].(string)
+		if _, err := dyn.Tracker().Get(controllerGVR, pa.GetNamespace(), pa.GetName()); err == nil {
+			return false, nil, nil
+		}
+		if uid == "" {
+			t.Errorf("apply without a UID reached an absent object; it would recreate it")
+			return true, nil, nil
+		}
+		return true, nil, apierrors.NewConflict(controllerGVR.GroupResource(), pa.GetName(),
+			fmt.Errorf("uid mismatch: the provided object specified uid %s, and no existing object was found", uid))
+	})
+
+	_, _, err := c.ApplyControllerSpecSSAIfExists(context.Background(), "ns1", "ctrl1",
+		map[string]any{"powerState": "Stopped"}, "varroa-ui", false)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound after the delete, got %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("GET count = %d, want 2 (the retry must re-GET)", gets)
+	}
+	if _, err := dyn.Tracker().Get(controllerGVR, "ns1", "ctrl1"); !apierrors.IsNotFound(err) {
+		t.Fatalf("tracker still holds the controller after the update: %v", err)
+	}
+}
+
 // TestApplyControllerSpecSSAIfExists_HappyPath verifies the ordinary case:
 // an existing controller gets spec.powerState applied and the resulting
 // object reflects it.
