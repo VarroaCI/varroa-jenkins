@@ -7140,7 +7140,7 @@ AssistantError:
       type: string
     code:
       type: string
-      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch]
+      enum: [assistant_disabled, assistant_key_unavailable, assistant_off, assistant_busy, prompt_not_startable, kill_switch, approval_expired, team_agent_session]
   additionalProperties: false
 
 ProposePipelineRequest:

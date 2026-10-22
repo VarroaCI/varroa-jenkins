@@ -154,6 +154,8 @@ nothing. When every approval of a session has a result, the session resumes.
 An approval that is not decided in the approval expiry window expires.
 The session then ends.
 
+A decision on an expired approval answers HTTP 409 with `approval_expired`.
+
 ## Keys
 
 A user may store a provider key for the browser session. The key is sealed
@@ -186,3 +188,5 @@ with `session_key_missing`.
 | `assistant_busy` | HTTP 409 or 429 | Too many sessions run, or the session changed. |
 | `prompt_not_startable` | HTTP 403 | The prompt cannot start a session. |
 | `kill_switch` | HTTP 409 | The kill switch blocks an approval. |
+| `approval_expired` | HTTP 409 | The approval expired before the decision. Ask again in a new session. |
+| `team_agent_session` | HTTP 409 | A Team agent session takes no messages. |

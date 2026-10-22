@@ -131,6 +131,13 @@ func (p *Postgres) ResolveApproval(ctx context.Context, id uuid.UUID, r Resoluti
 			return fmt.Errorf("%w: approval %s", ErrNotFound, id)
 		}
 		if state != agent.StateWaitingApproval {
+			cur, err := readApproval(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if cur.State == agent.ApprovalExpired {
+				return fmt.Errorf("%w: approval %s", ErrExpired, id)
+			}
 			return fmt.Errorf("%w: session state %s", ErrConflict, state)
 		}
 		now := p.now()
@@ -148,7 +155,7 @@ func (p *Postgres) ResolveApproval(ctx context.Context, id uuid.UUID, r Resoluti
 			if err != nil {
 				return err
 			}
-			if cur.State == agent.ApprovalPending {
+			if cur.State == agent.ApprovalPending || cur.State == agent.ApprovalExpired {
 				return fmt.Errorf("%w: approval %s", ErrExpired, id)
 			}
 			return fmt.Errorf("%w: approval is %s", ErrConflict, cur.State)

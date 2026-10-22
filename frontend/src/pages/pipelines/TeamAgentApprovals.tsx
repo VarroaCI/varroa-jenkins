@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { approveAssistantApproval, denyAssistantApproval, listTeamAgentSessions } from "../../api/client";
 import { usePermissions, canAccessTenantPipeline } from "../../hooks/usePermissions";
+import { ApiError } from "../../hooks/useApi";
+import { labelFor } from "../../components/assistant/labels";
 import { Card } from "../../components/Card";
 import type { AssistantApproval } from "../../types/assistant";
 import styles from "./TeamAgentPage.module.css";
@@ -39,7 +41,12 @@ export function TeamAgentApprovals({ team }: { team: string }) {
       if (approve) await approveAssistantApproval(id);
       else await denyAssistantApproval(id, { reason: reasons[id] ?? "" });
       refresh();
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "approval_expired") {
+        setRefusal(labelFor("errorCodes", "approval_expired"));
+        refresh();
+        return;
+      }
       setRefusal("The decision was refused. Reload and try again.");
     }
   };

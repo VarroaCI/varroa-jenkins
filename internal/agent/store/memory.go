@@ -457,7 +457,7 @@ func (m *Memory) CreateApprovals(_ context.Context, sessionID uuid.UUID, owner s
 }
 
 // ResolveApproval resolves one pending approval for the owner. A resolution
-// after the expiry answers ErrExpired.
+// after the expiry answers ErrExpired, before and after the sweep.
 func (m *Memory) ResolveApproval(_ context.Context, id uuid.UUID, r Resolution) (ResolveResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -478,6 +478,9 @@ func (m *Memory) ResolveApproval(_ context.Context, id uuid.UUID, r Resolution) 
 	}
 	if s.Principal != r.Owner {
 		return ResolveResult{}, fmt.Errorf("%w: approval %s", ErrNotFound, id)
+	}
+	if a.State == agent.ApprovalExpired {
+		return ResolveResult{}, fmt.Errorf("%w: approval %s", ErrExpired, id)
 	}
 	if s.State != agent.StateWaitingApproval {
 		return ResolveResult{}, fmt.Errorf("%w: session state %s", ErrConflict, s.State)

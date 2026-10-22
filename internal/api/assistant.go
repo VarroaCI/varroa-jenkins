@@ -33,6 +33,9 @@ const (
 	assistantErrBusy          = "assistant_busy"
 	assistantErrPromptNoStart = "prompt_not_startable"
 	assistantErrKillSwitch    = "kill_switch"
+	// assistantErrApprovalExpired answers a decision on an approval whose
+	// expiry passed. The decision is refused and the session is not resumed.
+	assistantErrApprovalExpired = "approval_expired"
 	// assistantErrTeamAgent answers a message to a Team agent session. Its
 	// turns come from the runner, so a person cannot add one.
 	assistantErrTeamAgent = "team_agent_session"
@@ -178,13 +181,16 @@ func writeAssistantError(s *Server, w http.ResponseWriter, status int, code, msg
 	s.writeJSONErrorStatus(w, status, msg, map[string]any{"code": code})
 }
 
-// assistantStoreError answers a store error. A missing row is 404, a state
-// conflict is 409, and anything else is 500.
+// assistantStoreError answers a store error. A missing row is 404, an expired
+// approval is 409 approval_expired, a state conflict is 409 assistant_busy,
+// and anything else is 500.
 func (s *Server) assistantStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		s.writeJSONError(w, http.StatusNotFound, "not found")
-	case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrExpired):
+	case errors.Is(err, store.ErrExpired):
+		writeAssistantError(s, w, http.StatusConflict, assistantErrApprovalExpired, "the approval expired")
+	case errors.Is(err, store.ErrConflict):
 		writeAssistantError(s, w, http.StatusConflict, assistantErrBusy, "the session changed; reload and try again")
 	case errors.Is(err, recordstore.ErrSchemaTooOld), errors.Is(err, store.ErrSchemaTooOld):
 		writeAssistantError(s, w, http.StatusServiceUnavailable, assistantErrDisabled, "the assistant store is not ready")

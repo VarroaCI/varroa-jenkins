@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createTestQueryClient } from "../../test/render-utils";
 import { TeamAgentApprovals } from "./TeamAgentApprovals";
+import * as client from "../../api/client";
+import { ApiError } from "../../hooks/useApi";
 
 const mockList = vi.fn();
 const mockCanWrite = vi.fn();
@@ -56,5 +58,16 @@ describe("TeamAgentApprovals", () => {
     renderApprovals();
     expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("names an expired approval and reloads the list", async () => {
+    mockCanWrite.mockReturnValue(true);
+    vi.mocked(client.approveAssistantApproval).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the approval expired", code: "approval_expired" }),
+    );
+    renderApprovals();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("This approval expired. Ask the assistant again.")).toBeInTheDocument();
+    await waitFor(() => expect(mockList.mock.calls.length).toBeGreaterThan(1));
   });
 });

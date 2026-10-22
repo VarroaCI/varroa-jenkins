@@ -285,7 +285,7 @@
       "404":
         $ref: '../components/responses.yaml#/NotFound'
       "409":
-        description: The approval is not pending, has expired, or the assistant is paused.
+        description: The approval is not pending (assistant_busy), has expired (approval_expired), or the assistant is paused (kill_switch).
         content:
           application/json:
             schema:
@@ -324,7 +324,7 @@
       "404":
         $ref: '../components/responses.yaml#/NotFound'
       "409":
-        description: The approval is not pending or has expired.
+        description: The approval is not pending (assistant_busy) or has expired (approval_expired).
         content:
           application/json:
             schema:
