@@ -101,7 +101,7 @@ sections describe.
   into its patch argument in place, so a reused map would carry a prior
   attempt's already-backfilled values into the next attempt and skip
   re-backfilling them from that attempt's own (possibly newer) GET.
-- **`ClientsetClient.CreateOrUpdateSecret` creates the Secret again, once, when the Get or the Update after AlreadyExists answers NotFound.** A Conflict is returned and not retried.
+- **`ClientsetClient.CreateOrUpdateSecret`, `CreateOrUpdateSecretWithOwner`, and `CreateOrUpdateSecretWithLabels` create the Secret again, once, when a delete races the write.** `CreateOrUpdateSecret` retries on a NotFound from the Get or the Update after AlreadyExists. The other two retry on a NotFound from the Update. A Conflict is returned and not retried.
 - **`CreateControllerSpecSSA` is the create fence for `controllers.create`.**
   The Create call refuses an existing name and writes nothing. The method then
   applies the same spec as `varroa-ui`. The apply carries the created UID, so

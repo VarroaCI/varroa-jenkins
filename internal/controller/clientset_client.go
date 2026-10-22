@@ -1323,82 +1323,110 @@ func (c *ClientsetClient) CreateOrUpdateSecret(ctx context.Context, name, namesp
 // it when the live Data differs from data — an unchanged source Secret
 // therefore never bumps resourceVersion on a projection tick, so a
 // desired-state hash derived from the data only changes on an actual
-// rotation.
+// rotation. A delete between the Get and the Update makes the Update answer
+// NotFound. The method then creates the Secret again, once. A Conflict is
+// returned and not retried.
 func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
-	existing, getErr := c.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(getErr) {
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:            name,
-				Namespace:       namespace,
-				OwnerReferences: []metav1.OwnerReference{owner},
-			},
-			Data: data,
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            name,
+					Namespace:       namespace,
+					OwnerReferences: []metav1.OwnerReference{owner},
+				},
+				Data: data,
+			}
+			_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+			if apierrors.IsAlreadyExists(err) {
+				// Someone created it between the Get and the Create; fall through
+				// to the update path on the next call rather than erroring.
+				return nil
+			}
+			return err
 		}
-		_, err := c.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-		if apierrors.IsAlreadyExists(err) {
-			// Someone created it between the Get and the Create; fall through
-			// to the update path on the next call rather than erroring.
+		if getErr != nil {
+			return fmt.Errorf("get existing secret for owned update: %w", getErr)
+		}
+		if reflect.DeepEqual(existing.Data, data) {
+			return nil // byte-identical: no write, no resourceVersion bump.
+		}
+		updated := existing.DeepCopy()
+		updated.Data = data
+		updated.OwnerReferences = []metav1.OwnerReference{owner}
+		_, updErr := secrets.Update(ctx, updated, metav1.UpdateOptions{})
+		if updErr == nil {
 			return nil
 		}
-		return err
+		if apierrors.IsNotFound(updErr) {
+			lastErr = updErr
+			continue
+		}
+		return updErr
 	}
-	if getErr != nil {
-		return fmt.Errorf("get existing secret for owned update: %w", getErr)
-	}
-	if reflect.DeepEqual(existing.Data, data) {
-		return nil // byte-identical: no write, no resourceVersion bump.
-	}
-	updated := existing.DeepCopy()
-	updated.Data = data
-	updated.OwnerReferences = []metav1.OwnerReference{owner}
-	_, err := c.clientset.CoreV1().Secrets(namespace).Update(ctx, updated, metav1.UpdateOptions{})
-	return err
+	return fmt.Errorf("create or update secret %s/%s: %w", namespace, name, lastErr)
 }
 
 // CreateOrUpdateSecretWithLabels creates a Secret carrying labels and data,
 // or merges both onto the live Secret. Each key of data is added or
 // replaced, and every other key of the live Secret stays. A converged Secret
-// gets no write, so a pool tick never bumps resourceVersion on its own.
+// gets no write, so a pool tick never bumps resourceVersion on its own. A
+// delete between the Get and the Update makes the Update answer NotFound. The
+// method then creates the Secret again, once. A Conflict is returned and not
+// retried.
 func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {
 	secrets := c.clientset.CoreV1().Secrets(namespace)
-	existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(getErr) {
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
-			Data:       data,
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+				Data:       data,
+			}
+			_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+			return err
 		}
-		_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
-		return err
-	}
-	if getErr != nil {
-		return fmt.Errorf("get existing secret for labelled update: %w", getErr)
-	}
-	updated := existing.DeepCopy()
-	if updated.Data == nil {
-		updated.Data = map[string][]byte{}
-	}
-	if updated.Labels == nil {
-		updated.Labels = map[string]string{}
-	}
-	changed := false
-	for k, v := range data {
-		if !bytes.Equal(updated.Data[k], v) {
-			updated.Data[k] = v
-			changed = true
+		if getErr != nil {
+			return fmt.Errorf("get existing secret for labelled update: %w", getErr)
 		}
-	}
-	for k, v := range labels {
-		if updated.Labels[k] != v {
-			updated.Labels[k] = v
-			changed = true
+		updated := existing.DeepCopy()
+		if updated.Data == nil {
+			updated.Data = map[string][]byte{}
 		}
+		if updated.Labels == nil {
+			updated.Labels = map[string]string{}
+		}
+		changed := false
+		for k, v := range data {
+			if !bytes.Equal(updated.Data[k], v) {
+				updated.Data[k] = v
+				changed = true
+			}
+		}
+		for k, v := range labels {
+			if updated.Labels[k] != v {
+				updated.Labels[k] = v
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		_, updErr := secrets.Update(ctx, updated, metav1.UpdateOptions{})
+		if updErr == nil {
+			return nil
+		}
+		if apierrors.IsNotFound(updErr) {
+			lastErr = updErr
+			continue
+		}
+		return updErr
 	}
-	if !changed {
-		return nil
-	}
-	_, err := secrets.Update(ctx, updated, metav1.UpdateOptions{})
-	return err
+	return fmt.Errorf("create or update secret %s/%s: %w", namespace, name, lastErr)
 }
 
 // CreateSecretExclusive creates an opaque Secret with the given labels and,
