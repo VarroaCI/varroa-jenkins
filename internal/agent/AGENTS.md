@@ -53,7 +53,7 @@ contract with its adapters, and the sandbox contract.
   tokens and also reports them apart (`CacheCreationTokens`,
   `CacheReadTokens`).
 
-- The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
+- The Team agent runner shares the store. `store.WithNotify` wraps any store and publishes one content-free notice per successful session write. A sweep publishes one notice for each session that it ends. `CreateUnderLock` (Postgres only) runs a check and the insert under a transaction-scoped advisory lock. `SetInstructionsSHA` records the instructions revision and one event in one write. `PutTeamAgentUnattended` writes one TeamAgent's unattended grant to the global settings; the other settings keys are untouched.
 - `agent.Settings.TeamAgentUnattended` maps `namespace/name` to `agent.UnattendedGrant`. A grant names its object by UID, so a recreated object gets no grant.
 - `agent.MaxRunningSessions` is the cap that the create paths of both kinds use.
 - `SettingsPatch.Check` runs on the merged settings under the scope row lock (`SELECT … FOR UPDATE` in Postgres, `m.mu` in Memory). An error from it writes nothing. The API puts the provider and model pair rules there.

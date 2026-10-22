@@ -120,6 +120,32 @@ func (n notifyingStore) CreateApprovals(ctx context.Context, sessionID uuid.UUID
 	return out, evs, err
 }
 
+// ExpireDue publishes one notice for each session that it ends.
+func (n notifyingStore) ExpireDue(ctx context.Context) ([]SweptSession, error) {
+	out, err := n.Store.ExpireDue(ctx)
+	n.notifySwept(ctx, out)
+	return out, err
+}
+
+// SweepLeases publishes one notice for each session that it ends.
+func (n notifyingStore) SweepLeases(ctx context.Context) ([]SweptSession, error) {
+	out, err := n.Store.SweepLeases(ctx)
+	n.notifySwept(ctx, out)
+	return out, err
+}
+
+// Sweep calls sweepBoth on the wrapper, not on the inner store. The wrapper's
+// ExpireDue and SweepLeases then publish the notices.
+func (n notifyingStore) Sweep(ctx context.Context) (expired, lost []SweptSession, err error) {
+	return sweepBoth(ctx, n)
+}
+
+func (n notifyingStore) notifySwept(ctx context.Context, ss []SweptSession) {
+	for _, s := range ss {
+		n.notify(ctx, s.ID, s.Seq)
+	}
+}
+
 func (n notifyingStore) ResolveApproval(ctx context.Context, id uuid.UUID, r Resolution) (ResolveResult, error) {
 	res, err := n.Store.ResolveApproval(ctx, id, r)
 	if err == nil {
