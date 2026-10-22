@@ -26,15 +26,33 @@ func startNATS(t *testing.T) string {
 	return srv.ClientURL()
 }
 
-// fetchCount pulls up to max messages and reports how many arrived before the
-// wait ended.
-func fetchCount(t *testing.T, conn *bus.Conn) int {
+// absenceWait is the window for a check that proves nothing arrived. An
+// absence check proves only that no row arrived in this window.
+const absenceWait = 500 * time.Millisecond
+
+// presenceWait is the bound for a check that expects one row. A check with
+// batch 1 returns as soon as the row arrives, so the long bound costs nothing
+// when the test passes.
+const presenceWait = 10 * time.Second
+
+// pullSub binds one pull subscription to the trigger consumer for the whole
+// test. A second subscription can lose a row to a pull request that the
+// first one left on the server.
+func pullSub(t *testing.T, conn *bus.Conn) *nats.Subscription {
 	t.Helper()
 	sub, err := conn.PullSubscribe("activity.>", StreamName, ConsumerName)
 	if err != nil {
 		t.Fatalf("PullSubscribe: %v", err)
 	}
-	msgs, err := sub.Fetch(10, nats.MaxWait(500*time.Millisecond))
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	return sub
+}
+
+// fetchWithin pulls up to limit messages, acks them, and reports how many
+// arrived before wait ended.
+func fetchWithin(t *testing.T, sub *nats.Subscription, limit int, wait time.Duration) int {
+	t.Helper()
+	msgs, err := sub.Fetch(limit, nats.MaxWait(wait))
 	if err != nil && !errors.Is(err, nats.ErrTimeout) {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -64,14 +82,18 @@ func TestConsumer_NewConsumerReplaysNothing(t *testing.T) {
 	if err := Ensure(conn); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	if got := fetchCount(t, conn); got != 0 {
+	sub := pullSub(t, conn)
+	if got := fetchWithin(t, sub, 10, absenceWait); got != 0 {
 		t.Fatalf("a new consumer replayed %d rows, want 0", got)
 	}
 	if _, err := conn.PublishJetStream("activity.build.failed", []byte(`{"type":"build.failed"}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if got := fetchCount(t, conn); got != 1 {
+	if got := fetchWithin(t, sub, 1, presenceWait); got != 1 {
 		t.Fatalf("a row published after the consumer = %d, want 1", got)
+	}
+	if got := fetchWithin(t, sub, 10, absenceWait); got != 0 {
+		t.Fatalf("extra rows after the published row = %d, want 0", got)
 	}
 }
 
