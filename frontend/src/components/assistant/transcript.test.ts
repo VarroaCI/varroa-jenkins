@@ -43,6 +43,17 @@ describe("applyEvent", () => {
     expect(m.calls.c1.result?.dataLevel).toBe("logs");
   });
 
+  it("marks a withheld tool result", () => {
+    let m = emptyModel();
+    m = applyEvent(m, frame(1, "tool_call", { call_id: "c1", name: "restart_run", arguments: { run: "r1" } }));
+    m = applyEvent(m, frame(2, "tool_result", { call_id: "c1", name: "restart_run", content: "", withheld: true }));
+    expect(m.calls.c1.result?.withheld).toBe(true);
+    expect(m.calls.c1.result?.content).toBe("");
+    m = applyEvent(m, frame(3, "tool_call", { call_id: "c2", name: "restart_run", arguments: {} }));
+    m = applyEvent(m, frame(4, "tool_result", { call_id: "c2", name: "restart_run", content: "ok", is_error: false }));
+    expect(m.calls.c2.result?.withheld).toBe(false);
+  });
+
   it("drops a result for an unknown call and an approval for an unknown id", () => {
     let m = emptyModel();
     m = applyEvent(m, frame(1, "tool_result", { call_id: "ghost", content: "x" }));
@@ -68,7 +79,7 @@ describe("applyEvent", () => {
     });
     expect(callLabel({ ...base, approval: approval("denied") })).toBe("Denied");
     expect(callLabel({ ...base, approval: approval("expired") })).toBe("Expired");
-    expect(callLabel({ ...base, result: { content: "x", isError: true, dataLevel: "logs", createdAt: at } })).toBe("Error");
+    expect(callLabel({ ...base, result: { content: "x", isError: true, dataLevel: "logs", createdAt: at, withheld: false } })).toBe("Error");
     expect(callLabel(base)).toBe("In progress");
   });
 });
@@ -86,7 +97,7 @@ describe("callDurationMs", () => {
   it("measures call to result and is null without a result", () => {
     const base: CallView = { callId: "c", name: "n", arguments: {}, class: "read", createdAt: "2026-10-18T10:00:00Z" };
     expect(callDurationMs(base)).toBeNull();
-    const done = { ...base, result: { content: "", isError: false, dataLevel: "logs", createdAt: "2026-10-18T10:00:02Z" } };
+    const done = { ...base, result: { content: "", isError: false, dataLevel: "logs", createdAt: "2026-10-18T10:00:02Z", withheld: false } };
     expect(callDurationMs(done)).toBe(2000);
     const bad = { ...base, result: { ...done.result, createdAt: "nope" } };
     expect(callDurationMs(bad)).toBeNull();

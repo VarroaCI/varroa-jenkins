@@ -47,6 +47,7 @@ export function createAssistantApproval(overrides: Partial<AssistantApproval> = 
     resolvedAt: null,
     reason: null,
     result: null,
+    resultWithheld: false,
     ...overrides,
   };
 }

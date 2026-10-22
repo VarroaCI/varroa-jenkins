@@ -59,7 +59,8 @@ func (s *Server) handleStreamAssistantEvents(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 
 	ctx := r.Context()
-	last, done, err := writeAssistantEvents(ctx, rt, w, sess.ID, after)
+	full := s.transcriptFull(ctx, claims, sess)
+	last, done, err := writeAssistantEvents(ctx, rt, w, sess.ID, after, full)
 	if err != nil {
 		return
 	}
@@ -79,7 +80,7 @@ func (s *Server) handleStreamAssistantEvents(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		last, done, err = writeAssistantEvents(ctx, rt, w, sess.ID, last)
+		last, done, err = writeAssistantEvents(ctx, rt, w, sess.ID, last, full)
 		if err != nil {
 			return
 		}
@@ -105,8 +106,9 @@ func streamCursor(r *http.Request) (int, error) {
 }
 
 // writeAssistantEvents writes every event after the cursor and reports the
-// new cursor, and whether a done event was written.
-func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer, id uuid.UUID, after int) (int, bool, error) {
+// new cursor, and whether a done event was written. full selects whether
+// tool result content is written; see assistantEventFrame.
+func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer, id uuid.UUID, after int, full bool) (int, bool, error) {
 	last := after
 	for {
 		page, err := rt.Store.Events(ctx, id, last, 500)
@@ -117,7 +119,7 @@ func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer
 			return last, false, nil
 		}
 		for _, e := range page {
-			frame, err := assistantEventFrame(e)
+			frame, err := assistantEventFrame(e, full)
 			if err != nil {
 				return last, false, err
 			}
@@ -133,11 +135,17 @@ func writeAssistantEvents(ctx context.Context, rt *AssistantRuntime, w io.Writer
 }
 
 // assistantEventFrame encodes one event as an SSE frame. The created_at
-// time joins the payload, and the sequence number is the frame id.
-func assistantEventFrame(e agent.Event) ([]byte, error) {
+// time joins the payload, and the sequence number is the frame id. When full
+// is false, a tool_result frame keeps call_id, name, and is_error, but its
+// content is empty and withheld is true.
+func assistantEventFrame(e agent.Event, full bool) ([]byte, error) {
 	var payload map[string]any
 	if err := json.Unmarshal(e.Payload, &payload); err != nil {
 		payload = map[string]any{}
+	}
+	if !full && e.Type == agent.EventToolResult {
+		payload["content"] = ""
+		payload["withheld"] = true
 	}
 	payload["created_at"] = e.CreatedAt.UTC().Format(time.RFC3339Nano)
 	body, err := json.Marshal(payload)

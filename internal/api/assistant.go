@@ -256,6 +256,9 @@ type assistantApprovalJSON struct {
 	ResolvedAt  *time.Time      `json:"resolvedAt"`
 	Reason      string          `json:"reason"`
 	Result      *string         `json:"result"`
+	// ResultWithheld is true when the caller may view the session but not its
+	// tool result content. Result is then nil.
+	ResultWithheld bool `json:"resultWithheld"`
 }
 
 func toAssistantApprovalJSON(a agent.Approval, result *string) assistantApprovalJSON {

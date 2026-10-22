@@ -429,13 +429,21 @@ func (s *Server) handleGetAssistantSession(w http.ResponseWriter, r *http.Reques
 		s.assistantStoreError(w, err)
 		return
 	}
+	full := s.transcriptFull(r.Context(), claims, sess)
 	approvals := make([]assistantApprovalJSON, 0, len(page.Items))
 	for _, a := range page.Items {
 		var result *string
+		withheld := false
 		if c, ok := results[a.CallID]; ok {
-			result = &c
+			if full {
+				result = &c
+			} else {
+				withheld = true
+			}
 		}
-		approvals = append(approvals, toAssistantApprovalJSON(a, result))
+		item := toAssistantApprovalJSON(a, result)
+		item.ResultWithheld = withheld
+		approvals = append(approvals, item)
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"session":   toAssistantSessionJSON(sess),

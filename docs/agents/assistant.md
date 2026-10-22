@@ -156,6 +156,15 @@ The session then ends.
 
 A decision on an expired approval answers HTTP 409 with `approval_expired`.
 
+## Read another person's session
+
+The owner of an assistant session reads the full transcript. An admin with
+`assistant:admin` reads every session. The admin sees each tool call, its name,
+and its arguments. The admin does not see the content of a tool result. A tool
+result holds data that the owner's grants fetched. The API marks each such
+result as withheld, and the transcript shows a notice. The assistant text of
+each turn stays visible to every reader who may view the session.
+
 ## Keys
 
 A user may store a provider key for the browser session. The key is sealed

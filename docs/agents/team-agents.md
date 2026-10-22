@@ -204,6 +204,10 @@ A tenant reader sees the sessions and the capabilities. A tenant writer also
 decides approvals and cancels sessions. The page never shows a forge token or
 a credential.
 
+A tenant reader sees each tool result of a session. An admin who is not a tenant
+reader sees the tool calls, but not their results. The API marks each such
+result as withheld.
+
 ## Member clusters
 
 A Team can run on a member cluster. The runner runs in the core release. A manual

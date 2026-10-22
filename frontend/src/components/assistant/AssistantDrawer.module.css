@@ -104,6 +104,12 @@
   margin: 0;
 }
 
+.withheld {
+  color: var(--text-2);
+  font-style: italic;
+  margin: 0;
+}
+
 .composer {
   display: flex;
   gap: 8px;

@@ -60,6 +60,13 @@ func (s *Server) teamAgentSessionAllowed(ctx context.Context, claims *auth.Claim
 	if verb != sessionDecide && s.assistantIsAdmin(claims) {
 		return true
 	}
+	return s.teamAgentTenantAllows(ctx, claims, sess, verb)
+}
+
+// teamAgentTenantAllows applies the tenant rows of the access table to a Team
+// agent session. A view needs a tenant read grant, and any other verb needs a
+// tenant write grant on one of the Team's tenants.
+func (s *Server) teamAgentTenantAllows(ctx context.Context, claims *auth.Claims, sess agent.Session, verb sessionVerb) bool {
 	refs, serr := s.resolveTeamTenants(ctx, claims, sess.Team)
 	if serr != nil {
 		return false
@@ -71,6 +78,22 @@ func (s *Server) teamAgentSessionAllowed(ctx context.Context, claims *auth.Claim
 		if verb != sessionView && s.canWritePipeline(claims, ref, "") {
 			return true
 		}
+	}
+	return false
+}
+
+// transcriptFull reports whether claims reads tool result content of sess.
+// A tool result holds data that the owner's grants fetched, so only the
+// principal, or a tenant reader of a Team agent session, reads it.
+func (s *Server) transcriptFull(ctx context.Context, claims *auth.Claims, sess agent.Session) bool {
+	if claims == nil {
+		return false
+	}
+	if sess.Principal == claims.Subject {
+		return true
+	}
+	if sess.Kind == agent.KindTeamAgent {
+		return s.teamAgentTenantAllows(ctx, claims, sess, sessionView)
 	}
 	return false
 }

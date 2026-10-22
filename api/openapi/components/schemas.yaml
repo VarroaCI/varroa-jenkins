@@ -7247,7 +7247,7 @@ AssistantSessionList:
 
 AssistantApproval:
   type: object
-  required: [id, sessionId, callId, tool, arguments, targetKind, state, requestedAt, expiresAt]
+  required: [id, sessionId, callId, tool, arguments, targetKind, state, requestedAt, expiresAt, resultWithheld]
   properties:
     id: {type: string}
     sessionId: {type: string}
@@ -7265,6 +7265,9 @@ AssistantApproval:
     result:
       type: string
       nullable: true
+    resultWithheld:
+      type: boolean
+      description: "True when the caller may view the session but not its tool results. result is then null."
 
 AssistantApprovalList:
   type: object

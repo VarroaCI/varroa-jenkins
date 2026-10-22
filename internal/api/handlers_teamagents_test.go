@@ -143,6 +143,7 @@ type teamAgentFixture struct {
 	reader   *auth.Claims
 	writer   *auth.Claims
 	ops      *auth.Claims
+	admin    *auth.Claims
 	stranger *auth.Claims
 	agent    *auth.Claims
 }
@@ -218,6 +219,7 @@ func newTeamAgentFixture(t *testing.T) *teamAgentFixture {
 	f.reader = &auth.Claims{Subject: "reader-user", PreferredUsername: "reader", IssuedAt: time.Now()}
 	f.writer = &auth.Claims{Subject: "writer-user", PreferredUsername: "writer", IssuedAt: time.Now()}
 	f.ops = &auth.Claims{Subject: "ops-user", PreferredUsername: "ops", IssuedAt: time.Now()}
+	f.admin = &auth.Claims{Subject: "aadmin-user", PreferredUsername: "aadmin", IssuedAt: time.Now()}
 	f.stranger = &auth.Claims{Subject: "stranger-user", PreferredUsername: "stranger", IssuedAt: time.Now()}
 	f.agent = &auth.Claims{Subject: teamAgentPrincipal, IssuedAt: time.Now()}
 
@@ -227,6 +229,8 @@ func newTeamAgentFixture(t *testing.T) *teamAgentFixture {
 			APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read"}}, {Resources: []string{"assistant"}, Verbs: []string{"use"}}}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "team-writer"}, Spec: v1alpha1.VarroaRoleSpec{
 			APIRules: []v1alpha1.APIRule{{Resources: []string{"pipelines"}, Verbs: []string{"read", "write"}}, {Resources: []string{"assistant"}, Verbs: []string{"use"}}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "assistant-admin"}, Spec: v1alpha1.VarroaRoleSpec{
+			APIRules: []v1alpha1.APIRule{{Resources: []string{"assistant"}, Verbs: []string{"admin"}}}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "ops"}, Spec: v1alpha1.VarroaRoleSpec{
 			APIRules: []v1alpha1.APIRule{{Resources: []string{"teamagents"}, Verbs: []string{"unattended"}}, {Resources: []string{"agentsessions"}, Verbs: []string{"read"}}}}},
 	}
@@ -242,6 +246,7 @@ func newTeamAgentFixture(t *testing.T) *teamAgentFixture {
 		bind("reader-b", "reader-user", "team-reader", scope),
 		bind("writer-b", "writer-user", "team-writer", scope),
 		bind("ops-b", "ops-user", "ops", nil),
+		bind("aadmin-b", "aadmin-user", "assistant-admin", nil),
 		bind("agent-b", teamAgentPrincipal, "team-writer", scope),
 	}
 	deps := &Dependencies{

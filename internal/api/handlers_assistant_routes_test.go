@@ -217,6 +217,128 @@ func TestAssistantEvents_StreamsTranscript(t *testing.T) {
 	}
 }
 
+// TestAssistantGet_WithholdsResultsFromAdmin proves an admin who is not the
+// owner reads each approval with its result withheld, and the owner reads it.
+func TestAssistantGet_WithholdsResultsFromAdmin(t *testing.T) {
+	f := newAssistantFixture(t, assistantRestartTurn(), assistantTextTurn("done"))
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "restart"})
+	var sess assistantSessionJSON
+	decodeBody(t, rec, &sess)
+	f.rt.Wait()
+	page, _ := f.mem.ListApprovals(context.Background(), store.ApprovalQuery{Principal: "viewer-user", SessionID: mustUUID(t, sess.ID)})
+	f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+page.Items[0].ID.String()+"/approve", nil)
+	f.rt.Wait()
+
+	rec = f.do(t, f.viewer, http.MethodGet, "/assistant/sessions/"+sess.ID, nil)
+	var owner struct {
+		Approvals []assistantApprovalJSON `json:"approvals"`
+	}
+	decodeBody(t, rec, &owner)
+	if len(owner.Approvals) != 1 || owner.Approvals[0].Result == nil || *owner.Approvals[0].Result != "ok:restart_run" || owner.Approvals[0].ResultWithheld {
+		t.Errorf("owner approvals = %+v", owner.Approvals)
+	}
+
+	rec = f.do(t, f.admin, http.MethodGet, "/assistant/sessions/"+sess.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin get = %d", rec.Code)
+	}
+	var admin struct {
+		Approvals []assistantApprovalJSON `json:"approvals"`
+	}
+	decodeBody(t, rec, &admin)
+	if len(admin.Approvals) != 1 {
+		t.Fatalf("admin approvals = %+v", admin.Approvals)
+	}
+	got := admin.Approvals[0]
+	if got.Result != nil || !got.ResultWithheld || got.Tool != "restart_run" || len(got.Arguments) == 0 {
+		t.Errorf("admin approval = %+v, want withheld result with tool and arguments", got)
+	}
+}
+
+// TestAssistantEvents_WithholdsToolResultFromAdmin proves the stream writes a
+// tool_result frame without content to an admin, and with content to the owner.
+func TestAssistantEvents_WithholdsToolResultFromAdmin(t *testing.T) {
+	f := newAssistantFixture(t, assistantRestartTurn(), assistantTextTurn("done"))
+	f.deps.Broadcaster = sse.NewBroadcaster()
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "restart"})
+	var sess assistantSessionJSON
+	decodeBody(t, rec, &sess)
+	f.rt.Wait()
+	page, _ := f.mem.ListApprovals(context.Background(), store.ApprovalQuery{Principal: "viewer-user", SessionID: mustUUID(t, sess.ID)})
+	f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+page.Items[0].ID.String()+"/approve", nil)
+	f.rt.Wait()
+
+	// The stream closes at the first done event, which is seq 5 here. A cursor
+	// of 5 reads the tool_result that the approval wrote after it.
+	stream := func(claims *auth.Claims, query string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assistant/sessions/"+sess.ID+"/events"+query, nil)
+		req = req.WithContext(auth.ContextWithClaims(req.Context(), claims))
+		rec := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			NewRouter(f.deps).ServeHTTP(rec, req)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the stream did not close after done")
+		}
+		return rec.Body.String()
+	}
+
+	body := stream(f.admin, "")
+	for _, want := range []string{"event: tool_call", "restart_run"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("admin stream lacks %q: %s", want, body)
+		}
+	}
+
+	body = stream(f.admin, "?after=5")
+	for _, want := range []string{"event: tool_result", `"withheld":true`, `"content":""`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("admin stream lacks %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "ok:restart_run") {
+		t.Errorf("admin stream carries the tool result: %s", body)
+	}
+
+	body = stream(f.viewer, "?after=5")
+	if !strings.Contains(body, "ok:restart_run") || strings.Contains(body, `"withheld"`) {
+		t.Errorf("owner stream = %s, want the result and no withheld key", body)
+	}
+}
+
+// TestAssistantEventFrame_WithheldOnlyToolResult proves only a tool_result
+// frame changes when the caller may not read the transcript in full.
+func TestAssistantEventFrame_WithheldOnlyToolResult(t *testing.T) {
+	result := agent.Event{Seq: 3, Type: agent.EventToolResult, Payload: json.RawMessage(`{"call_id":"c1","name":"restart_run","content":"ok","is_error":false}`), CreatedAt: time.Unix(0, 0)}
+	frame, err := assistantEventFrame(result, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(frame)
+	for _, want := range []string{`"call_id":"c1"`, `"name":"restart_run"`, `"content":""`, `"withheld":true`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("withheld frame lacks %s: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `"content":"ok"`) {
+		t.Errorf("withheld frame carries content: %s", body)
+	}
+
+	text := agent.Event{Seq: 4, Type: agent.EventAssistant, Payload: json.RawMessage(`{"text":"hello"}`), CreatedAt: time.Unix(0, 0)}
+	frame, err = assistantEventFrame(text, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(frame), "withheld") || !strings.Contains(string(frame), `"text":"hello"`) {
+		t.Errorf("assistant frame changed: %s", frame)
+	}
+}
+
 // TestAssistantEvents_BadCursor400 proves a non-numeric cursor is refused.
 func TestAssistantEvents_BadCursor400(t *testing.T) {
 	f, id, _, _ := ticketFixture(t)

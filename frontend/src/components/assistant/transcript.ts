@@ -25,7 +25,8 @@ export interface CallView {
   arguments: unknown;
   class: string;
   createdAt: string;
-  result?: { content: string; isError: boolean; dataLevel: string; createdAt: string };
+  /** withheld is true when the caller may not read the result content. */
+  result?: { content: string; isError: boolean; dataLevel: string; createdAt: string; withheld: boolean };
   approval?: ApprovalView;
 }
 
@@ -108,6 +109,7 @@ export function applyEvent(model: TranscriptModel, frame: AssistantFrame): Trans
             isError: d.is_error === true,
             dataLevel: str(d.data_level),
             createdAt,
+            withheld: d.withheld === true,
           },
         };
       }

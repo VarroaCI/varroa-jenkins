@@ -53,6 +53,7 @@ function pending(overrides: Partial<AssistantApproval> = {}): AssistantApproval 
     resolvedAt: null,
     reason: null,
     result: null,
+    resultWithheld: false,
     ...overrides,
   };
 }
