@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 // TestCreateSecretExclusiveSurfacesAlreadyExists guards the API-key collision
@@ -204,5 +207,133 @@ func TestCopyImagePullSecretSameNamespaceIsNoop(t *testing.T) {
 
 	if err := c.CopyImagePullSecret(ctx, "varroa", "varroa", "registry-creds"); err != nil {
 		t.Fatalf("expected nil for same namespace, got %v", err)
+	}
+}
+
+// countVerb returns how many recorded actions on the fake clientset carry verb.
+func countVerb(cs *fake.Clientset, verb string) int {
+	n := 0
+	for _, a := range cs.Actions() {
+		if a.GetVerb() == verb {
+			n++
+		}
+	}
+	return n
+}
+
+// TestCreateOrUpdateSecret_RecreatesWhenUpdateAnswersNotFound covers a delete
+// that lands between the Get and the Update. The method creates the Secret again.
+func TestCreateOrUpdateSecret_RecreatesWhenUpdateAnswersNotFound(t *testing.T) {
+	seed := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Data:       map[string][]byte{"k": []byte("old")},
+	}
+	cs := fake.NewSimpleClientset(seed)
+	gvr := corev1.SchemeGroupVersion.WithResource("secrets")
+	fired := false
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		if fired {
+			return false, nil, nil
+		}
+		fired = true
+		if err := cs.Tracker().Delete(gvr, "ns", "s"); err != nil {
+			t.Fatalf("delete from tracker: %v", err)
+		}
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	if err := c.CreateOrUpdateSecret(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}); err != nil {
+		t.Fatalf("CreateOrUpdateSecret: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
+	}
+	if n := countVerb(cs, "create"); n != 2 {
+		t.Fatalf("create actions = %d, want 2", n)
+	}
+}
+
+// TestCreateOrUpdateSecret_RecreatesWhenGetAnswersNotFound covers a delete that
+// lands between the AlreadyExists and the Get.
+func TestCreateOrUpdateSecret_RecreatesWhenGetAnswersNotFound(t *testing.T) {
+	seed := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Data:       map[string][]byte{"k": []byte("old")},
+	}
+	cs := fake.NewSimpleClientset(seed)
+	gvr := corev1.SchemeGroupVersion.WithResource("secrets")
+	fired := false
+	cs.PrependReactor("get", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		if fired {
+			return false, nil, nil
+		}
+		fired = true
+		if err := cs.Tracker().Delete(gvr, "ns", "s"); err != nil {
+			t.Fatalf("delete from tracker: %v", err)
+		}
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	if err := c.CreateOrUpdateSecret(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}); err != nil {
+		t.Fatalf("CreateOrUpdateSecret: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
+	}
+}
+
+// TestCreateOrUpdateSecret_StopsAfterOneRecreate shows that a Secret which keeps
+// vanishing returns NotFound after one recreate.
+func TestCreateOrUpdateSecret_StopsAfterOneRecreate(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("create", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewAlreadyExists(corev1.Resource("secrets"), "s")
+	})
+	cs.PrependReactor("get", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	err := c.CreateOrUpdateSecret(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound after one recreate, got %v", err)
+	}
+	if n := countVerb(cs, "create"); n != 2 {
+		t.Fatalf("create actions = %d, want 2", n)
+	}
+}
+
+// TestCreateOrUpdateSecret_ConflictNotRetried shows that a Conflict on the Update
+// is returned at once and never retried.
+func TestCreateOrUpdateSecret_ConflictNotRetried(t *testing.T) {
+	seed := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Data:       map[string][]byte{"k": []byte("old")},
+	}
+	cs := fake.NewSimpleClientset(seed)
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), "s", errors.New("stale"))
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	err := c.CreateOrUpdateSecret(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("expected Conflict, got %v", err)
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
 	}
 }
