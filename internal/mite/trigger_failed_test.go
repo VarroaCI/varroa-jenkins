@@ -9,6 +9,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
 
@@ -66,16 +67,9 @@ func seedPendingImperative(t *testing.T, h *BusHandler, conn *bus.Conn, cmd *mit
 	if err != nil {
 		t.Fatalf("pull subscribe: %v", err)
 	}
-	msgs, err := conn.DrainConsumer(sub, 1)
-	if err != nil {
-		t.Fatalf("fetch imperative: %v", err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("fetched %d messages, want 1", len(msgs))
-	}
-
-	filePendingImperative(h, cmd.CommandId, msgs[0])
-	return stream, consumer, msgs[0]
+	msg := bustest.FetchOne(t, sub, bustest.PresenceWait)
+	filePendingImperative(h, cmd.CommandId, msg)
+	return stream, consumer, msg
 }
 
 // filePendingImperative files msg as the pending imperative message of

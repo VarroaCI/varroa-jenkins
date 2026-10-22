@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/varroaci/varroa-jenkins/internal/bus"
+	"github.com/varroaci/varroa-jenkins/internal/bus/bustest"
 	"github.com/varroaci/varroa-jenkins/internal/ca"
 	mitev1 "github.com/varroaci/varroa-jenkins/internal/mite/proto/mitev1"
 )
@@ -176,11 +177,7 @@ func seedProgressMessage(t *testing.T, conn *bus.Conn, sub *nats.Subscription, s
 	if _, err := conn.PublishJetStream(subject, data); err != nil {
 		t.Fatalf("publish imperative: %v", err)
 	}
-	msgs, err := conn.DrainConsumer(sub, 1)
-	if err != nil || len(msgs) != 1 {
-		t.Fatalf("fetch imperative: %d messages, %v", len(msgs), err)
-	}
-	return msgs[0]
+	return bustest.FetchOne(t, sub, bustest.PresenceWait)
 }
 
 // redeliveredIDs fetches for wait and answers the command ids the stream
@@ -286,13 +283,10 @@ func TestForwardImperativeTerminatesUndecodableMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull subscribe: %v", err)
 	}
-	msgs, err := conn.DrainConsumer(sub, 1)
-	if err != nil || len(msgs) != 1 {
-		t.Fatalf("fetch: %d messages, %v", len(msgs), err)
-	}
+	msg := bustest.FetchOne(t, sub, bustest.PresenceWait)
 
 	sends := 0
-	h.forwardImperative(context.Background(), msgs[0], triggerFailedNS, triggerFailedCell, 7, func(*mitev1.OperatorMessage) error {
+	h.forwardImperative(context.Background(), msg, triggerFailedNS, triggerFailedCell, 7, func(*mitev1.OperatorMessage) error {
 		sends++
 		return nil
 	})
