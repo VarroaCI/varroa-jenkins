@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -229,12 +230,14 @@ func (p *Postgres) ListApprovals(ctx context.Context, q ApprovalQuery) (Approval
 }
 
 // ExpireDue expires the pending approvals past their expiry, one session per
-// transaction. It returns the sessions it ended.
+// transaction. It reads only the approvals of waiting sessions, so an approval
+// of an ended session never fills the batch. It returns the sessions it ended.
 func (p *Postgres) ExpireDue(ctx context.Context) ([]SweptSession, error) {
 	now := p.now()
 	rows, err := p.pool.Query(ctx, `
-		SELECT DISTINCT session_id FROM varroa.agent_approvals
-		WHERE state = 'pending' AND expires_at <= $1
+		SELECT DISTINCT a.session_id FROM varroa.agent_approvals a
+		JOIN varroa.agent_sessions s ON s.id = a.session_id
+		WHERE a.state = 'pending' AND a.expires_at <= $1 AND s.state = 'waiting_approval'
 		LIMIT 100`, now)
 	if err != nil {
 		return nil, fmt.Errorf("select due approvals: %w", err)
@@ -284,6 +287,15 @@ func (p *Postgres) ExpireDue(ctx context.Context) ([]SweptSession, error) {
 				}
 				evs = append(evs, ev)
 			}
+			left, err := denyPendingApprovals(ctx, tx, sid, "", endedApprovalReason(agent.StateExpired), now)
+			if err != nil {
+				return err
+			}
+			denied, err := deniedEvents(left, "")
+			if err != nil {
+				return err
+			}
+			evs = append(evs, denied...)
 			done, err := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateExpired})
 			if err != nil {
 				return err
@@ -305,6 +317,32 @@ func (p *Postgres) ExpireDue(ctx context.Context) ([]SweptSession, error) {
 		}
 	}
 	return ended, nil
+}
+
+// denyPendingApprovals denies the pending approvals of a session because the
+// session ended. It returns their ids in a fixed order.
+func denyPendingApprovals(ctx context.Context, tx pgx.Tx, sid uuid.UUID, by, reason string, now time.Time) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `
+		UPDATE varroa.agent_approvals SET state = 'denied', resolved_by = $2, resolved_at = $3, reason = $4
+		WHERE session_id = $1 AND state = 'pending'
+		RETURNING id`, sid, nullable(by), now, nullable(reason))
+	if err != nil {
+		return nil, fmt.Errorf("deny pending approvals: %w", err)
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan denied approval: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("deny pending approvals: %w", err)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	return ids, nil
 }
 
 // expireApprovals moves the due pending approvals of a session to expired and
@@ -399,7 +437,18 @@ func (p *Postgres) SweepLeases(ctx context.Context) ([]SweptSession, error) {
 			if n != 1 {
 				return nil
 			}
-			out, err := appendEvents(ctx, tx, c.id, lostEvents(msg), now)
+			var evs []agent.EventInput
+			if c.kind == "lease" {
+				ids, err := denyPendingApprovals(ctx, tx, c.id, "", endedApprovalReason(agent.StateFailed), now)
+				if err != nil {
+					return err
+				}
+				evs, err = deniedEvents(ids, "")
+				if err != nil {
+					return err
+				}
+			}
+			out, err := appendEvents(ctx, tx, c.id, append(evs, lostEvents(msg)...), now)
 			if err != nil {
 				return err
 			}

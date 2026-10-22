@@ -94,8 +94,10 @@ func containsState(list []agent.SessionState, s agent.SessionState) bool {
 type EndInput struct {
 	From       []agent.SessionState
 	LeaseOwner string
-	State      agent.SessionState
-	Events     []agent.EventInput
+	// By names the actor that ends the session. Each pending approval records it as resolved_by.
+	By     string
+	State  agent.SessionState
+	Events []agent.EventInput
 }
 
 // SessionQuery filters and pages sessions. A zero Limit means 50. The
@@ -481,6 +483,28 @@ const (
 func doneEnd(state agent.SessionState) agent.EventInput {
 	ev, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: state})
 	return ev
+}
+
+// endedApprovalReason is the reason that a pending approval records when its
+// session ends in state s.
+func endedApprovalReason(s agent.SessionState) string {
+	return "the session ended as " + string(s)
+}
+
+// deniedEvents returns one approval_resolved event per id, in order. Each
+// event records the approval as denied by by.
+func deniedEvents(ids []uuid.UUID, by string) ([]agent.EventInput, error) {
+	out := make([]agent.EventInput, 0, len(ids))
+	for _, id := range ids {
+		ev, err := agent.NewEvent(agent.EventApprovalResolved, agent.ApprovalResolvedPayload{
+			ApprovalID: id.String(), State: agent.ApprovalDenied, ResolvedBy: by,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
 }
 
 // lostEvents returns the error and done events that end a lost session.

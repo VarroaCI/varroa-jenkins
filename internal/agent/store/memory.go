@@ -336,7 +336,7 @@ func (m *Memory) RecordStep(_ context.Context, id uuid.UUID, owner string, promp
 }
 
 // EndSession ends a session with a final state, clears its lease, and
-// appends events.
+// appends events. It denies every pending approval of the session.
 func (m *Memory) EndSession(_ context.Context, id uuid.UUID, in EndInput) ([]agent.Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -362,7 +362,29 @@ func (m *Memory) EndSession(_ context.Context, id uuid.UUID, in EndInput) ([]age
 	s.EndedAt = &now
 	s.LeaseOwner = ""
 	s.LeaseExpiresAt = nil
-	return copyEvents(m.appendLocked(id, evs, now)), nil
+	pre, err := deniedEvents(m.denyPendingLocked(id, in.By, endedApprovalReason(in.State), now), in.By)
+	if err != nil {
+		return nil, err
+	}
+	return copyEvents(m.appendLocked(id, append(pre, evs...), now)), nil
+}
+
+// denyPendingLocked denies the pending approvals of session sid because the
+// session ended. It returns their ids in a fixed order.
+func (m *Memory) denyPendingLocked(sid uuid.UUID, by, reason string, now time.Time) []uuid.UUID {
+	var ids []uuid.UUID
+	for _, a := range m.approvals {
+		if a.SessionID != sid || a.State != agent.ApprovalPending {
+			continue
+		}
+		a.State = agent.ApprovalDenied
+		a.ResolvedBy = by
+		a.ResolvedAt = &now
+		a.Reason = reason
+		ids = append(ids, a.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	return ids
 }
 
 // endable reports whether a session may end in the state.
@@ -570,9 +592,13 @@ func (m *Memory) ExpireDue(_ context.Context) ([]SweptSession, error) {
 	now := m.now()
 	due := map[uuid.UUID][]*agent.Approval{}
 	for _, a := range m.approvals {
-		if a.State == agent.ApprovalPending && !a.ExpiresAt.After(now) {
-			due[a.SessionID] = append(due[a.SessionID], a)
+		if a.State != agent.ApprovalPending || a.ExpiresAt.After(now) {
+			continue
 		}
+		if s, ok := m.sessions[a.SessionID]; !ok || s.State != agent.StateWaitingApproval {
+			continue
+		}
+		due[a.SessionID] = append(due[a.SessionID], a)
 	}
 	ids := make([]uuid.UUID, 0, len(due))
 	for id := range due {
@@ -607,6 +633,11 @@ func (m *Memory) ExpireDue(_ context.Context) ([]SweptSession, error) {
 			}
 			evs = append(evs, ev)
 		}
+		denied, err := deniedEvents(m.denyPendingLocked(sid, "", endedApprovalReason(agent.StateExpired), now), "")
+		if err != nil {
+			return ended, err
+		}
+		evs = append(evs, denied...)
 		done, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateExpired})
 		evs = append(evs, done)
 		out := m.appendLocked(sid, evs, now)
@@ -638,7 +669,11 @@ func (m *Memory) SweepLeases(_ context.Context) ([]SweptSession, error) {
 		s.EndedAt = &now
 		s.LeaseOwner = ""
 		s.LeaseExpiresAt = nil
-		out := m.appendLocked(id, lostEvents(leaseExpiredMessage), now)
+		pre, err := deniedEvents(m.denyPendingLocked(id, "", endedApprovalReason(agent.StateFailed), now), "")
+		if err != nil {
+			return lost, err
+		}
+		out := m.appendLocked(id, append(pre, lostEvents(leaseExpiredMessage)...), now)
 		lost = append(lost, SweptSession{ID: id, Seq: out[len(out)-1].Seq})
 	}
 	for _, id := range firstN(lostResume, 100) {

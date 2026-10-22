@@ -528,3 +528,56 @@ func TestTeamAgentRoutes_Unattended409Empty(t *testing.T) {
 
 // teamAgentBoolPtr returns a pointer to v.
 func teamAgentBoolPtr(v bool) *bool { return &v }
+
+// TestTeamAgentRoutes_CancelDeniesPendingApprovals checks that a cancel of a
+// waiting Team agent session leaves no pending approval on its Team.
+func TestTeamAgentRoutes_CancelDeniesPendingApprovals(t *testing.T) {
+	f := newTeamAgentFixture(t)
+	ctx := context.Background()
+	id, err := agent.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, _, err := f.mem.CreateSession(ctx, agent.Session{
+		ID: id, Kind: agent.KindTeamAgent, Principal: teamAgentPrincipal, Team: "team-a",
+		Cluster: "core", Trigger: "run.failed", Provider: "smoke", Model: "m1",
+		KeySource: agent.KeySourceChart, DataSharing: agent.DataLogs, State: agent.StateRunning,
+		LeaseOwner: "pod-a",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID, err := agent.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.mem.CreateApprovals(ctx, sess.ID, "pod-a", []agent.Approval{{
+		ID: approvalID, CallID: "call-1", Tool: "restart_run", Arguments: []byte(`{}`),
+		TargetKind: agent.TargetNone, ExpiresAt: time.Now().Add(time.Hour),
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mem.ClearLease(ctx, sess.ID, "pod-a", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeMap(t, f.do(t, f.writer, http.MethodGet, "/pipelines/team-a/agent", nil))["pendingApprovals"]; got != float64(1) {
+		t.Fatalf("before cancel, pendingApprovals = %v, want 1", got)
+	}
+	if rec := f.do(t, f.writer, http.MethodPost, "/assistant/sessions/"+sess.ID.String()+"/cancel", nil); rec.Code != http.StatusAccepted {
+		t.Fatalf("cancel status = %d body = %s", rec.Code, rec.Body)
+	}
+	rec := f.do(t, f.writer, http.MethodGet, "/pipelines/team-a/agent", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent status = %d body = %s", rec.Code, rec.Body)
+	}
+	if got := decodeMap(t, rec)["pendingApprovals"]; got != float64(0) {
+		t.Errorf("after cancel, pendingApprovals = %v, want 0", got)
+	}
+	app, err := f.mem.GetApproval(ctx, approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.State != agent.ApprovalDenied || app.ResolvedBy != "writer" {
+		t.Errorf("approval = state %s by %q; want denied by writer", app.State, app.ResolvedBy)
+	}
+}

@@ -307,7 +307,8 @@ func (p *Postgres) RecordStep(ctx context.Context, id uuid.UUID, owner string, p
 	return out, err
 }
 
-// EndSession ends a session with a final state and clears its lease.
+// EndSession ends a session with a final state and clears its lease. It
+// denies every pending approval of the session in the same transaction.
 func (p *Postgres) EndSession(ctx context.Context, id uuid.UUID, in EndInput) ([]agent.Event, error) {
 	if !endable(in.State) {
 		return nil, fmt.Errorf("%w: end state %q", ErrInvalid, in.State)
@@ -336,7 +337,15 @@ func (p *Postgres) EndSession(ctx context.Context, id uuid.UUID, in EndInput) ([
 			id, string(in.State), now); err != nil {
 			return err
 		}
-		out, err = appendEvents(ctx, tx, id, evs, now)
+		ids, err := denyPendingApprovals(ctx, tx, id, in.By, endedApprovalReason(in.State), now)
+		if err != nil {
+			return err
+		}
+		pre, err := deniedEvents(ids, in.By)
+		if err != nil {
+			return err
+		}
+		out, err = appendEvents(ctx, tx, id, append(pre, evs...), now)
 		return err
 	})
 	return out, err

@@ -62,7 +62,7 @@ export function ApprovalRow({ approval: a, viewer, principal, run, onResolved }:
 
   const resolvedText =
     a.state === "approved" ? `Approved by ${a.resolvedBy ?? "someone"}`
-    : a.state === "denied" ? `Denied by ${a.resolvedBy ?? "someone"}`
+    : a.state === "denied" ? (a.resolvedBy ? `Denied by ${a.resolvedBy}` : "Denied")
     : a.state === "expired" ? "Expired"
     : null;
 
