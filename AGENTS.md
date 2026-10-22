@@ -1,88 +1,88 @@
 # AGENTS.md
 
+This file is the root contract for agents and contributors. Several subtrees have their own `AGENTS.md`; the index at the end lists them. Read this file first. Then read every `AGENTS.md` on the path to each file you change. The closest file controls local detail. No child file may weaken a rule here.
+
 ## What This Project Is
 
-Varroa is a Kubernetes-native operator for managing Jenkins controllers at scale:
-- A Go backend that is both a REST API server and a Kubernetes operator
-- A **mite** sidecar (`cmd/mite/`) in every Jenkins pod, receiving commands over gRPC mTLS
-- A React/TypeScript frontend dashboard (`frontend/`)
-- A Helm chart (`charts/varroa/`) deploying Varroa + Dex + NATS (bring your own observability stack)
-- A **VarroaSecurityRealm** Jenkins plugin in `plugin/` (built into the image and delivered to each Jenkins pod via init container) for OIDC JWT + mite operator-JWT auth
+Varroa is a Kubernetes-native operator that manages Jenkins controllers at scale. It has these parts:
+
+- A Go backend split into six binaries. `varroa-operator` reconciles the CRDs. `varroa-gateway` serves mite gRPC on `:9090`. `varroa-bff` serves the HTTP API and SSE on `:8080`. `varroa-updatecenter` is an opt-in in-cluster plugin update center. `varroa-recorder` is the opt-in build record store. `varroa-agent` runs Team agent sessions.
+- A **mite** sidecar (`cmd/mite/`) in every Jenkins pod. It receives commands over gRPC with mTLS.
+- A React/TypeScript dashboard (`frontend/`).
+- A Helm chart (`charts/varroa/`) that deploys Varroa, Dex, and NATS. You bring your own observability stack.
+- A `VarroaSecurityRealm` Jenkins plugin (`plugin/`). The image carries it, and an init container delivers it to each Jenkins pod.
+- `varroactl`, a CLI with an MCP bridge for agents.
+
+Two controller shapes exist. A classic controller is one Jenkins per `Controller` CR. A cell controller (`spec.cell.enabled`) is a shared, disposable Jenkins. It hosts several `Team` tenants and keeps build history in the record store.
 
 ## Project Principles
 
-- Prefer popular open-source and cloud-native tooling for Jenkins and Kubernetes problems before building custom Varroa-specific mechanisms. When a mature ecosystem solution exists, evaluate it first and only build our own when there is a clear gap or integration need.
-- **Greenfield, no legacy.** Varroa has no external userbase. Break contracts and roll forward: no deprecation paths, no dual-shape responses, no back-compat shims or migration flags. When a contract changes (API paths, payload shapes, CRD fields, CLI flags), update every in-repo consumer (frontend, MCP tools, mite, charts, docs) in lockstep within the same change.
-- **Docs ship with features.** Every feature change updates the user-facing docs under `docs/` (getting-started, admin-guide, operator-guide, api-keys, …) in the same change/PR that introduces the behavior. A feature is not done while the docs describe the old behavior.
+- **Prefer mature open-source tooling.** Evaluate an existing Jenkins or Kubernetes solution before you build a Varroa-specific one.
+- **Greenfield, no legacy.** Varroa has no external userbase. Break contracts and roll forward. Add no deprecation path, no dual-shape response, no back-compat shim, and no migration flag. When a contract changes, update every in-repo consumer in the same change. Consumers are the frontend, the MCP tools, the mite, the charts, and the docs.
+- **Docs ship with features.** A feature change updates the user-facing docs under `docs/` in the same PR. A feature is not done while the docs describe the old behavior.
+- **Write in Simplified Technical English.** This applies to docs, code comments, commit messages, and PR text. Use one instruction per sentence, active voice, and present tense. Keep sentences at or under 20 words.
+- **Comments carry constraints, not history.** A Go comment may state a constraint the code cannot show. It may not cite an issue or PR number, narrate the next line, or argue with a reviewer. `make check-comments` blocks citations on every PR.
 
 ## Commands
 
 ```bash
-make build          # compile bin/varroa-jenkins
-make test           # all Go tests with race detector
+make build          # the six backend binaries into bin/ (not varroa-agent or varroactl)
+make test           # all Go tests with the race detector
 make lint           # golangci-lint
-make chart-test     # every chart golden test (after helm dependency build charts/varroa)
+make chart-test     # chart golden tests (after helm dependency build charts/varroa)
+make check-comments # the comment rule
 make localdev       # full local stack on kind
 
-go test -v -race -count=1 ./internal/bundle/...   # single package
+go test -v -race -count=1 ./internal/bundle/...   # one package
 
 cd frontend && npm ci && npm run dev   # Vite dev server at :3000
 ```
 
-Backend components are split: `varroa-operator` reconciles controllers, `varroa-gateway` serves mite gRPC on `:9090`, `varroa-bff` serves HTTP API/SSE on `:8080`, and `varroa-updatecenter` (opt-in, `updateCenter.enabled`) serves the in-cluster Jenkins plugin update center on `:8080`. Set `VITE_VARROA_BFF_URL=http://localhost:8080/api/v1` in `frontend/.env` (or export `VARROA_API_URL` for the Vite `/api` proxy) to point the UI at a local BFF.
+Set `VITE_VARROA_BFF_URL=http://localhost:8080/api/v1` in `frontend/.env` to point the dashboard at a local BFF.
 
-## Architecture Map
+## Repo-wide Rules
 
-- **Controller reconciler**: `cmd/operator` registers the controller-runtime reconciler for `Controller` CRDs. Phases: `Pending → Provisioning → Running → Connected → Failed`. The reconciler persists results via `ResourceClient.PatchControllerStatus` and publishes desired state through NATS.
-- **RBAC federation**: `internal/rbac/` generates role-strategy YAML from `JenkinsRole`/`JenkinsRoleBinding` CRDs + `VarroaRole.JenkinsRoleRef` + legacy `VarroaRole.JenkinsPermissions`. `JenkinsRole` holds pure Jenkins permission sets (Global/Item/Agent); `JenkinsRoleBinding` assigns them to subjects with optional scope. Varroa owns the authorization strategy; bundle `authorizationStrategy` keys are stripped. Built-in roles (`varroa:admin`, `varroa:operator`, `varroa:developer`, `varroa:viewer`, `varroa:system-mite`) are reconciled by `role_controller.go`.
-- **mite ↔ gateway ↔ NATS ↔ operator**: `cmd/gateway` runs the `internal/mite/` gRPC server. Mites register with a bootstrap HMAC token (Secret `<controller>-bootstrap`), then get an mTLS cert from `internal/ca/`. `CommandStream` is a long-lived bidi stream; the gateway bridges mite heartbeats/snapshots/results and operator commands through NATS.
-- **ResourceClient + crdstore**: CRD reads/writes go through `internal/crdstore`: a small unstructured-level `Backend` seam (implemented by `ClientsetClient` and an in-memory `Fake` for tests) with typed generic helpers (`crdstore.Get[T]`/`List[T]`/`Apply[T]`/`PatchStatus[T]`, GVRs from a static registry). `ResourceClient` (`controller_controller.go`, ~40 methods) keeps only genuinely deep k8s operations (StatefulSet/Service/Ingress/Secret/ConfigMap builders, pod ops) plus named special-semantics methods (`PatchControllerStatus`, `ApplyControllerSpecSSA`, `SetHibernated`, `ClearUserPassword`); real impl `ClientsetClient` (`clientset_client.go`). Adding a CRD kind means one registry entry, never new interface methods.
-- **Activity persistence**: the recorder (`cmd/recorder`) owns `varroa_activity`, a fixed 72-hour JetStream transport buffer (`EnsureActivityStream`), and drains it through the durable consumer `activity-recorder` into the Postgres `activity` table (`internal/recordstore`, monthly partitions). `job_schedules` and `job_schedule_cells` hold the Jenkins cron inventory the plugin exports on a ten-minute poll. Every reader, `GET /activity` and MCP `list_activity`, goes through `deps.Backfill` (`Reader.ListActivity`, keyset paging, scope pushed into SQL); the in-memory ring is gone. The BFF needs `VARROA_RECORDSTORE_DSN`: without it `deps.Backfill` stays nil and the feed answers empty. The hourly retention round drops rows and partitions past `recordStore.retention.activity` (chart default `30d`), which replaces the old `activity.retention` dial (`off|7d|30d|90d`). Live SSE still rides `BusFanout` (subscribe `events.brood.>` + `activity.>`). Only audit-worthy events are published on `activity.*`: mite heartbeat/snapshot telemetry rides `events.brood.>` for live consumers and must never enter the bounded stream, or it evicts real audit history within days.
-- **JCasC bundles**: `internal/bundle/` implements the unified `ComposedBundle` model. A `ComposedBundle` has ordered `inputs[]`, each a union of `itemRef` (catalog item), `gitSource` (git repo), or `ociSource` (OCI artifact snapshot; `CatalogSource` likewise accepts `ociRef`, exactly-one-of with `repoURL`). `ReconcileComposedBundle` (`catalog_controller.go`) materializes git inputs via `Resolver.Materialize`, OCI inputs via `MaterializeOCI` (digest-HEAD cache invalidation instead of `git ls-remote`), catalog items via `CatalogItem` CRDs, then `Composer.Compose` merges all content in order and stores the **unresolved** result in an owner-referenced `ConfigMap` (`status.contentRef`). The controller hot path reads this ConfigMap, injects `varroa_controller_*` vars via `ResolveVars`, and runs a completeness check. **`spec.composedBundleRef` is optional**: a nil ref resolves to the operator-seeded `varroa-starter` bundle in the operator namespace (`internal/controller/starter.go`, content in `bundles/`). `Reconciler.effectiveBundleRef` is the single place that decides this. Dereferencing `cr.Spec.ComposedBundleRef` directly anywhere else reintroduces a nil panic.
-- **Provisioning**: `handleProvisioning` builds the init ConfigMap (Groovy startup script), StatefulSet (`CreateStatefulSet`, CreateOrUpdate semantics), agent RBAC, and reads cluster-scoped `ProvisioningDefaults` (`varroa-defaults`) unconditionally each tick.
-- **Version profiles**: `JenkinsVersionProfile` (cluster-scoped CRD) pins a plugin set + a version-specific JCasC overlay + wizard catalog metadata (`channel`/`recommended`/`eol`) to a Jenkins version or LTS line. `versionprofile_controller.go` (ticker reconciler) materializes `spec.pluginSetRef` into an owner-referenced `<name>-pluginset` ConfigMap (`status.contentRef`, `PluginSetReady`) and sets a non-blocking `LockJcascMismatch` warning. `ResolveProfile` (`versionresolve.go`) selects a profile for `cr.Spec.Version` by **exact → LTS-line (`major.minor`) → embedded `pluginlock` baseline**; `resolveCoreSet`/`coreSetForCr` feed the pinned set into `managedPluginLines` (provisioning **and** connected-phase drift checks). The profile's `spec.jcasc.content` is merged onto the composed `jenkins.yaml` via `bundle.MergeJenkinsYAML` in `resolveBundleForController` **before** `ResolveVars`. Default profiles are seeded by the operator itself from embedded content (`internal/controller/pluginlock/seed/`, generated by `hack/gen-plugin-lock.sh`) via `VersionProfileSeedReconciler` (`versionprofile_seed.go`), not templated by the Helm chart.
-- **Update center**: `UpdateCenter` cluster-scoped singleton CR (`varroa-update-center`) + the `varroa-updatecenter` component: an in-cluster Jenkins update center serving `update-center.actual.json` + `.hpi` blobs for the exact plugin set Varroa pins, backed by `internal/oci` (local OCI-layout PVC or external registry), with sha256-verified pull-through from `updates.jenkins.io` (upstream sha256s are base64). Operator gap-reconciles declared-vs-stored plugins and rewires the plugins-init `JENKINS_UC*` env (precedence: explicit `ProvisioningDefaults` > in-cluster UC > upstream; online fallback `UpdateCenterFallback`, air-gap block `WaitingForUpdateCenter`). Populated via seed packs (ghcr), pull-through, or `varroactl export/import` (`uc://` needs `VARROACTL_UC_TOKEN`). **Pull-through resolves sha256 from update-center metadata first and falls back to the artifact-archive `.sha256` sidecar on `repo.jenkins-ci.org`, so an aged LTS-line pin is servable**, but only through that second host, which `updateCenter.pullThrough.archiveURL` can disable and a narrowed egress allowlist can block. Air-gapped or egress-restricted installs still need the pins pre-seeded via `spec.seed.refs` or `varroactl export/import`.
-- **CRDs**: `api/v1alpha1/types.go`, group `varroa.dev/v1alpha1`: `Controller`, `Group`, `TemplateCatalog`, `ProvisioningDefaults`, `JenkinsVersionProfile`, `UpdateCenter`, plus `PodTemplate`/`User`. DeepCopy in `zz_generated.deepcopy.go` is generated; do not edit.
-
-## Gotchas (non-obvious, won't survive a code read)
-
-- **gRPC keepalive**: server (`internal/mite/server.go`) sets `KeepaliveEnforcementPolicy(MinTime: 15s)` / `KeepaliveParams(Time: 30s)`; client (`cmd/mite/agent.go`) pings every 30s. Mismatched policies make the server send `GOAWAY ENHANCE_YOUR_CALM`, silently killing the stream.
-- **Send serialization**: `sendMu` guards the mite's live session (`miteSession` in `cmd/mite/agent.go`: stream, connection, client) and serializes every send through `send`/`sendLocked`. The run loop clears the session before it reconnects, so a late send answers `errStreamNotConnected`.
-- **Context unblocking**: `processCommands` wraps `stream.Recv()` in a goroutine + channel so `ctx.Done()` breaks the loop; on a send error, `sendLocked` closes the connection of the session that owns the stream to unblock the Recv. It never closes a newer session's connection.
-- **Mite Jenkins auth**: Bearer JWT; the operator signs an RS256 JWT (`MiteTokenSigner` in `internal/mite/jenkinstoken.go`) and pushes it over gRPC. The mite caches it in-memory (`currentJenkinsToken()` in `cmd/mite/agent.go`). The Jenkins plugin verifies the JWT offline with the operator's public key (no Dex dependency).
-- **Waiting on cluster state**: a short retry/backoff loop beats a fixed sleep for anything waiting on reconciliation to converge: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
-- **Frontend commands**: always run `npm` commands from `frontend/`; don't assume the shell's cwd already points there.
-
-- **Comments carry constraints, not history.** A Go comment may state a constraint the code cannot show. It may not cite a GitHub issue or PR number, narrate the next line, or argue correctness at a reviewer; git history holds why a change was made. The comment check in the **Checks** job (`make check-comments`, `hack/checkcomments/`) blocks citations on every PR.
-
-## Linting
-
-golangci-lint v2 (`revive`, `gofmt`, `goimports`). Local import prefix `github.com/varroaci/varroa-jenkins` goes **last** in import groups. Proto-generated code under `internal/mite/proto/mitev1/` is excluded.
-
-The golangci-lint version is pinned, and `.github/workflows/pr.yaml`, `.github/workflows/release.yaml`, and `GOLANGCI_LINT_VERSION` in the `Makefile` (what `make lint` runs locally) must all pin the **same** version. `@latest` means a mid-week golangci-lint release turns every open PR red on untouched code; pinning only some of the three is worse still, because a PR passes lint on one workflow, merges, and then fails on the other after review is over, where the only symptom is that no image published. Bump all three in one deliberate PR, with the resulting findings fixed in the same change.
+- **Hand-write DeepCopy.** `api/v1alpha1/zz_generated.deepcopy.go` is maintained by hand for every kind. Never run `controller-gen object`. See `api/AGENTS.md`.
+- **One decision point per derived fact.** `v1alpha1.EffectiveBundleRef` alone resolves a nil `spec.composedBundleRef`. `v1alpha1.IsHeadless` alone decides whether a controller blocks its web UI. Do not read those fields directly elsewhere. See `api/AGENTS.md` and `internal/controller/AGENTS.md`.
+- **The desired-state command carries credential values.** It travels only as a core NATS request. No KV bucket or stream may store it. See `internal/mite/AGENTS.md`.
+- **Only audit-worthy events go on `activity.*`.** Heartbeat and snapshot telemetry rides `events.brood.>`. It must never enter the bounded activity stream. See `internal/api/AGENTS.md`.
+- **golangci-lint is pinned in three places.** They are `.github/workflows/pr.yaml`, `.github/workflows/release.yaml`, and `GOLANGCI_LINT_VERSION` in the `Makefile`. Bump all three in one PR and fix the resulting findings in the same change.
+- **Import order.** The local prefix `github.com/varroaci/varroa-jenkins` goes last in import groups. Lint excludes the proto-generated code under `internal/mite/proto/mitev1/`.
+- **Frontend commands run from `frontend/`.** Do not assume the shell is already there.
+- **Wait on cluster state with a bounded poll**, not a fixed sleep: `for i in $(seq 1 30); do <check> && break; sleep 5; done`.
 
 ## CI
 
-GitHub Actions (`.github/workflows/`), running on GitHub-hosted `ubuntu-latest` runners: `pr.yaml` runs lint, the **Checks** job (comment, outbound, generated-file helper, proto, API client, challenge bundle, bootstrap closure, CRD, and localdev checks), the chart golden tests, govulncheck, race tests, the frontend tests, and docker builds. It has no workflow-level paths filter. Its `Detect changes` job sets the outputs `go`, `charts`, `docker`, `frontend`, and `outbound`, and each job gates itself with `if:` on one output. A draft pull request skips every job, and `Required checks` fails on a draft. Its `Required checks` job is the single aggregate context that branch protection requires. `release.yaml` publishes images and the Helm chart on tag pushes. Every Go job uses the built-in cache of `actions/setup-go`. The Docker builds use the gha cache with one scope for each image: `backend` and `frontend`. PR Docker builds use no build cache. Only `release.yaml` writes the cache, on a tag ref.
+GitHub Actions (`.github/workflows/`) run on GitHub-hosted `ubuntu-latest` runners.
 
-Never assume a CLI is preinstalled on the runner image without checking. Pull it in via `uses: ./.github/actions/setup-ci-tools` (inputs `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`; each no-ops when already on PATH) rather than adding another inline installer. There is no Jenkinsfile; CI runs on Actions.
+`pr.yaml` runs lint, the **Checks** job, the chart golden tests, and govulncheck. It also runs the race tests, the frontend tests, and the Docker builds. The Checks job runs the comment, outbound, generated-file, proto, API client, challenge bundle, bootstrap closure, CRD, and localdev checks. The `Detect changes` job sets the outputs `go`, `charts`, `docker`, `frontend`, and `outbound`. Each build or test job gates itself with `if:` on those outputs. There is no workflow-level paths filter. A draft pull request skips every other job, and `Required checks` fails on a draft. `Required checks` is the single aggregate context that branch protection requires.
+
+`release.yaml` runs on a tag push, or on a manual dispatch against a tag ref. It publishes the images, the chart, the `varroactl` binaries, and the plugin seed packs. `release-please.yaml` cuts releases from conventional commits.
+
+Never assume a CLI is on the runner image. Pull it in with `uses: ./.github/actions/setup-ci-tools`. Its inputs are `yq`, `gh`, `rg`, `make`, `helm`, `shellcheck`, `envsubst`, `python3`, and `jq`. Extend that action rather than add an inline installer.
 
 Copilot code review reads `.github/copilot-instructions.md`, and also ingests `AGENTS.md` + `CLAUDE.md` as custom instructions. A same-repo pull request loads these files from its head branch. A fork pull request loads them from the base branch. Copilot review runs as an Actions run under a per-account model rate limit. The review body hides that error. The run log of the `copilot-pull-request-reviewer` job shows the real error. When repo conventions change here, keep `copilot-instructions.md` aligned so review comments stay low-noise.
 
-## Repository layout
+## Updating These Files
 
-- `api/`: CRD Go types (`v1alpha1`, group `varroa.dev/v1alpha1`) and the OpenAPI 3 contract.
-- `assets/`: static images/icons used by the frontend and docs.
-- `bundles/`: JCasC content embedded in the operator binary (the built-in starter bundle).
-- `charts/varroa/`: the umbrella Helm chart (split backend + Dex + NATS), generated CRDs.
-- `cmd/`: binaries/entrypoints: `operator`, `gateway`, `bff`, `mite`, `varroactl`, `fakemite`, `protogen`.
-- `config/`: reference/example Kubernetes manifests.
-- `docs/`: the user-facing Varroa Operator Handbook.
-- `examples/`: sample CRs (`Controller`, `CatalogSource`, …) to apply against a running cluster.
-- `frontend/`: React/TypeScript/Vite dashboard.
-- `hack/`: dev-tooling scripts: plugin-lock generation, localdev (kind), mock OIDC, OpenAPI bundling.
-- `internal/`: Go backend packages: `controller`, `api`, `mite`, `bundle`, `rbac`, `bus`, and more.
-- `legal/`: the commercial license agreement template (see `COMMERCIAL-LICENSE.md`).
-- `pkg/`: the repo's public/consumable Go surface: generated OpenAPI client, stream helper, embedded templates.
-- `plugin/`: the `VarroaSecurityRealm` Jenkins plugin (Maven/HPI, JDK 21).
-- `scripts/`: small CI/dev helper scripts.
+Update the closest `AGENTS.md` after a change that affects a subtree's purpose, contracts, workflows, inputs, outputs, or constraints. Update the parent when its child index changes. Delete stale text; do not mark it stale. The default section order of a child file is Purpose, Ownership, Local Contracts, Work Guidance, Verification, and Child DOX Index. A child omits a section it does not need.
+
+## Child DOX Index
+
+- [api](api/AGENTS.md): CRD Go types (`v1alpha1`, group `varroa.dev/v1alpha1`) and the OpenAPI 3 contract with its client codegen.
+- [cmd](cmd/AGENTS.md): the binaries. Indexes [mite](cmd/mite/AGENTS.md) and [varroactl](cmd/varroactl/AGENTS.md).
+- [internal](internal/AGENTS.md): the Go backend packages hub. Indexes `controller`, `api`, `mite`, `bundle`, `rbac`, `bus`, `recordstore`, `agent`, and `teamagent`.
+- [bundles](bundles/AGENTS.md): JCasC content embedded in the operator binary, including the built-in starter bundle.
+- [pkg](pkg/AGENTS.md): the consumable Go surface: generated OpenAPI client, stream helper, embedded templates.
+- [frontend](frontend/AGENTS.md): the React/TypeScript/Vite dashboard and its test and build gates.
+- [charts/varroa](charts/varroa/AGENTS.md): the umbrella Helm chart and its generated CRDs.
+- [plugin](plugin/AGENTS.md): the `VarroaSecurityRealm` Jenkins plugin (Maven/HPI, JDK 21).
+
+These directories have no child file:
+
+- `docs/`: the user handbook, published at https://varroa.dev/docs/.
+- `examples/`: sample CRs.
+- `config/`: reference manifests.
+- `assets/`: static images.
+- `scripts/`: small helper scripts.
+- `legal/`: the commercial license template.
