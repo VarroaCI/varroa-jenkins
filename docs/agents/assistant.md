@@ -154,6 +154,8 @@ nothing. When every approval of a session has a result, the session resumes.
 An approval that is not decided in the approval expiry window expires.
 The session then ends.
 
+When a session ends before an approval has a decision, the approval becomes `denied`. A cancel records the person who cancels. The session does not resume.
+
 A decision on an expired approval answers HTTP 409 with `approval_expired`.
 
 ## Read another person's session

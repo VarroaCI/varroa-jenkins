@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,6 +53,11 @@ func runContract(t *testing.T, f factory) {
 		{"SettingsCheckSeesMergedState", testSettingsCheckSeesMergedState},
 		{"SettingsCheckRefusalWritesNothing", testSettingsCheckRefusalWritesNothing},
 		{"SettingsCheckSerializesWriters", testSettingsCheckSerializesWriters},
+		{"CancelDeniesPendingApprovals", testCancelDeniesPendingApprovals},
+		{"CancelRunningWithApprovalsDenies", testCancelRunningWithApprovalsDenies},
+		{"LeaseLostDeniesPendingApprovals", testLeaseLostDeniesPendingApprovals},
+		{"ExpireDueSkipsEndedSessions", testExpireDueSkipsEndedSessions},
+		{"ExpireDueDeniesRemainingApprovals", testExpireDueDeniesRemainingApprovals},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -820,5 +826,209 @@ func testSettingsCheckSerializesWriters(t *testing.T, f factory) {
 	}
 	if st.DefaultProvider != "" || st.DefaultModel != "" {
 		t.Fatalf("stored pair = %q/%q, want empty", st.DefaultProvider, st.DefaultModel)
+	}
+}
+
+// lastEvents returns the last n events of a session.
+func lastEvents(t *testing.T, s Store, id uuid.UUID, n int) []agent.Event {
+	t.Helper()
+	evs, err := s.Events(context.Background(), id, 0, 1000)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(evs) < n {
+		t.Fatalf("got %d events, want at least %d", len(evs), n)
+	}
+	return evs[len(evs)-n:]
+}
+
+func testCancelDeniesPendingApprovals(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	app := park(t, s, clock, sess, 30*time.Minute)
+	if _, err := s.EndSession(ctx, sess.ID, EndInput{
+		From:   []agent.SessionState{agent.StateRunning, agent.StateWaitingApproval},
+		By:     "alice",
+		State:  agent.StateCancelled,
+		Events: []agent.EventInput{mustDone(agent.StateCancelled)},
+	}); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	got, err := s.GetApproval(ctx, app.ID)
+	if err != nil {
+		t.Fatalf("GetApproval: %v", err)
+	}
+	if got.State != agent.ApprovalDenied || got.ResolvedBy != "alice" || got.ResolvedAt == nil {
+		t.Fatalf("approval = state %s by %q resolved %v; want denied by alice", got.State, got.ResolvedBy, got.ResolvedAt)
+	}
+	if got.Reason != "the session ended as cancelled" {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+	page, err := s.ListApprovals(ctx, ApprovalQuery{Principal: "alice", State: agent.ApprovalPending})
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("pending approvals after cancel = %d, want 0", len(page.Items))
+	}
+	evs := lastEvents(t, s, sess.ID, 2)
+	if evs[0].Type != agent.EventApprovalResolved || evs[1].Type != agent.EventDone {
+		t.Fatalf("tail = %s, %s; want approval_resolved then done", evs[0].Type, evs[1].Type)
+	}
+	var resolved agent.ApprovalResolvedPayload
+	if err := json.Unmarshal(evs[0].Payload, &resolved); err != nil {
+		t.Fatalf("decode approval_resolved: %v", err)
+	}
+	if resolved.State != agent.ApprovalDenied || resolved.ApprovalID != app.ID.String() {
+		t.Fatalf("approval_resolved = %+v, want denied for %s", resolved, app.ID)
+	}
+	if _, err := s.ResolveApproval(ctx, app.ID, Resolution{State: agent.ApprovalApproved, By: "alice", Owner: "alice"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ResolveApproval after cancel = %v, want ErrConflict", err)
+	}
+}
+
+func testCancelRunningWithApprovalsDenies(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	id, _ := agent.NewID()
+	apps, _, err := s.CreateApprovals(ctx, sess.ID, testOwner, []agent.Approval{{
+		ID: id, CallID: "call-1", Tool: "run_pipeline", Arguments: []byte(`{}`),
+		TargetKind: agent.TargetNone, ExpiresAt: clock.Now().Add(30 * time.Minute),
+	}}, nil)
+	if err != nil {
+		t.Fatalf("CreateApprovals: %v", err)
+	}
+	if _, err := s.EndSession(ctx, sess.ID, EndInput{
+		From:   []agent.SessionState{agent.StateRunning},
+		State:  agent.StateCancelled,
+		Events: []agent.EventInput{mustDone(agent.StateCancelled)},
+	}); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	got, err := s.GetApproval(ctx, apps[0].ID)
+	if err != nil {
+		t.Fatalf("GetApproval: %v", err)
+	}
+	if got.State != agent.ApprovalDenied || got.ResolvedBy != "" {
+		t.Fatalf("approval = state %s by %q; want denied with no actor", got.State, got.ResolvedBy)
+	}
+}
+
+func testLeaseLostDeniesPendingApprovals(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	id, _ := agent.NewID()
+	apps, _, err := s.CreateApprovals(ctx, sess.ID, testOwner, []agent.Approval{{
+		ID: id, CallID: "call-1", Tool: "run_pipeline", Arguments: []byte(`{}`),
+		TargetKind: agent.TargetNone, ExpiresAt: clock.Now().Add(30 * time.Minute),
+	}}, nil)
+	if err != nil {
+		t.Fatalf("CreateApprovals: %v", err)
+	}
+	clock.Advance(LeaseTTL + time.Second)
+	if _, lost, err := s.Sweep(ctx); err != nil || len(lost) != 1 {
+		t.Fatalf("Sweep = lost %d, %v; want 1", len(lost), err)
+	}
+	got, _ := s.GetSession(ctx, sess.ID)
+	if got.State != agent.StateFailed {
+		t.Fatalf("state = %s, want failed", got.State)
+	}
+	ap, err := s.GetApproval(ctx, apps[0].ID)
+	if err != nil {
+		t.Fatalf("GetApproval: %v", err)
+	}
+	if ap.State != agent.ApprovalDenied || ap.ResolvedBy != "" {
+		t.Fatalf("approval = state %s by %q; want denied with no actor", ap.State, ap.ResolvedBy)
+	}
+	evs := lastEvents(t, s, sess.ID, 3)
+	if evs[0].Type != agent.EventApprovalResolved || evs[1].Type != agent.EventError || evs[2].Type != agent.EventDone {
+		t.Fatalf("tail = %s, %s, %s; want approval_resolved, error, done", evs[0].Type, evs[1].Type, evs[2].Type)
+	}
+}
+
+// seedOrphan creates a session that is cancelled while its approval stays
+// pending. The approval expires one minute after the clock reads now.
+func seedOrphan(t *testing.T, s Store, clock *testClock, i int) {
+	t.Helper()
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	id, _ := agent.NewID()
+	if _, _, err := s.CreateApprovals(ctx, sess.ID, testOwner, []agent.Approval{{
+		ID: id, CallID: fmt.Sprintf("orphan-%d", i), Tool: "run_pipeline", Arguments: []byte(`{}`),
+		TargetKind: agent.TargetNone, ExpiresAt: clock.Now().Add(time.Minute),
+	}}, nil); err != nil {
+		t.Fatalf("CreateApprovals orphan %d: %v", i, err)
+	}
+	now := clock.Now()
+	switch st := s.(type) {
+	case *Memory:
+		st.mu.Lock()
+		st.sessions[sess.ID].State = agent.StateCancelled
+		st.sessions[sess.ID].EndedAt = &now
+		st.mu.Unlock()
+	case *Postgres:
+		if _, err := st.pool.Exec(ctx, `UPDATE varroa.agent_sessions SET state = 'cancelled', ended_at = $2 WHERE id = $1`, sess.ID, now); err != nil {
+			t.Fatalf("cancel orphan session: %v", err)
+		}
+	default:
+		t.Fatalf("seedOrphan: unknown store %T", s)
+	}
+}
+
+func testExpireDueSkipsEndedSessions(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	for i := range 101 {
+		seedOrphan(t, s, clock, i)
+	}
+	sess := startRunning(t, s)
+	park(t, s, clock, sess, time.Minute)
+	clock.Advance(2 * time.Minute)
+	ended, err := s.ExpireDue(ctx)
+	if err != nil {
+		t.Fatalf("ExpireDue: %v", err)
+	}
+	if len(ended) != 1 || ended[0].ID != sess.ID {
+		t.Fatalf("ExpireDue ended %+v, want only session %s", ended, sess.ID)
+	}
+	got, _ := s.GetSession(ctx, sess.ID)
+	if got.State != agent.StateExpired {
+		t.Fatalf("state = %s, want expired", got.State)
+	}
+}
+
+func testExpireDueDeniesRemainingApprovals(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	dueID, _ := agent.NewID()
+	laterID, _ := agent.NewID()
+	if _, _, err := s.CreateApprovals(ctx, sess.ID, testOwner, []agent.Approval{
+		{ID: dueID, CallID: "call-1", Tool: "run_pipeline", Arguments: []byte(`{}`), TargetKind: agent.TargetNone, ExpiresAt: clock.Now().Add(time.Minute)},
+		{ID: laterID, CallID: "call-2", Tool: "run_pipeline", Arguments: []byte(`{}`), TargetKind: agent.TargetNone, ExpiresAt: clock.Now().Add(time.Hour)},
+	}, nil); err != nil {
+		t.Fatalf("CreateApprovals: %v", err)
+	}
+	if _, err := s.ClearLease(ctx, sess.ID, testOwner, nil); err != nil {
+		t.Fatalf("ClearLease: %v", err)
+	}
+	clock.Advance(2 * time.Minute)
+	if _, err := s.ExpireDue(ctx); err != nil {
+		t.Fatalf("ExpireDue: %v", err)
+	}
+	if ap, _ := s.GetApproval(ctx, dueID); ap.State != agent.ApprovalExpired {
+		t.Fatalf("due approval = %s, want expired", ap.State)
+	}
+	ap, _ := s.GetApproval(ctx, laterID)
+	if ap.State != agent.ApprovalDenied || ap.Reason != "the session ended as expired" {
+		t.Fatalf("remaining approval = state %s reason %q; want denied as expired", ap.State, ap.Reason)
 	}
 }

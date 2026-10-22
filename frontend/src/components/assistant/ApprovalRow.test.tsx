@@ -74,6 +74,12 @@ describe("ApprovalRow", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
+  it("shows Denied with no actor when the session ended and no person denied it", async () => {
+    renderRow({ ...pending, state: "denied", resolvedBy: "" });
+    expect(await screen.findByText("Denied")).toBeTruthy();
+    expect(screen.queryByText(/Denied by/)).toBeNull();
+  });
+
   it("names a 409 conflict and keeps the row", async () => {
     vi.mocked(client.approveAssistantApproval).mockRejectedValueOnce(new ApiError(409, "conflict"));
     renderRow(pending);

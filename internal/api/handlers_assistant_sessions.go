@@ -576,6 +576,7 @@ func (s *Server) handleCancelAssistantSession(w http.ResponseWriter, r *http.Req
 	}
 	if _, err := rt.Store.EndSession(r.Context(), sess.ID, store.EndInput{
 		From:   []agent.SessionState{agent.StateRunning, agent.StateWaitingApproval},
+		By:     ActorFrom(claims),
 		State:  agent.StateCancelled,
 		Events: []agent.EventInput{done},
 	}); err != nil {
