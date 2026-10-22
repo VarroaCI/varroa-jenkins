@@ -1320,11 +1320,13 @@ func (c *ClientsetClient) CreateOrUpdateSecret(ctx context.Context, name, namesp
 }
 
 // CreateOrUpdateSecretWithOwner creates a Secret carrying owner, or updates
-// it when the live Data differs from data — an unchanged source Secret
-// therefore never bumps resourceVersion on a projection tick, so a
-// desired-state hash derived from the data only changes on an actual
-// rotation. A delete between the Get and the Update makes the Update answer
-// NotFound. The method then creates the Secret again, once. A Conflict is
+// it when the live Data differs from data or the live Secret lacks owner — an
+// unchanged source Secret therefore never bumps resourceVersion on a
+// projection tick, so a desired-state hash derived from the data only changes
+// on an actual rotation. A delete between the Get and the Update makes the
+// Update answer NotFound. The method then creates the Secret again, once. A
+// create between the Get and the Create makes the Create answer AlreadyExists.
+// The method then reads the live Secret and updates it, once. A Conflict is
 // returned and not retried.
 func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, name, namespace string, data map[string][]byte, owner metav1.OwnerReference) error {
 	secrets := c.clientset.CoreV1().Secrets(namespace)
@@ -1342,16 +1344,15 @@ func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, nam
 			}
 			_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
 			if apierrors.IsAlreadyExists(err) {
-				// Someone created it between the Get and the Create; fall through
-				// to the update path on the next call rather than erroring.
-				return nil
+				lastErr = err
+				continue
 			}
 			return err
 		}
 		if getErr != nil {
 			return fmt.Errorf("get existing secret for owned update: %w", getErr)
 		}
-		if reflect.DeepEqual(existing.Data, data) {
+		if reflect.DeepEqual(existing.Data, data) && hasOwnerRef(existing.OwnerReferences, owner) {
 			return nil // byte-identical: no write, no resourceVersion bump.
 		}
 		updated := existing.DeepCopy()
@@ -1370,13 +1371,27 @@ func (c *ClientsetClient) CreateOrUpdateSecretWithOwner(ctx context.Context, nam
 	return fmt.Errorf("create or update secret %s/%s: %w", namespace, name, lastErr)
 }
 
+// hasOwnerRef reports whether refs holds owner, field for field. Other owner
+// references are ignored, so a Secret that another manager co-owns does not
+// get a write on every tick. A reference with owner's UID and other fields
+// that differ does not match.
+func hasOwnerRef(refs []metav1.OwnerReference, owner metav1.OwnerReference) bool {
+	for _, ref := range refs {
+		if reflect.DeepEqual(ref, owner) {
+			return true
+		}
+	}
+	return false
+}
+
 // CreateOrUpdateSecretWithLabels creates a Secret carrying labels and data,
 // or merges both onto the live Secret. Each key of data is added or
 // replaced, and every other key of the live Secret stays. A converged Secret
 // gets no write, so a pool tick never bumps resourceVersion on its own. A
 // delete between the Get and the Update makes the Update answer NotFound. The
-// method then creates the Secret again, once. A Conflict is returned and not
-// retried.
+// method then creates the Secret again, once. A create between the Get and the
+// Create makes the Create answer AlreadyExists. The method then reads the live
+// Secret and updates it, once. A Conflict is returned and not retried.
 func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {
 	secrets := c.clientset.CoreV1().Secrets(namespace)
 	var lastErr error
@@ -1388,6 +1403,10 @@ func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, na
 				Data:       data,
 			}
 			_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+			if apierrors.IsAlreadyExists(err) {
+				lastErr = err
+				continue
+			}
 			return err
 		}
 		if getErr != nil {
