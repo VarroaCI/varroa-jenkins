@@ -438,54 +438,51 @@ func TestCreateOrUpdateSecretWithOwner_ConflictNotRetried(t *testing.T) {
 	}
 }
 
-// TestCreateOrUpdateSecretWithLabels_RecreatesWhenUpdateAnswersNotFound covers a
-// delete that lands between the Get and the Update. The method creates the Secret
-// again, with the labels.
-func TestCreateOrUpdateSecretWithLabels_RecreatesWhenUpdateAnswersNotFound(t *testing.T) {
+// TestCreateOrUpdateSecretWithLabels_UpdateNotFoundIsReturned covers a delete
+// that lands between the Get and the Update. The method returns the NotFound and
+// creates nothing, because the data can be a partial store.
+func TestCreateOrUpdateSecretWithLabels_UpdateNotFoundIsReturned(t *testing.T) {
 	cs := fake.NewSimpleClientset(ownedSecretSeed())
 	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
 	c := &ClientsetClient{clientset: cs}
 
 	labels := map[string]string{"varroa.dev/cell-pool": "p"}
-	if err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", labels, map[string][]byte{"k": []byte("new")}); err != nil {
-		t.Fatalf("CreateOrUpdateSecretWithLabels: %v", err)
+	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", labels, map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound, got %v", err)
 	}
-	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get live secret: %v", err)
-	}
-	if string(live.Data["k"]) != "new" {
-		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
-	}
-	if live.Labels["varroa.dev/cell-pool"] != "p" {
-		t.Fatalf("live label = %q, want %q", live.Labels["varroa.dev/cell-pool"], "p")
-	}
-	if n := countVerb(cs, "create"); n != 1 {
-		t.Fatalf("create actions = %d, want 1", n)
+	if n := countVerb(cs, "get"); n != 1 {
+		t.Fatalf("get actions = %d, want 1", n)
 	}
 	if n := countVerb(cs, "update"); n != 1 {
 		t.Fatalf("update actions = %d, want 1", n)
 	}
+	if n := countVerb(cs, "create"); n != 0 {
+		t.Fatalf("create actions = %d, want 0", n)
+	}
+	if _, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("live secret after the delete: got %v, want NotFound", err)
+	}
 }
 
-// TestCreateOrUpdateSecretWithLabels_StopsAfterOneRetry shows that a Secret which
-// keeps vanishing returns NotFound after one retry, and never creates it.
-func TestCreateOrUpdateSecretWithLabels_StopsAfterOneRetry(t *testing.T) {
-	cs := fake.NewSimpleClientset(ownedSecretSeed())
-	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
-	})
+// TestCreateOrUpdateSecretWithLabels_GetNotFoundIsReturned shows that an absent
+// Secret answers NotFound from the Get and is never created.
+func TestCreateOrUpdateSecretWithLabels_GetNotFoundIsReturned(t *testing.T) {
+	cs := fake.NewSimpleClientset()
 	c := &ClientsetClient{clientset: cs}
 
 	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", map[string]string{"a": "b"}, map[string][]byte{"k": []byte("new")})
 	if !apierrors.IsNotFound(err) {
-		t.Fatalf("expected NotFound after one retry, got %v", err)
+		t.Fatalf("expected NotFound, got %v", err)
 	}
-	if n := countVerb(cs, "update"); n != 2 {
-		t.Fatalf("update actions = %d, want 2", n)
+	if n := countVerb(cs, "get"); n != 1 {
+		t.Fatalf("get actions = %d, want 1", n)
 	}
 	if n := countVerb(cs, "create"); n != 0 {
 		t.Fatalf("create actions = %d, want 0", n)
+	}
+	if n := countVerb(cs, "update"); n != 0 {
+		t.Fatalf("update actions = %d, want 0", n)
 	}
 }
 
@@ -556,41 +553,6 @@ func TestCreateOrUpdateSecretWithOwner_UpdatesWhenCreateAnswersAlreadyExists(t *
 	}
 }
 
-// TestCreateOrUpdateSecretWithLabels_UpdatesWhenCreateAnswersAlreadyExists covers
-// a create that lands between the Get and the Create. The method merges the
-// labels and data onto the live Secret and keeps its other keys.
-func TestCreateOrUpdateSecretWithLabels_UpdatesWhenCreateAnswersAlreadyExists(t *testing.T) {
-	seed := ownedSecretSeed()
-	seed.Data["other"] = []byte("x")
-	cs := fake.NewSimpleClientset(seed)
-	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
-	c := &ClientsetClient{clientset: cs}
-
-	labels := map[string]string{"varroa.dev/cell-pool": "p"}
-	if err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", labels, map[string][]byte{"k": []byte("new")}); err != nil {
-		t.Fatalf("CreateOrUpdateSecretWithLabels: %v", err)
-	}
-	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get live secret: %v", err)
-	}
-	if string(live.Data["k"]) != "new" {
-		t.Fatalf("live data k = %q, want %q", live.Data["k"], "new")
-	}
-	if string(live.Data["other"]) != "x" {
-		t.Fatalf("live data other = %q, want %q", live.Data["other"], "x")
-	}
-	if live.Labels["varroa.dev/cell-pool"] != "p" {
-		t.Fatalf("live label = %q, want %q", live.Labels["varroa.dev/cell-pool"], "p")
-	}
-	if n := countVerb(cs, "create"); n != 1 {
-		t.Fatalf("create actions = %d, want 1", n)
-	}
-	if n := countVerb(cs, "update"); n != 1 {
-		t.Fatalf("update actions = %d, want 1", n)
-	}
-}
-
 // TestCreateOrUpdateSecretWithOwner_AlreadyExistsThenUpdateNotFound pins the
 // bounded loop: AlreadyExists sends the method back to the Get once, and a
 // NotFound on that update is returned without a second create.
@@ -602,26 +564,6 @@ func TestCreateOrUpdateSecretWithOwner_AlreadyExistsThenUpdateNotFound(t *testin
 	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
 
 	err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner)
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("expected NotFound, got %v", err)
-	}
-	if n := countVerb(cs, "create"); n != 1 {
-		t.Fatalf("create actions = %d, want 1", n)
-	}
-	if n := countVerb(cs, "update"); n != 1 {
-		t.Fatalf("update actions = %d, want 1", n)
-	}
-}
-
-// TestCreateOrUpdateSecretWithLabels_AlreadyExistsThenUpdateNotFound pins the
-// bounded loop for the labelled form.
-func TestCreateOrUpdateSecretWithLabels_AlreadyExistsThenUpdateNotFound(t *testing.T) {
-	cs := fake.NewSimpleClientset(ownedSecretSeed())
-	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
-	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
-	c := &ClientsetClient{clientset: cs}
-
-	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", map[string]string{"a": "b"}, map[string][]byte{"k": []byte("new")})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("expected NotFound, got %v", err)
 	}
