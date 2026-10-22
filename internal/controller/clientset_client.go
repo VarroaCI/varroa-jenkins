@@ -1276,28 +1276,45 @@ func (c *ClientsetClient) GetSecretAnnotations(ctx context.Context, name, namesp
 	return secret.Annotations, nil
 }
 
-// CreateOrUpdateSecret creates a Secret, or updates it if it already exists.
-// This is used for bootstrap token rotation — the operator regenerates tokens
-// on restart and must write them to existing Secrets.
+// CreateOrUpdateSecret creates a Secret, or replaces its data when it exists. A
+// delete between the AlreadyExists and the write makes the Get or the Update
+// answer NotFound. The method then creates the Secret again, once. A Conflict is
+// returned and not retried.
 func (c *ClientsetClient) CreateOrUpdateSecret(ctx context.Context, name, namespace string, data map[string][]byte) error {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Data:       data,
+	secrets := c.clientset.CoreV1().Secrets(namespace)
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Data:       data,
+		}
+		_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			lastErr = getErr
+			continue
+		}
+		if getErr != nil {
+			return fmt.Errorf("get existing secret for update: %w", getErr)
+		}
+		secret.ResourceVersion = existing.ResourceVersion
+		_, updErr := secrets.Update(ctx, secret, metav1.UpdateOptions{})
+		if updErr == nil {
+			return nil
+		}
+		if apierrors.IsNotFound(updErr) {
+			lastErr = updErr
+			continue
+		}
+		return updErr
 	}
-	_, err := c.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	existing, getErr := c.clientset.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
-	if getErr != nil {
-		return fmt.Errorf("get existing secret for update: %w", getErr)
-	}
-	secret.ResourceVersion = existing.ResourceVersion
-	_, err = c.clientset.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
-	return err
+	return fmt.Errorf("create or update secret %s/%s: %w", namespace, name, lastErr)
 }
 
 // CreateOrUpdateSecretWithOwner creates a Secret carrying owner, or updates
