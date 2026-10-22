@@ -337,3 +337,175 @@ func TestCreateOrUpdateSecret_ConflictNotRetried(t *testing.T) {
 		t.Fatalf("update actions = %d, want 1", n)
 	}
 }
+
+// ownedSecretSeed returns the Secret that the owner and labelled tests start from.
+func ownedSecretSeed() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Data:       map[string][]byte{"k": []byte("old")},
+	}
+}
+
+// deleteOnceOnUpdate returns an update reactor that deletes the Secret from the
+// tracker and answers NotFound on its first call only.
+func deleteOnceOnUpdate(cs *fake.Clientset) clienttesting.ReactionFunc {
+	gvr := corev1.SchemeGroupVersion.WithResource("secrets")
+	fired := false
+	return func(clienttesting.Action) (bool, runtime.Object, error) {
+		if fired {
+			return false, nil, nil
+		}
+		fired = true
+		_ = cs.Tracker().Delete(gvr, "ns", "s")
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_RecreatesWhenUpdateAnswersNotFound covers a
+// delete that lands between the Get and the Update. The method creates the Secret
+// again, with the owner reference.
+func TestCreateOrUpdateSecretWithOwner_RecreatesWhenUpdateAnswersNotFound(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+
+	if err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner); err != nil {
+		t.Fatalf("CreateOrUpdateSecretWithOwner: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
+	}
+	if len(live.OwnerReferences) != 1 || live.OwnerReferences[0].UID != "u1" {
+		t.Fatalf("live owner references = %v, want UID u1", live.OwnerReferences)
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_StopsAfterOneRetry shows that a Secret which
+// keeps vanishing returns NotFound after one retry, and never creates it.
+func TestCreateOrUpdateSecretWithOwner_StopsAfterOneRetry(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	})
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+
+	err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound after one retry, got %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 2 {
+		t.Fatalf("update actions = %d, want 2", n)
+	}
+	if n := countVerb(cs, "create"); n != 0 {
+		t.Fatalf("create actions = %d, want 0", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_ConflictNotRetried shows that a Conflict on
+// the Update is returned at once.
+func TestCreateOrUpdateSecretWithOwner_ConflictNotRetried(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), "s", errors.New("stale"))
+	})
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+
+	err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("expected Conflict, got %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "create"); n != 0 {
+		t.Fatalf("create actions = %d, want 0", n)
+	}
+	if n := countVerb(cs, "get"); n != 1 {
+		t.Fatalf("get actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithLabels_RecreatesWhenUpdateAnswersNotFound covers a
+// delete that lands between the Get and the Update. The method creates the Secret
+// again, with the labels.
+func TestCreateOrUpdateSecretWithLabels_RecreatesWhenUpdateAnswersNotFound(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
+	c := &ClientsetClient{clientset: cs}
+
+	labels := map[string]string{"varroa.dev/cell-pool": "p"}
+	if err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", labels, map[string][]byte{"k": []byte("new")}); err != nil {
+		t.Fatalf("CreateOrUpdateSecretWithLabels: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
+	}
+	if live.Labels["varroa.dev/cell-pool"] != "p" {
+		t.Fatalf("live label = %q, want %q", live.Labels["varroa.dev/cell-pool"], "p")
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithLabels_StopsAfterOneRetry shows that a Secret which
+// keeps vanishing returns NotFound after one retry, and never creates it.
+func TestCreateOrUpdateSecretWithLabels_StopsAfterOneRetry(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", map[string]string{"a": "b"}, map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound after one retry, got %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 2 {
+		t.Fatalf("update actions = %d, want 2", n)
+	}
+	if n := countVerb(cs, "create"); n != 0 {
+		t.Fatalf("create actions = %d, want 0", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithLabels_ConflictNotRetried shows that a Conflict on
+// the Update is returned at once.
+func TestCreateOrUpdateSecretWithLabels_ConflictNotRetried(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("update", "secrets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), "s", errors.New("stale"))
+	})
+	c := &ClientsetClient{clientset: cs}
+
+	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", map[string]string{"a": "b"}, map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("expected Conflict, got %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "create"); n != 0 {
+		t.Fatalf("create actions = %d, want 0", n)
+	}
+}
