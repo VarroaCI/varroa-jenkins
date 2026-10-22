@@ -15,6 +15,7 @@ import {
   proposePipeline,
 } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { labelFor } from "../../components/assistant/labels";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { useAssistant } from "../../components/assistant/AssistantProvider";
@@ -116,8 +117,12 @@ export default function ProposePipelineCard({ team }: { team: string }) {
       setDenying(false);
       setReason("");
       refresh();
-    } catch {
-      setActionError("The decision was not recorded.");
+    } catch (err) {
+      setActionError(
+        err instanceof ApiError && err.code === "approval_expired"
+          ? labelFor("errorCodes", "approval_expired")
+          : "The decision was not recorded.",
+      );
       refresh();
     }
   };

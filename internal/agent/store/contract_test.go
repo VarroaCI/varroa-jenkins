@@ -42,6 +42,7 @@ func runContract(t *testing.T, f factory) {
 		{"OnlyLastResolutionResumes", testOnlyLastResolutionResumes},
 		{"NonOwnerNotFound", testNonOwnerNotFound},
 		{"ExpiredUnsweptAnswersErrExpired", testExpiredUnsweptAnswersErrExpired},
+		{"SweptExpiredAnswersErrExpired", testSweptExpiredAnswersErrExpired},
 		{"GetApproval", testGetApproval},
 		{"SettingsUserDefaults", testSettingsUserDefaults},
 		{"SettingsPerFieldWrite", testSettingsPerFieldWrite},
@@ -566,6 +567,28 @@ func testExpiredUnsweptAnswersErrExpired(t *testing.T, f factory) {
 	_, err := s.ResolveApproval(ctx, app.ID, Resolution{State: agent.ApprovalDenied, By: "alice", Owner: "alice"})
 	if !errors.Is(err, ErrExpired) {
 		t.Fatalf("resolution of an unswept expired approval = %v, want ErrExpired", err)
+	}
+}
+
+func testSweptExpiredAnswersErrExpired(t *testing.T, f factory) {
+	clock := newTestClock()
+	s := f(t, Options{Now: clock.Now})
+	ctx := context.Background()
+	sess := startRunning(t, s)
+	app := park(t, s, clock, sess, time.Minute)
+	clock.Advance(2 * time.Minute)
+	if n, err := s.ExpireDue(ctx); err != nil || n != 1 {
+		t.Fatalf("ExpireDue = %d, %v; want 1", n, err)
+	}
+	for _, state := range []agent.ApprovalState{agent.ApprovalApproved, agent.ApprovalDenied} {
+		_, err := s.ResolveApproval(ctx, app.ID, Resolution{State: state, By: "alice", Owner: "alice"})
+		if !errors.Is(err, ErrExpired) {
+			t.Fatalf("resolution %s of a swept approval = %v, want ErrExpired", state, err)
+		}
+	}
+	_, err := s.ResolveApproval(ctx, app.ID, Resolution{State: agent.ApprovalApproved, By: "mallory", Owner: "mallory"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-owner resolution of a swept approval = %v, want ErrNotFound", err)
 	}
 }
 

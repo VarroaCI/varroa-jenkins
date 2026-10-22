@@ -21,7 +21,9 @@ export type AssistantErrorCode =
   | "assistant_off"
   | "assistant_busy"
   | "prompt_not_startable"
-  | "kill_switch";
+  | "kill_switch"
+  | "approval_expired"
+  | "team_agent_session";
 
 /** The codes a note refusal carries. */
 export type RunNoteErrorCode = "note_too_long" | "note_session_invalid";

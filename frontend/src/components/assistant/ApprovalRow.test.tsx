@@ -83,6 +83,17 @@ describe("ApprovalRow", () => {
     expect(await screen.findByText("This approval changed. Reload and try again.")).toBeTruthy();
   });
 
+  it("names an expired approval", async () => {
+    vi.mocked(client.approveAssistantApproval).mockRejectedValueOnce(
+      new ApiError(409, "conflict", { error: "the approval expired", code: "approval_expired" }),
+    );
+    renderRow(pending);
+    const btn = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(btn);
+    expect(await screen.findByText("This approval expired. Ask the assistant again.")).toBeTruthy();
+  });
+
   it("names a generic failure", async () => {
     vi.mocked(client.approveAssistantApproval).mockRejectedValueOnce(new Error("network"));
     renderRow(pending);

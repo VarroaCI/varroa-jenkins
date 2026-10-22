@@ -477,6 +477,8 @@ components:
           - assistant_busy
           - prompt_not_startable
           - kill_switch
+          - approval_expired
+          - team_agent_session
           type: string
         error:
           type: string
@@ -4621,6 +4623,8 @@ components:
           - assistant_busy
           - prompt_not_startable
           - kill_switch
+          - approval_expired
+          - team_agent_session
           type: string
         error:
           type: string
@@ -13219,8 +13223,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_AssistantError'
-          description: The approval is not pending, has expired, or the assistant
-            is paused.
+          description: The approval is not pending (assistant_busy), has expired (approval_expired),
+            or the assistant is paused (kill_switch).
         "503":
           content:
             application/json:
@@ -13262,7 +13266,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/components_schemas_AssistantError'
-          description: The approval is not pending or has expired.
+          description: The approval is not pending (assistant_busy) or has expired
+            (approval_expired).
         "503":
           content:
             application/json:

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { approveAssistantApproval, denyAssistantApproval } from "../../api/client";
 import { ApiError } from "../../hooks/useApi";
+import { labelFor } from "./labels";
 import { usePermissions } from "../../hooks/usePermissions";
 import { Button } from "../Button";
 import { useAssistant } from "./AssistantProvider";
@@ -49,7 +50,8 @@ export function ApprovalRow({ approval: a, viewer, principal, run, onResolved }:
         void queryClient.invalidateQueries({ queryKey: ["assistant-session", a.sessionId] });
         void queryClient.invalidateQueries({ queryKey: ["assistant-approvals"] });
         if (err.code === "kill_switch") assistant.resolved(a.sessionId);
-        setError("This approval changed. Reload and try again.");
+        if (err.code === "approval_expired") setError(labelFor("errorCodes", "approval_expired"));
+        else setError("This approval changed. Reload and try again.");
       } else {
         setError("The decision was not recorded.");
       }

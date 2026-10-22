@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,13 +69,17 @@ type assistantFixture struct {
 	router http.Handler
 	admin  *auth.Claims
 	viewer *auth.Claims
+	// skew moves the store clock forward, in nanoseconds, so a test can pass
+	// an approval expiry without waiting.
+	skew *atomic.Int64
 }
 
 // newAssistantFixture wires a runtime with one scripted provider and a router
 // that carries the admin claims of the test caller.
 func newAssistantFixture(t *testing.T, turns ...[]provider.Delta) *assistantFixture {
 	t.Helper()
-	mem := store.NewMemory(store.Options{Now: time.Now})
+	skew := new(atomic.Int64)
+	mem := store.NewMemory(store.Options{Now: func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }})
 	factories := map[agent.ProviderKind]provider.Factory{
 		agent.ProviderOpenAICompatible: func(provider.Endpoint) (provider.Provider, error) {
 			return &scriptedAssistantProvider{turns: turns}, nil
@@ -125,7 +130,7 @@ func newAssistantFixture(t *testing.T, turns ...[]provider.Delta) *assistantFixt
 		Logger:     logger,
 		Assistant:  rt,
 	}
-	return &assistantFixture{rt: rt, mem: mem, deps: deps, router: NewRouter(deps), admin: admin, viewer: viewer}
+	return &assistantFixture{rt: rt, mem: mem, deps: deps, router: NewRouter(deps), admin: admin, viewer: viewer, skew: skew}
 }
 
 // do sends one request as the given caller and returns the recorder.
@@ -310,6 +315,65 @@ func TestAssistantDeny_WritesDenialAndResumes(t *testing.T) {
 	if !strings.HasPrefix(*detail.Approvals[0].Result, "denied by") {
 		t.Errorf("result = %q", *detail.Approvals[0].Result)
 	}
+}
+
+// assertErrorCode decodes the code field of an error body.
+func assertErrorCode(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, status, rec.Body)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	decodeBody(t, rec, &body)
+	if body.Code != code {
+		t.Fatalf("code = %q, want %q; body = %s", body.Code, code, rec.Body)
+	}
+}
+
+func TestAssistantApprove_ExpiredApproval409(t *testing.T) {
+	f := newAssistantFixture(t, assistantRestartTurn())
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "restart it"})
+	var sess assistantSessionJSON
+	decodeBody(t, rec, &sess)
+	f.rt.Wait()
+	page, err := f.mem.ListApprovals(context.Background(), store.ApprovalQuery{Principal: "viewer-user", SessionID: mustUUID(t, sess.ID)})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("approvals = %v, %v", page.Items, err)
+	}
+	id := page.Items[0].ID.String()
+
+	// The approval passed its one-hour expiry, but the sweep has not run.
+	f.skew.Store(int64(2 * time.Hour))
+	assertErrorCode(t, f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+id+"/approve", nil),
+		http.StatusConflict, "approval_expired")
+
+	// The sweep ran, so the approval and the session are expired.
+	if _, err := f.mem.ExpireDue(context.Background()); err != nil {
+		t.Fatalf("ExpireDue: %v", err)
+	}
+	assertErrorCode(t, f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+id+"/deny", map[string]any{"reason": "late"}),
+		http.StatusConflict, "approval_expired")
+}
+
+func TestAssistantApprove_RepeatDecisionIsBusy(t *testing.T) {
+	f := newAssistantFixture(t,
+		assistantRestartTurn(),
+		assistantTextTurn("restarted"),
+	)
+	rec := f.do(t, f.viewer, http.MethodPost, "/assistant/sessions", map[string]any{"message": "restart it"})
+	var sess assistantSessionJSON
+	decodeBody(t, rec, &sess)
+	f.rt.Wait()
+	page, _ := f.mem.ListApprovals(context.Background(), store.ApprovalQuery{Principal: "viewer-user", SessionID: mustUUID(t, sess.ID)})
+	id := page.Items[0].ID.String()
+	if rec := f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+id+"/approve", nil); rec.Code != http.StatusOK {
+		t.Fatalf("first approve = %d body = %s", rec.Code, rec.Body)
+	}
+	f.rt.Wait()
+	assertErrorCode(t, f.do(t, f.viewer, http.MethodPost, "/assistant/approvals/"+id+"/approve", nil),
+		http.StatusConflict, "assistant_busy")
 }
 
 func TestAssistantApprove_OtherUser404(t *testing.T) {

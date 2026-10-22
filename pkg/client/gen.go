@@ -53,12 +53,14 @@ const (
 
 // Defines values for ComponentsSchemasAssistantErrorCode.
 const (
+	ComponentsSchemasAssistantErrorCodeApprovalExpired         ComponentsSchemasAssistantErrorCode = "approval_expired"
 	ComponentsSchemasAssistantErrorCodeAssistantBusy           ComponentsSchemasAssistantErrorCode = "assistant_busy"
 	ComponentsSchemasAssistantErrorCodeAssistantDisabled       ComponentsSchemasAssistantErrorCode = "assistant_disabled"
 	ComponentsSchemasAssistantErrorCodeAssistantKeyUnavailable ComponentsSchemasAssistantErrorCode = "assistant_key_unavailable"
 	ComponentsSchemasAssistantErrorCodeAssistantOff            ComponentsSchemasAssistantErrorCode = "assistant_off"
 	ComponentsSchemasAssistantErrorCodeKillSwitch              ComponentsSchemasAssistantErrorCode = "kill_switch"
 	ComponentsSchemasAssistantErrorCodePromptNotStartable      ComponentsSchemasAssistantErrorCode = "prompt_not_startable"
+	ComponentsSchemasAssistantErrorCodeTeamAgentSession        ComponentsSchemasAssistantErrorCode = "team_agent_session"
 )
 
 // Defines values for ComponentsSchemasAssistantProviderKind.
