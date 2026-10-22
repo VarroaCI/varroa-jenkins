@@ -191,6 +191,7 @@ The chart requires `auth.bffUrl` in this mode.
 Create users through the dashboard or users API.
 The API refuses a name that already exists with 409. Use an update to change an existing user.
 The MCP tool `create_user` also needs a password. It does not set group membership. Change group membership with the group update tool, in the dashboard, or through the groups API.
+The MCP tool `update_user` acts only on a local account in the operator namespace. The MCP tool `delete_user` acts only in the operator namespace.
 
 The operator creates the first admin from the Secret `varroa-admin-credentials`.
 A new Secret adds its user to the `varroa-admins` group and to the `varroa-admin-bootstrap` role binding.

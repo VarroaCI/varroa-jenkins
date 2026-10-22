@@ -362,9 +362,10 @@ func deleteUserDeps(store crdstore.Backend) *api.Dependencies {
 		},
 	}
 	return &api.Dependencies{
-		Client:     &stubClient{},
-		Store:      store,
-		Authorizer: api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		Client:            &stubClient{},
+		Store:             store,
+		Authorizer:        api.NewAuthorizer(rbac.NewTestResolverWithRoles(roles, bindings), false),
+		OperatorNamespace: "ns",
 	}
 }
 
@@ -498,6 +499,7 @@ func TestUpdateUser_ConcurrentWriteKeepsFormerIdentifiers(t *testing.T) {
 	ctx := context.Background()
 	deps := userDeps(t)
 	deps.IdentityConfig.Mode = "local"
+	deps.OperatorNamespace = "ns"
 	st := deps.Store.(*crdstore.Fake)
 	crdstore.MustSeed(st, &v1alpha1.User{
 		ObjectMeta: metav1.ObjectMeta{Name: "u1", Namespace: "ns", ResourceVersion: "1"},

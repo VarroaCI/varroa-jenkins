@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,15 +18,17 @@ import (
 	"github.com/varroaci/varroa-jenkins/internal/crdstore"
 )
 
-// errNotLocalAccount is returned by the HandleUpdateUser mutation when the
-// stored User is not a local account.
-var errNotLocalAccount = errors.New("only a local account can be edited")
+// ErrNotLocalAccount is returned by UpdateLocalUser when the stored User is
+// not a local account.
+var ErrNotLocalAccount = errors.New("only a local account can be edited")
 
-// purposeError wraps a purpose validation failure raised inside a mutation,
-// so the handler can answer 400 with the validation message.
-type purposeError struct{ err error }
+// PurposeError wraps a purpose validation failure raised by UpdateLocalUser,
+// so a caller can answer with the validation message.
+type PurposeError struct{ err error }
 
-func (p purposeError) Error() string { return p.err.Error() }
+func (p PurposeError) Error() string { return p.err.Error() }
+
+func (p PurposeError) Unwrap() error { return p.err }
 
 // userListEntry is the JSON shape for each entry in GET /users.
 type userListEntry struct {
@@ -112,14 +115,14 @@ type createUserRequest struct {
 	Purpose     string `json:"purpose,omitempty"`
 }
 
-// validatePurpose checks a local account purpose. Beside OIDC a purpose is
+// validateUserPurpose checks a local account purpose. Beside OIDC a purpose is
 // required; in local mode it is optional.
-func (s *Server) validatePurpose(purpose string) error {
+func validateUserPurpose(cfg IdentityConfig, purpose string) error {
 	switch v1alpha1.UserPurpose(purpose) {
 	case v1alpha1.UserPurposeService, v1alpha1.UserPurposeBreakGlass:
 		return nil
 	case "":
-		if s.deps.IdentityConfig.LocalAccounts {
+		if cfg.LocalAccounts {
 			return fmt.Errorf("purpose is required for a local account beside OIDC: service or break-glass")
 		}
 		return nil
@@ -154,7 +157,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.writeJSONError(w, http.StatusBadRequest, "password is required")
 		return
 	}
-	if err := s.validatePurpose(req.Purpose); err != nil {
+	if err := validateUserPurpose(s.deps.IdentityConfig, req.Purpose); err != nil {
 		s.writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -222,35 +225,18 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 		s.writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	ctx := r.Context()
-	_, err := crdstore.Mutate[v1alpha1.User](ctx, s.deps.Store, name, s.deps.OperatorNamespace, func(user *v1alpha1.User) (bool, error) {
-		if managedByLabel(user, s.deps.IdentityConfig.Mode) != v1alpha1.ManagedByLocal {
-			return false, errNotLocalAccount
-		}
-
-		// An omitted purpose keeps the stored one, so an edit of other fields
-		// never clears the purpose that the sign-in gate reads.
-		purpose := req.Purpose
-		if purpose == "" {
-			purpose = string(user.Spec.Purpose)
-		}
-		if err := s.validatePurpose(purpose); err != nil {
-			return false, purposeError{err: err}
-		}
-
-		// Update identity fields only; never touch spec.password or status here.
-		user.Spec.Email = req.Email
-		user.Spec.DisplayName = req.DisplayName
-		user.Spec.Purpose = v1alpha1.UserPurpose(purpose)
-		return true, nil
+	_, err := UpdateLocalUser(r.Context(), s.deps.Store, s.deps.IdentityConfig, s.deps.OperatorNamespace, name, LocalUserEdit{
+		Email:       &req.Email,
+		DisplayName: &req.DisplayName,
+		Purpose:     v1alpha1.UserPurpose(req.Purpose),
 	})
-	var pe purposeError
+	var pe PurposeError
 	switch {
 	case apierrors.IsNotFound(err):
 		s.writeJSONError(w, http.StatusNotFound, "user not found")
 		return
-	case errors.Is(err, errNotLocalAccount):
-		s.writeJSONError(w, http.StatusBadRequest, errNotLocalAccount.Error())
+	case errors.Is(err, ErrNotLocalAccount):
+		s.writeJSONError(w, http.StatusBadRequest, ErrNotLocalAccount.Error())
 		return
 	case errors.As(err, &pe):
 		s.writeJSONError(w, http.StatusBadRequest, pe.Error())
@@ -262,6 +248,52 @@ func (s *Server) HandleUpdateUser(w http.ResponseWriter, r *http.Request, name s
 
 	s.notifyUserActivity(claims, UserUpdated, name)
 	s.writeJSON(w, http.StatusOK, map[string]string{"name": name})
+}
+
+// LocalUserEdit holds the identity fields that UpdateLocalUser changes. A nil
+// Email or DisplayName keeps the stored value. An empty Purpose keeps the
+// stored purpose.
+type LocalUserEdit struct {
+	Email       *string
+	DisplayName *string
+	Purpose     v1alpha1.UserPurpose
+}
+
+// UpdateLocalUser edits the identity fields of a local account. It refuses a
+// User that is not a local account. It never touches spec.password or status.
+// Every surface that edits a User calls this function.
+func UpdateLocalUser(ctx context.Context, store crdstore.Backend, cfg IdentityConfig,
+	namespace, name string, edit LocalUserEdit) (*v1alpha1.User, error) {
+	var updated *v1alpha1.User
+	_, err := crdstore.Mutate[v1alpha1.User](ctx, store, name, namespace, func(user *v1alpha1.User) (bool, error) {
+		if managedByLabel(user, cfg.Mode) != v1alpha1.ManagedByLocal {
+			return false, ErrNotLocalAccount
+		}
+
+		// An empty purpose keeps the stored one, so an edit of other fields
+		// never clears the purpose that the sign-in gate reads.
+		purpose := string(edit.Purpose)
+		if purpose == "" {
+			purpose = string(user.Spec.Purpose)
+		}
+		if err := validateUserPurpose(cfg, purpose); err != nil {
+			return false, PurposeError{err: err}
+		}
+
+		if edit.Email != nil {
+			user.Spec.Email = *edit.Email
+		}
+		if edit.DisplayName != nil {
+			user.Spec.DisplayName = *edit.DisplayName
+		}
+		user.Spec.Purpose = v1alpha1.UserPurpose(purpose)
+		updated = user
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 // HandleDeleteUser handles DELETE /users/{name}.
