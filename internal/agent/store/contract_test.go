@@ -577,8 +577,8 @@ func testSweptExpiredAnswersErrExpired(t *testing.T, f factory) {
 	sess := startRunning(t, s)
 	app := park(t, s, clock, sess, time.Minute)
 	clock.Advance(2 * time.Minute)
-	if n, err := s.ExpireDue(ctx); err != nil || n != 1 {
-		t.Fatalf("ExpireDue = %d, %v; want 1", n, err)
+	if swept, err := s.ExpireDue(ctx); err != nil || len(swept) != 1 {
+		t.Fatalf("ExpireDue = %v, %v; want one swept session", swept, err)
 	}
 	for _, state := range []agent.ApprovalState{agent.ApprovalApproved, agent.ApprovalDenied} {
 		_, err := s.ResolveApproval(ctx, app.ID, Resolution{State: state, By: "alice", Owner: "alice"})
