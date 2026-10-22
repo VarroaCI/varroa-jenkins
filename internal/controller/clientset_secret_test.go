@@ -509,3 +509,182 @@ func TestCreateOrUpdateSecretWithLabels_ConflictNotRetried(t *testing.T) {
 		t.Fatalf("create actions = %d, want 0", n)
 	}
 }
+
+// notFoundOnceOnGet returns a get reactor that answers NotFound on its first
+// call only. The Create that follows then answers AlreadyExists from the tracker.
+func notFoundOnceOnGet() clienttesting.ReactionFunc {
+	fired := false
+	return func(clienttesting.Action) (bool, runtime.Object, error) {
+		if fired {
+			return false, nil, nil
+		}
+		fired = true
+		return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "s")
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_UpdatesWhenCreateAnswersAlreadyExists covers
+// a create that lands between the Get and the Create. The method reads the live
+// Secret and updates it with the owner reference.
+func TestCreateOrUpdateSecretWithOwner_UpdatesWhenCreateAnswersAlreadyExists(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+
+	if err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner); err != nil {
+		t.Fatalf("CreateOrUpdateSecretWithOwner: %v", err)
+	}
+	if n := countVerb(cs, "get"); n != 2 {
+		t.Fatalf("get actions = %d, want 2", n)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data = %q, want %q", live.Data["k"], "new")
+	}
+	if len(live.OwnerReferences) != 1 || live.OwnerReferences[0].UID != "u1" {
+		t.Fatalf("live owner references = %v, want UID u1", live.OwnerReferences)
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithLabels_UpdatesWhenCreateAnswersAlreadyExists covers
+// a create that lands between the Get and the Create. The method merges the
+// labels and data onto the live Secret and keeps its other keys.
+func TestCreateOrUpdateSecretWithLabels_UpdatesWhenCreateAnswersAlreadyExists(t *testing.T) {
+	seed := ownedSecretSeed()
+	seed.Data["other"] = []byte("x")
+	cs := fake.NewSimpleClientset(seed)
+	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
+	c := &ClientsetClient{clientset: cs}
+
+	labels := map[string]string{"varroa.dev/cell-pool": "p"}
+	if err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", labels, map[string][]byte{"k": []byte("new")}); err != nil {
+		t.Fatalf("CreateOrUpdateSecretWithLabels: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if string(live.Data["k"]) != "new" {
+		t.Fatalf("live data k = %q, want %q", live.Data["k"], "new")
+	}
+	if string(live.Data["other"]) != "x" {
+		t.Fatalf("live data other = %q, want %q", live.Data["other"], "x")
+	}
+	if live.Labels["varroa.dev/cell-pool"] != "p" {
+		t.Fatalf("live label = %q, want %q", live.Labels["varroa.dev/cell-pool"], "p")
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_AlreadyExistsThenUpdateNotFound pins the
+// bounded loop: AlreadyExists sends the method back to the Get once, and a
+// NotFound on that update is returned without a second create.
+func TestCreateOrUpdateSecretWithOwner_AlreadyExistsThenUpdateNotFound(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
+	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+
+	err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound, got %v", err)
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithLabels_AlreadyExistsThenUpdateNotFound pins the
+// bounded loop for the labelled form.
+func TestCreateOrUpdateSecretWithLabels_AlreadyExistsThenUpdateNotFound(t *testing.T) {
+	cs := fake.NewSimpleClientset(ownedSecretSeed())
+	cs.PrependReactor("get", "secrets", notFoundOnceOnGet())
+	cs.PrependReactor("update", "secrets", deleteOnceOnUpdate(cs))
+	c := &ClientsetClient{clientset: cs}
+
+	err := c.CreateOrUpdateSecretWithLabels(context.Background(), "s", "ns", map[string]string{"a": "b"}, map[string][]byte{"k": []byte("new")})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound, got %v", err)
+	}
+	if n := countVerb(cs, "create"); n != 1 {
+		t.Fatalf("create actions = %d, want 1", n)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_UpdatesOwnerWhenDataMatches covers a live
+// Secret whose Data matches but which has no owner reference. The first call
+// writes the owner. A second call finds the Secret converged and writes nothing.
+func TestCreateOrUpdateSecretWithOwner_UpdatesOwnerWhenDataMatches(t *testing.T) {
+	seed := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Data:       map[string][]byte{"k": []byte("new")},
+	}
+	cs := fake.NewSimpleClientset(seed)
+	c := &ClientsetClient{clientset: cs}
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+	data := map[string][]byte{"k": []byte("new")}
+
+	if err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", data, owner); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	live, err := cs.CoreV1().Secrets("ns").Get(context.Background(), "s", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get live secret: %v", err)
+	}
+	if len(live.OwnerReferences) != 1 || live.OwnerReferences[0].UID != "u1" {
+		t.Fatalf("live owner references = %v, want UID u1", live.OwnerReferences)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions after first call = %d, want 1", n)
+	}
+
+	if err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", data, owner); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 1 {
+		t.Fatalf("update actions after second call = %d, want 1", n)
+	}
+}
+
+// TestCreateOrUpdateSecretWithOwner_NoWriteWhenOwnerAmongOthers covers a Secret
+// that another manager co-owns. The owner is already present, so the method
+// writes nothing and leaves the other owner reference in place.
+func TestCreateOrUpdateSecretWithOwner_NoWriteWhenOwnerAmongOthers(t *testing.T) {
+	owner := metav1.OwnerReference{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller", Name: "c", UID: "u1"}
+	other := metav1.OwnerReference{APIVersion: "v1", Kind: "Other", Name: "o", UID: "u2"}
+	seed := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns", OwnerReferences: []metav1.OwnerReference{other, owner}},
+		Data:       map[string][]byte{"k": []byte("new")},
+	}
+	cs := fake.NewSimpleClientset(seed)
+	c := &ClientsetClient{clientset: cs}
+
+	if err := c.CreateOrUpdateSecretWithOwner(context.Background(), "s", "ns", map[string][]byte{"k": []byte("new")}, owner); err != nil {
+		t.Fatalf("CreateOrUpdateSecretWithOwner: %v", err)
+	}
+	if n := countVerb(cs, "update"); n != 0 {
+		t.Fatalf("update actions = %d, want 0", n)
+	}
+}
