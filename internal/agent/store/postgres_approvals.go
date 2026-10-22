@@ -222,32 +222,33 @@ func (p *Postgres) ListApprovals(ctx context.Context, q ApprovalQuery) (Approval
 }
 
 // ExpireDue expires the pending approvals past their expiry, one session per
-// transaction. It returns the number of sessions it ended.
-func (p *Postgres) ExpireDue(ctx context.Context) (int, error) {
+// transaction. It returns the sessions it ended.
+func (p *Postgres) ExpireDue(ctx context.Context) ([]SweptSession, error) {
 	now := p.now()
 	rows, err := p.pool.Query(ctx, `
 		SELECT DISTINCT session_id FROM varroa.agent_approvals
 		WHERE state = 'pending' AND expires_at <= $1
 		LIMIT 100`, now)
 	if err != nil {
-		return 0, fmt.Errorf("select due approvals: %w", err)
+		return nil, fmt.Errorf("select due approvals: %w", err)
 	}
 	var sessions []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan due approval: %w", err)
+			return nil, fmt.Errorf("scan due approval: %w", err)
 		}
 		sessions = append(sessions, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("select due approvals: %w", err)
+		return nil, fmt.Errorf("select due approvals: %w", err)
 	}
 
-	ended := 0
+	var ended []SweptSession
 	for _, sid := range sessions {
+		var seq int
 		did := false
 		err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
 			if _, _, _, err := lockSession(ctx, tx, sid); err != nil {
@@ -281,15 +282,19 @@ func (p *Postgres) ExpireDue(ctx context.Context) (int, error) {
 				return err
 			}
 			evs = append(evs, done)
-			_, err = appendEvents(ctx, tx, sid, evs, now)
+			out, err := appendEvents(ctx, tx, sid, evs, now)
+			if err != nil {
+				return err
+			}
+			seq = out[len(out)-1].Seq
 			did = true
-			return err
+			return nil
 		})
 		if err != nil {
 			return ended, err
 		}
 		if did {
-			ended++
+			ended = append(ended, SweptSession{ID: sid, Seq: seq})
 		}
 	}
 	return ended, nil
@@ -318,8 +323,8 @@ func expireApprovals(ctx context.Context, tx pgx.Tx, sid uuid.UUID, now time.Tim
 }
 
 // SweepLeases fails the sessions whose lease expired, and the waiting sessions
-// that lost their resume. It returns the number of sessions it failed.
-func (p *Postgres) SweepLeases(ctx context.Context) (int, error) {
+// that lost their resume. It returns the sessions it failed.
+func (p *Postgres) SweepLeases(ctx context.Context) ([]SweptSession, error) {
 	now := p.now()
 	cut := now.Add(-LostResumeAfter)
 	const lostResumeCond = `
@@ -336,7 +341,7 @@ func (p *Postgres) SweepLeases(ctx context.Context) (int, error) {
 		WHERE `+lostResumeCond+`
 		LIMIT 200`, now, cut)
 	if err != nil {
-		return 0, fmt.Errorf("select lost sessions: %w", err)
+		return nil, fmt.Errorf("select lost sessions: %w", err)
 	}
 	type candidate struct {
 		id   uuid.UUID
@@ -347,17 +352,18 @@ func (p *Postgres) SweepLeases(ctx context.Context) (int, error) {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.kind); err != nil {
 			rows.Close()
-			return 0, fmt.Errorf("scan lost session: %w", err)
+			return nil, fmt.Errorf("scan lost session: %w", err)
 		}
 		cands = append(cands, c)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("select lost sessions: %w", err)
+		return nil, fmt.Errorf("select lost sessions: %w", err)
 	}
 
-	lost := 0
+	var lost []SweptSession
 	for _, c := range cands {
+		var seq int
 		did := false
 		err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
 			if _, _, _, err := lockSession(ctx, tx, c.id); err != nil {
@@ -386,22 +392,26 @@ func (p *Postgres) SweepLeases(ctx context.Context) (int, error) {
 			if n != 1 {
 				return nil
 			}
-			_, err := appendEvents(ctx, tx, c.id, lostEvents(msg), now)
+			out, err := appendEvents(ctx, tx, c.id, lostEvents(msg), now)
+			if err != nil {
+				return err
+			}
+			seq = out[len(out)-1].Seq
 			did = true
-			return err
+			return nil
 		})
 		if err != nil {
 			return lost, err
 		}
 		if did {
-			lost++
+			lost = append(lost, SweptSession{ID: c.id, Seq: seq})
 		}
 	}
 	return lost, nil
 }
 
 // Sweep runs ExpireDue, then SweepLeases.
-func (p *Postgres) Sweep(ctx context.Context) (expired, lost int, err error) {
+func (p *Postgres) Sweep(ctx context.Context) (expired, lost []SweptSession, err error) {
 	return sweepBoth(ctx, p)
 }
 

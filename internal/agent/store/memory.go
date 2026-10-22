@@ -560,8 +560,8 @@ func approvalBefore(a agent.Approval, t time.Time, id uuid.UUID) bool {
 
 // ExpireDue expires the pending approvals past their expiry. A waiting
 // session that loses its last pending approval ends as expired. It returns
-// the number of sessions it ended.
-func (m *Memory) ExpireDue(_ context.Context) (int, error) {
+// the sessions it ended.
+func (m *Memory) ExpireDue(_ context.Context) ([]SweptSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
@@ -579,7 +579,7 @@ func (m *Memory) ExpireDue(_ context.Context) (int, error) {
 	if len(ids) > 100 {
 		ids = ids[:100]
 	}
-	ended := 0
+	var ended []SweptSession
 	for _, sid := range ids {
 		s, ok := m.sessions[sid]
 		if !ok || s.State != agent.StateWaitingApproval {
@@ -606,15 +606,15 @@ func (m *Memory) ExpireDue(_ context.Context) (int, error) {
 		}
 		done, _ := agent.NewEvent(agent.EventDone, agent.DonePayload{State: agent.StateExpired})
 		evs = append(evs, done)
-		m.appendLocked(sid, evs, now)
-		ended++
+		out := m.appendLocked(sid, evs, now)
+		ended = append(ended, SweptSession{ID: sid, Seq: out[len(out)-1].Seq})
 	}
 	return ended, nil
 }
 
 // SweepLeases fails the sessions whose lease expired, and the waiting sessions
-// that lost their resume. It returns the number of sessions it failed.
-func (m *Memory) SweepLeases(_ context.Context) (int, error) {
+// that lost their resume. It returns the sessions it failed.
+func (m *Memory) SweepLeases(_ context.Context) ([]SweptSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
@@ -628,22 +628,22 @@ func (m *Memory) SweepLeases(_ context.Context) (int, error) {
 			lostResume = append(lostResume, id)
 		}
 	}
-	lost := 0
+	lost := make([]SweptSession, 0, len(expiredLease)+len(lostResume))
 	for _, id := range firstN(expiredLease, 100) {
 		s := m.sessions[id]
 		s.State = agent.StateFailed
 		s.EndedAt = &now
 		s.LeaseOwner = ""
 		s.LeaseExpiresAt = nil
-		m.appendLocked(id, lostEvents(leaseExpiredMessage), now)
-		lost++
+		out := m.appendLocked(id, lostEvents(leaseExpiredMessage), now)
+		lost = append(lost, SweptSession{ID: id, Seq: out[len(out)-1].Seq})
 	}
 	for _, id := range firstN(lostResume, 100) {
 		s := m.sessions[id]
 		s.State = agent.StateFailed
 		s.EndedAt = &now
-		m.appendLocked(id, lostEvents(resumeLostMessage), now)
-		lost++
+		out := m.appendLocked(id, lostEvents(resumeLostMessage), now)
+		lost = append(lost, SweptSession{ID: id, Seq: out[len(out)-1].Seq})
 	}
 	return lost, nil
 }
@@ -677,7 +677,7 @@ func (m *Memory) lastActivityLocked(id uuid.UUID, s *agent.Session) time.Time {
 }
 
 // Sweep runs ExpireDue, then SweepLeases.
-func (m *Memory) Sweep(ctx context.Context) (expired, lost int, err error) {
+func (m *Memory) Sweep(ctx context.Context) (expired, lost []SweptSession, err error) {
 	return sweepBoth(ctx, m)
 }
 

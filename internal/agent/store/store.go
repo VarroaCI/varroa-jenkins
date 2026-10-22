@@ -238,9 +238,10 @@ type Store interface {
 	CreateApprovals(ctx context.Context, sessionID uuid.UUID, owner string, approvals []agent.Approval, events []agent.EventInput) ([]agent.Approval, []agent.Event, error)
 	ResolveApproval(ctx context.Context, id uuid.UUID, r Resolution) (ResolveResult, error)
 	ListApprovals(ctx context.Context, q ApprovalQuery) (ApprovalPage, error)
-	ExpireDue(ctx context.Context) (int, error)
-	SweepLeases(ctx context.Context) (int, error)
-	Sweep(ctx context.Context) (expired, lost int, err error)
+	// ExpireDue and SweepLeases return the sessions they ended.
+	ExpireDue(ctx context.Context) ([]SweptSession, error)
+	SweepLeases(ctx context.Context) ([]SweptSession, error)
+	Sweep(ctx context.Context) (expired, lost []SweptSession, err error)
 	GetSettings(ctx context.Context, scope string) (agent.Settings, error)
 	PutSettings(ctx context.Context, scope string, p SettingsPatch, by string) (agent.Settings, error)
 	// SetInstructionsSHA records the revision a Team agent session read and
@@ -251,15 +252,23 @@ type Store interface {
 	PutTeamAgentUnattended(ctx context.Context, key string, grant *agent.UnattendedGrant, by string) error
 }
 
-// sweepBoth is the shared body of Sweep for both stores.
-func sweepBoth(ctx context.Context, s Store) (int, int, error) {
+// SweptSession names one session that a sweep ended, and the sequence number
+// of the last event that the sweep appended to it.
+type SweptSession struct {
+	ID  uuid.UUID
+	Seq int
+}
+
+// sweepBoth is the shared body of Sweep for both stores. On an error it still
+// returns the sessions that the failed step and the earlier step committed.
+func sweepBoth(ctx context.Context, s Store) ([]SweptSession, []SweptSession, error) {
 	expired, err := s.ExpireDue(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("expire due approvals: %w", err)
+		return expired, nil, fmt.Errorf("expire due approvals: %w", err)
 	}
 	lost, err := s.SweepLeases(ctx)
 	if err != nil {
-		return expired, 0, fmt.Errorf("sweep leases: %w", err)
+		return expired, lost, fmt.Errorf("sweep leases: %w", err)
 	}
 	return expired, lost, nil
 }

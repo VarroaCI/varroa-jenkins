@@ -355,8 +355,9 @@ func testDeadReplicaLeaseLost(t *testing.T, f factory) {
 	ctx := context.Background()
 	sess := startRunning(t, s)
 	clock.Advance(LeaseTTL + time.Second)
-	if _, lost, err := s.Sweep(ctx); err != nil || lost != 1 {
-		t.Fatalf("Sweep = lost %d, %v; want 1", lost, err)
+	_, lost, err := s.Sweep(ctx)
+	if err != nil || len(lost) != 1 {
+		t.Fatalf("Sweep = lost %d, %v; want 1", len(lost), err)
 	}
 	got, _ := s.GetSession(ctx, sess.ID)
 	if got.State != agent.StateFailed {
@@ -366,6 +367,9 @@ func testDeadReplicaLeaseLost(t *testing.T, f factory) {
 	last2 := evs[len(evs)-2:]
 	if last2[0].Type != agent.EventError || last2[1].Type != agent.EventDone {
 		t.Fatalf("tail = %s, %s; want error then done", last2[0].Type, last2[1].Type)
+	}
+	if lost[0].ID != sess.ID || lost[0].Seq != evs[len(evs)-1].Seq {
+		t.Fatalf("swept = %+v, want session %s at seq %d", lost[0], sess.ID, evs[len(evs)-1].Seq)
 	}
 	if !strings.Contains(string(last2[0].Payload), string(agent.CodeLeaseLost)) {
 		t.Fatalf("error payload %s lacks lease_lost", last2[0].Payload)
@@ -382,8 +386,8 @@ func testLiveHolderUntouched(t *testing.T, f factory) {
 		t.Fatalf("RenewLease: %v", err)
 	}
 	clock.Advance(LeaseTTL - time.Second)
-	if _, lost, err := s.Sweep(ctx); err != nil || lost != 0 {
-		t.Fatalf("Sweep of a live holder = lost %d, %v", lost, err)
+	if _, lost, err := s.Sweep(ctx); err != nil || len(lost) != 0 {
+		t.Fatalf("Sweep of a live holder = lost %d, %v", len(lost), err)
 	}
 	got, _ := s.GetSession(ctx, sess.ID)
 	if got.State != agent.StateRunning {
@@ -401,8 +405,8 @@ func testLostResumeEnds(t *testing.T, f factory) {
 		t.Fatalf("ResolveApproval: %v", err)
 	}
 	clock.Advance(6 * time.Minute)
-	if _, lost, err := s.Sweep(ctx); err != nil || lost != 1 {
-		t.Fatalf("Sweep = lost %d, %v; want 1", lost, err)
+	if _, lost, err := s.Sweep(ctx); err != nil || len(lost) != 1 {
+		t.Fatalf("Sweep = lost %d, %v; want 1", len(lost), err)
 	}
 	got, _ := s.GetSession(ctx, sess.ID)
 	if got.State != agent.StateFailed {
@@ -438,19 +442,24 @@ func testApprovalExpires(t *testing.T, f factory) {
 	sess := startRunning(t, s)
 	app := park(t, s, clock, sess, time.Minute)
 	clock.Advance(2 * time.Minute)
-	if n, err := s.ExpireDue(ctx); err != nil || n != 1 {
-		t.Fatalf("ExpireDue = %d, %v; want 1", n, err)
+	ended, err := s.ExpireDue(ctx)
+	if err != nil || len(ended) != 1 {
+		t.Fatalf("ExpireDue = %d, %v; want 1", len(ended), err)
 	}
 	got, _ := s.GetSession(ctx, sess.ID)
 	if got.State != agent.StateExpired {
 		t.Fatalf("session state = %s, want expired", got.State)
 	}
+	evs, _ := s.Events(ctx, sess.ID, 0, 100)
+	if ended[0].ID != sess.ID || ended[0].Seq != evs[len(evs)-1].Seq {
+		t.Fatalf("ended = %+v, want session %s at seq %d", ended[0], sess.ID, evs[len(evs)-1].Seq)
+	}
 	ap, _ := s.GetApproval(ctx, app.ID)
 	if ap.State != agent.ApprovalExpired {
 		t.Fatalf("approval state = %s, want expired", ap.State)
 	}
-	if n, err := s.ExpireDue(ctx); err != nil || n != 0 {
-		t.Fatalf("second ExpireDue = %d, %v; want 0", n, err)
+	if again, err := s.ExpireDue(ctx); err != nil || len(again) != 0 {
+		t.Fatalf("second ExpireDue = %d, %v; want 0", len(again), err)
 	}
 }
 
