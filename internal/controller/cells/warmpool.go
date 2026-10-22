@@ -77,12 +77,15 @@ type SecretReader interface {
 	GetSecret(ctx context.Context, name, namespace string) (map[string][]byte, error)
 }
 
-// SecretWriter writes a Secret's labels and some of its keys. The pool mint
-// step uses it to write the pool's own confidential store without importing
-// internal/controller. The write adds or replaces each key of data and
-// leaves every other key of the live Secret unchanged.
+// SecretWriter writes the pool's own confidential store without importing
+// internal/controller. CreateOrUpdateSecretWithLabels merges data onto a Secret
+// that exists and never creates one: its data can be a partial store. A
+// delete during the merge answers NotFound and the write creates nothing.
+// CreateSecretExclusive creates an absent store and answers AlreadyExists when
+// another writer created it first.
 type SecretWriter interface {
 	CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
+	CreateSecretExclusive(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error
 }
 
 // PluginPinReader reports whether the plugin set a controller running a
@@ -402,11 +405,15 @@ func (r *WarmPoolReconciler) artifactGateSecret(pool *v1alpha1.CellPool) string 
 
 // ensurePoolSecrets runs step 1a of the pool pass: it reads the pool's own
 // confidential store and acts on the answer. It mints all four keys for an
-// absent Secret and for a Secret with empty data. It adds only the missing
+// absent Secret and creates the store exclusively. It mints all four keys for
+// a Secret with empty data and merges them onto it. It adds only the missing
 // keys to a repairable Secret. It writes nothing for a Secret that holds
 // another key and no master.key, because a new master.key would invalidate
-// the keys the operator cannot read. It answers whether the pool now holds a
-// usable store.
+// the keys the operator cannot read. A delete during a write answers NotFound,
+// the write creates nothing, and the pass reports SecretsMissing. The next
+// pass finds the Secret absent and mints a full store. A mint that loses the
+// create race fails the pass, and the next pass repairs the live store. It
+// answers whether the pool now holds a usable store.
 func (r *WarmPoolReconciler) ensurePoolSecrets(ctx context.Context, pool *v1alpha1.CellPool) bool {
 	log := r.logger()
 	name := PoolSecretName(pool.Name)
@@ -419,7 +426,15 @@ func (r *WarmPoolReconciler) ensurePoolSecrets(ctx context.Context, pool *v1alph
 		log.Warn("cell pool: read the pool secret failed", "pool", pool.Name, "secret", name, "error", err)
 		return false
 	}
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		minted, mintErr := MintStore()
+		if mintErr != nil {
+			log.Warn("cell pool: mint the pool secret failed", "pool", pool.Name, "secret", name, "error", mintErr)
+			return false
+		}
+		return r.createPoolSecrets(ctx, pool, name, minted)
+	}
+	if len(data) == 0 {
 		minted, mintErr := MintStore()
 		if mintErr != nil {
 			log.Warn("cell pool: mint the pool secret failed", "pool", pool.Name, "secret", name, "error", mintErr)
@@ -460,8 +475,22 @@ func mergeStore(existing, added map[string][]byte) map[string][]byte {
 	return merged
 }
 
-// writePoolSecrets writes the given keys onto the pool's confidential store
-// and stamps the pool label. It answers whether the write succeeded.
+// createPoolSecrets creates the pool's confidential store with all four minted
+// keys and stamps the pool label. It creates exclusively: an AlreadyExists
+// answer means another writer created the store first, so the pass fails and
+// the next pass repairs the live store rather than replacing its master.key.
+// It answers whether the create succeeded.
+func (r *WarmPoolReconciler) createPoolSecrets(ctx context.Context, pool *v1alpha1.CellPool, name string, minted map[string][]byte) bool {
+	labels := map[string]string{LabelCellPool: pool.Name}
+	if err := r.SecretWriter.CreateSecretExclusive(ctx, name, r.OperatorNamespace, labels, minted); err != nil {
+		r.logger().Warn("cell pool: create the pool secret failed", "pool", pool.Name, "secret", name, "error", err)
+		return false
+	}
+	return true
+}
+
+// writePoolSecrets merges the given keys onto the pool's existing confidential
+// store and stamps the pool label. It answers whether the write succeeded.
 func (r *WarmPoolReconciler) writePoolSecrets(ctx context.Context, pool *v1alpha1.CellPool, name string, data map[string][]byte) bool {
 	labels := map[string]string{LabelCellPool: pool.Name}
 	if err := r.SecretWriter.CreateOrUpdateSecretWithLabels(ctx, name, r.OperatorNamespace, labels, data); err != nil {

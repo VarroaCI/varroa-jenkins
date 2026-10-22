@@ -1384,68 +1384,43 @@ func hasOwnerRef(refs []metav1.OwnerReference, owner metav1.OwnerReference) bool
 	return false
 }
 
-// CreateOrUpdateSecretWithLabels creates a Secret carrying labels and data,
-// or merges both onto the live Secret. Each key of data is added or
-// replaced, and every other key of the live Secret stays. A converged Secret
-// gets no write, so a pool tick never bumps resourceVersion on its own. A
-// delete between the Get and the Update makes the Update answer NotFound. The
-// method then creates the Secret again, once. A create between the Get and the
-// Create makes the Create answer AlreadyExists. The method then reads the live
-// Secret and updates it, once. A Conflict is returned and not retried.
+// CreateOrUpdateSecretWithLabels merges labels and data onto the live Secret.
+// Each key of data is added or replaced, and every other key of the live
+// Secret stays. A converged Secret gets no write, so a pool tick never bumps
+// resourceVersion on its own. The method never creates the Secret, because
+// its data can be a partial store. A NotFound from the Get or from the Update
+// is returned at once. A Conflict is returned and not retried.
 func (c *ClientsetClient) CreateOrUpdateSecretWithLabels(ctx context.Context, name, namespace string, labels map[string]string, data map[string][]byte) error {
 	secrets := c.clientset.CoreV1().Secrets(namespace)
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(getErr) {
-			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
-				Data:       data,
-			}
-			_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
-			if apierrors.IsAlreadyExists(err) {
-				lastErr = err
-				continue
-			}
-			return err
-		}
-		if getErr != nil {
-			return fmt.Errorf("get existing secret for labelled update: %w", getErr)
-		}
-		updated := existing.DeepCopy()
-		if updated.Data == nil {
-			updated.Data = map[string][]byte{}
-		}
-		if updated.Labels == nil {
-			updated.Labels = map[string]string{}
-		}
-		changed := false
-		for k, v := range data {
-			if !bytes.Equal(updated.Data[k], v) {
-				updated.Data[k] = v
-				changed = true
-			}
-		}
-		for k, v := range labels {
-			if updated.Labels[k] != v {
-				updated.Labels[k] = v
-				changed = true
-			}
-		}
-		if !changed {
-			return nil
-		}
-		_, updErr := secrets.Update(ctx, updated, metav1.UpdateOptions{})
-		if updErr == nil {
-			return nil
-		}
-		if apierrors.IsNotFound(updErr) {
-			lastErr = updErr
-			continue
-		}
-		return updErr
+	existing, getErr := secrets.Get(ctx, name, metav1.GetOptions{})
+	if getErr != nil {
+		return fmt.Errorf("get existing secret for merge: %w", getErr)
 	}
-	return fmt.Errorf("create or update secret %s/%s: %w", namespace, name, lastErr)
+	updated := existing.DeepCopy()
+	if updated.Data == nil {
+		updated.Data = map[string][]byte{}
+	}
+	if updated.Labels == nil {
+		updated.Labels = map[string]string{}
+	}
+	changed := false
+	for k, v := range data {
+		if !bytes.Equal(updated.Data[k], v) {
+			updated.Data[k] = v
+			changed = true
+		}
+	}
+	for k, v := range labels {
+		if updated.Labels[k] != v {
+			updated.Labels[k] = v
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	_, updErr := secrets.Update(ctx, updated, metav1.UpdateOptions{})
+	return updErr
 }
 
 // CreateSecretExclusive creates an opaque Secret with the given labels and,
