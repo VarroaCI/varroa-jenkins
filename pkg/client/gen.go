@@ -978,20 +978,23 @@ type ComponentsSchemasAssistantAcceptedState struct {
 
 // ComponentsSchemasAssistantApproval defines model for components_schemas_AssistantApproval.
 type ComponentsSchemasAssistantApproval struct {
-	Arguments   map[string]interface{}                  `json:"arguments"`
-	CallId      string                                  `json:"callId"`
-	ExpiresAt   time.Time                               `json:"expiresAt"`
-	Id          string                                  `json:"id"`
-	Reason      *string                                 `json:"reason,omitempty"`
-	RequestedAt time.Time                               `json:"requestedAt"`
-	ResolvedAt  *time.Time                              `json:"resolvedAt"`
-	ResolvedBy  *string                                 `json:"resolvedBy,omitempty"`
-	Result      *string                                 `json:"result"`
-	SessionId   string                                  `json:"sessionId"`
-	State       ComponentsSchemasAssistantApprovalState `json:"state"`
-	TargetKind  string                                  `json:"targetKind"`
-	TargetRef   *string                                 `json:"targetRef,omitempty"`
-	Tool        string                                  `json:"tool"`
+	Arguments   map[string]interface{} `json:"arguments"`
+	CallId      string                 `json:"callId"`
+	ExpiresAt   time.Time              `json:"expiresAt"`
+	Id          string                 `json:"id"`
+	Reason      *string                `json:"reason,omitempty"`
+	RequestedAt time.Time              `json:"requestedAt"`
+	ResolvedAt  *time.Time             `json:"resolvedAt"`
+	ResolvedBy  *string                `json:"resolvedBy,omitempty"`
+	Result      *string                `json:"result"`
+
+	// ResultWithheld True when the caller may view the session but not its tool results. result is then null.
+	ResultWithheld bool                                    `json:"resultWithheld"`
+	SessionId      string                                  `json:"sessionId"`
+	State          ComponentsSchemasAssistantApprovalState `json:"state"`
+	TargetKind     string                                  `json:"targetKind"`
+	TargetRef      *string                                 `json:"targetRef,omitempty"`
+	Tool           string                                  `json:"tool"`
 }
 
 // ComponentsSchemasAssistantApprovalState defines model for ComponentsSchemasAssistantApproval.State.

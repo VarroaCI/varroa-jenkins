@@ -401,6 +401,10 @@ components:
         result:
           nullable: true
           type: string
+        resultWithheld:
+          description: True when the caller may view the session but not its tool
+            results. result is then null.
+          type: boolean
         sessionId:
           type: string
         state:
@@ -426,6 +430,7 @@ components:
       - state
       - requestedAt
       - expiresAt
+      - resultWithheld
       type: object
     AssistantApprovalList:
       properties:
@@ -4547,6 +4552,10 @@ components:
         result:
           nullable: true
           type: string
+        resultWithheld:
+          description: True when the caller may view the session but not its tool
+            results. result is then null.
+          type: boolean
         sessionId:
           type: string
         state:
@@ -4572,6 +4581,7 @@ components:
       - state
       - requestedAt
       - expiresAt
+      - resultWithheld
       type: object
     components_schemas_AssistantApprovalList:
       properties:
@@ -13478,7 +13488,7 @@ paths:
   /api/v1/assistant/sessions/{id}/events:
     get:
       description: |
-        Sends every event after the cursor, then each new event. Each frame carries its sequence number as its id. The stream closes after a done event. The stream reads the ticket of the session scope, because a browser EventSource cannot set headers.
+        Sends every event after the cursor, then each new event. Each frame carries its sequence number as its id. The stream closes after a done event. The stream reads the ticket of the session scope, because a browser EventSource cannot set headers. A caller who is neither the session owner nor, for a Team agent session, a tenant reader, receives each tool_result frame with an empty content and withheld set to true. The frame keeps call_id and name.
       operationId: streamAssistantEvents
       parameters:
       - in: path

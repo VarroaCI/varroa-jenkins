@@ -33,7 +33,12 @@ export function TranscriptView({
               <details key={i} className={styles.call}>
                 <summary>{c.name} · {callLabel(c)}</summary>
                 <pre>{JSON.stringify(c.arguments, null, 2)}</pre>
-                {c.result && <pre className={c.result.isError ? styles.error : undefined}>{cutUtf8(c.result.content, 2048)}</pre>}
+                {c.result?.withheld && (
+                  <p className={styles.withheld}>Tool result withheld. You do not have permission to view it.</p>
+                )}
+                {c.result && !c.result.withheld && (
+                  <pre className={c.result.isError ? styles.error : undefined}>{cutUtf8(c.result.content, 2048)}</pre>
+                )}
                 {c.approval?.state === "pending" && approvalActions && (
                   <div className={styles.approval}>{approvalActions(c.approval.id)}</div>
                 )}

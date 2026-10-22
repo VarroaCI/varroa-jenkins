@@ -103,8 +103,10 @@ export interface AssistantApproval {
   resolvedBy: string | null;
   resolvedAt: string | null;
   reason: string | null;
-  /** The tool result text. Null until the approval runs. */
+  /** The tool result text. Null until the approval runs, and null when withheld. */
   result: string | null;
+  /** True when the caller may view the session but not its tool result. */
+  resultWithheld: boolean;
 }
 
 export interface AssistantApprovalList {

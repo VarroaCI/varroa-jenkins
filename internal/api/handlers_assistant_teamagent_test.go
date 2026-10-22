@@ -115,6 +115,41 @@ func TestTeamAgentSession_ApproveTenantWriter(t *testing.T) {
 	f.rt.Wait()
 }
 
+// TestTeamAgentSession_ResultVisibleToReaderWithheldFromAdmin proves a tenant
+// reader reads a Team agent tool result, and an admin who is not a tenant
+// reader reads the approval with its result withheld.
+func TestTeamAgentSession_ResultVisibleToReaderWithheldFromAdmin(t *testing.T) {
+	f := newTeamAgentFixture(t)
+	sess, approvalID := f.teamSessionWithApproval(t)
+	if rec := f.do(t, f.writer, http.MethodPost, "/assistant/approvals/"+approvalID+"/approve", nil); rec.Code != http.StatusOK {
+		t.Fatalf("approve status = %d body = %s", rec.Code, rec.Body)
+	}
+	f.rt.Wait()
+
+	type detail struct {
+		Approvals []assistantApprovalJSON `json:"approvals"`
+	}
+	rec := f.do(t, f.reader, http.MethodGet, "/assistant/sessions/"+sess.ID.String(), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reader get = %d body = %s", rec.Code, rec.Body)
+	}
+	var reader detail
+	decodeBody(t, rec, &reader)
+	if len(reader.Approvals) != 1 || reader.Approvals[0].Result == nil || reader.Approvals[0].ResultWithheld {
+		t.Errorf("reader approvals = %+v, want a visible result", reader.Approvals)
+	}
+
+	rec = f.do(t, f.admin, http.MethodGet, "/assistant/sessions/"+sess.ID.String(), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin get = %d body = %s", rec.Code, rec.Body)
+	}
+	var admin detail
+	decodeBody(t, rec, &admin)
+	if len(admin.Approvals) != 1 || admin.Approvals[0].Result != nil || !admin.Approvals[0].ResultWithheld {
+		t.Errorf("admin approvals = %+v, want a withheld result", admin.Approvals)
+	}
+}
+
 func TestTeamAgentSession_ApproveAgentSubjectRefused(t *testing.T) {
 	f := newTeamAgentFixture(t)
 	_, approvalID := f.teamSessionWithApproval(t)
