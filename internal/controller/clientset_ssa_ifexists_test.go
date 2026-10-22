@@ -254,8 +254,10 @@ func TestApplyControllerSpecSSAIfExists_RebackfillsFreshValueOnRetry(t *testing.
 		}
 		u := obj.(*unstructured.Unstructured).DeepCopy()
 		getAttempts++
-		if getAttempts > 1 {
-			// The owned leaf moves between attempt 1's GET and attempt 2's.
+		// GET 1 is the claim step's read, which runs before the retry loop.
+		// GET 2 is attempt 1's read. The owned leaf moves before GET 3, which is
+		// attempt 2's read.
+		if getAttempts > 2 {
 			if err := unstructured.SetNestedField(u.Object, "jenkins:v2", "spec", "jenkinsImage"); err != nil {
 				t.Fatalf("bump jenkinsImage: %v", err)
 			}

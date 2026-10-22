@@ -10,35 +10,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
 
+// createClaimUID is the UID the create reactor stamps on each created object.
+const createClaimUID = "uid-ctrl1"
+
 // createClaimHarness drives CreateControllerSpecSSA over the dynamic fake.
-// The fake tracker stores creates and merge patches. The apply reactor
-// records ApplyPatchType calls and returns the stored object, because the
-// fake does not implement server-side apply.
+// The create reactor stamps a resourceVersion and a UID on each created
+// object. The claim reactors in claimLog handle the apply and the JSON patch.
 type createClaimHarness struct {
 	client *ClientsetClient
 	dyn    *dynamicfake.FakeDynamicClient
+	log    *claimLog
 
 	// createManagedFields, when set, is written onto each created object. It
 	// models the Update entry that a real POST leaves for the creator.
 	createManagedFields []metav1.ManagedFieldsEntry
-	// applyErr, when set, makes the apply reactor fail.
-	applyErr error
-	// mergeConflicts counts the merge patches to fail with a Conflict first.
-	mergeConflicts int
-
-	applies []clienttesting.PatchActionImpl
-	merges  []map[string]any
 }
 
 func newCreateClaimHarness(t *testing.T, existing *unstructured.Unstructured) *createClaimHarness {
 	t.Helper()
 	client, dyn := newIfExistsTestClient(t, existing)
-	h := &createClaimHarness{client: client, dyn: dyn}
+	h := &createClaimHarness{client: client, dyn: dyn, log: &claimLog{}}
 
 	dyn.PrependReactor("create", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
 		obj, ok := action.(clienttesting.CreateActionImpl).GetObject().(*unstructured.Unstructured)
@@ -46,36 +41,13 @@ func newCreateClaimHarness(t *testing.T, existing *unstructured.Unstructured) *c
 			return false, nil, nil
 		}
 		obj.SetResourceVersion("1")
+		obj.SetUID(createClaimUID)
 		if h.createManagedFields != nil {
 			obj.SetManagedFields(h.createManagedFields)
 		}
 		return false, nil, nil
 	})
-
-	dyn.PrependReactor("patch", "controllers", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		pa := action.(clienttesting.PatchActionImpl)
-		switch pa.GetPatchType() {
-		case types.ApplyPatchType:
-			h.applies = append(h.applies, pa)
-			if h.applyErr != nil {
-				return true, nil, h.applyErr
-			}
-			obj, err := dyn.Tracker().Get(controllerGVR, pa.GetNamespace(), pa.GetName())
-			return true, obj, err
-		case types.MergePatchType:
-			if h.mergeConflicts > 0 {
-				h.mergeConflicts--
-				return true, nil, apierrors.NewConflict(controllerGVR.GroupResource(), pa.GetName(), errors.New("stale write"))
-			}
-			var body map[string]any
-			if err := json.Unmarshal(pa.GetPatch(), &body); err != nil {
-				return true, nil, err
-			}
-			h.merges = append(h.merges, body)
-			return false, nil, nil
-		}
-		return false, nil, nil
-	})
+	installClaimReactors(dyn, h.log)
 	return h
 }
 
@@ -124,11 +96,11 @@ func TestCreateControllerSpecSSA_ExistingNameFailsAndKeepsObject(t *testing.T) {
 	if !apierrors.IsAlreadyExists(err) {
 		t.Fatalf("err = %v, want AlreadyExists", err)
 	}
-	if len(h.applies) != 0 {
-		t.Fatalf("apply calls = %d, want 0 after a refused create", len(h.applies))
+	if len(h.log.applies) != 0 {
+		t.Fatalf("apply calls = %d, want 0 after a refused create", len(h.log.applies))
 	}
-	if len(h.merges) != 0 {
-		t.Fatalf("merge patches = %d, want 0 after a refused create", len(h.merges))
+	if len(h.log.jsonPatches) != 0 {
+		t.Fatalf("JSON patches = %d, want 0 after a refused create", len(h.log.jsonPatches))
 	}
 	version, _, _ := unstructured.NestedString(h.stored(t, "ns1", "ctrl1").Object, "spec", "version")
 	if version != "1.0" {
@@ -136,10 +108,10 @@ func TestCreateControllerSpecSSA_ExistingNameFailsAndKeepsObject(t *testing.T) {
 	}
 }
 
-func TestCreateControllerSpecSSA_ClaimsSpecAndDropsCreateEntry(t *testing.T) {
+func TestCreateControllerSpecSSA_ClaimsSpecAndMergesCreateEntry(t *testing.T) {
 	h := newCreateClaimHarness(t, nil)
 	h.createManagedFields = []metav1.ManagedFieldsEntry{
-		{Manager: "varroa-ui", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "varroa.dev/v1alpha1"},
+		specClaimEntry("varroa-ui", metav1.ManagedFieldsOperationUpdate, `{"f:spec":{"f:version":{}}}`),
 		{Manager: "varroa-operator", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "varroa.dev/v1alpha1", Subresource: "status"},
 	}
 
@@ -171,62 +143,142 @@ func TestCreateControllerSpecSSA_ClaimsSpecAndDropsCreateEntry(t *testing.T) {
 	}
 
 	// Exactly one apply, with force off.
-	if len(h.applies) != 1 {
-		t.Fatalf("apply calls = %d, want 1", len(h.applies))
+	if len(h.log.applies) != 1 {
+		t.Fatalf("apply calls = %d, want 1", len(h.log.applies))
 	}
-	if h.applies[0].PatchOptions.Force == nil || *h.applies[0].PatchOptions.Force {
+	if h.log.applies[0].PatchOptions.Force == nil || *h.log.applies[0].PatchOptions.Force {
 		t.Fatal("apply must set Force=false")
 	}
-	if h.applies[0].PatchOptions.FieldManager != "varroa-ui" {
-		t.Fatalf("apply field manager = %q, want varroa-ui", h.applies[0].PatchOptions.FieldManager)
+	if h.log.applies[0].PatchOptions.FieldManager != "varroa-ui" {
+		t.Fatalf("apply field manager = %q, want varroa-ui", h.log.applies[0].PatchOptions.FieldManager)
 	}
 
-	// The Update entry is gone, the status entry stays.
-	var sawStatus bool
+	// The create's Update entry is merged into the Apply entry, and the status
+	// entry stays.
+	var sawStatus, sawApply bool
 	for _, e := range h.stored(t, "ns1", "ctrl1").GetManagedFields() {
 		if e.Manager == "varroa-ui" && e.Operation == metav1.ManagedFieldsOperationUpdate && e.Subresource == "" {
 			t.Fatal("varroa-ui Update entry survived the claim")
+		}
+		if e.Manager == "varroa-ui" && e.Operation == metav1.ManagedFieldsOperationApply {
+			sawApply = true
+			var fields map[string]map[string]map[string]any
+			if err := json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields); err != nil {
+				t.Fatalf("decode varroa-ui Apply fields: %v", err)
+			}
+			if _, ok := fields["f:spec"]["f:version"]; !ok {
+				t.Fatalf("varroa-ui Apply entry does not own f:spec.f:version: %s", e.FieldsV1.GetRawBytes())
+			}
 		}
 		if e.Manager == "varroa-operator" && e.Subresource == "status" {
 			sawStatus = true
 		}
 	}
+	if !sawApply {
+		t.Fatal("no varroa-ui Apply entry after the claim")
+	}
 	if !sawStatus {
 		t.Fatal("varroa-operator status entry was dropped")
 	}
 
-	// The merge patch pins the resourceVersion of the read it filtered.
-	if len(h.merges) != 1 {
-		t.Fatalf("merge patches = %d, want 1", len(h.merges))
+	// The JSON patch pins the resourceVersion of the read it used.
+	if len(h.log.jsonPatches) != 1 {
+		t.Fatalf("JSON patches = %d, want 1", len(h.log.jsonPatches))
 	}
-	meta, _ := h.merges[0]["metadata"].(map[string]any)
-	if meta["resourceVersion"] != "1" {
-		t.Fatalf("merge patch resourceVersion = %#v, want \"1\"", meta["resourceVersion"])
+	var pinned bool
+	for _, op := range h.log.jsonPatches[0] {
+		if op["path"] == "/metadata/resourceVersion" {
+			pinned = op["value"] == "1"
+		}
+	}
+	if !pinned {
+		t.Fatalf("JSON patch does not replace /metadata/resourceVersion with \"1\": %#v", h.log.jsonPatches[0])
 	}
 }
 
-func TestCreateControllerSpecSSA_ReleaseRetriesOnConflict(t *testing.T) {
+func TestCreateControllerSpecSSA_ClaimApplyCarriesCreatedUID(t *testing.T) {
 	h := newCreateClaimHarness(t, nil)
 	h.createManagedFields = []metav1.ManagedFieldsEntry{
-		{Manager: "varroa-ui", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "varroa.dev/v1alpha1"},
+		specClaimEntry("varroa-ui", metav1.ManagedFieldsOperationUpdate, `{"f:spec":{"f:version":{}}}`),
 	}
-	h.mergeConflicts = 1
 
 	if _, err := h.client.CreateControllerSpecSSA(context.Background(), "ns1", "ctrl1", map[string]any{"version": "2.0"}, "varroa-ui"); err != nil {
 		t.Fatalf("CreateControllerSpecSSA: %v", err)
 	}
-	// One GET from the apply's completion read, then one GET per release try.
-	if gets := h.count("get"); gets != 3 {
-		t.Fatalf("get calls = %d, want 3 (apply read + two release reads)", gets)
+	if len(h.log.applies) != 1 {
+		t.Fatalf("apply calls = %d, want 1", len(h.log.applies))
 	}
-	if len(h.merges) != 1 {
-		t.Fatalf("accepted merge patches = %d, want 1", len(h.merges))
+	meta, _ := applyBodyMap(t, h.log.applies[0])["metadata"].(map[string]any)
+	if meta["uid"] != createClaimUID {
+		t.Fatalf("apply uid = %#v, want %q", meta["uid"], createClaimUID)
+	}
+	if _, ok := meta["resourceVersion"]; ok {
+		t.Fatal("apply pins resourceVersion; the claim must not")
+	}
+}
+
+func TestCreateControllerSpecSSA_ClaimRetriesOnConflict(t *testing.T) {
+	h := newCreateClaimHarness(t, nil)
+	h.createManagedFields = []metav1.ManagedFieldsEntry{
+		specClaimEntry("varroa-ui", metav1.ManagedFieldsOperationUpdate, `{"f:spec":{"f:version":{}}}`),
+	}
+	h.log.jsonConflicts = 1
+
+	if _, err := h.client.CreateControllerSpecSSA(context.Background(), "ns1", "ctrl1", map[string]any{"version": "2.0"}, "varroa-ui"); err != nil {
+		t.Fatalf("CreateControllerSpecSSA: %v", err)
+	}
+	// One GET from the apply's read, then one GET after the Conflict.
+	if gets := h.count("get"); gets != 2 {
+		t.Fatalf("get calls = %d, want 2 (apply read + one claim re-read)", gets)
+	}
+	if len(h.log.jsonPatches) != 1 {
+		t.Fatalf("accepted JSON patches = %d, want 1", len(h.log.jsonPatches))
+	}
+}
+
+func TestCreateControllerSpecSSA_ReplacedObjectReturnsPlainError(t *testing.T) {
+	h := newCreateClaimHarness(t, nil)
+	h.log.applyErr = apierrors.NewConflict(controllerGVR.GroupResource(), "ctrl1", errors.New("uid mismatch"))
+
+	got, err := h.client.CreateControllerSpecSSA(context.Background(), "ns1", "ctrl1", map[string]any{"version": "2.0"}, "varroa-ui")
+	if !errors.Is(err, errControllerReplaced) {
+		t.Fatalf("err = %v, want errControllerReplaced", err)
+	}
+	if errors.Is(err, ErrControllerSpecClaim) {
+		t.Fatal("a replaced object must not answer ErrControllerSpecClaim")
+	}
+	if got != nil {
+		t.Fatalf("returned object = %#v, want nil for a replaced object", got)
+	}
+}
+
+func TestCreateControllerSpecSSA_ReplacedDuringConflictIsReplaced(t *testing.T) {
+	h := newCreateClaimHarness(t, nil)
+	h.log.applyErr = errors.New("apply conflict")
+	h.log.beforeApply = func() {
+		obj, err := h.dyn.Tracker().Get(controllerGVR, "ns1", "ctrl1")
+		if err != nil {
+			t.Fatalf("get created controller: %v", err)
+		}
+		u := obj.(*unstructured.Unstructured)
+		u.SetUID("uid-replacement")
+		if err := h.dyn.Tracker().Update(controllerGVR, u, "ns1"); err != nil {
+			t.Fatalf("replace controller: %v", err)
+		}
+	}
+
+	got, err := h.client.CreateControllerSpecSSA(context.Background(), "ns1", "ctrl1", map[string]any{"version": "2.0"}, "varroa-ui")
+	if !errors.Is(err, errControllerReplaced) {
+		t.Fatalf("err = %v, want errControllerReplaced when the name now holds another UID", err)
+	}
+	if got != nil {
+		t.Fatalf("returned object = %#v, want nil", got)
 	}
 }
 
 func TestCreateControllerSpecSSA_ClaimFailureReturnsObjectAndSentinel(t *testing.T) {
 	h := newCreateClaimHarness(t, nil)
-	h.applyErr = errors.New("apply timed out")
+	h.log.applyErr = errors.New("apply timed out")
 
 	got, err := h.client.CreateControllerSpecSSA(context.Background(), "ns1", "ctrl1", map[string]any{"version": "2.0"}, "varroa-ui")
 	if !errors.Is(err, ErrControllerSpecClaim) {

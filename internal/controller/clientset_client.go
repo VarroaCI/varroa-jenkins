@@ -27,10 +27,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/csaupgrade"
 	"k8s.io/client-go/util/retry"
 
 	"github.com/varroaci/varroa-jenkins/api/v1alpha1"
@@ -2881,6 +2883,9 @@ type completionTree struct {
 // same manager name is a DISTINCT ownership record whose leaves are already
 // protected; reading it would inflate the Apply set. Entries are recorded
 // per-version; a mismatched apiVersion describes a different schema.
+//
+// The write path merges a same-name Update entry into the Apply entry before
+// it calls this function, so the leaves it reads already include that entry.
 func ownedLeaves(cur *unstructured.Unstructured, fieldManager string) *completionTree {
 	mf, found, err := unstructured.NestedSlice(cur.Object, "metadata", "managedFields")
 	if err != nil || !found {
@@ -3205,6 +3210,16 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 	ctx context.Context, namespace, name string, specPatch map[string]any,
 	fieldManager string, force bool,
 ) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+	return c.applyControllerSpecSSA(ctx, namespace, name, specPatch, fieldManager, force, "")
+}
+
+// applyControllerSpecSSA is ApplyControllerSpecSSA with an optional UID
+// precondition. A non-empty uid is sent in the apply manifest, so the server
+// answers Conflict when the object has another UID, such as a recreated one.
+func (c *ClientsetClient) applyControllerSpecSSA(
+	ctx context.Context, namespace, name string, specPatch map[string]any,
+	fieldManager string, force bool, uid types.UID,
+) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	// Null-translation runs BEFORE completion: completing first would backfill
 	// a removal from the current object and silently undo it — a bundle detach
 	// ({composedBundleRef: null}) would then do nothing.
@@ -3224,20 +3239,50 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 		if !apierrors.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("get controller for spec completion: %w", err)
 		}
-	} else if owned := ownedLeaves(cur, fieldManager); owned != nil {
-		if curSpec, ok, nestedErr := unstructured.NestedMap(cur.Object, "spec"); nestedErr == nil && ok {
-			completed = backfill(cleaned, curSpec, owned, removals, "")
+		if uid != "" {
+			// The object the caller created is gone. An apply with its UID would
+			// take the create path, so the apply is not sent.
+			return nil, nil, fmt.Errorf("%w: uid %s, object absent", errControllerReplaced, uid)
+		}
+	} else {
+		if uid != "" && cur.GetUID() != uid {
+			return nil, nil, fmt.Errorf("%w: uid %s, found %s", errControllerReplaced, uid, cur.GetUID())
+		}
+		if needsSpecClaim(cur, fieldManager) {
+			claimed, claimErr := c.claimSpecUpdateEntry(ctx, namespace, name, fieldManager, cur, uid)
+			switch {
+			case claimErr == nil:
+				cur = claimed
+			case uid != "" && apierrors.IsNotFound(claimErr):
+				return nil, nil, fmt.Errorf("%w: %v", errControllerReplaced, claimErr)
+			case apierrors.IsNotFound(claimErr):
+				// Deleted after the read. Apply the cleaned patch as a create.
+				cur = nil
+			default:
+				return nil, nil, fmt.Errorf("claim %s spec update entry: %w", fieldManager, claimErr)
+			}
+		}
+		if cur != nil {
+			if owned := ownedLeaves(cur, fieldManager); owned != nil {
+				if curSpec, ok, nestedErr := unstructured.NestedMap(cur.Object, "spec"); nestedErr == nil && ok {
+					completed = backfill(cleaned, curSpec, owned, removals, "")
+				}
+			}
 		}
 	}
 
+	meta := map[string]any{
+		"name":      name,
+		"namespace": namespace,
+	}
+	if uid != "" {
+		meta["uid"] = string(uid)
+	}
 	u := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "varroa.dev/v1alpha1",
 		"kind":       "Controller",
-		"metadata": map[string]any{
-			"name":      name,
-			"namespace": namespace,
-		},
-		"spec": completed,
+		"metadata":   meta,
+		"spec":       completed,
 	}}
 	data, err := json.Marshal(u)
 	if err != nil {
@@ -3248,6 +3293,11 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 		metav1.PatchOptions{FieldManager: fieldManager, Force: &force},
 	)
 	if err != nil {
+		// With a UID precondition, a NotFound, or a Conflict that is not an
+		// ownership conflict, means the server holds no object with that UID.
+		if uid != "" && (apierrors.IsNotFound(err) || (apierrors.IsConflict(err) && !isFieldManagerConflict(err))) {
+			return nil, nil, fmt.Errorf("%w: %v", errControllerReplaced, err)
+		}
 		return nil, nil, err
 	}
 
@@ -3266,9 +3316,16 @@ func (c *ClientsetClient) ApplyControllerSpecSSA(
 	return &out, unapplied, nil
 }
 
+// errControllerReplaced reports that the object a UID-fenced apply targets no
+// longer carries that UID. The created object is gone, so CreateControllerSpecSSA
+// returns this error without ErrControllerSpecClaim. The error is not a Conflict,
+// so the claim retry loop returns it at once.
+var errControllerReplaced = errors.New("controller was replaced before the spec claim")
+
 // ErrControllerSpecClaim reports that CreateControllerSpecSSA created the
 // Controller but did not finish the spec ownership claim. The error arrives
-// with the created object, so the caller can still answer the create.
+// with the created object, so the caller can still answer the create. The
+// next varroa-ui spec write repairs the claim.
 var ErrControllerSpecClaim = errors.New("controller created but spec ownership claim failed")
 
 // CreateControllerSpecSSA creates a Controller and claims its spec for
@@ -3276,16 +3333,12 @@ var ErrControllerSpecClaim = errors.New("controller created but spec ownership c
 // answers an apierrors AlreadyExists error and nothing is written. The
 // create also records an Update entry for fieldManager, which would make a
 // later SSA edit of the spec conflict. The method therefore applies the same
-// spec as fieldManager, so the Apply entry owns the sent fields, and then
-// drops the Update entry. The drop is a merge patch that pins the
-// resourceVersion, so a concurrent write makes it retry instead of losing
-// the newer entry. The spec apply sends the create's values with force off.
-// A field another manager changed after the create conflicts, so it is not
-// overwritten. The apply carries no resourceVersion precondition, because a
-// status write from the reconciler bumps resourceVersion without a spec
-// change. A failure after the create returns the created object and an error
-// that wraps ErrControllerSpecClaim. Such an object keeps the create's Update
-// entry, and nothing in this package retries the drop later.
+// spec as fieldManager with force off. The apply carries the created UID, so
+// a replaced object answers errControllerReplaced and creates nothing. The
+// apply's repair step merges the create's Update entry into the Apply entry.
+// A failure after the create returns the created object and an error that
+// wraps ErrControllerSpecClaim. Such an object keeps the Update entry until
+// the next varroa-ui spec write repairs it.
 func (c *ClientsetClient) CreateControllerSpecSSA(
 	ctx context.Context, namespace, name string, spec map[string]any, fieldManager string,
 ) (*v1alpha1.Controller, error) {
@@ -3305,65 +3358,114 @@ func (c *ClientsetClient) CreateControllerSpecSSA(
 		return nil, err
 	}
 
-	claimFailed := func(cause error) (*v1alpha1.Controller, error) {
-		var out v1alpha1.Controller
-		if convErr := runtime.DefaultUnstructuredConverter.FromUnstructured(created.Object, &out); convErr != nil {
-			return nil, fmt.Errorf("%w: %v; convert created controller: %v", ErrControllerSpecClaim, cause, convErr)
-		}
-		return &out, fmt.Errorf("%w: %v", ErrControllerSpecClaim, cause)
+	applied, _, err := c.applyControllerSpecSSA(ctx, namespace, name, runtime.DeepCopyJSON(spec), fieldManager, false, created.GetUID())
+	if err == nil {
+		return applied, nil
 	}
-
-	applied, _, err := c.ApplyControllerSpecSSA(ctx, namespace, name, runtime.DeepCopyJSON(spec), fieldManager, false)
-	if err != nil {
-		return claimFailed(err)
+	if errors.Is(err, errControllerReplaced) {
+		return nil, err
 	}
-	if err := c.dropCreateUpdateEntry(ctx, namespace, name, fieldManager); err != nil {
-		return claimFailed(err)
+	// The server checks the UID after the field-manager check. A replacement
+	// that also conflicts on ownership reaches this path, so re-read the name
+	// and compare the UID before the object is reported as kept.
+	if current, getErr := c.dynamic.Resource(controllerGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(getErr) ||
+		(getErr == nil && current.GetUID() != created.GetUID()) {
+		return nil, fmt.Errorf("%w: %v", errControllerReplaced, err)
 	}
-	return applied, nil
+	var out v1alpha1.Controller
+	if convErr := runtime.DefaultUnstructuredConverter.FromUnstructured(created.Object, &out); convErr != nil {
+		return nil, fmt.Errorf("%w: %v; convert created controller: %v", ErrControllerSpecClaim, err, convErr)
+	}
+	return &out, fmt.Errorf("%w: %v", ErrControllerSpecClaim, err)
 }
 
-// dropCreateUpdateEntry removes every metadata.managedFields entry that
-// fieldManager holds as an Update on the main resource. The merge patch
-// carries the resourceVersion of the read it filtered, so a write between the
-// read and the patch answers a Conflict and the read repeats.
-func (c *ClientsetClient) dropCreateUpdateEntry(ctx context.Context, namespace, name, fieldManager string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		cur, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return err
+// needsSpecClaim reports whether cur holds a fieldManager Update entry on the
+// main resource that owns f:spec. Every such entry must carry the object's
+// apiVersion and own only f:spec. An entry that owns another top-level field,
+// such as labels, is not repaired, because the next apply would delete that
+// field.
+func needsSpecClaim(cur *unstructured.Unstructured, fieldManager string) bool {
+	if cur == nil {
+		return false
+	}
+	found := false
+	for _, entry := range cur.GetManagedFields() {
+		if entry.Manager != fieldManager || entry.Subresource != "" {
+			continue
 		}
-		mf, _, err := unstructured.NestedSlice(cur.Object, "metadata", "managedFields")
-		if err != nil {
-			return err
+		// csaupgrade merges into the first same-name Apply entry, and it unions
+		// only the same-version Update entry. It drops every same-name Update
+		// entry. An entry of another version would lose its leaves, so the
+		// repair stays off while any such entry exists.
+		if entry.APIVersion != cur.GetAPIVersion() {
+			return false
 		}
-		kept := make([]any, 0, len(mf))
-		dropped := false
-		for _, raw := range mf {
-			m, ok := raw.(map[string]any)
-			if ok && m["manager"] == fieldManager && m["operation"] == "Update" {
-				if sub, _ := m["subresource"].(string); sub == "" {
-					dropped = true
-					continue
-				}
+		if entry.Operation != metav1.ManagedFieldsOperationUpdate {
+			continue
+		}
+		if entry.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields); err != nil {
+			return false
+		}
+		for key := range fields {
+			if key != "f:spec" {
+				return false
 			}
-			kept = append(kept, raw)
 		}
-		if !dropped {
+		if _, ok := fields["f:spec"]; ok {
+			found = true
+		}
+	}
+	return found
+}
+
+// claimSpecUpdateEntry merges the spec Update entry of fieldManager into its
+// Apply entry, with csaupgrade. The JSON patch pins the resourceVersion of the
+// read it used, so a concurrent write answers Conflict and the read repeats.
+// cur serves the first attempt when it is not nil. The returned object is the
+// object as it stands after the claim. NotFound passes through unchanged.
+func (c *ClientsetClient) claimSpecUpdateEntry(
+	ctx context.Context, namespace, name, fieldManager string, cur *unstructured.Unstructured, uid types.UID,
+) (*unstructured.Unstructured, error) {
+	var out *unstructured.Unstructured
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		obj := cur
+		cur = nil
+		if obj == nil {
+			got, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			obj = got
+		}
+		if uid != "" && obj.GetUID() != uid {
+			return fmt.Errorf("%w: uid %s, found %s", errControllerReplaced, uid, obj.GetUID())
+		}
+		if !needsSpecClaim(obj, fieldManager) {
+			out = obj
 			return nil
 		}
-		patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
-			"resourceVersion": cur.GetResourceVersion(),
-			"managedFields":   kept,
-		}})
+		patch, err := csaupgrade.UpgradeManagedFieldsPatch(obj, sets.New(fieldManager), fieldManager)
 		if err != nil {
 			return err
 		}
-		_, err = c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
-			ctx, name, types.MergePatchType, patch, metav1.PatchOptions{},
+		if patch == nil {
+			out = obj
+			return nil
+		}
+		res, err := c.dynamic.Resource(controllerGVR).Namespace(namespace).Patch(
+			ctx, name, types.JSONPatchType, patch, metav1.PatchOptions{},
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		out = res
+		return nil
 	})
+	return out, err
 }
 
 // ApplyControllerSpecSSAIfExists is the existence-guarded sibling of
@@ -3401,6 +3503,10 @@ func (c *ClientsetClient) ApplyControllerSpecSSAIfExists(
 ) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	cleaned, removals, err := translateNulls(specPatch)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if _, err := c.claimSpecUpdateEntry(ctx, namespace, name, fieldManager, nil, ""); err != nil {
 		return nil, nil, err
 	}
 
