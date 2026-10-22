@@ -342,3 +342,129 @@ func containsString(list []string, want string) bool {
 	}
 	return false
 }
+
+// TestUpdateUser_NonLocalUserIsToolError pins that update_user refuses an
+// edit of a User that is not a local account, as the REST route does.
+func TestUpdateUser_NonLocalUserIsToolError(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "alice",
+			Namespace: "varroa-system",
+			Labels:    map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByIDP},
+		},
+		Spec: v1alpha1.UserSpec{Email: "old@example.com"},
+	})
+	deps := localUserDeps(store)
+	deps.IdentityConfig.Mode = "oidc"
+	deps.IdentityConfig.LocalAccounts = true
+
+	resp := mcpRequest(t, NewHandler(deps), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "varroa-system", "name": "alice", "email": "new@example.com"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("update_user on a non-local user must return a tool error, got success: %v", tr.Content)
+	}
+	if got := toolText(tr); !strings.Contains(got, "only a local account can be edited") {
+		t.Errorf("error text = %q, want the non-local refusal", got)
+	}
+	got, err := crdstore.Get[v1alpha1.User](context.Background(), store, "alice", "varroa-system")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.Email != "old@example.com" {
+		t.Errorf("email = %q, want the stored value old@example.com", got.Spec.Email)
+	}
+}
+
+// TestUpdateUser_OtherNamespaceIsToolError pins that update_user refuses a
+// namespace other than the operator namespace and touches neither User.
+func TestUpdateUser_OtherNamespaceIsToolError(t *testing.T) {
+	store := crdstore.NewFake()
+	for _, ns := range []string{"team-a", "varroa-system"} {
+		crdstore.MustSeed(store, &v1alpha1.User{
+			ObjectMeta: metav1.ObjectMeta{Name: "bob", Namespace: ns},
+			Spec:       v1alpha1.UserSpec{Email: "old@example.com"},
+		})
+	}
+
+	resp := mcpRequest(t, NewHandler(localUserDeps(store)), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "team-a", "name": "bob", "email": "new@example.com"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("update_user in another namespace must return a tool error, got success: %v", tr.Content)
+	}
+	if got := toolText(tr); got != "local users live in the operator namespace varroa-system" {
+		t.Errorf("error text = %q, want the operator namespace refusal", got)
+	}
+	for _, ns := range []string{"team-a", "varroa-system"} {
+		got, err := crdstore.Get[v1alpha1.User](context.Background(), store, "bob", ns)
+		if err != nil {
+			t.Fatalf("Get %s/bob: %v", ns, err)
+		}
+		if got.Spec.Email != "old@example.com" {
+			t.Errorf("%s/bob email = %q, want the stored value", ns, got.Spec.Email)
+		}
+	}
+}
+
+// TestUpdateUser_EditsOperatorNamespaceUser pins that update_user changes the
+// named fields of an operator-namespace User and keeps the others.
+func TestUpdateUser_EditsOperatorNamespaceUser(t *testing.T) {
+	store := crdstore.NewFake()
+	crdstore.MustSeed(store, &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Name: "dan", Namespace: "varroa-system"},
+		Spec:       v1alpha1.UserSpec{Email: "old@example.com", DisplayName: "Dan"},
+	})
+
+	resp := mcpRequest(t, NewHandler(localUserDeps(store)), "tools/call", map[string]interface{}{
+		"name":      "update_user",
+		"arguments": map[string]interface{}{"namespace": "varroa-system", "name": "dan", "email": "new@example.com"},
+	}, mcpAdminClaims)
+	if tr := parseToolResult(t, resp.Result); tr.IsError {
+		t.Fatalf("update_user returned error: %v", tr.Content)
+	}
+	got, err := crdstore.Get[v1alpha1.User](context.Background(), store, "dan", "varroa-system")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec.Email != "new@example.com" {
+		t.Errorf("email = %q, want new@example.com", got.Spec.Email)
+	}
+	if got.Spec.DisplayName != "Dan" {
+		t.Errorf("displayName = %q, want the stored value Dan", got.Spec.DisplayName)
+	}
+}
+
+// TestDeleteUser_OtherNamespaceIsToolError pins that delete_user refuses a
+// namespace other than the operator namespace. The User of that name in
+// another namespace, and the operator-namespace User, both stay.
+func TestDeleteUser_OtherNamespaceIsToolError(t *testing.T) {
+	store := crdstore.NewFake()
+	for _, ns := range []string{"team-a", "varroa-system"} {
+		crdstore.MustSeed(store, &v1alpha1.User{
+			ObjectMeta: metav1.ObjectMeta{Name: "carol", Namespace: ns},
+		})
+	}
+
+	resp := mcpRequest(t, NewHandler(localUserDeps(store)), "tools/call", map[string]interface{}{
+		"name":      "delete_user",
+		"arguments": map[string]interface{}{"namespace": "team-a", "name": "carol"},
+	}, mcpAdminClaims)
+	tr := parseToolResult(t, resp.Result)
+	if !tr.IsError {
+		t.Fatalf("delete_user in another namespace must return a tool error, got success: %v", tr.Content)
+	}
+	if got := toolText(tr); got != "local users live in the operator namespace varroa-system" {
+		t.Errorf("error text = %q, want the operator namespace refusal", got)
+	}
+	for _, ns := range []string{"team-a", "varroa-system"} {
+		if _, err := crdstore.Get[v1alpha1.User](context.Background(), store, "carol", ns); err != nil {
+			t.Errorf("%s/carol was removed: %v", ns, err)
+		}
+	}
+}

@@ -310,7 +310,7 @@ func seedGuardObjects(t *testing.T, stub *guardStub) {
 		&v1alpha1.JenkinsRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRole{ObjectMeta: metav1.ObjectMeta{Name: name}},
 		&v1alpha1.VarroaRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}},
-		&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+		&v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "varroa-system"}},
 		&v1alpha1.CellPool{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec:       v1alpha1.CellPoolSpec{ProfileRef: "lts-2-555", MaxTenantsPerCell: 10},
@@ -397,8 +397,8 @@ func guardArgsFor(name string) map[string]interface{} {
 		"delete_jenkins_version_profile": {"name": obj},
 		// Users (namespaced, admin-only)
 		"create_user": {"namespace": "varroa-system", "name": "obj-new", "password": "pw-12345678"},
-		"update_user": {"namespace": ns, "name": obj},
-		"delete_user": {"namespace": ns, "name": obj},
+		"update_user": {"namespace": "varroa-system", "name": obj},
+		"delete_user": {"namespace": "varroa-system", "name": obj},
 		// Groups (cluster-scoped, admin-only)
 		"create_group": {"name": "obj-new"},
 		"update_group": {"name": obj},

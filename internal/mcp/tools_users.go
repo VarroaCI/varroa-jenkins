@@ -157,9 +157,8 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			return mcp.NewToolResultError("user creation is only available with local accounts"), nil
 		}
 		args := getArgs(req)
-		ns := strArg(args, "namespace")
-		if ns != "" && ns != deps.OperatorNamespace {
-			return mcp.NewToolResultError("local users live in the operator namespace " + deps.OperatorNamespace), nil
+		if msg := operatorNamespaceArg(deps, args); msg != "" {
+			return mcp.NewToolResultError(msg), nil
 		}
 		purpose, perr := userPurposeArg(deps, args, true)
 		if perr != "" {
@@ -199,8 +198,8 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 	})
 
 	updateU := mcp.NewTool("update_user",
-		mcp.WithDescription("Update an existing Varroa user (admin only, local accounts only)"),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace")),
+		mcp.WithDescription("Update an existing Varroa local user (admin only, local accounts only). Local users live in the operator namespace; a User with any other managed-by label is refused."),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace. Local users live in the operator namespace; any other value is refused.")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 		mcp.WithString("email", mcp.Description("Email address")),
 		mcp.WithString("displayName", mcp.Description("Display name")),
@@ -222,42 +221,38 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 			return mcp.NewToolResultError("user editing is only available with local accounts"), nil
 		}
 		args := getArgs(req)
-		ns, name := strArg(args, "namespace"), strArg(args, "name")
-		var purpose v1alpha1.UserPurpose
-		if strArg(args, "purpose") != "" {
-			p, perr := userPurposeArg(deps, args, false)
-			if perr != "" {
-				return mcp.NewToolResultError(perr), nil
-			}
-			purpose = p
+		if msg := operatorNamespaceArg(deps, args); msg != "" {
+			return mcp.NewToolResultError(msg), nil
 		}
-		var existing *v1alpha1.User
-		_, err = crdstore.Mutate[v1alpha1.User](ctx, deps.Store, name, ns, func(u *v1alpha1.User) (bool, error) {
-			if v := strArg(args, "email"); v != "" {
-				u.Spec.Email = v
-			}
-			if v := strArg(args, "displayName"); v != "" {
-				u.Spec.DisplayName = v
-			}
-			if strArg(args, "purpose") != "" {
-				u.Spec.Purpose = purpose
-			}
-			existing = u
-			return true, nil
-		})
-		if apierrors.IsNotFound(err) {
+		ns, name := deps.OperatorNamespace, strArg(args, "name")
+		// An empty field keeps the stored value, so a partial update leaves
+		// the other fields as they are.
+		edit := api.LocalUserEdit{Purpose: v1alpha1.UserPurpose(strArg(args, "purpose"))}
+		if v := strArg(args, "email"); v != "" {
+			edit.Email = &v
+		}
+		if v := strArg(args, "displayName"); v != "" {
+			edit.DisplayName = &v
+		}
+		u, err := api.UpdateLocalUser(ctx, deps.Store, deps.IdentityConfig, ns, name, edit)
+		var pe api.PurposeError
+		switch {
+		case apierrors.IsNotFound(err):
 			return mcp.NewToolResultError(fmt.Sprintf("user not found: %v", err)), nil
-		}
-		if err != nil {
+		case errors.Is(err, api.ErrNotLocalAccount):
+			return mcp.NewToolResultError(api.ErrNotLocalAccount.Error()), nil
+		case errors.As(err, &pe):
+			return mcp.NewToolResultError(pe.Error()), nil
+		case err != nil:
 			return mcp.NewToolResultError(fmt.Sprintf("failed to update user: %v", err)), nil
 		}
 		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserUpdated, ns, name))
-		return resultJSON(existing)
+		return resultJSON(u)
 	})
 
 	deleteU := mcp.NewTool("delete_user",
-		mcp.WithDescription("Delete a Varroa user and remove it from every role binding and group (admin only)"),
-		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace")),
+		mcp.WithDescription("Delete a Varroa user and remove it from every role binding and group (admin only). Local users live in the operator namespace; any other namespace is refused."),
+		mcp.WithString("namespace", mcp.Required(), mcp.Description("User namespace. Local users live in the operator namespace; any other value is refused.")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("User name")),
 	)
 	addTool(mcpServer, kindDelete, deleteU, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -271,8 +266,11 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		if !deps.Authorizer.IsAdmin(claims) {
 			return mcp.NewToolResultError("access denied: admin only"), nil
 		}
-		ns, _ := getArgs(req)["namespace"].(string)
-		name, _ := getArgs(req)["name"].(string)
+		args := getArgs(req)
+		if msg := operatorNamespaceArg(deps, args); msg != "" {
+			return mcp.NewToolResultError(msg), nil
+		}
+		ns, name := deps.OperatorNamespace, strArg(args, "name")
 		if err := api.DeleteUser(ctx, deps.Store, ns, name, deps.IdentityConfig.Mode); err != nil {
 			if errors.Is(err, api.ErrUserNotFound) {
 				return mcp.NewToolResultError("user not found"), nil
@@ -282,6 +280,16 @@ func registerUserTools(mcpServer *server.MCPServer, deps *api.Dependencies) {
 		emitActivity(ctx, deps, claims, api.UserActivityEvent(api.UserDeleted, ns, name))
 		return mcp.NewToolResultText("user " + ns + "/" + name + " deleted"), nil
 	})
+}
+
+// operatorNamespaceArg returns an error message unless the namespace argument
+// is empty or the operator namespace. Local users live only in the operator
+// namespace, so every user tool acts there.
+func operatorNamespaceArg(deps *api.Dependencies, args map[string]any) string {
+	if ns := strArg(args, "namespace"); ns != "" && ns != deps.OperatorNamespace {
+		return "local users live in the operator namespace " + deps.OperatorNamespace
+	}
+	return ""
 }
 
 // userPurposeArg reads and checks the purpose argument. On create, a local
