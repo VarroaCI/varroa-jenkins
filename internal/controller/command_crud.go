@@ -25,11 +25,10 @@ import (
 // CommandCRUDClient is a narrow interface for the k8s client operations
 // that CommandCRUD needs, allowing testability without *ClientsetClient.
 type CommandCRUDClient interface {
-	// ApplyControllerSpecSSA applies a sparse Controller spec via Kubernetes
-	// server-side apply. The returned []bus.UnappliedRemoval names each
-	// requested removal (explicit null) that did not take effect, tested
-	// against the applied object's unstructured spec.
-	ApplyControllerSpecSSA(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
+	// ApplyControllerSpecSSAIfExists applies a sparse Controller spec via
+	// server-side apply and never creates the object. A missing object
+	// answers apierrors NotFound. See ClientsetClient.ApplyControllerSpecSSAIfExists.
+	ApplyControllerSpecSSAIfExists(ctx context.Context, namespace, name string, specPatch map[string]any, fieldManager string, force bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error)
 	// CreateControllerSpecSSA creates the Controller, which fences the name,
 	// and claims its spec for fieldManager. See ClientsetClient.
 	// CreateControllerSpecSSA.
@@ -651,7 +650,7 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 	}
 
 	// Build the sparse spec map (fields-to-own) from req.Patch's "spec" key.
-	// The map is passed to ApplyControllerSpecSSA, which completes it with the
+	// The map is passed to ApplyControllerSpecSSAIfExists, which completes it with the
 	// leaves this manager already owns (read from metadata.managedFields) and
 	// translates nulls to removals. No typed round-trip, so zero-valued
 	// non-omitempty fields are never serialized unless the user explicitly
@@ -672,8 +671,11 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 	if fieldManager == "" {
 		fieldManager = "varroa-ui" // defense-in-depth: never apply with empty manager
 	}
-	result, unapplied, err := c.Client.ApplyControllerSpecSSA(ctx, req.Namespace, req.Name, specPatch, fieldManager, req.Force)
+	result, unapplied, err := c.Client.ApplyControllerSpecSSAIfExists(ctx, req.Namespace, req.Name, specPatch, fieldManager, req.Force)
 	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return c.crudReply(bus.ControllersUpdateResponse{Error: "controller not found", Code: bus.CodeNotFound})
+		}
 		if errors.Is(err, ErrNullInList) {
 			return c.crudReply(bus.ControllersUpdateResponse{Error: err.Error(), Code: bus.CodeInvalid})
 		}
@@ -694,7 +696,7 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 	}
 
 	// A power write clears hibernation. This is the UI/MCP/CLI power path
-	// (setPowerState → PATCH → HandleUpdate → ApplyControllerSpecSSA), and the
+	// (setPowerState → PATCH → HandleUpdate → ApplyControllerSpecSSAIfExists), and the
 	// frozen design requires the flag cleared at EVERY power write, not just
 	// brood's — a coalesced Stop→Start through the dashboard leaves
 	// Running + hibernated=true otherwise, and the controller re-hibernates.
@@ -719,7 +721,7 @@ func (c *CommandCRUD) HandleUpdate(data []byte) []byte {
 	// 6.2: report requested removals (explicit nulls) that did not take effect.
 	// The seam computed unapplied against the applied object's UNSTRUCTURED
 	// spec — the same computation the BFF's local route gets from its own
-	// ApplyControllerSpecSSA call, so the two routes are identical by
+	// ApplyControllerSpecSSAIfExists call, so the two routes are identical by
 	// construction. Ownership is deliberately NOT reported: stripManagedFields
 	// below removes metadata.managedFields before the NATS reply, so it could
 	// not survive the hop on this route.

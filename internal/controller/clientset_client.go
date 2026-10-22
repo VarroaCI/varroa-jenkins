@@ -3353,16 +3353,16 @@ func (c *ClientsetClient) dropCreateUpdateEntry(ctx context.Context, namespace, 
 // ApplyControllerSpecSSA: it never creates the target object. Unlike the
 // unguarded method, each attempt performs its own GET immediately before
 // applying, fails with the real apierrors NotFound when the object is
-// absent, and stamps that GET's resourceVersion into the applied object so
-// the server rejects the write if the object was deleted or changed between
-// the GET and the apply — a changed-but-still-present object surfaces as a
-// recognizable apierrors Conflict (stale resourceVersion on an update), but
-// a deletion takes the server down the create path instead, where the
-// stamped resourceVersion is simply invalid; that failure does not carry a
-// specific apierrors kind to match on, only the guarantee that it fails
-// rather than creating or resurrecting the object. A caller with an
-// earlier, separately-obtained Get result must not reuse it here — the GET
-// this method performs is what the resourceVersion precondition is
+// absent, and stamps both the UID and the resourceVersion of that GET into
+// the applied object. The UID is the fence against a delete. The apiserver
+// creates an absent object for an apply even when a resourceVersion is in
+// the body, so a resourceVersion alone does not stop a delete from
+// recreating the object. An apply that carries a UID for an absent object
+// answers Conflict and creates nothing. The resourceVersion is a freshness
+// check: a changed-but-still-present object answers Conflict on the stale
+// resourceVersion. The retry re-GETs, so a deleted object answers NotFound.
+// A caller with an earlier, separately-obtained Get result must not reuse
+// it here — the GET this method performs is what the preconditions are
 // anchored to.
 //
 // An optimistic-lock conflict (a stale resourceVersion) is retried
@@ -3450,6 +3450,9 @@ func (c *ClientsetClient) applyControllerSpecSSAIfExistsOnce(
 		},
 		"spec": completed,
 	}}
+	if uid := cur.GetUID(); uid != "" {
+		u.SetUID(uid)
+	}
 	data, err := json.Marshal(u)
 	if err != nil {
 		return nil, fmt.Errorf("marshal partial controller: %w", err)

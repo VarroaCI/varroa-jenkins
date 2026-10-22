@@ -30,7 +30,7 @@ type fakeCRUDClient struct {
 	composedBundles      map[string]*v1alpha1.ComposedBundle
 	provisioningDefaults map[string]*v1alpha1.ProvisioningDefaults
 	applyErr             error
-	ssaApplyErr          error // error returned by ApplyControllerSpecSSA (separate from applyErr)
+	ssaApplyErr          error // error returned by ApplyControllerSpecSSAIfExists (separate from applyErr)
 	deletePodErr         error
 	listErr              error
 	getErr               error
@@ -84,7 +84,7 @@ func (f *fakeCRUDClient) GetControllerCRD(_ context.Context, name, namespace str
 	return cr.DeepCopy(), nil
 }
 
-func (f *fakeCRUDClient) ApplyControllerSpecSSA(_ context.Context, ns, name string, specPatch map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
+func (f *fakeCRUDClient) ApplyControllerSpecSSAIfExists(_ context.Context, ns, name string, specPatch map[string]any, _ string, _ bool) (*v1alpha1.Controller, []bus.UnappliedRemoval, error) {
 	if f.ssaApplyErr != nil {
 		return nil, nil, f.ssaApplyErr
 	}
@@ -95,17 +95,8 @@ func (f *fakeCRUDClient) ApplyControllerSpecSSA(_ context.Context, ns, name stri
 	key := f.key(name, ns)
 	existing, ok := f.controllers[key]
 	if !ok {
-		// Create a new controller from the spec patch.
-		cr := &v1alpha1.Controller{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller"},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: types.UID("uid-" + name)},
-		}
-		// Unmarshal specPatch onto the spec.
-		specJSON, _ := json.Marshal(specPatch)
-		json.Unmarshal(specJSON, &cr.Spec)
-		f.controllers[key] = cr
-		f.mirrorController(cr)
-		return cr.DeepCopy(), UnappliedRemovals(cr, removals), nil
+		// The apply never creates the object. Mirrors ClientsetClient.ApplyControllerSpecSSAIfExists.
+		return nil, nil, k8serrors.NewNotFound(schema.GroupResource{Group: "varroa.dev", Resource: "controllers"}, name)
 	}
 	// Merge sparse spec onto existing.
 	existing = existing.DeepCopy()
@@ -626,6 +617,49 @@ func TestCommandCRUD_UpdateNotFound(t *testing.T) {
 	}
 	if updateResp.Code != bus.CodeNotFound {
 		t.Fatalf("expected code=%q, got %q", bus.CodeNotFound, updateResp.Code)
+	}
+}
+
+// TestCommandCRUD_HandleUpdate_DeletedAfterReadAnswersNotFound pins the
+// delete-between-read-and-apply window: the controller is deleted after
+// HandleUpdate reads it and before the apply. The update must answer
+// CodeNotFound and must not recreate the object from the update body.
+func TestCommandCRUD_HandleUpdate_DeletedAfterReadAnswersNotFound(t *testing.T) {
+	ct := newCommandCRUDTest(t)
+	ct.seedController(&v1alpha1.Controller{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "varroa.dev/v1alpha1", Kind: "Controller"},
+		ObjectMeta: metav1.ObjectMeta{Name: "ctrl1", Namespace: "team-a"},
+		Spec:       v1alpha1.ControllerSpec{Version: "2.479"},
+	})
+
+	// The store GET is HandleUpdate's first read. The hook runs after it, so
+	// the delete lands between the read and the apply.
+	ct.store.SetAfterGet(controllerGVR, func(ns, name string) {
+		delete(ct.client.controllers, ns+"/"+name)
+		if err := ct.store.DeleteObject(context.Background(), controllerGVR, ns, name); err != nil {
+			t.Errorf("simulated delete: %v", err)
+		}
+	})
+
+	req := bus.ControllersUpdateRequest{
+		Namespace: "team-a",
+		Name:      "ctrl1",
+		Patch:     mustMarshal(t, map[string]interface{}{"spec": map[string]interface{}{"version": "2.480"}}),
+	}
+	resp := ct.crud.HandleUpdate(mustMarshal(t, req))
+	var updateResp bus.ControllersUpdateResponse
+	if err := json.Unmarshal(resp, &updateResp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if updateResp.Code != bus.CodeNotFound || updateResp.Error != "controller not found" {
+		t.Fatalf("expected code=%q error=%q, got code=%q error=%q",
+			bus.CodeNotFound, "controller not found", updateResp.Code, updateResp.Error)
+	}
+	if _, ok := ct.client.controllers["team-a/ctrl1"]; ok {
+		t.Fatal("update recreated the deleted controller in the client")
+	}
+	if _, err := crdstore.Get[v1alpha1.Controller](context.Background(), ct.store, "ctrl1", "team-a"); !k8serrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound from the store after the update, got %v", err)
 	}
 }
 
@@ -1459,7 +1493,7 @@ func newDynamicSSACapture(t *testing.T) (*ClientsetClient, *[]map[string]any) {
 }
 
 // TestCommandCRUD_UpdateNullInListRejectedInvalid (5.10, brood route): a patch
-// with a null inside a list is invalid input. ApplyControllerSpecSSA rejects
+// with a null inside a list is invalid input. ApplyControllerSpecSSAIfExists rejects
 // it with ErrNullInList (translated before any Get/Patch), and HandleUpdate
 // maps that to CodeInvalid, which the BFF renders as 400. No apply is
 // attempted: the patch reactor is never called.
@@ -1512,7 +1546,7 @@ func TestCommandCRUD_UpdateNullInListRejectedInvalid(t *testing.T) {
 func TestCommandCRUD_HandleUpdate_ReportsUnappliedRemovals(t *testing.T) {
 	t.Run("removal blocked by another owner is reported", func(t *testing.T) {
 		ct := newCommandCRUDTest(t)
-		// Seed a controller with version set. The fake's ApplyControllerSpecSSA
+		// Seed a controller with version set. The fake's ApplyControllerSpecSSAIfExists
 		// keeps version when the patch nulls it (json.Unmarshal of null into a
 		// string field has no effect), standing in for another manager owning it.
 		ct.seedController(&v1alpha1.Controller{
@@ -1578,10 +1612,14 @@ func TestCommandCRUD_HandleUpdate_ReportsUnappliedRemovals(t *testing.T) {
 func TestCommandCRUD_HandleUpdate_RealSeam_ReportsRetainedZeroValue(t *testing.T) {
 	// The real seam (clientset_client.go) runs against a dynamic fake whose
 	// patch reactor simulates the apiserver retaining hibernation.enabled=false
-	// after the removal. No stored object is seeded on the dynamic client: the
-	// seam's completion Get returns NotFound and applies the cleaned patch
-	// as-is; the reactor supplies the post-SSA applied object.
-	h := newSSAHarness(t, nil, map[string]any{
+	// after the removal. The dynamic client seeds the stored Controller, so the
+	// seam's existence-guarded GET succeeds; the reactor supplies the post-SSA
+	// applied object.
+	current := completionCurrent(map[string]any{
+		"hibernation": map[string]any{"enabled": true},
+	}, nil)
+	current.SetUID("uid-ctrl1")
+	h := newSSAHarness(t, current, map[string]any{
 		"hibernation": map[string]any{"enabled": false},
 	})
 

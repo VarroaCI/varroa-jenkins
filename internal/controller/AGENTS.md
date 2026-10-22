@@ -72,13 +72,17 @@ sections describe.
   A failed read of the optional singleton **allows** — absence and a transient
   API error are indistinguishable here, and Varroa RBAC is the authorization
   boundary that has already run.
-- **`dispatchTarget`'s Stop/Start must use `ApplyControllerSpecSSAIfExists`,
-  never a separate `Get`-then-`ApplyControllerSpecSSA`.**
+- **`dispatchTarget`'s Stop/Start and `CommandCRUD.HandleUpdate` must use
+  `ApplyControllerSpecSSAIfExists`, never a separate `Get`-then-`ApplyControllerSpecSSA`.**
   `ApplyControllerSpecSSAIfExists` never creates the target: each attempt
   performs its own GET immediately before applying, fails terminally with
-  `apierrors.NotFound` when absent, and stamps that GET's resourceVersion
-  into the apply so the write conflicts if the object changed between the
-  GET and the apply. Only an optimistic-lock (stale-resourceVersion)
+  `apierrors.NotFound` when absent, and stamps both the UID and the
+  resourceVersion of that GET into the apply. The UID stops a delete
+  between the GET and the apply from recreating the object. The apiserver
+  creates an absent object for an apply even when a resourceVersion is in
+  the body, but it answers Conflict for a UID-stamped apply to an absent
+  object. The resourceVersion catches a changed object with a Conflict.
+  Only an optimistic-lock (stale-resourceVersion)
   conflict retries (`retry.OnError`, `retry.DefaultRetry`, gated by
   `!isFieldManagerConflict(err)`) — a live controller's reconciler patches
   status continuously, which bumps resourceVersion on its own and would
