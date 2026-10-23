@@ -307,7 +307,7 @@ of the fleet's audit activity, once a controller becomes disposable.
   every attempt signs and sends the same bytes. `WebhookDispatcher` leases
   rows with `FOR UPDATE SKIP LOCKED`, sends at most four at a time, and
   retries on the schedule in `webhookBackoff`. The sixth failure writes a
-  `tenant.webhook_failed` activity row. The dispatcher's dialer refuses
+  `tenant.webhook_failed` activity row. `deliver` reads the delivery row and the placement in one statement, sends only a `pending` row, and drops only through a guarded update on the incarnation it read. The dispatcher's dialer refuses
   any address that is not global unicast. A DB test
   swaps `d.client` for an `httptest` client, a test-only seam that
   production never sets. Each synthetic end writes one row in

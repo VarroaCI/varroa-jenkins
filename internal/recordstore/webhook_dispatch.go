@@ -164,14 +164,13 @@ func (d *WebhookDispatcher) drain(ctx context.Context) {
 
 // webhookRow is one leased outbox row.
 type webhookRow struct {
-	deliveryID  uuid.UUID
-	runID       uuid.UUID
-	cluster     string
-	tenant      string
-	incarnation string
-	body        []byte
-	attempts    int
-	key         string
+	deliveryID uuid.UUID
+	runID      uuid.UUID
+	cluster    string
+	tenant     string
+	body       []byte
+	attempts   int
+	key        string
 }
 
 // webhookEventFor returns the X-Varroa-Event value of a delivery key. A Tenant
@@ -218,7 +217,7 @@ func (d *WebhookDispatcher) lease(ctx context.Context) ([]webhookRow, error) {
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING delivery_id, run_id, cluster, tenant, incarnation, body, attempts, delivery_key
+		RETURNING delivery_id, run_id, cluster, tenant, body, attempts, delivery_key
 	`, webhookBatchSize, webhookLease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("lease webhook deliveries: %w", err)
@@ -227,7 +226,7 @@ func (d *WebhookDispatcher) lease(ctx context.Context) ([]webhookRow, error) {
 	var out []webhookRow
 	for rows.Next() {
 		var r webhookRow
-		if err := rows.Scan(&r.deliveryID, &r.runID, &r.cluster, &r.tenant, &r.incarnation, &r.body, &r.attempts, &r.key); err != nil {
+		if err := rows.Scan(&r.deliveryID, &r.runID, &r.cluster, &r.tenant, &r.body, &r.attempts, &r.key); err != nil {
 			return nil, fmt.Errorf("scan leased webhook delivery: %w", err)
 		}
 		out = append(out, r)
@@ -244,45 +243,88 @@ type webhookTarget struct {
 	Key string `json:"key"`
 }
 
-// currentWebhook reads the tenant's stored webhook and its current
-// incarnation. It answers false when the tenant has none, which drops the
-// delivery.
-func (d *WebhookDispatcher) currentWebhook(ctx context.Context, cluster, tenant string) (webhookTarget, string, bool, error) {
+// webhookDecision is the current state of one delivery and its tenant, read in one snapshot.
+type webhookDecision struct {
+	state       string
+	incarnation string // the delivery row's stored incarnation now
+	target      webhookTarget
+	hasWebhook  bool // the placement row exists with a non-NULL webhook and the same incarnation
+}
+
+// currentDecision reads one delivery and its tenant in one statement. It
+// answers false when the delivery row is gone.
+func (d *WebhookDispatcher) currentDecision(ctx context.Context, deliveryID uuid.UUID) (webhookDecision, bool, error) {
 	var (
-		raw         []byte
-		incarnation string
+		dec      webhookDecision
+		placeInc *string
+		raw      []byte
 	)
 	err := d.pool.QueryRow(ctx, `
-		SELECT incarnation, notification_webhook FROM varroa.tenant_placements
-		WHERE cluster = $1 AND tenant = $2 AND notification_webhook IS NOT NULL
-	`, cluster, tenant).Scan(&incarnation, &raw)
+		SELECT d.state, d.incarnation, p.incarnation, p.notification_webhook
+		FROM varroa.webhook_deliveries d
+		LEFT JOIN varroa.tenant_placements p
+		  ON p.cluster = d.cluster AND p.tenant = d.tenant
+		WHERE d.delivery_id = $1
+	`, deliveryID).Scan(&dec.state, &dec.incarnation, &placeInc, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return webhookTarget{}, "", false, nil
+		return webhookDecision{}, false, nil
 	}
 	if err != nil {
-		return webhookTarget{}, "", false, fmt.Errorf("read tenant webhook: %w", err)
+		return webhookDecision{}, false, fmt.Errorf("read webhook delivery decision: %w", err)
 	}
-	var target webhookTarget
-	if err := json.Unmarshal(raw, &target); err != nil {
-		return webhookTarget{}, "", false, fmt.Errorf("decode tenant webhook: %w", err)
+	if placeInc == nil || raw == nil || *placeInc != dec.incarnation {
+		return dec, true, nil
 	}
-	return target, incarnation, true, nil
+	if err := json.Unmarshal(raw, &dec.target); err != nil {
+		return webhookDecision{}, false, fmt.Errorf("decode tenant webhook: %w", err)
+	}
+	dec.hasWebhook = true
+	return dec, true, nil
+}
+
+// dropWebhookDelivery drops a pending delivery only while its stored
+// incarnation still equals readIncarnation. It reports whether it dropped
+// the row.
+func (d *WebhookDispatcher) dropWebhookDelivery(ctx context.Context, deliveryID uuid.UUID, readIncarnation, reason string) (bool, error) {
+	tag, err := d.pool.Exec(ctx, `
+		UPDATE varroa.webhook_deliveries
+		SET state='dropped', last_status=NULL, last_error=$3, updated_at=now()
+		WHERE delivery_id=$1 AND state='pending' AND incarnation=$2
+	`, deliveryID, readIncarnation, reason)
+	if err != nil {
+		return false, fmt.Errorf("drop webhook delivery: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // deliver sends one leased row and records the outcome.
 func (d *WebhookDispatcher) deliver(ctx context.Context, row webhookRow) {
-	target, incarnation, ok, err := d.currentWebhook(ctx, row.cluster, row.tenant)
+	dec, found, err := d.currentDecision(ctx, row.deliveryID)
 	if err != nil {
-		d.logger.Warn("webhook target read failed", "delivery", row.deliveryID, "error", err)
+		d.logger.Warn("webhook delivery read failed", "delivery", row.deliveryID, "error", err)
 		return
 	}
-	// A replaced Tenant object has a new incarnation. Its receiver must
+	if !found || dec.state != "pending" {
+		return
+	}
+	// The decision reads the delivery's stored incarnation, never the
+	// leased copy. A fence restamp can change it after the lease. A
+	// replaced Tenant object has a new incarnation, and its receiver must
 	// not get a delivery that the old object's run produced.
-	if !ok || incarnation != row.incarnation {
-		d.setState(ctx, row, "dropped", row.attempts, 0, "tenant webhook removed or the tenant was replaced")
-		d.metrics.add(ctx, webhookOutcomeDropped)
+	if !dec.hasWebhook {
+		dropped, err := d.dropWebhookDelivery(ctx, row.deliveryID, dec.incarnation, "tenant webhook removed or the tenant was replaced")
+		if err != nil {
+			d.logger.Warn("webhook drop failed", "delivery", row.deliveryID, "error", err)
+			return
+		}
+		if dropped {
+			d.metrics.add(ctx, webhookOutcomeDropped)
+		} else {
+			d.logger.Debug("webhook drop skipped, delivery changed", "delivery", row.deliveryID)
+		}
 		return
 	}
+	target := dec.target
 
 	ts := d.now().Unix()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL, bytes.NewReader(row.body))
